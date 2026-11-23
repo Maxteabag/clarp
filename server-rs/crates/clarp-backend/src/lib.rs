@@ -379,10 +379,11 @@ pub fn store_of(id: &str) -> Option<&'static str> {
     by_id(id).map(|backend| backend.runs_through().unwrap_or(backend.id()))
 }
 
-/// Whether two backends are one program with one store of conversations (`agy` and
-/// `agy-acp`): a move between them keeps the tool's own conversation and carries nothing.
+/// Whether a move between two backends keeps the tool's own conversation and carries nothing:
+/// only between `agy` and `agy-acp`, one program with one store. Other cards that run through
+/// one program (`deepseek` through `opencode`) move as any two tools do, with the Host's record.
 pub fn same_store(from: &str, to: &str) -> bool {
-    from != to && store_of(from).is_some_and(|store| store_of(to) == Some(store))
+    matches!((from, to), ("agy", agy_acp::ID) | (agy_acp::ID, "agy"))
 }
 
 /// The context window of the backend with this name, when it declares one.
@@ -496,7 +497,8 @@ mod tests {
     #[test]
     fn antigravity_and_antigravity_over_acp_keep_one_store() {
         assert!(same_store("agy", "agy-acp") && same_store("agy-acp", "agy"));
-        assert!(same_store("opencode", "deepseek"));
+        // One program, but not approved to share a conversation: it still carries.
+        assert!(!same_store("opencode", "deepseek") && !same_store("deepseek", "opencode"));
         for (from, to) in [
             ("agy", "agy"),
             ("agy", "claude"),
