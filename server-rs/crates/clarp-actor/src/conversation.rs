@@ -639,6 +639,15 @@ impl<'a> Reader<'a> {
                 row.revision = row.revision.max(revision);
             }
         }
+        // A goal's check-in that was sent again for the apps (`resend`) is, in a chat, as new
+        // as that. To a reader of everything it is where it was written.
+        if matches!(which, Which::Chat { .. })
+            && clarp_kernel::turn::names_a_goal_wake(row.entry.id())
+            && let Some(resent) = self.log.find(&resend::key(row.entry.id()))?
+            && resent.kind == kind::RESENT_ROW
+        {
+            row.revision = row.revision.max(resent.seq * REVISION_STEP);
+        }
         Ok(())
     }
 
@@ -754,13 +763,6 @@ impl<'a> Reader<'a> {
             ..Versioned::of(entry, item.seq * REVISION_STEP, item.ts_ms)
         };
         let mut newest = item.seq;
-        // A goal's check-in that was sent again (`resend`) is as new as that.
-        if clarp_kernel::turn::names_a_goal_wake(row.entry.id())
-            && let Some(resent) = self.log.find(&resend::key(row.entry.id()))?
-            && resent.kind == kind::RESENT_ROW
-        {
-            newest = newest.max(resent.seq);
-        }
         row.coordination = self.hidden(item, &row.entry)?;
         let split = if let Some(turn) = row.turn_number {
             let audience = self.mark(turn)?;
@@ -938,11 +940,14 @@ fn rows(
     let mut reader = Reader::new(log).with_imported_anchors(imported_anchors);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
-        // A row named again: it is given again, as it is now. A sending again that names no
-        // row only marks that a pass of them was made.
+        // A row named again: it is given again, as it is now. A hidden row the user joined is
+        // news to every reader; a check-in sent again for the apps (`resend`) only to a chat,
+        // not to the goal keeper or a delegate's start. A sending again that names no row
+        // only marks that a pass of them was made.
         if item.kind == kind::AUDIENCE_ROW || item.kind == kind::RESENT_ROW {
             let id = String::from_utf8_lossy(&item.body);
-            if place == Place::Newest && !id.is_empty() {
+            let news = item.kind == kind::AUDIENCE_ROW || matches!(which, Which::Chat { .. });
+            if place == Place::Newest && news && !id.is_empty() {
                 found.retain(|r| r.entry.id() != id.as_ref());
                 found.extend(reader.stored(&id, which)?);
             }

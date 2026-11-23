@@ -427,9 +427,10 @@ Rules:
   `goal_wake_quiet`).** The message a durable goal wakes its agent with is an automated row:
   `automated` true, `automation_kind` `goal` and the text "Goal check-in" in place of the
   prompt, which only the agent's tool reads. Its queue item reads the same, and it cannot be
-  reworded. What the agent answers in that turn is an ordinary reply. The check-ins written
-  before an agent's Host showed them so are sent once more, at a newer revision, so a delta
-  gives an app that holds one the row as it is now, to replace where it stands.
+  reworded. What the agent answers in that turn is an ordinary reply. An agent's check-ins
+  among its newest rows that were written before its Host showed them so are sent once more,
+  at a newer revision, so a delta gives an app that holds one the row as it is now, to replace
+  where it stands; one the app does not hold belongs where its timestamp puts it.
 - **A turn's end says why it did not complete (Rust Host contract 162, feature
   `turn_end_reason`).** The row that closes a turn carries `turn` (`turn_id`, `status`,
   `started_at_ms`, `ended_at_ms`, `worked_ms`, `tool_count`). When `status` is not
