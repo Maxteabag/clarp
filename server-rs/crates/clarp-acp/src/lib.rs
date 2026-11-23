@@ -19,6 +19,9 @@ pub mod schema;
 /// The protocol version this client speaks.
 pub const PROTOCOL_VERSION: u64 = 1;
 
+/// The version Clarp gives of itself as a client of the protocol.
+pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The methods of the protocol Clarp uses.
 pub mod method {
     pub const INITIALIZE: &str = "initialize";

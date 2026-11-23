@@ -233,25 +233,20 @@ fn command(program: &str, cwd: &Path) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
-    for variable in shared::STRIPPED {
+    // What agy is given is `clarp-acp`'s to say; what the Host's environment already holds is
+    // read here.
+    let bundle = std::env::var_os("SSL_CERT_FILE")
+        .is_none()
+        .then(|| CA_BUNDLES.iter().find(|path| Path::new(path).is_file()))
+        .flatten();
+    let over_ssh = std::env::var_os("SSH_CONNECTION").is_some();
+    let given = shared::child_env(shared::profile().as_deref(), bundle.copied(), over_ssh);
+    command.args(&given.args);
+    for variable in given.removed {
         command.env_remove(variable);
     }
-    command
-        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "1")
-        .env("PYTHONUNBUFFERED", "1");
-    if std::env::var_os("SSL_CERT_FILE").is_none()
-        && let Some(bundle) = CA_BUNDLES.iter().find(|path| Path::new(path).is_file())
-    {
-        command.env("SSL_CERT_FILE", bundle);
-    }
-    // A profile of its own keeps its login in a file there. agy 1.5 keeps a Google sign-in
-    // in the keyring unless it believes it runs over SSH, whatever else it is told.
-    if let Some(profile) = shared::profile() {
-        command.arg("--gemini-dir").arg(&profile);
-        command.env("AGY_ACP_FORCE_FILE_STORAGE", "1");
-        if std::env::var_os("SSH_CONNECTION").is_none() {
-            command.env("SSH_CONNECTION", "127.0.0.1 0 127.0.0.1 0");
-        }
+    for (variable, value) in given.set {
+        command.env(variable, value);
     }
     command
 }
@@ -546,7 +541,7 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
     let init = json!({
         "protocolVersion": clarp_acp::PROTOCOL_VERSION,
         "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
-        "clientInfo": {"name": "clarp", "title": "Clarp", "version": env!("CARGO_PKG_VERSION")},
+        "clientInfo": {"name": "clarp", "title": "Clarp", "version": clarp_acp::CLIENT_VERSION},
     });
     let initialized = match turn.setup(method::INITIALIZE, init)? {
         Ok(Answer::Result(result)) => result,

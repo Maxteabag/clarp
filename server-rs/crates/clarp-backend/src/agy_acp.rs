@@ -23,7 +23,7 @@
 //! ```
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clarp_acp::agy::{self as shared, Order};
 use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
@@ -141,12 +141,6 @@ pub fn order(spec: &TurnSpec) -> Order {
     }
 }
 
-/// Where this card's conversations are: Antigravity's own store, or the profile's.
-fn own_dir() -> PathBuf {
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    shared::own_dir(Path::new(&home), shared::profile().as_deref())
-}
-
 impl Backend for AgyAcp {
     fn id(&self) -> &'static str {
         ID
@@ -185,7 +179,7 @@ impl Backend for AgyAcp {
         let poisoned = shared::poisoned_dir()
             .and_then(|dir| shared::poisoned_mark(&dir, session))
             .is_some_and(|mark| mark.exists());
-        !poisoned && crate::past::agy_kept(&own_dir(), session)
+        !poisoned && crate::past::agy_kept(&shared::here(), session)
     }
 
     fn once(&self, question: &Question) -> Option<Launch> {
@@ -725,6 +719,8 @@ impl Interpreter for AcpInterpreter {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     fn spec(prompt: &str) -> TurnSpec {
