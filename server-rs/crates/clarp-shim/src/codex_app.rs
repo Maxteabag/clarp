@@ -92,30 +92,37 @@ impl AppServer {
         self.end();
     }
 
-    /// Codex runs each command in a process group of its own (seen with 0.167.1, 23 Nov
-    /// 2026), which a signal to Codex's group does not reach and which Codex's death leaves
-    /// running. The groups are read before anything is signalled: once Codex is gone its
-    /// commands are no longer found below it. A process that left on purpose (a daemon that
-    /// forked away from its parent) is not below Codex and is not touched.
+    /// Whether Codex was ended and reaped.
+    pub fn is_ended(&self) -> bool {
+        self.ended
+    }
+
+    /// Codex runs each command in a process group of its own, and a terminal command in a
+    /// session of its own (seen with 0.167.1, 23 Nov 2026). A signal to Codex's group reaches
+    /// neither, and Codex's death leaves them running. So every process below Codex is read
+    /// first, with its start time. Each one that is still that same process is then ended by
+    /// pid, then each group one of them leads, and Codex's own group last (the lead's ruling of
+    /// 23 Nov 2026: by pid and start time, before the group; no cgroups). A process that left
+    /// on purpose (a daemon that forked away from its parent) is not below Codex and is not
+    /// touched.
     fn end(&mut self) {
         if std::mem::replace(&mut self.ended, true) {
             return;
         }
-        let below = groups_below(self.child.id());
-        if let Ok(pid) = i32::try_from(self.child.id()) {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pid),
-                nix::sys::signal::Signal::SIGKILL,
-            );
+        let below = processes_below(self.child.id());
+        let kill = nix::sys::signal::Signal::SIGKILL;
+        let own = nix::unistd::getpgrp().as_raw();
+        let still: Vec<&Below> = below.iter().filter(|process| process.is_still()).collect();
+        for process in &still {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(process.pid), kill);
         }
-        let own = nix::unistd::getpgrp();
-        for group in below {
-            if group > 1 && group != own.as_raw() {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(group),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
+        for process in &still {
+            if process.group == process.pid && process.group > 1 && process.group != own {
+                let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(process.group), kill);
             }
+        }
+        if let Ok(pid) = i32::try_from(self.child.id()) {
+            let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pid), kill);
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -169,47 +176,69 @@ impl Drop for AppServer {
     }
 }
 
-/// The process groups of every process below `root`, its own group included, read from
-/// `/proc`. Empty where there is no `/proc`.
-fn groups_below(root: u32) -> Vec<i32> {
+/// A process below Codex, as `/proc` said when it was read.
+struct Below {
+    pid: i32,
+    group: i32,
+    start: u64,
+}
+
+impl Below {
+    /// The pid still names the process that was read, not one that took its number since.
+    fn is_still(&self) -> bool {
+        u32::try_from(self.pid)
+            .ok()
+            .and_then(stat_of)
+            .is_some_and(|(_, _, start)| start == self.start)
+    }
+}
+
+/// A process's parent, group and start time, from its `stat`. The name is in brackets and may
+/// hold anything: the fields after the last bracket are read (state, parent, group, ...; the
+/// start time is the twentieth of them).
+fn stat_of(pid: u32) -> Option<(u32, i32, u64)> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after: Vec<&str> = stat[stat.rfind(')')? + 1..].split_whitespace().collect();
+    Some((
+        after.get(1)?.parse().ok()?,
+        after.get(2)?.parse().ok()?,
+        after.get(19)?.parse().ok()?,
+    ))
+}
+
+/// Every process below `root`, read from `/proc`. Empty where there is none.
+fn processes_below(root: u32) -> Vec<Below> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
     };
-    let mut parent_of = std::collections::HashMap::new();
+    let mut known = Vec::new();
     for entry in entries.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok())
         else {
             continue;
         };
-        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
-            continue;
-        };
-        // The name is in brackets and may hold anything: the fields after the last bracket
-        // are the state, the parent and the group.
-        let Some(after) = stat.rfind(')').map(|end| &stat[end + 1..]) else {
-            continue;
-        };
-        let mut fields = after.split_whitespace().skip(1);
-        let (Some(ppid), Some(group)) = (
-            fields.next().and_then(|ppid| ppid.parse::<u32>().ok()),
-            fields.next().and_then(|group| group.parse::<i32>().ok()),
-        ) else {
-            continue;
-        };
-        parent_of.insert(pid, (ppid, group));
+        if let Some((ppid, group, start)) = stat_of(pid) {
+            known.push((pid, ppid, group, start));
+        }
     }
-    let mut groups = std::collections::BTreeSet::new();
-    let mut below = vec![root];
+    let mut found = Vec::new();
+    let mut parents = vec![root];
     let mut seen = std::collections::HashSet::from([root]);
-    while let Some(parent) = below.pop() {
-        for (&pid, &(ppid, group)) in &parent_of {
+    while let Some(parent) = parents.pop() {
+        for &(pid, ppid, group, start) in &known {
             if ppid == parent && seen.insert(pid) {
-                groups.insert(group);
-                below.push(pid);
+                if let Ok(id) = i32::try_from(pid) {
+                    found.push(Below {
+                        pid: id,
+                        group,
+                        start,
+                    });
+                }
+                parents.push(pid);
             }
         }
     }
-    groups.into_iter().collect()
+    found
 }
 
 fn read(reader: &mut impl BufRead) -> io::Result<Option<Frame>> {

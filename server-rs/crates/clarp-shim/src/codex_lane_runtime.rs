@@ -26,6 +26,8 @@ const RPC_LIMIT: Duration = Duration::from_secs(12);
 /// Loading a thread reads its whole rollout: a long one takes longer than a request. Below
 /// the Host's own 30 s for a first request (`codex_goal_lane::RPC_TIMEOUT`).
 const LOAD_LIMIT: Duration = Duration::from_secs(25);
+/// How long a lane that leaves gives Codex to end its terminals before it is ended itself.
+const EXIT_CLEAN_LIMIT: Duration = Duration::from_secs(2);
 /// Replies nobody waited for yet, kept for a request still being waited on further out.
 const STRAY_MOST: usize = 64;
 const BUFFER_MOST: usize = 512;
@@ -198,6 +200,11 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     io::stdout().flush()?;
     let result = lane.serve();
     let _ = lane.slot.lost(super::now_ms());
+    // A lane that leaves in order (retired, idle, a changed login) asks Codex to end what it
+    // keeps first; what remains is ended with Codex when the lane is dropped.
+    if result.is_ok() {
+        lane.end_terminals_before_leaving();
+    }
     let retired = lane
         .retire_reply
         .take()
@@ -1026,6 +1033,21 @@ impl Lane {
         ) {
             eprintln!("clarp-shim: Codex lane: a turn's commands were not ended: {error}");
         }
+    }
+
+    /// Bounded: a lane that leaves never waits long for Codex (the lead's ruling of 23 Nov
+    /// 2026: a clean before every normal exit).
+    fn end_terminals_before_leaving(&mut self) {
+        if self.server.is_ended() || !self.loaded {
+            return;
+        }
+        let Ok(id) = self.server.request(
+            "thread/backgroundTerminals/clean",
+            json!({"threadId": self.thread}),
+        ) else {
+            return;
+        };
+        let _ = self.response_within(id, None, EXIT_CLEAN_LIMIT);
     }
 
     fn reject_start(&mut self, native: &str) -> io::Result<()> {

@@ -422,8 +422,12 @@ ends the command within a second.
 ends with the turn. So the lane sends that clean at every turn's end, whether the turn
 completed, failed, was stopped, or was a turn the lane refused, as with exec. A process the
 agent detached itself (`setsid`, `nohup`) is not a background terminal and is not touched.
-When the lane kills Codex or leaves, it also ends the process groups below Codex (e26f873f1),
-because Codex runs each command in a group of its own. The Python Host leaves these commands
+A lane that leaves in order (retired, idle, or a changed login) first sends the same clean and
+waits at most 2 s. When the lane ends Codex (as it leaves, or because Codex did not answer a Stop
+in time), it reads every process below Codex with its start time. It then ends each one that is
+still that process by pid, then each group one of them leads, and Codex's group last: Codex runs a
+command in a group of its own, and a terminal command in a session of its own. This is the lead's
+ruling on review finding F3: no cgroups. The Python Host leaves these commands
 running (`docs/differences.md`).
 
 ## Decisions (the lead, 23 Nov 2026)
