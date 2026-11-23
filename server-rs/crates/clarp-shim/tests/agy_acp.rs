@@ -702,6 +702,10 @@ fn a_message_sent_while_a_prompt_runs_is_read_when_antigravity_works_on_it_and_a
         );
         std::fs::write(place.dir.join(format!("taken-{mode}")), "").unwrap();
         printed.until("the read", |line| read_of(line) == Some("u-add"));
+        // And what follows it, which may not have been read yet.
+        printed.until("agy's first word under the new prompt", |line| {
+            line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+        });
         let read = printed.at(|line| read_of(line) == Some("u-add"));
         assert_eq!(
             printed

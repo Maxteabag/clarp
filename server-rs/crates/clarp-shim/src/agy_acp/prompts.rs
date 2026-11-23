@@ -232,6 +232,18 @@ impl Prompts<'_> {
         let Some(at) = self.flight.iter().position(|sent| sent.id == id) else {
             return Ok(());
         };
+        // A refusal is no passing over: agy turned the newer prompt away and goes on with the
+        // older one, whose answer is still to come.
+        let refused = self.flight[at].unread.is_some()
+            && (matches!(answer, Answer::Error(_)) || turn.stopping.is_some());
+        if refused && at > 0 {
+            if let Some(sent) = self.flight.remove(at)
+                && let Some(uuid) = sent.unread
+            {
+                emit(&json!({"type": "steer_refused", "uuid": uuid, "reason": error_of(&answer)}))?;
+            }
+            return Ok(());
+        }
         let mut before: Vec<Sent> = self.flight.drain(..at).collect();
         let Some(mut sent) = self.flight.pop_front() else {
             return Ok(());
