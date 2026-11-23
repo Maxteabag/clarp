@@ -2629,8 +2629,8 @@ impl Actor {
     }
 
     /// The turn a message's row was taken into with the message that turn began for: the
-    /// reservation (`Join` with `together`) is the second event before its row, written in the
-    /// same append. None for every other row.
+    /// reservation (`Join` with `together`) is written in the same append, a few events before
+    /// its row (its read, and what the read did, stand between). None for every other row.
     fn gathered_into(&self, row: &Item) -> Result<Option<u64>, ActorError> {
         let Some(turn) = row.turn else {
             return Ok(None);
@@ -2638,7 +2638,7 @@ impl Actor {
         let receipts =
             self.recorder
                 .log()
-                .read_before(row.seq, Kinds::only(kind::AGENT_EVENT), 2)?;
+                .read_before(row.seq, Kinds::only(kind::AGENT_EVENT), 8)?;
         Ok(receipts.iter().find_map(|receipt| {
             match serde_json::from_slice::<AgentEvent>(&receipt.body) {
                 Ok(AgentEvent::Joined { turn: joined, join })

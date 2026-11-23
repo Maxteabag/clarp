@@ -121,10 +121,10 @@ mod provider_tasks;
 mod question_cards;
 #[path = "host/queue_provenance.rs"]
 mod queue_provenance;
-#[path = "host/quota_near.rs"]
-mod quota_near;
 #[path = "host/queue_together.rs"]
 mod queue_together;
+#[path = "host/quota_near.rs"]
+mod quota_near;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
 #[path = "host/r136_peer_wait.rs"]

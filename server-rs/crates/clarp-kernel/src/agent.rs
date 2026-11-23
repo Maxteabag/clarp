@@ -40,6 +40,27 @@ pub fn preempted_by(turn: TurnId) -> String {
     format!("message of turn {}", turn.0)
 }
 
+/// Whether a turn's Stop came from a newer message that took its place ([`preempted_by`]).
+fn preempted(by: &str) -> bool {
+    by.starts_with("message of turn ")
+}
+
+/// Whether a turn that ended so gives back the user's messages it took into its prompt, when
+/// it had not begun to answer them: the user did not give up on them. Anyone's Stop but the
+/// user's own, a newer message that took the turn's place, and a process lost under it
+/// (Maximus's ruling of 23 Nov 2026: nothing the user wrote ends unanswered because someone
+/// else stopped the turn). The user's own Stop ends them with the turn, as it ends a message
+/// steered into it.
+fn gives_back(outcome: &Outcome) -> bool {
+    match outcome {
+        Outcome::Interrupted { .. } => true,
+        Outcome::Stopped { by, .. } => {
+            preempted(by) || outcome.stopped_by().is_some_and(|by| !by.is_the_users())
+        }
+        _ => false,
+    }
+}
+
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -406,6 +427,8 @@ pub struct Agent {
     live_takeover: Option<crate::takeover::Start>,
     /// Whether the live turn started with an existing provider session to continue.
     live_resumed_session: bool,
+    /// The live turn's tool has begun to write its answer, in any attempt of it.
+    live_responded: bool,
     selected_takeover: Option<crate::takeover::Selection>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
@@ -499,6 +522,7 @@ impl Default for Agent {
             handoff_launch_failures: 0,
             live_takeover: None,
             live_resumed_session: false,
+            live_responded: false,
             selected_takeover: None,
             unheld: BTreeSet::new(),
             stop_released: BTreeSet::new(),
@@ -733,6 +757,9 @@ impl Agent {
             && self.stopping.is_none()
             && self.live_takeover.is_none()
             && self.joins.is_empty()
+            // What a turn took into its prompt is in no takeover's input: a turn of a later
+            // attempt, whose joins are gone, keeps it all the same.
+            && self.gathered(live).is_empty()
             && !self.paused
             && self.next_to_run().is_some_and(|next| {
                 next.id == into && next.origin.is_user() && next.admission == Admission::Queue
@@ -909,6 +936,37 @@ impl Agent {
                 .values()
                 .any(|held| held.join.together && held.stage == Stage::Pending)
             && self.waiting_together().first() == Some(&turn)
+    }
+
+    /// The user's messages a turn took into its prompt and never began to answer wait again,
+    /// in the order they were said: behind a direct message, which runs before everything,
+    /// and ahead of the rest. Their rows stay where they are, and a turn that takes one again
+    /// writes no second row (the journal's `enter`). A Stop's hold holds them with the rest.
+    fn give_back(&mut self, gathered: Vec<Gathered>) {
+        if gathered.is_empty() {
+            return;
+        }
+        let at = self
+            .mailbox
+            .iter()
+            .position(|waiting| waiting.admission != Admission::Direct)
+            .unwrap_or(self.mailbox.len());
+        for (offset, one) in gathered.into_iter().enumerate() {
+            self.waited.insert(one.turn);
+            self.mailbox.insert(
+                at + offset,
+                Queued {
+                    id: one.turn,
+                    message_seq: one.message_seq,
+                    origin: one.origin,
+                    admission: Admission::Queue,
+                    accepted_at_ms: one.accepted_at_ms,
+                    user_word: true,
+                    attempt: 1,
+                },
+            );
+        }
+        self.queue_revision += 1;
     }
 
     /// Whether a message admitted this way now would start at once, without waiting: and so
@@ -1479,12 +1537,15 @@ impl Agent {
                     .ok_or(invalid)?;
                 join.stage = Stage::Read(*at_ms);
                 if join.join.together {
+                    let waiting = &self.mailbox[position];
                     self.gathered
                         .entry(join.join.into)
                         .or_default()
                         .push(Gathered {
                             turn: *turn,
                             message_seq: join.message_seq,
+                            origin: waiting.origin.clone(),
+                            accepted_at_ms: waiting.accepted_at_ms,
                         });
                 }
                 self.mailbox.remove(position);
@@ -1850,11 +1911,17 @@ impl Agent {
                         _ => {}
                     }
                     self.joins.clear();
-                    // What the turn took into its prompt is over with it, also where no
-                    // process settled it (a turn held back for a move ends without one).
-                    for gathered in self.gathered.remove(&turn).unwrap_or_default() {
-                        self.deliveries.over(gathered.turn.0);
+                    let gathered = self.gathered.remove(&turn).unwrap_or_default();
+                    if !self.live_responded && gives_back(&ended.outcome) {
+                        self.give_back(gathered);
+                    } else {
+                        // What the turn took into its prompt is over with it, also where no
+                        // process settled it (a turn held back for a move ends without one).
+                        for gathered in gathered {
+                            self.deliveries.over(gathered.turn.0);
+                        }
                     }
+                    self.live_responded = false;
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -1874,6 +1941,15 @@ impl Agent {
                         }
                     ) {
                         self.interrupted_since_ms = None;
+                    }
+                    if matches!(
+                        change,
+                        TurnEvent::Moved {
+                            activity: Activity::Responding,
+                            ..
+                        }
+                    ) {
+                        self.live_responded = true;
                     }
                     if let Turn::Parked(parked) = &next {
                         if self.live_from_queue
@@ -1927,6 +2003,7 @@ impl Agent {
             next => {
                 if let TurnEvent::Started { at_ms, takeover } = change {
                     self.live_resumed_session = self.backend_session.is_some();
+                    self.live_responded = false;
                     self.live_takeover.clone_from(takeover);
                     if let Some(start) = takeover {
                         self.bind_session(Some(&start.session));
@@ -3981,5 +4058,149 @@ mod tests {
         a.user(13);
         assert_eq!(a.live(), Some(4));
         assert!(a.agent.waiting_together().is_empty());
+    }
+
+    /// Turn 1 runs; three of the user's messages wait behind it; turn 2 starts and takes the
+    /// two behind its own.
+    fn two_gathered() -> Driven {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        for seq in [11, 12, 13] {
+            a.user(seq);
+        }
+        a.finish(1);
+        assert_eq!(take_together(&mut a, 2), vec![3, 4]);
+        a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
+        a
+    }
+
+    /// The process of turn 2 ends after a Stop, its joins settled as the actor settles them.
+    fn ended_after_a_stop(a: &mut Driven, by: Option<Control>) {
+        for turn in [3, 4] {
+            a.send(Command::JoinSettled { turn: TurnId(turn) }).unwrap();
+        }
+        if let Some(by) = by {
+            a.send(Command::Stop { by }).unwrap();
+        }
+        a.send(Command::TurnEnded {
+            turn: TurnId(2),
+            outcome: RunOutcome::Interrupted {
+                reason: "the tool was ended by signal 15".into(),
+            },
+        })
+        .unwrap();
+    }
+
+    fn an_agent() -> Control {
+        Control {
+            actor: "agent:hazel".into(),
+            verified: true,
+            reason: "wrong direction".into(),
+        }
+    }
+
+    #[test]
+    fn a_turn_that_took_the_users_messages_is_not_taken_over_on_a_later_attempt() {
+        let mut a = two_gathered();
+        a.send(dropped(2)).unwrap();
+        a.send(Command::TurnRetried { turn: TurnId(2) }).unwrap();
+        assert!(a.agent.joins().is_empty(), "the park let go of the joins");
+        a.user(14);
+        assert_eq!(a.waiting(), vec![5]);
+        assert!(
+            !a.agent.can_take_over(TurnId(2), TurnId(5), 2),
+            "a takeover would give the tool turn 2's own words and the new ones, not 3 and 4"
+        );
+        assert_eq!(
+            a.send(Command::SelectTakeover {
+                selected: crate::takeover::Selection {
+                    into: TurnId(5),
+                    attempt: 2,
+                    fence: 0,
+                    trace: None,
+                    start: crate::takeover::Start {
+                        from: TurnId(2),
+                        session: "s".into(),
+                        input: crate::takeover::Input::Agy {
+                            first: "words".into(),
+                        },
+                    },
+                },
+            })
+            .map(|_| ()),
+            Err(Refusal::TakeoverStale)
+        );
+        assert_eq!(
+            gathered(&a, 2),
+            vec![(3, 12), (4, 13)],
+            "all kept for attempt 2"
+        );
+        a.finish(2);
+        assert_eq!(a.live(), Some(5), "the new message waited for the turn");
+    }
+
+    #[test]
+    fn an_agents_stop_gives_the_users_unanswered_messages_back_to_the_queue_in_order() {
+        let mut a = two_gathered();
+        ended_after_a_stop(&mut a, Some(an_agent()));
+        assert_eq!(
+            a.waiting(),
+            vec![3, 4],
+            "back in the queue, in order, held by the Stop as all that waits"
+        );
+        assert!(a.agent.is_paused());
+        assert!(a.agent.waiting().all(|queued| queued.attempt == 1
+            && queued.admission == Admission::Queue
+            && queued.user_word));
+        assert_eq!(Agent::replay(&a.history).unwrap(), a.agent);
+        a.send(Command::Resume { by: "user".into() }).unwrap();
+        assert_eq!(a.live(), Some(3));
+        assert_eq!(
+            take_together(&mut a, 3),
+            vec![4],
+            "they go to the tool together again"
+        );
+    }
+
+    #[test]
+    fn a_lost_process_or_a_newer_message_gives_them_back_and_the_users_stop_does_not() {
+        // The process went away under the turn: they run again at once.
+        let mut lost = two_gathered();
+        ended_after_a_stop(&mut lost, None);
+        assert_eq!(lost.live(), Some(3));
+        assert_eq!(lost.waiting(), vec![4]);
+
+        // A direct message took the turn's place: it runs first, they wait behind it.
+        let mut newer = two_gathered();
+        newer.user(14);
+        newer.direct(15);
+        newer
+            .send(Command::TurnEnded {
+                turn: TurnId(2),
+                outcome: RunOutcome::Interrupted {
+                    reason: "stopped".into(),
+                },
+            })
+            .unwrap();
+        assert_eq!(newer.live(), Some(6));
+        assert_eq!(newer.waiting(), vec![3, 4, 5]);
+
+        // The user's own Stop ends them with the turn.
+        let mut theirs = two_gathered();
+        ended_after_a_stop(&mut theirs, Some(Control::by("user")));
+        assert!(theirs.waiting().is_empty());
+        assert!(gathered(&theirs, 2).is_empty());
+
+        // A turn that had begun to answer them ends them with it, whoever stopped it.
+        let mut answered = two_gathered();
+        answered
+            .send(Command::TurnMoved {
+                turn: TurnId(2),
+                activity: Activity::Responding,
+            })
+            .unwrap();
+        ended_after_a_stop(&mut answered, Some(an_agent()));
+        assert!(answered.waiting().is_empty());
     }
 }
