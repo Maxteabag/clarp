@@ -103,13 +103,27 @@ impl Settings {
     pub(super) fn recipients(&self, kind: &str) -> Vec<String> {
         let family = if kind.starts_with("app_crash_") {
             "app_crash"
+        } else if kind.starts_with("scroll_flash_") {
+            "scroll_flash"
         } else if matches!(kind, "wait" | "sends" | "stall") {
             "queue"
         } else {
             ""
         };
+        // A scroll flash with no owner of its own goes to whoever owns that platform's app
+        // crashes: the app's owner.
+        let app_owner = kind.strip_prefix("scroll_flash_").and_then(|platform| {
+            self.owners
+                .get(&format!("app_crash_{platform}"))
+                .or_else(|| self.owners.get("app_crash"))
+        });
         let mut all = Vec::new();
-        if let Some(owner) = self.owners.get(kind).or_else(|| self.owners.get(family)) {
+        if let Some(owner) = self
+            .owners
+            .get(kind)
+            .or_else(|| self.owners.get(family))
+            .or(app_owner)
+        {
             all.push(owner.clone());
         }
         if !self.front_desk.is_empty() && !all.contains(&self.front_desk) {

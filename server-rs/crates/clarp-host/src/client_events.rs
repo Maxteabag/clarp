@@ -12,13 +12,17 @@ use axum::{
     http::{HeaderMap, StatusCode},
 };
 use clarp_ports::clock::Clock;
-use clarp_store_sqlite::client_events::{CrashCandidate, Event, Query as Filters, Store};
+use clarp_store_sqlite::client_events::{CrashCandidate, Event, Flash, Query as Filters, Store};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App, Principal};
 
 const DETAIL_BYTES: usize = 4096;
+/// The event the apps' scroll dashcam sends when a chat view jumps and comes back without a
+/// gesture: kept like an important one, with room for its frames and causes.
+pub(crate) const SCROLL_FLASH: &str = "scroll_flash";
+const FLASH_DETAIL_BYTES: usize = 16 * 1024;
 const REDACTED: &str = "[redacted]";
 const MARKER: &str = "…[truncated]";
 
@@ -104,13 +108,13 @@ pub(crate) fn redact_report(report: &Value) -> Value {
     redact(report, 0, false)
 }
 
-fn detail(value: &Value) -> Option<String> {
+fn detail(value: &Value, most: usize) -> Option<String> {
     if value.is_null() || value == "" {
         return None;
     }
     let mut text = redact(value, 0, true).to_string();
-    if text.len() > DETAIL_BYTES {
-        text.truncate(text.floor_char_boundary(DETAIL_BYTES - MARKER.len()));
+    if text.len() > most {
+        text.truncate(text.floor_char_boundary(most - MARKER.len()));
         text.push_str(MARKER);
     }
     Some(text)
@@ -204,7 +208,8 @@ impl Source {
         let level = text(item, "level", "");
         let level = level.trim().to_lowercase();
         let level = clarp_kernel::python::first(&level, 16);
-        let important = IMPORTANT.is_match(name) || IMPORTANT.is_match(level);
+        let flash = name == SCROLL_FLASH;
+        let important = flash || IMPORTANT.is_match(name) || IMPORTANT.is_match(level);
         let level = if !level.is_empty() {
             level
         } else if important {
@@ -222,7 +227,14 @@ impl Source {
             server_id: self.server_id.clone(),
             event: cap(name, 64),
             level: cap(level, 16),
-            detail: detail(&item["detail"]),
+            detail: detail(
+                &item["detail"],
+                if flash {
+                    FLASH_DETAIL_BYTES
+                } else {
+                    DETAIL_BYTES
+                },
+            ),
             trace_id: (!trace.is_empty()).then_some(trace),
             kept: important,
         }
@@ -293,6 +305,58 @@ pub(crate) async fn crash_candidates(
                 .map_err(|why| why.to_string())
         })
         .await
+}
+
+/// What the apps reported of chat-view scroll flashes on one platform in a window.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Flashes {
+    pub count: u64,
+    pub newest_at: i64,
+    /// The newest flash's rule (`jump_back`, `top_flip`).
+    pub rule: String,
+    /// The kinds of what happened around the newest flash (`reload`, `insert`, ...), each once.
+    pub causes: Vec<String>,
+}
+
+/// The scroll flashes of a window, by platform (the client that sent them).
+pub(crate) fn flashes_by_platform(rows: &[Flash]) -> std::collections::BTreeMap<String, Flashes> {
+    let mut by: std::collections::BTreeMap<String, Flashes> = Default::default();
+    for row in rows {
+        let flashes = by.entry(row.client.clone()).or_default();
+        flashes.count += 1;
+        if row.received_at >= flashes.newest_at {
+            flashes.newest_at = row.received_at;
+            let detail = row
+                .detail
+                .as_deref()
+                .and_then(|detail| serde_json::from_str::<Value>(detail).ok())
+                .unwrap_or(Value::Null);
+            flashes.rule = detail["rule"].as_str().unwrap_or("unknown").to_owned();
+            let mut causes: Vec<String> = Vec::new();
+            for event in detail["events"].as_array().into_iter().flatten() {
+                if let Some(kind) = event["kind"].as_str()
+                    && !causes.iter().any(|seen| seen == kind)
+                {
+                    causes.push(kind.to_owned());
+                }
+            }
+            flashes.causes = causes;
+        }
+    }
+    by
+}
+
+/// The scroll flashes apps reported in the window, by platform.
+pub(crate) async fn flashes(
+    app: &App,
+    since: i64,
+    now: i64,
+) -> Result<std::collections::BTreeMap<String, Flashes>, String> {
+    let rows = app
+        .client_events
+        .call(move |store| store.flashes(since, now).map_err(|why| why.to_string()))
+        .await?;
+    Ok(flashes_by_platform(&rows))
 }
 
 pub(crate) async fn record(
@@ -425,4 +489,80 @@ pub(crate) async fn events<'a>(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "store failed")
         })?;
     Ok(rows.into_iter().map(shown).collect())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn source() -> Source {
+        Source {
+            device: "phone".into(),
+            client: "ios".into(),
+            build: "500".into(),
+            contract: Some(80),
+            server_id: "host".into(),
+        }
+    }
+
+    fn flash(frames: usize) -> Value {
+        json!({
+            "event": SCROLL_FLASH, "level": "warning",
+            "detail": {
+                "chat": "transit-probe", "window": "main", "screen": 812, "rule": "jump_back",
+                "frames": (0..frames).map(|t| json!({"t": t, "y": t * 7, "h": 9000, "top": format!("message-{t}-{}", "0".repeat(48)), "g": false})).collect::<Vec<_>>(),
+                "events": [{"t": 3, "kind": "reload", "note": "snapshot"}, {"t": 5, "kind": "height", "note": "image"}],
+            },
+        })
+    }
+
+    #[test]
+    fn a_scroll_flash_is_kept_like_an_important_event_with_room_for_its_frames() {
+        let event = source().event(&flash(60), 1);
+        assert!(
+            event.kept,
+            "IMPORTANT does not match the name, the flash is kept all the same"
+        );
+        assert_eq!(event.level, "warning");
+        let detail = event.detail.unwrap();
+        assert!(
+            detail.len() > DETAIL_BYTES && detail.len() <= FLASH_DETAIL_BYTES,
+            "{}",
+            detail.len()
+        );
+        assert!(!detail.ends_with(MARKER));
+        // Another event of the same size is cut at the usual bound.
+        let mut other = flash(60);
+        other["event"] = json!("scroll_note");
+        let other = source().event(&other, 1);
+        assert!(!other.kept);
+        assert!(other.detail.unwrap().ends_with(MARKER));
+    }
+
+    #[test]
+    fn flashes_are_counted_by_platform_with_the_newest_ones_rule_and_causes() {
+        let row = |client: &str, at, rule: &str, kinds: &[&str]| {
+            Flash {
+            client: client.into(),
+            received_at: at,
+            detail: Some(
+                json!({"rule": rule, "events": kinds.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()})
+                    .to_string(),
+            ),
+        }
+        };
+        let by = flashes_by_platform(&[
+            row("ios", 10, "top_flip", &["insert"]),
+            row("desktop", 11, "jump_back", &["live"]),
+            row("ios", 20, "jump_back", &["reload", "height", "reload"]),
+        ]);
+        let ios = &by["ios"];
+        assert_eq!(
+            (ios.count, ios.newest_at, ios.rule.as_str()),
+            (2, 20, "jump_back")
+        );
+        assert_eq!(ios.causes, ["reload", "height"]);
+        assert_eq!(by["desktop"].count, 1);
+    }
 }

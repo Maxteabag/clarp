@@ -8,6 +8,7 @@ use clarp_actor::{QueueItemStatus, Waiting};
 use clarp_kernel::experience::{Window, is_user_wait};
 use clarp_store_sqlite::client_events::CrashCandidate;
 use futures_util::{StreamExt as _, stream};
+use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use crate::edge::App;
@@ -247,6 +248,51 @@ fn app_crashes(
     }
 }
 
+/// The finding kinds of the apps' chat-view scroll flashes, one for each platform (family
+/// `scroll_flash`).
+const SCROLL_FLASH_KINDS: [&str; 4] = [
+    "scroll_flash_ios",
+    "scroll_flash_android",
+    "scroll_flash_desktop",
+    "scroll_flash_web",
+];
+
+/// One chat-view scroll flash an app reported in the window is a finding of its platform.
+fn scroll_flashes(
+    seen: &mut Seen,
+    since: i64,
+    by_platform: &BTreeMap<String, crate::client_events::Flashes>,
+    zone: &TimeZone,
+) {
+    let hours = |ms: i64| {
+        jiff::Timestamp::from_millisecond(ms)
+            .map(|at| at.to_zoned(zone.clone()).strftime("%H:%M").to_string())
+            .unwrap_or_default()
+    };
+    for (client, flashes) in by_platform {
+        if flashes.count == 0 || !platform(client) {
+            continue;
+        }
+        let causes = if flashes.causes.is_empty() {
+            "no cause reported".to_owned()
+        } else {
+            flashes.causes.join(", ")
+        };
+        let plural = if flashes.count == 1 { "" } else { "es" };
+        seen.add(
+            &format!("scroll_flash_{client}"),
+            client,
+            format!(
+                "{} chat-view scroll flash{plural} since {} on {client}; the newest at {}: {}, with {causes}.",
+                flashes.count,
+                hours(since),
+                hours(flashes.newest_at),
+                flashes.rule,
+            ),
+        );
+    }
+}
+
 pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64) -> Seen {
     let directory = app.fleet.directory();
     let mut seen = Seen::default();
@@ -323,6 +369,14 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
         }
     }
 
+    match crate::client_events::flashes(app, since, now).await {
+        Ok(by_platform) => scroll_flashes(&mut seen, since, &by_platform, &TimeZone::system()),
+        Err(why) => {
+            seen.unavailable_kinds.extend(SCROLL_FLASH_KINDS);
+            eprintln!("clarp-host: experience-watch could not read scroll flashes: {why}");
+        }
+    }
+
     match crate::managed_skills::status(app).await {
         Ok(skills) => {
             for backend in ["claude", "codex", "agy"] {
@@ -359,6 +413,64 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+
+    #[test]
+    fn one_scroll_flash_is_a_finding_of_its_platform_and_goes_to_the_apps_owner() {
+        let mut seen = Seen::default();
+        let mut by = BTreeMap::new();
+        let flashes = |count, rule: &str, causes: &[&str]| crate::client_events::Flashes {
+            count,
+            newest_at: 1_800_000_600_000,
+            rule: rule.into(),
+            causes: causes.iter().map(|c| (*c).to_owned()).collect(),
+        };
+        by.insert(
+            "ios".to_owned(),
+            flashes(1, "jump_back", &["reload", "height"]),
+        );
+        by.insert("desktop".to_owned(), flashes(3, "top_flip", &[]));
+        by.insert("tv".to_owned(), flashes(2, "jump_back", &[]));
+        scroll_flashes(&mut seen, 1_800_000_000_000, &by, &TimeZone::UTC);
+        assert_eq!(
+            seen.found[&("scroll_flash_ios".into(), "ios".into())],
+            "1 chat-view scroll flash since 08:00 on ios; the newest at 08:10: jump_back, with reload, height."
+        );
+        assert_eq!(
+            seen.found[&("scroll_flash_desktop".into(), "desktop".into())],
+            "3 chat-view scroll flashes since 08:00 on desktop; the newest at 08:10: top_flip, with no cause reported."
+        );
+        assert_eq!(
+            seen.found.len(),
+            2,
+            "a client that is no platform is not a finding"
+        );
+        let settings = Settings::from_section(Some(
+            &toml::from_str(
+                "front_desk = 'desk'\n[owners]\napp_crash_ios = 'ios-owner'\napp_crash = 'apps'\nscroll_flash_web = 'web-owner'\n",
+            )
+            .unwrap(),
+        ));
+        assert_eq!(
+            settings.recipients("scroll_flash_ios"),
+            ["ios-owner", "desk"]
+        );
+        assert_eq!(
+            settings.recipients("scroll_flash_android"),
+            ["apps", "desk"]
+        );
+        assert_eq!(
+            settings.recipients("scroll_flash_web"),
+            ["web-owner", "desk"]
+        );
+        let family = Settings::from_section(Some(
+            &toml::from_str(
+                "front_desk = 'desk'\n[owners]\nscroll_flash = 'ui'\napp_crash = 'apps'\n",
+            )
+            .unwrap(),
+        ));
+        assert_eq!(family.recipients("scroll_flash_desktop"), ["ui", "desk"]);
+    }
+
     use super::*;
     use crate::experience_watch::book::{Book, Notice};
     use axum::{

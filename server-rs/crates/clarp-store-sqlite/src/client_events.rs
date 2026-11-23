@@ -61,6 +61,13 @@ pub struct CrashCandidate {
     pub report: Option<String>,
 }
 
+/// One chat-view scroll flash an app reported (`scroll_flash`): for the watcher's count.
+pub struct Flash {
+    pub client: String,
+    pub received_at: i64,
+    pub detail: Option<String>,
+}
+
 pub struct Query {
     pub device: Option<String>,
     pub since_ms: Option<i64>,
@@ -179,6 +186,23 @@ impl Store {
         rows.collect()
     }
 
+    /// The chat-view scroll flashes apps reported in the window, the oldest first.
+    pub fn flashes(&self, since: i64, now: i64) -> rusqlite::Result<Vec<Flash>> {
+        let mut select = self.connection.prepare_cached(
+            "SELECT client, received_at, detail FROM client_events
+             WHERE received_at BETWEEN ?1 AND ?2 AND event = 'scroll_flash'
+             ORDER BY received_at, id",
+        )?;
+        let rows = select.query_map(params![since, now], |row| {
+            Ok(Flash {
+                client: row.get(0)?,
+                received_at: row.get(1)?,
+                detail: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     pub fn read(&mut self, query: &Query, now: i64) -> rusqlite::Result<Vec<Event>> {
         self.prune(now)?;
         let mut select = self.connection.prepare_cached(
@@ -278,6 +302,44 @@ fn trim(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scroll_flashes_of_a_window_are_read_in_order() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(SCHEMA).unwrap();
+        let mut store = Store {
+            connection,
+            total: (100, 1_000_000),
+            per_device: (100, 1_000_000),
+        };
+        let event = |name: &str, client: &str, received_at| Event {
+            received_at,
+            device: "phone".into(),
+            event: name.into(),
+            kept: true,
+            client: client.into(),
+            client_build: String::new(),
+            client_contract: None,
+            server_id: String::new(),
+            level: "warning".into(),
+            detail: Some("{\"rule\":\"jump_back\"}".into()),
+            trace_id: None,
+        };
+        let rows = [
+            event("scroll_flash", "ios", 10),
+            event("app_crash", "ios", 11),
+            event("scroll_flash", "desktop", 12),
+            event("scroll_flash", "ios", 50),
+        ];
+        store.record(&rows, "phone", 60).unwrap();
+        let read = store.flashes(10, 20).unwrap();
+        let seen: Vec<_> = read
+            .iter()
+            .map(|f| (f.client.as_str(), f.received_at))
+            .collect();
+        assert_eq!(seen, [("ios", 10), ("desktop", 12)]);
+        assert_eq!(read[0].detail.as_deref(), Some("{\"rule\":\"jump_back\"}"));
+    }
 
     #[test]
     fn client_events_pin_context_and_enforce_age_count_and_byte_limits() {

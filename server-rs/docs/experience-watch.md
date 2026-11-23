@@ -20,6 +20,7 @@ release_kinds = ["check", "test"]
 [experience_watch.owners]
 app_crash_ios = "SESSION"
 app_crash_android = "SESSION"
+scroll_flash = "SESSION"
 queue = "SESSION"
 skills = "SESSION"
 cards = "SESSION"
@@ -67,6 +68,25 @@ separately. `app_crash_ios` and the other platform kinds fall back to
 show the paired device name with its ID, or the agent's name and session.
 Timestamps use the Host's local timezone, with a UTC offset. JSON keeps
 the stable subject IDs and original epoch-millisecond timestamps.
+
+A chat-view scroll flash is a `scroll_flash` client event (below). One flash
+in the window is a finding of its platform: `scroll_flash_ios`,
+`scroll_flash_android`, `scroll_flash_desktop` or `scroll_flash_web`, its
+subject the platform. The notice reads "N chat-view scroll flashes since
+HH:MM on <platform>; the newest at HH:MM: <rule>, with <cause kinds>."
+Its owner is `owners.<kind>`, else `owners.scroll_flash`, else that
+platform's app-crash owner (`app_crash_<platform>`, else `app_crash`), and
+the front desk as for every finding.
+
+The apps' scroll dashcam sends `scroll_flash` (level `warning`) to `POST /clog`
+when a chat view jumps and comes back without a gesture. Its `detail` is
+`{"chat": session, "window": pane, "screen": viewport height px,
+"rule": "jump_back" | "top_flip", "frames": [{"t": ms, "y": offset px,
+"h": content height px, "top": top visible message id, "g": gesture}]
+(changed frames only, at most 60), "events": [{"t": ms, "kind": "reload" |
+"insert" | "remove" | "height" | "live", "note": short}] (at most 30)}`.
+The Host keeps it like an important event (7 days, with its context) and
+lets its detail run to 16 KB (4 KB for other events).
 
 A release finding requires a running job registered as `check` or `test`
 and a recognized check step in that job's live worker process tree. Builds,
