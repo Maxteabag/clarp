@@ -190,6 +190,9 @@ chat_view = {"on": False, "fork": False, "refuse": False}
 main_turns = {}
 # /log rows carry turn summaries (feature log_turn_summary, Host contract 47).
 turn_summaries = False
+# A turn that did not complete says why on its end (feature turn_end_reason,
+# Rust Host contract 162): off until /__control/turn-reason turns it on.
+turn_reasons = False
 live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
@@ -1211,6 +1214,8 @@ class Handler(BaseHTTPRequestHandler):
             features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
+            if turn_reasons:
+                features.append("turn_end_reason")
             if coordination["on"]:
                 features.append("hidden_coordination")
             if transit["on"]:
@@ -1888,6 +1893,13 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "agent-roster", "kind": "coordination-changed"})
             return self.reply(200, {"ok": True, "session": session, "coordination_visibility": coordination_effective(session),
                                     "coordination_override": coordination["overrides"].get(session)})
+        if url.path == "/__control/turn-reason":
+            # Test control: the turn_end_reason feature on or off (read from
+            # /server-info on connecting). Rows carry turn.reason as their
+            # fixtures give it.
+            global turn_reasons
+            turn_reasons = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/turn-summary":
             # Test control: the log_turn_summary feature on or off (read from
             # /server-info on connecting). Rows carry trace_id, phase and turn

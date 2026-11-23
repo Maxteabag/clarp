@@ -31,6 +31,8 @@ pub(crate) struct Live {
     pub explanation_setting: bool,
     /// `/log` rows carry turn summaries (`log_turn_summary`).
     pub turn_summaries: bool,
+    /// A turn that did not complete says why on its end (`turn_end_reason`).
+    pub turn_reasons: bool,
     /// The Host's tool-explanation setting (§6), once it said.
     pub explanations: Option<Object>,
     /// Chats a live event (or a snapshot with something in it) has reached:
@@ -50,6 +52,14 @@ impl Engine {
     /// (`log_turn_summary`, docs/live-items.md §9).
     pub fn log_turn_summary(&self) -> bool {
         self.live.turn_summaries
+    }
+
+    /// Whether a turn that did not complete says why on its end
+    /// (`turn_end_reason`, Rust Host contract 162).
+    /// The chat's own Host decides, for a chat of another saved Host too.
+    pub fn turn_end_reason(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.turn_end_reason(local));
+        self.live.turn_reasons
     }
 
     /// Whether live items show this chat: the feature is on and the Host
@@ -120,6 +130,7 @@ impl Engine {
         let enabled = has("live_items");
         self.live.explanation_setting = has("tool_explanation_setting");
         self.live.turn_summaries = has("log_turn_summary");
+        self.live.turn_reasons = has(clarp_core::turn_reason::FEATURE);
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();

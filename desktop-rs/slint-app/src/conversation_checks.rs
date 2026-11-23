@@ -11,7 +11,9 @@
 //! inside it, and the pane's own stalled line stands down; the chat's menu
 //! and its profile pick a view and tell the Host; Clean chat puts every
 //! chat in Conversation; a write the Host refuses keeps the choice on this
-//! device and says so.
+//! device and says so. With `turn_end_reason` (#731) a turn stopped before
+//! it did any work says why in one quiet line under it; a completed turn
+//! says nothing.
 
 use std::time::Duration;
 
@@ -101,7 +103,7 @@ fn menu_open(window: &crate::AppWindow) {
 
 pub fn conversation_view_check(out: String) {
     let (out1, out2, out3, out4, out5, out6, out7) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
-    let (out8, out9) = (out.clone(), out.clone());
+    let (out8, out9, out10) = (out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("session as before", Box::new(|app, window, _| {
             if !app.engine.borrow().conversation(SESSION).is_some_and(|c| !c.rows().is_empty()) {
@@ -352,6 +354,36 @@ pub fn conversation_view_check(out: String) {
             check(error.ends_with("This device keeps the view."), &format!("one quiet line says the Host refused it: {error:?}"));
             check(app.engine.borrow().chat_view_own(SESSION) == Some("session") && has("w-1"), "the choice stays on this device");
             shot(&out7, "conversation-07-refused");
+            check(!has(&clarp_core::turn_reason::key("t-3")), "without turn_end_reason a stopped turn says nothing new");
+            // A turn stopped while it waited for an account (#729): no work at
+            // all, its prompt closes it, and the Host says why (#731).
+            let stopped = json!([{"id": "u-3", "role": "user", "text": "Write the summary", "origin": "user", "trace_id": "t-3", "view": "conversation",
+                "timestamp": "2026-11-23T10:04:00Z",
+                "turn": {"turn_id": "t-3", "status": "interrupted", "started_at_ms": 2_000, "ended_at_ms": 9_000, "worked_ms": 7_000, "tool_count": 0,
+                    "reason": "Stopped by its user."}}]);
+            check(control("/__control/upsert", &json!({"session": SESSION, "turns": stopped})).is_ok(), "a turn is stopped before it did any work");
+            true
+        })),
+        ("no reason without the feature", Box::new(|app, _window, elapsed| {
+            if !has("u-3") || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!has(&clarp_core::turn_reason::key("t-3")), &format!("without turn_end_reason the chat is as before: {:?}", ids()));
+            check(control("/__control/turn-reason", &json!({"on": true})).is_ok(), "the Host turns turn_end_reason on");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("turn reason", Box::new(move |app, _window, elapsed| {
+            let line = clarp_core::turn_reason::key("t-3");
+            if !app.engine.borrow().turn_end_reason(SESSION) || !has(&line) || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let ids = ids();
+            let at = |id: &str| ids.iter().position(|i| i == id);
+            check(row(&line).is_some_and(|r| r.author == "system" && r.blocks.row_count() == 1), "the Host's reason is one quiet system line");
+            check(at("u-3").is_some_and(|u| at(&line) == Some(u + 1)), &format!("under the stopped turn, which did no work: {ids:?}"));
+            check(!has(&clarp_core::turn_reason::key("t-1")), "a completed turn never shows a line");
+            shot(&out10, "conversation-10-turn-reason");
             true
         })),
     ];
