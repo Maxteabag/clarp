@@ -1322,9 +1322,12 @@ pub(super) fn scroll_paint_check(out: String) {
                 }
                 st.following += 1;
                 // Both what the transcript says and where its last row is
-                // drawn: its bottom edge inside the view.
+                // drawn: its bottom edge inside the view, and on the
+                // view's bottom (not above it with blank below: past the end).
                 let (visible, numbers) = last_row_visible();
-                if !now.at_end || !visible {
+                let geo = geometry();
+                let past = geo.find(&last_id()).is_some_and(|(top, bottom)| top > geo.top + 1.0 && geo.bottom - bottom > 12.0 && geo.rows.first().is_some_and(|r| r.1 < geo.top - 1.0));
+                if !now.at_end || !visible || past {
                     let at = st.begun.map_or(0, |b| b.elapsed().as_millis());
                     st.off_end.push(format!("frame {} at {at}ms: at-end {}, offset {:.0}, top row #{}: {numbers}", headless::frames_drawn(), now.at_end, now.offset, now.top));
                 }
