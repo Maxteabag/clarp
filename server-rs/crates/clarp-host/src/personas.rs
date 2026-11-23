@@ -136,7 +136,19 @@ async fn avatar(State(app): State<App>, Path(id): Path<String>, headers: HeaderM
         return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
     };
     let range = media::header_text(&headers, "range");
-    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+    send_picture(&app, picture_name(&digest), &range)
+}
+
+/// Sends a kept picture, said as what its bytes are (image/jpeg when they cannot be read): every
+/// picture is kept under a `.jpg` name, and a PNG portrait was once sent as image/jpeg.
+fn send_picture(app: &App, name: String, range: &str) -> Response {
+    let kind = app
+        .blobs
+        .read(&name, 0, 12)
+        .ok()
+        .and_then(|begins| kept::picture_kind(&begins))
+        .unwrap_or("image/jpeg");
+    media::send_kept(&app.blobs, name, kind, range)
 }
 
 /// Where the picture an agent has of its own is fetched from.
@@ -155,7 +167,7 @@ async fn agent_avatar(
         return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
     };
     let range = media::header_text(&headers, "range");
-    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+    send_picture(&app, picture_name(&digest), &range)
 }
 
 /// The picture an agent wears, as a portrait can hold it: its digest, and what kind of
@@ -250,7 +262,7 @@ async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: Heade
         if let Some(digest) = record.avatar.as_deref()
             && kept::worn_id(&record.agent_id, digest) == id
         {
-            return media::send_kept(&app.blobs, picture_name(digest), "image/jpeg", &range);
+            return send_picture(&app, picture_name(digest), &range);
         }
     }
     ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response()
@@ -397,7 +409,7 @@ async fn pushed_face(
         return forbidden();
     }
     let range = media::header_text(&headers, "range");
-    media::send_kept(&app.blobs, picture_name(&digest), "image/jpeg", &range)
+    send_picture(&app, picture_name(&digest), &range)
 }
 
 async fn avatar_settings(State(app): State<App>) -> Json<Value> {

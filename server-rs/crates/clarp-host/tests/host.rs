@@ -24104,6 +24104,18 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
     let part = fetch(&host, "secret", "GET", &face, &[("Range", "bytes=-7")], b"");
     assert_eq!((part.status, part.text().as_str()), (206, "picture"));
     assert_eq!(fetch(&host, "", "GET", &face, &[], b"").status, 401);
+    // A picture is said as what its bytes are: a PNG is sent as image/png.
+    let (status, made) = ask(
+        "/personas",
+        json!({ "name": "Pixel", "personality": "Personality: exact.", "avatar_base64": "iVBORw0KGgp4" }),
+    );
+    assert_eq!(status, 201, "{made}");
+    let (status, made) = ask("/agents", json!({ "name": "Pixel", "backend": "claude" }));
+    assert_eq!(status, 200, "{made}");
+    let png = made["agent"]["avatar_url"].as_str().unwrap().to_string();
+    let fetched = fetch(&host, "secret", "GET", &png, &[], b"");
+    assert_eq!(fetched.status, 200, "{png}");
+    assert_eq!(fetched.header("content-type"), "image/png");
     let nobody = fetch(
         &host,
         "secret",
