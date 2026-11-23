@@ -2072,6 +2072,9 @@ fn the_keeper_follows_the_next_event_after_a_trimmed_goal_is_upgraded_reopened_a
             "from":"fixture","turns":[],"plans":[{"plan":moved,"events":events}]}));
         assert_eq!(imported["ok"], true, "{imported}");
         assert_eq!(get(&target)["goal"]["updater"]["through_event"], wanted);
+        // An imported agent starts nothing until its move is handed over: the handoff's
+        // resume lets it go (an import holds its mailbox in the same write).
+        target.post("/turn-queue/resume", json!({ "session": session }));
         enable_test_keeper(&target, &owner);
         notice(&target, "import");
     }
@@ -3110,7 +3113,8 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
 
     // A launch that never starts (no shim to start the turn with): nothing was given to the
     // tool, so the turn waits to be tried again and holds the agent (R121), the next message
-    // waits behind it, and the user's Stop ends it at once; the agent is not left busy.
+    // waits behind it, and a Stop ends it at once; the agent is not left busy. (A maintenance
+    // Stop: the user's would start the user's second message at once, Host contract 141.)
     let place = Place::new("no-shim");
     let nowhere = place.root.join("no-shim-here");
     let shim = ["--shim", nowhere.to_str().unwrap()];
@@ -3130,7 +3134,7 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
         let row = row(&host);
         row["busy"] == true && row["queued_turn_count"] == 1
     });
-    host.post("/stop", json!({ "session": agent }));
+    host.post("/stop", json!({ "session": agent, "actor": "maintenance" }));
     wait_for("the first to have ended, and the agent to be free", || {
         let turns = host.turns(&agent);
         let failed = turns.iter().any(|turn| turn["turn"]["status"] == "failed");
@@ -11683,8 +11687,14 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     // another agent waits its turn like one left for later: it goes through the queue.
     agent_message(helper, &maker, "do the slice", "h1");
     wait_for("the helper's turn", || host.state(helper) == "done");
-    assert_eq!(state(helper), "running");
-    assert_eq!(roster_told(helper), 0);
+    // Its turn settled and it wrote nothing to its maker: it is marked so, and the apps hear
+    // of it (Rust contract 155, issue 399).
+    wait_for("the helper to be marked as ended without a report", || {
+        state(helper) == "ended-unreported"
+    });
+    wait_for("the apps to hear of the helper's move", || {
+        roster_told(helper) == 1
+    });
     assert_eq!(
         row(helper)["queued_turn_revision"],
         3,
@@ -11731,13 +11741,16 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
 
     // An agent that is neither its maker nor its helper moves nothing.
     agent_message(&maker, &other, "unrelated", "h3");
-    wait_for("the maker's turn", || host.state(&maker) == "background");
-    assert_eq!(state(helper), "running");
+    // Its helper is at rest, so the maker is shown at rest once its own turn is over.
+    wait_for("the maker's turn", || {
+        host.turns(&maker).iter().any(|row| row["id"] == "u-h3") && host.state(&maker) == "done"
+    });
+    assert_eq!(state(helper), "ended-unreported");
     // It writes to its maker: it has reported.
     agent_message(&maker, helper, "the slice is done", "h4");
     wait_for("the report to be noted", || state(helper) == "reported");
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 1
+        roster_told(helper) == 2
     });
     wait_for("the maker to be at rest", || host.state(&maker) == "done");
     let makers = row(&maker);
@@ -11760,9 +11773,17 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         state(helper) == "running"
     });
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 2
+        roster_told(helper) == 3
     });
     wait_for("the helper's turn", || host.state(helper) == "done");
+    // That turn too settled without a report.
+    wait_for(
+        "the helper to be marked as ended without a report again",
+        || state(helper) == "ended-unreported",
+    );
+    wait_for("the apps to hear of the helper's move", || {
+        roster_told(helper) == 4
+    });
 
     // Marked by hand: by the agent that made it, or by the user.
     let mark = |body: Value| refused("/agent-helper-state", body);
@@ -11810,7 +11831,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     // The state it has already is no change and no refusal.
     assert_eq!(mark(json!({ "session": helper, "state": "failed" })).0, 200);
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 3
+        roster_told(helper) == 5
     });
     // Opened again by the user, and the moment it ended is forgotten.
     assert_eq!(
@@ -16815,8 +16836,9 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
     let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
     let script = [
         "#!/bin/sh\nread message\n",
-        // The user's words, without what the Host says after them.
-        "message=$(printf '%s' \"$message\" | sed 's/<system-reminder>.*//')\n",
+        // The user's words, without what the Host says after them, nor the line's id, which
+        // is new for every attempt (each attempt's input has a uuid of its own).
+        "message=$(printf '%s' \"$message\" | sed 's/\"uuid\":\"[^\"]*\"//; s/<system-reminder>.*//')\n",
         "key=$(printf '%s' \"$message\" | cksum | cut -d' ' -f1)\n",
         &format!("file=\"{}/$key\"\n", counts.display()),
         "before=$(cat \"$file\" 2>/dev/null || echo 0)\n",
@@ -19682,7 +19704,8 @@ fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
         "{err}"
     );
 
-    let heard = host.listen();
+    // This Host asks for its token: the stream is listened to with it, as this machine may.
+    let heard = host.listen_at(&format!("/events?token={token}"));
     let form_events = || {
         heard
             .lock()
@@ -27058,7 +27081,9 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
         json!({ "session": cleo, "text": WORDS, "client_msg_id": "s3", "queue_if_busy": true }),
     );
     assert_eq!(left["queued"], true, "{left}");
-    host.post("/stop", json!({ "session": cleo }));
+    // A maintenance Stop holds what waits; the user's would start it at once (Host contract
+    // 141), into a tool that still holds.
+    host.post("/stop", json!({ "session": cleo, "actor": "maintenance" }));
     wait_for("the held turn to be cut off", || {
         host.state(&cleo) == "interrupted"
     });
