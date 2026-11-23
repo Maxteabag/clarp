@@ -25,6 +25,7 @@ mod peers;
 pub mod blocks;
 mod composer;
 mod connection;
+mod chat_view;
 mod coordination;
 mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
@@ -271,6 +272,7 @@ pub struct Engine {
     pending_log_mode: HashMap<String, String>,
     coordination: coordination::Coordination,
     transits: transit::Transits,
+    chat_view: chat_view::ChatView,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -425,6 +427,7 @@ impl Engine {
             pending_log_mode: HashMap::new(),
             coordination: coordination::Coordination::default(),
             transits: transit::Transits::default(),
+            chat_view: chat_view::ChatView::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -1599,7 +1602,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) {
+        if self.live_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) {
             return;
         }
         if tag == "server-info" {
@@ -1620,6 +1623,7 @@ impl Engine {
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
             self.coordination_server_info(object);
             self.transit_server_info(object);
+            self.chat_view_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1656,7 +1660,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
@@ -1795,8 +1799,11 @@ impl Engine {
                     self.with_conversation(&session, |c| c.set_voice_error(&message));
                 }
             }
-            "agent-roster" => self.request_snapshot(),
             "agent-transit" => self.transit_event(event),
+            "agent-roster" => {
+                self.chat_view_roster(event);
+                self.request_snapshot();
+            }
             "delivery-updated" => {
                 // F4: a send's delivery state changed without a new revision;
                 // the hint carries no state, so re-read the chat's tail.

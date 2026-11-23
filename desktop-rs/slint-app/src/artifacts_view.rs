@@ -1362,7 +1362,11 @@ fn toggles(id: &str) -> bool {
 /// O on a live item row or a prompt (or a click): opens or folds it, kept
 /// by its key.
 pub fn toggle_live(app: &App, key: &str) {
-    *app.artifact_cursor.borrow_mut() = key.to_owned();
+    // Show work on a reply (Conversation view, #702) is the reply's, not a
+    // card the keyboard is on.
+    if !key.starts_with(clarp_core::chat_view::WORK_PREFIX) {
+        *app.artifact_cursor.borrow_mut() = key.to_owned();
+    }
     // The quiet line where agent messages were (#653): opening it reads the
     // chat again with them shown, in place, for this visit.
     if key.starts_with(COORDINATION_PREFIX) {

@@ -23,22 +23,75 @@ pub(crate) fn explanations(engine: &Engine, session: &str) -> bool {
 }
 
 /// The chat's live entries over its `/log` rows, or none without live items.
+/// In Conversation view (`chat_view`, #702) a running turn is one Running
+/// box and a finished one only its reply; with no live turn to say so, a
+/// working agent still gets the box.
 pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded: &HashSet<String>) -> Option<Presented> {
+    let conversation = conversation_view(engine, session, rows);
     if !engine.live_active(session) {
-        return None;
+        return conversation.then(|| busy_box(engine, session, rows, None)).flatten();
     }
     let view = engine.live_view(session)?;
+    let host_now = view.host_now_ms(now_ms());
     let options = Options {
         explanations: explanations(engine, session),
         expanded: expanded.clone(),
-        host_now_ms: view.host_now_ms(now_ms()),
-        fold_running: folds_running(engine.chat_activity_mode(session)),
-        hide_settled: engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
-        show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
+        host_now_ms: host_now,
+        fold_running: conversation || folds_running(engine.chat_activity_mode(session)),
+        hide_settled: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
+        show_commentary: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
+    let running = view.turn().is_some_and(|t| matches!(t.get("status").and_then(|s| s.as_str()), Some("running") | None));
+    let main_line = engine.chat_main_turn_line(session);
+    if conversation {
+        if running && !presented.turn_id.is_empty() {
+            let started = view.turn().and_then(|t| t.get("started_at_ms")).and_then(|v| v.as_i64());
+            let clock = started.map(|at| clarp_core::live_present::clock(host_now - at)).unwrap_or_default();
+            let title = clarp_core::chat_view::running(&clarp_core::chat_view::status_words(view.activity()));
+            presented.entries = clarp_core::chat_view::running_box(&presented.entries, &presented.turn_id, &title, &clock, main_line.as_deref());
+        } else {
+            let shown: HashSet<&str> = rows.iter().filter(|r| clarp_core::chat_view::in_conversation(r)).map(|r| r.id.as_str()).collect();
+            presented.entries.retain(|e| clarp_core::chat_view::finished_entry_stays(e, |row| shown.contains(row)));
+            if let Some(boxed) = busy_box(engine, session, rows, Some(&presented)) {
+                presented.entries.extend(boxed.entries);
+            }
+        }
+    } else if let Some(line) = main_line.filter(|_| running) {
+        // The fork's turn is what the user talks to; the agent's own turn
+        // is a quiet line on its working row (iOS: inside its indicator).
+        if let Some(fold) = presented.entries.iter_mut().find(|e| e.kind == Kind::Fold && e.status == "running") {
+            fold.secondary = line;
+        }
+    }
     pace(&mut presented);
     Some(presented)
+}
+
+/// Whether the chat draws its Conversation view: the Host offers it, the
+/// chat's choice says so and the rows carry the Host's tags.
+pub(crate) fn conversation_view(engine: &Engine, session: &str, rows: &[Message]) -> bool {
+    engine.chat_view_conversation(session) && clarp_core::chat_view::tagged(rows)
+}
+
+/// The Running box of a working agent no live turn tells of (live items
+/// off, or between its turns): after the chat's newest rows, "Running…"
+/// with its clock from the snapshot. None while idle, or once the newest
+/// prompt's turn has its anchor.
+fn busy_box(engine: &Engine, session: &str, rows: &[Message], live: Option<&Presented>) -> Option<Presented> {
+    let agent = engine.roster().find(session)?;
+    if !agent.busy {
+        return None;
+    }
+    let trace = clarp_core::chat_view::busy_turn(rows)?;
+    if live.is_some_and(|l| !l.turn_id.is_empty() && l.turn_id == trace) {
+        return None;
+    }
+    let clock = agent.turn_started_at.map(|at| clarp_core::live_present::clock(now_ms() - at)).unwrap_or_default();
+    let main_line = engine.chat_main_turn_line(session);
+    let key = if trace.is_empty() { "busy".to_owned() } else { trace.clone() };
+    let entries = clarp_core::chat_view::running_box(&[], &key, &clarp_core::chat_view::running(""), &clock, main_line.as_deref());
+    Some(Presented { entries, turn_id: trace, ..Presented::default() })
 }
 
 /// Whether Tool activity folds the running turn into its `Working` row:
@@ -69,7 +122,28 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
     };
-    clarp_core::history_fold::present(rows, view, &options)
+    let mut folded = clarp_core::history_fold::present(rows, view, &options);
+    if conversation_view(engine, session, rows) {
+        conversation_history(&mut folded, expanded);
+    }
+    folded
+}
+
+/// Finished turns in Conversation view: a turn's work row and its steps
+/// leave with its rows; its reply stays. A turn opened with Show work
+/// reads as the Session view draws it.
+fn conversation_history(folded: &mut clarp_core::history_fold::Folded, expanded: &HashSet<String>) {
+    use clarp_core::history_fold::Piece;
+    for fold in &mut folded.folds {
+        let turn = clarp_core::chat_view::fold_turn(&fold.key);
+        if !turn.is_empty() && expanded.contains(&clarp_core::chat_view::work_key(turn)) {
+            continue;
+        }
+        fold.pieces.retain(|piece| match piece {
+            Piece::Row(_) => true,
+            Piece::Entry(entry) => entry.kind == Kind::Message && entry.phase != "commentary",
+        });
+    }
 }
 
 /// The status line: its text, whether the agent works, the interrupt key.
@@ -184,6 +258,8 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         },
         receipt: crate::ReceiptRow::default(),
         prompt: crate::PromptRow::default(),
+        work_key: SharedString::new(),
+        work_open: false,
     }
 }
 
