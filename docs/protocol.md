@@ -749,13 +749,24 @@ started"); what the tool itself said is in the event's `error` and the Host's lo
 nothing else changes.
 
 What is carried: the user's words and the agent's answers of each turn of the current
-conversation (since the agent was last started again), in order, from the Host's own record.
-Claude, Codex and Grok get a native session written where the tool keeps its sessions; the
-agent's next turn resumes it. Antigravity (the Host never opens its database) and OpenCode
-(whose free models refuse turns on a session handed to its import) get none: the agent's next
-turn there begins a new conversation that opens with the Host's record of the old one (its
-most recent 60,000 bytes). Not carried: tool calls and what they returned, thinking, attachments and images, the
-old tool's compaction summaries, system and developer prompts, and sub-agent sessions.
+conversation (since the agent was last started again), in order, from the Host's own record,
+with the tools the agent used and what they gave back. Claude, Codex and Grok get a native
+session written where the tool keeps its sessions; the agent's next turn resumes it. Claude
+gets each call as a `tool_use` block and its result as a `tool_result` block, Codex as a
+`function_call` and `function_call_output`, Grok as a quoted block after the answer's text
+(`[Tool call: <name>]`, `Input:`, `Result:` with each line quoted, `[End of tool call]`).
+Antigravity (the Host never opens its database) and OpenCode (whose free models refuse turns
+on a session handed to its import) get none: the agent's next turn there begins a new
+conversation that opens with the Host's record of the old one, its calls as the same quoted
+blocks (its most recent 60,000 bytes). A call's input and result are each cut past 8 KB, with
+a line that says how many bytes were. The Host's record keeps the first 4,000 characters of a
+result; for a call made in Claude the whole result is read from Claude Code's own transcript,
+and otherwise a shortened one says that the rest was not carried. Attachments come as what the
+user's message holds of them, the absolute path of each file, which the agent can open with
+its own file tool; a picture a tool returned is named (with its file where the call names one),
+never inlined. Not carried: thinking (it holds for the model that thought it; Claude signs its
+own), the old tool's compaction summaries, system and developer prompts, and sub-agent
+sessions.
 
 `clarp-admin agent transit --session S --backend B [--model M] [--effort E]` starts a change,
 waits until it is done or failed, and prints its last state (exit 1 when it failed).

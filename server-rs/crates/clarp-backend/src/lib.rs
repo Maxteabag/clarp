@@ -377,6 +377,10 @@ pub fn efforts(id: &str) -> &'static [&'static str] {
     by_id(id).map_or(&[], |backend| backend.efforts())
 }
 
+/// How many signs of what a tool gave back the Host keeps with the call, of every tool: what
+/// is past it is left out, with a mark ([`shorten`]).
+pub const TOOL_OUTPUT_KEPT: usize = 4_000;
+
 /// The first `max` characters of a text, with a mark when something was left out.
 pub(crate) fn shorten(text: &str, max: usize) -> String {
     match text.char_indices().nth(max) {

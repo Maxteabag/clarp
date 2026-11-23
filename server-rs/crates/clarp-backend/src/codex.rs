@@ -37,7 +37,7 @@ use crate::{
 };
 
 /// How much of what a tool gave back is kept with the call.
-const MAX_TOOL_OUTPUT: usize = 4_000;
+const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
 /// What Codex is started without when it is only to read ([`Backend::reads`]).
 const NOTHING_TO_ACT_WITH: [&str; 18] = [
     "shell_tool",

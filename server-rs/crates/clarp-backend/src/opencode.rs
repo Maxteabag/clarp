@@ -332,7 +332,7 @@ impl Stream {
         if matches!(status, "completed" | "error") && call.status == ToolStatus::Running {
             let failed = status == "error";
             let content = state["output"].as_str().unwrap_or(word(state, "error"));
-            call.output = Some(shorten(content, 4000));
+            call.output = Some(shorten(content, crate::TOOL_OUTPUT_KEPT));
             call.ended_at_ms = Some(t);
             call.status = if failed {
                 ToolStatus::Error

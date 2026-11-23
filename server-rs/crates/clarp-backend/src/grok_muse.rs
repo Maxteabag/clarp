@@ -199,7 +199,7 @@ impl Stream {
             } else {
                 ToolStatus::Error
             };
-            call.output = Some(shorten(&text, 4000));
+            call.output = Some(shorten(&text, crate::TOOL_OUTPUT_KEPT));
             call.ended_at_ms = Some(t);
             out.push(Signal::Glimpse(Glimpse::Returned {
                 id: call.id.clone(),

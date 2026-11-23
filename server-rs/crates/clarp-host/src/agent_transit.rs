@@ -132,7 +132,12 @@ pub(crate) fn carry(
     if let Some((live, waiting)) = actor.busy_for_change() {
         return Ok((Err(Refused::Busy { live, waiting }), Outputs::default()));
     }
-    let said = actor.said_so_far(CARRIED_MOST)?;
+    let mut said = actor.said_so_far(CARRIED_MOST)?;
+    // Claude keeps whole the results the Host kept only the start of.
+    if record.backend == "claude" {
+        let projects = transit::tool_home("claude", &crate::config::home()).join("projects");
+        transit::whole_results(&mut said, &projects, &record.cwd);
+    }
     let from = transit::kept_from(&said, CARRIED_MOST);
     let kept = &said[from..];
     change.progress.tell("translating");

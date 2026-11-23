@@ -219,6 +219,11 @@ pub const RESTORED_CLOSE: &str = "--- End Clarp restored conversation ---";
 /// how much of one thing that was said, in signs.
 pub const RESTORED_MOST: usize = 60_000;
 pub const RESTORED_OF_ONE: usize = 4_000;
+/// The same for the record of a conversation that moved from another tool ([`carried`]),
+/// where an answer comes with the tools it used and what they gave back: room for a few of
+/// those in one answer.
+pub const CARRIED_MOST: usize = RESTORED_MOST;
+pub const CARRIED_OF_ONE: usize = 16_000;
 
 /// A turn's message with the most recent part of its conversation before it, as the Host
 /// recorded it: for a tool that no longer has the conversation and continues it in a new
@@ -232,7 +237,7 @@ pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
          one. Below is Clarp's record of it, most recent last; carry on from it. The new message \
          follows the record."
     );
-    recorded(&note, said, message)
+    recorded(&note, said, message, RESTORED_OF_ONE, RESTORED_MOST)
 }
 
 /// A turn's message with the most recent part of the conversation before it, for an agent
@@ -244,10 +249,16 @@ pub fn carried(tool: &str, from: &str, said: &[(bool, &str)], message: &str) -> 
          Below is Clarp's record of it, most recent last; carry on from it. The new message \
          follows the record."
     );
-    recorded(&note, said, message)
+    recorded(&note, said, message, CARRIED_OF_ONE, CARRIED_MOST)
 }
 
-fn recorded(note: &str, said: &[(bool, &str)], message: &str) -> String {
+fn recorded(
+    note: &str,
+    said: &[(bool, &str)],
+    message: &str,
+    of_one: usize,
+    most: usize,
+) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for (by_user, text) in said {
         let shown = clarp_speech::markup::clean_for_display(text, false);
@@ -257,8 +268,8 @@ fn recorded(note: &str, said: &[(bool, &str)], message: &str) -> String {
         }
         let signs = body.chars().count();
         let who = if *by_user { "User" } else { "Assistant" };
-        if signs > RESTORED_OF_ONE {
-            let half = RESTORED_OF_ONE / 2;
+        if signs > of_one {
+            let half = of_one / 2;
             let begins: String = body.chars().take(half).collect();
             let ends: String = body.chars().skip(signs - half).collect();
             blocks.push(format!("{who}: {begins}\n[\u{2026}]\n{ends}"));
@@ -270,7 +281,7 @@ fn recorded(note: &str, said: &[(bool, &str)], message: &str) -> String {
     let mut size = 0;
     for block in blocks.iter().rev() {
         let cost = block.len() + 2;
-        if size + cost > RESTORED_MOST {
+        if size + cost > most {
             break;
         }
         kept.push(block);
@@ -688,5 +699,23 @@ mod tests {
             ("7", r#"{"mike":2,"zed-01":0}"#)
         );
         assert_eq!(Humanness::stored(Some(&usual), Some(&of_agents)), setting);
+    }
+
+    #[test]
+    fn a_moved_answer_keeps_its_tool_blocks_whole_where_a_restored_one_is_cut() {
+        let answer = format!(
+            "Looked.\n\n[Tool call: Read]\nResult:\n> {}",
+            "a".repeat(9_000)
+        );
+        let said = [(true, "Read it."), (false, answer.as_str())];
+        let moved = carried("Codex", "Claude Code", &said, "Next?");
+        assert!(moved.contains(&answer), "carried whole");
+        assert!(moved.contains("moved from Claude Code to Codex"));
+        assert!(moved.ends_with("\n\nNext?"));
+        let kept = restored("Codex", &said, "Next?");
+        assert!(
+            !kept.contains(&answer),
+            "a restored one keeps both ends of 4,000 signs"
+        );
     }
 }

@@ -3911,14 +3911,24 @@ impl Actor {
     }
 
     /// What was said in the agent's conversation (since it was last started again), the
-    /// oldest first: the user's words and the agent's answers, each with when. What goes on
-    /// in a turn besides (tool calls, what they returned, thinking) is not in it. Of a long
-    /// conversation the newest part is read, until `most` signs are held and one more.
+    /// oldest first: the user's words and the agent's answers, each with when, and with each
+    /// answer the tools it used and what they gave back as the Host kept it. Thinking is not
+    /// in it. Of a long conversation the newest part is read, until `most` signs are held and
+    /// one more.
     pub fn said_so_far(
         &self,
         most: usize,
     ) -> Result<Vec<clarp_backend::transit::Said>, ActorError> {
-        use clarp_backend::transit::{Role, Said as Carried};
+        self.said_until(most, None)
+    }
+
+    /// [`Self::said_so_far`], without the message of the id `except` (the one a turn is for).
+    fn said_until(
+        &self,
+        most: usize,
+        except: Option<&str>,
+    ) -> Result<Vec<clarp_backend::transit::Said>, ActorError> {
+        use clarp_backend::transit::{Role, Said as Carried, Used};
         const AT_A_TIME: usize = 200;
         let mut said: Vec<Carried> = Vec::new(); // the newest first
         let mut held = 0usize;
@@ -3928,34 +3938,49 @@ impl Actor {
                 if row.live {
                     continue;
                 }
-                let (role, text) = match &row.entry {
+                let used = |calls: &[ToolCall]| -> Vec<Used> {
+                    calls
+                        .iter()
+                        .map(|call| Used::recorded(call, row.session.clone()))
+                        .collect()
+                };
+                let one = match &row.entry {
                     // The user's compaction is the tool's own command, said to the tool that
                     // had the conversation: nothing that was said in it.
                     Entry::Message(message) if matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION) =>
                     {
                         continue;
                     }
-                    Entry::Message(message) => (Role::User, message.text.clone()),
-                    Entry::Reply(reply) => (Role::Assistant, reply.text.clone()),
+                    Entry::Message(message) if Some(message.id.as_str()) == except => continue,
+                    Entry::Message(message) => {
+                        Carried::new(Role::User, message.text.clone(), row.ts_ms)
+                    }
+                    Entry::Reply(reply) => {
+                        let mut one = Carried::new(Role::Assistant, reply.text.clone(), row.ts_ms);
+                        one.tools = used(&row.tools);
+                        one
+                    }
+                    // A call that is a row by itself: an answer of no words.
+                    Entry::Tool(call) if call.reply.is_none() => {
+                        let mut one = Carried::new(Role::Assistant, "", row.ts_ms);
+                        one.tools = used(std::slice::from_ref(call));
+                        one
+                    }
                     Entry::Imported(brought) => {
                         let text = brought.row["text"].as_str().unwrap_or_default().to_string();
                         match brought.row["role"].as_str() {
-                            Some("user") => (Role::User, text),
-                            Some("assistant") => (Role::Assistant, text),
+                            Some("user") => Carried::new(Role::User, text, row.ts_ms),
+                            Some("assistant") => Carried::new(Role::Assistant, text, row.ts_ms),
                             _ => continue,
                         }
                     }
                     _ => continue,
                 };
-                if text.trim().is_empty() {
+                if one.text.trim().is_empty() && one.tools.is_empty() {
                     continue;
                 }
-                held += text.chars().count();
-                said.push(Carried {
-                    role,
-                    text,
-                    at_ms: row.ts_ms,
-                });
+                held += one.size();
+                said.push(one);
             }
             let oldest = rows.entries.first().map(|row| row.entry.id().to_string());
             if held <= most
@@ -3966,7 +3991,22 @@ impl Actor {
             }
         }
         said.reverse();
-        Ok(said)
+        // An answer of no words belongs to the answer before it, when one came just before:
+        // its calls are that answer's.
+        let mut joined: Vec<Carried> = Vec::with_capacity(said.len());
+        for one in said {
+            match joined.last_mut() {
+                Some(last)
+                    if one.role == Role::Assistant
+                        && last.role == Role::Assistant
+                        && one.text.trim().is_empty() =>
+                {
+                    last.tools.extend(one.tools);
+                }
+                _ => joined.push(one),
+            }
+        }
+        Ok(joined)
     }
 
     /// The agent goes on with another tool, `backend`: the session of it its conversation was
@@ -4635,11 +4675,6 @@ impl Actor {
             None => message.text,
         };
         let prompt = if (lost || carried_from.is_some()) && !bare {
-            let said = self.said_before(&message.id)?;
-            let said: Vec<(bool, &str)> = said
-                .iter()
-                .map(|(by_user, text)| (*by_user, text.as_str()))
-                .collect();
             let label = |id: &str| {
                 clarp_backend::catalogue::declared(id)["shown"]["label"]
                     .as_str()
@@ -4647,8 +4682,39 @@ impl Actor {
             };
             let tool = label(self.backend.id());
             match carried_from.as_deref().filter(|_| !lost) {
-                Some(from) => told::carried(&tool, &label(from), &said, &prompt),
-                None => told::restored(&tool, &said, &prompt),
+                // What moved with the agent is carried with the tools it used, as quoted
+                // blocks: the new tool has no form of its own for another's calls.
+                Some(from) => {
+                    let mut said = self.said_until(told::CARRIED_MOST, Some(&message.id))?;
+                    if from == "claude" {
+                        let home = std::env::var_os("HOME")
+                            .map_or_else(|| PathBuf::from("/"), PathBuf::from);
+                        let projects =
+                            clarp_backend::transit::tool_home("claude", &home).join("projects");
+                        let cwd = self.profile.cwd.to_string_lossy();
+                        clarp_backend::transit::whole_results(&mut said, &projects, &cwd);
+                    }
+                    let said: Vec<(bool, String)> = said
+                        .iter()
+                        .map(|one| {
+                            let by_user = one.role == clarp_backend::transit::Role::User;
+                            (by_user, clarp_backend::transit::with_quoted(one))
+                        })
+                        .collect();
+                    let said: Vec<(bool, &str)> = said
+                        .iter()
+                        .map(|(by_user, text)| (*by_user, text.as_str()))
+                        .collect();
+                    told::carried(&tool, &label(from), &said, &prompt)
+                }
+                None => {
+                    let said = self.said_before(&message.id)?;
+                    let said: Vec<(bool, &str)> = said
+                        .iter()
+                        .map(|(by_user, text)| (*by_user, text.as_str()))
+                        .collect();
+                    told::restored(&tool, &said, &prompt)
+                }
             }
         } else {
             prompt

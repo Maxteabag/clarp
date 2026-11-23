@@ -48,9 +48,13 @@ done or failed and prints its last state. The Host refuses while a turn of the
 agent runs or messages wait in its queue, so never move yourself from inside
 your own turn: ask another agent or the user's app (the Backend row in an
 agent's profile, in the iOS, Android and Rust desktop apps). What is carried is the text
-of the user's and the agent's turns (the newest 400,000 characters); tool calls,
-their results and thinking are not. The agent's name, voice, goals and chat
-history stay. To move an agent to another Host instead, use
+of the user's and the agent's turns (the newest 400,000 characters) with the
+tools the agent used and what they gave back: in the new tool's own form for
+Claude and Codex, as quoted `[Tool call: <name>]` blocks for Grok, Antigravity
+and OpenCode. A call's input or result past 8 KB is cut with a line saying how
+much was. Attached files come as their absolute paths, never their content:
+open them with your file tool when you need them. Thinking is not carried. The
+agent's name, voice, goals and chat history stay. To move an agent to another Host instead, use
 `clarp-switch-agent-host`.
 
 ## An agent stays busy with no process

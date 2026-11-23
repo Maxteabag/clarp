@@ -4,8 +4,14 @@
 //! record of what was said (the user's words and the agent's answers, turn by turn), and a
 //! writer here puts that record where the target tool keeps its sessions, in the tool's own
 //! format, so that the tool's next turn continues it as one of its own. What is carried is
-//! the text of each turn, in order; tool calls, their results, thinking and attachments are
-//! not.
+//! the text of each turn, in order, with the tools the agent used and what they gave back:
+//! in the target's own form where it has one (Claude's `tool_use` and `tool_result` blocks,
+//! Codex's `function_call` and `function_call_output` items, OpenCode's tool parts), and as
+//! quoted blocks in the text where it has none (Grok, and the record Antigravity and OpenCode
+//! are given at the head of a new session, [`quoted`]). A result longer than [`RESULT_MOST`]
+//! is cut, with a line that says how much was. Attachments are carried as what the user's
+//! message holds of them, the path of each file, never their content. Thinking is left out on
+//! purpose: it holds for the model that thought it (Claude signs its own), not another.
 //!
 //! This is the `transit` tool's injectors, rebuilt for the Host (its notes on the formats are
 //! the rules: a Claude assistant row has a list of blocks as its content, never a string; a
@@ -49,6 +55,283 @@ pub struct Said {
     pub role: Role,
     pub text: String,
     pub at_ms: i64,
+    /// The tools an answer used after its text, in order: none for a user's message.
+    pub tools: Vec<Used>,
+}
+
+impl Said {
+    /// A thing said, without tools.
+    pub fn new(role: Role, text: impl Into<String>, at_ms: i64) -> Self {
+        Self {
+            role,
+            text: text.into(),
+            at_ms,
+            tools: Vec::new(),
+        }
+    }
+
+    /// How many signs it takes of what is carried: its text, and of each tool what is
+    /// carried of its input and result.
+    pub fn size(&self) -> usize {
+        self.text.chars().count()
+            + self
+                .tools
+                .iter()
+                .map(|used| used.name.len() + used.input_text().len() + used.result().len())
+                .sum::<usize>()
+    }
+
+    fn carried(&self) -> bool {
+        !self.text.trim().is_empty() || !self.tools.is_empty()
+    }
+}
+
+/// How long a tool's result, or its input, is carried at most, in bytes: what is past it is
+/// cut, with a line that says how much ([`cut`]).
+pub const RESULT_MOST: usize = 8 * 1024;
+
+/// One use of a tool by the agent, with what it gave back, as the Host recorded it (or, for
+/// a result the Host kept only the start of, as the source tool's own transcript has it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Used {
+    /// The id the source tool gave the call, where it gave one the Host kept.
+    pub id: String,
+    pub name: String,
+    pub input: Value,
+    /// What it gave back. `None`: it never returned (its turn was cut off).
+    pub output: Option<String>,
+    /// It returned an error.
+    pub failed: bool,
+    /// The Host kept only the start of the result, and nothing has the rest of it.
+    pub shortened: bool,
+    /// The session of the source tool the call was made in, where the Host knows it: where
+    /// a result the Host kept only the start of is looked up whole.
+    pub session: Option<String>,
+}
+
+impl Used {
+    /// The call's input as JSON text, cut past [`RESULT_MOST`].
+    pub fn input_text(&self) -> String {
+        let input = if self.input.is_null() {
+            "{}".to_string()
+        } else {
+            self.input.to_string()
+        };
+        cut(&input, RESULT_MOST)
+    }
+
+    /// The call's input as an object, which is what a tool call's input must be: anything
+    /// else is put under `input`.
+    pub fn input_object(&self) -> Value {
+        match &self.input {
+            Value::Object(_) => self.input.clone(),
+            Value::Null => json!({}),
+            other => json!({"input": other}),
+        }
+    }
+
+    /// What is carried of the result: the result, cut past [`RESULT_MOST`], or a line that
+    /// says there is none.
+    pub fn result(&self) -> String {
+        match &self.output {
+            None => "[The call never returned: its turn was cut off.]".to_string(),
+            Some(output) if self.shortened => format!(
+                "{}\n[Clarp kept only the start of this result; the rest was not carried.]",
+                cut(output.trim_end_matches('\u{2026}'), RESULT_MOST)
+            ),
+            Some(output) => cut(output, RESULT_MOST),
+        }
+    }
+
+    /// A call id the target tools take: letters, digits, `_` and `-`, never empty.
+    pub fn call_id(&self, at: usize) -> String {
+        let id: String = self
+            .id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if id.is_empty() {
+            format!("call_carried_{at}")
+        } else {
+            id
+        }
+    }
+
+    /// A tool name the target tools take: letters, digits, `_` and `-`, at most 64 signs.
+    pub fn tool_name(&self) -> String {
+        let name: String = self
+            .name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(64)
+            .collect();
+        if name.is_empty() {
+            "tool".to_string()
+        } else {
+            name
+        }
+    }
+}
+
+impl Used {
+    /// A call as the Host's record has it, made in the source tool's session `session`.
+    pub fn recorded(call: &clarp_kernel::conversation::ToolCall, session: Option<String>) -> Self {
+        use clarp_kernel::conversation::ToolStatus;
+        let output = call
+            .output
+            .clone()
+            .filter(|_| !matches!(call.status, ToolStatus::Running | ToolStatus::Interrupted));
+        // A result the record shortened ends in the mark, past as many signs as it keeps.
+        let shortened = output.as_deref().is_some_and(|output| {
+            output.ends_with('\u{2026}') && output.chars().count() > crate::TOOL_OUTPUT_KEPT
+        });
+        Self {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            input: call.input.clone(),
+            output,
+            failed: call.status == ToolStatus::Error,
+            shortened,
+            session,
+        }
+    }
+}
+
+/// Fills in, from Claude Code's own transcripts under `projects`, the results of calls made
+/// in Claude that the Host kept only the start of, or nothing of (a picture has no text):
+/// Claude Code keeps each whole, under the id the Host keeps the call by. A picture is never
+/// carried: it is named, with the file it was read from where the call says.
+pub fn whole_results(said: &mut [Said], projects: &Path, cwd: &str) {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut wanted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for used in said.iter().flat_map(|one| &one.tools) {
+        let short = used.shortened || used.output.as_deref().is_some_and(str::is_empty);
+        if let Some(session) = used
+            .session
+            .as_ref()
+            .filter(|_| short && !used.id.is_empty())
+        {
+            wanted
+                .entry(session.clone())
+                .or_default()
+                .insert(used.id.clone());
+        }
+    }
+    let mut found: BTreeMap<String, String> = BTreeMap::new();
+    for (session, ids) in wanted {
+        let Some(path) = crate::past::claude_transcript(projects, cwd, &session, true) else {
+            continue;
+        };
+        let Ok(file) = std::fs::File::open(path) else {
+            continue;
+        };
+        for line in std::io::BufRead::split(std::io::BufReader::new(file), b'\n') {
+            let Ok(line) = line else {
+                break;
+            };
+            // Only a line that holds a result is read whole.
+            if !line.windows(11).any(|w| w == b"tool_result") {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_slice::<Value>(&line) else {
+                continue;
+            };
+            for block in entry["message"]["content"].as_array().into_iter().flatten() {
+                let id = block["tool_use_id"].as_str().unwrap_or_default();
+                if block["type"] == "tool_result" && ids.contains(id) {
+                    found.insert(id.to_string(), result_text(&block["content"]));
+                }
+            }
+        }
+    }
+    for used in said.iter_mut().flat_map(|one| &mut one.tools) {
+        if let Some(text) = found.get(&used.id) {
+            let file = ["file_path", "path"]
+                .iter()
+                .find_map(|key| used.input[key].as_str());
+            let named = match file {
+                Some(file) => format!("[A picture, not carried: it is the file {file}.]"),
+                None => "[A picture, not carried.]".to_string(),
+            };
+            used.output = Some(text.replace(PICTURE, &named));
+            used.shortened = false;
+        }
+    }
+}
+
+const PICTURE: &str = "\u{0}picture\u{0}";
+
+/// The text of a result Claude Code kept: its text, or the texts of its parts, a picture
+/// as a mark that [`whole_results`] names.
+fn result_text(content: &Value) -> String {
+    match content {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| match part["type"].as_str() {
+                Some("image") => Some(PICTURE.to_string()),
+                _ => part["text"].as_str().map(str::to_string),
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// `text` whole where it is no longer than `most` bytes; else its first `most` bytes (never a
+/// sign cut in half) and a line that says how many bytes were cut.
+pub fn cut(text: &str, most: usize) -> String {
+    if text.len() <= most {
+        return text.to_string();
+    }
+    let mut end = most;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n[\u{2026} {} more bytes of this were cut when the conversation moved.]",
+        &text[..end],
+        text.len() - end
+    )
+}
+
+/// A tool's use as a quoted block in the text, for a target that has no form of its own for
+/// it: the tool's name, its input, and what it gave back, each line of the result quoted.
+pub fn quoted(used: &Used) -> String {
+    let status = if used.failed { " (an error)" } else { "" };
+    let result: Vec<String> = used
+        .result()
+        .lines()
+        .map(|line| format!("> {line}"))
+        .collect();
+    format!(
+        "[Tool call: {}]\nInput: {}\nResult{status}:\n{}\n[End of tool call]",
+        used.name,
+        used.input_text(),
+        result.join("\n")
+    )
+}
+
+/// An answer's text with its tools' uses as quoted blocks after it ([`quoted`]).
+pub fn with_quoted(said: &Said) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !said.text.trim().is_empty() {
+        parts.push(said.text.clone());
+    }
+    parts.extend(said.tools.iter().map(quoted));
+    parts.join("\n\n")
 }
 
 /// Where a writer writes, and what it says of the session.
@@ -178,7 +461,7 @@ pub fn tool_home(backend: &str, home: &Path) -> PathBuf {
 pub fn kept_from(said: &[Said], most: usize) -> usize {
     let mut size = 0usize;
     for (at, one) in said.iter().enumerate().rev() {
-        size += one.text.chars().count();
+        size += one.size();
         if size > most {
             return at + 1;
         }
@@ -291,7 +574,7 @@ fn lines(rows: &[Value]) -> Vec<u8> {
 }
 
 fn spoken(said: &[Said]) -> impl Iterator<Item = &Said> {
-    said.iter().filter(|one| !one.text.trim().is_empty())
+    said.iter().filter(|one| one.carried())
 }
 
 // ---- Claude Code ----------------------------------------------------------------------------
@@ -310,33 +593,61 @@ impl ClaudeWriter {
             json!({"type": "permission-mode", "permissionMode": "bypassPermissions", "sessionId": session}),
         ];
         let mut parent = Value::Null;
+        let mut calls = 0usize;
         for one in spoken(said) {
             let id = uuid4()?;
-            let mut row = json!({
-                "parentUuid": parent,
-                "isSidechain": false,
-                "type": one.role.name(),
-                "uuid": id,
-                "timestamp": iso(one.at_ms),
-                "userType": "external",
-                "entrypoint": "sdk-cli",
-                "cwd": place.cwd,
-                "sessionId": session,
-                "version": version,
-                "gitBranch": "",
-            });
+            let envelope = |kind: &str, id: &str, parent: &Value| {
+                json!({
+                    "parentUuid": parent,
+                    "isSidechain": false,
+                    "type": kind,
+                    "uuid": id,
+                    "timestamp": iso(one.at_ms),
+                    "userType": "external",
+                    "entrypoint": "sdk-cli",
+                    "cwd": place.cwd,
+                    "sessionId": session,
+                    "version": version,
+                    "gitBranch": "",
+                })
+            };
+            let mut row = envelope(one.role.name(), &id, &parent);
+            // The calls of an answer, each under the id its result names.
+            let ids: Vec<String> = one
+                .tools
+                .iter()
+                .map(|used| {
+                    calls += 1;
+                    used.call_id(calls)
+                })
+                .collect();
             match one.role {
                 // Its content is a list of blocks. Claude Code looks into each block of an
                 // answer (`"tool_use_id" in block`); a string it would walk sign by sign, and
-                // die on the first.
+                // die on the first. Its text comes first, then the tools it used.
                 Role::Assistant => {
+                    let mut content: Vec<Value> = Vec::new();
+                    if !one.text.trim().is_empty() {
+                        content.push(json!({"type": "text", "text": one.text}));
+                    }
+                    for (used, call) in one.tools.iter().zip(&ids) {
+                        content.push(json!({
+                            "type": "tool_use", "id": call, "name": used.tool_name(),
+                            "input": used.input_object(),
+                        }));
+                    }
+                    let stop = if one.tools.is_empty() {
+                        "end_turn"
+                    } else {
+                        "tool_use"
+                    };
                     row["message"] = json!({
                         "model": model,
                         "id": format!("msg_{}", id.replace('-', "")),
                         "type": "message",
                         "role": "assistant",
-                        "content": [{"type": "text", "text": one.text}],
-                        "stop_reason": "end_turn",
+                        "content": content,
+                        "stop_reason": stop,
                         "stop_sequence": null,
                         "usage": {
                             "input_tokens": 0,
@@ -356,6 +667,27 @@ impl ClaudeWriter {
             }
             parent = json!(id);
             rows.push(row);
+            // What the tools gave back comes in the user's next message, as Claude Code
+            // writes it: one block for each call, under the call's id.
+            if !one.tools.is_empty() {
+                let id = uuid4()?;
+                let mut row = envelope("user", &id, &parent);
+                let results: Vec<Value> = one
+                    .tools
+                    .iter()
+                    .zip(&ids)
+                    .map(|(used, call)| {
+                        json!({
+                            "type": "tool_result", "tool_use_id": call,
+                            "content": used.result(),
+                            "is_error": used.failed || used.output.is_none(),
+                        })
+                    })
+                    .collect();
+                row["message"] = json!({"role": "user", "content": results});
+                parent = json!(id);
+                rows.push(row);
+            }
         }
         Ok(rows)
     }
@@ -378,7 +710,7 @@ impl Writer for ClaudeWriter {
         write_new(&file, &lines(&rows))?;
         Ok(Written {
             session,
-            carried: rows.len() - 2,
+            carried: spoken(said).count(),
             files: vec![file],
             dirs: Vec::new(),
             rows: Vec::new(),
@@ -431,20 +763,33 @@ impl CodexWriter {
                 "model_provider": "openai",
             },
         })];
+        let mut calls = 0usize;
         for one in spoken(said) {
             let part = match one.role {
                 Role::User => "input_text",
                 Role::Assistant => "output_text",
             };
-            rows.push(json!({
-                "timestamp": iso(one.at_ms),
-                "type": "response_item",
-                "payload": {
+            let item = |payload: Value| json!({"timestamp": iso(one.at_ms), "type": "response_item", "payload": payload});
+            if !one.text.trim().is_empty() {
+                rows.push(item(json!({
                     "type": "message",
                     "role": one.role.name(),
                     "content": [{"type": part, "text": one.text}],
-                },
-            }));
+                })));
+            }
+            // The tools an answer used, each a call and its output under the same id, as
+            // Codex writes a function the model called.
+            for used in &one.tools {
+                calls += 1;
+                let call = used.call_id(calls);
+                rows.push(item(json!({
+                    "type": "function_call", "name": used.tool_name(),
+                    "arguments": used.input_object().to_string(), "call_id": call,
+                })));
+                rows.push(item(json!({
+                    "type": "function_call_output", "call_id": call, "output": used.result(),
+                })));
+            }
         }
         rows
     }
@@ -564,7 +909,7 @@ impl Writer for CodexWriter {
         write_new(&file, &lines(&rows))?;
         let mut written = Written {
             session: thread.clone(),
-            carried: rows.len() - 1,
+            carried: spoken(said).count(),
             files: vec![file.clone()],
             dirs: Vec::new(),
             rows: Vec::new(),
@@ -657,7 +1002,11 @@ impl GrokWriter {
                     }));
                     prompts += 1;
                 }
-                Role::Assistant => rows.push(json!({"type": "assistant", "content": one.text})),
+                // Grok's history has no form of its own for a tool's use that this Host
+                // knows to be safe: they come as quoted blocks after the answer's text.
+                Role::Assistant => {
+                    rows.push(json!({"type": "assistant", "content": with_quoted(one)}));
+                }
             }
         }
         (rows, prompts)
@@ -770,7 +1119,7 @@ impl OpenCodeWriter {
                 // An answer before anything was asked has nothing to answer, in OpenCode.
                 continue;
             }
-            let seq = u64::try_from(index).unwrap_or(0) * 2;
+            let seq = u64::try_from(index).unwrap_or(0) * 256; // room for its parts
             let message = opencode_id("msg", one.at_ms, seq)?;
             let mut info = json!({
                 "id": message, "sessionID": session, "role": one.role.name(), "agent": "build",
@@ -795,13 +1144,32 @@ impl OpenCodeWriter {
                     info["model"] = json!({"providerID": "clarp", "modelID": "imported"});
                 }
             }
-            messages.push(json!({
-                "info": info,
-                "parts": [{
+            let mut parts = Vec::new();
+            if !one.text.trim().is_empty() {
+                parts.push(json!({
                     "id": opencode_id("prt", one.at_ms, seq + 1)?,
                     "sessionID": session, "messageID": message, "type": "text", "text": one.text,
-                }],
-            }));
+                }));
+            }
+            // The tools an answer used, each a part of it as OpenCode keeps a tool's use: the
+            // call's id, the tool, and its state when it ended.
+            for (at, used) in one.tools.iter().enumerate() {
+                let part = u64::try_from(at).unwrap_or(0) + 2;
+                let state = if used.failed || used.output.is_none() {
+                    json!({"status": "error", "input": used.input_object(), "error": used.result(),
+                           "time": {"start": one.at_ms, "end": one.at_ms}})
+                } else {
+                    json!({"status": "completed", "input": used.input_object(),
+                           "output": used.result(), "title": used.name, "metadata": {},
+                           "time": {"start": one.at_ms, "end": one.at_ms}})
+                };
+                parts.push(json!({
+                    "id": opencode_id("prt", one.at_ms, seq + part)?,
+                    "sessionID": session, "messageID": message, "type": "tool",
+                    "callID": used.call_id(at + 1), "tool": used.tool_name(), "state": state,
+                }));
+            }
+            messages.push(json!({"info": info, "parts": parts}));
         }
         let started = said.first().map_or(place.now_ms, |one| one.at_ms);
         let slug: String = session
@@ -926,26 +1294,14 @@ mod tests {
 
     fn said() -> Vec<Said> {
         vec![
-            Said {
-                role: Role::User,
-                text: "Fix the parser, please.".into(),
-                at_ms: 1_800_000_000_000,
-            },
-            Said {
-                role: Role::Assistant,
-                text: "Done: the parser reads both shapes now.".into(),
-                at_ms: 1_800_000_001_000,
-            },
-            Said {
-                role: Role::User,
-                text: "   ".into(),
-                at_ms: 1_800_000_002_000,
-            },
-            Said {
-                role: Role::User,
-                text: "And the tests?".into(),
-                at_ms: 1_800_000_003_000,
-            },
+            Said::new(Role::User, "Fix the parser, please.", 1_800_000_000_000),
+            Said::new(
+                Role::Assistant,
+                "Done: the parser reads both shapes now.",
+                1_800_000_001_000,
+            ),
+            Said::new(Role::User, "   ", 1_800_000_002_000),
+            Said::new(Role::User, "And the tests?", 1_800_000_003_000),
         ]
     }
 
@@ -966,6 +1322,235 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    fn used(id: &str, output: Option<&str>) -> Used {
+        Used {
+            id: id.into(),
+            name: "Bash".into(),
+            input: json!({"command": "cat notes.txt"}),
+            output: output.map(str::to_string),
+            failed: false,
+            shortened: false,
+            session: None,
+        }
+    }
+
+    /// A conversation in which the agent used tools: one in its answer, one by itself after
+    /// it, and one whose turn was cut off.
+    fn said_with_tools() -> Vec<Said> {
+        let mut said = said();
+        said[1].tools = vec![used("toolu_01", Some("line one\nline two"))];
+        let mut cut_off = Said::new(Role::Assistant, "", 1_800_000_004_000);
+        cut_off.tools = vec![used("c-codex-item 7", None)];
+        said.push(cut_off);
+        said
+    }
+
+    #[test]
+    fn a_long_result_is_cut_with_how_much_was() {
+        assert_eq!(cut("short", RESULT_MOST), "short");
+        let long = "é".repeat(RESULT_MOST); // two bytes each
+        let carried = cut(&long, RESULT_MOST);
+        let (kept, marker) = carried.split_once('\n').unwrap();
+        assert_eq!(kept.len(), RESULT_MOST);
+        assert_eq!(
+            marker,
+            format!(
+                "[\u{2026} {} more bytes of this were cut when the conversation moved.]",
+                RESULT_MOST
+            )
+        );
+        // A sign is never cut in half.
+        let odd = format!("a{}", "é".repeat(RESULT_MOST));
+        assert_eq!(
+            cut(&odd, RESULT_MOST).split_once('\n').unwrap().0.len(),
+            RESULT_MOST - 1
+        );
+        let mut shortened = used("x", Some(&format!("{}\u{2026}", "a".repeat(10))));
+        shortened.shortened = true;
+        assert!(shortened.result().ends_with("the rest was not carried.]"));
+        assert!(!shortened.result().contains('\u{2026}'));
+        assert!(used("x", None).result().contains("never returned"));
+    }
+
+    #[test]
+    fn what_tools_take_is_carried_in_the_budget() {
+        let said = said_with_tools();
+        let tools = said[1].size() - said[1].text.chars().count();
+        assert!(tools > 0);
+        assert_eq!(
+            said[4].size(),
+            said[4].tools[0].name.len()
+                + said[4].tools[0].input_text().len()
+                + said[4].tools[0].result().len()
+        );
+    }
+
+    #[test]
+    fn claude_gets_the_calls_as_its_own_blocks() {
+        let rows = ClaudeWriter::rows(&said_with_tools(), &place(Path::new("/x")), "s").unwrap();
+        let turns = &rows[2..];
+        // user, answer with its call, the result, user, user, a call by itself, its result.
+        let kinds: Vec<&str> = turns
+            .iter()
+            .map(|row| row["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            ["user", "assistant", "user", "user", "assistant", "user"]
+        );
+        let answer = &turns[1]["message"];
+        assert_eq!(answer["stop_reason"], "tool_use");
+        assert_eq!(answer["content"][0]["type"], "text");
+        let call = &answer["content"][1];
+        assert_eq!(call["type"], "tool_use");
+        assert_eq!(call["id"], "toolu_01");
+        assert_eq!(call["name"], "Bash");
+        assert_eq!(call["input"]["command"], "cat notes.txt");
+        let result = &turns[2]["message"]["content"][0];
+        assert_eq!(result["type"], "tool_result");
+        assert_eq!(result["tool_use_id"], "toolu_01");
+        assert_eq!(result["content"], "line one\nline two");
+        assert_eq!(result["is_error"], false);
+        assert_eq!(turns[2]["parentUuid"], turns[1]["uuid"]);
+        // An answer of no words is its call alone; a call that never returned is an error.
+        let alone = &turns[4]["message"]["content"];
+        assert_eq!(alone.as_array().unwrap().len(), 1);
+        assert_eq!(alone[0]["id"], "c-codex-item_7", "an id Claude takes");
+        assert_eq!(
+            turns[5]["message"]["content"][0]["tool_use_id"],
+            "c-codex-item_7"
+        );
+        assert_eq!(turns[5]["message"]["content"][0]["is_error"], true);
+    }
+
+    #[test]
+    fn codex_gets_the_calls_as_function_calls_with_their_output() {
+        let rows = CodexWriter::rows(&said_with_tools(), &place(Path::new("/x")), "t");
+        let items: Vec<&Value> = rows[1..].iter().map(|row| &row["payload"]).collect();
+        let kinds: Vec<&str> = items
+            .iter()
+            .map(|item| item["type"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "message",
+                "message",
+                "function_call",
+                "function_call_output",
+                "message",
+                "function_call",
+                "function_call_output"
+            ]
+        );
+        assert_eq!(items[2]["name"], "Bash");
+        assert_eq!(items[2]["call_id"], "toolu_01");
+        let arguments: Value =
+            serde_json::from_str(items[2]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(arguments["command"], "cat notes.txt");
+        assert_eq!(items[3]["call_id"], "toolu_01");
+        assert_eq!(items[3]["output"], "line one\nline two");
+    }
+
+    #[test]
+    fn grok_gets_the_calls_as_quoted_blocks() {
+        let (rows, _) = GrokWriter::rows(&said_with_tools());
+        let answer = rows[1]["content"].as_str().unwrap();
+        assert_eq!(
+            answer,
+            "Done: the parser reads both shapes now.\n\n[Tool call: Bash]\n\
+             Input: {\"command\":\"cat notes.txt\"}\nResult:\n> line one\n> line two\n\
+             [End of tool call]"
+        );
+        let alone = rows.last().unwrap()["content"].as_str().unwrap();
+        assert!(alone.starts_with("[Tool call: Bash]"), "{alone}");
+    }
+
+    #[test]
+    fn opencode_gets_the_calls_as_tool_parts() {
+        let export =
+            OpenCodeWriter::export(&said_with_tools(), &place(Path::new("/x")), "ses_x").unwrap();
+        let answer = &export["messages"][1]["parts"];
+        assert_eq!(answer[0]["type"], "text");
+        let tool = &answer[1];
+        assert_eq!(tool["type"], "tool");
+        assert_eq!(tool["callID"], "toolu_01");
+        assert_eq!(tool["tool"], "Bash");
+        assert_eq!(tool["state"]["status"], "completed");
+        assert_eq!(tool["state"]["output"], "line one\nline two");
+        assert_eq!(tool["state"]["input"]["command"], "cat notes.txt");
+        // Its parts sort after its text and before the next message.
+        let ids: Vec<&str> = export["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|message| {
+                std::iter::once(message["info"]["id"].as_str().unwrap()).chain(
+                    message["parts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|p| p["id"].as_str().unwrap()),
+                )
+            })
+            .map(|id| &id[4..16])
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted);
+        let cut_off = &export["messages"].as_array().unwrap().last().unwrap()["parts"][0];
+        assert_eq!(cut_off["state"]["status"], "error");
+    }
+
+    #[test]
+    fn claude_transcripts_give_the_whole_of_what_the_host_shortened() {
+        let projects = temp("whole");
+        let session = uuid4().unwrap();
+        let cwd = "/home/someone/work/repo.x";
+        let dir = projects.join(crate::past::claude_project(cwd));
+        std::fs::create_dir_all(&dir).unwrap();
+        let whole = "w".repeat(RESULT_MOST + 100);
+        let rows = [
+            json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_long"}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "toolu_long", "content": whole}]}}),
+            json!({"type": "user", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "toolu_pic", "content": [
+                    {"type": "image", "source": {"type": "base64", "data": "AAAA"}}]}]}}),
+        ];
+        std::fs::write(dir.join(format!("{session}.jsonl")), lines(&rows)).unwrap();
+        let mut long = used("toolu_long", Some(&format!("{}\u{2026}", "w".repeat(4000))));
+        long.shortened = true;
+        long.session = Some(session.clone());
+        let mut picture = used("toolu_pic", Some(""));
+        picture.input = json!({"file_path": "/work/shot.png"});
+        picture.session = Some(session.clone());
+        let mut elsewhere = used("toolu_gone", Some(&format!("{}\u{2026}", "g".repeat(4000))));
+        elsewhere.shortened = true;
+        elsewhere.session = Some(uuid4().unwrap());
+        let mut said = vec![Said::new(Role::Assistant, "Looked.", 1)];
+        said[0].tools = vec![long, picture, elsewhere];
+        whole_results(&mut said, &projects, cwd);
+        let [long, picture, elsewhere] = &said[0].tools[..] else {
+            panic!("three calls");
+        };
+        assert!(!long.shortened);
+        assert_eq!(long.output.as_deref(), Some(whole.as_str()));
+        assert!(
+            long.result()
+                .ends_with("100 more bytes of this were cut when the conversation moved.]")
+        );
+        assert_eq!(
+            picture.output.as_deref(),
+            Some("[A picture, not carried: it is the file /work/shot.png.]")
+        );
+        assert!(
+            elsewhere.shortened,
+            "a session Claude does not have leaves the record's"
+        );
+        std::fs::remove_dir_all(projects).unwrap();
     }
 
     #[test]
@@ -1300,22 +1885,14 @@ mod tests {
         // An answer before anything was asked, and two answers in a row.
         said.insert(
             0,
-            Said {
-                role: Role::Assistant,
-                text: "Before any question.".into(),
-                at_ms: 1_799_999_999_000,
-            },
+            Said::new(Role::Assistant, "Before any question.", 1_799_999_999_000),
         );
-        said.push(Said {
-            role: Role::Assistant,
-            text: "Green.".into(),
-            at_ms: 1_800_000_004_000,
-        });
-        said.push(Said {
-            role: Role::Assistant,
-            text: "Also the docs.".into(),
-            at_ms: 1_800_000_005_000,
-        });
+        said.push(Said::new(Role::Assistant, "Green.", 1_800_000_004_000));
+        said.push(Said::new(
+            Role::Assistant,
+            "Also the docs.",
+            1_800_000_005_000,
+        ));
         let ours = OpenCodeWriter::export(&said, &place(Path::new("/nowhere")), "ses_x").unwrap();
         let genuine = genuine_export();
         let ours_messages = ours["messages"].as_array().unwrap();

@@ -43,7 +43,7 @@ use crate::{
 };
 
 /// How much of what a tool gave back is kept with the call.
-const MAX_TOOL_OUTPUT: usize = 4_000;
+const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
 /// Antigravity ends a turn by itself after five minutes unless it is told otherwise, and
 /// the turn then looks as if the agent fell silent. The Host has no clock of its own on a
 /// turn: the tool's is put out of the way.

@@ -538,7 +538,10 @@ the daily schedule.
 - **Moving an agent to another backend (issue 720, Rust contract 158).** `POST /agent-transit`,
   `GET /agent-transit`, the `agent-transit` event and `clarp-admin agent transit` move an agent to
   another tool with its conversation, rebuilt from the `transit` tool's writers: the Host writes
-  its own record of the conversation as a native Claude, Codex or Grok session, or opens the
+  its own record of the conversation, with the tools the agent used and what they gave back
+  (Claude's blocks, Codex's function calls, quoted blocks elsewhere; each cut past 8 KB, a result
+  the record shortened read whole from Claude Code's transcript where it was Claude's), as a
+  native Claude, Codex or Grok session, or opens the
   agent's next turn with that record for Antigravity, whose database it never opens, and for
   OpenCode, whose free models refuse every turn on a session handed to `opencode import`
   ("Free usage limit reached", 1.18.33) while they answer a session OpenCode began itself.

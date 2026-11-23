@@ -24,7 +24,7 @@ use crate::{
 pub const USAGE_LIMIT: &str = "Claude usage limit reached";
 
 /// The most of a tool's output that is kept with the conversation.
-const MAX_TOOL_OUTPUT: usize = 4_000;
+const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
 
 pub struct Claude {
     program: String,

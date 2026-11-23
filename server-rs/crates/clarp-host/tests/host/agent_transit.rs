@@ -1,7 +1,7 @@
 use super::*;
 
-/// A stand-in for Claude Code: says its version, and answers each message with "Heard: <it>",
-/// holding the turn while a file `hold` is there.
+/// A stand-in for Claude Code: says its version, and answers each message with "Heard: <it>"
+/// after looking at a file with a tool, holding the turn while a file `hold` is there.
 const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json
 import pathlib
@@ -22,6 +22,11 @@ def send(kind, **fields):
 send("system", subtype="init")
 while (root / "hold").exists():
     time.sleep(0.05)
+call = "toolu_" + str(time.time_ns())
+send("assistant", message={"id": "msg-look", "role": "assistant", "content": [
+    {"type": "tool_use", "id": call, "name": "Read", "input": {"file_path": "/work/word.txt"}}]})
+send("user", message={"role": "user", "content": [
+    {"type": "tool_result", "tool_use_id": call, "content": "The word in the file is ember."}]})
 answer = "Heard: " + prompt.split("\n")[0]
 send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
                            "content": [{"type": "text", "text": answer}]})
@@ -177,7 +182,8 @@ fn an_agent_moves_to_codex_with_its_conversation_and_keeps_its_name() {
     assert_eq!(done["model"], "gpt-5.5");
     assert_eq!(done["previous_backend"], "claude");
     assert_eq!(done["carried"]["user"], 1, "{done}");
-    assert_eq!(done["carried"]["assistant"], 1, "{done}");
+    // The message in which it looked at the file, and its answer.
+    assert_eq!(done["carried"]["assistant"], 2, "{done}");
     assert_eq!(done["carried"]["omitted"], 0);
     // The same request again begins nothing new.
     let (status, again) = host.ask("POST", "/agent-transit", Some(&ask));
@@ -190,6 +196,24 @@ fn an_agent_moves_to_codex_with_its_conversation_and_keeps_its_name() {
     let written = std::fs::read_to_string(&rollouts[0]).unwrap();
     assert!(written.contains("Remember the word lantern."));
     assert!(written.contains("Heard: Remember the word lantern."));
+    // With the tool the agent used, as Codex keeps a call and what it gave back.
+    let items: Vec<Value> = written
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap()["payload"].clone())
+        .collect();
+    let call = items
+        .iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("the call is carried");
+    assert_eq!(call["name"], "Read");
+    let input: Value = serde_json::from_str(call["arguments"].as_str().unwrap()).unwrap();
+    assert_eq!(input["file_path"], "/work/word.txt");
+    let output = items
+        .iter()
+        .find(|item| item["type"] == "function_call_output")
+        .expect("what it gave back is carried");
+    assert_eq!(output["call_id"], call["call_id"]);
+    assert_eq!(output["output"], "The word in the file is ember.");
 
     // The row has the new tool; the conversation keeps its name, its rows and the one row
     // every app shows of the change.
