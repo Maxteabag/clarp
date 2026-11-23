@@ -3,9 +3,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::process::ExitStatusExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::PathBuf;
 use std::process::{Child, Stdio};
+use std::time::{Duration, Instant};
 
 use clarp_acp::agy::{DRIVER, Order};
 use nix::sys::signal::{Signal, kill};
@@ -43,6 +44,7 @@ impl Place {
             model: "Claude B".into(),
             effort: "high".into(),
             attachments: Vec::new(),
+            silence_ms: 0,
         }
     }
 
@@ -55,6 +57,8 @@ impl Place {
         }
         let mut child = clarp_sealed::command(env!("CARGO_BIN_EXE_clarp-shim"), env)
             .args([DRIVER, self.agy.to_str().unwrap()])
+            // In a process group of its own, as the shim starts its tool.
+            .process_group(0)
             .current_dir(&self.dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -124,7 +128,7 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
     assert!(status.success(), "{status:?} {printed:?}");
     assert_eq!(
         driver(&printed, "bound")[0],
-        &json!({"clarp": "bound", "session": "conv-new", "resumed": false, "lost": null})
+        &json!({"clarp": "bound", "session": "conv-new", "resumed": false})
     );
     assert_eq!(driver(&printed, "initialized")[0]["appends"], true);
     assert_eq!(driver(&printed, "model")[0]["model"], "claude-b");
@@ -188,7 +192,7 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
 }
 
 #[test]
-fn a_conversation_is_resumed_and_one_antigravity_lost_is_begun_anew() {
+fn a_conversation_is_resumed_and_one_antigravity_lost_fails_the_turn_and_is_marked() {
     let place = Place::new("resume", "turn");
     let (printed, status) = place.run(&place.order("conv-old"));
     assert!(status.success());
@@ -205,14 +209,24 @@ fn a_conversation_is_resumed_and_one_antigravity_lost_is_begun_anew() {
     );
     assert!(place.sent_of("session/new").is_empty());
 
+    // A conversation agy no longer has is not begun anew without its history: the turn fails,
+    // and the mark makes the Host continue it with its own record.
     let lost = Place::new("resume-lost", "resume-lost");
     let (printed, status) = lost.run(&lost.order("conv-gone"));
-    assert!(status.success());
-    let bound = driver(&printed, "bound")[0];
-    assert_eq!(
-        (&bound["session"], &bound["lost"]),
-        (&json!("conv-new"), &json!("conv-gone"))
+    assert_eq!(status.code(), Some(1), "{printed:?}");
+    let failed = driver(&printed, "failed")[0];
+    assert_eq!(failed["stage"], "session");
+    assert!(
+        failed["text"]
+            .as_str()
+            .unwrap()
+            .contains("Session not found")
     );
+    assert!(driver(&printed, "bound").is_empty());
+    assert!(lost.sent_of("session/new").is_empty());
+    assert!(lost.sent_of("session/prompt").is_empty());
+    let mark = clarp_sealed::home(&lost.dir).join(".local/state/clarp/agy-acp/poisoned/conv-gone");
+    assert!(mark.exists(), "{}", mark.display());
 }
 
 #[test]
@@ -258,7 +272,7 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
 }
 
 #[test]
-fn attached_files_go_as_pictures_sounds_and_links_within_their_limits() {
+fn attached_files_go_as_pictures_and_links_and_sounds_only_where_taken() {
     let place = Place::new("attach", "turn");
     let uploads = place.dir.join("uploads/s");
     std::fs::create_dir_all(&uploads).unwrap();
@@ -283,12 +297,31 @@ fn attached_files_go_as_pictures_sounds_and_links_within_their_limits() {
         blocks[1],
         json!({"type": "image", "mimeType": "image/png", "data": "UE5H"})
     );
-    assert_eq!(blocks[2]["type"], "audio");
-    assert_eq!(blocks[3]["type"], "resource_link");
-    assert_eq!(blocks[3]["uri"], format!("file://{pdf}"));
-    assert_eq!(blocks.as_array().unwrap().len(), 4);
-    assert_eq!(driver(&printed, "not_attached")[0]["why"], "missing");
-    assert_eq!(driver(&printed, "attached").len(), 3);
+    // agy 1.5 takes no audio over ACP: the sound stays a path in the text.
+    assert_eq!(blocks[2]["type"], "resource_link");
+    assert_eq!(blocks[2]["uri"], format!("file://{pdf}"));
+    assert_eq!(blocks.as_array().unwrap().len(), 3);
+    let refused: Vec<&Value> = driver(&printed, "not_attached")
+        .into_iter()
+        .map(|line| &line["why"])
+        .collect();
+    assert_eq!(refused, [&json!("not taken"), &json!("missing")]);
+    assert_eq!(driver(&printed, "attached").len(), 2);
+
+    // An agy that takes audio is given the sound as itself.
+    let hearing = Place::new("attach-audio", "turn");
+    std::fs::write(hearing.dir.join("audio"), "").unwrap();
+    let mut order = hearing.order("");
+    order.attachments = vec![mp3_of(&uploads)];
+    let (_, status) = hearing.run(&order);
+    assert!(status.success());
+    let blocks = hearing.sent_of("session/prompt")[0]["params"]["prompt"].clone();
+    assert_eq!(blocks[1]["type"], "audio");
+    assert_eq!(blocks[1]["mimeType"], "audio/mpeg");
+}
+
+fn mp3_of(uploads: &std::path::Path) -> String {
+    uploads.join("b.mp3").display().to_string()
 }
 
 #[test]
@@ -428,4 +461,117 @@ fn a_model_antigravity_does_not_offer_fails_the_turn_before_anything_is_asked() 
         "no other model runs in its place"
     );
     assert!(place.sent_of("session/set_config_option").is_empty());
+}
+
+/// Runs the driver to its end, with how long it took.
+fn timed(place: &Place, order: &Order) -> (Vec<Value>, std::process::ExitStatus, Duration) {
+    let began = Instant::now();
+    let (printed, status) = place.run(order);
+    (printed, status, began.elapsed())
+}
+
+#[test]
+fn a_silent_prompt_ends_the_turn_but_a_running_tool_may_take_its_time() {
+    // No tool call open: silence past the bound ends the turn.
+    let stalled = Place::new("slow", "slow");
+    let mut order = stalled.order("");
+    order.silence_ms = 300;
+    let (printed, status, _) = timed(&stalled, &order);
+    assert_eq!(status.code(), Some(1), "{printed:?}");
+    let failed = driver(&printed, "failed")[0];
+    assert_eq!(
+        (&failed["stage"], &failed["silent"]),
+        (&json!("prompt"), &json!(true))
+    );
+
+    // A tool call that runs longer than the bound says nothing until it ends, and the turn waits.
+    let building = Place::new("slow-tool", "slow-tool");
+    let mut order = building.order("");
+    order.silence_ms = 300;
+    let (printed, status, _) = timed(&building, &order);
+    assert!(status.success(), "{printed:?}");
+    assert_eq!(
+        driver(&printed, "prompted")[0]["result"]["stopReason"],
+        "end_turn"
+    );
+    assert!(driver(&printed, "failed").is_empty());
+}
+
+#[test]
+fn a_message_too_long_for_one_spool_line_is_printed_cut_and_whole() {
+    let place = Place::new("big", "big");
+    let (printed, status) = place.run(&place.order(""));
+    assert!(status.success(), "{printed:?}");
+    let ended = updates(&printed, "tool_call_update")[0];
+    let line = serde_json::to_vec(ended).unwrap();
+    assert!(
+        line.len() <= clarp_acp::schema::PRINTED_MOST,
+        "{}",
+        line.len()
+    );
+    let update = &ended["params"]["update"];
+    assert_eq!(
+        (&update["toolCallId"], &update["status"]),
+        (&json!("t-big"), &json!("completed"))
+    );
+    assert!(
+        update["content"][0]["content"]["data"]
+            .as_str()
+            .unwrap()
+            .ends_with("bytes left out]")
+    );
+    assert!(
+        update["rawOutput"]["combinedOutput"]
+            .as_str()
+            .unwrap()
+            .ends_with("[cut]")
+    );
+}
+
+#[test]
+fn what_agy_leaves_behind_holding_standard_error_is_ended_with_the_turn() {
+    let place = Place::new("orphan", "orphan");
+    // The child sleeps two minutes and holds the driver's standard error: the turn must not wait
+    // for it.
+    let (printed, status, took) = timed(&place, &place.order(""));
+    assert!(status.success(), "{printed:?}");
+    assert!(
+        took < Duration::from_secs(60),
+        "the turn waited {took:?} for agy's child"
+    );
+}
+
+#[test]
+fn a_permission_asked_after_a_stop_is_declined() {
+    let place = Place::new("cancel-ask", "cancel-ask");
+    let mut child = place.start(&place.order(""), &[]);
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut printed = Vec::new();
+    let mut line = String::new();
+    while output.read_line(&mut line).unwrap() > 0 {
+        let said: Value = serde_json::from_str(&line).unwrap();
+        line.clear();
+        let working = said["params"]["update"]["content"]["text"] == "working";
+        printed.push(said);
+        if working {
+            kill(Pid::from_raw(child.id() as i32), Signal::SIGUSR1).unwrap();
+            break;
+        }
+    }
+    for rest in output.lines() {
+        printed.push(serde_json::from_str(&rest.unwrap()).unwrap());
+    }
+    let status = child.wait().unwrap();
+    assert_eq!(status.signal(), Some(Signal::SIGTERM as i32), "{status:?}");
+    let permission = driver(&printed, "permission")[0];
+    assert_eq!(
+        (&permission["answer"], &permission["stopped"]),
+        (&Value::Null, &json!(true))
+    );
+    let answer = place
+        .sent()
+        .into_iter()
+        .find(|message| message["id"] == "perm-1")
+        .unwrap();
+    assert_eq!(answer["result"]["outcome"], json!({"outcome": "cancelled"}));
 }

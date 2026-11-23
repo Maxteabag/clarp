@@ -264,6 +264,73 @@ pub fn current(options: &Value, category: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The longest line the shim's driver prints of one message, in bytes: well under the shim's
+/// own cut of a line (4 MiB), past which a line would be split and lost to whoever reads it.
+pub const PRINTED_MOST: usize = 1024 * 1024;
+
+/// What is kept of one text of a tool call's input, output or diff in a message cut to fit
+/// ([`bounded`]): what the Host keeps of a tool's output anyway.
+pub const KEPT_OF_A_TEXT: usize = 4_000;
+
+/// A message as it can be printed on one line of at most [`PRINTED_MOST`] bytes. A message
+/// that fits is itself. One that does not loses first the data of its pictures and sounds
+/// (each becomes a mark of how many bytes it had), then what is past [`KEPT_OF_A_TEXT`] of
+/// each text, and last what is past an even share of the line of each text that is left: so
+/// that it stays one valid message.
+pub fn bounded(message: &Value) -> Value {
+    let size = |value: &Value| serde_json::to_vec(value).map_or(usize::MAX, |line| line.len());
+    if size(message) <= PRINTED_MOST {
+        return message.clone();
+    }
+    let mut cut = message.clone();
+    strip_data(&mut cut);
+    if size(&cut) <= PRINTED_MOST {
+        return cut;
+    }
+    shorten_texts(&mut cut, KEPT_OF_A_TEXT);
+    let mut most = KEPT_OF_A_TEXT;
+    while size(&cut) > PRINTED_MOST && most > 16 {
+        most /= 2;
+        shorten_texts(&mut cut, most);
+    }
+    cut
+}
+
+/// The data of every picture and sound block, replaced by a mark of how much it was.
+fn strip_data(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            let media = matches!(
+                fields.get("type").and_then(Value::as_str),
+                Some("image" | "audio")
+            );
+            if media && let Some(Value::String(data)) = fields.get_mut("data") {
+                *data = format!("[{} bytes left out]", data.len());
+            }
+            fields.values_mut().for_each(strip_data);
+        }
+        Value::Array(items) => items.iter_mut().for_each(strip_data),
+        _ => {}
+    }
+}
+
+/// Every text longer than `most` characters, cut there with a mark.
+fn shorten_texts(value: &mut Value, most: usize) {
+    match value {
+        Value::String(text) => {
+            if let Some((at, _)) = text.char_indices().nth(most) {
+                text.truncate(at);
+                text.push_str("\u{2026} [cut]");
+            }
+        }
+        Value::Object(fields) => fields
+            .values_mut()
+            .for_each(|field| shorten_texts(field, most)),
+        Value::Array(items) => items.iter_mut().for_each(|item| shorten_texts(item, most)),
+        _ => {}
+    }
+}
+
 pub fn text_block(text: &str) -> Value {
     json!({"type": "text", "text": text})
 }
@@ -369,5 +436,34 @@ mod tests {
         assert_eq!(current(&options, "model").as_deref(), Some("gemini-a"));
         let thought = option(&options, "thought_level").unwrap();
         assert_eq!(matching(thought, "high").as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn a_message_too_long_for_one_line_loses_its_data_and_long_texts_and_stays_whole() {
+        let small = json!({"method": "session/update", "params": {"update": {"text": "hi"}}});
+        assert_eq!(bounded(&small), small);
+        let picture = "A".repeat(3 * 1024 * 1024);
+        let output = "line\n".repeat(400_000);
+        let big = json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s",
+            "update": {"sessionUpdate": "tool_call_update", "toolCallId": "t", "status": "completed",
+                "content": [{"type": "content", "content": {"type": "image", "mimeType": "image/png", "data": picture}}],
+                "rawOutput": {"combinedOutput": output}}}});
+        let cut = bounded(&big);
+        let line = serde_json::to_vec(&cut).unwrap();
+        assert!(line.len() <= PRINTED_MOST, "{}", line.len());
+        let update = &cut["params"]["update"];
+        assert_eq!(update["toolCallId"], "t");
+        assert_eq!(update["status"], "completed");
+        assert_eq!(
+            update["content"][0]["content"]["data"],
+            format!("[{} bytes left out]", 3 * 1024 * 1024)
+        );
+        let kept = update["rawOutput"]["combinedOutput"].as_str().unwrap();
+        assert!(
+            kept.starts_with("line\nline\n") && kept.ends_with("[cut]"),
+            "{}",
+            &kept[..20]
+        );
+        assert!(SessionUpdate::of_notification(&cut).is_some());
     }
 }

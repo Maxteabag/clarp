@@ -28,8 +28,12 @@ pub const AUDIO_MOST: u64 = 20 * 1024 * 1024;
 pub const ATTACHED_MOST: u64 = 50 * 1024 * 1024;
 /// How many files one message may carry.
 pub const ATTACHED_COUNT_MOST: usize = 20;
-/// How long a prompt may stay open without a word from Antigravity before the turn is ended.
+/// How long a prompt may stay open without a word from Antigravity before the turn is ended,
+/// while no tool call of its is open.
 pub const SILENCE_MOST_SECS: u64 = 15 * 60;
+/// The same while a tool call is open: a build or a test suite says nothing until it ends,
+/// and agy's own card gives a turn a day.
+pub const TOOL_SILENCE_MOST_SECS: u64 = 24 * 60 * 60;
 /// How long a stopped turn waits for Antigravity to say it cancelled.
 pub const CANCEL_WAIT_MS: u64 = 8_000;
 
@@ -98,6 +102,10 @@ pub struct Order {
     pub effort: String,
     /// The files of the message that may go as more than their path.
     pub attachments: Vec<String>,
+    /// How long a prompt may stay silent while no tool call is open, in milliseconds, where it
+    /// is not [`SILENCE_MOST_SECS`]: for tests, which cannot wait a quarter of an hour. Nought:
+    /// the bound itself.
+    pub silence_ms: u64,
 }
 
 impl Order {
@@ -111,6 +119,7 @@ impl Order {
             "model": self.model,
             "effort": self.effort,
             "attachments": self.attachments,
+            "silence_ms": self.silence_ms,
         })
     }
 
@@ -134,6 +143,7 @@ impl Order {
                         .collect()
                 })
                 .unwrap_or_default(),
+            silence_ms: value["silence_ms"].as_u64().unwrap_or(0),
         }
     }
 }
@@ -325,6 +335,7 @@ mod tests {
             model: "m".into(),
             effort: "low".into(),
             attachments: vec!["/d/uploads/a.png".into()],
+            silence_ms: 250,
         };
         assert_eq!(Order::from_json(&order.to_json()), order);
     }

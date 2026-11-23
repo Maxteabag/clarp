@@ -156,29 +156,33 @@ fn a_tool_call_is_named_as_the_conversation_names_tools_and_ends_with_its_output
 }
 
 #[test]
-fn a_question_answered_by_policy_a_lost_conversation_and_a_turn_limit_are_told() {
+fn a_question_answered_by_policy_and_a_turn_limit_are_told_and_a_request_after_a_stop_is_not() {
     let lines = [
-        json!({"clarp": "bound", "session": "conv-new", "resumed": false, "lost": "conv-gone"}),
+        json!({"clarp": "bound", "session": "conv-new", "resumed": false}),
         json!({"clarp": "notice", "code": "agy-model", "text": "Antigravity does not offer x."}),
-        json!({"clarp": "permission", "title": "Which colour?", "kind": "reject_once", "answer": "Red"}),
+        json!({"clarp": "permission", "title": "Which colour?", "kind": "reject_once", "answer": "Red", "stopped": false}),
+        json!({"clarp": "permission", "title": "Run after stop?", "kind": null, "answer": null, "stopped": true}),
         json!({"clarp": "prompted", "result": {"stopReason": "max_tokens"}}),
     ];
     let signals = read(&lines, "", Some(0), None);
     let codes: Vec<&str> = notices(&signals).iter().map(|(code, _)| *code).collect();
-    assert_eq!(
-        codes,
-        [
-            "agy-new-conversation",
-            "agy-model",
-            "agy-question",
-            "agy-turn-limit"
-        ]
-    );
-    assert!(notices(&signals)[0].1.contains("conv-gone"));
+    assert_eq!(codes, ["agy-model", "agy-question", "agy-turn-limit"]);
     assert!(
-        notices(&signals)[2].1.contains("Which colour?") && notices(&signals)[2].1.contains("Red")
+        notices(&signals)[1].1.contains("Which colour?") && notices(&signals)[1].1.contains("Red")
     );
     assert_eq!(ended(&signals), &RunOutcome::Completed);
+}
+
+#[test]
+fn a_conversation_agy_no_longer_has_fails_the_turn_as_lost() {
+    let lines = [json!({"clarp": "failed", "stage": "session",
+                        "error": {"code": -32002, "message": "Session not found: conv-gone"},
+                        "text": "Session not found: conv-gone"})];
+    let reason = failure(&read(&lines, "", Some(1), None));
+    assert!(
+        reason.starts_with("Antigravity no longer has this conversation"),
+        "{reason}"
+    );
 }
 
 #[test]
