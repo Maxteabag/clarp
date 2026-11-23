@@ -302,3 +302,107 @@ done
         "what Codex started went with it"
     );
 }
+
+#[test]
+fn steered_words_codex_dropped_at_an_interrupt_are_not_read() {
+    let fake = r#"#!/bin/sh
+set -eu
+read -r init
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+read -r resume
+printf '%s\n' '{"id":2,"result":{"thread":{"id":"old-thread"}}}'
+read -r turn
+printf '%s\n' \
+    '{"id":3,"result":{"turn":{"id":"t5"}}}' \
+    '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t5"}}}'
+read -r steer
+case "$steer" in (*'"method":"turn/steer"'*'"clientUserMessageId":"s-9"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":4,"result":{"turnId":"t5"}}'
+read -r interrupt
+case "$interrupt" in (*'"method":"turn/interrupt"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"id":5,"result":{}}' \
+    '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t5","status":"interrupted"}}}'
+read -r listed
+case "$listed" in (*'"method":"thread/turns/list"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":6,"result":{"data":[{"id":"t5","items":[{"type":"userMessage","clientId":"someone-else"}]}]}}'
+read -r end || :
+"#;
+    let lane = Lane::start("codex-chat-dropped", fake, |root| {
+        json!({"threadId": "old-thread", "cwd": root})
+    });
+    let claim = lane.claim();
+    let prompt = Request::Prompt {
+        claim: claim.clone(),
+        text: "work".into(),
+        model: None,
+        effort: None,
+        token: None,
+    };
+    assert_eq!(ask(&lane.socket, &prompt)["ok"], true);
+    let steered = ask(
+        &claim.socket,
+        &clarp_shim::Request::Steer {
+            id: "s-9".into(),
+            text: "and this".into(),
+        },
+    );
+    assert_eq!(steered["ok"], true, "Codex accepted the words");
+    let stopped = ask(&claim.socket, &clarp_shim::Request::Stop { grace_ms: 5_000 });
+    assert_eq!(stopped["ok"], true);
+
+    let (output, exit) = finished(&claim.spool);
+    assert_eq!(
+        output,
+        vec![
+            // A resumed thread is not named again.
+            json!({"type":"turn.started"}),
+            json!({"type":"steer.open"}),
+        ],
+        "no reading: the words wait for a turn of their own"
+    );
+    assert_eq!(exit, (None, Some(2)));
+}
+
+#[test]
+fn a_lane_whose_login_changed_refuses_with_its_code_and_gives_codex_nothing() {
+    let fake = r#"#!/bin/sh
+set -eu
+read -r init
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+if read -r anything; then
+    echo "$anything" > "$(dirname "$0")/reached-codex"
+fi
+"#;
+    let mut lane = Lane::start("codex-chat-login", fake, |root| {
+        fs::write(
+            root.join("auth.json"),
+            r#"{"tokens":{"account_id":"first"}}"#,
+        )
+        .unwrap();
+        json!({"threadId": "old-thread", "cwd": root, "_clarpLoginFile": root.join("auth.json")})
+    });
+    fs::write(
+        lane.root.join("auth.json"),
+        r#"{"tokens":{"account_id":"second"}}"#,
+    )
+    .unwrap();
+    let claim = lane.claim();
+    let refused = ask(
+        &lane.socket,
+        &Request::Prompt {
+            claim: claim.clone(),
+            text: "work".into(),
+            model: None,
+            effort: None,
+            token: None,
+        },
+    );
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["code"], clarp_shim::codex_lane::LOGIN_CHANGED);
+    assert!(lane.ended(Duration::from_secs(10)).success(), "the lane leaves");
+    assert!(!claim.spool.exists(), "nothing of the attempt was taken");
+    assert!(!lane.root.join("reached-codex").exists());
+}
