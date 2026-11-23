@@ -3,9 +3,12 @@
 //! A turn is tried more than once when the failure is one that passes. A connection that
 //! dropped or a tool that stalled passes by itself: the turn waits a moment (the Python Host's
 //! rule, `turn_retry._handle_failure`: three attempts in all, a second after the first, two
-//! after the second). An account that is out passes when another account is put in its place,
-//! or when its limit is over: the turn waits for that, when this Host is told to. Everything
-//! else ends the turn, and the user is told why (`failures::told`).
+//! after the second). A provider that turned an attempt away for a moment (overloaded, or
+//! holding requests back) passes too, more slowly: a turn that has done nothing yet waits half
+//! a minute, then a minute, and is asked the same again. An account that is out passes when
+//! another account is put in its place, or when its limit is over: the turn waits for that,
+//! when this Host is told to. Everything else ends the turn, and the user is told why
+//! (`failures::told`).
 
 use crate::failures;
 
@@ -14,6 +17,11 @@ pub const MAX_ATTEMPTS: u32 = 3;
 
 /// How long the turn waits after its first attempt. Twice as long after each one more.
 pub const BACKOFF_BASE_MS: i64 = 1_000;
+
+/// How long a turn waits after a first attempt its provider turned away for a moment. Twice
+/// as long after each one more. The tool has tried again by itself before it gave up, and a
+/// provider that holds requests back counts them by the minute.
+pub const PROVIDER_BACKOFF_MS: i64 = 30_000;
 
 /// How long a turn that waits for an account waits before it is tried on whatever account
 /// is there then: this long the first time, and twice as long each time after.
@@ -79,6 +87,9 @@ pub struct Failed<'a> {
     pub account_waits: u32,
     /// Since when the turn has waited for an account, when it has before.
     pub account_wait_since_ms: Option<i64>,
+    /// The turn has put nothing into the conversation and begun no tool, in any attempt:
+    /// asking the same again repeats nothing of it.
+    pub nothing_done: bool,
     pub now_ms: i64,
 }
 
@@ -106,6 +117,13 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
         failures::CONNECTION | failures::TIMEOUT if (1..MAX_ATTEMPTS).contains(&tries) => {
             Next::Retry {
                 after_ms: BACKOFF_BASE_MS << (tries - 1),
+            }
+        }
+        // Once the turn has done something, the same asked again could do it twice: it ends,
+        // and says why. No other account helps with a provider that is busy.
+        failures::TRANSIENT if failed.nothing_done && (1..MAX_ATTEMPTS).contains(&tries) => {
+            Next::Retry {
+                after_ms: PROVIDER_BACKOFF_MS << (tries - 1),
             }
         }
         // Also a plan that does not offer the model: another account's plan may, and the
@@ -165,7 +183,32 @@ mod tests {
             attempt,
             account_waits: 0,
             account_wait_since_ms: None,
+            nothing_done: false,
             now_ms: 10_000,
+        }
+    }
+
+    #[test]
+    fn a_busy_provider_is_asked_again_only_by_a_turn_that_has_done_nothing() {
+        for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
+            let untouched = |attempt| Failed {
+                nothing_done: true,
+                ..failed(failures::TRANSIENT, attempt)
+            };
+            assert_eq!(
+                after_failed_attempt(untouched(1), accounts),
+                Next::Retry { after_ms: 30_000 }
+            );
+            assert_eq!(
+                after_failed_attempt(untouched(2), accounts),
+                Next::Retry { after_ms: 60_000 }
+            );
+            assert_eq!(after_failed_attempt(untouched(3), accounts), Next::Fail);
+            // Something of the turn was said or begun: asked again, it could be done twice.
+            assert_eq!(
+                after_failed_attempt(failed(failures::TRANSIENT, 1), accounts),
+                Next::Fail
+            );
         }
     }
 
@@ -235,6 +278,7 @@ mod tests {
                     attempt: waits + 1,
                     account_waits: waits,
                     account_wait_since_ms: (waits > 0).then_some(since),
+                    nothing_done: false,
                     now_ms: now,
                 },
                 Accounts::Follow,
@@ -301,6 +345,7 @@ mod tests {
             attempt: 3,
             account_waits: 2,
             account_wait_since_ms: Some(1_000),
+            nothing_done: false,
             now_ms: 500_000,
         };
         assert_eq!(

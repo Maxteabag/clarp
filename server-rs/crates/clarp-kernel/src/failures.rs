@@ -103,11 +103,16 @@ static TRANSIENT_RE: LazyLock<Regex> = LazyLock::new(|| {
         r"overloaded|rate[ _]?limit|too many requests|\b429\b|",
         r"\b5\d{2}\b|internal server error|service unavailable|bad gateway|",
         r"gateway time-?out|api (error|timeout).*(retry|temporar)|temporarily unavailable|",
+        r"temporarily limiting|",
         r"upstream request failed|endpoint is unavailable",
     ))
 });
 static USAGE_LIMIT_RE: LazyLock<Regex> =
     LazyLock::new(|| pattern(&format!("{USAGE_WINDOW}|{USAGE_OTHER}")));
+// A usage limit named only to be denied: Claude Code 2.1.321 says "(not your usage limit)"
+// when its provider's servers hold requests back for a moment.
+static DENIED_USAGE_LIMIT_RE: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"\bnot (?:your |an? |the )?usage (?:limit|cap|quota)"));
 static USAGE_WINDOW_RE: LazyLock<Regex> = LazyLock::new(|| pattern(USAGE_WINDOW));
 static USAGE_OTHER_RE: LazyLock<Regex> = LazyLock::new(|| pattern(USAGE_OTHER));
 static STATES_ITS_RESET_RE: LazyLock<Regex> =
@@ -154,6 +159,11 @@ static OPENCODE_FREE_RE: LazyLock<Regex> =
 static PROVIDER_DOWN_RE: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"upstream request failed|endpoint is unavailable"));
 
+/// What a tool said, without what it says a failure is not: a denial is no reading of it.
+fn affirmed(message: &str) -> std::borrow::Cow<'_, str> {
+    DENIED_USAGE_LIMIT_RE.replace_all(message, " ")
+}
+
 /// The kind of a failure, from what a tool said of it.
 pub fn classify_error(message: &str) -> &'static str {
     let text = message.trim();
@@ -163,6 +173,7 @@ pub fn classify_error(message: &str) -> &'static str {
     if text.starts_with("muse_session_locked:") {
         return MUSE_SESSION_LOCKED;
     }
+    let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
     // stop. A turn that was stopped often also prints a broken pipe as it goes, and must
     // not be tried again. A usage limit that advertises a plan is a usage limit.
@@ -178,7 +189,7 @@ pub fn classify_error(message: &str) -> &'static str {
     ];
     order
         .iter()
-        .find(|(wording, _)| wording.is_match(text))
+        .find(|(wording, _)| wording.is_match(&text))
         .map_or(UNKNOWN, |(_, kind)| *kind)
 }
 
@@ -188,6 +199,8 @@ pub fn classify_error(message: &str) -> &'static str {
 /// of the kind that states its own reset is a window, unless it names something no reset
 /// clears.
 pub fn usage_limit_resets(message: &str) -> bool {
+    let message = affirmed(message);
+    let message = message.as_ref();
     if STATES_ITS_RESET_RE.is_match(message) && USAGE_LIMIT_RE.is_match(message) {
         return !NO_RESET_CLEARS_RE.is_match(message);
     }
@@ -666,6 +679,25 @@ mod tests {
         );
         assert_eq!(classify_error("  "), UNKNOWN);
         assert_eq!(classify_error("nothing anyone has a word for"), UNKNOWN);
+    }
+
+    #[test]
+    fn a_usage_limit_named_only_to_be_denied_is_none() {
+        // Claude Code 2.1.321, when its provider's servers hold requests back for a moment.
+        let held = "API Error: Server is temporarily limiting requests (not your usage limit) · \
+                    Number of request tokens has exceeded your per-minute rate limit";
+        assert_eq!(classify_error(held), TRANSIENT);
+        assert_eq!(
+            classify_error("Server is temporarily limiting requests (not your usage limit)"),
+            TRANSIENT
+        );
+        assert!(!usage_limit_resets(held));
+        // A limit that is one is read as one, as before.
+        assert_eq!(
+            classify_error("You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)"),
+            USAGE_LIMIT
+        );
+        assert_eq!(classify_error("Claude usage limit reached"), USAGE_LIMIT);
     }
 
     #[test]

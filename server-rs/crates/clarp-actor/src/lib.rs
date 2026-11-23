@@ -5836,12 +5836,20 @@ impl Actor {
                                 let kind = failures::classify_error(reason);
                                 let waits = batch.agent().live().map(Turn::account_waits);
                                 let waits = waits.unwrap_or_default();
+                                // Its last row is still its message only while no attempt
+                                // has said or begun anything.
+                                let nothing_done =
+                                    !closed_by_marker(&live.last_row, &live.message_id)
+                                        && live.tool_count == 0
+                                        && live.said.is_empty()
+                                        && live.steering.separate.is_none();
                                 let wait = match recovery::after_failed_attempt(
                                     recovery::Failed {
                                         kind,
                                         attempt: live.attempt,
                                         account_waits: waits.count,
                                         account_wait_since_ms: waits.since_ms,
+                                        nothing_done,
                                         now_ms: t,
                                     },
                                     accounts,

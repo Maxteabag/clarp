@@ -775,9 +775,13 @@ impl ClaudeInterpreter {
             "rate_limit_event" => {
                 let info = &event["rate_limit_info"];
                 let status = text_of(&info["status"]);
-                // The account is out. The turn ends on it, and its end says so: nothing
-                // is put into the conversation at this moment.
-                if matches!(status, "rejected" | "blocked") {
+                // The account is out when the refusal names the window it ran out of. The
+                // turn ends on it, and its end says so: nothing is put into the conversation
+                // at this moment. A refusal that names none is the provider's servers holding
+                // requests back for a moment, which no other account helps with: Claude Code
+                // tries again by itself, and where it gives up its own words say why.
+                let window = text_of(&info["rateLimitType"]);
+                if matches!(status, "rejected" | "blocked") && !window.trim().is_empty() {
                     self.usage_limit = true;
                 }
                 // What it says of the account's windows with that is told on.
@@ -1637,12 +1641,44 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_that_names_no_window_is_no_usage_limit() {
+        // What Claude Code 2.1.321 says when the provider's servers hold requests back for a
+        // moment: it tries again, is refused with no window named, and gives up in words of
+        // its own that say it is not the account's limit.
+        let said = "API Error: Server is temporarily limiting requests (not your usage limit) · Number of request tokens has exceeded your per-minute rate limit";
+        let gave_up = format!(
+            r#"{{"type":"assistant","error":"rate_limit","message":{{"id":"msg_held","model":"<synthetic>","role":"assistant","content":[{{"type":"text","text":"{said}"}}]}}}}"#
+        );
+        let result = format!(
+            r#"{{"type":"result","subtype":"success","is_error":true,"result":"{said}","api_error_status":429,"terminal_reason":"api_error"}}"#
+        );
+        for exit in [Some(0), Some(1)] {
+            let held = read(
+                &[
+                    INIT,
+                    r#"{"type":"system","subtype":"api_retry","attempt":1,"max_retries":2,"retry_delay_ms":2000,"error_status":429,"error":"rate_limit"}"#,
+                    r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","isUsingOverage":false}}"#,
+                    gave_up.as_str(),
+                    result.as_str(),
+                ],
+                (exit, None),
+            );
+            match held.last() {
+                Some(Signal::Ended(RunOutcome::Failed { reason })) => assert!(
+                    reason.starts_with(said),
+                    "the turn ends on the tool's own words, not on a usage limit: {reason}"
+                ),
+                other => panic!("the turn fails: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn the_ways_a_turn_fails_are_told_apart() {
         let limit = read(
             &[
                 INIT,
                 r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"five_hour"}}"#,
-                r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}"#,
             ],
             (Some(1), None),
         );
