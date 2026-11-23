@@ -89,3 +89,61 @@ fn stream_records_agree_with_the_reference_drain() {
     }
     assert_eq!(count, 127);
 }
+
+/// What the turn driver records of a turn whose provider refused the account (OpenCode
+/// 1.18.33's free tier, issue 721): the session, the user's prompt, and the `retry` OpenCode
+/// would repeat without end. The driver lets the turn go there; the turn ends on the
+/// provider's words, of the usage-limit kind.
+#[test]
+fn a_refusal_no_retry_gets_past_ends_the_turn_on_the_providers_words() {
+    let lines = include_str!("fixtures/opencode-1.18.33-refused.jsonl");
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "refused");
+    let mut signals = Vec::new();
+    let r = |entry| Record { t: 1, entry };
+    for line in lines.lines() {
+        interpreter.on_record(&r(Entry::Out(line.to_string())), &mut signals);
+    }
+    interpreter.on_record(
+        &r(Entry::Shim(ShimEvent::Exited {
+            code: Some(0),
+            signal: None,
+        })),
+        &mut signals,
+    );
+    let ends: Vec<RunOutcome> = signals
+        .into_iter()
+        .filter_map(|signal| match signal {
+            Signal::Ended(outcome) => Some(outcome),
+            _ => None,
+        })
+        .collect();
+    let said = "Free usage exceeded, subscribe to Go";
+    assert_eq!(
+        ends,
+        [RunOutcome::Failed {
+            reason: said.into()
+        }]
+    );
+    assert_eq!(
+        clarp_kernel::failures::classify_error(said),
+        clarp_kernel::failures::USAGE_LIMIT
+    );
+}
+
+#[test]
+fn a_passing_retry_is_left_to_opencode() {
+    let refused = |status: Value| clarp_kernel::opencode::refused(&status);
+    assert_eq!(refused(json!({"type": "busy"})), None);
+    assert_eq!(
+        refused(json!({"type": "retry", "attempt": 2, "message": "Rate limited, retrying"})),
+        None
+    );
+    assert_eq!(
+        refused(json!({"type": "retry", "message": "", "action": {"title": "Free limit reached"}})),
+        Some("Free limit reached".into())
+    );
+    assert_eq!(
+        refused(json!({"type": "retry", "message": "Insufficient credits"})),
+        Some("Insufficient credits".into())
+    );
+}

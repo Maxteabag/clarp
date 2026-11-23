@@ -375,6 +375,13 @@ fn serve(client: Client, request: &Value, stop: &Mutex<Stop>) -> Result<()> {
                 emit(&ev)?;
             }
             "message.part.delta" | "session.error" if mine => emit(&ev)?,
+            // A retry that no retry gets past (the provider refused the account): OpenCode
+            // would retry without end. Its words go to the record, the turn is let go.
+            "session.status" if mine && opencode::refused(&props["status"]).is_some() => {
+                emit(&ev)?;
+                let _ = client.post(&format!("{session}/abort"), None, 30);
+                break;
+            }
             "session.status" if mine => match props["status"]["type"].as_str() {
                 Some("busy" | "retry") => busy = true,
                 Some("idle") if busy => break,

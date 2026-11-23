@@ -444,6 +444,13 @@ impl Stream {
             "tool_use" | "tool_start" | "tool.running" => {
                 self.tool(if part.is_object() { part } else { v }, t, out)
             }
+            // The provider refused the account and OpenCode would retry without end: the
+            // turn ends on the provider's words, as a usage limit ends one of another tool.
+            "session.status" => {
+                if let Some(why) = rules::refused(&props["status"]) {
+                    self.errors.push(why);
+                }
+            }
             "error" | "session.error" => {
                 self.run_failed = props.get("error").is_none();
                 let e = error(props.get("error").unwrap_or(&v["error"]));
