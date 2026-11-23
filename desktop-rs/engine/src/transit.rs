@@ -127,7 +127,13 @@ impl Engine {
     pub fn transit_confirm(&mut self, session: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.transit_confirm(local));
         let mut start = None;
-        self.update_flow(session, |flow| start = flow.confirm(|| uuid::Uuid::new_v4().to_string()));
+        let from = self.roster.find(session).map(|a| a.backend.clone()).unwrap_or_default();
+        self.update_flow(session, |flow| {
+            start = flow.confirm(|| uuid::Uuid::new_v4().to_string());
+            if start.is_some() {
+                flow.from_backend = from;
+            }
+        });
         let Some((backend, model, request_id)) = start else { return };
         self.api.post_json(
             &format!("transit-start:{session}"),
@@ -193,19 +199,24 @@ impl Engine {
         if !self.transits.feature {
             return;
         }
-        let rows: Vec<(String, Option<Event>)> = self
+        let rows: Vec<(String, String, Option<Event>)> = self
             .roster
             .agents()
             .iter()
             .map(|agent| {
                 let mut row = agent.transit.clone();
                 row.entry("session").or_insert_with(|| Value::String(agent.session.clone()));
-                (agent.session.clone(), Event::from_json(&row))
+                (agent.session.clone(), agent.backend.clone(), Event::from_json(&row))
             })
             .collect();
-        for (session, running) in rows {
+        for (session, backend, running) in rows {
             if let Some(running) = running {
-                self.update_flow(&session, |flow| flow.adopt(&running));
+                self.update_flow(&session, |flow| {
+                    flow.adopt(&running);
+                    if flow.moving() && flow.from_backend.is_empty() {
+                        flow.from_backend = backend;
+                    }
+                });
                 continue;
             }
             let Some(id) = self.transits.flows.get(&session).and_then(|f| f.transit_id()).map(str::to_owned) else { continue };

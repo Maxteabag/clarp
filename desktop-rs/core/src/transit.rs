@@ -294,6 +294,9 @@ pub struct Flow {
     pub request_id: Option<String>,
     /// The model the running change goes to.
     pub target_model: String,
+    /// The backend the agent ran on when the change started (a model-only
+    /// switch keeps it); empty when unknown.
+    pub from_backend: String,
 }
 
 impl Flow {
@@ -583,7 +586,7 @@ mod tests {
         flow.refused("Finish or stop the current turn first");
         assert_eq!(flow.step, Step::Failed { backend: "codex".into(), reason: TURN_BLOCKED.into() });
         assert_eq!(first.2, "r1");
-        let mut retry = Flow { step: Step::Confirming { backend: "codex".into(), model: "gpt-6".into() }, request_id: Some("r1".into()), target_model: String::new() };
+        let mut retry = Flow { step: Step::Confirming { backend: "codex".into(), model: "gpt-6".into() }, request_id: Some("r1".into()), ..Flow::default() };
         assert_eq!(retry.confirm(|| "r2".into()).unwrap().2, "r1");
     }
 

@@ -96,6 +96,9 @@ mod narrow_checks;
 // ---- native forms (render_spec) in the chat
 #[path = "render_spec_checks.rs"]
 mod render_spec_checks;
+// ---- changing an agent's backend from its profile (#720)
+#[path = "transit_checks.rs"]
+mod transit_checks;
 // ---- what animating costs the UI thread
 #[path = "budget_checks.rs"]
 mod budget_checks;
@@ -555,6 +558,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "stalled-turn" => stall_checks::stalled_turn_check(out),
+        "backend-transit" => transit_checks::backend_transit_check(out),
         "all-hosts" => all_hosts_checks::all_hosts_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
         "explorer" => explorer_checks::explorer_check(out),

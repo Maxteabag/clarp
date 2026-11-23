@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, Motion } from "theme.slint";
 import { ComboBox, ScrollView, Switch } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { AgentAvatar, StatusPill, AvatarArt } from "avatar.slint";
@@ -62,6 +62,15 @@ export struct NamedItem {
     on: bool,
 }
 
+// One line of the backend picker (#720): a backend or a model.
+export struct TransitChoice {
+    label: string,
+    // Why it cannot be chosen, or "Current" / "Default".
+    detail: string,
+    enabled: bool,
+    current: bool,
+}
+
 export struct ProfileArtifact {
     title: string,
     kind: string,
@@ -110,6 +119,33 @@ export global ProfileBridge {
     callback set-schedule(string, bool);
     callback compact();
     callback release();
+
+    // Changing the agent's backend (#720), on a Host with the feature
+    // agent_backend_transit: the row's value ("Claude · Opus 5.5"), the line
+    // under it (the move's phase, why it cannot start, or the result), and
+    // whether it opens the picker now.
+    in property <bool> transit-shown;
+    in property <string> transit-value;
+    in property <string> transit-detail;
+    in property <bool> transit-enabled;
+    in property <bool> transit-moving;
+    in property <bool> transit-failed;
+    // The picker: "" closed, then "backend", "model" and "confirm".
+    in property <string> transit-step;
+    in property <string> transit-title;
+    in property <string> transit-body;
+    in property <bool> transit-loading;
+    in property <[TransitChoice]> transit-choices;
+    in property <int> transit-index;
+    // Bumped to give the picker, or back to the row, the keyboard.
+    in property <int> transit-focus-request;
+    in property <int> transit-row-request;
+    callback transit-open();
+    callback transit-choose(int);
+    callback transit-move-by(int);
+    callback transit-confirm();
+    callback transit-back();
+    callback transit-cancel();
 }
 
 component Card inherits VerticalLayout {
@@ -147,6 +183,182 @@ component Confirm inherits Modal {
             alignment: end;
             IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { ProfileBridge.confirm = ""; } }
             IconButton { icon: @image-url("icons/check.svg"); tip: root.yes-tip; clicked => { root.accepted(); } }
+        }
+    }
+}
+
+// The Backend row: Return, Space or a click opens the picker.
+component TransitRow inherits FocusScope {
+    property <int> request: ProfileBridge.transit-row-request;
+    changed request => { self.focus(); }
+    height: 30px;
+    enabled: ProfileBridge.transit-enabled;
+    accessible-role: button;
+    accessible-label: "Backend, " + ProfileBridge.transit-value;
+    accessible-description: ProfileBridge.transit-detail;
+    accessible-action-default => { if (ProfileBridge.transit-enabled) { ProfileBridge.transit-open(); } }
+    key-pressed(event) => {
+        if (event.text == Key.Return || event.text == " ") {
+            if (ProfileBridge.transit-enabled) { ProfileBridge.transit-open(); }
+            return accept;
+        }
+        reject
+    }
+    Rectangle {
+        border-radius: 3px;
+        border-width: root.has-focus ? 1px : 0px;
+        border-color: Palette.accent;
+        background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+        HorizontalLayout {
+            padding-left: 6px;
+            padding-right: 6px;
+            spacing: 8px;
+            Text { text: "Backend"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+            Text {
+                text: ProfileBridge.transit-value;
+                color: root.enabled ? Palette.text : Palette.muted;
+                font-size: 12 * Look.unit;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Image {
+                y: (parent.height - self.height) / 2;
+                source: @image-url("icons/route.svg");
+                width: 14 * Look.unit;
+                height: 14 * Look.unit;
+                colorize: root.enabled ? Palette.chrome-text : Palette.faint;
+            }
+        }
+        touch := TouchArea {
+            enabled: root.enabled;
+            clicked => {
+                root.focus();
+                ProfileBridge.transit-open();
+            }
+        }
+    }
+}
+
+// A thin bar whose segment runs along it while a move runs; still under
+// reduced motion (the words carry the phase).
+component TransitBar inherits Rectangle {
+    property <float> phase: ProfileBridge.reduced-motion ? 0.0 : Math.mod(Motion.spin / 1400ms, 1.0);
+    height: 3px;
+    border-radius: 1.5px;
+    background: Palette.border;
+    clip: true;
+    accessible-role: progress-indicator;
+    accessible-label: ProfileBridge.transit-detail;
+    Rectangle {
+        width: ProfileBridge.reduced-motion ? parent.width : parent.width * 0.3;
+        x: ProfileBridge.reduced-motion ? 0px : -self.width + root.phase * (parent.width + self.width);
+        border-radius: 1.5px;
+        background: Palette.accent;
+        opacity: ProfileBridge.reduced-motion ? 0.45 : 1.0;
+    }
+}
+
+// The backend picker: backend, then model, then the confirmation. Up/Down
+// move, Return chooses, Escape steps back, a click outside closes it.
+component TransitPicker inherits Modal {
+    card-width: 480px;
+    card-height: 440px;
+    dismissed => { ProfileBridge.transit-cancel(); }
+    keys := FocusScope {
+        property <int> request: ProfileBridge.transit-focus-request;
+        changed request => { self.focus(); }
+        init => { self.focus(); }
+        capture-key-pressed(event) => {
+            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                ProfileBridge.transit-move-by(event.text == Key.DownArrow ? 1 : -1);
+                return accept;
+            }
+            if (event.text == Key.Return || event.text == " ") {
+                if (ProfileBridge.transit-step == "confirm") {
+                    ProfileBridge.transit-confirm();
+                } else {
+                    ProfileBridge.transit-choose(ProfileBridge.transit-index);
+                }
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            Text { text: ProfileBridge.transit-title; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; wrap: word-wrap; }
+            if ProfileBridge.transit-body != "": Text { text: ProfileBridge.transit-body; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
+            if ProfileBridge.transit-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+            if ProfileBridge.transit-step != "confirm": ScrollView {
+                vertical-stretch: 1;
+                content-width: self.visible-width;
+                content-height: list.preferred-height;
+                list := VerticalLayout {
+                    width: parent.width;
+                    spacing: 2px;
+                    for choice[index] in ProfileBridge.transit-choices: Rectangle {
+                        height: 38px;
+                        border-radius: 3px;
+                        background: index == ProfileBridge.transit-index ? Palette.hover : transparent;
+                        border-width: index == ProfileBridge.transit-index ? 1px : 0px;
+                        border-color: Palette.accent;
+                        accessible-role: list-item;
+                        accessible-label: choice.detail == "" ? choice.label : choice.label + ", " + choice.detail;
+                        accessible-enabled: choice.enabled;
+                        accessible-action-default => { ProfileBridge.transit-choose(index); }
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 8px;
+                            Text {
+                                text: choice.label;
+                                color: choice.enabled ? Palette.text : Palette.faint;
+                                font-size: 12 * Look.unit;
+                                font-weight: choice.current ? 600 : 400;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                            }
+                            if choice.current: Image {
+                                y: (parent.height - self.height) / 2;
+                                source: @image-url("icons/check.svg");
+                                width: 12 * Look.unit;
+                                height: 12 * Look.unit;
+                                colorize: Palette.chrome-text;
+                            }
+                            Text {
+                                text: choice.detail;
+                                color: Palette.muted;
+                                font-size: 11 * Look.unit;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                                overflow: elide;
+                                max-width: 240px;
+                            }
+                        }
+                        TouchArea {
+                            enabled: choice.enabled;
+                            clicked => { ProfileBridge.transit-choose(index); }
+                        }
+                    }
+                }
+            }
+            if ProfileBridge.transit-step == "confirm": Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: end;
+                IconButton {
+                    icon: @image-url("icons/close.svg");
+                    tip: ProfileBridge.transit-step == "backend" ? "Cancel" : "Back";
+                    clicked => { ProfileBridge.transit-back(); }
+                }
+                if ProfileBridge.transit-step == "confirm": IconButton {
+                    icon: @image-url("icons/check.svg");
+                    tip: "Move";
+                    clicked => { ProfileBridge.transit-confirm(); }
+                }
+            }
         }
     }
 }
@@ -296,6 +508,17 @@ export component AgentProfile inherits Modal {
                             clicked => { ProfileBridge.load-older(); }
                         }
                     }
+                }
+                if ProfileBridge.transit-shown: Card {
+                    title: "BACKEND";
+                    TransitRow { }
+                    if ProfileBridge.transit-detail != "": Text {
+                        text: ProfileBridge.transit-detail;
+                        color: ProfileBridge.transit-failed ? Palette.danger : Palette.muted;
+                        font-size: 11 * Look.unit;
+                        wrap: word-wrap;
+                    }
+                    if ProfileBridge.transit-moving: TransitBar { }
                 }
                 Card {
                     title: "MODEL & EFFORT";
@@ -478,6 +701,10 @@ export component ProfileLayers inherits Rectangle {
         message: "The contact, history, files, and artifacts remain.";
         yes-tip: "Release";
         accepted => { ProfileBridge.release(); }
+    }
+    if ProfileBridge.transit-step != "": TransitPicker {
+        width: root.width;
+        height: root.height;
     }
     if ProfileBridge.viewing >= 0 && ProfileBridge.viewing < ProfileBridge.media.length: MediaViewer {
         width: root.width;
