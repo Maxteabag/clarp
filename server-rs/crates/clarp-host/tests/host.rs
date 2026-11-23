@@ -637,7 +637,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 157);
+    assert_eq!(info["contract"]["host"], clarp_host::edge::HOST_CONTRACT);
     assert_eq!(info["contract"]["features"]["agent_state"], 156);
     assert_eq!(info["contract"]["features"]["agent_moved"], 125);
     assert_eq!(info["contract"]["features"]["queue_user_first"], 118);
@@ -5469,12 +5469,9 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (both.0, both.2.as_str()),
         (1, "--origin cannot be combined with --from\n")
     );
-    // What is not on this Host says so, and does nothing.
+    // What is not on this Host says so, and does nothing. (A delayed prompt is on it now: it
+    // is scheduled through the user's service manager, which this test does not reach.)
     assert_eq!(admin(&["update"]).0, 69);
-    assert_eq!(
-        admin(&["prompt", "--to", &worker, "--text", "x", "--delay", "5m"]).0,
-        69
-    );
     let stranger = admin(&["prompt", "--to", &worker, "--text", "x", "--server", "work"]);
     assert_eq!(
         (stranger.0, stranger.2.as_str()),
@@ -9372,7 +9369,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 157);
+    assert_eq!(info["contract"]["host"], clarp_host::edge::HOST_CONTRACT);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
     assert_eq!(info["contract"]["features"]["render_spec_v2"], 133);
     assert_eq!(
@@ -10234,6 +10231,8 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
         "deployment_mode",
         "version",
         "image_version",
+        // The ids of the Hosts this one took over from (Rust contract 144).
+        "previous_server_ids",
         "clarp_version",
         "min_app_version",
         "capabilities",
@@ -24094,7 +24093,8 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
     turn(&scout, "m1");
     assert_eq!(told_last(), "You are Scout. Personality: curious.");
 
-    // The persona is changed and then removed: the agent stays who it was made as.
+    // The persona is changed, and its removal is refused while a chat uses it (issue 314):
+    // the agent stays who it was made as.
     let (status, changed) = ask(
         "/personas/update",
         json!({
@@ -24103,7 +24103,10 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         }),
     );
     assert_eq!(status, 200, "{changed}");
-    assert_eq!(host.ask("DELETE", "/personas/Scout", None).0, 200);
+    assert_eq!(
+        host.ask("DELETE", "/personas/Scout", None),
+        (409, json!({ "error": "contact is in use by a chat" }))
+    );
     assert_eq!(row(&host, &scout), listed);
     let picture = fetch(&host, "secret", "GET", &face, &[], b"");
     assert_eq!(

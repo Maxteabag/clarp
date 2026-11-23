@@ -2485,7 +2485,8 @@ mod tests {
         for turn in turns {
             assert_eq!(fields(&turns[0]), fields(turn), "{}", turn["id"]);
         }
-        assert_eq!(fields(&turns[0]).len(), 22);
+        // 23 with `conversation_id` (Rust contract 153).
+        assert_eq!(fields(&turns[0]).len(), 23);
         assert_eq!(turns[0]["view"], "conversation");
         assert_eq!(turns[1]["view"], "session");
         assert_eq!(turns[4]["view"], "conversation");
@@ -2777,7 +2778,8 @@ mod tests {
         assert_eq!(row["last_compaction"], serde_json::Value::Null);
         assert_eq!(
             row.as_object().unwrap().len(),
-            55,
+            // The Python Host's 55, and `transit` (Rust contract 158).
+            56,
             "the fields of the Python Host's row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
