@@ -34006,8 +34006,16 @@ fn a_turn_stopped_while_it_waits_for_an_account_ends_under_its_message() {
     let ends: Vec<&Value> = rows.iter().filter(|row| row["turn"].is_object()).collect();
     assert_eq!(ends.len(), 1, "{rows:#?}");
     assert_eq!(
-        (&ends[0]["turn"]["turn_id"], &ends[0]["turn"]["status"]),
-        (&json!(trace), &json!("interrupted")),
+        (
+            &ends[0]["turn"]["turn_id"],
+            &ends[0]["turn"]["status"],
+            &ends[0]["turn"]["reason"]
+        ),
+        (
+            &json!(trace),
+            &json!("interrupted"),
+            &json!("Stopped by its user.")
+        ),
         "{rows:#?}"
     );
     let messages = rows.iter().filter(|row| row["id"] == "u-parked-1").count();

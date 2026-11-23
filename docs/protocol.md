@@ -423,6 +423,13 @@ Rules:
   to the response's `latest_revision`, which never exceeds the rows actually
   returned (when `has_more` is true the server holds the cursor back so the
   next call continues the backlog).
+- **A turn's end says why it did not complete (Rust Host contract 162, feature
+  `turn_end_reason`).** The row that closes a turn carries `turn` (`turn_id`, `status`,
+  `started_at_ms`, `ended_at_ms`, `worked_ms`, `tool_count`). When `status` is not
+  `completed`, `turn.reason` is the Host's own sentence of why it ended: the failure as its
+  user is told it, who stopped it and why, what interrupted it, or that a newer message's
+  turn replaced it. It is absent on a completed turn and on ends written before contract
+  162. It adds no row: an automated turn that fails stays quiet in the chat.
 - **`has_more`** on a tail snapshot or an older-history page means older
   messages exist before the first one returned. On a delta it means more
   changed messages exist after the last one returned; call again.

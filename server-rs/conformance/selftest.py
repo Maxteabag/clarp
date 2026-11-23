@@ -84,6 +84,18 @@ def main() -> int:
     check(not ok and 'unexplained: 5' in '\n'.join(lines),
           'log additions still differ without their register entries', failed)
 
+    ended = {'turn_id': 't', 'status': 'interrupted'}
+    base = recording(read('/log', [{'id': 'a', 'turn': dict(ended)}, {'id': 'b', 'turn': dict(ended)}]),
+                     read('/another-route', [{'id': 'a', 'turn': dict(ended)}]))
+    head = recording(read('/log', [
+        {'id': 'a', 'turn': {**ended, 'reason': 'Stopped by its user.'}},
+        {'id': 'b', 'turn': {**ended, 'reason': 3}, 'reason': 'not on the turn'},
+    ]), read('/another-route', [{'id': 'a', 'turn': {**ended, 'reason': 'Stopped by its user.'}}]))
+    lines, ok = conform.judged([base], head, ROUTER, {'log-turn-field-added:reason'}, [])
+    page = '\n'.join(lines)
+    check(not ok and 'differences: 4  registered intended: 1' in page and 'unexplained: 3' in page,
+          'a turn end\'s reason is intended only as text on the turn of a GET /log row', failed)
+
     def roster(path, agents, status=200):
         return {'method': 'GET', 'path': path, 'status': status, 'body': {'agents': agents}}
 

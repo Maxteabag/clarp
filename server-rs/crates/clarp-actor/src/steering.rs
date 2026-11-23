@@ -322,6 +322,15 @@ impl State {
                 total: None,
                 limits: None,
                 note_count: 0,
+                // A follow-up read into another turn's process ends with that process.
+                reason: match status {
+                    "completed" => None,
+                    "failed" => Some("The turn this message was read into failed.".to_string()),
+                    _ => Some(
+                        "The process this message was read into ended before it answered."
+                            .to_string(),
+                    ),
+                },
             };
             batch.item(written(&Entry::TurnEnd(end), now_ms)?);
         }

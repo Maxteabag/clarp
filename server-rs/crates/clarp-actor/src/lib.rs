@@ -1014,17 +1014,7 @@ fn ending_notice(
         id: format!("n-{name}-{code}"),
         turn: Some(turn.0),
         code: code.to_string(),
-        text: if reason == clarp_kernel::agent_moves::MOVED {
-            failures::told(
-                reason,
-                clarp_kernel::agent_moves::CONTINUATION_ERROR,
-                "",
-                failures::Known::default(),
-            )
-            .row
-        } else {
-            reason.to_string()
-        },
+        text: clarp_kernel::conversation::interrupted_sentence(reason),
         trace_id,
     })
 }
@@ -1235,6 +1225,11 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
     compaction_said(batch, turn, &facts);
     let ended = batch.agent().last().filter(|last| last.id == turn)?;
     let mut end = TurnEnd::of(ended, closes)?;
+    // A failure is told with the model the turn ran on, which the settled turn does not hold.
+    if matches!(ended.outcome, clarp_kernel::turn::Outcome::Failed { .. }) {
+        let model = facts.model.as_deref().unwrap_or_default();
+        end.reason = clarp_kernel::conversation::end_reason(&ended.outcome, model);
+    }
     end.note_count = facts.notes;
     end.trace_id = facts.trace_id;
     end.model = facts.model;
@@ -1947,10 +1942,19 @@ impl Actor {
                             now_ms,
                         )
                         .map_err(JournalError::Refused)?;
-                    if let Some(live) = self.live.as_ref()
-                        && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
-                    {
-                        batch.item(written(&end, now_ms)?);
+                    if let Some(live) = self.live.as_ref() {
+                        // What every other end of a moved turn says under it (issue 729).
+                        let notice = ending_notice(
+                            turn,
+                            turn_name(&live.message_id),
+                            "turn-interrupted",
+                            clarp_kernel::agent_moves::MOVED,
+                            live.trace_id.clone(),
+                        );
+                        batch.item(written(&notice, now_ms)?);
+                        if let Some(end) = closing(&mut batch, turn, notice.id(), live.facts()) {
+                            batch.item(written(&end, now_ms)?);
+                        }
                     }
                     true
                 }

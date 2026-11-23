@@ -337,6 +337,60 @@ pub struct TurnEnd {
     /// written, never by reading the turn's rows. Absent: none.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub note_count: u32,
+    /// The Host's own sentence of why a turn that did not complete ended: a failure as the
+    /// user is told it, who stopped it and why, what interrupted it (issue 729). Absent for a
+    /// turn that completed, and in an end written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// What the Host says of an interrupted turn: a move is told as a move is, anything else in
+/// the words of whatever saw the turn's process go.
+pub fn interrupted_sentence(reason: &str) -> String {
+    if reason == crate::agent_moves::MOVED {
+        crate::failures::told(
+            reason,
+            crate::agent_moves::CONTINUATION_ERROR,
+            "",
+            crate::failures::Known::default(),
+        )
+        .row
+    } else {
+        reason.to_string()
+    }
+}
+
+/// Who stopped a turn, as its end says it: its user, a newer message, or the agent or the
+/// routine named, with the reason given where one was.
+pub fn stopped_sentence(by: &str, reason: &str) -> String {
+    let who = if by == crate::control::USER {
+        "Stopped by its user".to_string()
+    } else if by.starts_with("message of turn") {
+        "Stopped for a newer message".to_string()
+    } else {
+        format!("Stopped by {}", by.strip_prefix("agent:").unwrap_or(by))
+    };
+    let reason = reason.trim();
+    if reason.is_empty() {
+        format!("{who}.")
+    } else {
+        format!("{who}: {reason}")
+    }
+}
+
+/// The Host's sentence of why a settled turn did not complete (`TurnEnd::reason`): `None` for
+/// one that completed or was taken back. A failure is told as its user is told it, with the
+/// model the turn ran on where that is known.
+pub fn end_reason(outcome: &Outcome, model: &str) -> Option<String> {
+    match outcome {
+        Outcome::Completed | Outcome::Withdrawn { .. } => None,
+        Outcome::Failed { reason, kind } => {
+            Some(crate::failures::told(kind, reason, model, crate::failures::Known::default()).row)
+        }
+        Outcome::Stopped { by, reason, .. } => Some(stopped_sentence(by, reason)),
+        Outcome::Interrupted { reason } => Some(interrupted_sentence(reason)),
+        Outcome::Replaced { .. } => Some("Replaced by the turn of a newer message.".to_string()),
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -381,6 +435,7 @@ impl TurnEnd {
             total: None,
             limits: None,
             note_count: 0,
+            reason: end_reason(&settled.outcome, ""),
         })
     }
 }
@@ -516,6 +571,66 @@ impl Entry {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Issue 729: every end that did not complete says why, in the Host's words; one that
+    /// completed, or a message taken back, says nothing.
+    #[test]
+    fn an_end_that_did_not_complete_says_why() {
+        let why = |outcome: Outcome| end_reason(&outcome, "");
+        assert_eq!(why(Outcome::Completed), None);
+        assert_eq!(why(Outcome::Withdrawn { by: "user".into() }), None);
+        assert_eq!(
+            why(Outcome::stopped(crate::control::Control::by("user"))),
+            Some("Stopped by its user.".into())
+        );
+        let by_an_agent = Outcome::Stopped {
+            by: "agent:rs-transit".into(),
+            verified: true,
+            reason: "switching model".into(),
+        };
+        assert_eq!(
+            why(by_an_agent),
+            Some("Stopped by rs-transit: switching model".into())
+        );
+        let preempted = Outcome::stopped(crate::control::Control::by(crate::agent::preempted_by(
+            crate::turn::TurnId(2),
+        )));
+        assert_eq!(why(preempted), Some("Stopped for a newer message.".into()));
+        let gone = "the turn's process is gone and did not say how it went";
+        assert_eq!(
+            why(Outcome::Interrupted {
+                reason: gone.into()
+            }),
+            Some(gone.into())
+        );
+        let moved = why(Outcome::Interrupted {
+            reason: crate::agent_moves::MOVED.into(),
+        })
+        .unwrap();
+        assert!(
+            moved.starts_with("The agent moved to another Host"),
+            "{moved}"
+        );
+        assert_eq!(
+            why(Outcome::Replaced {
+                by: crate::turn::TurnId(3),
+                trace: None
+            }),
+            Some("Replaced by the turn of a newer message.".into())
+        );
+        let failed = why(Outcome::Failed {
+            reason: "Claude usage limit reached".into(),
+            kind: crate::failures::USAGE_LIMIT.into(),
+        })
+        .unwrap();
+        let told = crate::failures::told(
+            crate::failures::USAGE_LIMIT,
+            "Claude usage limit reached",
+            "",
+            crate::failures::Known::default(),
+        );
+        assert_eq!(failed, told.row, "the words of the failure's row");
+    }
 
     /// The log keeps a waiting message's send time under its own key, and a message whose turn
     /// started at once is written without one, as before issue 491.
@@ -669,6 +784,7 @@ mod tests {
                 total: None,
                 limits: None,
                 note_count: 0,
+                reason: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

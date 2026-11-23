@@ -800,6 +800,15 @@ impl Actor {
                         total: None,
                         limits: None,
                         note_count: 0,
+                        reason: match &outcome {
+                            RunOutcome::Completed => None,
+                            RunOutcome::Stopped { by } => {
+                                Some(clarp_kernel::conversation::stopped_sentence(by, ""))
+                            }
+                            RunOutcome::Failed { reason } | RunOutcome::Interrupted { reason } => {
+                                Some(clarp_kernel::conversation::interrupted_sentence(reason))
+                            }
+                        },
                     };
                     batch.item(written(&Entry::TurnEnd(end), now_ms)?);
                     self.fork.ended = Some((turn, status, failed.map(str::to_owned)));

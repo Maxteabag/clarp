@@ -225,7 +225,11 @@ def audit_agent(host: Host, session: str, agent: dict, since: int, until: int, n
             state = str(end.get("status") or "ended")
             result["turn_status"][state] = result["turn_status"].get(state, 0) + 1
             if state != "completed":
-                reason = host_word(rows, end["row"], trace) or (
+                # The Host's word on the end itself (contract 162, `turn_end_reason`), else
+                # the row it wrote under the turn.
+                said = " ".join(str(end.get("reason") or "").split())
+                said = "".join("#" if ch.isdigit() else ch for ch in said)[:120]
+                reason = said or host_word(rows, end["row"], trace) or (
                     f"replaced by a later turn" if end.get("replaced_by") else "no sentence from the Host")
                 key = f"{state}: {reason}"
                 result["reasons"][key] = result["reasons"].get(key, 0) + 1

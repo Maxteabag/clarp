@@ -1374,6 +1374,10 @@ fn turn_end(end: &TurnEnd) -> Value {
     if let Some(replaced_by) = &end.replaced_by {
         summary["replaced_by"] = json!(replaced_by);
     }
+    // Why a turn that did not complete ended, in the Host's words (`turn_end_reason`).
+    if let Some(reason) = end.reason.as_deref().filter(|_| end.status != "completed") {
+        summary["reason"] = json!(reason);
+    }
     summary
 }
 
@@ -2322,6 +2326,7 @@ mod tests {
             total: None,
             limits: None,
             note_count: 0,
+            reason: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -2618,7 +2623,30 @@ mod tests {
             total: None,
             limits: None,
             note_count: 0,
+            reason: None,
         }
+    }
+
+    /// Issue 729: the `turn` of an end that did not complete carries its `reason`, and reads
+    /// as the contract's type; a completed one carries none.
+    #[test]
+    fn an_end_that_did_not_complete_carries_its_reason() {
+        let mut done = ended();
+        done.reason = Some("left over".to_string());
+        assert!(turn_end(&done).get("reason").is_none());
+        let mut stopped = ended();
+        stopped.status = "interrupted".to_string();
+        stopped.reason = Some("Stopped by its user.".to_string());
+        let shown = turn_end(&stopped);
+        assert_eq!(shown["reason"], json!("Stopped by its user."));
+        let typed: clarp_protocol::log::TurnOutcome = serde_json::from_value(shown).unwrap();
+        assert_eq!(typed.reason.as_deref(), Some("Stopped by its user."));
+        let mut older = ended();
+        older.status = "failed".to_string();
+        assert!(
+            turn_end(&older).get("reason").is_none(),
+            "an end written before"
+        );
     }
 
     #[test]
@@ -3217,6 +3245,7 @@ mod tests {
             total: None,
             limits: None,
             note_count: 0,
+            reason: None,
         };
         let asked = |origin: Origin| {
             let message = Message {

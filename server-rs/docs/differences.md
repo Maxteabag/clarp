@@ -649,6 +649,11 @@ Every `/log` row carries `conversation_id` on the Rust Host (contract 153, featu
 `conversation_fork`), and `session_id` is present where the producing session is known.
 The conversation ID stays the same across a relaunch or conversation fork. The retired Python
 reference has neither row field. `conformance/intended.txt` registers their addition on log rows.
+The `turn` of a `/log` row that closes a turn that did not complete carries `reason` on the
+Rust Host (contract 162, feature `turn_end_reason`, issue 729): the Host's sentence of why it
+ended (the failure as its user is told it, who stopped it and why, what interrupted it). The
+retired Python reference says why only in a row of its own, and not for a Stop or for an
+automated turn that failed. `conformance/intended.txt` registers the addition on the turn.
 The agent-row flag `conversation_fork` is true for an eligible agent named in
 `[conversation_forks]` in the Host's `config.toml` and false otherwise. The retired
 Python reference has no such flag. The conformance register covers its boolean addition

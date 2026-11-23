@@ -2261,6 +2261,7 @@ def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
 
 HTTP_ADDED_FIELD = re.compile(r'^\[(\d+)\]\.body\.(.+)\.([a-z0-9_#]+)$')
 LOG_ROW = re.compile(r'^turns\[\d+\]$')
+LOG_TURN = re.compile(r'^turns\[\d+\]\.turn$')
 AGENT_ROW = re.compile(r'^agents\[\d+\]$')
 LOG_ROW_TEXT = re.compile(r'^(?:str\[[1-9]\d*\]#[0-9a-f]{8}|<(?:id|secret):\d+>)$')
 
@@ -2281,6 +2282,11 @@ def intended_http_field(difference: dict, base: dict, registered: set) -> bool:
         return bool(LOG_ROW_TEXT.fullmatch(difference['head'])) and any(
             f'log-row-field-added:{key}' in registered and field == diff.safe_key(key)
             for key in ('conversation_id', 'session_id'))
+    if route == ('GET', '/log') and LOG_TURN.fullmatch(row):
+        # Why a turn that did not complete ended (contract 162, issue 729): text on the turn
+        # of the row that closes it.
+        return (bool(LOG_ROW_TEXT.fullmatch(difference['head']))
+                and 'log-turn-field-added:reason' in registered and field == diff.safe_key('reason'))
     if ('agent-row-field-added:conversation_fork' not in registered
             or field != diff.safe_key('conversation_fork')
             or difference['head'] not in ('true', 'false')):

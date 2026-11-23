@@ -109,4 +109,8 @@ pub struct TurnOutcome {
     pub worked_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_count: Option<u64>,
+    /// Why a turn that did not complete ended, in the Host's words (feature
+    /// `turn_end_reason`, Rust Host contract 162).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }

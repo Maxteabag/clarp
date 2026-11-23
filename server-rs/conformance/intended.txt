@@ -193,3 +193,8 @@ log-row-field-added:session_id  the producing tool session where the Host knows 
 # Issue 718 also adds per-agent conversation_fork. It is a boolean, false
 # unless the agent is configured for forks. The retired reference has no flag.
 agent-row-field-added:conversation_fork  agent rows in the snapshot, archived roster and made-agent response
+
+# Issue 729, Rust Host contract 162 (feature turn_end_reason). The retired Python
+# reference says nothing on a turn's end of why it did not complete. Match only text
+# added as `reason` on the `turn` of a row in a successful GET /log response.
+log-turn-field-added:reason  the Host's sentence of why a turn that did not complete ended

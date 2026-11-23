@@ -5024,6 +5024,49 @@ fn a_move_settles_a_parked_attempt_and_keeps_its_waiting_messages() {
     }
 }
 
+/// Issue 729: a turn that ran when its agent moved, and of which it cannot be proved that
+/// nothing reached the tool, ends interrupted with the sentence every other moved turn has:
+/// a notice under it, and the same words on its end.
+#[test]
+fn a_running_turn_ended_by_a_move_says_why_under_it_and_on_its_end() {
+    use clarp_kernel::agent_moves::{MOVED, Target};
+
+    let mut world = World::new("moved-running");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-running", "go", Admission::Queue);
+    world.says(1, r#"{"session": "session-1"}"#);
+    world.hint(&mut actor);
+    let target = Target {
+        host: "Destination".into(),
+        id: "agent-y".into(),
+    };
+    let (receipt, out) = actor
+        .set_move(Some(target), Some(TurnId(1)), world.tick())
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    assert!(receipt.changed);
+    let status = actor.status();
+    assert!(
+        matches!(status.last.unwrap().outcome, Outcome::Interrupted { reason } if reason == MOVED)
+    );
+    let rows = actor.tail(20).unwrap().entries;
+    let notice = rows
+        .iter()
+        .find_map(|row| match &row.entry {
+            Entry::Notice(notice) if notice.code == "turn-interrupted" => Some(notice.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{:#?}", shown_rows(&rows)));
+    assert!(
+        notice.text.starts_with("The agent moved to another Host"),
+        "{notice:?}"
+    );
+    let closing: Vec<_> = rows.iter().filter_map(|row| row.turn.clone()).collect();
+    assert_eq!(closing.len(), 1, "{:#?}", shown_rows(&rows));
+    assert_eq!(closing[0].status, "interrupted");
+    assert_eq!(closing[0].reason.as_deref(), Some(notice.text.as_str()));
+}
+
 // ---- the turn an artifact names (R102) -------------------------------------------------------
 
 /// The trace of the agent's running turn, as its rows carry it, is what an artifact published in
@@ -6019,6 +6062,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             total: None,
             limits: None,
             note_count: 0,
+            reason: None,
         });
         items.push(end.to_item(at).unwrap());
         let settled = TurnEvent::Settled {
