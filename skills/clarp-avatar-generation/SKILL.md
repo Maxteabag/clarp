@@ -129,3 +129,19 @@ other `px`, or a Host without the feature, gives the full picture. No row has a 
 for it. Publish the full-size portrait as before: the Host makes the thumbnails itself, once per
 picture and size. An address whose `v` is the picture's current version may be cached for a
 year; a new picture has a new `v`.
+
+---
+
+## 7. Setting a running agent's picture (Rust Host)
+
+There is no `clarp-admin` avatar command. An agent's picture comes from its own gallery:
+
+1. `clarp-media-publish FILE --session <agent-session> --caption "..."` returns
+   `clarp-media://asset/<asset_id>`.
+2. `POST /agent-portraits {"action":"add_media_asset","session":"<s>","asset_id":"<asset_id>"}`
+   with the `[server].auth_token` bearer adds it as an alternate (max 3 kept) and returns its `portrait_id`.
+3. `POST /agent-portraits {"action":"select_primary","session":"<s>","portrait_id":"<id>"}` makes it the picture worn.
+4. Verify: `GET /agents/snapshot` shows `avatar_url` `/avatars/<agent_id>?v=...`, and fetching it returns the file you published.
+
+If the `openai` module is missing, run the generator with `uv run -q --with openai python ...`.
+The key is in `rbw get env-OPENAI_API_KEY`.
