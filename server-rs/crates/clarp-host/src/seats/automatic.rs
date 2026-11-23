@@ -212,6 +212,16 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
         },
     );
     let mut switched = false;
+    if let Ok(body) = &read
+        && mode == "automatic"
+    {
+        // No account has room: the owner's reset tool may spend a banked reset, under his
+        // rule (every account out, the soonest natural reset more than 48 hours away). An
+        // earlier attempt whose outcome is unknown is reconciled first.
+        let saved = accounts.iter().map(|seat| seat.alias.clone()).collect();
+        let exhausted = decision["action"] == "exhausted";
+        reset::consider(app, id, tool, exhausted, body, saved, required.clone()).await;
+    }
     if read.is_ok() {
         action = decision["action"].as_str().unwrap_or("skip").into();
         if mode == "automatic" && action == "switch" {

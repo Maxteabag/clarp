@@ -14,6 +14,7 @@ pub mod agent_goal;
 pub mod agent_moves;
 pub mod alert_routes;
 pub mod artifacts;
+pub mod banked_reset;
 pub mod calendar;
 pub mod call_transcription;
 pub mod calls;

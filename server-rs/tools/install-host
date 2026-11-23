@@ -637,7 +637,8 @@ if [ ! -s "$config/env" ]; then
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
 # Keep the owner's public URL, web read origins, experience watcher settings and the agents named for
-# conversation forks (issue 718): an install must not turn a fork off.
+# conversation forks (issue 718): an install must not turn a fork off. And the Hotseat switcher's banked-reset
+# settings ([agents] claude_reset_command, codex_reset_command, codex_reset_max_per_day).
 carried_config="$(python3 - "$own_config" <<'PYTHON'
 from datetime import date, time
 import json
@@ -691,6 +692,13 @@ if isinstance(watch, dict):
 forks = config.get("conversation_forks")
 if isinstance(forks, dict):
     table("conversation_forks", forks)
+# The Hotseat switcher's banked-reset settings: the owner sets them once; an install keeps them.
+agents = config.get("agents")
+if isinstance(agents, dict):
+    kept = {name: agents[name] for name in ("claude_reset_command", "codex_reset_command",
+                                            "codex_reset_max_per_day") if name in agents}
+    if kept:
+        table("agents", kept)
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.

@@ -19,6 +19,9 @@ What it compares:
   3. the connection relay's name (host_id): the Python Host's relay.json against the name the Rust Host dials (its
      own relay.json, the file named by relay-config in its install.conf, or a relay-also name);
   4. owner config keys the Rust Host does not read (informational; from the audit of 22 Nov 2026);
+  6. (23 Nov 2026) the Hotseat switcher's banked-reset settings ([agents] claude_reset_command, codex_reset_command,
+     codex_reset_max_per_day): the Rust Host reads them from its own config (~/.config/clarp-host/config.toml), and the
+     cut-over dropped them unseen; a key the Python config has and the Rust config lacks or holds otherwise is reported;
   5. (since laptopstudio's cut-over, 22 Nov 2026) each janitor's MODEL (the Python janitor agent's model against the
      Rust janitor's), janitors the Rust Host lacks, and the Python Host's peers (~/.config/clarp/peers.json) against
      the Rust Host's (GET /peers): both cut-overs had lost them and nothing noticed.
@@ -240,11 +243,32 @@ def compare(findings):
         cfg = tomllib.loads((HOME / ".config/clarp/config.toml").read_text())
     except (OSError, ValueError):
         cfg = {}
+    # 6. the banked-reset settings, which the Rust Host reads from its own config
+    try:
+        rust_cfg = tomllib.loads((HOME / ".config/clarp-host/config.toml").read_text())
+    except (OSError, ValueError):
+        rust_cfg = {}
+    findings.extend(reset_findings(cfg, rust_cfg))
     for (section, key), why in UNREAD_CONFIG.items():
         present = section in cfg and (key == "*" or key in (cfg.get(section) or {}))
         if present:
             findings.append(("config not read", f"[{section}] {key}", why, "informational"))
     return findings
+
+
+RESET_KEYS = ("claude_reset_command", "codex_reset_command", "codex_reset_max_per_day")
+
+
+def reset_findings(python_cfg, rust_cfg):
+    """The banked-reset settings the Python config has and the Rust config lacks or holds otherwise."""
+    mine = python_cfg.get("agents") if isinstance(python_cfg.get("agents"), dict) else {}
+    theirs = rust_cfg.get("agents") if isinstance(rust_cfg.get("agents"), dict) else {}
+    found = []
+    for key in RESET_KEYS:
+        if key in mine and mine[key] not in ([], None) and theirs.get(key) != mine[key]:
+            found.append(("reset setting", f"[agents] {key}", json.dumps(mine[key])[:120],
+                          "missing" if key not in theirs else json.dumps(theirs[key])[:120]))
+    return found
 
 
 def rust_janitor_session(template):

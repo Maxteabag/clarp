@@ -35,6 +35,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::process::Stdio;
 pub(crate) mod automatic;
+mod reset;
 mod switching;
 pub use automatic::start as start_switcher;
 use std::time::Duration;
@@ -85,6 +86,9 @@ struct Kept {
     last_switch: BTreeMap<String, Value>,
     #[serde(default)]
     notifications: BTreeMap<String, String>,
+    /// The banked-reset lane of each tool ([`reset`]).
+    #[serde(default)]
+    resets: BTreeMap<String, clarp_kernel::banked_reset::Ledger>,
 }
 
 #[derive(Default)]
