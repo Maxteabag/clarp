@@ -232,3 +232,36 @@ fn rows_carry_their_view_and_the_anchor_its_session_rows() {
     assert_eq!(agent.chat_view, "conversation");
     assert!(agent.conversation_fork);
 }
+
+/// #727: an opened turn's work is one box under its reply, as on iOS.
+#[test]
+fn opened_work_moves_under_its_reply_in_one_box() {
+    use chat_view::{Edge, WorkBox, gather};
+    let ids = ["u-1", "w-1", "w-2", "f-1", "u-2"];
+    let boxed = WorkBox { anchor: "f-1".into(), inside: false, members: ["w-1", "w-2"].iter().map(|s| (*s).to_owned()).collect() };
+    let (order, edges) = gather(&ids, &[boxed]);
+    let drawn: Vec<&str> = order.iter().map(|&i| ids[i]).collect();
+    assert_eq!(drawn, ["u-1", "f-1", "w-1", "w-2", "u-2"]);
+    assert_eq!(edges, [Edge::None, Edge::None, Edge::Top, Edge::Bottom, Edge::None]);
+}
+
+#[test]
+fn the_running_box_begins_its_own_box_and_one_row_is_a_whole_box() {
+    use chat_view::{Edge, WorkBox, gather};
+    let ids = ["u-2", "live:fold:t-2", "live:it-1"];
+    let running = WorkBox { anchor: "live:fold:t-2".into(), inside: true, members: ["live:it-1".to_owned()].into_iter().collect() };
+    let (order, edges) = gather(&ids, &[running]);
+    assert_eq!(order, [0, 1, 2]);
+    assert_eq!(edges, [Edge::None, Edge::Top, Edge::Bottom]);
+    let single = WorkBox { anchor: "f".into(), inside: false, members: ["w".to_owned()].into_iter().collect() };
+    assert_eq!(gather(&["w", "f"], &[single]).1, [Edge::None, Edge::Only]);
+}
+
+#[test]
+fn a_box_whose_reply_is_not_drawn_leaves_its_rows_alone() {
+    use chat_view::{Edge, WorkBox, gather};
+    let boxed = WorkBox { anchor: "gone".into(), inside: false, members: ["w-1".to_owned()].into_iter().collect() };
+    let (order, edges) = gather(&["u-1", "w-1"], &[boxed]);
+    assert_eq!(order, [0, 1]);
+    assert_eq!(edges, [Edge::None, Edge::None]);
+}

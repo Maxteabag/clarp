@@ -85,7 +85,7 @@ pub fn place(lines: &[Line], shown: &[Shown<'_>]) -> Vec<(usize, Line)> {
             .iter()
             .enumerate()
             .skip(start + 1)
-            .find(|(_, row)| row.unsent || (row.role == "user" && !own(row)))
+            .find(|(_, row)| row.unsent || (row.role == "user" && !own(*row)))
             .map_or(shown.len(), |(i, _)| i);
         placed.push((at, line.clone()));
     }

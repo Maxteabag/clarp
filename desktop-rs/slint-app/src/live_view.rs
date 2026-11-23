@@ -172,6 +172,13 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
     let busy = running || engine.roster().find(session).is_some_and(|a| a.busy);
     let narrating = engine.narrator_enabled() && !engine.narrator_unavailable();
     let explain = |tool: &clarp_core::json::Object| engine.explanation_for(session, tool);
+    // Conversation view (#727): an opened turn's work lists its steps at
+    // once, inside its box, as on iOS: its work row opens with it.
+    let mut expanded = expanded.clone();
+    if conversation_view(engine, session, rows) {
+        let opened: Vec<String> = expanded.iter().filter_map(|k| k.strip_prefix(clarp_core::chat_view::WORK_PREFIX)).map(|t| format!("live:fold:{t}")).collect();
+        expanded.extend(opened);
+    }
     let options = clarp_core::history_fold::Options {
         summaries: engine.log_turn_summary(),
         explanations: explanations(engine, session),
@@ -185,7 +192,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
     };
     let mut folded = clarp_core::history_fold::present(rows, view, &options);
     if conversation_view(engine, session, rows) {
-        conversation_history(&mut folded, expanded);
+        conversation_history(&mut folded, &expanded);
     }
     folded
 }
@@ -327,6 +334,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         prompt: crate::PromptRow::default(),
         work_key: SharedString::new(),
         work_open: false,
+        work_box: SharedString::new(),
     }
 }
 

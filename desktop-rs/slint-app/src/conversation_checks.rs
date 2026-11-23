@@ -3,7 +3,7 @@
 //! chat is as before and its menu offers no view. With it, the agent's
 //! Conversation view leaves out every session row (commentary, tools, a
 //! run between agents); a finished turn's reply opens them again with Show
-//! work; a working agent is one Running box, from the snapshot alone and
+//! work, inside one bordered box under the reply (#727); a working agent is one Running box, from the snapshot alone and
 //! from a live turn, which names the agent's own turn beside a
 //! conversation fork's (contract 153); W opens and folds the work from the
 //! keyboard; a turn another agent started reads "Working with <Name>" and
@@ -59,6 +59,54 @@ fn press(id: &str) -> bool {
         .find_first()
         .map(|e| e.invoke_accessible_default_action())
         .is_some()
+}
+
+/// Where the drawn element with accessible id `id` is: (x, y, width,
+/// height) in the window; None when it is not drawn.
+fn frame(id: &str) -> Option<(f32, f32, f32, f32)> {
+    use i_slint_backend_testing::ElementQuery;
+    let window = crate::window()?;
+    let id = id.to_owned();
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0 && e.size().height > 0.0)
+        .find_first()
+        .map(|e| {
+            let (p, s) = (e.absolute_position(), e.size());
+            (p.x, p.y, s.width, s.height)
+        })
+}
+
+/// #727: the rows `ids` are drawn as one bordered box, in that order: the
+/// first its top band, the last its bottom one, the bands joined edge to
+/// edge with one left and right side, and each row's own drawing inside
+/// it. Says what it found.
+fn one_box(ids: &[&str]) -> Result<(), String> {
+    let bands: Vec<String> = ids.iter().map(|id| row(id).map(|r| r.work_box.to_string()).unwrap_or_else(|| "missing".into())).collect();
+    let want: Vec<&str> = match ids.len() {
+        1 => vec!["only"],
+        n => std::iter::once("top").chain(std::iter::repeat_n("middle", n - 2)).chain(std::iter::once("bottom")).collect(),
+    };
+    if bands != want {
+        return Err(format!("bands {bands:?}, want {want:?}"));
+    }
+    let boxes: Vec<(f32, f32, f32, f32)> = ids.iter().map(|id| frame(&format!("work-box:{id}")).ok_or(format!("no box band drawn for {id}"))).collect::<Result<_, _>>()?;
+    let first = boxes[0];
+    for (id, band) in ids.iter().zip(&boxes) {
+        if (band.0 - first.0).abs() > 0.5 || (band.2 - first.2).abs() > 0.5 {
+            return Err(format!("{id}'s band is not under the box's sides: {band:?} vs {first:?}"));
+        }
+        let Some(drawn) = frame(&format!("row:{id}")) else { return Err(format!("{id} is not drawn")) };
+        let inside = drawn.0 >= band.0 && drawn.0 + drawn.2 <= band.0 + band.2 && drawn.1 >= band.1 && drawn.1 + drawn.3 <= band.1 + band.3 + 0.5;
+        if !inside {
+            return Err(format!("{id} is drawn outside its band: {drawn:?} in {band:?}"));
+        }
+    }
+    for (pair, ids) in boxes.windows(2).zip(ids.windows(2)) {
+        if (pair[0].1 + pair[0].3 - pair[1].1).abs() > 1.0 {
+            return Err(format!("{} and {} leave a gap in the box: {:?} then {:?}", ids[0], ids[1], pair[0], pair[1]));
+        }
+    }
+    Ok(())
 }
 
 /// W in the chat, as the keyboard runs it.
@@ -158,8 +206,12 @@ pub fn conversation_view_check(out: String) {
                 return false;
             }
             let ids = ids();
-            let at = |id: &str| ids.iter().position(|i| i == id);
-            check(at("u-1") < at("w-1") && at("w-1") < at("f-1"), &format!("the turn's left-out rows show in their places, as the Session view draws them: {ids:?}"));
+            let at = |id: &str| ids.iter().position(|i| i == id).map_or(-1, |i| i as i64);
+            check(at("u-1") < at("f-1") && at("f-1") + 1 == at("w-1") && at("w-1") + 1 == at("w-2") && at("w-2") < at("u-2"),
+                &format!("the turn's left-out rows show under its reply, in their order (#727): {ids:?}"));
+            let boxed = one_box(&["w-1", "w-2"]);
+            check(boxed.is_ok(), &format!("inside one bordered box, as on iOS: {boxed:?}"));
+            check(row("f-1").is_some_and(|r| r.work_box.is_empty()) && row("u-2").is_some_and(|r| r.work_box.is_empty()), "the reply and the next message are outside it");
             check(row("f-1").is_some_and(|r| r.work_open), "the reply's Show work is lit (it folds them again)");
             check(!ids.iter().any(|i| i == "a-1"), "another turn's rows stay out");
             shot(&out2, "conversation-02-show-work");
@@ -171,6 +223,7 @@ pub fn conversation_view_check(out: String) {
                 return false;
             }
             check(row("f-1").is_some_and(|r| !r.work_open), "Hide work folds them away again");
+            check(shown().iter().all(|r| r.work_box.is_empty()), "and no box is left");
             // The agent works on the user's next message; no live turn says so.
             check(control("/__control/agent", &json!({"session": SESSION, "set": {"latest_state": "thinking", "busy": true, "turn_started_at": now_ms() - 65_000}})).is_ok(), "the agent starts working");
             true
@@ -228,6 +281,8 @@ pub fn conversation_view_check(out: String) {
                 return false;
             }
             check(has("live:it-1"), &format!("opened, the box lists the turn's steps under it: {:?}", ids()));
+            let boxed = one_box(&[BOX, "live:it-1"]);
+            check(boxed.is_ok(), &format!("inside its border (#727): {boxed:?}"));
             check(!has("live:it-0"), "its words in between stay out");
             shot(&out5, "conversation-05-box-opened");
             // W: the keyboard is on the box (its O opened it): it folds.
@@ -299,6 +354,7 @@ pub fn conversation_view_check(out: String) {
             check(written.iter().any(|p| p["body"] == json!({"session": SESSION, "chat_view": "session"})), &format!("the choice is written to the Host: {written:?}"));
             check(app.engine.borrow().chat_view_own(SESSION) == Some("session"), "and kept as the chat's own on this device");
             check(has("a-1") && has("w-1"), &format!("Session view shows everything again: {:?}", ids()));
+            check(shown().iter().all(|r| r.work_box.is_empty()), "with no work box: Session view is unchanged (#727)");
             check(row("f-1").is_some_and(|r| r.work_key.is_empty()), "with no Show work");
             menu_open(window);
             let menu = window.global::<crate::ChatMenu>();
@@ -381,7 +437,12 @@ pub fn conversation_view_check(out: String) {
             let ids = ids();
             let at = |id: &str| ids.iter().position(|i| i == id);
             check(row(&line).is_some_and(|r| r.author == "system" && r.blocks.row_count() == 1), "the Host's reason is one quiet system line");
-            check(at("u-3").is_some_and(|u| at(&line) == Some(u + 1)), &format!("under the stopped turn, which did no work: {ids:?}"));
+            // Under the stopped turn: nothing but live rows between them.
+            let under = match (at("u-3"), at(line.as_str())) {
+                (Some(u), Some(l)) => u < l && ids[u + 1..l].iter().all(|i| i.starts_with("live:")),
+                _ => false,
+            };
+            check(under, &format!("under the stopped turn, which did no work: {ids:?}"));
             check(!has(&clarp_core::turn_reason::key("t-1")), "a completed turn never shows a line");
             shot(&out10, "conversation-10-turn-reason");
             true
