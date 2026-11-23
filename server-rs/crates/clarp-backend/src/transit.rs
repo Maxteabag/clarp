@@ -836,7 +836,7 @@ impl Writer for OpenCodeWriter {
         let body = serde_json::to_vec(&export).map_err(|why| Failed::Translate(why.to_string()))?;
         write_new(&file, &body)?;
         let ran = run_bounded(
-            std::process::Command::new(&program)
+            clarp_child::command(&program)
                 .arg("import")
                 .arg(&file)
                 .current_dir(if Path::new(&place.cwd).is_dir() {

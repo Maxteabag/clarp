@@ -326,7 +326,7 @@ async fn schedule_prompt(
 async fn launch_prompt(args: Vec<OsString>) -> Result<(), String> {
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        tokio::process::Command::new("systemd-run")
+        tokio::process::Command::from(clarp_child::command("systemd-run"))
             .args(args)
             .kill_on_drop(true)
             .output(),
