@@ -72,14 +72,25 @@ impl Engine {
     }
 
     /// One client event to the Host's /clog (the desktop's diagnostics, e.g.
-    /// the dashcam's `scroll_flash`): `level` "fault" is kept whatever the
-    /// Host's diagnostics setting.
+    /// the dashcam's `scroll_flash`).
     pub fn report_client_event(&self, event: &str, level: &str, detail: serde_json::Value) {
         if self.token.is_empty() {
             return;
         }
         let body = serde_json::json!({"event": event, "level": level, "detail": detail});
         self.api.post_json("client-event", "/clog", body, Some(std::time::Duration::from_secs(10)));
+    }
+
+    /// A client event about one chat, to that chat's own Host (a peer's chat
+    /// to the peer, `detail` made with its session there).
+    pub fn report_chat_event(&self, session: &str, event: &str, level: &str, detail: impl FnOnce(&str) -> serde_json::Value) {
+        if let Some(peer) = self.peer_ref(session) {
+            if let Some((engine, local)) = peer {
+                engine.report_client_event(event, level, detail(local));
+            }
+            return;
+        }
+        self.report_client_event(event, level, detail(session));
     }
 
     pub fn report_application_activity(&self, instance: &str, sequence: u64, foreground: bool, input_age_ms: i64) {
