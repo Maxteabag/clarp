@@ -424,6 +424,44 @@ def proc_stat(pid: int) -> dict:
     return {"pid": pid, "name": name, "ppid": int(fields[1]), "pgid": int(fields[2])}
 
 
+def started_at(pid: int):
+    """A process's start time in clock ticks since boot, which tells it from a later process
+    that got the same id; None when it is gone."""
+    try:
+        raw = pathlib.Path(f"/proc/{pid}/stat").read_text()
+        return int(raw[raw.rindex(")") + 2:].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def alive(command: tuple) -> bool:
+    """Is this (pid, start) still the same running process? A zombie is not running."""
+    pid, start = command
+    if started_at(pid) != start:
+        return False
+    return not pid_gone(pid)
+
+
+def commands_of(host: "Host", lane, name: str) -> list:
+    """The turn's command, as (pid, start): the processes called `name` below the lane's shim or
+    in its app-server's group, and any other of this user's called so that work in the run's
+    folder (a command that left the lane's tree is still the turn's)."""
+    found = {m["pid"] for m in (lane or {}).get("members", []) if m["name"] == name}
+    mine = str(host.root)
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid() or proc_stat(int(entry.name)).get("name") != name:
+                continue
+            cwd = os.readlink(entry / "cwd")
+        except OSError:
+            continue
+        if cwd == mine or cwd.startswith(mine + "/"):
+            found.add(int(entry.name))
+    return [(pid, started_at(pid)) for pid in sorted(found) if started_at(pid) is not None]
+
+
 def memory_kb(pid: int) -> tuple:
     """RSS and PSS of one process in KiB (PSS shares a shared page out among its users)."""
     rss = pss = 0
@@ -832,33 +870,35 @@ def case_stop(agent: Agent, n: int) -> dict:
     # On a lane the turn's command runs inside the lane's app-server group: note it (the `sleep`
     # asked for) and the lane's other processes, to see the command end and the lane's own stay.
     lane = lane_of(agent, lanes(agent.host)) if agent.row in SETTINGS_OF else None
-    commands = [m["pid"] for m in (lane or {}).get("members", []) if m["name"] == "sleep"]
+    commands = commands_of(agent.host, lane, "sleep") if lane is not None else []
     helpers = [m for m in (lane or {}).get("members", []) if m["name"] not in ("sleep", "sh", "bash", "zsh")]
     t_stop = now_ms()
     status, answer = agent.host.ask("POST", "/stop", {"session": agent.session})
     t_answered = now_ms()
     # An exec turn's process ends with the turn. A lane's app-server is meant to stay: once the
     # spool says the turn's attempt exited, it is given three seconds more and then counted kept.
-    gone = None
-    exited_at = None
-    deadline = time.monotonic() + 60
-    while time.monotonic() < deadline:
-        if pid_gone(pid):
-            gone = now_ms()
-            break
-        if exited_at is None and spools and spool_marks(spools[0]).get("exited"):
-            exited_at = time.monotonic()
-        if exited_at is not None and time.monotonic() - exited_at > 3:
+    # The turn's command is watched in the same loop, and looked at again 5 s and 15 s after the
+    # Stop: on a lane it must end with the turn, as an exec turn's whole group does.
+    gone = exited_at = command_gone = None
+    alive_at = {}
+    began = time.monotonic()
+    while time.monotonic() - began < 40:
+        settled = gone is not None or (exited_at is not None and time.monotonic() - exited_at > 3)
+        if not settled:
+            if pid_gone(pid):
+                gone = now_ms()
+            elif exited_at is None and spools and spool_marks(spools[0]).get("exited"):
+                exited_at = time.monotonic()
+        if commands and command_gone is None and not any(alive(c) for c in commands):
+            command_gone = now_ms()
+        for mark in (5, 15):
+            if mark not in alive_at and time.monotonic() - began >= mark:
+                alive_at[mark] = any(alive(c) for c in commands)
+        # A command that is kept is watched on, up to 40 s, so its lifetime is known too.
+        done_with_command = not commands or command_gone is not None
+        if settled and done_with_command:
             break
         time.sleep(0.02)
-    command_gone = None
-    if commands:
-        deadline = time.monotonic() + 40
-        while time.monotonic() < deadline:
-            if all(pid_gone(c) for c in commands):
-                command_gone = now_ms()
-                break
-            time.sleep(0.02)
     ended = agent.wait_ended(t_stop, timeout=60)
     agent.wait_idle(60)
     lost = [m["name"] for m in helpers if pid_gone(m["pid"])]
@@ -878,6 +918,9 @@ def case_stop(agent: Agent, n: int) -> dict:
         found["measures"].update({
             "stop_to_command_gone": seconds(t_stop, command_gone),
             "command_seen": bool(commands),
+            "command_alive_5s": alive_at.get(5, False) if commands else None,
+            "command_alive_15s": alive_at.get(15, False) if commands else None,
+            "command_kept": (alive_at.get(5, False) or alive_at.get(15, False)) if commands else None,
             "lane_helpers_lost": lost,
         })
     return found
@@ -1241,11 +1284,15 @@ def summary(result: dict) -> str:
                     and "command_seen" in c["measures"]]
         if commands:
             seen = [m for m in commands if m["command_seen"]]
-            outlived = [m for m in seen if m.get("stop_to_command_gone") is None]
+            kept = [m for m in seen if m.get("command_kept")]
+            at5 = sum(1 for m in seen if m.get("command_alive_5s"))
+            at15 = sum(1 for m in seen if m.get("command_alive_15s"))
             lost = sorted({name for m in commands for name in m.get("lane_helpers_lost") or []})
-            lines.append(f"Stop on the lane: the turn's command was found in {len(seen)} of {len(commands)}; it outlived "
-                         f"the 40 s watch in {len(outlived)}. Lane processes that died with the Stop: "
-                         f"{', '.join(lost) if lost else 'none'}.")
+            lines.append(f"Stop on the lane: the turn's command was found in {len(seen)} of {len(commands)} stops; "
+                         f"command_kept in {len(kept)} (alive 5 s after the Stop in {at5}, 15 s after in {at15}). "
+                         f"Lane processes that died with the Stop: {', '.join(lost) if lost else 'none'}.")
+            if len(seen) < len(commands):
+                lines.append("A stop whose command was not found says nothing of command_kept: look at it.")
         for look in entry.get("lanes_idle") or []:
             found = look["lanes"]
             if not found:
@@ -1305,8 +1352,10 @@ def summary(result: dict) -> str:
         "- Idle lanes: each lane's `clarp-shim codex-goal-lane`, its app-server child and that child's process "
         "group (an MCP server it started), RSS and PSS from /proc smaps_rollup, read twice, `--lane-settle` apart.",
         "- steer_wait_for_own_turn: for a send that waited, the second send to its own turn starting.",
-        "- stop_to_command_gone (lane row): Stop to the turn's command (the `sleep`, found in the lane's process "
-        "group before the Stop) being gone, polled every 20 ms for 40 s.",
+        "- stop_to_command_gone (lane row): Stop to the turn's command (the `sleep`, found before the Stop below "
+        "the lane's shim, in its app-server's group, or working in the run's folder; matched by pid and start "
+        "time) being gone, polled every 20 ms for up to 40 s (empty: it outlived that). command_alive_5s and command_alive_15s: is it still running 5 s and "
+        "15 s after the Stop; command_kept: either.",
         "- stop_to_turn_over: Stop to the `agent-state` that ends the turn; stop_to_process_gone: Stop to the "
         "tool's process id being gone (polled every 20 ms).",
     ]
