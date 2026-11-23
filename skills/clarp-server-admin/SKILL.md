@@ -49,6 +49,19 @@ The owner's `clarp-admin pair list` also works on the Rust Host. Use
 `--all` to include revoked devices. The full MetricKit payloads are the files
 the `metrickit_report` events name, beside the state database in `crashes/`.
 
+`clarp-admin pair create|list|revoke` answer only the owner. Inside an agent's
+turn the tool speaks as the agent ("owner token required"); an agent the owner
+asked to pair a device runs it as the owner, on the Rust Host:
+
+```bash
+env -u CLARP_TOOL_TOKEN \
+  CLARP_HOST_TOKEN="$(sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env)" \
+  clarp-admin pair create --name NAME --scope full   # prints the clarp:// link once
+```
+
+The link is single-use and carries the code: hand it only to the device, and
+revoke a test pairing afterwards (`pair revoke DEVICE_ID`).
+
 ## Which code may meet which database
 
 Only the installed Host and runtime services upgrade a database, when they
