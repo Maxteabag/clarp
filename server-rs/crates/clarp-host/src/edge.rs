@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 163;
+pub const HOST_CONTRACT: u64 = 164;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -361,6 +361,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The prompt a goal's owner is woken with is an automated row (`automation_kind` `goal`,
     // text "Goal check-in"), in the queue as well, and is not edited there (owner, 23 Nov).
     ("goal_wake_quiet", 163),
+    // In a turn for another agent that the user wrote into, a note that answers the user gives
+    // the live turn back to the agents (a `turn` op, `audience` `agents`) and a later message of
+    // the user's gives it back to the user; what the agent writes after such a note is the
+    // agents' from the first read on, so nothing is shown and then hidden (rule FU, by place).
+    ("turn_audience_returns", 164),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by

@@ -617,10 +617,15 @@ has no active plan. A plan revision publishes `task-plan-updated` with
 `session`, `agent_id`, `plan_id` and `revision` after the changed plan is
 readable. Native Codex goals continue to use `goal-updated`.
 
-On a Rust Host coordination turn that a user's message joins, the final reply
-retains its agents audience if the user received a note after their latest
-steer. The note, the steered message, and the other post-steer rows remain
-visible. If no note followed the steer, the final reply remains visible.
+On a Rust Host coordination turn that a user's message joins, a note that answers
+the user gives the rest of the turn back to the agents (rule FU, contract 164,
+feature `turn_audience_returns`). It is decided by place, so it is the same on the
+first read and after the end: reply text written after a note that followed the
+user's latest message there is the agents' as a draft, once stored and after the
+end; the live turn's `audience` goes back to `agents` at the note, and a later
+message of the user's makes it `user` again. The note, the user's messages and
+what was written before the note stay visible. The Python Host never gives such a
+turn back to the agents.
 
 Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP recipients
 a bounded ring answer grace through the existing answer route. The Python Host

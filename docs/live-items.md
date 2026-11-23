@@ -210,7 +210,12 @@ work behind `Worked for 1m 12s · 6 tools`.
 the turn, else `user` (docs/protocol.md, Provenance: coordination between
 agents). When the user steps into such a turn while it runs, a `turn` op with
 the same `turn_id` and `audience: "user"` follows at once; `GET /live` answers
-the turn as it stands. It never goes from `user` back to `agents`.
+the turn as it stands. On a Host below Rust Host contract 164 it never goes from `user`
+back to `agents`. From contract 164 (feature `turn_audience_returns`), a note that answers
+the user in such a turn gives it back to the agents: a `turn` op with the same `turn_id` and
+`audience: "agents"` follows the note, and a later message of the user's read into the turn
+makes it `user` again. What was shown before the note stays: its rows are `user` in `/log`.
+What the agent writes after the note is the agents', and is never shown.
 
 A `failed` turn adds `"error": {"reason": "account_plan", "message": "This
 account's plan does not include gpt-6-astra. …", "detail": "<the provider's own

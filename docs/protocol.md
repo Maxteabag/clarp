@@ -569,7 +569,10 @@ explicit act addressed to the user: a note (`POST /agent-notes`), a decision
 card or an artifact, each shown whatever turn made it. A coordination turn the
 user steps into (a message of theirs steered into it while it runs) is `user`
 from then on: its rows get new revisions, so a delta carries them again, and it
-never goes back to `agents`. An agent's message steered into a turn the user
+never goes back to `agents`, except on a Rust Host from contract 164 (feature
+`turn_audience_returns`): a note that answers the user there gives the rest of the turn back
+to the agents, and a later message of the user's makes it `user` again ([Live
+items](live-items.md)). An agent's message steered into a turn the user
 started is a row of its own trace and is the only row marked. A turn that holds the user's own word is never `agents`, whatever arrives in it. `POST /send` refuses (409) a `trace_id` that already belongs to another message (an admission, a queued send, a turn or a row) unless the request is a retry of that very message: the same `client_msg_id`, sender and origin. Rows from before
 contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting, and a turn marked while it could leave no note stays shown after it moves to a backend that can. Until feature `hidden_coordination` is advertised
 
