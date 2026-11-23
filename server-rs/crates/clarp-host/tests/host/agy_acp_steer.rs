@@ -86,7 +86,7 @@ fn a_message_reaches_a_running_antigravity_turn_when_antigravity_takes_it_up() {
             .and_then(|row| row["status"].as_str().map(str::to_owned))
     };
 
-    for mode in ["tool", "writing", "refused", "stop"] {
+    for mode in ["tool", "writing", "sentence", "refused", "stop"] {
         let session = format!("acp-steer-{mode}");
         host.post(
             "/agents",
@@ -96,13 +96,13 @@ fn a_message_reaches_a_running_antigravity_turn_when_antigravity_takes_it_up() {
         let first = host.send(&session, &case, "first");
         assert_eq!(first["queued"], false, "{first}");
         await_file(&format!("working-{mode}"));
-        if mode != "writing" {
-            wait_for("the tool in the live projection", || {
-                host.state(&session) == "tool"
-            });
-        } else {
+        match mode {
             // What it writes before the message comes is shown as it is written.
-            shown_live(&host, &session, "before-steer");
+            "writing" => shown_live(&host, &session, "before-steer"),
+            "sentence" => shown_live(&host, &session, "5 plus"),
+            _ => wait_for("the tool in the live projection", || {
+                host.state(&session) == "tool"
+            }),
         }
 
         let add = if mode == "stop" {
@@ -155,6 +155,25 @@ fn a_message_reaches_a_running_antigravity_turn_when_antigravity_takes_it_up() {
                 let read = vec!["u-first".to_string(), format!("u-{add}")];
                 wait_for("the message read into the turn", || ids(&session) == read);
                 assert_eq!(queue_status(&session, &add), None, "it left the queue");
+                if mode == "sentence" {
+                    // agy took the message in the middle of a sentence, and went on with it:
+                    // the sentence is one whole row, before the message, never cut by it.
+                    let rows = host.turns(&session);
+                    let whole = rows
+                        .iter()
+                        .position(|row| row["text"] == "5 plus 4 is 9")
+                        .unwrap_or_else(|| panic!("{rows:?}"));
+                    let read = rows
+                        .iter()
+                        .position(|row| row["id"] == "u-add-sentence")
+                        .unwrap();
+                    assert!(whole < read, "{rows:?}");
+                    assert!(
+                        rows.iter().all(|row| row["text"] != "5 plus"
+                            && row["text"] != " 4 is 9"),
+                        "{rows:?}"
+                    );
+                }
                 if mode == "writing" {
                     // An answer given before the message was read stays an answer: stored
                     // before the message, and still there while the turn goes on.
