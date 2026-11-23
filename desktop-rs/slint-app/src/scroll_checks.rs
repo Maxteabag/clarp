@@ -916,6 +916,8 @@ struct Jump {
     begun: bool,
     /// The scroll journal's lines before the event.
     journal: usize,
+    /// The dashcam's flashes before the event.
+    flashes: usize,
 }
 
 type Act = Box<dyn Fn(&Rc<crate::App>, &crate::AppWindow)>;
@@ -980,6 +982,7 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
             st.before = Some(now);
             st.done = 0;
             st.journal = crate::scroll_journal::logged().len();
+            st.flashes = crate::scroll_journal::flashes_seen();
             true
         })),
         (label, Box::new(move |_, window, elapsed| {
@@ -1021,6 +1024,8 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
             if following {
                 check(!journal.iter().any(|c| c == "follow"), &format!("{label}: following, the scroll journal logs no pins (logged {journal:?})"));
             }
+            let flashes = crate::scroll_journal::flashes_seen() - st.flashes;
+            check(flashes == 0, &format!("{label}: the dashcam finds no flash ({flashes} found)"));
             *st = Jump::default();
             true
         })),
@@ -1213,5 +1218,130 @@ pub(super) fn scroll_jump_check(out: String) {
     stages.extend(jump_case(s(), "a split and close a notch above the end", false, true, vec![
         (0, act(|app, window| { crate::commands::run(app, window, "split-right"); })),
         (1000, act(|app, window| { crate::commands::run(app, window, "close-pane"); }))], 2500, always()));
+    run_stages(stages);
+}
+
+/// What the dashcam saw while a check streamed into a following chat: its
+/// frames (by when they were drawn) and the flashes found before it began.
+#[derive(Default)]
+struct Dash {
+    frames: Vec<crate::scroll_journal::Frame>,
+    flashes: usize,
+    posted: usize,
+    pane: String,
+    done: usize,
+}
+
+impl Dash {
+    /// Takes the frames drawn since the last look.
+    fn look(&mut self) {
+        let last = self.frames.last().map(|f| f.at);
+        let new: Vec<_> = crate::scroll_journal::frames(&self.pane).into_iter().filter(|f| last.is_none_or(|at| f.at > at)).collect();
+        self.frames.extend(new);
+    }
+}
+
+/// `--check scroll-flash --out DIR`: a chat following its end never draws
+/// a frame anywhere else. Agent turns stream into a 200-row chat (tools
+/// come and go, rows are filed, a live reply grows and is replaced by the
+/// durable one, new rows land in bursts) while the dashcam keeps every
+/// frame drawn: none may leave the end, and its flash detector finds none.
+pub(super) fn scroll_flash_check(out: String) {
+    const SESSION: &str = "flash";
+    const ROWS: usize = 200;
+    let state = Rc::new(RefCell::new(Dash::default()));
+    let (s1, s2) = (state.clone(), state.clone());
+    let mut steps: Vec<(String, Box<dyn Fn()>)> = Vec::new();
+    for turn in 0..3 {
+        steps.extend(agent_turn(SESSION, turn));
+        // A burst: three new rows at once, then a reply that grows fast.
+        steps.push((format!("turn {turn}: three rows land at once"), Box::new(move || {
+            upsert(SESSION, json!((0..3).map(|n| json!({"id": format!("flash-burst-{turn}-{n}"), "role": if n == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(1 + n)})).collect::<Vec<_>>()));
+        })));
+        for n in 0..6 {
+            steps.push((format!("turn {turn}: a fast reply grows ({n})"), Box::new(move || {
+                upsert(SESSION, json!([{"id": format!("flash-fast-{turn}"), "role": "assistant", "kind": "live", "text": streamed(n)}]));
+            })));
+        }
+        steps.push((format!("turn {turn}: the fast reply is filed"), Box::new(move || {
+            upsert(SESSION, json!([{"id": format!("flash-fast-done-{turn}"), "role": "assistant", "text": streamed(6)}]));
+        })));
+    }
+    let steps = Rc::new(steps);
+    let count = steps.len();
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Flash"})).is_ok(), "the Host takes a new chat");
+            true
+        })),
+        ("select", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find(SESSION).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(SESSION);
+            crate::pump();
+            true
+        })),
+        ("fill", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().conversation(SESSION).is_none() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(control("/__control/rich", &json!({"session": SESSION, "count": ROWS})).is_ok(), &format!("the Host fills the chat with {ROWS} varied rows"));
+            true
+        })),
+        ("at the end", Box::new(move |app, window, elapsed| {
+            if rows(window).len() < ROWS || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            if !(report().follows && report().at_end && last_row_visible().0) {
+                app.to_latest();
+                return false;
+            }
+            let mut st = s1.borrow_mut();
+            st.pane = app.active_id().to_string();
+            st.flashes = crate::scroll_journal::flashes_seen();
+            st.posted = crate::scroll_journal::flashes().len();
+            st.frames.clear();
+            true
+        })),
+        ("streams", Box::new(move |_, _, elapsed| {
+            let mut st = s2.borrow_mut();
+            // A step every 150 ms, then a second and a half to settle.
+            let due = (elapsed.as_millis() / 150) as usize;
+            while st.done < count && st.done <= due {
+                (steps[st.done].1)();
+                st.done += 1;
+            }
+            st.look();
+            if st.done < count || elapsed < Duration::from_millis(150 * count as u64 + 1500) {
+                return false;
+            }
+            let following: Vec<&crate::scroll_journal::Frame> = st.frames.iter().filter(|f| f.shot.follow).collect();
+            let off: Vec<&&crate::scroll_journal::Frame> = following
+                .iter()
+                .filter(|f| {
+                    let s = &f.shot;
+                    (s.place() - 1.0).abs() * (s.content - s.viewport).max(0.0) > 2.0
+                })
+                .collect();
+            let worst = off.iter().map(|f| (f.shot.place() - 1.0).abs() * (f.shot.content - f.shot.viewport).max(0.0)).fold(0.0, f32::max);
+            let sample: Vec<String> = off
+                .iter()
+                .take(6)
+                .map(|f| format!("{:.0}ms place {:.3} offset {:.0} content {:.0} [{}]", f.at.as_secs_f64() * 1000.0, f.shot.place(), f.shot.offset, f.shot.content, f.events.join(", ")))
+                .collect();
+            check(following.len() >= count / 2, &format!("the dashcam kept the frames drawn while {count} updates streamed in ({} frames, {} following)", st.frames.len(), following.len()));
+            check(off.is_empty(), &format!("no frame of the following chat is drawn off its end: {} of {} were, up to {worst:.0}px: {sample:?}", off.len(), following.len()));
+            let flashes = crate::scroll_journal::flashes_seen() - st.flashes;
+            check(flashes == 0, &format!("the dashcam finds no flash ({flashes} found; posted {:?})", &crate::scroll_journal::flashes()[st.posted..]));
+            let (visible, numbers) = last_row_visible();
+            check(report().follows && visible, &format!("the chat still follows and shows its last row whole: {numbers}"));
+            shot(&out, "scroll-flash-01-streamed");
+            true
+        })),
+    ];
     run_stages(stages);
 }
