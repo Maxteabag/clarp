@@ -173,13 +173,17 @@ impl Desk {
 
 /// What an agent was last told and said, as its conversation has it: what a person or
 /// another agent wrote to it and what it answered. What the Host sends by itself on its
-/// own schedule says nothing of whom a spoken message is for, and is left out.
+/// own schedule says nothing of whom a spoken message is for, and is left out: a goal's
+/// wake too, which no person said (issue 732).
 async fn said_of(member: &Fellow) -> Vec<Said> {
     let Ok(page) = member.agent.tail(READ_BACK, Which::WithoutAutomated).await else {
         return Vec::new();
     };
     let mut said = Vec::new();
     for version in &page.entries {
+        if version.entry.is_goal_wake() {
+            continue;
+        }
         let (role, text) = match &version.entry {
             Entry::Message(message) => ("user", message.text.as_str()),
             Entry::Reply(reply) => ("assistant", reply.text.as_str()),

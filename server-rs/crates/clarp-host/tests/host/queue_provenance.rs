@@ -207,3 +207,63 @@ fn the_users_stop_starts_waiting_user_and_oracle_sends_in_order() {
         },
     );
 }
+
+/// Issue 732: a goal's check-in is told by what waits (origin `automation` under a wake's id),
+/// not by an id alone. Its words are not changed; a person's message sent under such an id
+/// keeps the right to new words; and such an id that names nothing waiting is not there.
+#[test]
+fn only_a_waiting_goal_check_in_refuses_new_words() {
+    let place = Place::new("queue-goal-reword");
+    let host = place.start_with_token("admin");
+    let target = host.new_agent("Receiver");
+    let (device, _) = pair(&host, "A phone", "full");
+    host.send(&target, "sleep 60", "running");
+    wait_for("the target to be busy", || {
+        host.state(&target) == "thinking"
+    });
+    let enqueue = |id: &str, origin: &str, token: &str| {
+        let (status, reply) = host.ask_as(
+            token,
+            "POST",
+            "/send",
+            Some(&json!({
+                "session": target, "text": id, "client_msg_id": id, "queue_if_busy": true,
+                "origin": origin,
+            })),
+        );
+        assert!((200..300).contains(&status), "{status}: {reply}");
+    };
+    enqueue("task-goal-wake", "automation", "admin");
+    enqueue("task-goal-typed", "user", &device);
+    let put = |id: &str| {
+        host.ask(
+            "PUT",
+            &format!("/turn-queue/{id}"),
+            Some(&json!({ "text": "new words" })),
+        )
+    };
+    assert_eq!(
+        put("task-goal-wake"),
+        (
+            409,
+            json!({ "error": "a goal's check-in is the Host's own and cannot be edited" })
+        )
+    );
+    let (status, reply) = put("task-goal-typed");
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(
+        put("task-goal-gone"),
+        (404, json!({ "error": "queued message not found" }))
+    );
+    let items = host.get(&format!("/turn-queue?session={target}"))["items"].clone();
+    let text = |id: &str| {
+        items
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .map(|item| item["text"].clone())
+    };
+    assert_eq!(text("task-goal-wake"), Some(json!("Goal check-in")));
+    assert_eq!(text("task-goal-typed"), Some(json!("new words")));
+}

@@ -951,6 +951,8 @@ impl Desk {
                     continue;
                 }
                 let (by_user, text) = match &row.entry {
+                    // A goal's wake is the Host's own, never what a person said (issue 732).
+                    Entry::Message(_) if row.entry.is_goal_wake() => continue,
                     Entry::Message(message) => (true, &message.text),
                     Entry::Reply(reply) if !row.commentary => (false, &reply.text),
                     _ => continue,

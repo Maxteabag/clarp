@@ -35,7 +35,7 @@ use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
 use clarp_kernel::request_body;
 use clarp_kernel::trust::{self, FailureLimiter};
-use clarp_kernel::turn::{Admission, Origin, TurnId};
+use clarp_kernel::turn::{Admission, Origin};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest, StopRequest};
@@ -3920,11 +3920,14 @@ async fn resume(
     })))
 }
 
-/// The agent a waiting message waits for, and the message's turn there: by the id its app
-/// gave it, which is what the queue names it by.
-async fn waiting_named(app: &App, id: &str) -> Result<Option<(Arc<Member>, TurnId)>, ApiError> {
+/// The agent a waiting message waits for, and the message as it waits there: by the id its
+/// app gave it, which is what the queue names it by.
+async fn waiting_named(
+    app: &App,
+    id: &str,
+) -> Result<Option<(Arc<Member>, clarp_actor::Waiting)>, ApiError> {
     let directory = app.fleet.directory();
-    let mut named: Option<(Arc<Member>, TurnId)> = None;
+    let mut named: Option<(Arc<Member>, clarp_actor::Waiting)> = None;
     for member in &directory.members {
         if member.agent.view().status.waiting.is_empty() {
             continue;
@@ -3936,7 +3939,7 @@ async fn waiting_named(app: &App, id: &str) -> Result<Option<(Arc<Member>, TurnI
             if named.is_some() {
                 return Err(ApiError::new(StatusCode::CONFLICT, AMBIGUOUS_WAITING));
             }
-            named = Some((member.clone(), found.turn));
+            named = Some((member.clone(), found.clone()));
         }
     }
     Ok(named)
@@ -3956,11 +3959,14 @@ async fn take_back(
     State(app): State<App>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some((member, turn)) = waiting_named(&app, &id).await? else {
+    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());
     };
     // It may have gone to run since it was looked for.
-    let (waited, _) = member.agent.withdraw(turn, "user".to_string()).await?;
+    let (waited, _) = member
+        .agent
+        .withdraw(waiting.turn, "user".to_string())
+        .await?;
     if !waited {
         return Err(not_waiting());
     }
@@ -3983,18 +3989,19 @@ async fn reword(
     if text.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
     }
+    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting());
+    };
     // A goal's wake is the Host's own: its queue item shows a check-in, not its words, and
-    // saving that over the prompt would wake the agent with nothing to go on.
-    if clarp_kernel::turn::names_a_goal_wake(&id) {
+    // saving that over the prompt would wake the agent with nothing to go on. Told by what
+    // waits, not by the id alone: a person's message keeps its words whatever id it has.
+    if wire::is_goal_wake(&waiting) {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "a goal's check-in is the Host's own and cannot be edited",
         ));
     }
-    let Some((member, turn)) = waiting_named(&app, &id).await? else {
-        return Err(not_waiting());
-    };
-    match member.agent.reword(turn, text.to_string()).await? {
+    match member.agent.reword(waiting.turn, text.to_string()).await? {
         Reworded::Done => Ok(Json(json!({ "ok": true }))),
         Reworded::NotWaiting => Err(not_waiting()),
         Reworded::InConversation => Err(ApiError::new(
@@ -4011,10 +4018,14 @@ async fn send_by_hand(
     State(app): State<App>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let Some((member, turn)) = waiting_named(&app, &id).await? else {
+    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());
     };
-    match member.agent.send_now(turn, "user".to_string()).await? {
+    match member
+        .agent
+        .send_now(waiting.turn, "user".to_string())
+        .await?
+    {
         ByHand::Sent => {
             let answer = json!({
                 "ok": true,

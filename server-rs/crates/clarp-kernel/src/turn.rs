@@ -102,8 +102,9 @@ pub fn message_automation_kind<'a>(origin: &'a str, id: &str) -> &'a str {
     }
 }
 
-/// Whether a waiting message named by this id in the queue is a goal's wake: the Host's own,
-/// which nobody rewords ([`message_automation_kind`]; the queue names it without `u-`).
+/// Whether this id (a row's, or a queue item's, which comes without `u-`) is one a goal's wake
+/// is filed under. The id alone does not make a message a wake: [`message_automation_kind`]
+/// asks for origin `automation` too. This says only where a wake may stand.
 pub fn names_a_goal_wake(queue_id: &str) -> bool {
     let id = queue_id.strip_prefix("u-").unwrap_or(queue_id);
     id.starts_with(crate::goals::WAKE_PREFIX)

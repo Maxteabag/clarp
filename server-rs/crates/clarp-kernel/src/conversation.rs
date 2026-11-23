@@ -533,6 +533,21 @@ impl Entry {
         }
     }
 
+    /// Whether this is a goal's wake: the Host's own message, never a person's words (contract
+    /// 163), written here or brought from another Host. Whoever reads what a person said, a
+    /// model included, leaves it out.
+    pub fn is_goal_wake(&self) -> bool {
+        let (origin, id) = match self {
+            Self::Message(message) => (message.origin.name(), message.id.as_str()),
+            Self::Imported(imported) if imported.row["role"] == "user" => (
+                imported.row["origin"].as_str().unwrap_or(""),
+                imported.id.as_str(),
+            ),
+            _ => return false,
+        };
+        crate::turn::message_automation_kind(origin, id) == crate::turn::GOAL_WAKE
+    }
+
     pub fn turn(&self) -> Option<u64> {
         match self {
             Self::Message(_) => None,
@@ -583,6 +598,35 @@ impl Entry {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Issue 732: a goal's wake is told by its origin and its id, here or brought from another
+    /// Host; a person's message is never one, whatever id it was sent under.
+    #[test]
+    fn a_goals_wake_is_told_by_origin_and_id_wherever_it_was_written() {
+        let message = |origin: crate::turn::Origin, id: &str| {
+            Entry::Message(Message {
+                id: id.into(),
+                text: "Continue your durable outcome commitment.".into(),
+                origin,
+                ..Message::default()
+            })
+        };
+        let automation = || crate::turn::Origin::Trigger {
+            name: "automation".into(),
+        };
+        let imported = |role: &str, origin: &str, id: &str| {
+            Entry::Imported(Imported {
+                id: id.into(),
+                row: serde_json::json!({"id": id, "role": role, "origin": origin}),
+            })
+        };
+        assert!(message(automation(), "u-task-goal-1").is_goal_wake());
+        assert!(!message(crate::turn::Origin::User, "u-task-goal-1").is_goal_wake());
+        assert!(!message(automation(), "u-scheduled").is_goal_wake());
+        assert!(imported("user", "automation", "u-task-goal-2").is_goal_wake());
+        assert!(!imported("user", "user", "u-task-goal-2").is_goal_wake());
+        assert!(!imported("assistant", "automation", "u-task-goal-2").is_goal_wake());
+    }
 
     /// Issue 729: every end that did not complete says why, in the Host's words; one that
     /// completed, or a message taken back, says nothing.

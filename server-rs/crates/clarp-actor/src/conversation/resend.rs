@@ -187,6 +187,28 @@ mod tests {
         );
         assert_eq!(page.entries[3].revision, 6 * REVISION_STEP);
 
+        // A page at a time from there: a check-in read on an earlier page than its sending
+        // again waits for the page that reaches it, and comes once (issue 732).
+        let mut cursor = REVISION_STEP;
+        let mut paged = Vec::new();
+        loop {
+            let page = after(log.as_ref(), cursor, &[], span(log.as_ref(), 0), 1, chat).unwrap();
+            paged.extend(ids(&page).into_iter().map(str::to_owned));
+            cursor = page.latest_revision;
+            if !page.has_more {
+                break;
+            }
+        }
+        assert_eq!(
+            paged,
+            [
+                "r-task-goal-newer",
+                "u-plain",
+                "u-task-goal-older",
+                "u-task-goal-newer"
+            ]
+        );
+
         // Read where they stand, they carry in a chat the revision they were sent again with.
         let newest = tail(log.as_ref(), &[], span(log.as_ref(), 0), 100, chat).unwrap();
         assert_eq!(

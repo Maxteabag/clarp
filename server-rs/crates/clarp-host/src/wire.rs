@@ -711,6 +711,13 @@ fn queue_provenance(
     ]
 }
 
+/// Whether a waiting message is a goal's wake: the Host's own, a message of origin
+/// `automation` under a wake's id, and never a person's message whatever id it was sent under.
+pub fn is_goal_wake(message: &Waiting) -> bool {
+    clarp_kernel::turn::message_automation_kind(message.origin.name(), &message.message_id)
+        == clarp_kernel::turn::GOAL_WAKE
+}
+
 /// One item from `GET /turn-queue`, including the original fields for older clients.
 pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
     let kind = if message.admission.left_for_later() {
@@ -719,11 +726,8 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
         "waiting"
     };
     // A goal's wake waits as the Host's own business, not as the long prompt it is.
-    let goal_wake =
-        clarp_kernel::turn::message_automation_kind(message.origin.name(), &message.message_id)
-            == clarp_kernel::turn::GOAL_WAKE;
     let text = automated_prompt(clarp_kernel::turn::GOAL_WAKE)
-        .filter(|_| goal_wake)
+        .filter(|_| is_goal_wake(message))
         .map_or_else(|| message.text.clone(), str::to_string);
     let mut item = Map::from_iter([
         ("client_msg_id".into(), json!(message.told_id)),
