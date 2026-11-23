@@ -6,7 +6,8 @@
 //! ([`Client::wait`]); what the agent says meanwhile goes to the caller's [`Handler`]: a
 //! notification to be kept, a request of the agent's to be answered. A wait ends with the
 //! answer, or with why there is none ([`Ended`]): so an interrupt can be acted on (a prompt
-//! cancelled) and the same answer waited for again.
+//! cancelled), or a line of the owner's (a message for the running turn) passed on, and the
+//! same answer waited for again.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -18,13 +19,15 @@ use serde_json::{Value, json};
 /// agent that writes one is taken to be gone.
 pub const LINE_MOST: usize = 64 * 1024 * 1024;
 
-/// What reaches the client: a message of the agent's, the end of its output, or an interrupt
-/// from the client's owner.
+/// What reaches the client: a message of the agent's, the end of its output, an interrupt
+/// from the client's owner, or a line of the owner's for the agent (`None`: the owner has no
+/// more to say).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Inbound {
     Message(Value),
     Closed,
     Interrupt,
+    Owner(Option<Value>),
 }
 
 /// The answer to a request.
@@ -35,7 +38,7 @@ pub enum Answer {
 }
 
 /// Why a wait ended without its answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ended {
     /// The agent's output closed: it is gone.
     Closed,
@@ -43,6 +46,8 @@ pub enum Ended {
     Interrupted,
     /// The agent said nothing for longer than the wait, or the deadline passed.
     Silent,
+    /// The client's owner said this (`None`: it has no more to say). The answer may still come.
+    Owner(Option<Value>),
 }
 
 /// What the client's caller does with what the agent says that answers nothing it asked.
@@ -105,6 +110,20 @@ impl<W: Write> Client<W> {
         deadline: Option<Instant>,
         handler: &mut impl Handler,
     ) -> io::Result<Result<Answer, Ended>> {
+        Ok(self
+            .wait_any(&[id], silence, deadline, handler)?
+            .map(|(_, answer)| answer))
+    }
+
+    /// Waits for the answer to any of the requests `ids`, with the id it answers: for a client
+    /// with more than one request open. With no id, waits for whatever else ends a wait.
+    pub fn wait_any(
+        &mut self,
+        ids: &[u64],
+        silence: Duration,
+        deadline: Option<Instant>,
+        handler: &mut impl Handler,
+    ) -> io::Result<Result<(u64, Answer), Ended>> {
         loop {
             let bound = match deadline {
                 Some(deadline) => deadline
@@ -114,15 +133,25 @@ impl<W: Write> Client<W> {
             };
             match self.inbound.recv_timeout(bound) {
                 Ok(Inbound::Message(message)) => {
-                    if message.get("method").is_none() && message["id"] == json!(id) {
-                        return Ok(Ok(match message.get("error") {
-                            Some(error) if !error.is_null() => Answer::Error(error.clone()),
-                            _ => Answer::Result(message["result"].clone()),
-                        }));
+                    let answered = message
+                        .get("method")
+                        .is_none()
+                        .then(|| message["id"].as_u64())
+                        .flatten()
+                        .filter(|id| ids.contains(id));
+                    if let Some(id) = answered {
+                        return Ok(Ok((
+                            id,
+                            match message.get("error") {
+                                Some(error) if !error.is_null() => Answer::Error(error.clone()),
+                                _ => Answer::Result(message["result"].clone()),
+                            },
+                        )));
                     }
                     self.other(&message, handler)?;
                 }
                 Ok(Inbound::Interrupt) => return Ok(Err(Ended::Interrupted)),
+                Ok(Inbound::Owner(line)) => return Ok(Err(Ended::Owner(line))),
                 Ok(Inbound::Closed) | Err(RecvTimeoutError::Disconnected) => {
                     return Ok(Err(Ended::Closed));
                 }

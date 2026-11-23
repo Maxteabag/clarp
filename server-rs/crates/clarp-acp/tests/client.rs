@@ -250,3 +250,56 @@ fn silence_and_a_closed_agent_end_a_wait() {
     // Nothing more can be sent to it.
     assert!(client.notify(method::SESSION_CANCEL, json!({})).is_err());
 }
+
+#[test]
+fn an_owner_line_ends_a_wait_and_either_of_two_prompts_may_be_answered_first() {
+    let (mut client, owner, server) = wired(|server| {
+        let first = server.read().unwrap();
+        let second = server.read().unwrap();
+        // As agy does: the running prompt is answered the moment a new one arrives.
+        server.send(
+            json!({"jsonrpc": "2.0", "id": first["id"], "result": {"stopReason": "end_turn"}}),
+        );
+        server.update(json!({"sessionUpdate": "agent_message_chunk",
+                             "content": {"type": "text", "text": "both"}}));
+        server.send(
+            json!({"jsonrpc": "2.0", "id": second["id"], "result": {"stopReason": "end_turn"}}),
+        );
+    });
+    let mut kept = Kept::default();
+    let first = client
+        .send_request(method::SESSION_PROMPT, json!({"sessionId": "s"}))
+        .unwrap();
+    owner
+        .send(Inbound::Owner(Some(json!({"type": "user", "uuid": "u"}))))
+        .unwrap();
+    assert_eq!(
+        client.wait(first, WAIT, None, &mut kept).unwrap(),
+        Err(Ended::Owner(Some(json!({"type": "user", "uuid": "u"}))))
+    );
+    let second = client
+        .send_request(method::SESSION_PROMPT, json!({"sessionId": "s"}))
+        .unwrap();
+    let (answered, _) = client
+        .wait_any(&[first, second], WAIT, None, &mut kept)
+        .unwrap()
+        .unwrap();
+    assert_eq!(answered, first);
+    assert!(
+        kept.notified.is_empty(),
+        "the update comes after the first answer"
+    );
+    let (answered, _) = client
+        .wait_any(&[second], WAIT, None, &mut kept)
+        .unwrap()
+        .unwrap();
+    assert_eq!(answered, second);
+    assert_eq!(kept.notified.len(), 1);
+    owner.send(Inbound::Owner(None)).unwrap();
+    assert_eq!(
+        client.wait_any(&[], WAIT, None, &mut kept).unwrap(),
+        Err(Ended::Owner(None))
+    );
+    client.close();
+    server.join().unwrap();
+}

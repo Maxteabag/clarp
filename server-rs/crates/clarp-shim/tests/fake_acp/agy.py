@@ -3,7 +3,15 @@
 # scripted by the file `scenario` beside it (one word; `turn` when there is none). Every
 # message it is sent is written to `acp.log` beside it, one per line, for the test to read.
 # Started with anything but `acp` first (`agy models`, `agy --version`), it says nothing.
-import json, os, subprocess, sys, time
+#
+# Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
+# running prompt is answered at once as ended and the work goes on under the new one. The
+# first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-closing`, `case-background`, `case-refused`,
+# `case-stop`, `case-after`); a prompt that names `add-...` and no case is a message run as a turn of its
+# own, answered `separate-add-...`. It waits for files beside it (`taken-<mode>`: say a word
+# under the new prompt; `release-<mode>`: answer) and leaves files for the test
+# (`working-<mode>`, `received-<message>`).
+import json, os, re, subprocess, sys, time
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -79,6 +87,96 @@ def text(sid, kind, words):
     update(sid, {"sessionUpdate": kind, "content": {"type": "text", "text": words}})
 
 
+def touch(name):
+    open(os.path.join(here, name), "a").close()
+
+
+def wait_file(name):
+    end = time.monotonic() + 40
+    while not os.path.exists(os.path.join(here, name)):
+        if time.monotonic() >= end:
+            sys.exit("stand-in release expired: " + name)
+        time.sleep(0.02)
+
+
+def said_in(message):
+    return "".join(block.get("text", "") for block in (message.get("params") or {}).get("prompt", [])
+                   if block.get("type") == "text")
+
+
+def next_prompt():
+    while True:
+        message = read()
+        if message.get("method") == "session/prompt":
+            return message
+
+
+def wait_cancel():
+    while True:
+        if read().get("method") == "session/cancel":
+            return
+
+
+def tool(sid, status):
+    kind = "tool_call" if status == "in_progress" else "tool_call_update"
+    update(sid, {"sessionUpdate": kind, "toolCallId": "t-s", "title": "run_command", "kind": "execute",
+                 "status": status, "rawInput": {"CommandLine": "sleep 5"}})
+
+
+def steering(mid, sid, words):
+    found = re.search(r"case-([a-z]+)", words)
+    mode = found.group(1) if found else ""
+    if mode == "after":
+        # Answered before anything else comes: what comes later is a prompt of its own.
+        text(sid, "agent_message_chunk", "first-after")
+        return result(mid, {"stopReason": "end_turn"})
+    if mode == "writing":
+        text(sid, "agent_message_chunk", "before-steer")
+    elif mode in ("sentence", "closing"):
+        text(sid, "agent_message_chunk", "5 plus")
+    else:
+        tool(sid, "in_progress")
+    touch("working-" + mode)
+    second = next_prompt()
+    touch("received-" + said_in(second))
+    if mode == "refused":
+        error(second["id"], -32603, "a prompt is already running")
+        wait_file("release-" + mode)
+        tool(sid, "completed")
+        text(sid, "agent_message_chunk", "first-refused")
+        return result(mid, {"stopReason": "end_turn"})
+    # As agy 1.5 does: the running prompt is answered at once; the work goes on under the new one.
+    result(mid, {"stopReason": "end_turn", "usage": {"inputTokens": 3, "outputTokens": 1}})
+    # As agy does within milliseconds of every prompt, before it has touched the message.
+    update(sid, {"sessionUpdate": "usage_update", "used": 0, "size": 1000000})
+    if mode == "background":
+        # The command begun under the first prompt ends by itself, before agy works on the new one.
+        tool(sid, "completed")
+        touch("ended-background")
+    # Its first word under the new prompt is what makes the message read: the test says when.
+    wait_file("taken-" + mode)
+    if mode in ("sentence", "closing"):
+        # As agy did live: the sentence it was writing goes on after the hand-over.
+        text(sid, "agent_message_chunk", " 4 is 9")
+    if mode == "closing":
+        # And the new prompt is answered with nothing more said.
+        return result(second["id"], {"stopReason": "end_turn"})
+    text(sid, "agent_thought_chunk", "Reading " + said_in(second))
+    if mode == "stop":
+        third = next_prompt()
+        touch("received-" + said_in(third))
+        result(second["id"], {"stopReason": "end_turn"})
+        # Nothing is said of the third prompt: it is never taken. The Stop comes.
+        wait_cancel()
+        tool(sid, "failed")
+        return result(third["id"], {"stopReason": "cancelled"})
+    wait_file("release-" + mode)
+    if mode not in ("writing", "background", "sentence"):
+        tool(sid, "completed")
+    text(sid, "agent_message_chunk", "after-" + mode)
+    result(second["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}})
+
+
 def ask(sid, options, title):
     send({"jsonrpc": "2.0", "id": "perm-1", "method": "session/request_permission", "params": {
         "sessionId": sid, "toolCall": {"toolCallId": "t-2", "title": title}, "options": options}})
@@ -88,7 +186,17 @@ def ask(sid, options, title):
             return answer
 
 
-def prompt(mid, sid):
+def prompt(mid, sid, words=""):
+    if scenario == "steer":
+        alone = re.search(r"add-[a-z0-9-]+", words)
+        if alone and "case-" not in words:
+            # As agy does on its own: what it offers, before it touches the message.
+            update(sid, {"sessionUpdate": "available_commands_update", "availableCommands": []})
+            if "meta" in alone.group(0):
+                return error(mid, -32603, "a prompt it would not take")
+            text(sid, "agent_message_chunk", "separate-" + alone.group(0))
+            return result(mid, {"stopReason": "end_turn"})
+        return steering(mid, sid, words)
     if scenario == "quota":
         return error(mid, -32603, "Error 429, Message: Resource has been exhausted, Status: RESOURCE_EXHAUSTED "
                      "[reason:QUOTA_EXHAUSTED quotaResetTimeStamp:2026-11-23T18:00:00Z]")
@@ -184,6 +292,6 @@ while True:
                 option["currentValue"] = params.get("value")
         result(mid, {"configOptions": OPTIONS})
     elif method == "session/prompt":
-        prompt(mid, params.get("sessionId"))
+        prompt(mid, params.get("sessionId"), said_in(message))
     elif mid is not None:
         error(mid, -32601, "Method not found")
