@@ -400,7 +400,8 @@ account:
     a turn ends, so a background job of the turn keeps its identity.
   - **The goal-lane spool fixes stay ungated:** a `userMessage` is no longer a tool call, and
     no line is written per delta. They are bug fixes.
-  - **M4, M5, M7, M8 and M9:** kept by the lead.
+  - **M4, M8 and M9:** kept by the lead.
+  - **M5 and M7:** fixed in 52b1d8881 and 61b929a2e.
 
 ## Measured on a real lane (turn-timings preview, 23 Nov 2026)
 
