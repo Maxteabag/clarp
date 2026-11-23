@@ -213,7 +213,10 @@ fn processes_below(root: u32) -> Vec<Below> {
     };
     let mut known = Vec::new();
     for entry in entries.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok())
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
         else {
             continue;
         };

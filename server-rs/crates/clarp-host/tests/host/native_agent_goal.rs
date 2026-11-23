@@ -214,7 +214,8 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
         std::thread::sleep(Duration::from_millis(50));
     }
     wait_for("the words said during the goal to be answered", || {
-        host.conversation("ada").contains(&said("assistant", "Queued reply"))
+        host.conversation("ada")
+            .contains(&said("assistant", "Queued reply"))
             && host.state("ada") == "done"
     });
     assert!(
