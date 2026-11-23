@@ -319,6 +319,9 @@ impl Prompts<'_> {
     fn settle(&mut self, turn: &mut Turn, held: Held) -> Result<()> {
         let text = std::mem::take(&mut turn.record.answer_text);
         turn.record.settled = true;
+        // The answer ends the message being written, as the Host reads it: what agy writes
+        // next is a message of its own.
+        turn.record.writing = false;
         let stopped = turn.stopping.is_some();
         let own = held.covers.iter().any(|uuid| uuid == self.own)
             || (self.own.is_empty() && self.outcome.is_none());
