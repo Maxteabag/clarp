@@ -234,7 +234,7 @@ read -r end || :
 }
 
 #[test]
-fn a_turn_that_does_not_answer_a_stop_is_ended_with_its_group() {
+fn a_turn_that_does_not_end_after_a_stop_is_ended_with_its_group_however_much_it_says() {
     let fake = r#"#!/bin/sh
 set -eu
 read -r init
@@ -253,7 +253,11 @@ echo $! > left-behind
 read -r interrupt
 case "$interrupt" in (*'"method":"turn/interrupt"'*'"turnId":"t9"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' '{"id":4,"result":{}}'
-wait
+# It answers, and talks on without ending the turn: the Stop's time still runs out.
+while :; do
+    printf '%s\n' '{"method":"item/updated","params":{"threadId":"old-thread","turnId":"t9","item":{"type":"reasoning","id":"r"}}}'
+    sleep 0.02
+done
 "#;
     let mut lane = Lane::start("codex-chat-stop", fake, |root| {
         json!({
