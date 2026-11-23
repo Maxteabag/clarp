@@ -251,3 +251,57 @@ fn the_card_shares_antigravitys_models_and_is_shown_under_its_own_name() {
     assert_eq!(card["program"], "agy");
     assert_eq!(card["runs_through"], "agy");
 }
+
+#[test]
+fn a_write_shows_what_it_wrote_and_an_edit_what_it_replaced() {
+    let lines = [
+        json!({"clarp": "bound", "session": "conv-new", "resumed": false}),
+        update(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "w-1", "title": "Writing hello.txt",
+                      "kind": "edit", "status": "pending",
+                      "rawInput": {"TargetFile": "/w/hello.txt", "Content": "hello\n"}}),
+        ),
+        update(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "w-1", "status": "completed"}),
+        ),
+        update(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "e-1", "title": "Changing notes.md",
+                      "kind": "edit", "status": "in_progress"}),
+        ),
+        update(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "e-1", "status": "completed",
+                      "content": [{"type": "diff", "path": "/w/notes.md", "oldText": "old line", "newText": "new line"}]}),
+        ),
+        json!({"clarp": "prompted", "result": {"stopReason": "end_turn"}}),
+    ];
+    let signals = read(&lines, "", Some(0), None);
+    let ended: Vec<_> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Tool(call) if call.status != ToolStatus::Running => Some(call),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ended[0].name, "Write");
+    assert_eq!(ended[0].input["file_path"], "/w/hello.txt");
+    assert_eq!(ended[0].input["content"], "hello\n");
+    assert_eq!(ended[1].name, "Edit");
+    assert_eq!(ended[1].input["file_path"], "/w/notes.md");
+    assert_eq!(ended[1].input["old_string"], "old line");
+    assert_eq!(ended[1].input["new_string"], "new line");
+}
+
+#[test]
+fn a_model_that_is_not_offered_fails_the_turn_in_the_drivers_words() {
+    let why = "Antigravity does not offer the model gemini-z-low over ACP; it offers gemini-a, claude-b, each with a thinking level of low, high.";
+    let lines = [
+        json!({"clarp": "bound", "session": "conv-new", "resumed": false}),
+        json!({"clarp": "failed", "stage": "config", "text": why}),
+    ];
+    let signals = read(&lines, "", Some(1), None);
+    assert_eq!(failure(&signals), why);
+    assert!(
+        !signals.contains(&Signal::Concluded),
+        "nothing was asked of the model"
+    );
+}

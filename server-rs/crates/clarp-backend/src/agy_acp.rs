@@ -529,6 +529,18 @@ impl AcpInterpreter {
         if call.status != ToolStatus::Running {
             return; // told twice
         }
+        // What the call wrote or changed may come only with its end.
+        let later = tool_input(&call.name, update);
+        if let (Some(kept), Some(later)) = (call.input.as_object_mut(), later.as_object()) {
+            for (key, value) in later {
+                let empty = kept
+                    .get(key)
+                    .is_none_or(|kept| kept.as_str().is_some_and(str::is_empty));
+                if empty && value.as_str().is_some_and(|value| !value.is_empty()) {
+                    kept.insert(key.clone(), value.clone());
+                }
+            }
+        }
         let (came_back, exit_code) = tool_output(update);
         let failed =
             update.status.as_deref() == Some("failed") || exit_code.is_some_and(|code| code != 0);
@@ -622,6 +634,9 @@ impl AcpInterpreter {
     }
 }
 
+/// The fields in which Antigravity gives a whole file's content.
+const WHOLE: [&str; 3] = ["Content", "CodeContent", "content"];
+
 /// What a tool is called in the conversation: Antigravity's own name of it where the title
 /// says one, else what its kind is, else its title.
 fn tool_name(update: &schema::ToolCall) -> String {
@@ -632,12 +647,14 @@ fn tool_name(update: &schema::ToolCall) -> String {
     if let Some(name) = native {
         return name.to_string();
     }
-    if update
-        .raw_input
-        .as_ref()
-        .is_some_and(|input| input["CommandLine"].is_string())
-    {
+    let raw = update.raw_input.as_ref().unwrap_or(&Value::Null);
+    if raw["CommandLine"].is_string() {
         return "Bash".to_string();
+    }
+    // A call that gives a whole file's content and nothing to replace writes the file.
+    let whole = WHOLE.iter().any(|key| raw[*key].is_string());
+    if whole && !raw["TargetContent"].is_string() {
+        return "Write".to_string();
     }
     let by_kind = match update.kind.as_deref().unwrap_or_default() {
         "execute" => "Bash",
@@ -669,6 +686,56 @@ fn tool_input(name: &str, update: &schema::ToolCall) -> Value {
         && file.as_str().is_some_and(str::is_empty)
     {
         *file = json!(path);
+    }
+    // What was written or changed, where the call says it: in its input, or in the diff it
+    // shows (the protocol's `{"type": "diff", "path", "oldText", "newText"}`).
+    let raw = update.raw_input.as_ref().unwrap_or(&Value::Null);
+    let said = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| raw[*key].as_str().map(str::to_string))
+    };
+    let diff = update
+        .content
+        .iter()
+        .flatten()
+        .find(|block| block["type"] == "diff");
+    let Some(fields) = input.as_object_mut() else {
+        return input;
+    };
+    let mut fill = |key: &str, value: Option<String>| {
+        let empty = fields
+            .get(key)
+            .is_none_or(|kept| kept.as_str().is_some_and(str::is_empty));
+        if let Some(value) = value.filter(|value| !value.is_empty())
+            && empty
+        {
+            fields.insert(key.to_string(), json!(value));
+        }
+    };
+    let new_text = diff
+        .and_then(|diff| diff["newText"].as_str())
+        .map(str::to_string);
+    if let Some(path) = diff.and_then(|diff| diff["path"].as_str()) {
+        fill("file_path", Some(path.to_string()));
+    }
+    match name {
+        "Write" => fill("content", said(&WHOLE).or(new_text)),
+        "Edit" => {
+            let old_text = diff
+                .and_then(|diff| diff["oldText"].as_str())
+                .map(str::to_string);
+            fill(
+                "old_string",
+                said(&["TargetContent", "old_string"]).or(old_text),
+            );
+            fill(
+                "new_string",
+                said(&["ReplacementContent", "new_string"])
+                    .or(new_text)
+                    .or_else(|| said(&WHOLE)),
+            );
+        }
+        _ => {}
     }
     input
 }
