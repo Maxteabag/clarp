@@ -379,3 +379,53 @@ fn a_profile_of_its_own_keeps_the_login_in_a_file_there() {
     assert_eq!(argv["env"]["AGY_ACP_FORCE_FILE_STORAGE"], "1");
     assert_eq!(argv["env"]["SSH_CONNECTION"], "127.0.0.1 0 127.0.0.1 0");
 }
+
+#[test]
+fn a_model_id_with_its_effort_runs_as_the_model_offered_at_that_thinking_level() {
+    let place = Place::new("folded", "turn");
+    let mut order = place.order("");
+    order.model = "claude-b-high".into();
+    order.effort = String::new();
+    let (printed, status) = place.run(&order);
+    assert!(status.success(), "{printed:?}");
+    let chosen: Vec<(Value, Value)> = place
+        .sent_of("session/set_config_option")
+        .iter()
+        .map(|set| {
+            (
+                set["params"]["configId"].clone(),
+                set["params"]["value"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        chosen,
+        [
+            (json!("model"), json!("claude-b")),
+            (json!("thought_level"), json!("high"))
+        ]
+    );
+    assert_eq!(driver(&printed, "model")[0]["model"], "claude-b");
+    assert!(driver(&printed, "notice").is_empty());
+}
+
+#[test]
+fn a_model_antigravity_does_not_offer_fails_the_turn_before_anything_is_asked() {
+    let place = Place::new("unoffered", "turn");
+    let mut order = place.order("");
+    order.model = "gemini-z-low".into();
+    let (printed, status) = place.run(&order);
+    assert_eq!(status.code(), Some(1), "{printed:?}");
+    let failed = driver(&printed, "failed")[0];
+    assert_eq!(failed["stage"], "config");
+    let text = failed["text"].as_str().unwrap();
+    assert!(
+        text.contains("gemini-z-low") && text.contains("gemini-a, claude-b"),
+        "{text}"
+    );
+    assert!(
+        place.sent_of("session/prompt").is_empty(),
+        "no other model runs in its place"
+    );
+    assert!(place.sent_of("session/set_config_option").is_empty());
+}
