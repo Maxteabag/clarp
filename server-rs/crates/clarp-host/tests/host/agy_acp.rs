@@ -82,9 +82,12 @@ fn moved(host: &Host, session: &str, backend: &str, id: &str) -> Value {
     last
 }
 
-#[test]
-fn an_agent_moves_from_antigravity_over_acp_and_back_with_its_conversation() {
-    let place = Place::new("agy-acp-move");
+/// The mark the Host's own record of a conversation begins with, where a turn opens with it.
+const RECORD: &str = "--- Clarp restored conversation ---";
+
+/// A Host whose Antigravity is the stand-in, for both cards, in a home of the test's own.
+fn antigravity(name: &str) -> (Place, Host) {
+    let place = Place::new(name);
     let agy = place.root.join("agy");
     program(&agy, FAKE);
     let world = [
@@ -92,54 +95,160 @@ fn an_agent_moves_from_antigravity_over_acp_and_back_with_its_conversation() {
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
+    (place, host)
+}
+
+/// The lines of a file the stand-in wrote, each a JSON object.
+fn written(place: &Place, file: &str) -> Vec<Value> {
+    std::fs::read_to_string(place.root.join(file))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// What the stand-in was sent over ACP of one method.
+fn asked(place: &Place, method: &str) -> Vec<Value> {
+    written(place, "acp.log")
+        .into_iter()
+        .filter(|message| message["method"] == method)
+        .collect()
+}
+
+fn idle(host: &Host, session: &str) -> bool {
+    host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session)
+        .is_some_and(|row| row["busy"] == false)
+}
+
+/// The text of the `n`th prompt the stand-in was sent over ACP.
+fn prompt_text(place: &Place, n: usize) -> String {
+    asked(place, "session/prompt")[n]["params"]["prompt"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn a_move_between_antigravity_and_its_acp_card_goes_on_in_the_same_conversation() {
+    let (place, host) = antigravity("agy-same-store");
     let options = host.get("/agent-model-options");
     assert_eq!(
         options["providers"]["agy-acp"]["runs_through"], "agy",
         "{options}"
     );
     assert_eq!(options["providers"]["agy-acp"]["supports_steer"], false);
-    let made = host.post("/agents", json!({"name": "Mover", "backend": "agy-acp"}));
+    let made = host.post("/agents", json!({"name": "Mover", "backend": "agy"}));
     let session = made["session"].as_str().unwrap().to_string();
     host.send(&session, "remember the word lantern", "m-1");
-    wait_for("the first turn to finish", || {
-        host.state(&session) == "done"
+    wait_for("the turn on agy", || {
+        written(&place, "print.log").len() == 1 && idle(&host, &session)
     });
 
-    // To Antigravity as it runs today: it has no writer, so its next turn would begin with the
-    // Host's record. And back, the same way.
-    let away = moved(&host, &session, "agy", "move-1");
-    assert_eq!(away["phase"], "done", "{away}");
-    assert_eq!(away["previous_backend"], "agy-acp");
-    let back = moved(&host, &session, "agy-acp", "move-2");
-    assert_eq!(back["phase"], "done", "{back}");
-    assert_eq!(back["backend"], "agy-acp");
-
-    // The next turn opens a new conversation that begins with what was said before.
+    // To the ACP card: the same store, so nothing is carried and the conversation is kept.
+    let there = moved(&host, &session, "agy-acp", "move-1");
+    assert_eq!(there["phase"], "done", "{there}");
+    assert_eq!(there["carried"]["turns"], 0, "{there}");
+    assert!(
+        host.conversation(&session).iter().any(
+            |(role, text)| role == "system" && text.ends_with("The same conversation goes on.")
+        ),
+        "{:?}",
+        host.conversation(&session)
+    );
     host.send(&session, "what was the word?", "m-2");
-    wait_for("the turn after the move to finish", || {
-        host.state(&session) == "done"
-            && std::fs::read_to_string(place.root.join("acp.log"))
-                .unwrap_or_default()
-                .lines()
-                .filter(|line| line.contains("session/prompt"))
-                .count()
-                == 2
+    wait_for("the turn over ACP", || {
+        asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
     });
-    let prompts: Vec<Value> = std::fs::read_to_string(place.root.join("acp.log"))
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .filter(|message| message["method"] == "session/prompt")
-        .collect();
-    let text = prompts[1]["params"]["prompt"][0]["text"].as_str().unwrap();
-    assert!(text.contains("remember the word lantern"), "{text}");
-    assert!(text.contains("what was the word?"), "{text}");
-    let opened = std::fs::read_to_string(place.root.join("acp.log"))
-        .unwrap()
-        .lines()
-        .filter(|line| line.contains("\"session/new\""))
-        .count();
-    assert_eq!(opened, 2, "the move back begins a new conversation");
+    // It resumes agy's own conversation, natively, with no record of the Host's at its head.
+    assert_eq!(
+        asked(&place, "session/resume")[0]["params"]["sessionId"],
+        "conv-print"
+    );
+    assert!(asked(&place, "session/new").is_empty());
+    let text = prompt_text(&place, 0);
+    assert!(
+        !text.contains(RECORD) && !text.contains("lantern"),
+        "{text}"
+    );
+
+    // And back: agy continues the same conversation by its id.
+    let back = moved(&host, &session, "agy", "move-2");
+    assert_eq!(back["phase"], "done", "{back}");
+    assert_eq!(back["carried"]["turns"], 0, "{back}");
+    host.send(&session, "and once more", "m-3");
+    wait_for("the turn on agy again", || {
+        written(&place, "print.log").len() == 2 && idle(&host, &session)
+    });
+    let second = &written(&place, "print.log")[1];
+    assert_eq!(second["conversation"], "conv-print", "{second}");
+    assert!(
+        !second["prompt"].as_str().unwrap().contains(RECORD),
+        "{second}"
+    );
+}
+
+#[test]
+fn a_conversation_lost_after_a_same_store_move_goes_on_with_the_hosts_record() {
+    // From agy to the ACP card, where agy answers that it no longer knows the conversation: that
+    // turn fails and marks it, and the next one opens a new conversation with the Host's record.
+    let (place, host) = antigravity("agy-same-store-lost");
+    let made = host.post("/agents", json!({"name": "Forgetful", "backend": "agy"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(&session, "remember the word lantern", "m-1");
+    wait_for("the turn on agy", || {
+        written(&place, "print.log").len() == 1 && idle(&host, &session)
+    });
+    assert_eq!(moved(&host, &session, "agy-acp", "move-1")["phase"], "done");
+    std::fs::write(place.root.join("scenario"), "resume-lost").unwrap();
+    host.send(&session, "what was the word?", "m-2");
+    wait_for("the resume agy refuses", || {
+        !asked(&place, "session/resume").is_empty() && idle(&host, &session)
+    });
+    if asked(&place, "session/prompt").is_empty() {
+        host.send(&session, "the word, please", "m-3");
+    }
+    wait_for("a turn in a new conversation", || {
+        asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
+    });
+    assert_eq!(asked(&place, "session/new").len(), 1);
+    let text = prompt_text(&place, 0);
+    assert!(
+        text.contains(RECORD) && text.contains("remember the word lantern"),
+        "{text}"
+    );
+
+    // From the ACP card to agy, where agy has let the conversation go: agy is not told its id,
+    // and its turn opens with the Host's record.
+    let (place, host) = antigravity("agy-same-store-lost-back");
+    let made = host.post(
+        "/agents",
+        json!({"name": "Forgetful", "backend": "agy-acp"}),
+    );
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(&session, "remember the word lantern", "m-1");
+    wait_for("the turn over ACP", || {
+        asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
+    });
+    assert_eq!(moved(&host, &session, "agy", "move-1")["phase"], "done");
+    let kept = place
+        .root
+        .join(".gemini/antigravity-cli/conversations/conv-new.db");
+    std::fs::remove_file(&kept).unwrap();
+    host.send(&session, "what was the word?", "m-2");
+    wait_for("the turn on agy", || {
+        written(&place, "print.log").len() == 1 && idle(&host, &session)
+    });
+    let turn = &written(&place, "print.log")[0];
+    assert_eq!(turn["conversation"], false, "{turn}");
+    let text = turn["prompt"].as_str().unwrap();
+    assert!(
+        text.contains(RECORD) && text.contains("remember the word lantern"),
+        "{text}"
+    );
 }
 
 /// The names of the machine's environment a real Antigravity needs: its program, its home and

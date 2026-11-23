@@ -6,7 +6,29 @@
 import json, os, subprocess, sys, time
 
 here = os.path.dirname(os.path.abspath(__file__))
+
+
+def keep(conversation):
+    # Where agy keeps a conversation, under its user's home: what the Host looks for.
+    store = os.path.join(os.environ.get("HOME", here), ".gemini", "antigravity-cli", "conversations")
+    os.makedirs(store, exist_ok=True)
+    open(os.path.join(store, conversation + ".db"), "a").close()
+
+
 if sys.argv[1:2] != ["acp"]:
+    # `agy --print=<message>`, as the `agy` card runs a turn: one conversation, continued by
+    # `--conversation <id>`, its turn told as stream-json. Anything else (`agy models`) is silent.
+    told = [arg[len("--print="):] for arg in sys.argv[1:] if arg.startswith("--print=")]
+    if not told:
+        sys.exit(0)
+    args = sys.argv[1:]
+    conversation = args[args.index("--conversation") + 1] if "--conversation" in args else "conv-print"
+    keep(conversation)
+    with open(os.path.join(here, "print.log"), "a") as out:
+        out.write(json.dumps({"conversation": "--conversation" in args and conversation, "prompt": told[0]}) + "\n")
+    print(json.dumps({"event": "init", "conversation_id": conversation, "init": {"model": "fixture"}}))
+    print(json.dumps({"event": "result", "result": {"conversation_id": conversation, "status": "SUCCESS",
+                                                     "response": "Printed"}}))
     sys.exit(0)
 try:
     with open(os.path.join(here, "scenario")) as said:
@@ -140,6 +162,7 @@ while True:
         if scenario == "signed-out":
             error(mid, -32000, "Authentication required")
         else:
+            keep("conv-new")
             result(mid, {"sessionId": "conv-new", "configOptions": OPTIONS})
     elif method == "session/resume":
         if scenario == "resume-lost":
