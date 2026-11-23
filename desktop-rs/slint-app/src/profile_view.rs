@@ -98,7 +98,6 @@ pub fn escape(app: &App, window: &AppWindow) {
     if overlay == "profile" && !bridge.get_transit_step().is_empty() {
         let session = session();
         app.engine.borrow_mut().transit_back(&session);
-        pump_now(app);
         fill_transit(app, window, &session);
     } else if overlay == "profile" && bridge.get_viewing() >= 0 {
         bridge.set_viewing(-1);
