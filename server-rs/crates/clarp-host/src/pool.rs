@@ -194,10 +194,12 @@ impl Service {
     ) -> bool {
         let trace = turn.0.to_string();
         self.told(|pool, now| {
-            if let Some(at) = resets_at_ms {
+            let (waits, effects) = pool.request(agent, &trace, true, plan, now);
+            // Only a turn the pool took waits for its reset, and tells it to its model's.
+            if let Some(at) = resets_at_ms.filter(|_| waits) {
                 pool.out_until(agent, &trace, at, now);
             }
-            pool.request(agent, &trace, true, plan, now)
+            (waits, effects)
         })
     }
 

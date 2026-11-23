@@ -527,12 +527,14 @@ impl Pool {
 
     /// The tool of the agent's turn said when the account it ran out on has usage again. The
     /// turn, and every other waiting turn of its model, waits until then where that is longer
-    /// than half an hour, and is let go then.
-    /// A time that is over, or further than a week, is no reset to wait for.
+    /// than half an hour, and is let go then. Told after the pool took the turn
+    /// ([`Pool::request`]): a turn the pool did not take waits for nothing, and says nothing
+    /// of the model to the others. A time that is over, or further than a week, is no reset
+    /// to wait for.
     pub fn out_until(&mut self, agent: &str, trace: &str, resets_at_ms: i64, now_ms: i64) {
         if let Some(at) = self
             .at(agent)
-            .filter(|at| self.attempts[*at].trace == trace)
+            .filter(|at| self.attempts[*at].trace == trace && self.attempts[*at].parked)
         {
             let until = crate::recovery::after_reset(Some(resets_at_ms), now_ms);
             self.attempts[at].resets_until_ms = until;
@@ -551,11 +553,38 @@ impl Pool {
             .or_else(|| self.resets_by_model.get(&attempt.model).copied())
     }
 
-    /// A recovery is over: what its turns were told of their account is no word on the next.
-    fn recovered(&mut self) {
+    /// A recovery is over. What its turns were told of their account stands for the turns of
+    /// the model that still wait (an answer for some of the models holds the others), and is
+    /// no word on the next recovery.
+    fn recovered(&mut self, now_ms: i64) {
         self.recovering = false;
         self.quiet_checks = 0;
-        self.resets_by_model.clear();
+        self.forget_resets(now_ms);
+    }
+
+    /// Forgets the reset of a model that is over, or that no waiting turn waits for any more.
+    fn forget_resets(&mut self, now_ms: i64) {
+        let waiting: BTreeSet<String> = self
+            .attempts
+            .iter()
+            .filter(|attempt| attempt.parked && attempt.owned)
+            .map(|attempt| attempt.model.clone())
+            .collect();
+        self.resets_by_model
+            .retain(|model, at| *at > now_ms && waiting.contains(model));
+    }
+
+    /// When the turn's own wait is half an hour old.
+    fn half_hour(&self, attempt: &Attempt, now_ms: i64) -> i64 {
+        let since = self.first_parked_ms.get(&attempt.key()).copied();
+        since.unwrap_or(now_ms) + MAX_PARK_MS
+    }
+
+    /// Whether the turn waits past its half hour for a reset it was told: let go then, it may
+    /// be parked again for a next one. A reset that came before its half hour is none.
+    fn waits_for_reset(&self, attempt: &Attempt, now_ms: i64) -> bool {
+        let half_hour = self.half_hour(attempt, now_ms);
+        self.resets_until(attempt).is_some_and(|at| at > half_hour)
     }
 
     /// A turn failed on its account. Whether the pool takes it up: where it does not, the
@@ -772,8 +801,7 @@ impl Pool {
     /// waits for that reset as well, as a turn of a Host that follows the login does.
     fn take_overdue(&mut self, attempts: &[Attempt], now_ms: i64) -> Vec<Attempt> {
         let old = |attempt: &&Attempt| {
-            let since = self.first_parked_ms.get(&attempt.key()).copied();
-            let half_hour = since.unwrap_or(now_ms) + MAX_PARK_MS;
+            let half_hour = self.half_hour(attempt, now_ms);
             now_ms
                 >= self
                     .resets_until(attempt)
@@ -781,7 +809,7 @@ impl Pool {
         };
         let overdue: Vec<Attempt> = attempts.iter().filter(old).cloned().collect();
         for attempt in &overdue {
-            let told = self.resets_until(attempt).is_some();
+            let told = self.waits_for_reset(attempt, now_ms);
             self.take(&attempt.agent);
             if !told {
                 self.park_expired.insert(attempt.key());
@@ -842,8 +870,8 @@ impl Pool {
         // of its reset is over.
         for attempt in back {
             self.take(&attempt.agent);
-            self.resets_by_model.remove(&attempt.model);
         }
+        self.forget_resets(now_ms);
         for attempt in back {
             self.resumed_at_ms.insert(attempt.key(), now_ms);
             out.push(resumed(attempt));
@@ -900,6 +928,8 @@ impl Pool {
             self.arm_hold(out);
         }
         Self::release(&overdue, out);
+        // A reset that is over, or that no held turn waits for, is said no more.
+        self.forget_resets(now_ms);
         begin
     }
 
@@ -989,7 +1019,7 @@ impl Pool {
         }
         self.awaiting.clear();
         match self.decided(&pending, Checked::NotYet, now_ms) {
-            Decision::Release { .. } => self.recovered(),
+            Decision::Release { .. } => self.recovered(now_ms),
             Decision::Park { delay_ms, .. } => out.push(Effect::Timer {
                 timer: Timer::Recovery,
                 after_ms: delay_ms,
@@ -1084,12 +1114,13 @@ impl Pool {
         let decision = self.decided(&pending, checked, now_ms);
         match &decision {
             Decision::Resume { .. } => {
-                self.recovered();
                 self.last_resumed_ms = Some(now_ms);
                 // All of them out first, as above.
                 for attempt in &pending {
                     self.take(&attempt.agent);
                 }
+                // The reset of a model whose turns are held stands for them.
+                self.recovered(now_ms);
                 for attempt in &pending {
                     if attempt.owned {
                         self.resumed_at_ms.insert(attempt.key(), now_ms);
@@ -1112,13 +1143,13 @@ impl Pool {
                     // Those that waited for a reset they were told may wait for the next.
                     let untold: Vec<Key> = pending
                         .iter()
-                        .filter(|attempt| self.resets_until(attempt).is_none())
+                        .filter(|attempt| !self.waits_for_reset(attempt, now_ms))
                         .map(Attempt::key)
                         .collect();
                     self.park_expired.extend(untold);
                     self.attempts.clear();
                 }
-                self.recovered();
+                self.recovered(now_ms);
             }
             _ => {}
         }
@@ -1352,8 +1383,8 @@ mod tests {
         let out = || {
             let mut pool = Pool::new();
             assert!(!pool.register(starting("a", "t-a"), 0).0);
-            pool.out_until("a", "t-a", reset, 0);
             assert!(pool.request("a", "t-a", true, false, 0).0);
+            pool.out_until("a", "t-a", reset, 0);
             assert!(pool.fired(Timer::Recovery, 0).contains(&stop("a")));
             assert_eq!(pool.stopped("a", 0), vec![asked.clone()]);
             pool
@@ -1390,8 +1421,8 @@ mod tests {
         // A reset that is over is none: the turn waits its half hour, asked every minute.
         let mut pool = Pool::new();
         assert!(!pool.register(starting("a", "t-a"), 0).0);
-        pool.out_until("a", "t-a", -hour, 0);
         assert!(pool.request("a", "t-a", true, false, 0).0);
+        pool.out_until("a", "t-a", -hour, 0);
         pool.fired(Timer::Recovery, 0);
         pool.stopped("a", 0);
         let recheck = Effect::Timer {
@@ -1414,8 +1445,8 @@ mod tests {
         let mut pool = Pool::new();
         assert!(!pool.register(starting("a", "t-a"), 0).0);
         assert!(!pool.register(starting("b", "t-b"), 0).0);
-        pool.out_until("a", "t-a", reset, 0);
         assert!(pool.request("a", "t-a", true, false, 0).0);
+        pool.out_until("a", "t-a", reset, 0);
         let stops = pool.fired(Timer::Recovery, 0);
         assert!(stops.contains(&stop("a")) && stops.contains(&stop("b")));
         assert_eq!(pool.stopped("a", 0), vec![]);
@@ -1462,8 +1493,112 @@ mod tests {
         // reset too, where a turn that waited for none is never parked again.
         let week = now + 2 * 86_400_000;
         assert!(!pool.register(starting("a", "t-a"), now).0);
-        pool.out_until("a", "t-a", week, now);
         assert!(pool.request("a", "t-a", true, false, now).0);
+        pool.out_until("a", "t-a", week, now);
+    }
+
+    /// The number of the timer that looks at the held turns, among what the pool wants done.
+    fn held_timer(effects: &[Effect]) -> Option<u64> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Timer {
+                timer: Timer::Held(number),
+                ..
+            } => Some(*number),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn turns_held_for_a_model_an_answer_does_not_serve_still_wait_for_its_reset() {
+        let reset = 5 * 3_600_000;
+        let on = |agent, trace, model| Starting {
+            agent,
+            trace,
+            model,
+            holds: true,
+            ends: true,
+        };
+        // A and B run on one model, C on another. A is refused and says when the account
+        // resets; B is stopped with it, and C too.
+        let mut pool = Pool::new();
+        assert!(!pool.register(on("a", "t-a", "opus"), 0).0);
+        assert!(!pool.register(on("b", "t-b", "opus"), 0).0);
+        assert!(!pool.register(on("c", "t-c", "sonnet"), 0).0);
+        assert!(pool.request("a", "t-a", true, false, 0).0);
+        pool.out_until("a", "t-a", reset, 0);
+        pool.fired(Timer::Recovery, 0);
+        pool.stopped("a", 0);
+        pool.stopped("b", 0);
+        let asked = pool.stopped("c", 0);
+        assert!(
+            asked
+                .iter()
+                .any(|effect| matches!(effect, Effect::Ask { .. })),
+            "{asked:?}"
+        );
+        // The account now active serves the other model only: C goes on, A and B are held.
+        let served = Verdict::Only(BTreeSet::from(["sonnet".to_string()]));
+        let answered = pool.answered(served, 1_000);
+        assert!(
+            answered.contains(&resume("c")) && !answered.contains(&resume("b")),
+            "{answered:?}"
+        );
+        assert!(!pool.register(on("c", "t-c", "sonnet"), 1_000).0, "C runs");
+        // They are looked at every minute. B is not let go at its half hour: both go on at
+        // the reset A was told.
+        let mut held = held_timer(&answered)
+            .unwrap_or_else(|| panic!("the held turns are looked at: {answered:?}"));
+        let mut now = 1_000;
+        let back = loop {
+            now += RECHECK_MS;
+            let looked = pool.fired(Timer::Held(held), now);
+            if looked.contains(&resume("b")) {
+                break looked;
+            }
+            held = held_timer(&looked).unwrap_or_else(|| panic!("at {now}: {looked:?}"));
+        };
+        assert!(back.contains(&resume("a")), "{back:?}");
+        let at = reset + crate::recovery::RESET_MARGIN_MS;
+        assert!((at..at + RECHECK_MS).contains(&now), "{now}");
+        assert!(pool.stood(now).get("resets_until_ms").is_none());
+    }
+
+    #[test]
+    fn a_reset_before_the_half_hour_or_of_a_turn_not_taken_lets_no_turn_wait_twice() {
+        let asked = Effect::Ask {
+            models: vec!["m1".to_string()],
+        };
+        // A's account resets in ten minutes, B was told nothing. No account has usage: both
+        // wait their half hour, and neither is parked again.
+        let mut pool = Pool::new();
+        assert!(!pool.register(starting("a", "t-a"), 0).0);
+        assert!(!pool.register(starting("b", "t-b"), 0).0);
+        assert!(pool.request("a", "t-a", true, false, 0).0);
+        pool.out_until("a", "t-a", 600_000, 0);
+        pool.fired(Timer::Recovery, 0);
+        pool.stopped("a", 0);
+        assert_eq!(pool.stopped("b", 0), vec![asked.clone()]);
+        let mut now = 0;
+        let released = loop {
+            let answered = pool.answered(Verdict::NoAccount, now);
+            let [Effect::Timer { after_ms, .. }] = answered.as_slice() else {
+                break answered;
+            };
+            now += after_ms;
+            assert_eq!(pool.fired(Timer::Recovery, now), vec![asked.clone()]);
+        };
+        assert_eq!(now, MAX_PARK_MS);
+        assert_eq!(released, vec![resume("a"), resume("b")]);
+        for (agent, trace) in [("a", "t-a"), ("b", "t-b")] {
+            assert!(!pool.register(starting(agent, trace), now).0);
+            assert!(!pool.request(agent, trace, true, false, now).0, "{agent}");
+        }
+        // A turn the pool does not take waits for nothing, and tells its model nothing.
+        let mut pool = Pool::new();
+        assert!(!pool.register(starting("a", "t-a"), 0).0);
+        assert!(!pool.request("a", "t-a", false, false, 0).0);
+        pool.out_until("a", "t-a", 5 * 3_600_000, 0);
+        assert!(pool.stood(0).get("resets_until_ms").is_none());
     }
 
     #[test]
