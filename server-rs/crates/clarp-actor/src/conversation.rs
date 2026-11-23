@@ -332,6 +332,15 @@ fn mixed_record(log: &dyn AgentLog, turn: u64) -> Result<Option<Item>, ActorErro
         .filter(|item| item.kind == kind::MIXED_TURN))
 }
 
+/// Whether a turn that answers another agent was split by a message of the user's read into
+/// it: rows after the split are the user's, until a note answers the user (rule FU).
+pub(super) fn split_by_the_user(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
+    Ok(
+        mixed_record(log, turn)?.is_some_and(|item| !item.body.is_empty())
+            && original_mark(log, turn)?.is_some(),
+    )
+}
+
 pub(super) fn mixed(log: &dyn AgentLog, turn: u64) -> Result<bool, ActorError> {
     Ok(mixed_record(log, turn)?.is_some())
 }
@@ -433,37 +442,25 @@ fn recorded_end(log: &dyn AgentLog, turn: u64) -> Result<Option<(TurnEnd, Seq)>,
     Ok(None)
 }
 
-/// The last reply belongs to the agents if the user already received a
-/// note after their latest steered message. Read only this split turn's
-/// suffix, and only when its end says a note exists.
-fn final_after_note(
-    log: &dyn AgentLog,
-    turn: u64,
-    split: Seq,
-) -> Result<Option<String>, ActorError> {
-    let Some((end, mut before)) = recorded_end(log, turn)? else {
-        return Ok(None);
-    };
-    if end.status != "completed"
-        || end.note_count == 0
-        || !log
-            .find(&end.closes)?
-            .is_some_and(|row| row.kind == kind::REPLY)
-    {
-        return Ok(None);
-    }
+/// What happened in a split turn from its split on, in the log's order: each of the turn's notes
+/// (`true`) and each message of the user's read into it (`false`), by place. A reply written
+/// after a note that came after the user's latest message there belongs to the agents again:
+/// the agent answered the user in the note, and what it says after is for the agent it works
+/// for (rule FU). Decided by place alone, so a row is never shown and later hidden.
+fn split_marks(log: &dyn AgentLog, turn: u64, split: Seq) -> Result<Vec<(Seq, bool)>, ActorError> {
+    let end = recorded_end(log, turn)?.map_or(Seq::MAX, |(_, seq)| seq);
     // The echo writes the joined message immediately before the split marker.
-    let first = split.saturating_sub(1);
-    let mut noted = false;
-    while before > first {
-        let rows = log.read_before(before, Kinds::range(kind::MESSAGE, kind::AGENT_NOTE), CHUNK)?;
-        let Some(oldest) = rows.first() else {
+    let mut after = split.saturating_sub(2);
+    let mut marks = Vec::new();
+    loop {
+        let rows = log.read_after(after, Kinds::range(kind::MESSAGE, kind::AGENT_NOTE), CHUNK)?;
+        let Some(last) = rows.last() else {
             break;
         };
-        before = oldest.seq;
-        for row in rows.iter().rev().take_while(|row| row.seq >= first) {
+        after = last.seq;
+        for row in rows.iter().take_while(|row| row.seq < end) {
             match row.kind {
-                kind::AGENT_NOTE if row.turn == Some(turn) => noted = true,
+                kind::AGENT_NOTE if row.turn == Some(turn) => marks.push((row.seq, true)),
                 kind::MESSAGE if row.turn != Some(turn) => {
                     let entry = Entry::from_item(row).map_err(|error| corrupt(row, error))?;
                     if let Some(Entry::Message(message)) = entry
@@ -478,17 +475,26 @@ fn final_after_note(
                             AgentEvent::JoinRead { .. }
                         )
                     {
-                        return Ok(noted.then_some(end.closes));
+                        marks.push((row.seq, false));
                     }
                 }
                 _ => {}
             }
         }
-        if rows.len() < CHUNK {
+        if rows.len() < CHUNK || last.seq >= end {
             break;
         }
     }
-    Ok(None)
+    Ok(marks)
+}
+
+/// Whether the latest of the marks before this place is a note.
+fn after_a_note(marks: &[(Seq, bool)], seq: Seq) -> bool {
+    marks
+        .iter()
+        .take_while(|(at, _)| *at < seq)
+        .last()
+        .is_some_and(|(_, note)| *note)
 }
 
 enum TurnAudience {
@@ -498,21 +504,23 @@ enum TurnAudience {
     Agents {
         sender: String,
         split: Option<(Seq, Split)>,
-        final_after_note: Option<String>,
+        /// The notes and the user's messages after the split, by place ([`split_marks`]).
+        marks: Vec<(Seq, bool)>,
     },
 }
 
 impl TurnAudience {
-    fn sender(&self, id: &str, seq: Seq) -> Option<&str> {
+    /// The agent a row at this place answers, when the row is the agents' (`reply`: the row
+    /// is the agent's text, as a draft or written).
+    fn sender(&self, id: &str, seq: Seq, reply: bool) -> Option<&str> {
         match self {
             Self::Agents {
                 sender,
                 split,
-                final_after_note,
-            } if final_after_note.as_deref() == Some(id)
-                || split
-                    .as_ref()
-                    .is_none_or(|(at, split)| seq < *at || split.earlier.contains(id)) =>
+                marks,
+            } if split.as_ref().is_none_or(|(at, split)| {
+                seq < *at || split.earlier.contains(id) || (reply && after_a_note(marks, seq))
+            }) =>
             {
                 Some(sender)
             }
@@ -564,14 +572,14 @@ impl<'a> Reader<'a> {
                                     .map_err(|error| corrupt(item, error))
                             })
                             .transpose()?;
-                        let final_after_note = match &split {
-                            Some((at, _)) => final_after_note(self.log, turn, *at)?,
-                            None => None,
+                        let marks = match &split {
+                            Some((at, _)) => split_marks(self.log, turn, *at)?,
+                            None => Vec::new(),
                         };
                         TurnAudience::Agents {
                             sender,
                             split,
-                            final_after_note,
+                            marks,
                         }
                     }
                     None => TurnAudience::User { restamped: false },
@@ -585,7 +593,7 @@ impl<'a> Reader<'a> {
     fn draft_mark(&mut self, draft: &Draft) -> Result<Option<String>, ActorError> {
         Ok(self
             .mark(draft.turn)?
-            .sender(&draft.id, Seq::MAX)
+            .sender(&draft.id, Seq::MAX, true)
             .map(str::to_owned))
     }
 
@@ -665,7 +673,7 @@ impl<'a> Reader<'a> {
         match item.turn.or(entry.turn()) {
             Some(turn) => Ok(self
                 .mark(turn)?
-                .sender(entry.id(), item.seq)
+                .sender(entry.id(), item.seq, matches!(entry, Entry::Reply(_)))
                 .map(str::to_owned)),
             None => Ok(None),
         }
@@ -791,7 +799,10 @@ impl<'a> Reader<'a> {
                 {
                     if split
                         && row.coordination.is_none()
-                        && self.mark(call.turn)?.sender(id, stored.seq).is_some()
+                        && self
+                            .mark(call.turn)?
+                            .sender(id, stored.seq, false)
+                            .is_some()
                     {
                         continue;
                     }
@@ -1534,6 +1545,26 @@ mod tests {
 
     #[allow(clippy::unwrap_used)]
     fn split_turn_with_note(note_after_steer: bool) -> clarp_kernel::journal::Recorder {
+        split_turn(
+            if note_after_steer {
+                Noted::AfterSteer
+            } else {
+                Noted::BeforeSteer
+            },
+            true,
+        )
+    }
+
+    /// Where the turn's note to the user is, in a turn for another agent the user wrote into.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Noted {
+        BeforeSteer,
+        AfterSteer,
+        AfterReplies,
+    }
+
+    #[allow(clippy::unwrap_used)]
+    fn split_turn(noted: Noted, ended: bool) -> clarp_kernel::journal::Recorder {
         use clarp_kernel::agent::Command;
         use clarp_kernel::conversation::{Message, Note};
         use clarp_kernel::journal::{Incoming, Recorder};
@@ -1592,7 +1623,7 @@ mod tests {
             text: "An answer for the user.".into(),
             trace_id: None,
         });
-        if !note_after_steer {
+        if noted == Noted::BeforeSteer {
             batch.item(note.to_item(125).unwrap());
         }
         batch
@@ -1612,7 +1643,7 @@ mod tests {
             .command(Command::JoinRead { turn: followup }, 140)
             .unwrap();
         assert!(split(&mut batch, into, OpenRows::default(), 140).unwrap());
-        if note_after_steer {
+        if noted == Noted::AfterSteer {
             batch.item(note.to_item(145).unwrap());
         }
         for id in ["post-steer", "final-reply"] {
@@ -1623,6 +1654,13 @@ mod tests {
                 ..Reply::default()
             });
             batch.item(reply.to_item(150).unwrap());
+        }
+        if noted == Noted::AfterReplies {
+            batch.item(note.to_item(155).unwrap());
+        }
+        if !ended {
+            batch.commit().unwrap();
+            return recorder;
         }
         batch
             .command(
@@ -1649,8 +1687,41 @@ mod tests {
         assert_eq!(final_reply.coordination.as_deref(), Some("peer"));
         let page = tail(log, &[], Span::default(), 20, Which::WithoutCoordination).unwrap();
         let ids: Vec<_> = page.entries.iter().map(|row| row.entry.id()).collect();
-        assert_eq!(ids, ["u-steer", "note-user", "post-steer"]);
-        assert_eq!(page.hidden_after.unwrap().messages, 1);
+        // What the agent said after the note is the agents' again, not only its last words:
+        // decided by place, never later.
+        assert_eq!(ids, ["u-steer", "note-user"]);
+        assert_eq!(page.hidden_after.unwrap().messages, 2);
+    }
+
+    /// Rule FU: whether a reply of a turn the user wrote into is the user's is the same
+    /// while the turn runs and after it ended, wherever the note is: a row the user was
+    /// shown is never hidden later, and none is shown and then taken away.
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_reply_of_a_split_turn_is_shown_or_hidden_the_same_before_and_after_its_end() {
+        let seen = |noted: Noted, ended: bool| -> Vec<(String, bool)> {
+            let recorder = split_turn(noted, ended);
+            let log = recorder.log();
+            ["post-steer", "final-reply"]
+                .iter()
+                .map(|id| {
+                    let row = one(log, id).unwrap().unwrap();
+                    ((*id).to_string(), row.coordination.is_none())
+                })
+                .collect()
+        };
+        for noted in [Noted::BeforeSteer, Noted::AfterSteer, Noted::AfterReplies] {
+            assert_eq!(seen(noted, false), seen(noted, true));
+        }
+        let both = |shown: bool| {
+            vec![
+                ("post-steer".to_string(), shown),
+                ("final-reply".to_string(), shown),
+            ]
+        };
+        assert_eq!(seen(Noted::AfterSteer, true), both(false));
+        assert_eq!(seen(Noted::AfterReplies, true), both(true));
+        assert_eq!(seen(Noted::BeforeSteer, true), both(true));
     }
 
     #[test]
