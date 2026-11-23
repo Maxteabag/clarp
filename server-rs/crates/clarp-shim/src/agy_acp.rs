@@ -86,6 +86,9 @@ struct Record {
     /// The tool calls Antigravity began and has not said the end of: while one is open, the
     /// prompt may be silent for as long as a tool runs.
     open_tools: BTreeSet<String>,
+    /// Every tool call Antigravity has begun in the turn: one that goes on or ends after a
+    /// message was sent is work begun before it, no sign that the message was taken.
+    seen_tools: BTreeSet<String>,
     /// The prompt was cancelled: what Antigravity asks after that is declined.
     stopping: bool,
     /// A message whose read is printed before Antigravity's next update: it is at work on the
@@ -113,11 +116,17 @@ impl Handler for Record {
         // commands it offers, what the conversation is called and how full it is, before it has
         // touched the message (seen in a stopped turn's spool, 23 Nov 2026).
         if update
-            && works(message)
+            && works(message, &self.seen_tools)
             && let Some(uuid) = self.read_next.take()
         {
             read_out(&uuid)?;
             self.took = Some(uuid);
+        }
+        if let Some(id) = message["params"]["update"]["toolCallId"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+        {
+            self.seen_tools.insert(id.to_string());
         }
         match schema::SessionUpdate::of_notification(message) {
             Some(schema::SessionUpdate::AgentMessageChunk { content }) => {
@@ -490,20 +499,19 @@ fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<()> {
     emit(&line)
 }
 
-/// Whether an update is Antigravity at work on its prompt: what it writes, thinks, runs or plans,
-/// or its own echo of the message. Not what it says by itself of the conversation.
-fn works(message: &Value) -> bool {
-    matches!(
-        message["params"]["update"]["sessionUpdate"].as_str(),
-        Some(
-            "agent_message_chunk"
-                | "agent_thought_chunk"
-                | "tool_call"
-                | "tool_call_update"
-                | "plan"
-                | "user_message_chunk"
-        )
-    )
+/// Whether an update is Antigravity at work on its prompt: what it writes, thinks or plans, a
+/// tool call it begins, or its own echo of the message. Not what it says by itself of the
+/// conversation (its commands, its title, how full it is), and not a tool call begun before:
+/// a command started earlier that ends now (a background build) says nothing of the message.
+fn works(message: &Value, seen_tools: &BTreeSet<String>) -> bool {
+    let update = &message["params"]["update"];
+    match update["sessionUpdate"].as_str() {
+        Some("agent_message_chunk" | "agent_thought_chunk" | "plan" | "user_message_chunk") => true,
+        Some("tool_call" | "tool_call_update") => update["toolCallId"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty() && !seen_tools.contains(id)),
+        _ => false,
+    }
 }
 
 /// The read of a message: the one place it is printed. When it is printed is the prompts'
@@ -771,6 +779,7 @@ pub fn run(program: &str) -> Result<u8> {
             first_update_ms: None,
             resume_ms: None,
             open_tools: BTreeSet::new(),
+            seen_tools: BTreeSet::new(),
             stopping: false,
             read_next: None,
             took: None,
@@ -817,6 +826,38 @@ pub fn run(program: &str) -> Result<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_work_on_the_prompt_takes_a_message() {
+        let update = |kind: &str, more: Value| {
+            let mut update = json!({"sessionUpdate": kind});
+            if let (Some(update), Value::Object(more)) = (update.as_object_mut(), more) {
+                update.extend(more);
+            }
+            json!({"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s", "update": update}})
+        };
+        let seen: BTreeSet<String> = ["t-old".to_string()].into();
+        for working in [
+            update("agent_message_chunk", json!({})),
+            update("agent_thought_chunk", json!({})),
+            update("plan", json!({})),
+            update("user_message_chunk", json!({})),
+            update("tool_call", json!({"toolCallId": "t-new"})),
+            update("tool_call_update", json!({"toolCallId": "t-new"})),
+        ] {
+            assert!(works(&working, &seen), "{working}");
+        }
+        for by_itself in [
+            update("usage_update", json!({"used": 0})),
+            update("session_info_update", json!({})),
+            update("available_commands_update", json!({})),
+            update("config_option_update", json!({})),
+            update("tool_call_update", json!({"toolCallId": "t-old", "status": "completed"})),
+            update("tool_call", json!({})),
+        ] {
+            assert!(!works(&by_itself, &seen), "{by_itself}");
+        }
+    }
 
     #[test]
     fn a_driver_line_carries_its_own_fields() {

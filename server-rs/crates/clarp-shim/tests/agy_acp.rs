@@ -914,3 +914,40 @@ fn what_antigravity_says_by_itself_is_no_read_of_a_message() {
     assert_eq!(answers.len(), 1, "{seen:?}");
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
 }
+
+#[test]
+fn a_command_begun_before_the_message_that_ends_after_it_is_no_read() {
+    let place = Place::new("steer-background", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-background"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-background");
+    steer(&mut input, "u-add", "add-background");
+    // agy hands the work over, then the command the first prompt began ends by itself.
+    printed.until("the earlier command's end", |line| {
+        line["params"]["update"]["status"] == "completed"
+    });
+    assert!(
+        printed.seen.iter().all(|line| read_of(line).is_none()),
+        "an update agy sends on its own is no read: {:?}",
+        printed.seen
+    );
+    // The next update under the new prompt is.
+    std::fs::write(place.dir.join("taken-background"), "").unwrap();
+    printed.until("agy's first word under the new prompt", |line| {
+        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+    });
+    let read = printed.at(|line| read_of(line) == Some("u-add"));
+    let ended = printed.at(|line| line["params"]["update"]["status"] == "completed");
+    let first = printed.at(|line| {
+        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+    });
+    assert!(ended < read && read + 1 == first, "{:?}", printed.seen);
+    std::fs::write(place.dir.join("release-background"), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let answers = settled(&printed.seen);
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+}
