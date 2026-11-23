@@ -19,6 +19,7 @@
 //! A spool that says "spawned" belongs to a turn that must never be started again. A spool that
 //! does not belongs to a turn whose program was never given anything to do.
 
+mod agy_acp;
 mod codex_lane_login;
 mod codex_lane_runtime;
 mod codex_lane_socket;
@@ -60,8 +61,9 @@ const HOLD_LOOKS_EVERY: Duration = Duration::from_millis(1);
 const HOLD_RETRY_AFTER: Duration = Duration::from_millis(25);
 /// A stopped child can need a short window to finish exec and unblock its parent.
 const HOLD_RETRY_WINDOW: Duration = Duration::from_millis(10);
-/// The driver a served tool is run through: the shim's own program, with this word first.
-const SERVED: &str = "opencode-turn";
+/// The drivers a served tool is run through: the shim's own program, with one of these words
+/// first.
+const SERVED: [&str; 2] = ["opencode-turn", clarp_tool_args::agy_acp::DRIVER];
 const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";
 
 struct Args {
@@ -1339,7 +1341,10 @@ fn run(args: Args) -> Result<u8, String> {
         input,
         printed,
         errors,
-        served: args.program_args.first().is_some_and(|word| word == SERVED),
+        served: args
+            .program_args
+            .first()
+            .is_some_and(|word| SERVED.contains(&word.as_str())),
         proc: PathBuf::from("/proc"),
         hold: Mutex::default(),
         hold_changed: Condvar::new(),
@@ -1454,6 +1459,19 @@ fn main() -> ExitCode {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
                 eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if argv
+        .peek()
+        .is_some_and(|word| word == clarp_tool_args::agy_acp::DRIVER)
+    {
+        argv.next();
+        return match agy_acp::run(&argv.next().unwrap_or_else(|| "agy".into())) {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("clarp-shim: Antigravity over ACP: {error}");
                 ExitCode::FAILURE
             }
         };

@@ -54,7 +54,7 @@ pub(super) fn plan(
             };
             Some((session, input))
         }
-        "agy" => {
+        "agy" | "agy-acp" => {
             let session = known?;
             let path = past::agy_transcript(&home.join(agy::OWN), session)?;
             let text = transcript(&path)?;
@@ -82,7 +82,7 @@ pub(super) async fn can_use(
     program: PathBuf,
     versions: &crate::cli_version::Cache,
 ) -> bool {
-    if !matches!(backend, "claude" | "agy") {
+    if !matches!(backend, "claude" | "agy" | "agy-acp") {
         return false;
     }
     versions

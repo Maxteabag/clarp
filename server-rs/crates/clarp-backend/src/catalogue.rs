@@ -36,7 +36,24 @@ const POINT: char = '\u{b7}';
 /// What is declared of a tool. Empty for a tool this Host does not run.
 pub fn declared(tool: &str) -> Value {
     let table: Value = serde_json::from_str(TABLE).unwrap_or_default();
+    if tool == crate::agy_acp::ID {
+        return acp_card(&table["agy"]);
+    }
     table[tool].clone()
+}
+
+/// The card of Antigravity over ACP: the `agy` card's models, efforts and sign-in, shown
+/// under a name of its own. It is this Host's alone, so it is made here and not written into
+/// the table the Python Host's catalogue is copied to.
+fn acp_card(agy: &Value) -> Value {
+    let mut card = agy.clone();
+    if !card.is_object() {
+        return card;
+    }
+    card["shown"]["label"] = json!("Antigravity (ACP)");
+    card["shown"]["detail"] = json!("Runs on Antigravity over the Agent Client Protocol.");
+    card["runs_through"] = json!("agy");
+    card
 }
 
 /// Where something that is said of a tool comes from, and how fresh it is.
@@ -336,7 +353,7 @@ fn seen_models(tool: &str, declared: &Value, said: Option<&str>, observed_at: &s
         ("opencode" | "deepseek", Some(said)) => {
             clarp_kernel::opencode::models(said, tool == "deepseek", observed_at)
         }
-        ("agy", Some(said)) => agy_models(said, observed_at),
+        ("agy" | "agy-acp", Some(said)) => agy_models(said, observed_at),
         ("grok", Some(said)) => grok_models(said, &declared["efforts"], observed_at),
         ("muse", Some(said)) => muse_models(said, &declared["efforts"], observed_at),
         _ => Vec::new(),

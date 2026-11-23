@@ -45,8 +45,8 @@ use crate::fleet::{AgentRecord, Amend};
 use crate::hub::Hub;
 use crate::roster::{Fields, Refusal};
 
-/// The tools an agent can be moved to: the five that keep a conversation of their own.
-pub const TARGETS: [&str; 5] = ["claude", "codex", "agy", "grok", "opencode"];
+/// The tools an agent can be moved to: those that keep a conversation of their own.
+pub const TARGETS: [&str; 6] = ["claude", "codex", "agy", "agy-acp", "grok", "opencode"];
 
 /// How many changes the Host remembers, the finished ones forgotten first.
 const KEPT: usize = 256;

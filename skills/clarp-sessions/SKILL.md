@@ -41,7 +41,7 @@ clarp-admin agent transit --session lena-1a3f --backend codex --model gpt-5.5
 clarp-admin agent transit --session lena-1a3f --backend claude --model opus --effort high
 ```
 
-`--backend` is one of `claude`, `codex`, `agy`, `grok`, `opencode` whose row in
+`--backend` is one of `claude`, `codex`, `agy`, `agy-acp`, `grok`, `opencode` whose row in
 `GET /agent-model-options` says `available: true`; `--model` is an exact ID that
 row lists (`""` for the tool's default). The command waits until the move is
 done or failed and prints its last state. The Host refuses while a turn of the
@@ -60,7 +60,15 @@ part as it was and the rest as one summary at its head. You may be asked for tha
 summary in one last automated turn before you move (a `[Clarp] You are about to
 move to ...` message): answer with the summary alone, use no tool. If you cannot,
 a cheap model writes it. The
-agent's name, voice, goals and chat history stay. To move an agent to another Host instead, use
+agent's name, voice, goals and chat history stay.
+
+`agy-acp` ("Antigravity (ACP)" in the pickers, on a Rust Host whose
+`GET /agent-model-options` lists it) is Antigravity driven over the Agent Client
+Protocol (`agy acp`): the same program, sign-in, models and conversations as `agy`,
+but its message has no 60 KB limit, files a user attached (pictures, sounds, PDFs)
+reach the model as themselves, and Stop cancels the turn cleanly. It cannot yet be
+steered while a turn runs: a message sent then waits for the next turn. Moving
+between `agy` and `agy-acp` carries the conversation like any other move. To move an agent to another Host instead, use
 `clarp-switch-agent-host`.
 
 ## An agent stays busy with no process

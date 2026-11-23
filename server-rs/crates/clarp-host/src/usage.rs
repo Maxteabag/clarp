@@ -46,8 +46,8 @@ const KIND: &str = "used";
 /// And the kind of the moment from which this Host has counted.
 const SINCE: &str = "counted-since";
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 7] = [
-    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+const TOOLS: [&str; 8] = [
+    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 /// After how many turns what is too old to count is looked for and let go.
 const LOOKED_OVER_EVERY: u32 = 200;

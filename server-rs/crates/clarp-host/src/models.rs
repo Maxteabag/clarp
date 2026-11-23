@@ -30,8 +30,8 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 7] = [
-    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+const TOOLS: [&str; 8] = [
+    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 /// How long a tool has to answer one question about itself, where nothing else is declared
 /// of the question (Antigravity fetches its list of models, and is given longer).
@@ -46,7 +46,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// tools: `told`), and what an account has used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app.
-const NOT_YET: [(&str, &[&str]); 4] = [
+const NOT_YET: [(&str, &[&str]); 5] = [
     (
         "claude",
         &["supports_steer", "supports_auth", "supports_usage"],
@@ -63,6 +63,7 @@ const NOT_YET: [(&str, &[&str]); 4] = [
         ],
     ),
     ("agy", &["supports_compact"]),
+    ("agy-acp", &["supports_compact"]),
     ("grok", &["supports_compact", "supports_auth"]),
 ];
 
