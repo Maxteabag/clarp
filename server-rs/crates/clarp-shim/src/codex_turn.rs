@@ -32,15 +32,18 @@ impl TurnSpool {
         pid: u32,
         now_ms: i64,
     ) -> io::Result<Self> {
-        Self::bind(SpoolWriter::create(path)?, thread, turn, pid, now_ms)
+        Self::bind(SpoolWriter::create(path)?, thread, turn, pid, now_ms, false)
     }
 
+    /// `started` says the lane started the thread for this turn: only then is its name told
+    /// to the conversation, as exec tells a thread it made.
     pub fn bind(
         writer: SpoolWriter,
         thread: String,
         turn: String,
         pid: u32,
         now_ms: i64,
+        started: bool,
     ) -> io::Result<Self> {
         let mut spool = Self {
             writer,
@@ -57,12 +60,14 @@ impl TurnSpool {
             now_ms,
         )?;
         spool.record(Entry::Shim(ShimEvent::Spawned { pid }), now_ms)?;
-        // As exec names its thread: a lane that started the thread for this turn tells the
-        // conversation its name here, and a resumed one says the name it already has.
-        spool.output(
-            json!({"type": "thread.started", "thread_id": spool.thread}),
-            now_ms,
-        )?;
+        // As exec names a thread it made. A resumed thread is the conversation's already, and a
+        // goal's turn says nothing of it, as before (review of 23 Nov 2026).
+        if started {
+            spool.output(
+                json!({"type": "thread.started", "thread_id": spool.thread}),
+                now_ms,
+            )?;
+        }
         spool.output(json!({"type": "turn.started"}), now_ms)?;
         spool.output(json!({"type": "steer.open"}), now_ms)?;
         spool.writer.sync()?;

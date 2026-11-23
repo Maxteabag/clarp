@@ -69,6 +69,7 @@ impl Slot {
         native_turn: &str,
         pid: u32,
         now_ms: i64,
+        started: bool,
     ) -> io::Result<bool> {
         let (binding, writer) = match std::mem::take(self) {
             Self::Reserved { binding, writer } => (binding, writer),
@@ -89,6 +90,7 @@ impl Slot {
                     native_turn.to_owned(),
                     pid,
                     now_ms,
+                    started,
                 )?;
                 *self = Self::Running { binding, spool };
                 Ok(true)

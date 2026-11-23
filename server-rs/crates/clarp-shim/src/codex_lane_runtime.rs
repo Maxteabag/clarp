@@ -164,6 +164,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         model,
         effort: None,
         idle_since: Instant::now(),
+        started_thread: false,
         stop_deadline: None,
         stray: BTreeMap::new(),
         revision: 0,
@@ -222,6 +223,8 @@ struct Lane {
     effort: Option<String>,
     /// Since when the lane has held no claim.
     idle_since: Instant,
+    /// The lane started its thread for the prompt it is starting: that turn names it.
+    started_thread: bool,
     /// The attempt a Stop interrupted, and when Codex is ended if the turn still runs.
     stop_deadline: Option<(Instant, (u64, u32))>,
     /// Replies that came while another request was waited on, by request id. A request made
@@ -568,12 +571,14 @@ impl Lane {
             self.effort = effort.or(self.effort.take());
         }
         if let Some(native) = accepted {
+            let started = std::mem::take(&mut self.started_thread);
             self.slot.bind(
                 Some(id),
                 &self.thread,
                 native,
                 self.server.pid(),
                 super::now_ms(),
+                started,
             )?;
         }
         for (method, params) in std::mem::take(&mut self.early) {
@@ -686,6 +691,7 @@ impl Lane {
         }
         self.thread = thread;
         self.loaded = true;
+        self.started_thread = true;
         Ok(())
     }
 
@@ -970,7 +976,7 @@ impl Lane {
             let admitted = !self.fenced
                 && self
                     .slot
-                    .bind(None, &self.thread, native, self.server.pid(), now)?;
+                    .bind(None, &self.thread, native, self.server.pid(), now, false)?;
             if !admitted {
                 self.reject_start(native)?;
             } else {

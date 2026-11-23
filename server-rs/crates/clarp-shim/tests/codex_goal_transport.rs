@@ -115,7 +115,6 @@ printf '%s\n' \
     assert_eq!(
         output,
         vec![
-            json!({"type":"thread.started","thread_id":"thread"}),
             json!({"type":"turn.started"}),
             json!({"type":"steer.open"}),
             // A delta is not kept; the user's words are a receipt, once, and no item.
