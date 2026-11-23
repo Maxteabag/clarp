@@ -36,7 +36,7 @@ pub struct PaneState {
     book: crate::scroll_book::HeightBook,
     /// The presentation settings the rows were last presented with; a
     /// preference change re-presents only when these moved.
-    presented_with: Option<(i32, bool, bool, bool, (bool, bool))>,
+    presented_with: Option<(i32, bool, bool, bool, (bool, bool, bool))>,
     /// Conversation view (#702): older pages read this visit to fill a
     /// short screen, by the chat and view they were read for.
     fill: (String, u32),
@@ -262,6 +262,15 @@ impl App {
     }
 
     /// The active pane's chat.
+    /// The chat whose pane draws the live row `key` (a Running box), the
+    /// open chat first.
+    pub fn session_showing(&self, key: &str) -> Option<String> {
+        let panes = self.pane_state.borrow();
+        let has = |i: usize| panes[i].messages.iter().any(|r| r.live.key == key);
+        let active = self.active_index().filter(|i| has(*i));
+        active.or_else(|| (0..panes.len()).find(|i| has(*i))).map(|i| panes[i].session.clone())
+    }
+
     pub fn active_session(&self) -> String {
         self.active_index().map(|i| self.pane_state.borrow()[i].session.clone()).unwrap_or_default()
     }
@@ -545,7 +554,12 @@ impl App {
 
     /// The open chat's working indicator for a stalled turn (#249), "" when
     /// the Host offers no Stop for a stall.
+    /// In Conversation view the Running box carries it, Stop inside (#702):
+    /// the pane then draws no line of its own.
     fn stall_indicator(engine: &Engine, session: &str) -> String {
+        if crate::live_view::running_box_shown(engine, session) {
+            return String::new();
+        }
         let Some(agent) = engine.roster().find(session) else { return String::new() };
         let Some(since) = clarp_core::stall::stop_offered(agent) else { return String::new() };
         clarp_core::stall::indicator(since, chrono::Utc::now().timestamp_millis(), agent.queued_turn_count > 0)
@@ -811,7 +825,7 @@ impl App {
     }
 
     /// What a transcript's rows depend on among the preferences.
-    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool, (bool, bool)) {
+    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool, (bool, bool, bool)) {
         let engine = self.engine.borrow();
         // The quiet line where agent messages were (#653) is drawn or not.
         let line = engine.chat_hidden_coordination(session) && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
@@ -821,7 +835,9 @@ impl App {
         // turn does, so a snapshot that starts or ends one draws it again.
         let conversation = engine.chat_view_conversation(session);
         let busy = conversation && engine.roster().find(session).is_some_and(|a| a.busy);
-        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line, (conversation, busy))
+        // A stall puts the box in even where no turn would (#249).
+        let stalled = busy && engine.roster().find(session).and_then(clarp_core::stall::stop_offered).is_some();
+        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line, (conversation, busy, stalled))
     }
 
     /// Puts the live rows where the turn happened (`Presented::anchors`):

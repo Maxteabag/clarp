@@ -300,32 +300,93 @@ pub fn second_line(failed: usize, other: Option<&str>) -> String {
     [failure, other.map(str::to_owned)].into_iter().flatten().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")
 }
 
+/// The status of a stalled turn's Running box (#249): it reads Seems stuck
+/// and holds Stop.
+pub const STALLED: &str = "stalled";
+
+/// The prefix of the key a stalled box's Stop sends: `live:stop:<box key>`.
+pub const STOP_PREFIX: &str = "live:stop:";
+
+/// A turn another agent's message started, in the Running box: "Working
+/// with Bella" (iOS `CoordinationLiveRule.workingText`), never the turn's
+/// activity.
+pub fn working_with(name: &str) -> String {
+    let name = name.trim();
+    format!("Working with {}", if name.is_empty() { "another agent" } else { name })
+}
+
+/// Whether a turn is one between agents (`audience` `agents`).
+pub fn between_agents(audience: &str) -> bool {
+    audience.trim().eq_ignore_ascii_case("agents")
+}
+
+/// Who started the turn `trace`: the newest agent prompt of that trace
+/// among the rows (its `sender_name`), else `fallback` (the agent row's
+/// `working_with`).
+pub fn sender_of(rows: &[Message], trace: &str, fallback: &str) -> String {
+    let named = (!trace.is_empty())
+        .then(|| rows.iter().rev().find(|r| r.role == "user" && r.trace_id == trace && !r.sender_name.trim().is_empty()))
+        .flatten();
+    named.map_or_else(|| fallback.trim().to_owned(), |r| r.sender_name.trim().to_owned())
+}
+
+/// What the Running box says besides the turn's steps.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BoxLook {
+    /// What runs ("Running swift build…", `running`).
+    pub title: String,
+    /// The turn's clock.
+    pub meta: String,
+    /// The fork's main-turn line (`main_turn_line`).
+    pub other: Option<String>,
+    /// A stalled turn (#249): `stall::indicator`'s words, which take the
+    /// title's place; the box then holds Stop.
+    pub stall: Option<String>,
+    /// The key that stops the agent, on that Stop.
+    pub stop_key: String,
+    /// A turn between agents: "Working with <Name>" in the title's place.
+    /// It never opens, and its second line says only the kind of step.
+    pub with: Option<String>,
+    /// That turn's kind of step (`step_words`), never its text.
+    pub step: Option<String>,
+}
+
 /// The running turn's entries as the conversation view draws them: one
-/// Running box (`title`, the turn's clock in `meta`, `other` the fork's
-/// main-turn line). It stands in the place of the turn's work row (live
-/// items folded as Grouped folds them) under its key, so it opens in place
-/// as that row does and then lists the turn's steps under it; failed steps
-/// go inside it, counted on its second line. Nothing else of the running
-/// turn shows: its text in between is not the reply.
-pub fn running_box(entries: &[Entry], turn_id: &str, title: &str, meta: &str, other: Option<&str>) -> Vec<Entry> {
+/// Running box (`look`). It stands in the place of the turn's work row
+/// (live items folded as Grouped folds them) under its key, so it opens in
+/// place as that row does and then lists the turn's steps under it; failed
+/// steps go inside it, counted on its second line. Nothing else of the
+/// running turn shows: its text in between is not the reply. A turn
+/// between agents shows only who it works with and the kind of step; a
+/// stalled one says so and holds Stop, so a stuck agent is never hidden.
+pub fn running_box(entries: &[Entry], turn_id: &str, look: &BoxLook) -> Vec<Entry> {
     let fold_key = format!("live:fold:{turn_id}");
     let fold = entries.iter().find(|e| e.kind == Kind::Fold && e.key == fold_key);
     let work: Vec<&Entry> = entries.iter().filter(|e| e.kind != Kind::Message && e.kind != Kind::Fold).collect();
     let failed = work.iter().filter(|e| matches!(e.status.as_str(), "failed" | "interrupted")).count();
-    let expandable = fold.is_some_and(|f| f.expandable);
+    let expandable = look.with.is_none() && fold.is_some_and(|f| f.expandable);
     let open = expandable && fold.is_some_and(|f| f.expanded);
+    let stalled = look.stall.as_deref().filter(|s| !s.is_empty());
+    let title = stalled.or(look.with.as_deref()).unwrap_or(&look.title).to_owned();
+    let mut second = second_line(failed, look.other.as_deref());
+    if look.with.is_some()
+        && let Some(step) = look.step.as_deref().filter(|s| !s.is_empty())
+    {
+        second = if second.is_empty() { step.to_owned() } else { format!("{step} · {second}") };
+    }
     let boxed = Entry {
         key: fold_key,
         kind: Kind::Fold,
         items: fold.map(|f| f.items.clone()).unwrap_or_default(),
-        status: "running".to_owned(),
-        title: title.to_owned(),
-        meta: meta.to_owned(),
-        secondary: second_line(failed, other),
+        status: if stalled.is_some() { STALLED } else { "running" }.to_owned(),
+        title,
+        meta: look.meta.clone(),
+        secondary: second,
         expandable,
         expanded: open,
         rev: fold.map_or(0, |f| f.rev),
         started_at_ms: entries.iter().filter_map(|e| e.started_at_ms).min(),
+        stop: if stalled.is_some() { if look.stop_key.is_empty() { "■".to_owned() } else { look.stop_key.clone() } } else { String::new() },
         ..Entry::default()
     };
     let mut out = vec![boxed];

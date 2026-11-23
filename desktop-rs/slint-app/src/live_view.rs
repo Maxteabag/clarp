@@ -49,7 +49,9 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
             let started = view.turn().and_then(|t| t.get("started_at_ms")).and_then(|v| v.as_i64());
             let clock = started.map(|at| clarp_core::live_present::clock(host_now - at)).unwrap_or_default();
             let title = clarp_core::chat_view::running(&clarp_core::chat_view::status_words(view.activity()));
-            presented.entries = clarp_core::chat_view::running_box(&presented.entries, &presented.turn_id, &title, &clock, main_line.as_deref());
+            let audience = view.turn().and_then(|t| t.get("audience")).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+            let look = box_look(engine, session, rows, &presented.turn_id, &audience, Some(view.activity()), title, clock, main_line);
+            presented.entries = clarp_core::chat_view::running_box(&presented.entries, &presented.turn_id, &look);
         } else {
             let shown: HashSet<&str> = rows.iter().filter(|r| clarp_core::chat_view::in_conversation(r)).map(|r| r.id.as_str()).collect();
             presented.entries.retain(|e| clarp_core::chat_view::finished_entry_stays(e, |row| shown.contains(row)));
@@ -83,15 +85,74 @@ fn busy_box(engine: &Engine, session: &str, rows: &[Message], live: Option<&Pres
     if !agent.busy {
         return None;
     }
-    let trace = clarp_core::chat_view::busy_turn(rows)?;
-    if live.is_some_and(|l| !l.turn_id.is_empty() && l.turn_id == trace) {
+    // A stalled agent always has its box: it is never hidden (#249).
+    let stalled = stall_words(engine, session).is_some();
+    let trace = match clarp_core::chat_view::busy_turn(rows) {
+        Some(trace) => trace,
+        None if stalled => String::new(),
+        None => return None,
+    };
+    if !stalled && live.is_some_and(|l| !l.turn_id.is_empty() && l.turn_id == trace) {
         return None;
     }
     let clock = agent.turn_started_at.map(|at| clarp_core::live_present::clock(now_ms() - at)).unwrap_or_default();
     let main_line = engine.chat_main_turn_line(session);
     let key = if trace.is_empty() { "busy".to_owned() } else { trace.clone() };
-    let entries = clarp_core::chat_view::running_box(&[], &key, &clarp_core::chat_view::running(""), &clock, main_line.as_deref());
+    let look = box_look(engine, session, rows, &trace, "", None, clarp_core::chat_view::running(""), clock, main_line);
+    let entries = clarp_core::chat_view::running_box(&[], &key, &look);
     Some(Presented { entries, turn_id: trace, ..Presented::default() })
+}
+
+/// What the Running box says: what runs, its clock and the fork's line;
+/// for a turn another agent started (the live turn's `audience`, else the
+/// agent row's), "Working with <Name>" and the kind of step only; for a
+/// stalled turn (#249) the working indicator's own words, with Stop.
+#[allow(clippy::too_many_arguments)]
+fn box_look(
+    engine: &Engine,
+    session: &str,
+    rows: &[Message],
+    trace: &str,
+    audience: &str,
+    activity: Option<&clarp_core::json::Object>,
+    title: String,
+    meta: String,
+    other: Option<String>,
+) -> clarp_core::chat_view::BoxLook {
+    use clarp_core::chat_view;
+    let agent = engine.roster().find(session);
+    let audience = if audience.trim().is_empty() { agent.map(|a| a.working_audience.as_str()).unwrap_or_default() } else { audience };
+    let with = chat_view::between_agents(audience).then(|| chat_view::working_with(&chat_view::sender_of(rows, trace, agent.map(|a| a.working_with.as_str()).unwrap_or_default())));
+    let step = activity.and_then(|a| {
+        let text = |o: &clarp_core::json::Object, key: &str| o.get(key).and_then(|v| v.as_str()).unwrap_or_default().trim().to_ascii_lowercase();
+        let tool = a.get("tool").and_then(|t| t.as_object()).map(|t| text(t, "name")).unwrap_or_default();
+        chat_view::step_words(&text(a, "state"), &tool).map(str::to_owned)
+    });
+    chat_view::BoxLook {
+        title,
+        meta,
+        other,
+        stall: stall_words(engine, session),
+        stop_key: stop_key(engine),
+        with,
+        step,
+    }
+}
+
+/// The stalled turn's words (`stall::indicator`), when the Host offers
+/// Stop for it; None otherwise.
+pub(crate) fn stall_words(engine: &Engine, session: &str) -> Option<String> {
+    let agent = engine.roster().find(session)?;
+    let since = clarp_core::stall::stop_offered(agent)?;
+    Some(clarp_core::stall::indicator(since, now_ms(), agent.queued_turn_count > 0))
+}
+
+/// Whether the chat's Running box stands for its working indicator: the
+/// chat draws its Conversation view and its agent works. The pane then
+/// leaves out its own stalled line, which the box carries.
+pub(crate) fn running_box_shown(engine: &Engine, session: &str) -> bool {
+    engine.roster().find(session).is_some_and(|a| a.busy)
+        && engine.conversation(session).is_some_and(|c| conversation_view(engine, session, c.rows()))
 }
 
 /// Whether Tool activity folds the running turn into its `Working` row:
@@ -163,6 +224,10 @@ pub(crate) fn stop_key(engine: &Engine) -> String {
 
 /// Whether anything shown ticks (a running item, a busy status line).
 pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
+    // The Running box's clock and a stall's minutes move while it shows.
+    if running_box_shown(engine, session) {
+        return true;
+    }
     let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return false };
     let busy = clarp_core::live_present::status_line(view, 0).is_some_and(|l| l.busy);
     busy || view.items().iter().any(|i| i.get("status").and_then(|s| s.as_str()) == Some("running"))
@@ -171,7 +236,7 @@ pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
 /// What a live row is built from: an equal signature builds an equal row.
 pub(crate) fn signature(entry: &Entry) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         entry.rev,
         entry.status,
         entry.title,
@@ -183,7 +248,8 @@ pub(crate) fn signature(entry: &Entry) -> String {
         entry.text.len(),
         entry.items.len(),
         entry.explaining,
-        entry.row
+        entry.row,
+        entry.stop
     )
 }
 
@@ -255,6 +321,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             expanded: entry.expanded,
             shimmer: tone.into(),
             letters: ModelRc::new(VecModel::from(letters)),
+            stop: entry.stop.clone().into(),
         },
         receipt: crate::ReceiptRow::default(),
         prompt: crate::PromptRow::default(),
