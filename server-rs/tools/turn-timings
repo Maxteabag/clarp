@@ -1178,7 +1178,7 @@ def summary(result: dict) -> str:
             if any(isinstance(c.get("measures"), dict) and c["measures"].get("lane_seen") for c in rows):
                 warm = [c for c in rows if not c["measures"].get("lane_new")]
                 cold = [c for c in rows if c["measures"].get("lane_new")]
-                groups.append((f"{case} (warm lane)" if case != "cold" else case, measures, warm))
+                groups.append((f"{case} (warm lane)", measures, warm) if case != "cold" else (case, measures, rows))
                 if cold and case != "cold":
                     groups.append((f"{case} (lane started)", measures, cold))
             else:
