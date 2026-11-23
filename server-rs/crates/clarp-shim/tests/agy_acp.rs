@@ -1041,3 +1041,89 @@ fn a_sentence_that_goes_on_to_the_new_prompts_answer_is_read_before_that_answer(
     assert_eq!(answers.len(), 1);
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
 }
+
+/// agy goes on writing after the hand-over and answers the message inside that text: the
+/// pieces it printed from the turn of `case`, until the settled answer.
+fn written_through_the_hand_over(case: &str) -> Vec<Value> {
+    let place = Place::new(&format!("steer-{case}"), "steer");
+    let (mut child, mut input) = place.open(&steering(&place, &format!("case-{case}")), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, &format!("working-{case}"));
+    steer(&mut input, "u-add", &format!("add-{case}"));
+    wait_file(&place, &format!("received-add-{case}"));
+    std::fs::write(place.dir.join(format!("taken-{case}")), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let answers = settled(&printed.seen);
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+    printed.seen
+}
+
+/// What was printed, as the Host reads it: the words of each piece, `<read>` for the message's
+/// read and `<prompted>` for the answer.
+fn as_read(seen: &[Value]) -> Vec<String> {
+    seen.iter()
+        .filter_map(|line| {
+            if read_of(line) == Some("u-add") {
+                Some("<read>".to_string())
+            } else if line["clarp"] == "prompted" {
+                Some("<prompted>".to_string())
+            } else if line["params"]["update"]["sessionUpdate"] == "agent_message_chunk" {
+                line["params"]["update"]["content"]["text"]
+                    .as_str()
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn a_message_agy_answers_in_the_text_it_goes_on_writing_is_read_at_the_paragraph_break() {
+    let seen = written_through_the_hand_over("paragraph");
+    // The piece with the break is printed in two: up to and with the break, the read, the rest.
+    assert_eq!(
+        as_read(&seen),
+        [
+            "5 plus",
+            " 4 is 9.\n\n",
+            "<read>",
+            "7 times",
+            " 6 is 42.",
+            "<prompted>"
+        ],
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn a_paragraph_break_across_two_pieces_takes_the_read_after_it() {
+    let seen = written_through_the_hand_over("straddle");
+    // The break began with the piece before the hand-over and ends with the first after it.
+    assert_eq!(
+        as_read(&seen),
+        [
+            "5 plus 4 is 9.\n",
+            "\n",
+            "<read>",
+            "7 times 6 is 42.",
+            "<prompted>"
+        ],
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn lines_with_no_paragraph_break_are_read_at_the_new_prompts_answer() {
+    let seen = written_through_the_hand_over("lines");
+    // No paragraph break came: the read waits for the answer, as before.
+    assert_eq!(
+        as_read(&seen),
+        ["one\ntwo", "\nthree\n", "four", "<read>", "<prompted>"],
+        "{seen:?}"
+    );
+}

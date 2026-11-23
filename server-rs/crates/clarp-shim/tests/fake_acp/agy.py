@@ -7,7 +7,7 @@
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
 # first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-closing`, `case-background`, `case-refused`,
-# `case-stop`, `case-after`); a prompt that names `add-...` and no case is a message run as a turn of its
+# `case-stop`, `case-after`, and the paragraph cases in `WRITTEN`); a prompt that names `add-...` and no case is a message run as a turn of its
 # own, answered `separate-add-...`. It waits for files beside it (`taken-<mode>`: say a word
 # under the new prompt; `release-<mode>`: answer) and leaves files for the test
 # (`working-<mode>`, `received-<message>`).
@@ -123,6 +123,19 @@ def tool(sid, status):
                  "status": status, "rawInput": {"CommandLine": "sleep 5"}})
 
 
+# What agy writes before and after the hand-over when it answers the new prompt inside the
+# text it was writing (seen live on 23 Nov 2026): the new prompt is then answered with nothing
+# else said.
+WRITTEN = {
+    # A paragraph break inside a piece written after the hand-over.
+    "paragraph": ("5 plus", [" 4 is 9.\n\n7 times", " 6 is 42."]),
+    # A break whose first half ended the piece before the hand-over.
+    "straddle": ("5 plus 4 is 9.\n", ["\n7 times 6 is 42."]),
+    # Lines, but no paragraph break.
+    "lines": ("one\ntwo", ["\nthree\n", "four"]),
+}
+
+
 def steering(mid, sid, words):
     found = re.search(r"case-([a-z]+)", words)
     mode = found.group(1) if found else ""
@@ -134,6 +147,8 @@ def steering(mid, sid, words):
         text(sid, "agent_message_chunk", "before-steer")
     elif mode in ("sentence", "closing"):
         text(sid, "agent_message_chunk", "5 plus")
+    elif mode in WRITTEN:
+        text(sid, "agent_message_chunk", WRITTEN[mode][0])
     else:
         tool(sid, "in_progress")
     touch("working-" + mode)
@@ -160,6 +175,10 @@ def steering(mid, sid, words):
         text(sid, "agent_message_chunk", " 4 is 9")
     if mode == "closing":
         # And the new prompt is answered with nothing more said.
+        return result(second["id"], {"stopReason": "end_turn"})
+    if mode in WRITTEN:
+        for piece in WRITTEN[mode][1]:
+            text(sid, "agent_message_chunk", piece)
         return result(second["id"], {"stopReason": "end_turn"})
     text(sid, "agent_thought_chunk", "Reading " + said_in(second))
     if mode == "stop":

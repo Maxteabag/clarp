@@ -103,6 +103,9 @@ struct Record {
     /// Antigravity is writing a message: its last word was a piece of one, and no thought or
     /// tool call has ended it since. The Host shows such pieces as one reply.
     writing: bool,
+    /// How many line breaks the message being written ends with, at most two: a paragraph
+    /// break can begin in one piece and end in the next.
+    breaks: usize,
 }
 
 impl Handler for Record {
@@ -120,22 +123,35 @@ impl Handler for Record {
         // touched the message (seen in a stopped turn's spool, 23 Nov 2026).
         //
         // A piece that goes on with the message agy was writing when it took the new prompt is
-        // the rest of that message, not work on the new one: the read waits for what comes
-        // after it, so that the reply before the message stays whole (seen live on 23 Nov 2026:
-        // "5 plus" | the message | " 4 is 9").
+        // the rest of that message, not work on the new one: the read waits for the message's
+        // first paragraph break, so that the reply before the message stays whole (seen live on
+        // 23 Nov 2026: "5 plus" | the message | " 4 is 9"). agy 1.5 may answer the message
+        // inside the text it goes on writing, with no other sign until the answer; the break
+        // is where that answer can begin. Where none comes, the read waits for what comes
+        // after the message, or for the newer prompt's answer.
         let kind = message["params"]["update"]["sessionUpdate"].as_str();
-        let goes_on = self.writing && kind == Some("agent_message_chunk");
-        if update
-            && !goes_on
-            && works(message, &self.seen_tools)
-            && let Some(uuid) = self.read_next.take()
-        {
-            read_out(&uuid)?;
-            self.took = Some(uuid);
-        }
+        let chunk = update && kind == Some("agent_message_chunk");
+        let goes_on = self.writing && chunk;
+        let words = message["params"]["update"]["content"]["text"]
+            .as_str()
+            .filter(|_| chunk);
+        let breaks = if goes_on { self.breaks } else { 0 };
+        // Where in this update the read goes: before it (0), or after the paragraph break.
+        let read_at = if update && self.read_next.is_some() && works(message, &self.seen_tools) {
+            if goes_on {
+                words.and_then(|words| paragraph_break(breaks, words))
+            } else {
+                Some(0)
+            }
+        } else {
+            None
+        };
         // What ends a message being written, as the Host reads it: a thought or a tool call.
         match kind {
-            Some("agent_message_chunk") if update => self.writing = true,
+            Some("agent_message_chunk") if update => {
+                self.writing = true;
+                self.breaks = words.map_or(breaks, |words| ends_with_breaks(breaks, words));
+            }
             Some("agent_thought_chunk" | "tool_call" | "tool_call_update") if update => {
                 self.writing = false;
             }
@@ -162,8 +178,26 @@ impl Handler for Record {
             }
             _ => {}
         }
-        // One line of the record each, short enough that the shim never splits it.
-        emit(&schema::bounded(message))
+        // One line of the record each, short enough that the shim never splits it. A piece
+        // with a paragraph break where the read goes is printed in two, the read between.
+        let Some(at) = read_at else {
+            return emit(&schema::bounded(message));
+        };
+        let words = words.unwrap_or_default();
+        if at > 0 {
+            emit(&schema::bounded(&with_words(message, &words[..at])))?;
+        }
+        if let Some(uuid) = self.read_next.take() {
+            read_out(&uuid)?;
+            self.took = Some(uuid);
+        }
+        if at == 0 {
+            emit(&schema::bounded(message))
+        } else if at < words.len() {
+            emit(&schema::bounded(&with_words(message, &words[at..])))
+        } else {
+            Ok(())
+        }
     }
 
     fn request(
@@ -538,6 +572,39 @@ fn works(message: &Value, seen_tools: &BTreeSet<String>) -> bool {
     }
 }
 
+/// Where a paragraph break in a piece of a message ends, for a message that ended with
+/// `breaks` line breaks before it: just after the break's last line break, so that the rest
+/// begins with words. None when the piece holds no paragraph break.
+fn paragraph_break(breaks: usize, words: &str) -> Option<usize> {
+    let mut run = breaks;
+    for (at, c) in words.char_indices() {
+        match c {
+            '\n' => run += 1,
+            '\r' => {}
+            _ if run >= 2 => return Some(at),
+            _ => run = 0,
+        }
+    }
+    (run >= 2).then_some(words.len())
+}
+
+/// How many line breaks, at most two, a message ends with once a piece is added to one that
+/// ended with `breaks`.
+fn ends_with_breaks(breaks: usize, words: &str) -> usize {
+    words.chars().fold(breaks, |run, c| match c {
+        '\n' => (run + 1).min(2),
+        '\r' => run,
+        _ => 0,
+    })
+}
+
+/// A piece of a message with other words: a part of it, printed on its own.
+fn with_words(message: &Value, words: &str) -> Value {
+    let mut part = message.clone();
+    part["params"]["update"]["content"]["text"] = json!(words);
+    part
+}
+
 /// The read of a message: the one place it is printed. When it is printed is the prompts'
 /// rule ([`prompts`]): once Antigravity has taken the message, before anything it says of it.
 fn read_out(uuid: &str) -> io::Result<()> {
@@ -801,6 +868,7 @@ pub fn run(program: &str) -> Result<u8> {
             answer_text: String::new(),
             settled: false,
             writing: false,
+            breaks: 0,
         },
         stopping: None,
         waiting: Vec::new(),
@@ -875,6 +943,26 @@ mod tests {
         ] {
             assert!(!works(&by_itself, &seen), "{by_itself}");
         }
+    }
+
+    #[test]
+    fn the_read_goes_after_a_paragraph_break_never_inside_a_sentence() {
+        assert_eq!(paragraph_break(0, " 4 is 9.\n\n7 times"), Some(10));
+        assert_eq!(paragraph_break(0, "a\n\n\nb"), Some(4));
+        assert_eq!(paragraph_break(0, "a\r\n\r\nb"), Some(5));
+        assert_eq!(paragraph_break(0, "done.\n\n"), Some(7));
+        // Across two pieces: the first half ended the one before.
+        assert_eq!(paragraph_break(1, "\n7 times"), Some(1));
+        assert_eq!(paragraph_break(2, "7 times"), Some(0));
+        for none in ["5 plus", " 4 is 9", "one\ntwo", "\nthree\n", ""] {
+            assert_eq!(paragraph_break(0, none), None, "{none:?}");
+        }
+        assert_eq!(paragraph_break(1, "x\n"), None);
+        assert_eq!(ends_with_breaks(0, "one\ntwo"), 0);
+        assert_eq!(ends_with_breaks(0, "9.\n"), 1);
+        assert_eq!(ends_with_breaks(1, "\n"), 2);
+        assert_eq!(ends_with_breaks(2, "\n\n"), 2);
+        assert_eq!(ends_with_breaks(1, ""), 1);
     }
 
     #[test]
