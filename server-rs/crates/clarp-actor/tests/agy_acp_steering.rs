@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::conversation::Versioned;
-use clarp_actor::{Action, Actor, JoinedRead, Outputs, Profile, ShimOrder};
+use clarp_actor::{Action, Actor, JoinedRead, Outputs, Profile, ShimOrder, Steering};
 use clarp_backend::Backend;
 use clarp_backend::agy_acp::AgyAcp;
 use clarp_codec::standard_set;
@@ -114,8 +114,11 @@ impl World {
                         asked.push(actor.spool_changed(now).unwrap());
                     }
                     Action::Steer { input, .. } => {
-                        assert!(input.ends_with('\n'), "one line");
-                        self.steered.push(serde_json::from_str(&input).unwrap());
+                        let Steering::Stdin(line) = input else {
+                            panic!("agy-acp is steered on its input: {input:?}");
+                        };
+                        assert!(line.ends_with('\n'), "one line");
+                        self.steered.push(serde_json::from_str(&line).unwrap());
                     }
                     Action::Stop { turn, .. } => self.stopped.push(turn.0),
                     Action::Follow { .. } => {}

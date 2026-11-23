@@ -977,9 +977,8 @@ fn a_command_begun_before_the_message_that_ends_after_it_is_no_read() {
     });
     let read = printed.at(|line| read_of(line) == Some("u-add"));
     let ended = printed.at(|line| line["params"]["update"]["status"] == "completed");
-    let first = printed.at(|line| {
-        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
-    });
+    let first =
+        printed.at(|line| line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk");
     assert!(ended < read && read + 1 == first, "{:?}", printed.seen);
     std::fs::write(place.dir.join("release-background"), "").unwrap();
     printed.until("the settled answer", |line| line["type"] == "result");
@@ -1005,9 +1004,8 @@ fn a_sentence_agy_goes_on_writing_after_the_hand_over_is_whole_before_the_read()
     });
     let rest = printed.at(|line| line["params"]["update"]["content"]["text"] == " 4 is 9");
     let read = printed.at(|line| read_of(line) == Some("u-add"));
-    let thought = printed.at(|line| {
-        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
-    });
+    let thought =
+        printed.at(|line| line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk");
     // "5 plus" and " 4 is 9" are one reply; the message is read after it, before the thought.
     assert!(rest < read && read + 1 == thought, "{:?}", printed.seen);
     std::fs::write(place.dir.join("release-sentence"), "").unwrap();

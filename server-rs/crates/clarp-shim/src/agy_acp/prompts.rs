@@ -339,10 +339,7 @@ impl Prompts<'_> {
                 {
                     result["usage"] = held.spent;
                 }
-                emit(&said(
-                    "prompted",
-                    json!({"uuid": tag, "result": result}),
-                ))?;
+                emit(&said("prompted", json!({"uuid": tag, "result": result})))?;
                 emit(&steer::settled_line(false, &text, &held.covers))?;
                 if stopped {
                     Outcome::Stopped

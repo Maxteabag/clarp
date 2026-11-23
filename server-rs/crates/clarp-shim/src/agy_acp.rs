@@ -634,12 +634,10 @@ fn open(
                     emit(&bound(id, false, &order.uuid))?;
                     Ok(Ok((id.to_string(), opened)))
                 }
-                None => {
-                    Ok(Err(failed(
-                        "session",
-                        &json!({"message": "Antigravity opened no conversation"}),
-                    )?))
-                }
+                None => Ok(Err(failed(
+                    "session",
+                    &json!({"message": "Antigravity opened no conversation"}),
+                )?)),
             }
         }
         Ok(Answer::Error(error)) => Ok(Err(failed(
@@ -869,7 +867,10 @@ mod tests {
             update("session_info_update", json!({})),
             update("available_commands_update", json!({})),
             update("config_option_update", json!({})),
-            update("tool_call_update", json!({"toolCallId": "t-old", "status": "completed"})),
+            update(
+                "tool_call_update",
+                json!({"toolCallId": "t-old", "status": "completed"}),
+            ),
             update("tool_call", json!({})),
         ] {
             assert!(!works(&by_itself, &seen), "{by_itself}");

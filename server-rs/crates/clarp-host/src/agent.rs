@@ -2979,23 +2979,23 @@ impl Worker {
         let can_offer_steering = (self.setup.backend.steers()
             || (self.setup.record.backend == "codex" && self.chat_lane()))
             && match &ask {
-            Ask::Send {
-                message,
-                admission,
-                reservation: None,
-                marks,
-                ..
-            } => {
-                let direct_user = *admission == Admission::Queue
-                    && message.origin.is_user_send()
-                    && marks.coordination.is_none();
-                let desk_relay = *admission == Admission::Later
-                    && marks.user_word
-                    && marks.coordination.is_some();
-                direct_user || desk_relay
-            }
-            _ => false,
-        };
+                Ask::Send {
+                    message,
+                    admission,
+                    reservation: None,
+                    marks,
+                    ..
+                } => {
+                    let direct_user = *admission == Admission::Queue
+                        && message.origin.is_user_send()
+                        && marks.coordination.is_none();
+                    let desk_relay = *admission == Admission::Later
+                        && marks.user_word
+                        && marks.coordination.is_some();
+                    direct_user || desk_relay
+                }
+                _ => false,
+            };
         if can_offer_steering && let Some(actor) = self.actor.as_mut() {
             // Read any input fence that reached the spool before this send, even if its
             // wakeup is still behind the send in the mailbox.
