@@ -133,7 +133,7 @@ rules(A,"desk",[
     ('if read.is_ok()', 'if read.is_err()', "discard every successful scheduled report"),
 ])
 rules("clarp-host/src/agent.rs","desk",[
-    ('pool.guard_turn(&mut order);','let _ = (&pool, &mut order);',"launch a provider without holding its login lock"),
+    ('                        runtime.block_on(launcher::gate_steering(&mut order, &versions));\n                        if let Some(pool) = pool {\n                            pool.guard_turn(&mut order);','                        runtime.block_on(launcher::gate_steering(&mut order, &versions));\n                        if let Some(pool) = pool {\n                            let _ = (&pool, &mut order);',"launch a provider without holding its login lock"),
 ])
 rules(M,"desk",[
     ('"reason":"switch_in_progress"','"reason":"no_accounts"',"mislabel a still-running switch"),
