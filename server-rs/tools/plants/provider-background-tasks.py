@@ -172,7 +172,7 @@ PLANTS=[
     ('clarp-host/src/joblog.rs', 'output', 'accept invalid metadata path components', 'filter(|name| valid_id(name))', 'filter(|_|true)'),
     ('clarp-host/src/edge.rs', 'host', 'cancel a provider job as an ordinary worker', '&& current.provider_owned()', '&& false'),
     ('clarp-host/src/edge.rs', 'host', 'claim the expected generation matches', '*generation != current.generation', 'false'),
-    ('clarp-host/src/agent.rs', 'host', 'omit managed Claude settings', '"--settings".into(), settings', '"--other-settings".into(),settings'),
+    ('clarp-host/src/agent.rs', 'host', 'omit managed Claude settings', "as a fork's are.\n                        crate::conversation_forks::add_settings(&mut order.args, &settings);", "as a fork's are.\n                        let _ = &settings;"),
     ('clarp-host/src/launcher.rs', 'host', 'register the wrong hook event', '"PreToolUse":[', '"PostToolUse":['),
     ('clarp-shim/src/main.rs', 'hook_binary', 'reject the largest permitted hook input', 'bytes.len() as u64 > MAX_INPUT', 'bytes.len() as u64>=MAX_INPUT'),
     ('clarp-shim/src/main.rs', 'hook_binary', 'accept an oversized hook input', 'bytes.len() as u64 > MAX_INPUT', 'false'),

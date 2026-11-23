@@ -94,7 +94,7 @@ for why,before,after in [
 
 for why,before,after in [
         ('long prompts use the wrong file flag','args.push("--prompt-file".into());','args.push("--wrong-file".into());'),
-        ('tool result text is discarded','call.output = Some(shorten(&text, 4000));','call.output = None;'),
+        ('tool result text is discarded','call.output = Some(shorten(&text, crate::TOOL_OUTPUT_KEPT));','call.output = None;'),
         ('a completed tool reports failure','call.status = if ok','call.status = if !ok'),
         ('resumed sessions are fresh','spec.backend_session.is_none(),','spec.backend_session.is_some(),')]:
     change(B,'host',why,before,after)
