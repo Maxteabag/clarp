@@ -126,6 +126,16 @@ pub fn state_name(kind: &AgentStateKind) -> String {
 }
 
 /// When the state an app shows began. An agent that never ran has been as it is since it was made.
+/// When what the agent does last changed: a running turn's last move, else the state's own
+/// time. The time of an activity, as the Python Host stamps a phase change; a turn that runs
+/// tools without one that runs now has not been quiet since it started.
+fn activity_since(record: &AgentRecord, status: &Status) -> i64 {
+    status.live.as_ref().map_or_else(
+        || state_since(record, status),
+        |live| live.moved_at_ms.max(live.started_at_ms),
+    )
+}
+
 pub(crate) fn state_since(record: &AgentRecord, status: &Status) -> i64 {
     match (&status.live, &status.last) {
         (Some(live), _) => live.started_at_ms,
@@ -655,7 +665,7 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "call_id": followed.map(|tool| &tool.id),
         "started_at_ms": followed.map(|tool| tool.started_at_ms),
         "turn_started_ms": running.map(|live| live.started_at_ms),
-        "ts": followed.map_or_else(|| state_since(record, status), |tool| tool.started_at_ms),
+        "ts": followed.map_or_else(|| activity_since(record, status), |tool| tool.started_at_ms),
     });
     // Who stopped or repaired the agent and why, while that is its latest state.
     let marked = match (&status.note, status.last.as_ref()) {
@@ -1971,7 +1981,9 @@ pub fn summary(
         json!({
             "state": state,
             "headline": headline,
-            "since_ms": tools.last().map_or(since, |tool| tool.started_at_ms),
+            "since_ms": tools
+                .last()
+                .map_or_else(|| activity_since(record, status), |tool| tool.started_at_ms),
             "turn_id": turn_id,
             "turn_started_ms": live.map(|live| live.started_at_ms),
             "running_tools": running_tools,
@@ -2253,6 +2265,22 @@ mod tests {
         assert_eq!(iso(-1), "1969-12-31T23:59:59.999Z");
     }
 
+    /// The time of an agent's activity is its turn's last move, not the start of the turn: a
+    /// turn that ran a tool every few seconds was read as quiet since it began. The chat's own
+    /// clock, what orders the list of chats, stays where it was.
+    #[test]
+    fn an_activity_is_as_new_as_the_turns_last_move() {
+        let mut moved = status(Some(Activity::Thinking), None);
+        if let Some(live) = moved.live.as_mut() {
+            live.moved_at_ms = 9_000;
+        }
+        assert_eq!(activity(&record(), &moved)["ts"], 9_000);
+        let row = summary(&record(), &moved, "agy", None, None, false);
+        assert_eq!(row["live_activity"]["since_ms"], 9_000);
+        assert_eq!(row["live_activity"]["turn_started_ms"], 5_000);
+        assert_eq!(row["last_activity"], 5_000);
+    }
+
     fn status(live: Option<Activity>, last: Option<Outcome>) -> Status {
         Status {
             moved: None,
@@ -2266,6 +2294,7 @@ mod tests {
                 starting: false,
                 activity,
                 started_at_ms: 5_000,
+                moved_at_ms: 5_000,
                 tool_count: 1,
                 tools: Vec::new(),
                 stopping: false,

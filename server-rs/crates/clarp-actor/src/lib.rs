@@ -538,6 +538,9 @@ pub struct LiveStatus {
     pub starting: bool,
     pub activity: Activity,
     pub started_at_ms: i64,
+    /// When the turn's activity last changed: its tool's last move, or its start before the
+    /// tool has said anything. A turn's `started_at_ms` is not when it last did something.
+    pub moved_at_ms: i64,
     pub tool_count: u32,
     /// The tool calls that run now, the one that started last at the end.
     pub tools: Vec<LiveTool>,
@@ -2124,6 +2127,7 @@ impl Actor {
                 starting: true,
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
+                moved_at_ms: turn.started_at_ms,
                 tool_count: turn.tool_count,
                 tools,
                 stopping,
@@ -2143,6 +2147,7 @@ impl Actor {
                 starting: false,
                 activity: turn.activity.clone(),
                 started_at_ms: turn.started_at_ms,
+                moved_at_ms: turn.moved_at_ms,
                 tool_count: turn.tool_count,
                 tools,
                 stopping,
@@ -2163,6 +2168,7 @@ impl Actor {
                 starting: false,
                 activity: Activity::Thinking,
                 started_at_ms: turn.started_at_ms,
+                moved_at_ms: turn.started_at_ms,
                 tool_count: turn.tool_count,
                 tools: Vec::new(),
                 stopping,

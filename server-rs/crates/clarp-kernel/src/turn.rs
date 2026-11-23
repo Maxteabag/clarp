@@ -400,6 +400,8 @@ pub struct Running {
     pub attempt: u32,
     pub backend_session: Option<String>,
     pub activity: Activity,
+    /// When the tool last said what it is doing (its last move): the time of its activity.
+    pub moved_at_ms: i64,
     pub tool_count: u32,
     pub account: AccountWaits,
     pub ran_before: bool,
@@ -569,6 +571,7 @@ impl Starting {
             attempt: self.attempt,
             backend_session: self.backend_session,
             activity: Activity::Thinking,
+            moved_at_ms: at_ms,
             tool_count: self.tool_count,
             account: self.account,
             ran_before: self.ran_before,
@@ -658,6 +661,7 @@ impl Running {
             self.tool_count = self.tool_count.saturating_add(1);
         }
         self.activity = activity.clone();
+        self.moved_at_ms = at_ms;
         (self, TurnEvent::Moved { activity, at_ms })
     }
 
@@ -1026,6 +1030,10 @@ mod tests {
         let (starting, started) = queued.start(1_100);
         assert_eq!(starting.attempt, 1);
         let (running, moved) = starting.running(1_200);
+        assert_eq!(
+            running.moved_at_ms, 1_200,
+            "its activity is as old as its start"
+        );
         let (running, bound) = running.bind("sess-1".to_string());
         let (running, tool) = running.moved(
             Activity::Tool {
@@ -1033,6 +1041,7 @@ mod tests {
             },
             1_250,
         );
+        assert_eq!(running.moved_at_ms, 1_250, "and as new as its last move");
         // The connection drops: the turn is not over.
         let (parked, dropped) = running.park(
             Wait::Retry { until_ms: 2_300 },
