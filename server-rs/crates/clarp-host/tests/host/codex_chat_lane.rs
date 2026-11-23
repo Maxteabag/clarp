@@ -98,6 +98,8 @@ for line in sys.stdin:
             else:
                 current = None
                 answer(turn_id, "reply-" + word)
+    elif method == "thread/backgroundTerminals/clean":
+        note("cleaned", thread)
     elif method == "turn/steer":
         if current is None or params["expectedTurnId"] != current:
             emit({"id": request_id, "error": {"code": -32600, "message": "no active turn to steer"}})
@@ -184,10 +186,14 @@ fn codex_chat_turns_run_on_one_lane_and_take_steered_words() {
         "the steered words never ran as a turn of their own"
     );
 
-    // The next turn reuses the lane. Each turn's tools found their own identity.
+    // The next turn reuses the lane. Each turn's tools found their own identity, and what
+    // Codex kept for each turn ended with it.
     host.send("lane", "next-message", "next");
     answered("reply-next-message");
     wait_for("the third turn to end", || host.state("lane") == "done");
+    wait_for("each turn's end to clean its commands", || {
+        read("cleaned").lines().count() == 3
+    });
     assert_eq!(read("launches"), "app-server\n");
     let tokens: Vec<String> = read("tokens").lines().map(str::to_owned).collect();
     assert_eq!(tokens.len(), 3, "{tokens:?}");

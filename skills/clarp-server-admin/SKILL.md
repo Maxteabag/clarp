@@ -275,6 +275,10 @@ codex_lane_idle_minutes = 15  # a lane with no turn and no running goal leaves
 codex_lane_most = 8           # live lanes kept; the longest idle one leaves first
 ```
 
+A command a lane turn started in the background ends with that turn, as with exec. Start
+something that must outlive the turn as a detached process (`setsid`, `nohup`), or as a
+tracked job (`clarp-background-jobs`).
+
 Turning it off is the rollback: each lane leaves before the agent's next exec
 turn, and exec continues the same Codex thread. A lane is
 `<run>/<agent>-cxg.sock`. Its `Inspect` shows the thread, the claim, the model and

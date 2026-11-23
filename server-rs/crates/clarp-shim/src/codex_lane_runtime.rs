@@ -767,17 +767,7 @@ impl Lane {
                 "turn/interrupt",
                 json!({"threadId": self.thread, "turnId": native}),
             );
-            // Codex ends the turn on an interrupt but leaves the commands it started running,
-            // as the thread's background terminals (seen by the timing harness on 23 Nov 2026:
-            // a stopped turn's `sleep 30` lived on in the idle lane). A Stop of an exec turn
-            // ends its whole group, so the lane ends them too. Not waited for: its reply is
-            // kept with the other stray replies.
-            if interrupted.is_ok() {
-                let _ = self.server.request(
-                    "thread/backgroundTerminals/clean",
-                    json!({"threadId": self.thread}),
-                );
-            }
+            // The turn's commands end with the turn's end (`end_terminals`).
             // Codex has the Stop's time to end the turn: at once when it did not answer.
             if self.holds(attempt) {
                 let grace = if interrupted.is_ok() {
@@ -998,6 +988,7 @@ impl Lane {
             && self.rejected_turn.as_deref() == params["turn"]["id"].as_str()
             && self.rejected_turn.take().is_some()
         {
+            self.end_terminals();
             self.show();
             return Ok(());
         }
@@ -1011,6 +1002,7 @@ impl Lane {
         };
         if self.slot.notification(method, params, now)? {
             self.clear_slot()?;
+            self.end_terminals();
         } else {
             self.hint();
         }
@@ -1018,6 +1010,22 @@ impl Lane {
             self.notice(&method, &params, None)?;
         }
         Ok(())
+    }
+
+    /// What Codex keeps for a turn ends with the turn, however it ended, as with exec: Codex
+    /// ends a turn but leaves the commands it started running as the thread's background
+    /// terminals (seen on 23 Nov 2026: a stopped turn's `sleep 30` lived on in the idle lane;
+    /// probed with 0.167.1, `thread/backgroundTerminals/clean` ends them within a second). A
+    /// process the agent detached itself is not one of them and is not touched (the lead's rule
+    /// of 23 Nov 2026, as for Antigravity). Not waited for: its reply is kept with the other
+    /// stray replies.
+    fn end_terminals(&mut self) {
+        if let Err(error) = self.server.request(
+            "thread/backgroundTerminals/clean",
+            json!({"threadId": self.thread}),
+        ) {
+            eprintln!("clarp-shim: Codex lane: a turn's commands were not ended: {error}");
+        }
     }
 
     fn reject_start(&mut self, native: &str) -> io::Result<()> {
