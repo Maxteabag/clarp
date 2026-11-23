@@ -248,7 +248,8 @@ case "$turn" in (*'"method":"turn/start"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' \
     '{"id":3,"result":{"turn":{"id":"t9"}}}' \
     '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t9"}}}'
-sleep 60 &
+# Codex runs a command in a group of its own: the kill must find it below Codex.
+setsid sleep 60 &
 echo $! > left-behind
 read -r interrupt
 case "$interrupt" in (*'"method":"turn/interrupt"'*'"turnId":"t9"'*) ;; (*) exit 1 ;; esac
@@ -408,4 +409,107 @@ fi
     assert!(lane.ended(Duration::from_secs(10)).success(), "the lane leaves");
     assert!(!claim.spool.exists(), "nothing of the attempt was taken");
     assert!(!lane.root.join("reached-codex").exists());
+}
+
+
+#[test]
+fn a_stop_ends_the_turns_long_command_and_the_lane_answers_the_next_turn() {
+    // Codex 0.167.1 ends the turn on turn/interrupt and leaves the command running as the
+    // thread's background terminal; thread/backgroundTerminals/clean ends it (23 Nov 2026).
+    // The stand-in does the same.
+    let fake = r#"#!/bin/sh
+set -eu
+here="$(dirname "$0")"
+read -r init
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+read -r resume
+printf '%s\n' '{"id":2,"result":{"thread":{"id":"old-thread"}}}'
+read -r turn
+printf '%s\n' \
+    '{"id":3,"result":{"turn":{"id":"t1"}}}' \
+    '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t1"}}}'
+setsid sleep 63 &
+echo $! > "$here/command"
+read -r interrupt
+case "$interrupt" in (*'"method":"turn/interrupt"'*'"turnId":"t1"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"id":4,"result":{}}' \
+    '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t1","status":"interrupted"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"old-thread"'*) ;; (*) exit 1 ;; esac
+kill "$(cat "$here/command")"
+printf '%s\n' '{"id":5,"result":{}}'
+read -r next
+case "$next" in (*'"method":"turn/start"'*'after the stop'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"id":6,"result":{"turn":{"id":"t2"}}}' \
+    '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t2"}}}' \
+    '{"method":"item/completed","params":{"threadId":"old-thread","turnId":"t2","item":{"type":"agentMessage","id":"a2","text":"still here"}}}' \
+    '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t2","status":"completed"}}}'
+read -r end || :
+"#;
+    let lane = Lane::start("codex-chat-command", fake, |root| {
+        json!({"threadId": "old-thread", "cwd": root})
+    });
+    let claim = lane.claim();
+    let prompt = |claim: &Claim, text: &str| {
+        ask(
+            &lane.socket,
+            &Request::Prompt {
+                claim: claim.clone(),
+                text: text.into(),
+                model: None,
+                effort: None,
+                token: None,
+            },
+        )
+    };
+    assert_eq!(prompt(&claim, "run something long")["ok"], true);
+    let command = lane.root.join("command");
+    let until = Instant::now() + Duration::from_secs(5);
+    while !command.exists() {
+        assert!(Instant::now() < until, "the command did not start");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pid = fs::read_to_string(&command).unwrap().trim().to_owned();
+
+    let grace = Duration::from_millis(2_000);
+    let stopped_at = Instant::now();
+    let stopped = ask(
+        &claim.socket,
+        &clarp_shim::Request::Stop {
+            grace_ms: u64::try_from(grace.as_millis()).unwrap(),
+        },
+    );
+    assert_eq!(stopped["ok"], true);
+    let (_, exit) = finished(&claim.spool);
+    assert_eq!(exit, (None, Some(2)), "the turn ended by its interrupt");
+    let alive = || {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        stat.rfind(')')
+            .and_then(|end| stat[end + 1..].split_whitespace().next())
+            .is_some_and(|state| state != "Z")
+    };
+    while alive() {
+        assert!(
+            stopped_at.elapsed() < grace,
+            "the stopped turn's command outlived the Stop's grace"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let next = Claim {
+        turn: 4,
+        attempt: 1,
+        spool: lane.root.join("next.jsonl"),
+        socket: lane.root.join("next.sock"),
+    };
+    assert_eq!(prompt(&next, "after the stop")["ok"], true);
+    let (output, exit) = finished(&next.spool);
+    assert!(
+        output.contains(&json!({"type":"item.completed","item":{"type":"agent_message","id":"a2","text":"still here"}})),
+        "{output:?}"
+    );
+    assert_eq!(exit, (Some(0), None));
 }
