@@ -35,6 +35,7 @@ pub mod lifecycle;
 mod live;
 mod queue;
 mod stop;
+mod transit;
 pub mod search;
 mod panels;
 pub mod profile;
@@ -140,6 +141,8 @@ pub enum Change {
     RosterFreshness,
     /// A chat's Stop line changed (`stop_notice`).
     Stopped(String),
+    /// A chat's backend change (its picker, options or move) changed.
+    Transit(String),
 }
 
 enum Message {
@@ -311,6 +314,7 @@ pub struct Engine {
     render_specs: render_spec::RenderSpecs,
     teams: teams::Teams,
     profile: profile::Profile,
+    transits: transit::Transits,
     avatars: avatars::Avatars,
     live: live::Live,
     form_events: FormEventStore,
@@ -453,6 +457,7 @@ impl Engine {
             render_specs: Default::default(),
             teams: Default::default(),
             profile: Default::default(),
+            transits: Default::default(),
             avatars: Default::default(),
             live: Default::default(),
             form_events: form_events::store(config.form_events.clone()),
@@ -1560,7 +1565,7 @@ impl Engine {
         if self.form_events_json(tag, object) {
             return;
         }
-        if self.lifecycle_json(tag, object) {
+        if self.lifecycle_json(tag, object) || self.transit_json(tag, object) {
             return;
         }
         if self.render_spec_json(tag, object) || self.panels_json(tag, object) {
@@ -1617,6 +1622,7 @@ impl Engine {
             self.coordination_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
+            self.transit_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
             for session in open {
                 self.live_chat_opened(&session);
@@ -1628,6 +1634,7 @@ impl Engine {
             }
             self.complete_snapshot_request();
             self.apply_snapshot(object);
+            self.transit_snapshot();
         } else if let Some(session) = tag.strip_prefix("log-tail:") {
             self.apply_log(session, object, LoadKind::Tail);
         } else if let Some(session) = tag.strip_prefix("log-replace:") {
@@ -1662,7 +1669,7 @@ impl Engine {
             }
             return;
         }
-        if self.lifecycle_failure(tag, message, status) {
+        if self.lifecycle_failure(tag, message, status) || self.transit_failure(tag, message, status) {
             return;
         }
         if self.render_spec_failure(tag, message, status) || self.panels_failure(tag, message, status) {
@@ -1835,6 +1842,7 @@ impl Engine {
                 }
             }
             "agent-focus" => self.mutate_roster(|r| r.apply_focus_event(event)),
+            "agent-transit" => self.transit_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
             "user-notification" => {
                 self.request_snapshot();

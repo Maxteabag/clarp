@@ -179,6 +179,48 @@ sys.path.insert(0, str(REPO / "server"))
 from lib.live_items import LiveView  # noqa: E402
 
 live_features = False
+# Changing an agent's backend (feature agent_backend_transit, #720): off
+# until /__control/transit turns it on. `options` is what
+# /agent-model-options?session= answers; `refuse` [status, body] answers the
+# next start; `hold` stops a move after translating until `release`; `fail`
+# ends it failed with that error. `states` holds each transit's latest state.
+transit = {"on": False, "options": None, "refuse": None, "hold": False, "fail": None, "delay": 0.15,
+           "states": {}, "requests": {}, "release": threading.Event()}
+
+
+def transit_announce(session, state):
+    broadcast(dict(state, type="agent-transit"))
+    broadcast({"type": "agent-roster", "kind": "agent-transit", "session": session})
+
+
+def transit_run(session, transit_id, same_backend):
+    """The Host's move as the agent's events show it (server-rs agent_transit.rs)."""
+    state = transit["states"][transit_id]
+    phases = ["switching"] if same_backend else ["reading", "translating", "registering", "switching"]
+    for phase in phases:
+        with state_lock:
+            state["phase"] = phase
+            for agent in agents:
+                if agent["session"] == session:
+                    agent["transit"] = {"transit_id": transit_id, "phase": phase, "backend": state["backend"], "model": state["model"]}
+        transit_announce(session, state)
+        time.sleep(transit["delay"])
+        if phase == "translating" and transit["hold"]:
+            transit["release"].wait(30)
+            transit["release"].clear()
+    with state_lock:
+        for agent in agents:
+            if agent["session"] != session:
+                continue
+            agent["transit"] = None
+            if transit["fail"]:
+                state.update(phase="failed", error=transit["fail"])
+            else:
+                agent["backend"], agent["model"] = state["backend"], state["model"]
+                state.update(phase="done", carried=None if same_backend else {"turns": 4, "user": 2, "assistant": 2, "omitted": 0})
+    transit_announce(session, state)
+
+
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
@@ -1157,6 +1199,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("hidden_coordination")
             if stall_feature:
                 features.append("stalled_turn")
+            if transit["on"]:
+                features.append("agent_backend_transit")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -1291,7 +1335,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/message-tool-details":
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
+            if transit["on"] and transit["options"] is not None and query.get("session"):
+                return self.reply(200, transit["options"])
             return self.reply(200, model_options)
+        if url.path == "/agent-transit":
+            state = transit["states"].get(query.get("transit_id", ""))
+            if not state or state["session"] != query.get("session"):
+                return self.reply(404, {"error": "unknown transit"})
+            return self.reply(200, state)
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
         if url.path.startswith("/static/avatars/") and (AVATAR_DIR / url.path.rsplit("/", 1)[1]).is_file():
@@ -1572,6 +1623,40 @@ class Handler(BaseHTTPRequestHandler):
                 for subscriber in list(subscribers):
                     subscriber.put(CLOSE)
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/transit":
+            # Test control: the backend change (see `transit`).
+            for key in ("on", "options", "refuse", "hold", "fail", "delay"):
+                if key in body:
+                    transit[key] = body[key]
+            if body.get("release"):
+                transit["release"].set()
+            return self.reply(200, {"ok": True})
+        if url.path == "/agent-transit":
+            record({"method": "POST", "path": url.path, "body": body})
+            if transit["refuse"]:
+                status, refusal = transit["refuse"]
+                transit["refuse"] = None
+                return self.reply(status, refusal)
+            session = body.get("session", "")
+            key = (session, body.get("request_id", ""))
+            if key[1] and key in transit["requests"]:
+                return self.reply(202, {"transit_id": transit["requests"][key]})
+            with state_lock:
+                agent = next((a for a in agents if a["session"] == session), None)
+                if agent is None:
+                    return self.reply(404, {"error": "no such agent"})
+                if agent.get("transit"):
+                    return self.reply(409, {"error": "transit_running"})
+                transit_id = f"t{len(transit['states']) + 1}"
+                same = body.get("backend") == agent.get("backend")
+                transit["states"][transit_id] = {
+                    "agent_id": agent["agent_id"], "session": session, "transit_id": transit_id,
+                    "backend": body.get("backend", ""), "model": body.get("model", ""),
+                    "phase": "switching" if same else "reading", "error": None, "carried": None,
+                    "previous_backend": agent.get("backend", ""), "previous_model": agent.get("model", "")}
+                transit["requests"][key] = transit_id
+            threading.Thread(target=transit_run, args=(session, transit_id, same), daemon=True).start()
+            return self.reply(202, {"transit_id": transit_id})
         global create_mode, next_create_response, pending_agents, stop_response
         if url.path == "/__control/stop":
             # Test control: what every following POST /stop answers.

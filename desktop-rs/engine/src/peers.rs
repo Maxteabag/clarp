@@ -500,6 +500,7 @@ impl Engine {
                     Change::Composer(s) => out.push(Change::Composer(q(s))),
                     Change::Queue(s) => out.push(Change::Queue(q(s))),
                     Change::Stopped(s) => out.push(Change::Stopped(q(s))),
+                    Change::Transit(s) => out.push(Change::Transit(q(s))),
                     Change::AgentMutated(s) => out.push(Change::AgentMutated(q(s))),
                     Change::AssignmentSucceeded(s) => out.push(Change::AssignmentSucceeded(q(s))),
                     Change::AssignmentRequested { session, automatic } => out.push(Change::AssignmentRequested { session: q(session), automatic }),

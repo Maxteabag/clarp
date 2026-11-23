@@ -36,6 +36,9 @@ pub struct Agent {
     pub team_ids: Vec<Value>,
     /// Empty unless the Host says this agent's provider cannot serve a turn.
     pub backend_quota: Object,
+    /// The roster row's `transit` while a backend change runs (Host feature
+    /// `agent_backend_transit`); empty otherwise and on older Hosts.
+    pub transit: Object,
     pub latest_state_timestamp: i64,
     /// When the running turn started (epoch ms, the Host's clock), from the
     /// snapshot's `turn_started_at`. None while idle, and on a Host too old
@@ -118,6 +121,7 @@ impl Default for Agent {
             mcp_servers: Vec::new(),
             team_ids: Vec::new(),
             backend_quota: Object::new(),
+            transit: Object::new(),
             latest_state_timestamp: 0,
             turn_started_at: None,
             stalled_since: None,
@@ -195,6 +199,7 @@ impl Agent {
             } else {
                 Object::new()
             },
+            transit: json::object(object, "transit"),
             latest_state_timestamp: i("latest_state_ts"),
             turn_started_at: object.get("turn_started_at").and_then(Value::as_i64).filter(|t| *t > 0),
             stalled_since: crate::stall::since(object),
