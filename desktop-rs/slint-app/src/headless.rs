@@ -139,6 +139,7 @@ impl Platform for Headless {
                     });
                 });
                 if drew {
+                    crate::scroll_journal::frame_drawn();
                     LAST_DRAWN.with(|l| l.set(Some(std::time::Instant::now())));
                 }
             }

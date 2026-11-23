@@ -1654,9 +1654,9 @@ impl Engine {
         if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) {
             return;
         }
-        if tag == "desktop-presence" || tag == "application-activity" {
-            // Older or offline Hosts ignore these optional leases: say so
-            // once, never as a chat error.
+        if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
+            // Older or offline Hosts ignore these optional leases and
+            // diagnostics: say so once, never as a chat error.
             if self.quiet_failures.insert(tag.to_owned()) {
                 eprintln!("Engine: {tag} is not accepted by this Host: {detail}");
             }

@@ -152,6 +152,12 @@ export global ScrollBook {
     callback relayout(string);
     // The row a distance from the chat's top falls on.
     pure callback row-at(string, length) -> int;
+    // The dashcam (scroll_journal.rs): what a chat would draw now, each
+    // time it changes: the pane, the row across its top (id and index),
+    // the offset, content and viewport heights, whether it follows, whether
+    // the reader is scrolling it and the row count. The app keeps what each
+    // drawn frame showed.
+    callback frame(string, string, int, length, length, length, bool, bool, int);
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.
@@ -1017,6 +1023,20 @@ export component Transcript inherits FocusScope {
     }
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
+    // What the chat would draw, for the dashcam (ScrollBook.frame).
+    property <{offset: length, content: length, viewport: length, top: string, top-index: int, follow: bool, reading: bool, rows: int}> shot: {
+        offset: list.content-y,
+        content: list.content-height,
+        viewport: list.visible-height,
+        top: root.top-index < root.rows.length ? root.rows[root.top-index].id : "",
+        top-index: root.top-index,
+        follow: root.follow,
+        reading: root.settling || root.dragging,
+        rows: root.rows.length,
+    };
+    changed shot => {
+        ScrollBook.frame(root.pane-id, root.shot.top, root.shot.top-index, root.shot.offset, root.shot.content, root.shot.viewport, root.shot.follow, root.shot.reading, root.shot.rows);
+    }
     list := ListView {
         scrolled => { root.reader-scrolled(); }
         width: parent.width;
@@ -1320,6 +1340,7 @@ export component Transcript inherits FocusScope {
     // or the top (load the page before) is decided once it has settled.
     function reader-scrolled() {
         ArtifactBridge.reader-moved();
+        root.journal("reader", list.content-y, list.content-y, root.place(), root.place(), list.content-height, list.visible-height, root.at-end, root.follow, root.rows.length);
         root.seeking-row = false;
         root.goal-ticks = 0;
         root.holding = false;

@@ -71,6 +71,17 @@ impl Engine {
         self.api.post_json("desktop-presence", "/desktop-presence", body, Some(std::time::Duration::from_secs(5)));
     }
 
+    /// One client event to the Host's /clog (the desktop's diagnostics, e.g.
+    /// the dashcam's `scroll_flash`): `level` "fault" is kept whatever the
+    /// Host's diagnostics setting.
+    pub fn report_client_event(&self, event: &str, level: &str, detail: serde_json::Value) {
+        if self.token.is_empty() {
+            return;
+        }
+        let body = serde_json::json!({"event": event, "level": level, "detail": detail});
+        self.api.post_json("client-event", "/clog", body, Some(std::time::Duration::from_secs(10)));
+    }
+
     pub fn report_application_activity(&self, instance: &str, sequence: u64, foreground: bool, input_age_ms: i64) {
         if self.token.is_empty() {
             return;
