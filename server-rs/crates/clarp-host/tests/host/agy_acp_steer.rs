@@ -169,8 +169,8 @@ fn a_message_reaches_a_running_antigravity_turn_when_antigravity_takes_it_up() {
                         .unwrap();
                     assert!(whole < read, "{rows:?}");
                     assert!(
-                        rows.iter().all(|row| row["text"] != "5 plus"
-                            && row["text"] != " 4 is 9"),
+                        rows.iter()
+                            .all(|row| row["text"] != "5 plus" && row["text"] != " 4 is 9"),
                         "{rows:?}"
                     );
                 }
