@@ -234,7 +234,7 @@ impl Launcher {
         if let Some(grace_ms) = starting.over()
             && matches!(launched, Launched::TurnTaken)
         {
-            ask_to_stop(&order.socket, grace_ms);
+            ask_to_stop_within(&order.socket, grace_ms, TAKEN_LISTENS_WITHIN);
         }
         launched
     }
@@ -246,7 +246,7 @@ impl Launcher {
                 follow(&order.socket, tell);
                 let _ = child.wait();
             }
-            Launched::TurnTaken => follow(&order.socket, tell),
+            Launched::TurnTaken => follow_taken(&order.socket, tell),
             Launched::SaidWhy => tell(Told::SpoolChanged),
             Launched::Failed(reason) | Launched::NoShim(reason) => tell(Told::Failed(reason)),
             // Nothing was started: the turn is gone at once, as one held for an account is.
@@ -266,10 +266,25 @@ pub(crate) async fn gate_steering(order: &mut ShimOrder, versions: &crate::cli_v
     }
 }
 
+/// How long a launch that found its turn taken waits for the shim that took it to listen.
+const TAKEN_LISTENS_WITHIN: Duration = Duration::from_secs(10);
+
 /// Follows the shim at this socket until it is gone: says when its spool may have grown, and
 /// at the end that nothing answers any more. Blocks for as long as the shim lives.
 pub fn follow(socket: &Path, tell: &dyn Fn(Told)) {
-    if let Ok(mut shim) = UnixStream::connect(socket) {
+    follow_within(socket, Duration::ZERO, tell);
+}
+
+/// Follows the shim that took a turn before this launch did (issue 726). That shim makes its
+/// spool before it listens, so it is waited for, for up to [`TAKEN_LISTENS_WITHIN`], before
+/// it is followed: the turn is not reported gone while its shim is still starting.
+pub fn follow_taken(socket: &Path, tell: &dyn Fn(Told)) {
+    follow_within(socket, TAKEN_LISTENS_WITHIN, tell);
+}
+
+/// [`follow`], when the shim may need up to `within` before it listens.
+fn follow_within(socket: &Path, within: Duration, tell: &dyn Fn(Told)) {
+    if let Some(mut shim) = connect_within(socket, within) {
         let asked = serde_json::to_string(&Request::Follow)
             .map(|line| shim.write_all(format!("{line}\n").as_bytes()).is_ok())
             .unwrap_or(false);
@@ -313,7 +328,12 @@ pub fn stop(socket: &Path, grace_ms: u64) {
 
 /// Sends a Stop to the shim at this socket, if one is there.
 fn ask_to_stop(socket: &Path, grace_ms: u64) {
-    let Ok(mut shim) = UnixStream::connect(socket) else {
+    ask_to_stop_within(socket, grace_ms, Duration::ZERO);
+}
+
+/// [`ask_to_stop`], when the shim may need up to `within` before it listens.
+fn ask_to_stop_within(socket: &Path, grace_ms: u64, within: Duration) {
+    let Some(mut shim) = connect_within(socket, within) else {
         return;
     };
     let _ = shim.set_read_timeout(Some(STOP_TIMEOUT));
@@ -324,6 +344,18 @@ fn ask_to_stop(socket: &Path, grace_ms: u64) {
     if shim.write_all(format!("{line}\n").as_bytes()).is_ok() {
         let mut reply = String::new();
         let _ = BufReader::new(shim).read_line(&mut reply);
+    }
+}
+
+/// A connection to the shim at this socket, once it listens: tried again for up to `within`.
+fn connect_within(socket: &Path, within: Duration) -> Option<UnixStream> {
+    let until = std::time::Instant::now() + within;
+    loop {
+        match UnixStream::connect(socket) {
+            Ok(shim) => return Some(shim),
+            Err(_) if std::time::Instant::now() < until => std::thread::sleep(STRIDE),
+            Err(_) => return None,
+        }
     }
 }
 
@@ -835,6 +867,28 @@ except socket.timeout:
         };
         assert!(child.wait().unwrap().success());
         assert!(again.read("asked").is_empty(), "nothing asked it to stop");
+    }
+
+    #[test]
+    fn a_launch_that_finds_its_turn_taken_follows_the_shim_that_took_it_once_it_listens() {
+        // The shim that took the turn made its spool, and listens two seconds later (726).
+        let first = StandIn::new("taken-first", 2.0, None);
+        let launch = first.launch_in_background(&Starting::default());
+        let mut second = StandIn::new("taken-second", 0.0, Some(EXIT_TURN_TAKEN));
+        second.order.socket = first.order.socket.clone();
+        let told = Mutex::new(Vec::new());
+        second
+            .launcher
+            .launch_and_follow(&second.order, &Starting::default(), &|what| {
+                told.lock().unwrap().push(what);
+            });
+        let asked = first.read("asked");
+        assert_eq!(asked.len(), 1, "the first shim was followed: {asked:?}");
+        assert_eq!(told.lock().unwrap().last(), Some(&Told::Gone));
+        let Launched::Ready(mut child) = launch.join().unwrap() else {
+            panic!("the first stand-in was to say it is ready");
+        };
+        assert!(child.wait().unwrap().success());
     }
 
     #[test]

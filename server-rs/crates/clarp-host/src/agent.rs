@@ -4206,7 +4206,7 @@ impl Worker {
                                         return;
                                     }
                                     Launched::TurnTaken => {
-                                        crate::launcher::follow(&order.socket, &|told| {
+                                        crate::launcher::follow_taken(&order.socket, &|told| {
                                             tell(&tx, turn, attempt, told)
                                         });
                                         return;
