@@ -1209,7 +1209,7 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     // Job monitors stop their workers on exit 1. Only a valid Host answer may name
     // a terminal or superseded job. A failure to get that answer leaves it unknown.
     let job_active = name == "clarp-agent-bg" && argv.get(1).is_some_and(|arg| arg == "job-active");
-    let only_reads = reads_only(&name, &argv);
+    let wait_limit = wait_ends(&name, &argv);
     let unavailable = |why: String| ToolOutcome {
         exit: if job_active { 2 } else { 69 },
         stdout: String::new(),
@@ -1354,7 +1354,8 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     }
     let mut retries = if tell_user { 6 } else { 0 };
     let mut delay = Duration::from_secs(1);
-    // Since when the Host has not answered a tool that only reads.
+    // Since when the Host has not answered a wait for a card's answer.
+    let began = std::time::Instant::now();
     let mut unanswered_since: Option<std::time::Instant> = None;
     loop {
         let result = post(&address, "/tools/run", token, &asked);
@@ -1372,7 +1373,8 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
         if !retryable {
             unanswered_since = None;
         } else if asks_again(
-            only_reads,
+            wait_limit,
+            began.elapsed(),
             unanswered_since
                 .get_or_insert_with(std::time::Instant::now)
                 .elapsed(),
@@ -1418,21 +1420,38 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     }
 }
 
-/// How long a tool that only reads asks again a Host that does not answer: a release restarts
-/// the Host, and it is away for seconds.
+/// How long a wait for a card's answer asks again a Host that does not answer: a release
+/// restarts the Host, and it is away for seconds.
 const RESTART_GRACE: Duration = Duration::from_secs(120);
 
-/// Whether a tool call only reads, so that asking it again changes nothing: a wait for the
-/// answer of a card, whose every ask carries the time it began ([`crate::artifact_tool`]). A
-/// ring is not: asked again after a restart, it would ring once more.
-fn reads_only(name: &str, argv: &[String]) -> bool {
-    name == "clarp-agent-artifacts" && argv.first().is_some_and(|arg| arg == "wait")
+/// How long a wait for a card's answer lasts by its own `--timeout` (600 seconds unless given,
+/// as the Host reads it): such a wait only reads, and every ask carries the time it began
+/// ([`crate::artifact_tool`]), so asking it again changes nothing. `None` for every other
+/// call, which is never asked again: a ring, for one, lives in the Host's memory, and asked
+/// again after a restart it would be refused as a call already made, or placed once more.
+fn wait_ends(name: &str, argv: &[String]) -> Option<Duration> {
+    if name != "clarp-agent-artifacts" || argv.first().is_none_or(|arg| arg != "wait") {
+        return None;
+    }
+    let mut seconds = 600;
+    let mut args = argv.iter();
+    while let Some(arg) = args.next() {
+        let given = match arg.strip_prefix("--timeout=") {
+            Some(value) => Some(value),
+            None if arg == "--timeout" => args.next().map(String::as_str),
+            None => None,
+        };
+        if let Some(value) = given.and_then(|value| value.trim().parse::<u64>().ok()) {
+            seconds = value.max(1);
+        }
+    }
+    Some(Duration::from_secs(seconds))
 }
 
-/// Whether a call the Host did not answer is asked again: one that only reads, while the Host
-/// has been away for less than [`RESTART_GRACE`].
-fn asks_again(reads_only: bool, away_for: Duration) -> bool {
-    reads_only && away_for < RESTART_GRACE
+/// Whether a call the Host did not answer is asked again: a wait for a card's answer that has
+/// time left of its own, while the Host has been away for less than [`RESTART_GRACE`].
+fn asks_again(wait_limit: Option<Duration>, waited: Duration, away_for: Duration) -> bool {
+    wait_limit.is_some_and(|limit| waited < limit) && away_for < RESTART_GRACE
 }
 
 /// `clarp-host peer`: names another Host for the running Host, lists the ones it knows, or
@@ -1686,26 +1705,41 @@ mod tests {
                 .map(|arg| (*arg).to_string())
                 .collect::<Vec<_>>()
         };
-        let wait = args(&["wait", "card-1", "--timeout", "300"]);
-        assert!(reads_only("clarp-agent-artifacts", &wait));
-        assert!(!reads_only(
-            "clarp-agent-artifacts",
-            &args(&["input", "s", "t", "q"])
-        ));
-        assert!(!reads_only(
-            "clarp-admin",
-            &args(&["call", "ring", "oak", "--wait"])
-        ));
-        assert!(!reads_only("clarp-agent-artifacts", &[]));
-        assert!(asks_again(true, Duration::ZERO));
-        assert!(asks_again(true, RESTART_GRACE - Duration::from_secs(1)));
+        let wait = |list: &[&str]| wait_ends("clarp-agent-artifacts", &args(list));
+        let minutes = |count: u64| Some(Duration::from_secs(count * 60));
+        assert_eq!(wait(&["wait", "card-1", "--timeout", "300"]), minutes(5));
+        assert_eq!(wait(&["wait", "card-1", "--timeout=60"]), minutes(1));
+        assert_eq!(
+            wait(&["wait", "card-1"]),
+            minutes(10),
+            "the Host's own default"
+        );
+        assert_eq!(
+            wait(&["input", "s", "t", "q"]),
+            None,
+            "a card is never made twice"
+        );
+        assert_eq!(wait(&[]), None);
+        let ring = args(&["call", "ring", "--wait", "--reason", "x"]);
+        assert_eq!(
+            wait_ends("clarp-admin", &ring),
+            None,
+            "a ring is never asked again"
+        );
+        let second = Duration::from_secs(1);
+        assert!(asks_again(minutes(5), Duration::ZERO, Duration::ZERO));
+        assert!(asks_again(minutes(5), 60 * second, RESTART_GRACE - second));
         assert!(
-            !asks_again(true, RESTART_GRACE),
+            !asks_again(minutes(5), 60 * second, RESTART_GRACE),
             "a Host away this long is down"
         );
         assert!(
-            !asks_again(false, Duration::ZERO),
-            "a ring asked again would ring again"
+            !asks_again(minutes(1), 60 * second, Duration::ZERO),
+            "the wait's own time is up"
+        );
+        assert!(
+            !asks_again(None, Duration::ZERO, Duration::ZERO),
+            "not a wait"
         );
     }
 
