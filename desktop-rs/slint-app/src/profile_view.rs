@@ -532,6 +532,16 @@ struct Picker {
     choices: Vec<TransitChoice>,
 }
 
+/// The chat header's "Moving to …" while the agent changes backend (#723),
+/// the words the profile's Backend row shows; empty otherwise. The roster
+/// row's `transit` drives it (also a move another app started), and it
+/// clears when the move is done or failed.
+pub(crate) fn moving_line(engine: &clarp_engine::Engine, session: &str) -> String {
+    let Some(agent) = engine.roster().find(session) else { return String::new() };
+    let row = backend_row(engine, session, &agent.name, &agent.backend, &agent.model);
+    if row.moving { row.detail } else { String::new() }
+}
+
 /// The Backend row and its picker, from the agent's roster row, its flow and
 /// the options the Host offered it. Nothing without the feature.
 fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend: &str, model: &str) -> BackendRow {

@@ -486,6 +486,7 @@ impl App {
         // "Moved to …" (#651, Host contract 125).
         view.host = engine.host_badge(session).into();
         view.moved = agent.map(clarp_core::all_hosts::moved_line).unwrap_or_default().into();
+        view.moving = crate::profile_view::moving_line(engine, session).into();
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
@@ -1103,7 +1104,7 @@ impl App {
             window.set_workspaces(ModelRc::new(VecModel::from(tabs)));
             window.set_save_warning(engine.panes().workspace_save_warning().into());
         }
-        let everything = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster | Change::Selection | Change::Panes));
+        let everything = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster | Change::Selection | Change::Panes | Change::Profile));
         let mut panes = std::mem::take(&mut *self.pane_state.borrow_mut());
         for pane in &mut panes {
             let session = pane.session.clone();

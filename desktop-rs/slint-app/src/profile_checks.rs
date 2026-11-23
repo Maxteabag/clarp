@@ -603,6 +603,15 @@ pub(super) fn backend_row_check(out: String) {
             headless::press(Key::Return);
             true
         })),
+        ("moving header", Box::new(|_, window, _| {
+            // The open chat's header says the move too, as on iOS (#723).
+            let moving = window.get_panes().iter().find(|p| p.session == "rachel").map(|p| p.moving.to_string()).unwrap_or_default();
+            if moving.is_empty() {
+                return false;
+            }
+            check(moving.starts_with("Moving to Codex"), &format!("the chat header says the move: {moving:?}"));
+            true
+        })),
         ("moved", Box::new(move |app, window, elapsed| {
             let (info, step, _) = backend_now(window);
             let engine = app.engine.borrow();
@@ -617,6 +626,8 @@ pub(super) fn backend_row_check(out: String) {
             check(body["session"] == "rachel" && body["backend"] == "codex" && body["model"] == "gpt-5.5" && body["request_id"].as_str().is_some_and(|r| !r.is_empty()) && body.get("effort").is_none(),
                 &format!("Move starts it with a request id: {body}"));
             check(step.is_empty() && info.backend_value == "Codex · GPT-5.5" && info.backend_detail.is_empty(), &format!("the row lands on the moved agent: {:?} {:?}", info.backend_value, info.backend_detail));
+            let header = window.get_panes().iter().find(|p| p.session == "rachel").map(|p| p.moving.to_string()).unwrap_or_default();
+            check(header.is_empty(), &format!("and the header's moving line clears: {header:?}"));
             let rows: Vec<&str> = engine.conversation("rachel").map(|c| c.rows().iter().map(|r| r.text.as_str()).collect()).unwrap_or_default();
             check(rows.contains(&"Hello") && rows.contains(&"Now on Codex · GPT-5.5. The conversation came along."), &format!("the chat keeps its rows and gains the Host's one line: {rows:?}"));
             check(rows.iter().filter(|r| r.starts_with("Now on")).count() == 1, "the app adds no line of its own");

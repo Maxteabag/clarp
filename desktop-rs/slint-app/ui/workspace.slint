@@ -91,6 +91,8 @@ export struct PaneView {
     // status line).
     host: string,
     moved: string,
+    // "Moving to Codex… Starting" while the agent changes backend (#723).
+    moving: string,
     default-effort: string,
     busy: bool,
     // "Working…" under the transcript (Show when ready, agent working).
@@ -495,6 +497,7 @@ export component Pane inherits Rectangle {
             info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
                 : (root.pane.host != "" ? root.pane.host + "  ·  " : "")
                 + (root.pane.moved != "" ? root.pane.moved + "  ·  " : "")
+                + (root.pane.moving != "" ? root.pane.moving + "  ·  " : "")
                 + (root.pane.workspace-label != "" ? root.pane.workspace-label + "  ·  " : "")
                 + (root.pane.status != "" ? root.pane.status + "  ·  " : "")
                 + (root.pane.model != "" ? root.pane.model : "model not reported")

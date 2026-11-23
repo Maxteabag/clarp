@@ -282,7 +282,7 @@ export component AgentProfile inherits Modal {
                     title: "BACKEND";
                     HorizontalLayout {
                         spacing: 8px;
-                        Text { text: "Backend"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                        // The card's title already says BACKEND (#724): the row is the value alone, as on iOS.
                         Text {
                             text: root.info.backend-value;
                             color: root.info.backend-enabled ? Palette.text : Palette.muted;

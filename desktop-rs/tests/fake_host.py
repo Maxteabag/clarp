@@ -225,7 +225,9 @@ def run_transit(transit_id, session, backend, model, fail):
         state["phase"] = phase
         transit["states"][transit_id] = dict(state)
         broadcast({"type": "agent-transit", **state})
-        time.sleep(0.05)
+        # Long enough for a check to see the move running (the chat header's
+        # "Moving to …", #723).
+        time.sleep(0.15)
     label, model_label = transit_label(backend, model)
     old_label, old_model = transit_label(*before)
     with state_lock:
