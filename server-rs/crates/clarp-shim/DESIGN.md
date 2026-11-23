@@ -399,6 +399,23 @@ account:
   - the turn file is not cleared when a turn ends (decision 3 as written);
   - a paused goal keeps its lane from leaving by idle.
 
+## Measured on a real lane (turn-timings preview, 23 Nov 2026)
+
+Codex 0.167.1 with the owner's Codex configuration, on the 30e9df83c build:
+- **Idle memory.** RSS is 214 to 273 MiB per idle lane (PSS 83 to 142), and the shim is 4 MiB.
+  So `codex_lane_most = 8` allows up to about 2 GiB RSS of idle lanes. The MCP server (exa) is
+  remote: it has no process of its own.
+- **Launch.** Send to `turn.started` takes 0.01 s on a warm lane, 0.53 s on a cold one, and
+  0.95 s with exec.
+- **Steering.** `steer.read` comes 0.01 s after the send.
+
+The lead keeps 8 lanes and 15 minutes for now. The preview found that a Stop left the turn's
+command running: Codex ends the turn on `turn/interrupt` and keeps the command as the
+thread's background terminal. Since 466caed53 the lane sends
+`thread/backgroundTerminals/clean` after the interrupt, which a probe of 0.167.1 showed ends
+the command within a second. Since e26f873f1, the lane also ends the process groups below
+Codex when it kills Codex or leaves, because Codex runs each command in a group of its own.
+
 ## Decisions (the lead, 23 Nov 2026)
 
 1. `codex_chat_lane` lands off. It is turned on for both Rust Hosts after the harness's before
