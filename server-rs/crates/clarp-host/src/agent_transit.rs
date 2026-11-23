@@ -83,6 +83,9 @@ pub struct Change {
     pub budget: usize,
     /// What stands for the older part of the conversation where it does not all fit.
     pub summary: Option<transit::Summary>,
+    /// The new tool keeps its conversations where the old one did ([`clarp_backend::same_store`]):
+    /// the agent goes on in the same conversation, and nothing is carried.
+    pub same_store: bool,
     pub progress: Progress,
 }
 
@@ -167,6 +170,9 @@ pub(crate) fn carry(
 ) -> Result<(Result<Changed, Refused>, Outputs), ActorError> {
     if let Some((live, waiting)) = actor.busy_for_change() {
         return Ok((Err(Refused::Busy { live, waiting }), Outputs::default()));
+    }
+    if change.same_store {
+        return in_the_same_store(actor, change, now_ms);
     }
     let mut said = actor.said_so_far(CARRIED_MOST.min(change.budget))?;
     // Claude keeps whole the results the Host kept only the start of.
@@ -268,6 +274,43 @@ pub(crate) fn carry(
             }
             Err(error)
         }
+    }
+}
+
+/// A move between two tools of one store (`agy` and `agy-acp`): the agent keeps the tool's
+/// own conversation, and its next turn continues it natively. Nothing is read or written. Should
+/// the tool no longer have it, the next turn finds so (`keeps`, or the tool's own answer that it
+/// does not know it, which marks it), and the turn after begins anew with the Host's record.
+fn in_the_same_store(
+    actor: &mut Actor,
+    change: &Change,
+    now_ms: i64,
+) -> Result<(Result<Changed, Refused>, Outputs), ActorError> {
+    change.progress.tell("translating");
+    let session = actor.status().backend_session;
+    change.progress.tell("registering");
+    change.progress.tell("switching");
+    let (backend, model) = &change.shown_as;
+    let row = format!("Now on {backend} · {model}. The same conversation goes on.");
+    match actor.change_tool(&change.backend, session.clone(), None, &row, now_ms)? {
+        (Ok(()), out) => {
+            let changed = Changed {
+                backend_session: session,
+                carried: 0,
+                user: 0,
+                assistant: 0,
+                omitted: 0,
+                summary: None,
+            };
+            Ok((Ok(changed), out))
+        }
+        (Err(why), _) => Ok((
+            Err(Refused::Failed {
+                stage: "switching",
+                why,
+            }),
+            Outputs::default(),
+        )),
     }
 }
 
@@ -715,7 +758,13 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
         }))
     };
     let budget = budget_of(&goal.backend, &goal.model);
-    let summary = summarized(app, member, &goal, budget).await;
+    // A tool of the same store goes on in the same conversation: there is nothing to summarize.
+    let same_store = clarp_backend::same_store(&before.backend, &goal.backend);
+    let summary = if same_store {
+        None
+    } else {
+        summarized(app, member, &goal, budget).await
+    };
     let change = Change {
         backend: goal.backend.clone(),
         model: goal.model.clone(),
@@ -725,6 +774,7 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
         shown_from: goal.shown.old_backend.clone(),
         budget,
         summary,
+        same_store,
         progress,
     };
     let carried = match member.agent.change_tool(change).await {

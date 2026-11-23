@@ -373,6 +373,18 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
     }
 }
 
+/// The program whose store a backend keeps its conversations in: the one it runs through, else
+/// its own. `None` for no backend of this Host.
+pub fn store_of(id: &str) -> Option<&'static str> {
+    by_id(id).map(|backend| backend.runs_through().unwrap_or(backend.id()))
+}
+
+/// Whether two backends are one program with one store of conversations (`agy` and
+/// `agy-acp`): a move between them keeps the tool's own conversation and carries nothing.
+pub fn same_store(from: &str, to: &str) -> bool {
+    from != to && store_of(from).is_some_and(|store| store_of(to) == Some(store))
+}
+
 /// The context window of the backend with this name, when it declares one.
 pub fn context_window(id: &str) -> Option<u64> {
     by_id(id).and_then(|backend| backend.context_window())
@@ -479,6 +491,22 @@ mod tests {
         assert_eq!(efforts("agy-acp"), efforts("agy"));
         assert_eq!(by_id("scripted").unwrap().id(), "scripted");
         assert!(by_id("nobody").is_none());
+    }
+
+    #[test]
+    fn antigravity_and_antigravity_over_acp_keep_one_store() {
+        assert!(same_store("agy", "agy-acp") && same_store("agy-acp", "agy"));
+        assert!(same_store("opencode", "deepseek"));
+        for (from, to) in [
+            ("agy", "agy"),
+            ("agy", "claude"),
+            ("agy-acp", "codex"),
+            ("agy", "nobody"),
+        ] {
+            assert!(!same_store(from, to), "{from} -> {to}");
+        }
+        assert_eq!(store_of("agy-acp"), Some("agy"));
+        assert_eq!(store_of("nobody"), None);
     }
 
     #[test]
