@@ -298,7 +298,7 @@ for line in sys.stdin:
         count += 1
         turn_id = f"t{count}"
         note("turns", word)
-        note("turn-models", f"{word} {params.get('model')}")
+        note("turn-models", f"{word} {params.get('model')} {params.get('effort')}")
         result = {"turn": {"id": turn_id}}
         stopped = threading.Event()
         with state:
@@ -460,6 +460,12 @@ fn a_stop_interrupts_the_lane_turn_at_once_and_the_next_message_runs_on_the_same
     let socket = lane_agent(&host, &place, "stopper");
     asked(&host, "stopper", "ask-first");
 
+    // Every turn's end cleans what Codex kept for it: the first turn's clean is in before
+    // the Stop's is counted.
+    wait_for("the first turn's end to clean its commands", || {
+        noted(&place, "cleaned").lines().count() == 1
+    });
+    let cleaned = noted(&place, "cleaned").lines().count();
     host.send("stopper", "hold-stop", "hold");
     wait_for("the held turn", || place.root.join("holding-stop").exists());
     let began = Instant::now();
@@ -478,8 +484,8 @@ fn a_stop_interrupts_the_lane_turn_at_once_and_the_next_message_runs_on_the_same
         "the held turn was interrupted"
     );
     assert_eq!(answers(&host, "stopper", "said-hold-stop"), 0);
-    wait_for("each turn's end to clean its commands", || {
-        noted(&place, "cleaned").lines().count() == 2
+    wait_for("the stopped turn's end to clean its commands", || {
+        noted(&place, "cleaned").lines().count() == cleaned + 1
     });
     assert!(
         lane_lives(&socket),
@@ -532,7 +538,7 @@ fn a_lane_turn_held_through_a_host_restart_is_answered_once() {
     host.kill();
     let host = start_lane_host(&place, &world);
     wait_for("the second turn rejoined", || {
-        host.state("keeper") != "done"
+        host.state("keeper") == "thinking"
     });
     std::fs::write(place.root.join("release-up"), "").unwrap();
     wait_for("the answer given after the restart", || {
@@ -578,16 +584,18 @@ fn an_idle_lane_leaves_after_its_time_and_the_next_turn_starts_another_on_the_sa
     let host = start_lane_host(&place, &world);
     let socket = lane_agent(&host, &place, "idler");
     asked(&host, "idler", "ask-first");
-    let idle_from = Instant::now();
     let seen = lane_said(&socket, "inspect").expect("the lane answers after its turn");
     assert!(seen["state"]["claim"].is_null(), "{seen}");
-    assert!(seen["state"]["idle_ms"].is_u64(), "{seen}");
+    // The lane went idle when its turn ended, before the Host showed the turn done: it says
+    // for how long.
+    let idle_ms = seen["state"]["idle_ms"].as_u64().expect("the lane says how long it is idle");
+    let idle_from = Instant::now() - Duration::from_millis(idle_ms);
 
     wait_within("the idle lane to leave", Duration::from_secs(120), || {
         !lane_lives(&socket)
     });
     assert!(
-        idle_from.elapsed() >= Duration::from_secs(55),
+        idle_from.elapsed() >= Duration::from_secs(59),
         "the lane stayed for its idle time: it left after {:?}",
         idle_from.elapsed()
     );
@@ -685,12 +693,15 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
     let socket = lane_agent(&host, &place, "tuner");
     asked(&host, "tuner", "ask-one");
     let first = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
-    let models = || -> Vec<String> {
+    // What each turn asked Codex for: its word, model and effort, as the stand-in noted them.
+    let asked_for = |field: usize| -> Vec<String> {
         noted(&place, "turn-models")
             .lines()
-            .map(|line| line.split_once(' ').unwrap().1.to_owned())
+            .map(|line| line.split(' ').nth(field).unwrap().to_owned())
             .collect()
     };
+    let models = || asked_for(1);
+    let efforts = || asked_for(2);
 
     let tuned = host.post(
         "/agent-llm",
@@ -729,6 +740,33 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
         models()
     );
     assert_eq!(noted(&place, "turns"), "ask-one\nask-two\nask-three\n");
+
+    // An effort is given with each turn, so setting one keeps the lane. Clearing it does not:
+    // the options are the same, but Codex would keep the effort an earlier turn gave it, so
+    // the lane starts again for the turn that asks for the default.
+    let effort = host.post("/agent-llm", json!({"session": "tuner", "effort": "high"}));
+    assert_eq!(effort["effort"], "high", "{effort}");
+    asked(&host, "tuner", "ask-four");
+    assert_eq!(
+        lane_said(&socket, "inspect").unwrap()["state"]["instance"],
+        third,
+        "a turn's effort needs no new lane"
+    );
+    assert_eq!(efforts()[3], "high");
+    let cleared = host.post("/agent-llm", json!({"session": "tuner", "effort": null}));
+    assert_ne!(cleared["effort"], "high", "{cleared}");
+    asked(&host, "tuner", "ask-five");
+    assert_ne!(
+        lane_said(&socket, "inspect").unwrap()["state"]["instance"],
+        third,
+        "the lane was started again for the default effort"
+    );
+    assert_eq!(noted(&place, "launches").lines().count(), 4);
+    assert_eq!(efforts()[4], efforts()[0], "{:?}", efforts());
+    assert_eq!(
+        noted(&place, "turns"),
+        "ask-one\nask-two\nask-three\nask-four\nask-five\n"
+    );
 }
 
 /// Whether a process runs: it is there and has not ended (an ended child its parent has not
