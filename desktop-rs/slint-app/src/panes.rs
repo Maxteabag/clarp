@@ -36,7 +36,7 @@ pub struct PaneState {
     book: crate::scroll_book::HeightBook,
     /// The presentation settings the rows were last presented with; a
     /// preference change re-presents only when these moved.
-    presented_with: Option<(i32, bool, bool, bool)>,
+    presented_with: Option<(i32, bool, bool, bool, bool)>,
     pub report: Report,
     pub draft: String,
     draft_set: i32,
@@ -575,15 +575,20 @@ impl App {
         // its tools) the item rows show instead.
         // Finished turns fold the same way (§7.6): their rows show as the
         // fold, their tools as its rows.
-        let (live, history) = {
+        let (live, history, projection) = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
             let expanded = self.expanded.borrow();
             let live = crate::live_view::present(&engine, &pane.session, &rows, &expanded);
             let history = crate::live_view::history(&engine, &pane.session, &rows, &expanded, live.as_ref());
-            (live, history)
+            // Conversation view (#702): the session rows leave the chat.
+            let projection = crate::live_view::projection(&engine, &pane.session, &rows, &expanded);
+            (live, history, projection)
         };
         let mut hide = history.hidden_rows.clone();
+        if let Some(projection) = &projection {
+            hide.extend(projection.hidden.iter().cloned());
+        }
         let mut strip = history.stripped_calls.clone();
         if let Some(live) = &live {
             hide.extend(live.absorbed_rows.iter().chain(&live.hidden_rows).cloned());
@@ -763,18 +768,30 @@ impl App {
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
+        // A reply that opens its turn's work (Conversation view, #702):
+        // its Show work / Hide work, drawn again when it opens or folds.
+        if let Some(projection) = &projection {
+            for (shown, row) in fresh.iter_mut().zip(rows.iter_mut()) {
+                if let Some((words, key)) = projection.work_item(&shown.0.message.id) {
+                    row.work_key = key.into();
+                    row.work_open = words == clarp_core::chat_view::HIDE_WORK;
+                    shown.2.push_str(if row.work_open { "|work:open" } else { "|work" });
+                }
+            }
+        }
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
         crate::scroll_book::measure_soon();
     }
 
     /// What a transcript's rows depend on among the preferences.
-    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool) {
+    fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool, bool) {
         let engine = self.engine.borrow();
         // The quiet line where agent messages were (#653) is drawn or not.
         let line = engine.chat_hidden_coordination(session) && engine.settings().boolean(crate::catalogue::COORDINATION_LINE, true);
-        // The chat's own Tool activity (#653), else the global one.
-        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line)
+        // The chat's own Tool activity (#653), else the global one; and its
+        // view (#702), which the snapshot (its Host's value) may change.
+        (engine.chat_activity_mode(session), engine.show_when_ready(), self.prefs.borrow().timestamps, line, engine.chat_in_conversation(session))
     }
 
     /// Puts the live rows where the turn happened (`Presented::anchors`):
@@ -1047,7 +1064,7 @@ impl App {
             let fresh = rebound.contains(&pane.id);
             // A preference re-presents a transcript only when one its rows
             // depend on changed (the theme, voice and the rest do not).
-            let preference = changes.contains(&Change::Preferences) && pane.presented_with != Some(presentation);
+            let preference = (changes.contains(&Change::Preferences) || changes.contains(&Change::Roster)) && pane.presented_with != Some(presentation);
             let conversation = fresh
                 || preference
                 || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) | Change::Live(s) if *s == session));

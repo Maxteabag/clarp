@@ -479,9 +479,14 @@ impl Engine {
         }
         let mut out = Vec::new();
         let mut identified = Vec::new();
+        let mut chat_views = Vec::new();
         let badges = self.peers.badges;
         for (index, peer) in self.peers.list.iter_mut().enumerate() {
-            for change in peer.engine.pump() {
+            let changes = peer.engine.pump();
+            // What the peer's Host said of a chat's view: the primary keeps it.
+            let outcomes = peer.engine.take_chat_view_outcomes();
+            chat_views.extend(Engine::qualify_chat_view_outcomes(outcomes, &peer.server_id));
+            for change in changes {
                 if change == Change::ServerInfo {
                     let (id, name) = (peer.engine.server_id().to_owned(), peer.engine.server_name().to_owned());
                     if peer.label.is_empty() || peer.label == peer.url {
@@ -519,6 +524,7 @@ impl Engine {
             }
         }
         self.changes.extend(out);
+        self.settle_chat_views(chat_views);
         for index in identified {
             self.peer_identified(index);
         }

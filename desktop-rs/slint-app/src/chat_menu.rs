@@ -4,7 +4,9 @@
 //! choice, `POST /agent-coordination`). Both are in the chat's "⋯" menu on
 //! its pane's frame, each a submenu showing its current value, and in its
 //! profile. The menu also opens the agent's artifacts (its profile's
-//! Artifacts).
+//! Artifacts). On a Host with `chat_view` (#702) it holds the chat's view
+//! too (Follow Settings, Conversation, Session), and leaves Tool activity
+//! out in Conversation view, where it does not apply.
 
 use clarp_engine::Engine;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -51,6 +53,13 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     menu.set_coordination_choices(choices(&COORDINATION, &coordination));
     menu.set_coordination_label(SharedString::from(coordination_label(&coordination)));
     menu.set_coordination_shown(engine.chat_hidden_coordination(session));
+    // The chat's view (#702) on a Host that offers it; Tool activity only
+    // in Session view.
+    let view = engine.chat_view_menu_value(session);
+    menu.set_view_shown(engine.chat_view_feature(session));
+    menu.set_view_choices(choices(&clarp_core::chat_view::MENU, view));
+    menu.set_view_label(SharedString::from(clarp_core::chat_view::menu_label(view)));
+    menu.set_activity_shown(!engine.chat_in_conversation(session));
 }
 
 /// Opens (or closes again) the menu of pane `pane_id`.
@@ -84,6 +93,7 @@ pub fn pick(app: &App, window: &AppWindow, submenu: &str, value: &str) {
         match submenu {
             "activity" => set_activity(&mut app.engine.borrow_mut(), &session, value),
             "coordination" => app.engine.borrow_mut().set_chat_coordination(&session, value),
+            "view" => app.engine.borrow_mut().choose_chat_view_menu(&session, value),
             _ => {}
         }
     }

@@ -215,6 +215,9 @@ fn state(name: &str) -> Vec<Binding> {
             b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], "Balance panes", false, Always, false),
             // Slint's rich text cannot be selected: the chat as plain text.
             b("select-text", &["V"], "Select text", false, Agent, false),
+            // Conversation or Session view of the chat (#702), on a Host
+            // with `chat_view`: the other one, as the chat's own choice.
+            b("chat-view", &["C"], "Conversation / Session", false, Agent, false),
         ],
         "sidebar" => vec![
             b("agent-next", &["J", "Down"], "Next", false, Rows, false),

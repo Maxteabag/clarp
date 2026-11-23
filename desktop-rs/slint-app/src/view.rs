@@ -692,6 +692,8 @@ pub(crate) fn message_row(
             line: p.line.into(),
             expanded: prompt_open,
         }),
+        work_key: SharedString::new(),
+        work_open: false,
     }
 }
 

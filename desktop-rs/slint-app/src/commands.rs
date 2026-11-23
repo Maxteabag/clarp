@@ -397,6 +397,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "escape" if crate::mention_view::is_open(app) => crate::mention_view::dismiss_active(app),
         // V in the chat: the whole loaded chat as plain text to select from.
         "select-text" => crate::select_text::open_conversation(app, window),
+        // The open chat's other view (#702); nothing on a Host without it.
+        "chat-view" => {
+            let session = app.active_session();
+            if !app.engine.borrow_mut().toggle_chat_view(&session) {
+                return false;
+            }
+        }
         // Ctrl+F: message search, in the switcher.
         "search-messages" => {
             open_switcher(app, window);

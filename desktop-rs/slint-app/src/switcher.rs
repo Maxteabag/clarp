@@ -127,6 +127,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("recent-agents", "Ctrl+R"),
         ("search-messages", "Ctrl+F"),
         ("select-text", "V"),
+        ("chat-view", "C"),
         ("refresh", "F5"),
         ("refresh-agents", "Shift+F5"),
         ("overview", "Ctrl+Shift+O"),

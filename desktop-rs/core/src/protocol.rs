@@ -83,6 +83,9 @@ pub struct Agent {
     /// it follows the Host).
     pub coordination_visibility: String,
     pub coordination_override: String,
+    /// The chat's view as its Host keeps it (`chat_view`, issue 702):
+    /// `conversation` or `session`; empty from a Host without the feature.
+    pub chat_view: String,
     /// The `server_id` of the Host this agent moved to (`moved.to.id`), or
     /// empty: a merged list leaves the row out when that Host is in it.
     pub moved_to: String,
@@ -145,6 +148,7 @@ impl Default for Agent {
             quiet: false,
             coordination_visibility: String::new(),
             coordination_override: String::new(),
+            chat_view: String::new(),
             moved_to: String::new(),
             moved_to_host: String::new(),
             host: String::new(),
@@ -219,6 +223,7 @@ impl Agent {
             unread: false,
             coordination_visibility: object.get("coordination_visibility").and_then(Value::as_str).unwrap_or_default().to_owned(),
             coordination_override: object.get("coordination_override").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            chat_view: object.get("chat_view").and_then(Value::as_str).unwrap_or_default().to_owned(),
             moved_to: object
                 .get("moved")
                 .and_then(|m| m.get("to"))
@@ -334,6 +339,12 @@ pub struct Message {
     /// Rows the Host left out before this one (`hidden_coordination`):
     /// `{messages, exchanges, agents, capped}`.
     pub hidden_before: Option<Object>,
+    /// Which view of the chat the row belongs to (`chat_view`, issue 702):
+    /// `conversation` or `session`; empty from a Host without the feature.
+    pub view: String,
+    /// On a turn's anchor row (`chat_view`): how many of the turn's rows
+    /// the Conversation view leaves out.
+    pub session_rows: Option<i64>,
     pub category: String,
     pub activity_status: String,
     pub activity_match_key: String,
@@ -383,6 +394,8 @@ impl Message {
             phase: s("phase"),
             turn: object.get("turn").and_then(Value::as_object).cloned(),
             hidden_before: object.get("hidden_before").and_then(Value::as_object).cloned(),
+            view: s("view"),
+            session_rows: object.get("session_rows").and_then(Value::as_i64),
             category,
             revision: json::integer(object, "revision"),
             activity_count: json::integer(object, "activity_count") as i32,

@@ -26,6 +26,7 @@ pub mod blocks;
 mod composer;
 mod connection;
 mod coordination;
+mod chat_view;
 mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
 mod voice;
@@ -269,6 +270,7 @@ pub struct Engine {
     catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     coordination: coordination::Coordination,
+    chat_view: chat_view::ChatViews,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -422,6 +424,7 @@ impl Engine {
             catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
             coordination: coordination::Coordination::default(),
+            chat_view: chat_view::ChatViews::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -506,6 +509,10 @@ impl Engine {
                 Message::PeerCredential { base, token, generation } => self.peer_credential(&base, token, generation),
                 Message::PeersDue(generation) => self.peers_due(generation),
             }
+        }
+        if !self.peer {
+            let outcomes = self.take_chat_view_outcomes();
+            self.settle_chat_views(outcomes);
         }
         self.pump_peers();
         let mut changes = std::mem::take(&mut self.changes);
@@ -1595,7 +1602,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.coordination_json(tag, object) {
+        if self.live_json(tag, object) || self.coordination_json(tag, object) || self.chat_view_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1615,6 +1622,7 @@ impl Engine {
             self.live_server_info(object);
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
             self.coordination_server_info(object);
+            self.chat_view_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1651,7 +1659,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) || self.chat_view_failure(tag, &detail) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
@@ -1790,7 +1798,10 @@ impl Engine {
                     self.with_conversation(&session, |c| c.set_voice_error(&message));
                 }
             }
-            "agent-roster" => self.request_snapshot(),
+            "agent-roster" => {
+                self.chat_view_roster(event);
+                self.request_snapshot();
+            }
             "delivery-updated" => {
                 // F4: a send's delivery state changed without a new revision;
                 // the hint carries no state, so re-read the chat's tail.

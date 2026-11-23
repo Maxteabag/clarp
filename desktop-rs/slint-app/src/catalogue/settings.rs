@@ -98,6 +98,17 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Conversation and Session views (#702): this device shows every
+        // chat without its own choice in Conversation view. Listed while a
+        // Host read offers `chat_view`.
+        Setting::toggle(
+            e("clean-chat", clarp_core::chat_view::CLEAN_CHAT, "chats", clarp_core::chat_view::CLEAN_CHAT_DETAIL, &["conversation view", "session view", "chat view", "clean", "show work"]),
+            "CHATS",
+            |app| app.engine.borrow().clean_chat(),
+            |app, _, on| app.engine.borrow_mut().set_clean_chat(on),
+        )
+        .default("off")
+        .when(|app| app.engine.borrow().chat_view_offered()),
         // Coordination between agents (`hidden_coordination`, #653): the
         // Host's own setting, written only when the reader flips it.
         Setting::toggle(

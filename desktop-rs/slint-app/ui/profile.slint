@@ -40,6 +40,12 @@ export struct ProfileInfo {
     agent-messages-shown: bool,
     agent-messages-index: int,
     tool-activity-index: int,
+    // The chat's view (#702), on a Host with `chat_view`: 0 Follow
+    // Settings, 1 Conversation, 2 Session. Tool activity applies in
+    // Session view only.
+    chat-view-shown: bool,
+    chat-view-index: int,
+    tool-activity-applies: bool,
     error: string,
 }
 
@@ -104,6 +110,8 @@ export global ProfileBridge {
     // Bumped to bring the profile's Artifacts into view.
     in-out property <int> artifacts-request;
     callback set-tool-activity(int);
+    callback set-chat-view(int);
+    in property <[string]> chat-view-choices: ["Follow Settings", "Conversation", "Session"];
     in property <[string]> agent-message-choices: ["Follow Settings", "Show", "Hide"];
     in property <[string]> tool-activity-choices: ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"];
     callback set-mcp(string, bool);
@@ -330,6 +338,17 @@ export component AgentProfile inherits Modal {
                 }
                 Card {
                     title: "THIS CHAT";
+                    if root.info.chat-view-shown: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.chat-view-choices;
+                            current-index: root.info.chat-view-index;
+                            accessible-label: "Chat view";
+                            selected => { ProfileBridge.set-chat-view(self.current-index); }
+                        }
+                    }
                     if root.info.agent-messages-shown: HorizontalLayout {
                         spacing: 8px;
                         Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
@@ -348,6 +367,7 @@ export component AgentProfile inherits Modal {
                             horizontal-stretch: 1;
                             model: ProfileBridge.tool-activity-choices;
                             current-index: root.info.tool-activity-index;
+                            enabled: root.info.tool-activity-applies;
                             accessible-label: "Tool activity";
                             selected => { ProfileBridge.set-tool-activity(self.current-index); }
                         }

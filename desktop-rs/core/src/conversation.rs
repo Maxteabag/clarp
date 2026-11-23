@@ -843,6 +843,7 @@ pub fn message_to_json(message: &Message) -> Value {
         "tool_details_available": message.tool_details_available,
         "delivery_failed": message.delivery_failed, "tools": message.tools,
         "display_cells": message.display_cells, "hidden_before": message.hidden_before,
+        "view": message.view, "session_rows": message.session_rows,
     })
 }
 

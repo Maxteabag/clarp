@@ -191,6 +191,27 @@ tool_explanation_settings = {"enabled": True, "detail_level": 2}
 # Coordination between agents (feature hidden_coordination, Host contract
 # 120): off until a check turns it on; the Host's value, and each chat's own.
 coordination = {"on": False, "visibility": "hide", "overrides": {}}
+# Conversation and Session views (feature chat_view, Rust Host contract 145,
+# issue 702): off until a check turns it on; each agent's value (default
+# session), and whether writes are refused (403 agents_may_not).
+chat_views = {"on": False, "values": {}, "refuse": False}
+
+
+def row_view(row):
+    """The view a /log row belongs to, as the Host tags it (docs/protocol.md
+    "Conversation and session views"); a row that says its own keeps it."""
+    if row.get("view"):
+        return row["view"]
+    if row.get("audience") == "agents":
+        return "session"
+    if row.get("role") == "user":
+        own = row.get("origin") in (None, "", "user", "oracle") and not row.get("sender_agent_id")
+        return "conversation" if own else "session"
+    if row.get("kind") == "note" or row.get("session_rows") is not None:
+        return "conversation"
+    if row.get("role") == "assistant" and row.get("phase") == "final" and not row.get("tool_name") and not row.get("tools"):
+        return "conversation"
+    return "session"
 
 
 def coordination_effective(session):
@@ -1155,6 +1176,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if coordination["on"]:
                 features.append("hidden_coordination")
+            if chat_views["on"]:
+                features.append("chat_view")
             if stall_feature:
                 features.append("stalled_turn")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
@@ -1174,6 +1197,11 @@ class Handler(BaseHTTPRequestHandler):
                     for agent in agents:
                         agent["coordination_visibility"] = coordination_effective(agent["session"])
                         agent["coordination_override"] = coordination["overrides"].get(agent["session"])
+                for agent in agents:
+                    if chat_views["on"]:
+                        agent["chat_view"] = chat_views["values"].get(agent["session"], "session")
+                    else:
+                        agent.pop("chat_view", None)
                 return self.reply(200, {"agents": agents, "personas": personas,
                                         "tool_explanations": tool_explanation_settings,
                                         "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
@@ -1410,6 +1438,8 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int(query.get("limit", "0") or 0)
                     if limit and len(chosen) > limit:
                         chosen, more = chosen[:limit], True
+            if chat_views["on"]:
+                chosen = [dict(t, view=row_view(t)) for t in chosen]
             answer = {"conversation_id": cid, "turns": chosen, "latest_revision": latest, "has_more": more, "missing": False}
             if echo is not None:
                 answer["coordination"] = echo
@@ -1778,6 +1808,28 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "agent-roster", "kind": "coordination-changed"})
             return self.reply(200, {"ok": True, "session": session, "coordination_visibility": coordination_effective(session),
                                     "coordination_override": coordination["overrides"].get(session)})
+        if url.path == "/__control/chat-view":
+            # Test control: the chat_view feature on or off (read from
+            # /server-info on connecting), writes refused or not, and another
+            # device's choice for a session (`set`: {session, chat_view}),
+            # broadcast as the Host does.
+            chat_views["on"] = bool(body.get("on", chat_views["on"]))
+            chat_views["refuse"] = bool(body.get("refuse", False))
+            chosen = body.get("set")
+            if chosen:
+                chat_views["values"][chosen["session"]] = chosen["chat_view"]
+                broadcast({"type": "agent-roster", "kind": "chat_view", "session": chosen["session"], "chat_view": chosen["chat_view"]})
+            return self.reply(200, {"ok": True})
+        if url.path == "/agent-chat-view":
+            record({"method": "POST", "path": url.path, "body": body})
+            session, value = body.get("session", ""), body.get("chat_view", "")
+            if chat_views["refuse"]:
+                return self.reply(403, {"error": "agents_may_not"})
+            if value not in ("conversation", "session"):
+                return self.reply(400, {"error": "chat_view must be one of: conversation, session"})
+            chat_views["values"][session] = value
+            broadcast({"type": "agent-roster", "kind": "chat_view", "session": session, "chat_view": value})
+            return self.reply(200, {"ok": True, "session": session, "chat_view": value})
         if url.path == "/__control/turn-summary":
             # Test control: the log_turn_summary feature on or off (read from
             # /server-info on connecting). Rows carry trace_id, phase and turn

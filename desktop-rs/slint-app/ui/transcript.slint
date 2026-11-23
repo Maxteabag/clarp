@@ -131,6 +131,12 @@ export struct MessageRow {
     live: LiveRow,
     receipt: ReceiptRow,
     prompt: PromptRow,
+    // Conversation view (chat_view, #702): the key of the finished turn's
+    // work this reply opens ("" for none), and whether it is open. Its
+    // Show work / Hide work is the button beside Copy, and O once J/K
+    // reached the reply.
+    work-key: string,
+    work-open: bool,
 }
 
 // A row handed to the transcript to measure off screen, and the batch it
@@ -783,7 +789,9 @@ component TranscriptRow inherits HorizontalLayout {
         accessible-role: list-item;
         accessible-id: root.measuring ? "" : "row:" + root.message.id;
         background: root.marked ? Palette.accent.with-alpha(0.14) : root.message.author == "user" && root.message.receipt.key == "" ? Palette.bubble : transparent;
-        border-width: root.marked ? 2px : 0px;
+        // J/K reached a reply that opens its turn's work (#702): ringed.
+        property <bool> work-selected: root.message.work-key != "" && !root.measuring && ArtifactBridge.cursor == root.message.work-key;
+        border-width: root.marked ? 2px : self.work-selected ? 1px : 0px;
         border-color: Palette.accent;
         border-radius: Look.radius / 3;
         max-width: root.message.author == "user" ? Math.min(root.lane, root.list-width * Look.bubble-share) : root.lane;
@@ -809,6 +817,33 @@ component TranscriptRow inherits HorizontalLayout {
             accessible-label: "Copy message";
             Image { source: @image-url("icons/copy.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
+        }
+        // Conversation view (#702): the reply's Show work / Hide work, as the
+        // phones' long-press menu offers it; shown on hover, while J/K are
+        // on the reply and while its work is open. Its turn's work opens in
+        // place, as the Session view draws it.
+        if root.message.work-key != "" && !root.measuring: Rectangle {
+            x: parent.width - 64px * ChatText.scale;
+            y: 2px;
+            width: 18px * ChatText.scale;
+            height: 18px * ChatText.scale;
+            accessible-role: button;
+            accessible-id: "show-work:" + root.message.id;
+            accessible-label: root.message.work-open ? "Hide work" : "Show work";
+            accessible-action-default => { ArtifactBridge.open(root.message.work-key); }
+            if hover.has-hover || work-touch.has-hover || bubble.work-selected || root.message.work-open: Image {
+                source: @image-url("icons/work.svg");
+                width: 14px * ChatText.scale;
+                height: 14px * ChatText.scale;
+                colorize: root.message.work-open || work-touch.has-hover ? Palette.accent : Palette.faint;
+            }
+            work-touch := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.open(root.message.work-key); } }
+        }
+        // Reports where it is, as a card does, so J/K reach the reply.
+        Timer {
+            interval: 150ms;
+            running: root.message.work-key != "" && !root.measuring;
+            triggered => { ArtifactBridge.card-shown(root.message.work-key, bubble.absolute-position.x, bubble.absolute-position.y, bubble.width, bubble.height, root.view-top, root.view-bottom); }
         }
         // Next to it: the message as plain text to select from. Its icon is
         // made only while the message is hovered (no layer per row for a

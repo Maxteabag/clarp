@@ -38,6 +38,13 @@ export global ChatMenu {
     in property <string> activity-label;
     in property <[ChatChoice]> coordination-choices;
     in property <[ChatChoice]> activity-choices;
+    // The chat's view (#702), on a Host with `chat_view`: Follow Settings,
+    // Conversation or Session. Tool activity applies in Session view only,
+    // so the menu leaves it out in Conversation view.
+    in property <bool> view-shown;
+    in property <string> view-label;
+    in property <[ChatChoice]> view-choices;
+    in property <bool> activity-shown: true;
     callback opened(string);
     callback pick(string, string);
     // Opens the chat's agent's artifacts (its profile's Artifacts).
@@ -535,13 +542,19 @@ export component Pane inherits Rectangle {
             TouchArea { }
             menu-list := VerticalLayout {
                 padding: 3px;
+                if ChatMenu.submenu == "" && ChatMenu.view-shown: ChatMenuItem {
+                    id: "chat-menu-view";
+                    text: "Chat view";
+                    value: ChatMenu.view-label;
+                    clicked => { ChatMenu.submenu = "view"; }
+                }
                 if ChatMenu.submenu == "" && ChatMenu.coordination-shown: ChatMenuItem {
                     id: "chat-menu-coordination";
                     text: "Messages between agents";
                     value: ChatMenu.coordination-label;
                     clicked => { ChatMenu.submenu = "coordination"; }
                 }
-                if ChatMenu.submenu == "": ChatMenuItem {
+                if ChatMenu.submenu == "" && ChatMenu.activity-shown: ChatMenuItem {
                     id: "chat-menu-activity";
                     text: "Tool activity";
                     value: ChatMenu.activity-label;
@@ -559,6 +572,13 @@ export component Pane inherits Rectangle {
                         id: "chat-menu-coordination:" + choice.value;
                         text: (choice.current ? "✓  " : "     ") + choice.label;
                         clicked => { ChatMenu.pick("coordination", choice.value); }
+                    }
+                }
+                if ChatMenu.submenu == "view": VerticalLayout {
+                    for choice in ChatMenu.view-choices: ChatMenuItem {
+                        id: "chat-menu-view:" + choice.value;
+                        text: (choice.current ? "✓  " : "     ") + choice.label;
+                        clicked => { ChatMenu.pick("view", choice.value); }
                     }
                 }
                 if ChatMenu.submenu == "activity": VerticalLayout {

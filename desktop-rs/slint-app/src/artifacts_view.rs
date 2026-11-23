@@ -1314,6 +1314,10 @@ pub fn selectables(app: &App) -> Vec<String> {
         if !row.prompt.key.is_empty() {
             ids.push(row.prompt.key.to_string());
         }
+        // A reply that opens its turn's work (Conversation view, #702).
+        if !row.work_key.is_empty() {
+            ids.push(row.work_key.to_string());
+        }
     }
     ids
 }
@@ -1356,7 +1360,7 @@ pub const COORDINATION_PREFIX: &str = "live:coordination:";
 /// A live item row or another agent's prompt: O (or a click) opens and
 /// folds it.
 fn toggles(id: &str) -> bool {
-    id.starts_with("live:") || id.starts_with(clarp_core::agent_prompt::PREFIX)
+    id.starts_with("live:") || id.starts_with(clarp_core::agent_prompt::PREFIX) || id.starts_with(clarp_core::chat_view::WORK_PREFIX)
 }
 
 /// O on a live item row or a prompt (or a click): opens or folds it, kept
@@ -1371,14 +1375,22 @@ pub fn toggle_live(app: &App, key: &str) {
         app.refresh(&[Change::Conversation(session)]);
         return;
     }
+    let conversation = app.engine.borrow().chat_in_conversation(&app.active_session());
     {
         let mut expanded = app.expanded.borrow_mut();
-        if !expanded.remove(key) {
+        // Conversation view (#702): the opened work row of a turn whose
+        // work was shown from its reply folds it again: Hide work.
+        let work = key.strip_prefix("live:fold:").filter(|_| conversation).map(clarp_core::chat_view::work_key);
+        if let Some(work) = work.filter(|w| expanded.contains(w)) {
+            expanded.remove(&work);
+            expanded.remove(key);
+            *app.artifact_cursor.borrow_mut() = work;
+        } else if !expanded.remove(key) {
             expanded.insert(key.to_owned());
         }
     }
     let session = app.active_session();
-    app.refresh(&[Change::Live(session), Change::Updates]);
+    app.refresh(&[Change::Live(session.clone()), Change::Conversation(session), Change::Updates]);
 }
 
 /// The receipt `key` in the open chat.
