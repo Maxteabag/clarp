@@ -648,7 +648,9 @@ fn a_shim_that_cannot_be_started_leaves_the_turn_waiting_with_the_reason() {
         .launch_failed(TurnId(1), 1, "clarp-shim: no such file", now)
         .unwrap();
     assert!(out.actions.is_empty());
-    let parked = actor.status().live.unwrap().parked.unwrap();
+    let live = actor.status().live.unwrap();
+    assert_eq!(live.moved_at_ms, now, "it changed when it began to wait");
+    let parked = live.parked.unwrap();
     assert_eq!(
         (parked.kind.as_str(), parked.reason.as_str()),
         ("not_started", "clarp-shim: no such file")

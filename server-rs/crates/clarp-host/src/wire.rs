@@ -125,10 +125,10 @@ pub fn state_name(kind: &AgentStateKind) -> String {
         .unwrap_or_else(|| "idle".to_string())
 }
 
-/// When the state an app shows began. An agent that never ran has been as it is since it was made.
-/// When what the agent does last changed: a running turn's last move, else the state's own
-/// time. The time of an activity, as the Python Host stamps a phase change; a turn that runs
-/// tools without one that runs now has not been quiet since it started.
+/// When what the agent does last changed: a live turn's last change (a move, a wait begun, an
+/// attempt begun), else the state's own time. The time of an activity, as the Python Host
+/// stamps a phase change; a turn that runs tools without one that runs now has not been quiet
+/// since it started.
 fn activity_since(record: &AgentRecord, status: &Status) -> i64 {
     status.live.as_ref().map_or_else(
         || state_since(record, status),
@@ -136,6 +136,22 @@ fn activity_since(record: &AgentRecord, status: &Status) -> i64 {
     )
 }
 
+/// The one time an agent's state and its activity are stamped with, as the Python Host stamps
+/// both with the time of the same change. The apps keep the newest of the two and drop what is
+/// older, so they must never disagree, and a note on the state never makes it go back.
+fn state_stamp(record: &AgentRecord, status: &Status) -> i64 {
+    // A tool that started with no move of its own (a second one of the same name) is a change
+    // too: the state is as new as the newest tool, as the Python Host stamps a tool's row.
+    let newest_tool = status
+        .live
+        .as_ref()
+        .and_then(|live| live.tools.last())
+        .map_or(i64::MIN, |tool| tool.started_at_ms);
+    let at = activity_since(record, status).max(newest_tool);
+    status.note.as_ref().map_or(at, |note| note.at_ms.max(at))
+}
+
+/// When the state an app shows began. An agent that never ran has been as it is since it was made.
 pub(crate) fn state_since(record: &AgentRecord, status: &Status) -> i64 {
     match (&status.live, &status.last) {
         (Some(live), _) => live.started_at_ms,
@@ -461,7 +477,7 @@ pub fn state(
         "session": record.session,
         "persona": record.persona,
         "kind": state_name(&kind),
-        "ts": status.note.as_ref().map_or_else(|| state_since(record, status), |note| note.at_ms),
+        "ts": state_stamp(record, status),
         "detail": detail,
         "status_text": status.label,
     })
@@ -665,7 +681,7 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "call_id": followed.map(|tool| &tool.id),
         "started_at_ms": followed.map(|tool| tool.started_at_ms),
         "turn_started_ms": running.map(|live| live.started_at_ms),
-        "ts": followed.map_or_else(|| activity_since(record, status), |tool| tool.started_at_ms),
+        "ts": state_stamp(record, status),
     });
     // Who stopped or repaired the agent and why, while that is its latest state.
     let marked = match (&status.note, status.last.as_ref()) {
@@ -2052,7 +2068,7 @@ pub fn summary(
         "busy": live.is_some(),
         "focused": focused,
         "latest_state": state_name(&kind),
-        "latest_state_ts": since,
+        "latest_state_ts": state_stamp(record, status),
         "turn_started_at": turn_started_at,
         "last_activity": since,
         // When a turn last ran to its end: a turn that failed or was stopped since does not
@@ -2279,6 +2295,26 @@ mod tests {
         assert_eq!(row["live_activity"]["since_ms"], 9_000);
         assert_eq!(row["live_activity"]["turn_started_ms"], 5_000);
         assert_eq!(row["last_activity"], 5_000);
+        // One stamp for the state and its activity: an app that keeps the newest of the two
+        // and drops what is older drops neither.
+        assert_eq!(state(&record(), &moved, "claude", None)["ts"], 9_000);
+        assert_eq!(row["latest_state_ts"], 9_000);
+        // A tool that started after the last move, with no move of its own: both are as new
+        // as the tool.
+        if let Some(live) = moved.live.as_mut() {
+            live.tools = vec![LiveTool {
+                id: "c-2".to_string(),
+                name: "Bash".to_string(),
+                category: "exec",
+                label: "npm test".to_string(),
+                action: "running command".to_string(),
+                summary: "Run the tests".to_string(),
+                file_path: String::new(),
+                started_at_ms: 12_000,
+            }];
+        }
+        assert_eq!(activity(&record(), &moved)["ts"], 12_000);
+        assert_eq!(state(&record(), &moved, "claude", None)["ts"], 12_000);
     }
 
     fn status(live: Option<Activity>, last: Option<Outcome>) -> Status {

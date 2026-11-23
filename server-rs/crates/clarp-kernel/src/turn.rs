@@ -387,6 +387,8 @@ pub struct Starting {
     pub recovering: bool,
     /// An earlier attempt reached its tool.
     pub ran_before: bool,
+    /// When the turn last changed: its start, or when this attempt began after a wait.
+    pub moved_at_ms: i64,
 }
 
 /// A turn whose tool process is working.
@@ -530,6 +532,7 @@ impl Queued {
             account: AccountWaits::default(),
             recovering: false,
             ran_before: false,
+            moved_at_ms: at_ms,
         };
         (
             next,
@@ -744,6 +747,7 @@ impl Parked {
             account: self.account,
             recovering: self.wait.is_for_an_account(),
             ran_before: self.ran,
+            moved_at_ms: at_ms,
         };
         (next, TurnEvent::Retried { at_ms })
     }
@@ -1042,6 +1046,12 @@ mod tests {
             1_250,
         );
         assert_eq!(running.moved_at_ms, 1_250, "and as new as its last move");
+        // A Host that starts again rebuilds the same time from the log.
+        let replayed = Turn::replay([&accepted, &started, &moved, &bound, &tool]).unwrap();
+        assert!(
+            matches!(&replayed, Some(Turn::Running(again)) if again.moved_at_ms == 1_250),
+            "{replayed:?}"
+        );
         // The connection drops: the turn is not over.
         let (parked, dropped) = running.park(
             Wait::Retry { until_ms: 2_300 },
@@ -1062,6 +1072,10 @@ mod tests {
         assert_eq!(
             (again.attempt, again.started_at_ms, again.tool_count),
             (2, 1_100, 1)
+        );
+        assert_eq!(
+            again.moved_at_ms, 2_300,
+            "a new attempt is a change, never a step back"
         );
         assert_eq!(again.backend_session.as_deref(), Some("sess-1"));
         let (running, moved_again) = again.running(2_400);
