@@ -4,10 +4,22 @@
 //! reconnect after a crash and learn the lane's current claim before deciding
 //! whether to start, follow, stop or release a turn.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+/// The refusal a lane gives when the tool's login changed since it started. The lane leaves,
+/// and nothing of the attempt reached Codex: the Host starts a new lane and offers the same
+/// attempt again.
+pub const LOGIN_CHANGED: &str = "lane-login-changed";
+
+/// The lock that says who may write a native thread, under `dir`. An exec turn takes it
+/// shared; a lane takes it exclusive and holds it until its app-server has been reaped.
+pub fn thread_lock(dir: &Path, thread: &str) -> PathBuf {
+    dir.join(format!("{:x}.lock", Sha256::digest(thread.as_bytes())))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claim {
@@ -60,13 +72,21 @@ pub enum Request {
     /// Reopen a thread with a previously stored active goal in its reserved slot.
     Recover,
     /// Reserve the next spontaneous turn. The Host commits the attempt first.
-    Reserve { claim: Claim },
-    /// Start an ordinary prompt in its already admitted slot.
+    Reserve {
+        claim: Claim,
+        /// The turn's identity for the Clarp tools it calls, written to the lane's turn file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+    },
+    /// Start an ordinary prompt in its already admitted slot. A lane that has no thread yet
+    /// starts one for it.
     Prompt {
         claim: Claim,
         text: String,
         model: Option<String>,
         effort: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
     },
     /// Start and resume are allowed only while holding a goal reservation.
     Goal {
@@ -81,6 +101,7 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// Empty while a lane started for a new conversation has not started its thread.
     pub thread: String,
     pub instance: u32,
     pub revision: u64,
@@ -91,6 +112,19 @@ pub struct Snapshot {
     pub goal: Option<Value>,
     pub claim: Option<Claim>,
     pub native_turn: Option<String>,
+    /// What the Host started the lane with, as the digest it gave: a lane started otherwise
+    /// is retired while idle and started again.
+    #[serde(default)]
+    pub options: String,
+    /// The model and effort the lane last gave Codex. Codex keeps them for later turns, so a
+    /// turn that asks for the defaults again needs a new lane.
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// How long the lane has held no claim, in milliseconds.
+    #[serde(default)]
+    pub idle_ms: u64,
 }
 
 /// The lane never hands a spontaneous start to an unclaimed actor slot.

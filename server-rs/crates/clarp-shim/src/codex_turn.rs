@@ -1,6 +1,10 @@
 //! One app-server execution written in the ordinary Codex turn spool format.
+//!
+//! Two lines are a lane's own. `steer.open` says the turn takes more of the user's words while
+//! it runs; an exec turn never prints it. `steer.read` names the id of words Codex took into
+//! the turn: it is the only evidence that a steered message was read.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::io;
 use std::path::Path;
 
@@ -11,8 +15,11 @@ pub struct TurnSpool {
     writer: SpoolWriter,
     thread: String,
     turn: String,
-    messages: BTreeMap<String, String>,
     total: Option<(u64, u64)>,
+    /// The ids of steered words Codex accepted for this turn.
+    steered: BTreeSet<String>,
+    /// The ids whose reading is in the spool.
+    read: BTreeSet<String>,
 }
 
 impl TurnSpool {
@@ -39,8 +46,9 @@ impl TurnSpool {
             writer,
             thread,
             turn,
-            messages: BTreeMap::new(),
             total: None,
+            steered: BTreeSet::new(),
+            read: BTreeSet::new(),
         };
         spool.record(
             Entry::Shim(ShimEvent::Session {
@@ -49,9 +57,41 @@ impl TurnSpool {
             now_ms,
         )?;
         spool.record(Entry::Shim(ShimEvent::Spawned { pid }), now_ms)?;
+        // As exec names its thread: a lane that started the thread for this turn tells the
+        // conversation its name here, and a resumed one says the name it already has.
+        spool.output(
+            json!({"type": "thread.started", "thread_id": spool.thread}),
+            now_ms,
+        )?;
         spool.output(json!({"type": "turn.started"}), now_ms)?;
+        spool.output(json!({"type": "steer.open"}), now_ms)?;
         spool.writer.sync()?;
         Ok(spool)
+    }
+
+    /// Codex accepted steered words under this id.
+    pub fn steered(&mut self, id: &str) {
+        self.steered.insert(id.to_owned());
+    }
+
+    /// The accepted ids whose reading is not in the spool.
+    pub fn unread(&self) -> Vec<String> {
+        self.steered.difference(&self.read).cloned().collect()
+    }
+
+    /// Codex took the words of this id into the turn. Written once, and made durable before
+    /// anything is said of it: a restarted Host reads the same answer.
+    pub fn receipt(&mut self, id: &str, now_ms: i64) -> io::Result<()> {
+        if id.is_empty() || !self.read.insert(id.to_owned()) {
+            return Ok(());
+        }
+        self.output(json!({"type": "steer.read", "id": id}), now_ms)?;
+        self.writer.sync()
+    }
+
+    /// The lane ended Codex where it stood after a Stop it did not answer in time.
+    pub fn killed(&mut self, now_ms: i64) -> io::Result<()> {
+        self.exit(None, Some(nix::libc::SIGKILL), now_ms)
     }
 
     /// Store an event only for the claimed execution. Returns true once the
@@ -65,22 +105,24 @@ impl TurnSpool {
             return Ok(false);
         }
         match method {
+            // The user's words in the turn are no item of the reply. Their id, where they
+            // carry one, is the reading of steered words (23 Nov 2026: Codex 0.167.1 says a
+            // steered input as a `userMessage` whose `clientId` is the id it was sent under,
+            // as soon as it takes it into the turn).
+            "item/started" | "item/completed" if params["item"]["type"] == "userMessage" => {
+                if let Some(id) = params["item"]["clientId"].as_str() {
+                    self.receipt(id, now_ms)?;
+                }
+            }
             "item/started" | "item/updated" | "item/completed" => {
                 if let Some(item) = normalize_item(&params["item"]) {
                     let step = method.replace('/', ".");
                     self.output(json!({"type": step, "item": item}), now_ms)?;
                 }
             }
-            "item/agentMessage/delta" => {
-                if let (Some(id), Some(delta)) =
-                    (params["itemId"].as_str(), params["delta"].as_str())
-                {
-                    let text = self.messages.entry(id.to_owned()).or_default();
-                    text.push_str(delta);
-                    let item = json!({"type": "agent_message", "id": id, "text": text});
-                    self.output(json!({"type": "item.updated", "item": item}), now_ms)?;
-                }
-            }
+            // A reply is kept whole when it is complete. The apps do not show text as it is
+            // written (the owner's decision of 23 Nov 2026), and a line per delta that carried
+            // the whole text so far made a spool grow with the square of the reply.
             "thread/tokenUsage/updated" => {
                 let total = &params["tokenUsage"]["total"];
                 self.total = total["inputTokens"]

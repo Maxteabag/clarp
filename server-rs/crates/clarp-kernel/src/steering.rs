@@ -1,4 +1,5 @@
-//! Evidence that Claude can take more input and when it actually reads it.
+//! Evidence that a running turn can take more input and when it actually reads it: Claude's
+//! replayed input, or a Codex lane's `steer.read`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -105,6 +106,15 @@ impl Stream {
         if event["type"] == "user" && event["isReplay"] == true {
             return nonempty(&event["uuid"]).map_or(Observation::Other, Observation::Echo);
         }
+        // A Codex lane's turn: the reading of steered words, and the end of the turn, after
+        // which nothing more is taken into it.
+        if event["type"] == "steer.read" {
+            return nonempty(&event["id"]).map_or(Observation::Other, Observation::Echo);
+        }
+        if event["type"] == "turn.completed" || event["type"] == "turn.failed" {
+            self.input_ended = true;
+            return Observation::Other;
+        }
         if event["type"] == "result" {
             // The reference observes results before filtering nested events.
             self.input_ended = true;
@@ -127,6 +137,22 @@ impl Stream {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_codex_lane_says_what_it_read_and_takes_nothing_after_its_turn_ended() {
+        let mut stream = Stream::default();
+        let read = json!({"type": "steer.read", "id": "words"});
+        assert!(matches!(stream.observe(&read), Observation::Echo("words")));
+        let nameless = json!({"type": "steer.read", "id": ""});
+        assert!(matches!(stream.observe(&nameless), Observation::Other));
+        assert!(stream.can_join());
+        let ended = json!({"type": "turn.completed", "usage": null});
+        assert!(matches!(stream.observe(&ended), Observation::Other));
+        assert!(!stream.can_join());
+        let mut failed = Stream::default();
+        failed.observe(&json!({"type": "turn.failed", "error": "gone"}));
+        assert!(!failed.can_join());
+    }
 
     #[test]
     fn a_read_follow_up_is_a_user_entry_or_a_queued_command_attachment() {

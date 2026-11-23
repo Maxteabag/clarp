@@ -260,6 +260,29 @@ See the Host's `docs/runtime-restarts.md`. Unexpected crashes retain visible
 interruption markers; explicitly enrolled goals and user/peer queued work keep
 their independent ownership and recovery rules.
 
+## Codex chat turns on a lane (Rust Host)
+
+On a Rust Host built from issue 742 on, a Codex agent's chat turns can run on
+one long-lived `codex app-server` per agent (its lane, under the shim)
+instead of a `codex exec` per message. Then a user's message reaches the
+running turn (`turn/steer`), Stop interrupts it (`turn/interrupt`), and a turn
+starts without launching Codex. Three top-level keys in the Rust Host's own
+`~/.config/clarp-host/config.toml`, read at each turn (no restart, no build):
+
+```toml
+codex_chat_lane = true        # off by default; false rolls back to exec
+codex_lane_idle_minutes = 15  # a lane with no turn and no running goal leaves
+codex_lane_most = 8           # live lanes kept; the longest idle one leaves first
+```
+
+Turning it off is the rollback: each lane leaves before the agent's next exec
+turn, and exec continues the same Codex thread. A lane is
+`<run>/<agent>-cxg.sock`. Its `Inspect` shows the thread, the claim, the model and
+effort Codex keeps, and `idle_ms`. A lane turn's Clarp tools take their turn's
+identity from `CLARP_PROVIDER_TURN_FILE` (`<run>/<agent>-turn.token`), which the
+lane rewrites at each turn. The apps do not yet advertise Codex steering
+(`supports_steer`); the Python Host steers Codex in its own way.
+
 ## Docker Container Administration
 
 When diagnosing or managing Clarp inside a Docker container:

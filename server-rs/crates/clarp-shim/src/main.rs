@@ -660,6 +660,8 @@ impl Control {
                 self.input.close();
                 Reply::ok(Some(self.pid))
             }
+            // A turn of its own process takes more words on its input, if at all.
+            Request::Steer { .. } => Reply::failed("this turn takes no steering"),
             Request::Hook { name, data } => {
                 let record = || {
                     self.to_spool

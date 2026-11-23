@@ -118,6 +118,39 @@ impl Slot {
         Ok(false)
     }
 
+    /// Codex accepted steered words for the running turn.
+    pub(crate) fn steered(&mut self, id: &str) {
+        if let Self::Running { spool, .. } = self {
+            spool.steered(id);
+        }
+    }
+
+    /// The accepted steered ids of the running turn that Codex has not said it read.
+    pub(crate) fn unread(&self) -> Vec<String> {
+        match self {
+            Self::Running { spool, .. } => spool.unread(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn receipt(&mut self, id: &str, now_ms: i64) -> io::Result<()> {
+        match self {
+            Self::Running { spool, .. } => spool.receipt(id, now_ms),
+            _ => Ok(()),
+        }
+    }
+
+    /// Codex was ended where it stood after it did not answer a Stop.
+    pub(crate) fn killed(&mut self, now_ms: i64) -> io::Result<()> {
+        match std::mem::take(self) {
+            Self::Free => Ok(()),
+            Self::Running { mut spool, .. } => spool.killed(now_ms),
+            Self::Reserved { mut writer, .. } => {
+                end_unbound(&mut writer, None, Some(nix::libc::SIGKILL), now_ms)
+            }
+        }
+    }
+
     /// A reservation that never bound a provider turn still settles once.
     pub(crate) fn cancel(&mut self, now_ms: i64) -> io::Result<()> {
         if let Self::Reserved { mut writer, .. } = std::mem::take(self) {

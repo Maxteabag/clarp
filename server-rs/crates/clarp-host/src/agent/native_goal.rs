@@ -4,7 +4,7 @@ use clarp_actor::native_goal::{NativeGoal, Ownership};
 use clarp_kernel::agent_goal::{Goal, Status as GoalStatus};
 use clarp_shim::codex_lane::{GoalAction, Request, Snapshot};
 
-use crate::codex_goal_lane::{Lane, Login, Submission};
+use crate::codex_goal_lane::{Lane, Login, Settings, Submission};
 
 use super::{
     ActorError, Answer, Ask, ShimOrder, Told, Unavailable, Worker, launch_permitted, tell,
@@ -47,7 +47,13 @@ impl Native {
 }
 
 impl Worker {
-    fn lane(&self) -> Lane {
+    /// Whether this agent's chat turns run on its lane: a Codex agent, while the owner's
+    /// setting is on (issue 742).
+    pub(super) fn chat_lane(&self) -> bool {
+        self.setup.record.backend == "codex" && Settings::read().chat
+    }
+
+    pub(super) fn lane(&self) -> Lane {
         Lane::new(
             self.setup
                 .profile
@@ -136,7 +142,7 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, &thread)
+                .start(&launcher, &profile, &login, Some(&thread), None)
                 .and_then(|child| {
                     reap(child);
                     lane.ask(Request::Goal { action, objective })
@@ -213,15 +219,28 @@ impl Worker {
             self.native.after_retire = Some(order);
             return;
         }
-        let Some(record) = self.native.record.as_ref() else {
-            return;
+        // A goal's record names its thread. A chat turn's is the conversation's, and none
+        // for a new conversation: the lane starts one.
+        let record = self
+            .native
+            .record
+            .as_ref()
+            .filter(|record| record.lane != Ownership::Exec);
+        let thread = match record {
+            Some(record) => Some(record.thread.clone()),
+            None => self
+                .actor
+                .as_ref()
+                .and_then(|actor| actor.status().backend_session)
+                .filter(|thread| !thread.is_empty()),
         };
-        let thread = record.thread.clone();
-        let stopping = record.lane == Ownership::Stopping;
-        let restore = matches!(
-            record.lane,
-            Ownership::AccountHold | Ownership::SchedulerHold
-        );
+        let stopping = record.is_some_and(|record| record.lane == Ownership::Stopping);
+        let restore = record.is_some_and(|record| {
+            matches!(
+                record.lane,
+                Ownership::AccountHold | Ownership::SchedulerHold
+            )
+        });
         let private = self
             .actor
             .as_ref()
@@ -257,26 +276,56 @@ impl Worker {
         };
         let (turn, attempt, socket) = (order.turn, order.attempt, order.socket.clone());
         let spool = order.spool.clone();
+        let wanted = match &submission {
+            Submission::Prompt { model, effort } => Some((model.clone(), effort.clone())),
+            _ => None,
+        };
+        // Who the turn is, for the Clarp tools it calls: the lane keeps it in its turn file.
+        let token = self
+            .setup
+            .turns
+            .token(&self.setup.record.agent_id, order.turn.0);
         let lane = self.lane();
         let launcher = self.setup.launcher.clone();
         let profile = self.setup.profile.clone();
         let login = self.native_login();
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
+            let start = || {
+                let asked = wanted.as_ref().map(|(model, effort)| (model, effort));
+                reap(lane.start(&launcher, &profile, &login, thread.as_deref(), asked)?);
+                Ok::<(), std::io::Error>(())
+            };
             let result = (|| {
                 if !launch_permitted(&tx, turn, attempt) {
                     return Err(std::io::Error::other(
                         "the actor no longer admits this attempt",
                     ));
                 }
-                reap(lane.start(&launcher, &profile, &login, &thread)?);
+                start()?;
                 if stopping {
                     lane.recover_stop()?;
                 }
                 if !launch_permitted(&tx, turn, attempt) {
                     return Err(std::io::Error::other("the actor stopped this attempt"));
                 }
-                lane.submit(*order, submission)
+                match lane.submit((*order).clone(), submission.clone(), token.clone()) {
+                    // The login changed since the lane started, and it left without giving
+                    // Codex anything: the same attempt goes to a lane under the new login,
+                    // once.
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::PermissionDenied
+                            && !spool.try_exists().unwrap_or(true) =>
+                    {
+                        lane.wait_released()?;
+                        start()?;
+                        if !launch_permitted(&tx, turn, attempt) {
+                            return Err(std::io::Error::other("the actor stopped this attempt"));
+                        }
+                        lane.submit(*order, submission, token)
+                    }
+                    other => other,
+                }
             })();
             // An absent reply cannot prove that Codex did not take the attempt.
             // The supervisor creates the spool before handing the request over.
@@ -507,7 +556,7 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, &thread)
+                .start(&launcher, &profile, &login, Some(&thread), None)
                 .and_then(|child| {
                     reap(child);
                     if stopping {
@@ -537,6 +586,24 @@ impl Worker {
         let Some(record) = self.native.record.as_ref() else {
             return;
         };
+        // While chat turns run on the lane, a goal that is done leaves the lane to them: its
+        // thread goes back to the chat turns, and the lane leaves when it has been idle.
+        if record.lane == Ownership::Owned
+            && record
+                .goal
+                .as_ref()
+                .is_none_or(|goal| goal.status == GoalStatus::Complete)
+            && !self.native.retiring
+            && self
+                .actor
+                .as_ref()
+                .is_some_and(|actor| actor.status().live.is_none())
+            && self.chat_lane()
+        {
+            let thread = record.thread.clone();
+            let _ = self.finish_native_retirement(&thread, true);
+            return;
+        }
         if self.native.retiring
             || self.native.retirement_failed
             || record.lane != Ownership::Owned
@@ -568,6 +635,10 @@ impl Worker {
                         claim: None,
                         native_turn: None,
                         goal: None,
+                        options: String::new(),
+                        model: None,
+                        effort: None,
+                        idle_ms: 0,
                     })
                 } else {
                     Err(error)

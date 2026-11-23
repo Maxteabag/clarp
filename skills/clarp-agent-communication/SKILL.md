@@ -65,6 +65,14 @@ but a send with `queue_if_busy` waits, unannounced, until the user resumes
 the queue; do not use it to reach a stopped agent. Requests work between agents on this Host; for
 a peer server use `prompt`.
 
+A message from the user, or a front desk's relay of the user's words, that
+reaches an agent while its turn runs is read into that turn where the agent's
+tool can take it: Claude Code on the Rust Host, and Codex on a Rust Host whose
+owner turned the `codex_chat_lane` setting on (off by default; see
+`clarp-server-admin`). Elsewhere, and for every other message between agents,
+it waits and runs as the agent's next turn. Either way, send it once: the queue
+shows it until it is read.
+
 A helper agent (one created with `--parent`) reports to its parent the same
 way. That message moves the helper to `reported`; a message from the parent
 back to it moves it to `running` again. See `clarp-sub-agents`.

@@ -23,6 +23,24 @@ def _config() -> tuple[str, str]:
     return f"http://{bind}:{int(server.get('port', 7682))}", str(server.get("auth_token", ""))
 
 
+def _provider_turn() -> str:
+    """The Host-issued identity of the running turn. A Codex lane's turn finds it in the
+    file its lane rewrites at each turn (CLARP_PROVIDER_TURN_FILE), read only where the
+    variable itself is not set."""
+    token = os.environ.get("CLARP_PROVIDER_TURN", "")
+    if token:
+        return token
+    path = os.environ.get("CLARP_PROVIDER_TURN_FILE", "")
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read(4096).strip()
+    except OSError:
+        return ""
+    return text if text and not any(c.isspace() for c in text) else ""
+
+
 def _request(method: str, path: str, body: dict | bytes | None = None) -> dict:
     base, token = _config()
     data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
@@ -31,8 +49,9 @@ def _request(method: str, path: str, body: dict | bytes | None = None) -> dict:
     if token: request.add_header("Authorization", "Bearer " + token)
     # The Host-issued identity of the turn running this command, so the
     # Host can verify which agent is acting (lib.turn_identity).
-    if os.environ.get("CLARP_PROVIDER_TURN"):
-        request.add_header("X-Clarp-Turn", os.environ["CLARP_PROVIDER_TURN"])
+    turn = _provider_turn()
+    if turn:
+        request.add_header("X-Clarp-Turn", turn)
     with urllib.request.urlopen(request, timeout=20) as response:
         return json.load(response)
 

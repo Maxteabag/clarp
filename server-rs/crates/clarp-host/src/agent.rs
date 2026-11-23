@@ -1538,7 +1538,7 @@ struct Worker {
     /// tool's accounts takes the turn up.
     held: Option<Box<ShimOrder>>,
     /// Socket requests from this agent are written in the order it accepted them.
-    followups: Option<mpsc::Sender<(PathBuf, String)>>,
+    followups: Option<mpsc::Sender<(PathBuf, clarp_actor::Steering)>>,
     /// The turn the pool was last told of.
     pooled: Option<TurnId>,
     /// How many terminals are open on the agent's own tool.
@@ -2971,7 +2971,9 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
-        let can_offer_steering = self.setup.record.backend == "claude"
+        // A Codex turn takes steered words only on its lane; the actor reads that from the
+        // turn's own spool.
+        let can_offer_steering = matches!(self.setup.record.backend.as_str(), "claude" | "codex")
             && match &ask {
                 Ask::Send {
                     message,
@@ -4054,7 +4056,10 @@ impl Worker {
             other => other,
         };
         let action = match action {
-            Action::Launch(order) if self.native.owns() => {
+            // An opening turn keeps its own gated launch.
+            Action::Launch(order)
+                if self.native.owns() || (self.chat_lane() && order.opening.is_none()) =>
+            {
                 self.launch_on_native_lane(order);
                 return;
             }
@@ -4143,11 +4148,15 @@ impl Worker {
                 let runtime = self.setup.runtime.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 let starting = self.launches.begin(turn, &order.socket);
+                // A lane left from when chat turns ran on it, or from before the agent moved to
+                // another tool, holds the thread: it leaves first, once idle.
+                let lane = self.lane();
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        let _ = lane.retire();
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);
@@ -4349,9 +4358,9 @@ impl Worker {
             })
     }
 
-    fn write_followup(&mut self, socket: PathBuf, input: String) {
+    fn write_followup(&mut self, socket: PathBuf, input: clarp_actor::Steering) {
         if self.followups.is_none() {
-            let (send, receive) = mpsc::channel::<(PathBuf, String)>();
+            let (send, receive) = mpsc::channel::<(PathBuf, clarp_actor::Steering)>();
             if let Err(error) = std::thread::Builder::new()
                 .name("follow-up-input".to_string())
                 .spawn(move || {

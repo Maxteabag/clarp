@@ -218,6 +218,15 @@ pub struct ShimOrder {
     pub env: Vec<(String, String)>,
 }
 
+/// How a follow-up reaches the running turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Steering {
+    /// A line for the tool's standard input (Claude Code).
+    Stdin(String),
+    /// Words for a Codex lane's running turn, under the id its reading is told by.
+    Words { id: String, text: String },
+}
+
 /// What the world must do for an actor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -238,8 +247,8 @@ pub enum Action {
         socket: PathBuf,
         grace_ms: u64,
     },
-    /// Write this accepted follow-up to the same shim's input once.
-    Steer { socket: PathBuf, input: String },
+    /// Give this accepted follow-up to the turn's shim once.
+    Steer { socket: PathBuf, input: Steering },
     /// Start a shim for a turn of the agent's conversation fork ([`fork`]), and then follow
     /// it as [`Action::Launch`] says. Its tool is the agent's own, under the fork's session.
     Fork(Box<ShimOrder>),
@@ -4942,14 +4951,17 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
-            steering: steering::State::for_prompt((self.backend.id() == "claude").then(|| {
-                clarp_kernel::takeover::attempt_prompt_uuid(
-                    &self.profile.agent_id,
-                    turn.0,
-                    message.trace_id.as_deref(),
-                    attempt,
-                )
-            })),
+            steering: steering::State::for_prompt(
+                self.backend.id(),
+                (self.backend.id() == "claude").then(|| {
+                    clarp_kernel::takeover::attempt_prompt_uuid(
+                        &self.profile.agent_id,
+                        turn.0,
+                        message.trace_id.as_deref(),
+                        attempt,
+                    )
+                }),
+            ),
             opening: opening.is_some(),
             launch_model: preferences.model.clone(),
             turn,
@@ -5121,7 +5133,7 @@ impl Actor {
         } else {
             None
         };
-        let mut steering = steering::State::for_prompt(uuid);
+        let mut steering = steering::State::for_prompt(self.backend.id(), uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
         let mut offset = 0;
         let mut last_output_ms = None;
