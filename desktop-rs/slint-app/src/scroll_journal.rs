@@ -271,6 +271,8 @@ struct Ring {
 #[derive(Default)]
 pub struct Dashcam {
     rings: HashMap<String, Ring>,
+    /// Flashes found so far, recorded or not.
+    pub seen: usize,
 }
 
 impl Dashcam {
@@ -312,6 +314,7 @@ impl Dashcam {
             }
             let frames = ring.frames.make_contiguous();
             let Some(flash) = detect(&frames[frames.len().saturating_sub(BACK_WITHIN + 2)..]) else { continue };
+            self.seen += 1;
             if ring.recorded.is_some_and(|at| now.duration_since(at) < FLASH_EVERY) {
                 ring.skipped += 1;
                 continue;
@@ -443,6 +446,16 @@ pub fn frame_drawn() {
             FLASHES.with(|f| f.borrow_mut().push(detail));
         });
     }
+}
+
+/// A pane's frames of the last three seconds (for the checks).
+pub fn frames(pane: &str) -> Vec<Frame> {
+    DASHCAM.with(|d| d.borrow().frames(pane))
+}
+
+/// Flashes found so far, recorded or not (for the checks).
+pub fn flashes_seen() -> usize {
+    DASHCAM.with(|d| d.borrow().seen)
 }
 
 /// The flash events recorded so far (for the checks).
