@@ -987,3 +987,27 @@ fn a_sentence_agy_goes_on_writing_after_the_hand_over_is_whole_before_the_read()
     assert_eq!(answers.len(), 1);
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
 }
+
+#[test]
+fn a_sentence_that_goes_on_to_the_new_prompts_answer_is_read_before_that_answer() {
+    let place = Place::new("steer-closing", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-closing"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-closing");
+    steer(&mut input, "u-add", "add-closing");
+    wait_file(&place, "received-add-closing");
+    std::fs::write(place.dir.join("taken-closing"), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let rest = printed.at(|line| line["params"]["update"]["content"]["text"] == " 4 is 9");
+    let read = printed.at(|line| read_of(line) == Some("u-add"));
+    let prompted = printed.at(|line| line["clarp"] == "prompted");
+    // Nothing but the rest of the sentence came: the read is printed with the new prompt's
+    // answer, after the whole sentence and before the answer's lines.
+    assert!(rest < read && read + 1 == prompted, "{:?}", printed.seen);
+    let answers = settled(&printed.seen);
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+}

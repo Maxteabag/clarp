@@ -6,7 +6,7 @@
 #
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
-# first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-background`, `case-refused`,
+# first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-closing`, `case-background`, `case-refused`,
 # `case-stop`, `case-after`); a prompt that names `add-...` and no case is a message run as a turn of its
 # own, answered `separate-add-...`. It waits for files beside it (`taken-<mode>`: say a word
 # under the new prompt; `release-<mode>`: answer) and leaves files for the test
@@ -110,7 +110,7 @@ def steering(mid, sid, words):
         return result(mid, {"stopReason": "end_turn"})
     if mode == "writing":
         text(sid, "agent_message_chunk", "before-steer")
-    elif mode == "sentence":
+    elif mode in ("sentence", "closing"):
         text(sid, "agent_message_chunk", "5 plus")
     else:
         tool(sid, "in_progress")
@@ -133,9 +133,12 @@ def steering(mid, sid, words):
         touch("ended-background")
     # Its first word under the new prompt is what makes the message read: the test says when.
     wait_file("taken-" + mode)
-    if mode == "sentence":
+    if mode in ("sentence", "closing"):
         # As agy did live: the sentence it was writing goes on after the hand-over.
         text(sid, "agent_message_chunk", " 4 is 9")
+    if mode == "closing":
+        # And the new prompt is answered with nothing more said.
+        return result(second["id"], {"stopReason": "end_turn"})
     text(sid, "agent_thought_chunk", "Reading " + said_in(second))
     if mode == "stop":
         third = next_prompt()
