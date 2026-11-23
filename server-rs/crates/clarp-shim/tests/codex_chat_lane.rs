@@ -325,12 +325,12 @@ case "$interrupt" in (*'"method":"turn/interrupt"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' \
     '{"id":5,"result":{}}' \
     '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t5","status":"interrupted"}}}'
-read -r clean
-case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"old-thread"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":6,"result":{}}'
 read -r listed
 case "$listed" in (*'"method":"thread/turns/list"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":7,"result":{"data":[{"id":"t5","items":[{"type":"userMessage","clientId":"someone-else"}]}]}}'
+printf '%s\n' '{"id":6,"result":{"data":[{"id":"t5","items":[{"type":"userMessage","clientId":"someone-else"}]}]}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"old-thread"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":7,"result":{}}'
 read -r end || :
 "#;
     let lane = Lane::start("codex-chat-dropped", fake, |root| {
@@ -512,4 +512,99 @@ read -r end || :
         "{output:?}"
     );
     assert_eq!(exit, (Some(0), None));
+}
+
+
+#[test]
+fn a_completed_turns_commands_end_with_it_and_the_next_turn_runs_on_the_lane() {
+    // What Codex keeps for a turn (its background terminals) ends with the turn, however it
+    // ended, as with exec (the lead's rule of 23 Nov 2026). The stand-in ends its command on
+    // the clean, as Codex 0.167.1 does.
+    let fake = r#"#!/bin/sh
+set -eu
+here="$(dirname "$0")"
+read -r init
+printf '%s\n' '{"id":1,"result":{}}'
+read -r initialized
+read -r resume
+printf '%s\n' '{"id":2,"result":{"thread":{"id":"old-thread"}}}'
+read -r turn
+setsid sleep 64 &
+echo $! > "$here/command"
+printf '%s\n' \
+    '{"id":3,"result":{"turn":{"id":"t1"}}}' \
+    '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t1"}}}' \
+    '{"method":"item/completed","params":{"threadId":"old-thread","turnId":"t1","item":{"type":"agentMessage","id":"a1","text":"started a server"}}}' \
+    '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t1","status":"completed"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"old-thread"'*) ;; (*) exit 1 ;; esac
+kill "$(cat "$here/command")"
+printf '%s\n' '{"id":4,"result":{}}'
+read -r next
+case "$next" in (*'"method":"turn/start"'*'the next one'*) ;; (*) exit 1 ;; esac
+printf '%s\n' \
+    '{"id":5,"result":{"turn":{"id":"t2"}}}' \
+    '{"method":"turn/started","params":{"threadId":"old-thread","turn":{"id":"t2"}}}' \
+    '{"method":"item/completed","params":{"threadId":"old-thread","turnId":"t2","item":{"type":"agentMessage","id":"a2","text":"next answered"}}}' \
+    '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t2","status":"completed"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+touch "$here/second-clean"
+printf '%s\n' '{"id":6,"result":{}}'
+read -r end || :
+"#;
+    let lane = Lane::start("codex-chat-turn-end", fake, |root| {
+        json!({"threadId": "old-thread", "cwd": root})
+    });
+    let prompt = |claim: &Claim, text: &str| {
+        ask(
+            &lane.socket,
+            &Request::Prompt {
+                claim: claim.clone(),
+                text: text.into(),
+                model: None,
+                effort: None,
+                token: None,
+            },
+        )
+    };
+    let first = lane.claim();
+    assert_eq!(prompt(&first, "start a server")["ok"], true);
+    let (_, exit) = finished(&first.spool);
+    assert_eq!(exit, (Some(0), None));
+    let pid = fs::read_to_string(lane.root.join("command"))
+        .unwrap()
+        .trim()
+        .to_owned();
+    let gone = || {
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+        !stat
+            .rfind(')')
+            .and_then(|end| stat[end + 1..].split_whitespace().next())
+            .is_some_and(|state| state != "Z")
+    };
+    let until = Instant::now() + Duration::from_secs(5);
+    while !gone() {
+        assert!(Instant::now() < until, "the completed turn's command lived on");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let next = Claim {
+        turn: 4,
+        attempt: 1,
+        spool: lane.root.join("next.jsonl"),
+        socket: lane.root.join("next.sock"),
+    };
+    assert_eq!(prompt(&next, "the next one")["ok"], true);
+    let (output, exit) = finished(&next.spool);
+    assert!(
+        output.contains(&json!({"type":"item.completed","item":{"type":"agent_message","id":"a2","text":"next answered"}})),
+        "{output:?}"
+    );
+    assert_eq!(exit, (Some(0), None));
+    let until = Instant::now() + Duration::from_secs(5);
+    while !lane.root.join("second-clean").exists() {
+        assert!(Instant::now() < until, "every turn's end cleans");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }

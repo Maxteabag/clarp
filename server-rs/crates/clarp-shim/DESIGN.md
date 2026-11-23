@@ -415,10 +415,16 @@ Codex 0.167.1 with the owner's Codex configuration, on the 30e9df83c build:
 
 The lead keeps 8 lanes and 15 minutes for now. The preview found that a Stop left the turn's
 command running: Codex ends the turn on `turn/interrupt` and keeps the command as the
-thread's background terminal. Since 466caed53 the lane sends
-`thread/backgroundTerminals/clean` after the interrupt, which a probe of 0.167.1 showed ends
-the command within a second. Since e26f873f1, the lane also ends the process groups below
-Codex when it kills Codex or leaves, because Codex runs each command in a group of its own.
+thread's background terminal. A probe of 0.167.1 showed that `thread/backgroundTerminals/clean`
+ends the command within a second.
+
+**The lead's rule (23 Nov 2026), the same as for Antigravity:** what the tool keeps for a turn
+ends with the turn. So the lane sends that clean at every turn's end, whether the turn
+completed, failed, was stopped, or was a turn the lane refused, as with exec. A process the
+agent detached itself (`setsid`, `nohup`) is not a background terminal and is not touched.
+When the lane kills Codex or leaves, it also ends the process groups below Codex (e26f873f1),
+because Codex runs each command in a group of its own. The Python Host leaves these commands
+running (`docs/differences.md`).
 
 ## Decisions (the lead, 23 Nov 2026)
 

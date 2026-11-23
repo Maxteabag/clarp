@@ -79,27 +79,36 @@ printf '%s\n' \
     '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"second-turn","status":"completed"}}}' \
     '{"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"too-early"}}}' \
     '{"method":"item/completed","params":{"threadId":"fixture-thread","turnId":"too-early","item":{"type":"agentMessage","id":"rogue","text":"must stay out"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":8,"result":{}}'
 read -r defer
 case "$defer" in (*'"method":"thread/goal/set"'*'"status":"paused"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":8,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
+printf '%s\n' '{"id":9,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
 read -r reject
 case "$reject" in (*'"method":"turn/interrupt"'*'"turnId":"too-early"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' \
     '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"too-early","status":"interrupted"}}}' \
-    '{"id":9,"result":{}}'
+    '{"id":10,"result":{}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":11,"result":{}}'
 read -r probe
 case "$probe" in (*'"method":"thread/goal/get"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":10,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
+printf '%s\n' '{"id":12,"result":{"goal":{"objective":"finish the proof","status":"paused"}}}'
 read -r recover
 case "$recover" in (*'"method":"thread/goal/set"'*'"status":"active"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' \
     '{"method":"turn/started","params":{"threadId":"fixture-thread","turn":{"id":"third-turn"}}}' \
-    '{"id":11,"result":{"goal":{"objective":"finish the proof","status":"active"}}}' \
+    '{"id":13,"result":{"goal":{"objective":"finish the proof","status":"active"}}}' \
     '{"method":"thread/goal/updated","params":{"threadId":"fixture-thread","goal":{"objective":"finish the proof","status":"complete"}}}' \
     '{"method":"turn/completed","params":{"threadId":"fixture-thread","turn":{"id":"third-turn","status":"completed"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":14,"result":{}}'
 read -r clear
 case "$clear" in (*'"method":"thread/goal/clear"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":12,"result":{"cleared":true}}'
+printf '%s\n' '{"id":15,"result":{"cleared":true}}'
 read -r end || :
 "#,
     )
