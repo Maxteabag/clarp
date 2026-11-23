@@ -195,6 +195,12 @@ GitHub issuene? Hvorfor var de ute?" Found it, filed it, moved on is not allowed
   session is archived or gone hands the issue to the area owner; the release owner moves such
   labels when he finds them.
 
+## Code describes itself, never other projects
+
+Code, comments, tests, commit messages and docs say what Clarp does. They never name
+another product or project as the source or model for it ("like X's pattern"). Write
+the behaviour instead. Peter's rule of 23 Nov 2026.
+
 ## The web app is deprecated
 
 Peter, 22 Nov 2026: "Web appen er egentlig deprecated." The browser web app (web/ and the
