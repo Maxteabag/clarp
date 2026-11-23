@@ -652,6 +652,8 @@ struct LiveTurn {
     /// The replies of this turn that said something and that no tool work has followed yet,
     /// oldest first. Tool work that comes makes them commentary.
     said: Vec<String>,
+    /// The newest of `said` carried tool calls: it announced work, and is no answer.
+    said_worked: bool,
     /// What the turn's replies mark for the ear is said aloud.
     speak: bool,
     /// What the tool has said of itself so far: its model, what the turn cost, and how
@@ -1273,12 +1275,14 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
 /// The replies at the end of what a turn has put into the conversation that said something
 /// and that no tool work has followed, oldest first, as the log has them. An attempt before
 /// the one that runs may have said them, and an actor before this one.
-fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<Vec<String>, ActorError> {
+fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), ActorError> {
     const AT_A_TIME: usize = 32;
     let corrupt = |error: serde_json::Error| {
         ActorError::Corrupt(format!("a row of turn {} cannot be read: {error}", turn.0))
     };
     let mut said = Vec::new();
+    // Whether the newest of them carried tool calls.
+    let mut newest_worked = None;
     let mut before = Seq::MAX;
     'reading: loop {
         let chunk = log.read_before(before, kind::ROWS, AT_A_TIME)?;
@@ -1292,6 +1296,7 @@ fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<Vec<String>, ActorErro
                     let worked = !reply.tools.is_empty();
                     if !reply.text.trim().is_empty() {
                         said.push(reply.id);
+                        newest_worked.get_or_insert(worked);
                     }
                     if worked {
                         // What came before this was told when this was written.
@@ -1309,7 +1314,7 @@ fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<Vec<String>, ActorErro
         }
     }
     said.reverse();
-    Ok(said)
+    Ok((said, newest_worked.unwrap_or(false)))
 }
 
 /// Writes that tool work followed these replies: what they said was said along the way.
@@ -1593,6 +1598,7 @@ impl Actor {
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
                 said: Vec::new(),
+                said_worked: false,
                 speak: message.speak,
                 interpreter: actor
                     .backend
@@ -4966,6 +4972,7 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         let in_call = opening.is_some() || message.call.is_some();
+        let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt((self.backend.id() == "claude").then(|| {
                 clarp_kernel::takeover::attempt_prompt_uuid(
@@ -4979,7 +4986,8 @@ impl Actor {
             launch_model: preferences.model.clone(),
             turn,
             last_row,
-            said: unfollowed(self.recorder.log(), turn)?,
+            said,
+            said_worked,
             speak: message.speak,
             client_id,
             message_id: message.id,
@@ -5266,6 +5274,7 @@ impl Actor {
         let speak = message.speak || steering.joined_speech;
         let input_skipped = steering.input_skipped;
         let in_call = opening_message(&message) || message.call.is_some();
+        let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
@@ -5282,7 +5291,8 @@ impl Actor {
             origin: message.origin,
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             last_row,
-            said: unfollowed(self.recorder.log(), turn)?,
+            said,
+            said_worked,
             speak,
             model,
             tokens,
@@ -6081,6 +6091,7 @@ impl Actor {
                             }
                             if !reply.text.trim().is_empty() {
                                 live.said.push(reply.id.clone());
+                                live.said_worked = !reply.tools.is_empty();
                             }
                             // What the reply marks for the ear waits to be spoken from the
                             // moment the reply is in the conversation.
@@ -6140,6 +6151,8 @@ impl Actor {
                         drafts: &live.drafts,
                         calls: &live.calls,
                     };
+                    let read_before = out.joined_reads.len();
+                    let separate_before = live.steering.separate.is_some();
                     if let Some(sharing) = live.steering.observe(
                         &event,
                         &mut batch,
@@ -6153,6 +6166,20 @@ impl Actor {
                             revealed_at = Some(t);
                         }
                         out.changed.status = true;
+                    }
+                    // A message read into the turn closes what the turn said before it: an answer
+                    // given there answered what came before, and the work that follows is for the
+                    // new message. Tool work must never make it commentary, which the conversation
+                    // does not show: a reply the user was shown stays shown. That holds where the
+                    // tool had already ended its answer (the message begins a turn of its own), and
+                    // where its newest words carried no call. Words that announced a call are said
+                    // along the way, and the work after them still makes them so.
+                    let separate_now = !separate_before && live.steering.separate.is_some();
+                    if out.joined_reads.len() > read_before && (separate_now || !live.said_worked) {
+                        live.said.clear();
+                        live.said_worked = false;
+                        // Those who watch the turn keep them as answers too.
+                        self.shown.close_answers();
                     }
                 }
                 // The turn moved on to something else: what was read up to here is written

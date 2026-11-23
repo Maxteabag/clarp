@@ -358,3 +358,51 @@ fn a_provider_asked_again_is_shown_until_it_answers() {
     let _ = hub.end_turn("failed", None, 1_020);
     assert_eq!(line(&mut hub, 1_021)["state"], "interrupted");
 }
+
+#[test]
+fn an_answer_a_read_message_closed_stays_an_answer_whatever_work_follows() {
+    let mut hub = Hub::new("e1", "a1", "s1");
+    let call = |id| ToolStart {
+        name: "Bash",
+        call_id: id,
+        category: "shell",
+        label: "Bash",
+        command: None,
+        input_preview: None,
+    };
+    let phase = |hub: &mut Hub, id: &str, now: i64| {
+        let (snapshot, _) = hub.snapshot(now).unwrap();
+        snapshot["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .map(|item| item["phase"].clone())
+    };
+    let _ = hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    let _ = hub.message_text("said", "Looking", (None, None), Some("t-1"), 20);
+    let _ = hub.tool_start("tool-1", &call("c-1"), "running", Some("t-1"), 30);
+    assert_eq!(
+        phase(&mut hub, "said", 31),
+        Some(json!("commentary")),
+        "words before a call are said along the way"
+    );
+    let _ = hub.done("tool-1", "completed", None, Some("t-1"), 40);
+    let _ = hub.message_text("answer", "Here it is", (None, None), Some("t-1"), 50);
+    hub.close_answers();
+    let _ = hub.tool_start("tool-2", &call("c-2"), "running", Some("t-1"), 60);
+    assert_eq!(
+        phase(&mut hub, "answer", 61),
+        Some(json!("final")),
+        "a message read after it closed it as an answer"
+    );
+    let _ = hub.end_turn("completed", None, 70);
+    let _ = hub.begin_turn("s1", "c1", "t-2", Some(80), "user", 80);
+    let _ = hub.message_text("answer", "Looking again", (None, None), Some("t-2"), 90);
+    let _ = hub.tool_start("tool-3", &call("c-3"), "running", Some("t-2"), 100);
+    assert_eq!(
+        phase(&mut hub, "answer", 101),
+        Some(json!("commentary")),
+        "a new turn holds no answers of the one before"
+    );
+}

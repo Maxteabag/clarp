@@ -37,6 +37,11 @@ def start(tool, name, parent=None):
         "content_block": {"type": "tool_use", "id": tool, "name": name, "input": {}},
     })
 
+def carried(tool, name, message):
+    # The whole message that carries a call, as Claude sends it after the streamed start.
+    say("assistant", message={"id": message, "role": "assistant", "content": [
+        {"type": "tool_use", "id": tool, "name": name, "input": {}}]})
+
 def returned(tool, parent=None):
     say("user", parent_tool_use_id=parent,
         message={"content": [{"type": "tool_result", "tool_use_id": tool, "content": "tick"}]})
@@ -83,6 +88,60 @@ if mode == "mixed":
     say("assistant", message={"id": "msg_before_steer", "role": "assistant",
         "content": [{"type": "text", "text": "before-steer"}]})
     say("stream_event", event={"type": "message_stop"})
+if mode == "answered":
+    # The first message is answered whole; the follow-up comes after that answer, and the
+    # work it asks for begins with a tool.
+    say("assistant", message={"id": "msg_first_answer", "role": "assistant",
+        "content": [{"type": "text", "text": "first-answered"}]})
+    say("stream_event", event={"type": "message_stop"})
+    (root / "answered-first").touch()
+    uid, follow = prompt()
+    (root / ("received-" + follow)).write_text(uid)
+    echo(uid)
+    start("tool-answered", "Bash")
+    carried("tool-answered", "Bash", "msg_answered_call")
+    (root / "tool-answered").touch()
+    release("release-answered")
+    returned("tool-answered")
+    answer("joined-answered", first, uid)
+    raise SystemExit(0)
+if mode == "answered-separate":
+    # The first message is answered, and the answer's result comes after the follow-up was
+    # written but before it is read: the follow-up is a turn of its own in the same process.
+    say("assistant", message={"id": "msg_first_separate", "role": "assistant",
+        "content": [{"type": "text", "text": "first-separate"}]})
+    say("stream_event", event={"type": "message_stop"})
+    (root / "answered-first-separate").touch()
+    uid, follow = prompt()
+    (root / ("received-" + follow)).write_text(uid)
+    say("result", subtype="success", is_error=False, result="first-separate",
+        user_message_uuids=[first])
+    echo(uid)
+    start("tool-separate", "Bash")
+    carried("tool-separate", "Bash", "msg_separate_call")
+    (root / "tool-answered-separate").touch()
+    release("release-answered-separate")
+    returned("tool-separate")
+    answer("second-separate", uid)
+    raise SystemExit(0)
+if mode == "narrated":
+    # Words that announce a call, then the call: the follow-up is read when the call returns,
+    # and more work follows for it.
+    say("assistant", message={"id": "msg_narration", "role": "assistant", "content": [
+        {"type": "text", "text": "narrated-before"},
+        {"type": "tool_use", "id": "tool-narrated-1", "name": "Bash", "input": {}}]})
+    (root / "narrated-first").touch()
+    uid, follow = prompt()
+    (root / ("received-" + follow)).write_text(uid)
+    returned("tool-narrated-1")
+    echo(uid)
+    start("tool-narrated-2", "Bash")
+    carried("tool-narrated-2", "Bash", "msg_narrated_call")
+    (root / "tool-narrated").touch()
+    release("release-narrated")
+    returned("tool-narrated-2")
+    answer("joined-narrated", first, uid)
+    raise SystemExit(0)
 tool = "tool-" + mode
 if mode in ("writing", "between-tools"):
     if mode == "between-tools":
@@ -700,6 +759,149 @@ fn a_claude_follow_up_can_join_while_no_tool_call_is_open() {
             format!("{initial}\n")
         );
     }
+}
+
+#[test]
+fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it() {
+    // The answer, the follow-up, the file that says the follow-up's tool runs, and what the
+    // turn says last. In the second the answer ends with a result before the follow-up is
+    // read, so the follow-up is a turn of its own in the same process.
+    for (mode, answer, tool, last) in [
+        (
+            "answered",
+            "first-answered",
+            "tool-answered",
+            "joined-answered",
+        ),
+        (
+            "answered-separate",
+            "first-separate",
+            "tool-answered-separate",
+            "second-separate",
+        ),
+    ] {
+        let place = Place::new(mode);
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+        let host = place.start_in("", &[], &world);
+        let session = "answered";
+        host.post(
+            "/agents",
+            json!({"name":session,"session":session,"backend":"claude"}),
+        );
+        host.send(session, &format!("case-{mode}"), "first");
+        wait_for("the answer", || {
+            live_phase_of(&host, session, answer).is_some()
+                || stored_phase_of(&host, session, answer).is_some()
+        });
+        let follow = format!("add-{mode}");
+        assert_eq!(host.send(session, &follow, &follow)["queued"], true);
+        wait_for("the follow-up read, and the tool it asked for", || {
+            place.root.join(tool).exists()
+        });
+        wait_for("the tool in the live projection", || {
+            host.state(session) == "tool"
+        });
+        // The user was shown the answer: the work for the new message makes it no narration,
+        // neither for those who watch the turn nor in what is kept.
+        assert_eq!(
+            live_phase_of(&host, session, answer).as_deref(),
+            Some("final"),
+            "{mode}: live, while the tool runs"
+        );
+        assert_eq!(
+            stored_phase_of(&host, session, answer).as_deref(),
+            Some("final"),
+            "{mode}: kept, while the tool runs"
+        );
+        std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
+        collect_answer(&host, session, last);
+        if mode == "answered-separate" {
+            // A turn of its own for the follow-up: the answer is its own turn's, in the
+            // conversation once that turn has ended with its process.
+            wait_for("the answer in the conversation", || {
+                view_of(&host, session, answer) == Some(json!("conversation"))
+            });
+        }
+        assert_eq!(
+            stored_phase_of(&host, session, answer).as_deref(),
+            Some("final"),
+            "{mode}: after the turn"
+        );
+    }
+}
+
+#[test]
+fn words_that_announce_a_call_are_said_along_the_way_also_when_a_message_is_steered_in() {
+    let place = Place::new("narrated");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let session = "narrated";
+    host.post(
+        "/agents",
+        json!({"name":session,"session":session,"backend":"claude"}),
+    );
+    host.send(session, "case-narrated", "first");
+    wait_for("the words and their call", || {
+        place.root.join("narrated-first").exists()
+    });
+    wait_for("the call in the live projection", || {
+        host.state(session) == "tool"
+    });
+    assert_eq!(
+        host.send(session, "add-narrated", "add-narrated")["queued"],
+        true
+    );
+    wait_for("the follow-up read, and the next call", || {
+        place.root.join("tool-narrated").exists()
+    });
+    // Those who watch the turn see the same: the next call makes the words narration.
+    wait_for("the words said along the way, live", || {
+        live_phase_of(&host, session, "narrated-before").as_deref() == Some("commentary")
+    });
+    std::fs::write(place.root.join("release-narrated"), "").unwrap();
+    collect_answer(&host, session, "joined-narrated");
+    // What announced the first call was said along the way: the work after it makes it so,
+    // whatever was read in between.
+    wait_for("the turn's answer in the conversation", || {
+        view_of(&host, session, "joined-narrated") == Some(json!("conversation"))
+    });
+    assert_eq!(
+        stored_phase_of(&host, session, "narrated-before").as_deref(),
+        Some("commentary")
+    );
+}
+
+/// The row with this text as the conversation keeps it: its view, if it is there at all.
+fn view_of(host: &Host, session: &str, text: &str) -> Option<Value> {
+    host.get(&format!("/log?session={session}"))["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["text"] == text)
+        .map(|row| row["view"].clone())
+}
+
+/// Whether the kept row with this text was said along the way or at the end.
+fn stored_phase_of(host: &Host, session: &str, text: &str) -> Option<String> {
+    host.get(&format!("/log?session={session}"))["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["text"] == text)
+        .and_then(|row| row["phase"].as_str().map(str::to_string))
+}
+
+/// The phase of the message with this text, as those who watch the running turn are shown it.
+fn live_phase_of(host: &Host, session: &str, text: &str) -> Option<String> {
+    host.get(&format!("/live?session={session}"))["items"]
+        .as_array()?
+        .iter()
+        .find(|item| item["kind"] == "message" && item["text"] == text)
+        .and_then(|item| item["phase"].as_str().map(str::to_string))
 }
 
 fn reads(heard: &Mutex<Vec<Value>>, session: &str, id: &str) -> Vec<u64> {
