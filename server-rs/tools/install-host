@@ -636,7 +636,8 @@ if [ ! -s "$config/env" ]; then
     (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
-# Keep the owner's public URL, web read origins and experience watcher settings.
+# Keep the owner's public URL, web read origins, experience watcher settings and the agents named for
+# conversation forks (issue 718): an install must not turn a fork off.
 carried_config="$(python3 - "$own_config" <<'PYTHON'
 from datetime import date, time
 import json
@@ -687,6 +688,9 @@ if isinstance(origins, list):
 watch = config.get("experience_watch")
 if isinstance(watch, dict):
     table("experience_watch", watch)
+forks = config.get("conversation_forks")
+if isinstance(forks, dict):
+    table("conversation_forks", forks)
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.
