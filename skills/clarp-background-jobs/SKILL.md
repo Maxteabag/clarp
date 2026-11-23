@@ -90,9 +90,10 @@ boundary across restarts so items arriving during downtime remain eligible.
 A Claude background `Bash` task belongs to the turn that started it. Clarp runs
 one Claude process per turn; when your reply ends, that process exits and the
 task stops with it, so "you will be notified when it completes" does not hold
-here. On an `agy-acp` agent, a process that still holds the turn's standard output or
-error ends with the turn: start a server with both streams redirected (`> log 2>&1`, or
-`setsid` with both redirected); stdout to a file alone is not enough. A process you detach with `setsid` or `nohup` outlives the turn, but it
+here. On an `agy` or `agy-acp` agent, Antigravity itself ends what its command tool starts
+in the background, within a moment and before the turn ends, even with `setsid` or `nohup`
+and both streams redirected (seen on agy 1.5.15, 23 Nov 2026): such an agent cannot keep a
+server running that way, and no other way is verified yet. On other backends, a process you detach with `setsid` or `nohup` outlives the turn, but it
 stays in the Clarp runtime service's cgroup, and a runtime restart (an update,
 an idle release handoff) kills it. On 2026-10-04 one render's watcher ended
 with its turn and the user polled 45 minutes later; that evening a second
