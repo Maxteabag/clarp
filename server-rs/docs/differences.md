@@ -550,6 +550,20 @@ the daily schedule.
   models beside them (`known_too`), offering a model the login could not run. A row seen
   running one model (`cli_cache`, Claude Code) keeps the catalogue.
 
+- **Avatar thumbnails (Rust contract 160, feature `avatar_thumbnails`).** `&px=64`, `128` or
+  `256` on the address of an agent's or a persona's picture (`/avatars/<agent>`,
+  `/persona-avatars/<id>`, `/agent-portraits/<id>/content`, `/notification-avatars/<agent>`,
+  and the pictures this Host ships under `/static/avatars/` and `/static/janitor-avatars/`)
+  answers a square JPEG cut from the middle of the picture (quality 80, never larger than the
+  picture), made once per picture and size and kept in the blob store
+  (`<digest>.px<N>.jpg`, or `<version>.shipped.px<N>.jpg` for a shipped file); another
+  `px`, or a picture that cannot be read, is answered whole. On the token routes an address
+  whose `v` is the picture's current version is sent with
+  `Cache-Control: private, max-age=31536000, immutable`; a stale or absent `v` keeps
+  `no-store`. `/static/` keeps its own rule (`public, ..., immutable` by version, else
+  `no-cache` with an ETag). No row gains a field: an app adds `px` to the address it has. The
+  Python Host has none of it: it ignores `px`, and its own pictures stay `no-store`.
+
 - **Agent activity feature advertisement (feature 156).** The Rust Host
   advertises `agent_state` to clients that gate on it. Both Hosts already
   send `agent-state` and `agent-activity` in the base event stream.
