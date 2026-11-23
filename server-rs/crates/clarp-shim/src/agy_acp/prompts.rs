@@ -295,6 +295,8 @@ impl Prompts<'_> {
             spent,
         };
         if self.flight.is_empty() {
+            // Nothing waits to be read now: a read held for this prompt was printed above.
+            turn.record.read_next = None;
             self.settle(turn, held)
         } else {
             // A newer prompt is on its way: this answer hands the work to it.
