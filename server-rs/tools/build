@@ -10,7 +10,9 @@
 #   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
 #   server-rs/tools/build test [args...]   cargo test --workspace [args...], the shim built first
 #   server-rs/tools/build clippy           the lint gate, as CI runs it
-#   server-rs/tools/build fmt              format the sources in place here (runs rustfmt remotely, copies back)
+#   server-rs/tools/build fmt              format the sources in place here (runs rustfmt remotely on a private
+#                                          copy, brings back only what it changed; exits 3 when a file it
+#                                          formatted was changed here meanwhile and was left alone)
 #   server-rs/tools/build conform [args]   build the Host and compare it with the Python Host's written-down
 #                                          answers (server-rs/conformance); starts only the Rust Host
 #   server-rs/tools/build answers [args]   build the Host, run the corpus against it and bring home what it
@@ -121,6 +123,74 @@ case "$cmd" in
         EXTRA_ENV= ;;
 esac
 
+if [ "$cmd" = fmt ]; then
+    # fmt formats a copy of its own, not this checkout's shared copy: another job of the same
+    # checkout may upload its tree there while fmt waits in the queue, and fmt would then format,
+    # and bring home, a tree it was not given. Only what cargo fmt reads goes up: the manifests,
+    # the lockfile, a rustfmt.toml and the crates' Rust sources.
+    ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote"
+    copy=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.fmt-XXXXXXXX")
+    if [[ "$copy" != "$remote"/.fmt-???????? ]]; then
+        echo "could not make a private copy for fmt on $HOST" >&2
+        exit 2
+    fi
+    work=$(mktemp -d /var/tmp/clarp-fmt-XXXXXXXX)
+    trap 'rm -rf -- "$work"; ssh "${ssh_opts[@]}" "$HOST" "rm -rf -- $copy" || true' EXIT
+    rsync -rlp --prune-empty-dirs --exclude target/ --include '*/' --include '*.rs' --include Cargo.toml \
+        --include rustfmt.toml --include .rustfmt.toml --exclude '*' \
+        -e "ssh ${ssh_opts[*]}" "$here/crates/" "$HOST:$copy/crates/"
+    top=("$here/Cargo.toml" "$here/tools/build-queue.py")
+    for f in Cargo.lock rustfmt.toml .rustfmt.toml; do
+        if [ -e "$here/$f" ]; then top+=("$here/$f"); fi
+    done
+    rsync -lp -e "ssh ${ssh_opts[*]}" "${top[@]}" "$HOST:$copy/"
+    # What fmt was given is hashed in its copy just before it runs, and again after: a file whose
+    # hash moved is one fmt changed.
+    hashes="find crates -name '*.rs' -type f -print0 | xargs -0 -r sha256sum -z"
+    who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
+    # fmt builds nothing, so it takes the slot without the build disk's floor, which belongs to a
+    # checkout's target.
+    printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 build-queue.py "$who" bash -c "$hashes > .fmt-sent && CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd && $hashes > .fmt-done"
+    ssh "${ssh_opts[@]}" "$HOST" "cd $copy && exec env $queued" || exit $?
+    ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-sent" > "$work/sent"
+    ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-done" > "$work/done"
+    declare -A sent=()
+    while IFS= read -r -d '' line; do sent["${line:66}"]="${line:0:64}"; done < "$work/sent"
+    changed=()
+    while IFS= read -r -d '' line; do
+        p="${line:66}"
+        if [[ -v sent["$p"] && "${sent["$p"]}" != "${line:0:64}" ]]; then changed+=("$p"); fi
+    done < "$work/done"
+    if [ ${#changed[@]} -eq 0 ]; then exit 0; fi
+    printf '%s\0' "${changed[@]}" > "$work/list"
+    rsync -r --from0 --files-from="$work/list" -e "ssh ${ssh_opts[*]}" "$HOST:$copy/" "$work/formatted/"
+    # A formatted file comes home only over the very file that was sent. One edited here since
+    # (while fmt waited in the queue, say) is left as it is and named, and fmt then exits 3, so
+    # a script that formats and then commits stops there. The check is made again just before
+    # the formatted file takes the name, which it takes whole, by a rename.
+    left=0
+    for p in "${changed[@]}"; do
+        f="$here/$p"
+        now=$(sha256sum < "$f" 2>/dev/null) || now=
+        if [ "${now%% *}" = "${sent["$p"]}" ]; then
+            tmp="$f.fmt-$$"
+            cat "$work/formatted/$p" > "$tmp"
+            chmod --reference="$f" "$tmp"
+            now=$(sha256sum < "$f" 2>/dev/null) || now=
+            if [ "${now%% *}" = "${sent["$p"]}" ]; then
+                mv -f -- "$tmp" "$f"
+                echo "formatted: server-rs/$p"
+                continue
+            fi
+            rm -f -- "$tmp"
+        fi
+        echo "changed here since it was sent: not formatted: server-rs/$p" >&2
+        left=1
+    done
+    if [ $left -ne 0 ]; then exit 3; fi
+    exit 0
+fi
+
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
 # What goes up is what differs in content, and it arrives with the time of its arrival, not with
 # the time it has here. cargo decides what to compile by comparing a source's time with the time
@@ -160,9 +230,6 @@ printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_F
 ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec env $queue_env $queued"
 code=$?
 set -e
-if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
-    rsync -a --exclude target/ --exclude Cargo.lock -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/crates/" "$here/crates/"
-fi
 if [ "$cmd" = release ] && [ $code -eq 0 ]; then
     mkdir -p "$here/dist"
     rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$export_dir/clarp-host" "$HOST:$export_dir/clarp-shim" "$here/dist/"
