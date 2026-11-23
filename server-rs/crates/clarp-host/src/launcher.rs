@@ -904,6 +904,7 @@ except socket.timeout:
             second.order.clone(),
             starting.clone(),
         );
+        let began = std::time::Instant::now();
         let launch = std::thread::spawn(move || launcher.launch(&order, &held));
         // Both stand-ins note their start in the first one's place; the second leaves at once.
         let deadline = std::time::Instant::now() + Duration::from_secs(20);
@@ -920,6 +921,10 @@ except socket.timeout:
             "still starting: the launch keeps the Stop"
         );
         assert!(matches!(launch.join().unwrap(), Launched::TurnTaken));
+        assert!(
+            began.elapsed() < Duration::from_secs(8),
+            "the shim answered: the launch did not wait out its ten seconds"
+        );
         let stops: Vec<String> = first
             .read("asked")
             .into_iter()
