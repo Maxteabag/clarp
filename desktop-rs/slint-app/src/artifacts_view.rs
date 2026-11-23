@@ -1418,6 +1418,7 @@ pub fn show_work(app: &App) -> bool {
     let vim = crate::vim_view::cursor();
     let card = selected(app).unwrap_or_default();
     let at = [vim, card].into_iter().filter(|c| !c.is_empty()).find_map(|c| {
+        let c = c.as_str();
         rows.iter().position(|r| r.id == c || r.live.key == c || r.receipt.key == c || r.prompt.key == c || r.artifacts.iter().any(|a| a.id == c))
     });
     let keys: Vec<&str> = works.iter().map(String::as_str).collect();
