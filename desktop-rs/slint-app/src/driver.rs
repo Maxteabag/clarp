@@ -555,6 +555,7 @@ pub fn start_check(name: &str, out: String) {
         "quiet-chat" => quiet_checks::quiet_chat_check(out),
         "agent-messages" => quiet_checks::agent_messages_check(out),
         "conversation-view" => conversation_checks::conversation_view_check(out),
+        "audience-flip" => conversation_checks::audience_flip_check(out),
         "observe" => observe_checks::observe_check(out),
         "message-search" => search_checks::message_search_check(out),
         "mention" => search_checks::mention_check(out),

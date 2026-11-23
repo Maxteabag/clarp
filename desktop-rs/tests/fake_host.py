@@ -206,6 +206,15 @@ coordination = {"on": False, "visibility": "hide", "overrides": {}}
 # makes the next move fail with that error; moves are kept by transit id
 # (GET /agent-transit) and by request id (a repeated start is the same).
 transit = {"on": False, "respond": None, "fail": None, "by_request": {}, "states": {}, "count": 0}
+# A live turn's audience goes back to agents (feature turn_audience_returns,
+# Rust Host contract 164, docs/live-items.md §1.4): off until
+# /__control/audience-flip turns it on. Without it step 3 is refused: an
+# older Host never turns a turn back to agents.
+audience_returns = False
+BELLA = {"agent_id": "agent-bella", "name": "Bella"}
+# The words written for Bella after the note: a check looks for them.
+FOR_BELLA = "Bella, the build is green, as you asked."
+audience_started = {}  # (session, turn id) -> when the turn began
 
 
 def transit_label(backend, model):
@@ -288,6 +297,140 @@ def coordination_rows(session, rows, mode):
             run = []
         shown.append(row)
     return shown, echo, (count(run) if run else None)
+
+
+def put_rows(session, new_rows):
+    """Updates rows by id or appends them, each with a new revision, and
+    announces it (what a Host write does)."""
+    global revision
+    with state_lock:
+        rows = turns.setdefault(session, [])
+        for turn in new_rows:
+            revision += 1
+            turn = {"timestamp": "2026-09-29T10:00:00Z", **turn, "revision": revision}
+            existing = next((t for t in rows if t["id"] == turn["id"]), None)
+            if existing is None:
+                rows.append(turn)
+            else:
+                existing.update(turn)
+        for agent in agents:
+            if agent["session"] == session:
+                agent["head_revision"] = revision
+    broadcast({"type": "transcript-updated", "session": session})
+
+
+def send_live(session, ops):
+    """One `live` event of `ops`, its lseq next, applied and sent."""
+    with state_lock:
+        view = live_view(session)
+        event = {"type": "live", "conv": "conv-1", "epoch": view.epoch, "lseq": view.lseq + 1, "ops": ops}
+    live_step(session, {"event": event})
+
+
+def live_item(session, item_id, kind, item, op="upsert"):
+    """An upsert (or done) op for `item_id` at its next revision."""
+    with state_lock:
+        held = next((i for i in live_view(session).items() if i.get("id") == item_id), None)
+    rev = (held.get("rev", 0) if held else 0) + 1
+    if op == "done":
+        return {"op": "done", "id": item_id, "rev": rev, "status": item.pop("status", "completed"), "item": item}
+    return {"op": "upsert", "id": item_id, "kind": kind, "rev": rev, "item": item}
+
+
+def set_agent(session, fields):
+    with state_lock:
+        for agent in agents:
+            if agent["session"] == session:
+                agent.update(fields)
+    broadcast({"type": "agent-roster", "session": session, "kind": "updated"})
+
+
+def audience_step(session, t, step):
+    """Step `step` of docs/live-items.md's sequence for turn `t`: 1 another
+    agent (Bella) starts it ("agents"); 2 the user's message is read in
+    ("user"); 3 the agent leaves a note, the turn is "agents" again and
+    goes on for Bella (its words are "agents" in /log, so a hiding read
+    leaves them out); 4 the user's next message is read in ("user"); 5 the
+    turn ends and its rows are stored. Every `turn` op carries the same
+    fields but `audience` (and the end's status)."""
+    now = int(time.time() * 1000)
+    started = audience_started.setdefault((session, t), now)
+    turn = {"turn_id": t, "status": "running", "started_at_ms": started}
+
+    def row(suffix, **fields):
+        return {"id": f"{t}-{suffix}", "trace_id": t, "timestamp": iso_at(int(time.time() * 1000)), **fields}
+
+    def message(n, text, phase, row_id=""):
+        item = {"turn_id": t, "kind": "message", "status": "completed", "phase": phase, "ordinal": n,
+                "started_at_ms": int(time.time() * 1000), "text": text}
+        if row_id:
+            item["row_id"] = f"{t}-{row_id}"
+        return live_item(session, f"{t}-m{n}", "message", item)
+
+    def tool(n, label, status):
+        return live_item(session, f"{t}-c{n}", "tool", {"turn_id": t, "kind": "tool", "status": status, "ordinal": n,
+                                                     "started_at_ms": int(time.time() * 1000),
+                                                     "tool": {"name": "Bash", "call_id": f"{t}-call-{n}", "category": "exec",
+                                                              "label": label, "command": label}})
+
+    def done(n):
+        return live_item(session, f"{t}-c{n}", "tool", {"status": "completed", "ended_at_ms": int(time.time() * 1000)}, op="done")
+
+    if step == 1:
+        put_rows(session, [row("ask", role="user", text="Can you check the build for me?", origin="agent", sender_name=BELLA["name"],
+                               sender_agent_id=BELLA["agent_id"], audience="agents", view="session")])
+        set_agent(session, {"busy": True, "latest_state": "thinking", "turn_started_at": started,
+                            "working_audience": "agents", "working_with": BELLA})
+        send_live(session, [{"op": "turn", "turn": {**turn, "audience": "agents"}},
+                            {"op": "status", "activity": {"state": "thinking", "turn_started_ms": started}}])
+        send_live(session, [message(0, "Bella asked me to look at the build.", "commentary", "r0")])
+    elif step == 2:
+        # The user steps in: the turn's rows are the user's from now on.
+        put_rows(session, [{"id": f"{t}-ask", "audience": "user"},
+                           row("u1", role="user", text="Is it green yet?", origin="user", audience="user", view="conversation")])
+        set_agent(session, {"working_audience": "user", "working_with": None})
+        send_live(session, [{"op": "turn", "turn": {**turn, "audience": "user"}},
+                            {"op": "status", "activity": {"state": "tool", "turn_started_ms": started,
+                                                          "tool": {"name": "Bash", "label": "make build"}}}])
+        send_live(session, [message(1, "Checking the build log now.", "commentary", "r1"), tool(2, "make build", "running")])
+        send_live(session, [done(2), message(3, "The build is green: every test passes.", "commentary", "r3"),
+                            tool(4, "clarp-admin tell-user", "running")])
+    elif step == 3:
+        put_rows(session, [row("note", role="assistant", kind="note", origin="note", text="The build is green: every test passes.",
+                               audience="user", view="conversation")])
+        set_agent(session, {"working_audience": "agents", "working_with": BELLA})
+        send_live(session, [done(4), {"op": "turn", "turn": {**turn, "audience": "agents"}}])
+        # What the agent writes for Bella after the note: "agents" in /log.
+        put_rows(session, [row("live", role="assistant", kind="live", text=FOR_BELLA, audience="agents", view="session")])
+        send_live(session, [message(5, FOR_BELLA, "final", "live"), tool(6, "clarp-admin prompt --to bella", "running")])
+    elif step == 4:
+        put_rows(session, [row("u2", role="user", text="And the release notes?", origin="user", audience="user", view="conversation")])
+        set_agent(session, {"working_audience": "user", "working_with": None})
+        send_live(session, [done(6), {"op": "turn", "turn": {**turn, "audience": "user"}}])
+        send_live(session, [message(7, "The release notes are next on my list.", "final", "final")])
+    elif step == 5:
+        ended = int(time.time() * 1000)
+        summary = {"turn_id": t, "status": "completed", "started_at_ms": started, "ended_at_ms": ended,
+                   "worked_ms": ended - started, "tool_count": 3}
+
+        def call(n, label, audience):
+            return row(f"r{n}", role="assistant", text="", audience=audience, view="session",
+                       tools=[{"name": "Bash", "summary": label, "status": "ok", "id": f"{t}-call-{n}", "command": label, "result": "ok"}])
+        put_rows(session, [
+            row("r0", role="assistant", text="Bella asked me to look at the build.", phase="commentary", audience="user", view="session"),
+            row("r1", role="assistant", text="Checking the build log now.", phase="commentary", audience="user", view="session"),
+            call(2, "make build", "user"),
+            row("r3", role="assistant", text="The build is green: every test passes.", phase="commentary", audience="user", view="session"),
+            call(4, "clarp-admin tell-user", "user"),
+            {"id": f"{t}-live", "kind": "", "phase": "commentary"},
+            call(6, "clarp-admin prompt --to bella", "agents"),
+            row("final", role="assistant", text="The release notes are next on my list.", phase="final", audience="user",
+                view="conversation", session_rows=6, turn=summary),
+        ])
+        set_agent(session, {"busy": False, "latest_state": "idle", "turn_started_at": None, "working_audience": None, "working_with": None})
+        send_live(session, [{"op": "turn", "turn": {**turn, "audience": "user", "status": "completed", "ended_at_ms": ended,
+                                                     "worked_ms": ended - started, "tool_count": 3}},
+                            {"op": "status", "activity": {"state": "idle"}}])
 
 
 LOREM = ("The build runs the unit tests first, then the integration suite against a scratch "
@@ -1220,6 +1363,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("hidden_coordination")
             if transit["on"]:
                 features.append("agent_backend_transit")
+            if audience_returns:
+                features.append("turn_audience_returns")
             if stall_feature:
                 features.append("stalled_turn")
             if chat_view["on"]:
@@ -1776,21 +1921,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/upsert":
             # Test control: update turns by id (a streaming reply growing) or
             # append them, each with a new revision, and announce it.
-            session = body["session"]
-            with state_lock:
-                rows = turns.setdefault(session, [])
-                for turn in body["turns"]:
-                    revision += 1
-                    turn = {"timestamp": "2026-09-29T10:00:00Z", **turn, "revision": revision}
-                    existing = next((t for t in rows if t["id"] == turn["id"]), None)
-                    if existing is None:
-                        rows.append(turn)
-                    else:
-                        existing.update(turn)
-                for agent in agents:
-                    if agent["session"] == session:
-                        agent["head_revision"] = revision
-            broadcast({"type": "transcript-updated", "session": session})
+            put_rows(body["session"], body["turns"])
             return self.reply(200, {"ok": True})
         if url.path == "/__control/publish-pending":
             with state_lock:
@@ -1868,6 +1999,20 @@ class Handler(BaseHTTPRequestHandler):
             transit["respond"] = body.get("respond")
             transit["fail"] = body.get("fail")
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/audience-flip":
+            # Test control: the turn_audience_returns feature on or off (read
+            # from /server-info on connecting), or step `step` of the
+            # sequence for turn `turn_id` (audience_step). Step 3 turns the
+            # turn back to agents: refused without the feature.
+            global audience_returns
+            if "on" in body:
+                audience_returns = bool(body["on"])
+            if "step" in body:
+                step = int(body["step"])
+                if step == 3 and not audience_returns:
+                    return self.reply(409, {"error": "turn_audience_returns is off"})
+                audience_step(body.get("session", "rachel"), body["turn_id"], step)
+            return self.reply(200, {"ok": True, "on": audience_returns})
         if url.path == "/agent-transit":
             record({"method": "POST", "path": url.path, "body": body})
             if transit["respond"]:
