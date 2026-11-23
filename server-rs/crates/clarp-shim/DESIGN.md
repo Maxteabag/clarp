@@ -395,9 +395,12 @@ account:
   said.
 - A reply that arrives while another request is waited on is kept for that request.
 - The Stop deadline is looked at before queued input is taken.
-- Left as they are, for the lead:
-  - the turn file is not cleared when a turn ends (decision 3 as written);
-  - a paused goal keeps its lane from leaving by idle.
+- The lead's decisions after review:
+  - **M1:** the turn file stays as built. It is rewritten at each claim and not cleared when
+    a turn ends, so a background job of the turn keeps its identity.
+  - **The goal-lane spool fixes stay ungated:** a `userMessage` is no longer a tool call, and
+    no line is written per delta. They are bug fixes.
+  - **M4, M5, M7, M8 and M9:** kept by the lead.
 
 ## Measured on a real lane (turn-timings preview, 23 Nov 2026)
 
