@@ -23,6 +23,8 @@ mod agent_creation;
 mod agent_moved;
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/agent_read_parity.rs"]
+mod agent_read_parity;
 #[path = "host/agent_transit.rs"]
 mod agent_transit;
 #[path = "host/backend_auth.rs"]
@@ -59,6 +61,8 @@ mod goal_ledger;
 mod harness;
 #[path = "host/harness_providers.rs"]
 mod harness_providers;
+#[path = "host/helper_reports.rs"]
+mod helper_reports;
 #[path = "host/hotseat_demand.rs"]
 mod hotseat_demand;
 #[path = "host/import_devices.rs"]
@@ -107,6 +111,8 @@ mod peer_snapshot;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/question_cards.rs"]
+mod question_cards;
 #[path = "host/queue_provenance.rs"]
 mod queue_provenance;
 #[path = "host/r108_stream_ids.rs"]
@@ -131,6 +137,8 @@ mod stand_ins;
 mod start_tolerance;
 #[path = "host/steer_c.rs"]
 mod steer_c;
+#[path = "host/stop_resume.rs"]
+mod stop_resume;
 #[path = "host/takeover_b.rs"]
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]
@@ -1029,38 +1037,6 @@ fn an_idle_agents_own_label_that_outlived_its_time_is_taken_back_and_the_apps_ar
         "Again",
         "it is younger than its time"
     );
-}
-
-#[test]
-fn job_active_reports_unknown_for_missing_jobs_and_unavailable_answers() {
-    let place = Place::new("job-active-unknown");
-    let host = place.start();
-    let session = host.new_agent("Builder");
-    let query = ["clarp-agent-bg", &session, "job-active", "bg1:1:unseen"];
-    let missing = tool(&host, &place.root, None, &query);
-    assert_eq!(missing.0, 2, "{}", missing.2);
-
-    let address = host.address.clone();
-    let token = host.token.clone();
-    host.kill();
-    let probe = |address: &str| {
-        place
-            .command(env!("CARGO_BIN_EXE_clarp-host"))
-            .arg("tool")
-            .args(query)
-            .env("CLARP_HOST_ADDR", address)
-            .env("CLARP_HOST_TOKEN", &token)
-            .ended()
-    };
-    let unreachable = probe(&address);
-    assert_eq!(unreachable.status.code(), Some(2), "{unreachable:?}");
-    assert!(String::from_utf8_lossy(&unreachable.stderr).contains("does not answer"));
-
-    let (url, _) = speech_reply_stand_in("200 OK", "{}");
-    let address = url.strip_suffix("/v1/speech-to-text").unwrap();
-    let unreadable = probe(address);
-    assert_eq!(unreadable.status.code(), Some(2), "{unreadable:?}");
-    assert!(String::from_utf8_lossy(&unreadable.stderr).contains("no valid job state"));
 }
 
 #[test]
@@ -2547,65 +2523,6 @@ fn the_apps_read_an_agents_plans_and_the_user_sets_a_criterion_aside() {
     assert_eq!(
         host.get(&format!("/task-plans?session={session}"))["plans"][0]["status"],
         "completed"
-    );
-}
-
-#[test]
-fn a_question_can_offer_only_the_listed_options() {
-    let place = Place::new("question-no-custom");
-    let host = place.start();
-    let session = host.new_agent("Asker");
-    let options = r#"[{"id":"a","label":"First"},{"id":"b","label":"Second"}]"#;
-    let question = |flag: &str| {
-        tool(
-            &host,
-            &place.root,
-            None,
-            &[
-                "clarp-agent-artifacts",
-                "question",
-                &session,
-                "Choose",
-                "Which?",
-                options,
-                flag,
-            ],
-        )
-    };
-    let (exit, body, stderr) = question("--dry-run");
-    assert_eq!(exit, 0, "{stderr}");
-    let dry: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(dry["body"]["allow_custom_text"], true);
-
-    let (exit, _, stderr) = question("--no-custom=true");
-    assert_ne!(exit, 0);
-    assert_eq!(
-        stderr.trim(),
-        "agent_artifacts: argument --no-custom: ignored explicit argument 'true'"
-    );
-
-    let (exit, body, stderr) = question("--no-custom");
-    assert_eq!(exit, 0, "{stderr}");
-    let artifact: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(artifact["decision"]["allow_custom_text"], false);
-    let id = artifact["decision"]["decision_id"].as_str().unwrap();
-    let resolve = format!("/decisions/{id}/resolve");
-    let (status, refusal) = host.ask(
-        "POST",
-        &resolve,
-        Some(&json!({"answer":{"text":"Something else"}, "expected_revision":1})),
-    );
-    assert_eq!(status, 409, "{refusal}");
-    assert_eq!(refusal["error"], "custom text answers are not enabled");
-    let (status, selected) = host.ask(
-        "POST",
-        &resolve,
-        Some(&json!({"answer":{"option_id":"b"}, "expected_revision":1})),
-    );
-    assert_eq!(status, 200, "{selected}");
-    assert_eq!(
-        selected["artifact"]["decision"]["answer"]["label"],
-        "Second"
     );
 }
 
@@ -4248,133 +4165,6 @@ for line in [
 fn now_ms() -> i64 {
     let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
     i64::try_from(since.unwrap().as_millis()).unwrap()
-}
-
-#[test]
-fn stop_resume_issue_308_admin_resume_releases_a_held_queue() {
-    let place = Place::new("admin-resume-queue");
-    let host = place.start();
-    let session = host.new_agent("Helper");
-    let owner = host.new_agent("Owner");
-    let (code, help, err) = tool(&host, &place.root, None, &["clarp-admin", "stop", "--help"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(help.contains("clarp-admin resume --session"));
-    let (code, help, err) = tool(&host, &place.root, None, &["clarp-admin", "resume", "-h"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(help.contains("usage: clarp-admin resume"));
-    let commitment = json!({
-        "outcome": "Finish work", "criteria": ["Done"], "limits": "Disposable Host only",
-    })
-    .to_string();
-    let plan = goal(
-        &host,
-        &place.root,
-        &["create", &session, "keep", "Keep it", "[]", &commitment],
-    );
-    let plan_id = plan["plan_id"].as_str().unwrap();
-    let (code, text, err) = tool(
-        &host,
-        &place.root,
-        None,
-        &[
-            "clarp-admin",
-            "stop",
-            "--session",
-            &session,
-            "--from",
-            &owner,
-            "--reason",
-            "held for review",
-        ],
-    );
-    assert_eq!(code, 0, "{err}");
-    let stopped: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(stopped["goals_paused"], 1);
-    assert_eq!(
-        goal(&host, &place.root, &["get", plan_id])["status"],
-        "paused"
-    );
-    let queued = host.post(
-        "/send",
-        json!({
-            "session": session, "text": "wait here", "client_msg_id": "wait-here",
-            "origin": "agent", "sender": owner, "queue_if_busy": true,
-        }),
-    );
-    assert_eq!(queued["queued"], true, "{queued}");
-    assert!(host.conversation(&session).is_empty());
-    // A fresh peer send is documented to run past a backlog held by an ordinary Stop.
-    let peer = host.post(
-        "/send",
-        json!({
-            "session": session, "text": "go past the held backlog", "client_msg_id": "fresh",
-            "origin": "agent", "sender": owner,
-        }),
-    );
-    assert_eq!(peer["queued"], false, "{peer}");
-    wait_for("the fresh peer turn", || host.state(&session) == "done");
-    let queue = host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
-    assert_eq!(queue["items"][0]["text"], "wait here");
-    let (code, text, err) = tool(
-        &host,
-        &place.root,
-        None,
-        &[
-            "clarp-admin",
-            "resume",
-            "--session",
-            &session,
-            "--from",
-            &owner,
-        ],
-    );
-    assert_eq!(code, 0, "{err}");
-    let resumed: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(resumed["action"], "unpause");
-    assert_eq!(resumed["queue_paused"], false);
-    wait_for("the resumed message to finish", || {
-        host.conversation(&session).len() == 4 && host.state(&session) == "done"
-    });
-    assert_eq!(host.conversation(&session)[2], said("user", "wait here"));
-    assert_eq!(
-        goal(&host, &place.root, &["get", plan_id])["status"],
-        "paused"
-    );
-}
-
-#[test]
-fn stop_resume_issue_386_due_self_prompts_wait_for_resume() {
-    let place = Place::new("paused-self-prompt");
-    let host = place.start();
-    let session = host.new_agent("Helper");
-    let stopped = host.post("/stop", json!({"session": session}));
-    assert_eq!(stopped["queue_paused"], true, "{stopped}");
-    // The timer runs this plain clarp-admin command later, without the old turn token.
-    for (message, from) in [
-        ("named wake", Some(session.as_str())),
-        ("unattributed wake", None),
-    ] {
-        let mut args = vec!["clarp-admin", "prompt", "--to", &session, "--text", message];
-        if let Some(from) = from {
-            args.extend(["--from", from]);
-        }
-        let (code, text, err) = tool(&host, &place.root, None, &args);
-        assert_eq!(code, 0, "{err}");
-        let sent: Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(sent["queued"], true, "{sent}");
-    }
-    let queue = host.get(&format!("/turn-queue?session={session}"));
-    assert_eq!(queue["paused"], true, "{queue}");
-    let rows = queue["items"].as_array().unwrap();
-    assert_eq!(rows.len(), 2, "{queue}");
-    assert_eq!(rows[0]["text"], "named wake");
-    assert_eq!(rows[1]["text"], "unattributed wake");
-    assert!(host.conversation(&session).is_empty());
-    host.post("/turn-queue/resume", json!({"session": session}));
-    wait_for("both prompt deliveries after Resume", || {
-        host.conversation(&session).len() == 4 && host.state(&session) == "done"
-    });
 }
 
 #[test]
@@ -11627,45 +11417,6 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
 }
 
 #[test]
-fn a_finished_helper_with_no_report_is_marked_for_its_maker() {
-    let place = Place::new("unreported-helper");
-    let host = place.start_with("", &["--helpers-checked-every-ms", "50"]);
-    let maker = host.new_agent("Maker");
-    let helper = host.post(
-        "/agents",
-        json!({
-            "name": "Slice", "backend": "scripted", "role": "helper", "parent": maker,
-        }),
-    );
-    let helper = helper["session"].as_str().unwrap();
-    let state =
-        || host.get(&format!("/agent-helper-state?session={helper}"))["helper_state"].clone();
-    let events = host.listen();
-    host.send(helper, "Do this work.", "first");
-    wait_for("the settled helper with no report", || {
-        state() == "ended-unreported"
-    });
-    wait_for("the helper state roster event", || {
-        events.lock().unwrap().iter().any(|event| {
-            event["type"] == "agent-roster"
-                && event["kind"] == "helper-state"
-                && event["session"] == helper
-        })
-    });
-    assert_eq!(
-        host.post(
-            "/send",
-            json!({
-                "session": maker, "text": "Here is my report.", "origin": "agent",
-                "sender": helper, "client_msg_id": "late-report"
-            })
-        )["ok"],
-        true
-    );
-    assert_eq!(state(), "reported");
-}
-
-#[test]
 fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     let place = Place::new("helpers");
     // The fleet looks after its helpers often here, and one that is done is put away at once.
@@ -16642,82 +16393,6 @@ const STAND_IN_ANSWERS: &str = "\
 printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
 printf '%s\\n' '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"on it\"}]}}'\n\
 printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1}'\n";
-
-#[test]
-fn agent_read_parity_peers_list_uses_only_public_fields() {
-    let place = Place::new("tool-peers-list");
-    let admin = "fixture-admin";
-    let host = place.start_with_token(admin);
-    let token = "private-fixture-peer-token";
-    let peer = json!({
-        "name": "work", "url": "https://work.invalid", "token": token, "server_id": "work-host",
-    });
-    host.post("/peers", peer.clone());
-
-    let tools = clarp_host::tool_token(admin);
-    let output = place
-        .host_command()
-        .args(["tool", "clarp-admin", "peers", "list"])
-        .current_dir(&place.root)
-        .env("CLARP_HOST_ADDR", &host.address)
-        .env("CLARP_TOOL_TOKEN", &tools)
-        .env_remove("CLARP_HOST_TOKEN")
-        .ended();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let listed: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(
-        listed,
-        json!([{"name": "work", "url": "https://work.invalid", "enabled": true, "server_id": "work-host"}])
-    );
-    for (method, path) in [
-        ("GET", "/peers"),
-        ("POST", "/peers"),
-        ("DELETE", "/peers/work"),
-    ] {
-        assert_eq!(host.ask_as(&tools, method, path, Some(&peer)).0, 403);
-    }
-}
-
-#[test]
-fn agent_read_parity_background_jobs_opens_only_the_list() {
-    let place = Place::new("tool-background-jobs");
-    let admin = "fixture-admin";
-    let host = place.start_with_token(admin);
-    let session = host.new_agent("Worker");
-    let job_id = "tool-list-job";
-    let (code, _, error) = tool(
-        &host,
-        &place.root,
-        None,
-        &[
-            "clarp-agent-bg",
-            &session,
-            "job-upsert",
-            job_id,
-            "implementation",
-            "Fixture job",
-        ],
-    );
-    assert_eq!(code, 0, "{error}");
-    let tools = clarp_host::tool_token(admin);
-    let (status, listed) = host.ask_as(&tools, "GET", "/background-jobs", None);
-    assert_eq!(status, 200, "{listed}");
-    let jobs = listed["jobs"].as_array().unwrap();
-    let job = jobs.iter().find(|job| job["job_id"] == job_id).unwrap();
-    assert_eq!(job["session"], session);
-    assert!(job.get("log_tail").is_none());
-    for (method, path) in [
-        ("POST", "/background-jobs"),
-        ("GET", "/background-jobs/tool-list-job"),
-        ("DELETE", "/background-jobs/tool-list-job"),
-    ] {
-        assert_eq!(host.ask_as(&tools, method, path, None).0, 403);
-    }
-}
 
 #[test]
 fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
@@ -21998,46 +21673,6 @@ fn answers_using(
         }
     });
     (address, taken)
-}
-
-#[test]
-fn an_open_event_stream_cannot_keep_the_host_from_exiting() {
-    use nix::sys::signal::{Signal, kill};
-    use nix::unistd::Pid;
-
-    let place = Place::new("shutdown-open-stream");
-    let mut host = place.start();
-    let events = host.listen();
-    wait_for("the open event stream", || {
-        events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event["type"] == "server-version")
-    });
-
-    let stopping = Instant::now();
-    let pid = Pid::from_raw(i32::try_from(host.process.id()).unwrap());
-    kill(pid, Signal::SIGTERM).unwrap();
-    // Allow for scheduling the signal and observing the exit on a shared build machine.
-    wait_within(
-        "the Host to exit with an open stream",
-        Duration::from_secs(7),
-        || host.process.try_wait().unwrap().is_some(),
-    );
-    let status = host.process.wait().unwrap();
-    assert!(status.success(), "{status}");
-    assert!(stopping.elapsed() >= Duration::from_secs(5));
-    wait_within(
-        "the count of open connections",
-        Duration::from_secs(1),
-        || {
-            host.heard
-                .lock()
-                .unwrap()
-                .contains("HTTP shutdown deadline reached with 1 open connections")
-        },
-    );
 }
 
 #[test]

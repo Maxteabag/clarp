@@ -95,3 +95,43 @@ fn a_helper_whose_parent_was_deleted_before_its_removal_came_is_abandoned_at_the
     assert_eq!(again["helper_state"], "abandoned");
     assert_eq!(again["helper_completed_at_ms"], json!(completed));
 }
+
+#[test]
+fn an_open_event_stream_cannot_keep_the_host_from_exiting() {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+
+    let place = Place::new("shutdown-open-stream");
+    let mut host = place.start();
+    let events = host.listen();
+    wait_for("the open event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "server-version")
+    });
+
+    let stopping = Instant::now();
+    let pid = Pid::from_raw(i32::try_from(host.process.id()).unwrap());
+    kill(pid, Signal::SIGTERM).unwrap();
+    // Allow for scheduling the signal and observing the exit on a shared build machine.
+    wait_within(
+        "the Host to exit with an open stream",
+        Duration::from_secs(7),
+        || host.process.try_wait().unwrap().is_some(),
+    );
+    let status = host.process.wait().unwrap();
+    assert!(status.success(), "{status}");
+    assert!(stopping.elapsed() >= Duration::from_secs(5));
+    wait_within(
+        "the count of open connections",
+        Duration::from_secs(1),
+        || {
+            host.heard
+                .lock()
+                .unwrap()
+                .contains("HTTP shutdown deadline reached with 1 open connections")
+        },
+    );
+}
