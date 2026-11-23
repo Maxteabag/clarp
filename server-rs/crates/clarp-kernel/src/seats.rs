@@ -196,7 +196,7 @@ fn plan_label(value: &Value) -> Option<String> {
         .then(|| said.chars().take(MAX_LABEL).collect())
 }
 
-fn family(model: &Value) -> Option<&'static str> {
+pub(crate) fn family(model: &Value) -> Option<&'static str> {
     let text = if crate::python::truthy(model) {
         written(model).to_lowercase()
     } else {

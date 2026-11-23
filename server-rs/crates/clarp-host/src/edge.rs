@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 166;
+pub const HOST_CONTRACT: u64 = 167;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -372,6 +372,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A turn whose conversation no longer fits its model fails as `prompt_too_long`, its own
     // kind, which says to compact the conversation or start a new one; never tried again.
     ("prompt_too_long", 166),
+    // Before an agent's account is used up, its row says that it is near a limit
+    // (`backend_quota` with `state` `near`, `used_percentage`, `window`, `resets_at` and
+    // `failover`): from four fifths of the five hours and nine tenths of the week, and only
+    // where no other seat of its tool would take its turn (`clarp_kernel::quota_near`). The
+    // apps are told when it appears, changes or clears (`agent-roster`, `backend-quota`).
+    ("backend_quota_near", 167),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -1483,7 +1489,7 @@ pub(crate) fn agent_row(
     member: &Member,
     faces: &crate::faces::Faces,
     owners: &toml::Table,
-    used_up: &crate::quota::UsedUp,
+    quota: &crate::quota::Rows,
     forks: &crate::conversation_forks::Named,
 ) -> Value {
     let view = member.agent.view();
@@ -1560,8 +1566,9 @@ pub(crate) fn agent_row(
         });
         row["last_activity"] = json!(at);
     }
-    // Whether its tool's account is used up: advice for whoever is about to write to it.
-    row["backend_quota"] = used_up.get(view.backend).cloned().unwrap_or(Value::Null);
+    // Whether its tool's account is used up, or near a limit with no other seat to take its
+    // turn: advice for whoever is about to write to it.
+    row["backend_quota"] = quota.of(view.backend, &member.record.model);
     // A change of its backend that runs now (feature `agent_backend_transit`), else null.
     row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);
     // The face it is shown with: the picture it has of its own; else, unless it has a
@@ -1641,7 +1648,7 @@ async fn snapshot(
     let without_archived = query.include_archived.as_deref() == Some("0");
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let families = Families::of(&directory);
-    let used_up = crate::quota::used_up(&app).await;
+    let quota = crate::quota::rows(&app).await;
     // Which agents the user calls live: by their profiles, as they are now.
     let (live_defaults, live_available) = app.calls.taking(&app).await;
     let owners = app.mouth.owners_from(&directory);
@@ -1660,7 +1667,7 @@ async fn snapshot(
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| {
             let mut row = agent_row(
-                &directory, &families, member, &app.faces, &owners, &used_up, &forks,
+                &directory, &families, member, &app.faces, &owners, &quota, &forks,
             );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
@@ -1679,7 +1686,7 @@ async fn snapshot(
             continue;
         }
         let mut row = agent_row(
-            &directory, &families, member, &app.faces, &owners, &used_up, &forks,
+            &directory, &families, member, &app.faces, &owners, &quota, &forks,
         );
         row["team_ids"] = json!(team_ids(member));
         row["live_call_available"] = json!(false);
@@ -2203,7 +2210,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
         .named(&record.agent_id)
         .map(|member| {
             // Whether its tool's account is used up is none of the fields of this answer.
-            let (families, unasked) = (Families::of(&directory), crate::quota::UsedUp::new());
+            let (families, unasked) = (Families::of(&directory), crate::quota::Rows::unasked());
             agent_row(
                 &directory,
                 &families,

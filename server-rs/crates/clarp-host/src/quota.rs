@@ -10,7 +10,9 @@
 //!
 //! An agent's row says of its tool that its account is used up (`backend_quota`) while a
 //! window that was said to be all used is fresh and no turn of the tool completed since:
-//! advice for whoever is about to write to the agent, and no refusal.
+//! advice for whoever is about to write to the agent, and no refusal. Before that, it says
+//! that the account is near a limit (`state: near`, `clarp_kernel::quota_near`), unless
+//! another seat of the tool would take the agent's turn ([`Rows`]).
 //!
 //! A turn that fails for a usage limit is a limit too, of which nothing more is known: it is
 //! told as a hard limit and stands until a turn of the tool completes.
@@ -141,9 +143,58 @@ pub struct Desk {
     refresh: tokio::sync::Mutex<()>,
     verified: std::sync::Mutex<BTreeMap<String, Verification>>,
     agy_attempt: std::sync::Mutex<Option<i64>>,
-    /// Which accounts were used up when that was last looked at, and which tools were
-    /// looked at at all: to tell when it is no longer as it was.
-    last: std::sync::Mutex<Option<(Arc<UsedUp>, Vec<String>)>>,
+    /// Which accounts were used up and which near a limit when that was last looked at, and
+    /// which tools were looked at at all: to tell when it is no longer as it was.
+    last: std::sync::Mutex<Option<(Looked, Vec<String>)>>,
+    /// When the first window that an agent's row names begins anew: it is looked at again
+    /// then, so that what it said clears as it does.
+    wake: std::sync::Mutex<Option<i64>>,
+    /// Whether another seat would take the turns of a tool that is near a limit, as the apps
+    /// were last told it by a reading of the seats ([`seats_changed`]).
+    failover: std::sync::Mutex<BTreeMap<String, &'static str>>,
+}
+
+/// Which accounts are used up, and which are near a limit and not used up, by the tool's
+/// name, with what an agent's row says of its tool then.
+#[derive(Clone, Default)]
+pub struct Looked {
+    pub used_up: Arc<UsedUp>,
+    pub near: Arc<UsedUp>,
+}
+
+/// What a tool's account is as an agent's row says it: used up, and else near a limit. Both
+/// have one shape (state, provider_id, reason, window, resets_at, observed_at) and say how
+/// much of the window they name is used (`used_percentage`, 0 to 100): on a used-up account
+/// null where that is not known (a limit that a turn failed for).
+type Said = (Option<Value>, Option<Value>);
+
+/// What is used of the window that a used-up account's row names, set on the row.
+fn with_used(mut used_up: Option<Value>, used: impl FnOnce(&str) -> Option<f64>) -> Option<Value> {
+    if let Some(said) = &mut used_up {
+        let window = said["window"].as_str().unwrap_or("").to_string();
+        said["used_percentage"] = json!(used(&window));
+    }
+    used_up
+}
+
+fn codex_said(kept: &Kept, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Said {
+    let used_up = kept.used_up(tool, login, now_ms);
+    let used_up = with_used(used_up, |window| kept.used_of(login, now_ms, window));
+    let near = match &used_up {
+        None => kept.near(tool, login, now_ms),
+        Some(_) => None,
+    };
+    (used_up, near)
+}
+
+fn claude_said(kept: &Standing, tool: Tool<'_>, active: Option<&str>, now_ms: i64) -> Said {
+    let used_up = kept.used_up(tool, active, now_ms);
+    let used_up = with_used(used_up, |window| kept.used_of(window));
+    let near = match &used_up {
+        None => kept.near(tool, active, now_ms),
+        Some(_) => None,
+    };
+    (used_up, near)
 }
 
 const VERIFICATION_MS: i64 = 60_000;
@@ -396,7 +447,7 @@ impl Desk {
                     self.looked(
                         with,
                         name,
-                        kept.used_up(tool, account.as_deref(), with.now_ms),
+                        claude_said(&kept, tool, account.as_deref(), with.now_ms),
                     );
                 }
                 _ => {
@@ -421,7 +472,7 @@ impl Desk {
                         kept.refresh_failed(with.now_ms);
                     }
                     known.keep(with.fleet, name, kept.clone()).await;
-                    self.looked(with, name, kept.used_up(tool, on, with.now_ms));
+                    self.looked(with, name, codex_said(&kept, tool, on, with.now_ms));
                 }
             }
             if let Some(stamp) = before {
@@ -516,7 +567,7 @@ impl Desk {
         for event in events {
             with.hub.publish(event, with.now_ms);
         }
-        self.looked(with, tool, kept.used_up(of, login, with.now_ms));
+        self.looked(with, tool, codex_said(&kept, of, login, with.now_ms));
     }
 
     /// A turn of Claude Code ended: the newest it said of its account's windows in the turn
@@ -555,7 +606,7 @@ impl Desk {
         self.looked(
             with,
             CLAUDE,
-            kept.used_up(of, account.as_deref(), with.now_ms),
+            claude_said(&kept, of, account.as_deref(), with.now_ms),
         );
     }
 
@@ -572,7 +623,7 @@ impl Desk {
         self.looked(
             with,
             CLAUDE,
-            kept.used_up(of, account.as_deref(), with.now_ms),
+            claude_said(&kept, of, account.as_deref(), with.now_ms),
         );
         kept.provider(of, account.as_deref(), with.now_ms)
     }
@@ -599,12 +650,12 @@ impl Desk {
         for event in &shown.events {
             with.hub.publish(event.clone(), with.now_ms);
         }
-        self.looked(with, tool, kept.used_up(of, login, with.now_ms));
+        self.looked(with, tool, codex_said(&kept, of, login, with.now_ms));
         shown
     }
 
-    /// Which accounts are used up now: looked at afresh, tool by tool.
-    pub async fn used_up(&self, with: With<'_>) -> Arc<UsedUp> {
+    /// Which accounts are used up and which near a limit now: looked at afresh, tool by tool.
+    pub async fn used_up(&self, with: With<'_>) -> Looked {
         let mut known = self.known.lock().await;
         let on = known.login(with, CODEX, false).await;
         let kept = known.of(with.fleet, CODEX).await.unwrap_or_default();
@@ -614,7 +665,7 @@ impl Desk {
             provider: CODEX,
         };
         let login = on.as_ref().map(Named::login);
-        self.looked(with, CODEX, kept.used_up(of, login, with.now_ms));
+        self.looked(with, CODEX, codex_said(&kept, of, login, with.now_ms));
         let account = known.claude_account(with, false).await;
         let kept = known.standing(with.fleet).await.unwrap_or_default();
         let instance = format!("{}:{CLAUDE}", with.server_id);
@@ -625,52 +676,177 @@ impl Desk {
         self.looked(
             with,
             CLAUDE,
-            kept.used_up(of, account.as_deref(), with.now_ms),
+            claude_said(&kept, of, account.as_deref(), with.now_ms),
         )
     }
 
-    /// Remembers whether a tool's account is used up now (`now`: what an agent's row says
-    /// of it then). Where an app would show another thing of it than at the last look (which
-    /// window, until when), the apps are told to read their agents' rows again. The first
-    /// look at a tool tells nothing: nothing is known to have changed.
-    fn looked(&self, with: With<'_>, tool: &str, now: Option<Value>) -> Arc<UsedUp> {
-        let shown = |all: &UsedUp| {
-            let said = all.get(tool)?;
-            Some((said["window"].clone(), said["resets_at"].clone()))
+    /// Remembers whether a tool's account is used up or near a limit now (`said`: what an
+    /// agent's row says of it then). Where an app would show another thing of it than at the
+    /// last look (used up or near, which window, until when, near by how many whole percent),
+    /// the apps are told to read their agents' rows again. The first look at a tool tells
+    /// nothing: nothing is known to have changed.
+    fn looked(&self, with: With<'_>, tool: &str, (used_up, near): Said) -> Looked {
+        let shown = |all: &Looked| {
+            let (said, used) = match all.used_up.get(tool) {
+                Some(said) => (said, Value::Null),
+                None => {
+                    let said = all.near.get(tool)?;
+                    // In whole percents: the apps are told again as the share grows by one,
+                    // and not at every turn.
+                    (
+                        said,
+                        json!(said["used_percentage"].as_f64().map(f64::floor)),
+                    )
+                }
+            };
+            let what = |field: &str| said[field].clone();
+            Some((what("state"), what("window"), what("resets_at"), used))
         };
         let mut last = self.last.lock().unwrap_or_else(PoisonError::into_inner);
         let (before, looked_at) = last.get_or_insert_with(Default::default);
-        let mut all: UsedUp = before.as_ref().clone();
-        match now {
-            Some(said) => all.insert(tool.to_string(), said),
-            None => all.remove(tool),
+        let keep = |of: &Arc<UsedUp>, said: Option<Value>| {
+            let mut all: UsedUp = of.as_ref().clone();
+            match said {
+                Some(said) => all.insert(tool.to_string(), said),
+                None => all.remove(tool),
+            };
+            Arc::new(all)
+        };
+        let all = Looked {
+            used_up: keep(&before.used_up, used_up),
+            near: keep(&before.near, near),
         };
         let first_look = !looked_at.iter().any(|at| at == tool);
         if first_look {
             looked_at.push(tool.to_string());
         }
         let changed = !first_look && shown(before) != shown(&all);
-        let all = Arc::new(all);
         *before = all.clone();
         drop(last);
+        // The first window named that begins anew: looked at again when it has.
+        let resets = all.used_up.values().chain(all.near.values());
+        let wake = resets
+            .filter_map(|said| said["resets_at"].as_str().and_then(quota::from_text))
+            .filter(|at| *at > with.now_ms)
+            .min();
+        *self.wake.lock().unwrap_or_else(PoisonError::into_inner) = wake;
         if changed {
             let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
             with.hub.publish(again, with.now_ms);
         }
         all
     }
+
+    /// How long until the accounts are looked at again: every five minutes, and a second
+    /// after the first window that an agent's row names begins anew, where that is sooner.
+    fn next_look(&self, now_ms: i64) -> Duration {
+        let wake = *self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        let until = wake.filter(|at| *at > now_ms).map(|at| at - now_ms + 1_000);
+        let until = until.and_then(|ms| u64::try_from(ms).ok());
+        until.map_or(LOOKED_EVERY, |ms| {
+            Duration::from_millis(ms).min(LOOKED_EVERY)
+        })
+    }
 }
 
 /// Which accounts are used up now, for an app's request.
 pub async fn used_up(app: &crate::edge::App) -> Arc<UsedUp> {
     let home = crate::config::home();
-    app.limits.used_up(With::of(app, &home)).await
+    app.limits.used_up(With::of(app, &home)).await.used_up
 }
 
-/// That an account is used up stops being so with time, and nothing happens when it does:
-/// what was said of it grows old, its window begins anew. So it is looked at now and then
-/// (every five minutes, as the Python Host looks), and an app that shows an account as used
-/// up is told to look again.
+/// What the agents' rows say of their tools' accounts (`backend_quota`): used up, and else
+/// near a limit where no other seat of the tool would take the agent's turn.
+pub struct Rows {
+    looked: Looked,
+    accounts: clarp_kernel::recovery::Accounts,
+    /// The tools whose pool has the owner's selector, which moves the tool to another seat
+    /// when its account is used up.
+    selectors: std::collections::BTreeSet<&'static str>,
+    /// The seats as `GET /hotseat/status` serves them, where a tool is near a limit.
+    desk: Value,
+}
+
+impl Rows {
+    /// For an answer that says nothing of the accounts.
+    pub fn unasked() -> Self {
+        Self {
+            looked: Looked::default(),
+            accounts: clarp_kernel::recovery::Accounts::None,
+            selectors: Default::default(),
+            desk: Value::Null,
+        }
+    }
+
+    /// Whether another seat would take a turn of an agent on `model` from its tool.
+    fn failover(&self, tool: &str, model: &str) -> clarp_kernel::quota_near::Failover {
+        let selector = self.selectors.contains(tool);
+        clarp_kernel::quota_near::failover(self.accounts, tool, model, selector, &self.desk)
+    }
+
+    /// What the row of an agent on this tool and model says of its account.
+    pub fn of(&self, tool: &str, model: &str) -> Value {
+        if let Some(used_up) = self.looked.used_up.get(tool) {
+            return used_up.clone();
+        }
+        let Some(near) = self.looked.near.get(tool) else {
+            return Value::Null;
+        };
+        clarp_kernel::quota_near::row(near, self.failover(tool, model))
+    }
+}
+
+/// What the agents' rows say of their tools' accounts now, for an app's request. The seats
+/// are read as they are kept, and only where a tool is near a limit.
+pub async fn rows(app: &crate::edge::App) -> Rows {
+    let home = crate::config::home();
+    let looked = app.limits.used_up(With::of(app, &home)).await;
+    let desk = if looked.near.is_empty() {
+        Value::Null
+    } else {
+        crate::seats::status(app).await
+    };
+    let selectors = app.pools.iter().filter(|pool| pool.has_selector());
+    Rows {
+        looked,
+        accounts: app.config.accounts,
+        selectors: selectors.map(|pool| pool.tool()).collect(),
+        desk,
+    }
+}
+
+/// The seats were read again, or the tool was moved to another: whether another seat would
+/// take the turns of a tool that is near a limit may have changed, and the account the tool
+/// is on with it. The accounts are looked at again, and where a tool's warning is now shown
+/// otherwise than it was, the apps are told to read their agents' rows again. (Judged for an
+/// agent on no model of its own; a seat that is closed to one model only is weighed for each
+/// agent when its row is read.)
+pub async fn seats_changed(app: &crate::edge::App) {
+    let rows = rows(app).await;
+    let now: BTreeMap<String, &'static str> = rows
+        .looked
+        .near
+        .keys()
+        .map(|tool| (tool.clone(), rows.failover(tool, "").word()))
+        .collect();
+    let mut told = app
+        .limits
+        .failover
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let changed = *told != now;
+    *told = now;
+    drop(told);
+    if changed {
+        let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
+        app.hub.publish(again, app.clock.now_ms());
+    }
+}
+
+/// That an account is used up or near a limit stops being so with time, and nothing happens
+/// when it does: what was said of it grows old, its window begins anew. So it is looked at now
+/// and then (every five minutes, as the Python Host looks, and as the first window an agent's
+/// row names begins anew), and an app that shows such an account is told to look again.
 pub async fn watch(
     desk: Arc<Desk>,
     fleet: FleetHandle,
@@ -680,7 +856,7 @@ pub async fn watch(
 ) {
     let home = crate::config::home();
     loop {
-        tokio::time::sleep(LOOKED_EVERY).await;
+        tokio::time::sleep(desk.next_look(clock.now_ms())).await;
         let with = With {
             fleet: &fleet,
             hub: &hub,

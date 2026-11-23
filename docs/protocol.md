@@ -252,6 +252,31 @@ Rules:
   reason to refuse the send: an account switch may still serve the turn.
   The Host refreshes usage every five minutes and sends `agent-roster` with
   `kind: "backend-quota"` when the picture changes.
+  On a Rust Host from contract 167 (feature `backend_quota_near`) it can also be
+  `{"state": "near", "provider_id", "reason": "usage_limit", "window"
+  (five_hour | seven_day), "used_percentage" (0 to 100, below 100), "resets_at"
+  (ISO time or null), "observed_at", "failover" (none | unknown)}`, the shape of
+  `exhausted` with `used_percentage` and `failover`; and `exhausted` gains
+  `used_percentage` too, the share of the window it names, null where that is
+  not known (window `unknown`). The account
+  this agent runs on is near a limit. It starts at 80% of the five-hour window
+  (about an hour of steady work left; the same share as the five-hour
+  `provider-limit` warning) and at 90% of the weekly window (80% of a week would
+  leave a warning up for more than a day), names the window nearest its end, and
+  stands until that window resets or the tool is on another account; at 100% the
+  row is `exhausted` instead. It is set only when no other seat of the tool would
+  take the turn, since account switching would hide the limit: `failover: "none"`
+  means the Host knows no seat would (it switches no accounts, or its seats
+  reading shows no other seat below those shares for the agent's model),
+  `"unknown"` that it cannot know (`--accounts follow`, where another Host
+  switches, or a seats reading that is old, failed, missing or does not say
+  enough). The Host looks again a second after a named window resets, and sends
+  `agent-roster` with `kind: "backend-quota"` when the warning appears, changes
+  window or reset, grows by a whole percent, changes `failover`, or clears.
+  Example: `{"state": "near", "provider_id": "claude", "reason": "usage_limit",
+  "window": "five_hour", "used_percentage": 84.0, "resets_at":
+  "2026-11-23T18:00:00Z", "observed_at": "2026-11-23T15:12:40Z", "failover":
+  "none"}`.
 - `parent_agent_id` is the agent that created this one (a helper's parent,
   or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
   `helper_state` is `null` unless `role` is `helper`; then it is `running`,

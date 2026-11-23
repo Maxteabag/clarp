@@ -175,6 +175,29 @@ impl Standing {
         })
     }
 
+    /// How much of a window of the last word is used, in percent, where it said so.
+    pub fn used_of(&self, kind: &str) -> Option<f64> {
+        self.windows.get(kind)?["used_percentage"].as_f64()
+    }
+
+    /// Whether the account the Host is on stands near a limit of its usage, and what an
+    /// agent's row says of its tool then (`crate::quota_near`). A word of another account than
+    /// the one the Host is on says nothing of it.
+    pub fn near(&self, tool: Tool<'_>, active: Option<&str>, now_ms: i64) -> Option<Value> {
+        let fresh = self.fresh(active, now_ms)?;
+        let windows = KINDS.iter().filter_map(|kind| {
+            let window = self.windows.get(*kind)?;
+            Some(crate::quota_near::Window {
+                kind,
+                used: window["used_percentage"].as_f64()?,
+                resets_at: window["resets_at"].as_str(),
+                fresh,
+                observed_at_ms: self.seen_at_ms,
+            })
+        });
+        crate::quota_near::nearest(tool.provider, windows, now_ms)
+    }
+
     /// Whether the account the Host is on is used up, as far as the word of it stands, and
     /// what an agent's row says of its tool then (`backend_usage.exhausted_backends`): a
     /// window of a fresh word that is all used, unless a turn of the tool completed after
