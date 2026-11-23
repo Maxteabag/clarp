@@ -137,7 +137,9 @@ pub fn order(spec: &TurnSpec) -> Order {
         append,
         model: given(&spec.model),
         effort: given(&spec.effort).to_lowercase(),
-        attachments: attached(&spec.prompt),
+        // Only the new message's files: a record carried before it names old ones.
+        attachments: attached(&told::without_restored(&spec.prompt)),
+        silence_ms: 0,
     }
 }
 
@@ -323,15 +325,6 @@ impl AcpInterpreter {
                         backend_session: session.to_string(),
                     });
                 }
-                if let Some(lost) = line["lost"].as_str().filter(|lost| !lost.is_empty()) {
-                    self.notice(
-                        "agy-new-conversation",
-                        format!(
-                            "Antigravity no longer had conversation {lost}; this turn began a new one."
-                        ),
-                        out,
-                    );
-                }
             }
             "model" => self.model(text_of(&line["model"]), out),
             "notice" => {
@@ -346,7 +339,11 @@ impl AcpInterpreter {
             }
             // A question with fixed choices is answered by policy, as a permission is: the
             // user is told what was chosen. An allowed permission says nothing.
-            "permission" if !matches!(text_of(&line["kind"]), "allow_once" | "allow_always") => {
+            // One asked after a Stop is declined without a word: the turn is ending.
+            "permission"
+                if line["stopped"] != true
+                    && !matches!(text_of(&line["kind"]), "allow_once" | "allow_always") =>
+            {
                 let title = shorten(text_of(&line["title"]), 300);
                 let text = match line["answer"].as_str() {
                     Some(answer) => {

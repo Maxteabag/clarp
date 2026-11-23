@@ -14,6 +14,7 @@
 //! stopped. Every permission Antigravity asks for is answered at once by Clarp's policy
 //! ([`clarp_acp::schema::chosen`]): nobody is waited for.
 
+use std::collections::BTreeSet;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -24,8 +25,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clarp_acp::agy::{self as shared, Failure, Kind, Order};
 use clarp_acp::client::{self, Answer, Client, Ended, Handler, Inbound};
 use clarp_acp::{code, method, schema};
-use nix::sys::signal::{SigSet, Signal, kill};
-use nix::unistd::Pid;
+use nix::sys::signal::{SigSet, Signal, kill, killpg};
+use nix::unistd::{Pid, getpgrp, getpid};
 use serde_json::{Value, json};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -34,6 +35,8 @@ type Result<T> = std::result::Result<T, Error>;
 /// How long Antigravity may take over a request before the prompt: it unpacks itself and
 /// signs in when it starts.
 const SETUP_WAIT: Duration = Duration::from_secs(5 * 60);
+/// How long what agy left behind is given to leave after TERM, before it is killed.
+const REAP_GRACE: Duration = Duration::from_millis(500);
 /// How long agy is given to leave on its own once its input is closed, and again after TERM.
 const LEAVE_WAIT: Duration = Duration::from_secs(5);
 /// The certificate bundles of the distributions, for an agy whose own Python looks elsewhere.
@@ -73,6 +76,11 @@ struct Record {
     first_update_ms: Option<u64>,
     /// How long continuing the conversation took.
     resume_ms: Option<u64>,
+    /// The tool calls Antigravity began and has not said the end of: while one is open, the
+    /// prompt may be silent for as long as a tool runs.
+    open_tools: BTreeSet<String>,
+    /// The prompt was cancelled: what Antigravity asks after that is declined.
+    stopping: bool,
 }
 
 impl Handler for Record {
@@ -84,7 +92,20 @@ impl Handler for Record {
         if update && self.prompting && self.first_update_ms.is_none() {
             self.first_update_ms = Some(ms(self.launched));
         }
-        emit(message)
+        match schema::SessionUpdate::of_notification(message) {
+            Some(
+                schema::SessionUpdate::ToolCall(call) | schema::SessionUpdate::ToolCallUpdate(call),
+            ) if !call.tool_call_id.is_empty() => {
+                if call.ended() {
+                    self.open_tools.remove(&call.tool_call_id);
+                } else {
+                    self.open_tools.insert(call.tool_call_id);
+                }
+            }
+            _ => {}
+        }
+        // One line of the record each, short enough that the shim never splits it.
+        emit(&schema::bounded(message))
     }
 
     fn request(
@@ -100,7 +121,12 @@ impl Handler for Record {
             )));
         }
         let options = schema::permission_options(params);
-        let chosen = schema::chosen(&options);
+        // After a Stop, nothing more is allowed: the request is answered as cancelled.
+        let chosen = if self.stopping {
+            None
+        } else {
+            schema::chosen(&options)
+        };
         emit(&said(
             "permission",
             json!({
@@ -109,6 +135,7 @@ impl Handler for Record {
                 "options": options.iter().map(|option| option.name.clone()).collect::<Vec<_>>(),
                 "kind": chosen.map(|option| option.kind.clone()),
                 "answer": chosen.map(|option| option.name.clone()),
+                "stopped": self.stopping,
             }),
         ))?;
         Ok(Ok(schema::permission_outcome(chosen)))
@@ -142,19 +169,27 @@ impl Turn {
         &mut self,
         session: &str,
         blocks: Vec<Value>,
+        silence: Duration,
     ) -> Result<std::result::Result<Answer, Ended>> {
         let id = self.client.send_request(
             method::SESSION_PROMPT,
             json!({"sessionId": session, "prompt": blocks}),
         )?;
         self.record.prompting = true;
-        let silence = Duration::from_secs(shared::SILENCE_MOST_SECS);
+        let tool_silence = Duration::from_secs(shared::TOOL_SILENCE_MOST_SECS);
         loop {
+            // A tool that runs says nothing until it ends: a build or a test suite. The short
+            // bound holds only while no tool call is open.
+            let short = self.record.open_tools.is_empty();
+            let bound = if short { silence } else { tool_silence };
             match self
                 .client
-                .wait(id, silence, self.stopping, &mut self.record)?
+                .wait(id, bound, self.stopping, &mut self.record)?
             {
+                Err(Ended::Silent)
+                    if short && self.stopping.is_none() && !self.record.open_tools.is_empty() => {}
                 Err(Ended::Interrupted) => {
+                    self.record.stopping = true;
                     if self.stopping.is_none() {
                         self.stopping =
                             Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
@@ -211,6 +246,12 @@ impl Agent {
 
 /// SIGUSR1, the shim's way to ask for a Stop, becomes an interrupt of the client's wait.
 fn stop_watch(inbound: Sender<Inbound>) -> Result<()> {
+    // SIGTERM is held by every thread of the driver, so that the driver can end what agy left
+    // in its process group without ending itself ([`reap`]); agy and its children start with
+    // nothing held. A stopped turn lets it through to end itself by it.
+    let mut held = SigSet::empty();
+    held.add(Signal::SIGTERM);
+    held.thread_block()?;
     let mut signals = SigSet::empty();
     signals.add(Signal::SIGUSR1);
     signals.thread_block()?;
@@ -460,7 +501,6 @@ fn open(
         params["_meta"] = meta.clone();
     }
     let named = order.session.trim();
-    let mut lost = None;
     if !named.is_empty() {
         let mut resume = params.clone();
         resume["sessionId"] = json!(named);
@@ -479,7 +519,17 @@ fn open(
                 emit(&said("bound", json!({"session": named, "resumed": true})))?;
                 return Ok(Ok((named.to_string(), opened)));
             }
-            Ok(Answer::Error(error)) if gone(&error) => lost = Some(named),
+            // A conversation agy no longer has is not begun anew here, empty: it is marked,
+            // and the turn fails, so that the Host continues it with its own record of it.
+            Ok(Answer::Error(error)) if gone(&error) => {
+                mark_poisoned(named);
+                let said = shared::error_text(&error);
+                failed(
+                    "session",
+                    &json!({"code": code::NOT_FOUND, "message": format!("Session not found: {said}")}),
+                )?;
+                return Ok(Err(Outcome::Failed));
+            }
             Ok(Answer::Error(error)) => {
                 failed(
                     if error["code"] == code::AUTH_REQUIRED {
@@ -498,10 +548,7 @@ fn open(
         Ok(Answer::Result(opened)) => {
             match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
                 Some(id) => {
-                    emit(&said(
-                        "bound",
-                        json!({"session": id, "resumed": false, "lost": lost}),
-                    ))?;
+                    emit(&said("bound", json!({"session": id, "resumed": false})))?;
                     Ok(Ok((id.to_string(), opened)))
                 }
                 None => {
@@ -563,7 +610,11 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
         &order.headed
     };
     let prompt = blocks(order, text, &capabilities["promptCapabilities"])?;
-    let answer = turn.prompt(&session, prompt)?;
+    let silence = match order.silence_ms {
+        0 => Duration::from_secs(shared::SILENCE_MOST_SECS),
+        ms => Duration::from_millis(ms),
+    };
+    let answer = turn.prompt(&session, prompt, silence)?;
     emit(&said(
         "timing",
         json!({
@@ -593,9 +644,53 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
             }
         }
         // A Stop whose cancel was not answered in time: agy is ended below.
-        Err(Ended::Silent) if stopped => Outcome::Stopped,
+        // After a Stop, however agy ends, the turn was stopped.
+        Err(_) if stopped => Outcome::Stopped,
         Err(how) => early("prompt", how)?,
     })
+}
+
+/// Ends what agy left behind in the driver's process group: a server or a command it started,
+/// which would outlive the turn, and, holding the shim's standard error, keep the turn from
+/// ending. Only where the driver leads a group of its own, as the shim starts it: never the
+/// group of whoever started the driver otherwise. TERM first (the driver holds it), then KILL
+/// to what is still there.
+fn reap() {
+    let group = getpgrp();
+    if group != getpid() || others_of(group).is_empty() {
+        return;
+    }
+    if killpg(group, Signal::SIGTERM).is_err() {
+        return;
+    }
+    std::thread::sleep(REAP_GRACE);
+    for pid in others_of(group) {
+        let _ = kill(pid, Signal::SIGKILL);
+    }
+}
+
+/// The processes of a group but the driver, as `/proc` lists them.
+fn others_of(group: Pid) -> Vec<Pid> {
+    let me = getpid();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+        .map(Pid::from_raw)
+        .filter(|pid| *pid != me)
+        .filter(|pid| {
+            // The fields after the name in parentheses: state, parent, group.
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    let after = stat.rsplit_once(')')?.1;
+                    after.split_whitespace().nth(2)?.parse::<i32>().ok()
+                })
+                .is_some_and(|of| of == group.as_raw())
+        })
+        .collect()
 }
 
 pub fn run(program: &str) -> Result<u8> {
@@ -621,17 +716,23 @@ pub fn run(program: &str) -> Result<u8> {
             prompting: false,
             first_update_ms: None,
             resume_ms: None,
+            open_tools: BTreeSet::new(),
+            stopping: false,
         },
         stopping: None,
     };
     let mut agent = Agent { child };
     let outcome = run_turn(&mut turn, &order, &cwd.display().to_string());
     agent.end(&mut turn.client);
+    reap();
     match outcome? {
         Outcome::Answered => Ok(0),
         Outcome::Failed => Ok(1),
         Outcome::Stopped => {
             // A stopped turn ends by signal, as the shim's own stop would end a tool.
+            let mut held = SigSet::empty();
+            held.add(Signal::SIGTERM);
+            let _ = held.thread_unblock();
             let _ = kill(Pid::this(), Signal::SIGTERM);
             loop {
                 std::thread::park();
