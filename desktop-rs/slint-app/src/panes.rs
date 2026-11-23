@@ -172,6 +172,7 @@ impl App {
     /// A row the transcript drew.
     pub fn row_shown(&self, pane: &str, id: &str, height: f32, width: f32) {
         let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        crate::scroll_journal::event(pane, "height");
         if let Some(pane) = panes.iter_mut().find(|p| p.id == pane)
             && pane.book.shown(&pane.messages, id, height, width)
         {
@@ -764,7 +765,10 @@ impl App {
         }
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
-        sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
+        let (removed, inserted, updated) = sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
+        if removed + inserted + updated > 0 {
+            crate::scroll_journal::event(&pane.id, &format!("rows -{removed} +{inserted} ~{updated}"));
+        }
         crate::scroll_book::measure_soon();
     }
 
@@ -947,6 +951,7 @@ impl App {
                     pane.shown[at].2 = signature;
                     let row = pane.rows.live_row(entry);
                     pane.messages.set_row_data(at, row);
+                    crate::scroll_journal::event(&pane.id, "live");
                     crate::scroll_book::measure_soon();
                 }
             }

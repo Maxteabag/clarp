@@ -868,6 +868,13 @@ fn main() {
         }
     });
     book.on_row_at(|pane, y| app().map_or(0, |app| app.row_at(&pane, y)));
+    book.on_frame(|pane, top, top_index, offset, content, viewport, follow, reading, rows| {
+        if reading {
+            scroll_journal::event(&pane, "reader");
+        }
+        let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows };
+        scroll_journal::shot(&pane, shot);
+    });
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {
         scroll_journal::record(scroll_journal::Move { pane: pane.into(), cause: cause.into(), old, new, old_place, new_place, content, viewport, at_end, follow, rows });
     });
