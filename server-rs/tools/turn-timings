@@ -1,0 +1,1053 @@
+#!/usr/bin/env python3
+"""How responsive a turn is, per backend, measured on a disposable Host. Run by hand, never a gate.
+
+    server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--rounds N] [--cases LIST]
+                                        [--bin DIR] [--out DIR] [--model BACKEND=MODEL ...]
+                                        [--effort BACKEND=EFFORT ...] [--keep-host]
+    server-rs/tools/turn-timings report RUN_DIR
+
+`run` starts a Host of its own (its own data, port, token and an empty configuration folder),
+makes one test agent per backend on a cheap model at low effort, and runs every case `--rounds`
+times (default 5). The cases, and what each measures:
+
+  plain   "reply with one word". Send to the first live activity of the turn (time to first
+          activity), send to the turn's end (end to end), and the launch overhead split where the
+          spool lets it: the Host's queue (send to the shim's spool being made), the launch (spool
+          made to the tool's process up, the shim's `spawned`) and the tool's own start (process
+          up to its first line of output).
+  tool    "run `ls`, then reply". The tool call's round trip as the Host shows it: the activity
+          that says the command runs to the one that says it finished (same call id), and the
+          same span in the spool, from the tool's own lines.
+  steer   "run `sleep 20`, then reply"; while the command runs a second message is sent. Steer to
+          effect: the second send to its row in the conversation (`GET /log`). Whether the
+          running turn took it (steered) or it waited for the next turn (queued) is recorded,
+          and for a queued one how long it waited until its own turn started.
+  stop    "run `sleep 30`, then reply"; Stop while the command runs. Stop to the Host saying the
+          turn is over, and Stop to the tool's process being gone (the spool's `exited`, and the
+          process id no longer there).
+
+Every case records the machine's load (os.getloadavg and `uptime`) before and after it, because
+this machine is busy: never compare runs taken at very different loads. The raw timings go to
+`<out>/<run-id>/timings.json` and a summary (median and p90 per measure, per backend) to
+`summary.md` beside it. `report` writes the summary again from a `timings.json`.
+
+The disposable Host follows hard rule 2 of server-rs/REBUILD.md: its own `--data`, port and
+token; XDG_CONFIG_HOME and CLARP_CONFIG_DIR an empty folder of its own, so it never reads the
+real peers.json and never reaches another Host; no relay, push keys or push relay; the direct
+launcher. `GET /peers` must answer an empty list before the first case, or the run stops. The
+binaries are the installed release (~/.local/share/clarp-host/bin) unless `--bin` names a dist
+folder; nothing is built. The tools run on the machine's own logins as they are: nothing logs in
+or out, and nothing is copied. The run stops its Host by the process id it started and deletes
+the Host's folders (unless `--keep-host`). Claude test agents run on Sonnet (hard rule 8).
+
+Before and after the run it looks at the tools' own settings files for an entry naming the run's
+folder (a trust entry, a project), removes one if a tool wrote it, and says so in the summary.
+Nothing here prints conversation text: the spool is read for record types and times only.
+"""
+from __future__ import annotations
+
+import argparse
+import http.client
+import json
+import os
+import pathlib
+import re
+import secrets
+import shutil
+import signal
+import statistics
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+
+HOME = pathlib.Path.home()
+RELEASE_BIN = HOME / ".local/share/clarp-host/bin"
+OUT = pathlib.Path("/var/tmp/turn-timings")
+BACKENDS = ("codex", "claude", "agy")
+CASES = ("plain", "tool", "steer", "stop")
+# Cheap and low by default. Claude is on Sonnet: hard rule 8 of REBUILD.md.
+MODELS = {"codex": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low"}
+# agy folds its effort into the model's name.
+EFFORTS = {"codex": "low", "claude": "low", "agy": ""}
+TURN_TIMEOUT = 180.0
+ENDED = {"done", "idle", "stopped", "interrupted", "error", "failed"}
+
+
+def now_ms() -> float:
+    return time.time() * 1000.0
+
+
+def load() -> dict:
+    one, five, fifteen = os.getloadavg()
+    try:
+        said = subprocess.run(["uptime"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        said = ""
+    return {"at": int(now_ms()), "load1": one, "load5": five, "load15": fifteen, "uptime": said}
+
+
+# ---------------------------------------------------------------------------------------------
+# The disposable Host
+# ---------------------------------------------------------------------------------------------
+
+def tool_programs() -> dict:
+    """Where the tools are: the installed Host's own choice when its unit names one, else PATH."""
+    found = {}
+    try:
+        unit = subprocess.run(["systemctl", "--user", "cat", "clarp-host.service"], capture_output=True,
+                              text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        unit = ""
+    for name in ("CLAUDE", "CODEX", "AGY"):
+        match = re.search(rf"^Environment=\"?CLARP_{name}_PROGRAM=([^\"\n]+)", unit, re.M)
+        if match and pathlib.Path(match.group(1)).exists():
+            found[f"CLARP_{name}_PROGRAM"] = match.group(1)
+        elif shutil.which(name.lower()):
+            found[f"CLARP_{name}_PROGRAM"] = shutil.which(name.lower())
+    match = re.search(r"^Environment=\"PATH=([^\"\n]+)\"", unit, re.M)
+    if match:
+        found["PATH"] = match.group(1)
+    return found
+
+
+def installed_release() -> str:
+    """The release the installed Host runs, as its unit names its skills folder."""
+    try:
+        unit = subprocess.run(["systemctl", "--user", "cat", "clarp-host.service"], capture_output=True,
+                              text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = re.search(r"/releases/([0-9a-f]{7,40})/skills", unit)
+    return match.group(1) if match else ""
+
+
+def own_environment(root: pathlib.Path, secret: str) -> dict:
+    """The environment of the disposable Host: the machine's HOME and PATH (the tools' logins),
+    nothing of the Clarp session this script may run in, and folders of its own for the rest."""
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("CLARP_", "CLAUDE_PWA_", "CLAUDE_CODE_", "CODEX_"))
+           and key not in ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT")}
+    env.update(tool_programs())
+    config = root / "config"
+    env.update({
+        "XDG_CONFIG_HOME": str(config),
+        "CLARP_CONFIG_DIR": str(config / "clarp-host"),
+        "CLAUDE_PWA_CONFIG": str(config / "clarp-host" / "config.toml"),
+        "CLARP_SHARE_DIR": str(root / "share"),
+        "CLARP_CACHE_DIR": str(root / "share" / "cache"),
+        "CLAUDE_PWA_LOG_DIR": str(root / "share" / "logs"),
+        "CLAUDE_PWA_DB": str(root / "share" / "no-python-state.sqlite"),
+        "CLARP_HOST_TOKEN": secret,
+        "CLARP_HEARTBEATS_DISABLED": "1",
+    })
+    return env
+
+
+class Host:
+    """One disposable Host: started here, spoken to on its own port, stopped by its own pid."""
+
+    def __init__(self, root: pathlib.Path, bin_dir: pathlib.Path):
+        self.root, self.bin_dir = root, bin_dir
+        self.secret = secrets.token_hex(24)
+        self.proc = None
+        self.address = ""
+        self.events: list = []
+        self.events_lock = threading.Lock()
+        self.stream_stop = threading.Event()
+
+    def start(self):
+        for name in ("data", "run", "config/clarp-host", "share/logs", "ws"):
+            (self.root / name).mkdir(parents=True, exist_ok=True)
+        binary = self.bin_dir / "clarp-host"
+        shim = self.bin_dir / "clarp-shim"
+        command = [str(binary), "--data", str(self.root / "data"), "--run", str(self.root / "run"),
+                   "--listen", "127.0.0.1:0", "--launcher", "direct", "--shim", str(shim),
+                   "--name", "turn-timings", "--cwd", str(self.root / "ws"), "--accounts", "none",
+                   "--keep-spools"]
+        self.log = open(self.root / "host.log", "w")
+        self.proc = subprocess.Popen(command, cwd=self.root, env=own_environment(self.root, self.secret),
+                                     stdin=subprocess.DEVNULL, stdout=self.log, stderr=subprocess.STDOUT,
+                                     start_new_session=True)
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline and not self.address:
+            if self.proc.poll() is not None:
+                raise SystemExit(f"the disposable Host exited at start (code {self.proc.returncode}); "
+                                 f"see {self.root / 'host.log'}")
+            for line in (self.root / "host.log").read_text(errors="replace").splitlines():
+                if line.startswith("clarp-host listens on "):
+                    self.address = line.split("listens on ", 1)[1].strip()
+            time.sleep(0.2)
+        if not self.address:
+            raise SystemExit("the disposable Host did not say where it listens within a minute")
+        threading.Thread(target=self.stream, daemon=True).start()
+
+    def stop(self) -> list:
+        """Stop the Host by its own pid (hard rule 6), then whatever it started that outlived it.
+        A shim is made to outlive its Host, so the processes still working in the run's folder
+        are found by their working directory, captured, and ended by those ids. Says which."""
+        self.stream_stop.set()
+        if self.proc and self.proc.poll() is None:
+            os.kill(self.proc.pid, signal.SIGTERM)
+            try:
+                self.proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                os.kill(self.proc.pid, signal.SIGKILL)
+                self.proc.wait(timeout=10)
+        left = self.processes_in_root()
+        for pid in left:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and any(not pid_gone(pid) for pid in left):
+            time.sleep(0.2)
+        for pid in left:
+            if not pid_gone(pid):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        return left
+
+    def processes_in_root(self) -> list:
+        """The ids of this user's processes whose working directory is in the run's folder."""
+        found, mine = [], str(self.root)
+        for entry in pathlib.Path("/proc").iterdir():
+            if not entry.name.isdigit() or int(entry.name) == os.getpid():
+                continue
+            try:
+                if entry.stat().st_uid != os.getuid():
+                    continue
+                cwd = os.readlink(entry / "cwd")
+            except OSError:
+                continue
+            if cwd == mine or cwd.startswith(mine + "/"):
+                found.append(int(entry.name))
+        return found
+
+    def ask(self, method: str, path: str, body=None, timeout: float = 30):
+        host, port = self.address.rsplit(":", 1)
+        conn = http.client.HTTPConnection(host, int(port), timeout=timeout)
+        try:
+            data = json.dumps(body) if body is not None else None
+            conn.request(method, path, data, {"Content-Type": "application/json",
+                                              "Authorization": f"Bearer {self.secret}"})
+            answer = conn.getresponse()
+            raw = answer.read()
+            try:
+                return answer.status, json.loads(raw)
+            except ValueError:
+                return answer.status, raw.decode("utf-8", "replace")
+        except (OSError, http.client.HTTPException) as failed:
+            return 0, str(failed)
+        finally:
+            conn.close()
+
+    def stream(self):
+        """The Host's live events, each kept with the time it arrived here."""
+        host, port = self.address.rsplit(":", 1)
+        while not self.stream_stop.is_set():
+            try:
+                conn = http.client.HTTPConnection(host, int(port), timeout=40)
+                conn.request("GET", "/events", headers={"Authorization": f"Bearer {self.secret}",
+                                                        "Accept": "text/event-stream"})
+                answer = conn.getresponse()
+                while not self.stream_stop.is_set():
+                    line = answer.fp.readline()
+                    if not line:
+                        break
+                    line = line.decode("utf-8", "replace").rstrip("\r\n")
+                    if line.startswith("data:"):
+                        try:
+                            event = json.loads(line[5:].strip())
+                        except ValueError:
+                            continue
+                        if isinstance(event, dict):
+                            with self.events_lock:
+                                self.events.append((now_ms(), event))
+            except (OSError, http.client.HTTPException):
+                time.sleep(0.5)
+
+    def events_since(self, t: float, session: str) -> list:
+        with self.events_lock:
+            return [(at, e) for at, e in self.events if at >= t and e.get("session") == session]
+
+
+# ---------------------------------------------------------------------------------------------
+# One agent's turns
+# ---------------------------------------------------------------------------------------------
+
+class Agent:
+    def __init__(self, host: Host, backend: str, session: str, agent_id: str):
+        self.host, self.backend, self.session, self.agent_id = host, backend, session, agent_id
+        self.sent = 0
+
+    def spool_dir(self) -> pathlib.Path:
+        return self.host.root / "data" / "agents" / self.agent_id / "spool"
+
+    def spools(self) -> dict:
+        found = {}
+        for path in self.spool_dir().glob("*.jsonl"):
+            try:
+                found[path] = path.stat().st_mtime
+            except OSError:
+                pass
+        return found
+
+    def send(self, text: str) -> dict:
+        self.sent += 1
+        client_id = f"tt-{self.backend}-{int(now_ms())}-{self.sent}"
+        at = now_ms()
+        status, answer = self.host.ask("POST", "/send", {"session": self.session, "text": text,
+                                                         "client_msg_id": client_id,
+                                                         "synthesize_audio": False})
+        return {"client_msg_id": client_id, "t_send": at, "t_accepted": now_ms(), "status": status,
+                "queued": bool(isinstance(answer, dict) and answer.get("queued")),
+                "dispatch": answer.get("dispatch") if isinstance(answer, dict) else None,
+                "trace_id": answer.get("trace_id") if isinstance(answer, dict) else None}
+
+    def row_seen(self, client_id: str) -> bool:
+        status, body = self.host.ask("GET", f"/log?session={urllib.parse.quote(self.session)}&limit=30")
+        if status != 200 or not isinstance(body, dict):
+            return False
+        return any(row.get("id") == f"u-{client_id}" for row in body.get("turns") or [])
+
+    def wait_ended(self, since: float, timeout: float = TURN_TIMEOUT, count: int = 1):
+        """The time of the `count`th agent-state that ends a turn after `since`, or None."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            ends = [at for at, e in self.host.events_since(since, self.session)
+                    if e.get("type") == "agent-state" and e.get("kind") in ENDED]
+            if len(ends) >= count:
+                return ends[count - 1]
+            time.sleep(0.1)
+        return None
+
+    def wait_idle(self, timeout: float = TURN_TIMEOUT) -> bool:
+        """Nothing runs and nothing waits: the agent is ready for the next case."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status, snap = self.host.ask("GET", "/agents/snapshot")
+            row = None
+            if status == 200 and isinstance(snap, dict):
+                for candidate in snap.get("agents") or []:
+                    if candidate.get("session") == self.session:
+                        row = candidate
+            busy = True
+            if row is not None:
+                state = (row.get("latest_state") or {}).get("kind") if isinstance(row.get("latest_state"), dict) \
+                    else row.get("state")
+                busy = bool(row.get("busy")) or state in ("thinking", "working", "responding", "tool")
+                busy = busy or bool(row.get("queue_depth"))
+            if not busy and not self.live_shim():
+                return True
+            time.sleep(0.5)
+        return False
+
+    def live_shim(self) -> bool:
+        """A spool of this agent without `exited`: its tool still runs."""
+        for path in self.spools():
+            records = read_spool(path)
+            if records and not any(r.get("event") == "exited" for r in records if r.get("s") == "shim"):
+                if not any(r.get("event") == "spawn-failed" for r in records):
+                    return True
+        return False
+
+    def wait_tool_running(self, since: float, timeout: float = 90.0):
+        """The time the Host first showed a running tool call in this turn, or None."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            for at, e in self.host.events_since(since, self.session):
+                if e.get("type") == "agent-activity" and e.get("status") == "running" and e.get("tool"):
+                    return at, e
+            time.sleep(0.05)
+        return None, None
+
+
+def read_spool(path: pathlib.Path) -> list:
+    """A spool's records as {t, s, event?, type?, item?}: structure and times only, no text."""
+    out = []
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        data, kept = record.get("d"), {"t": record.get("t"), "s": record.get("s")}
+        if isinstance(data, dict) and "event" in data:
+            kept["event"] = data["event"]
+            if "pid" in data:
+                kept["pid"] = data["pid"]
+            if data.get("signal") is not None:
+                kept["signal"] = data["signal"]
+        elif record.get("s") == "out" and isinstance(data, str):
+            try:
+                inner = json.loads(data)
+            except ValueError:
+                inner = None
+            if isinstance(inner, dict):
+                kept["type"] = str(inner.get("type") or inner.get("method") or inner.get("event") or "")
+                # agy: a step's kind and state. Claude: a streamed event's kind and its block's.
+                update = inner.get("step_update")
+                if isinstance(update, dict):
+                    kept["item"] = f"{update.get('step_type') or ''}:{update.get('state') or ''}"
+                streamed = inner.get("event")
+                if inner.get("type") == "stream_event" and isinstance(streamed, dict):
+                    block = streamed.get("content_block") if isinstance(streamed.get("content_block"), dict) else {}
+                    kept["item"] = f"{streamed.get('type') or ''}:{block.get('type') or ''}"
+                item = inner.get("item") if isinstance(inner.get("item"), dict) else \
+                    (inner.get("params") or {}).get("item") if isinstance(inner.get("params"), dict) else None
+                if isinstance(item, dict):
+                    kept["item"] = str(item.get("type") or "")
+                if inner.get("type") in ("assistant", "user") and isinstance(inner.get("message"), dict):
+                    kinds = [c.get("type") for c in inner["message"].get("content") or [] if isinstance(c, dict)]
+                    kept["item"] = ",".join(str(k) for k in kinds)
+                if inner.get("subtype"):
+                    kept["subtype"] = str(inner["subtype"])
+        out.append(kept)
+    return out
+
+
+def spool_birth(path: pathlib.Path):
+    """When the shim made the spool, in ms since the epoch (statx birth time), or None."""
+    try:
+        said = subprocess.run(["stat", "-c", "%.6W", str(path)], capture_output=True, text=True,
+                              timeout=5).stdout.strip()
+        value = float(said)
+        return value * 1000.0 if value > 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def new_spools(agent: Agent, before: dict) -> list:
+    """The spools made since `before`, oldest first."""
+    made = [p for p in agent.spools() if p not in before]
+    return sorted(made, key=lambda p: (spool_birth(p) or 0, p.name))
+
+
+def spool_marks(path: pathlib.Path) -> dict:
+    """The launch's steps as the spool tells them: made, spawned, first output, the first tool
+    call started and finished, the end of the tool's turn, stopping and exited."""
+    records = read_spool(path)
+    marks = {"spool": path.name, "made": spool_birth(path)}
+    for r in records:
+        t, event, kind, item = r.get("t"), r.get("event"), r.get("type", ""), r.get("item", "")
+        if event == "spawned":
+            marks.setdefault("spawned", t)
+            marks["pid"] = r.get("pid")
+        elif event == "stopping":
+            marks.setdefault("stopping", t)
+        elif event == "exited":
+            marks.setdefault("exited", t)
+        elif r.get("s") == "out":
+            marks.setdefault("first_out", t)
+            marks.setdefault("first_out_type", kind)
+            # A tool call starting and finishing, in each tool's own words.
+            starts = (kind in ("item.started", "item/started") and item in ("command_execution", "commandExecution")) \
+                or (kind == "stream_event" and item == "content_block_start:tool_use") \
+                or (kind == "assistant" and "tool_use" in item) \
+                or (kind == "step_update" and item == "tool:ACTIVE")
+            ends = (kind in ("item.completed", "item/completed") and item in ("command_execution", "commandExecution")) \
+                or (kind == "user" and "tool_result" in item) \
+                or (kind == "step_update" and item == "tool:DONE")
+            if starts:
+                marks.setdefault("tool_started", t)
+            if ends:
+                marks.setdefault("tool_finished", t)
+            # The tool ready for the model: Codex's turn started, Claude's init line.
+            if kind in ("turn.started", "turn/started", "init") or (kind == "system" and r.get("subtype") == "init"):
+                marks.setdefault("ready", t)
+            if (kind in ("item.completed", "item/completed") and item in ("agent_message", "agentMessage")) \
+                    or (kind == "stream_event" and item == "content_block_start:text") \
+                    or (kind == "assistant" and "text" in item) \
+                    or (kind == "step_update" and item.startswith("agent_response:")):
+                marks.setdefault("first_reply", t)
+            if kind in ("turn.completed", "turn/completed", "result"):
+                marks.setdefault("turn_completed", t)
+    marks["records"] = [{k: v for k, v in r.items() if k in ("t", "s", "event", "type", "item", "subtype")}
+                        for r in records][:200]
+    return marks
+
+
+def pid_gone(pid) -> bool:
+    if not pid:
+        return True
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    # A zombie is gone for this purpose.
+    try:
+        return pathlib.Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1].startswith("Z")
+    except (OSError, IndexError):
+        return True
+
+
+def first_activity(agent: Agent, since: float, until: float):
+    """The Host's first sign of the turn (its own `thinking`, made at dispatch), and the first
+    sign that comes from the tool itself: an `agent-activity` other than the dispatch's
+    `thinking` (a tool call, a reply streaming, the turn's end)."""
+    events = [(at, e) for at, e in agent.host.events_since(since, agent.session)
+              if at <= until and e.get("type") == "agent-activity"]
+    ack = events[0][0] if events else None
+    for at, e in events:
+        if (e.get("state") or e.get("kind")) != "thinking" or e.get("phase") == "tool_finished":
+            return ack, at, str(e.get("state") or e.get("kind") or "")
+    return ack, None, ""
+
+
+def watch_turn(agent: Agent, sent: dict, timeout: float = TURN_TIMEOUT):
+    """Wait for the turn's end, looking at `GET /log` every 0.1 s meanwhile: the time the first
+    row after the user's message appeared (a tool row or the reply), and the first reply."""
+    first_row = first_reply = None
+    deadline = time.monotonic() + timeout
+    ended = None
+    while time.monotonic() < deadline:
+        ended = agent.wait_ended(sent["t_send"], timeout=0.01)
+        status, body = agent.host.ask("GET", f"/log?session={urllib.parse.quote(agent.session)}&limit=30")
+        if status == 200 and isinstance(body, dict):
+            rows = body.get("turns") or []
+            ids = [row.get("id") for row in rows]
+            mine = f"u-{sent['client_msg_id']}"
+            if mine in ids:
+                after = [row for row in rows[ids.index(mine) + 1:] if row.get("role") != "user"]
+                if after and first_row is None:
+                    first_row = now_ms()
+                if first_reply is None and any(row.get("role") == "assistant" and not row.get("kind")
+                                               and row.get("origin") != "system" for row in after):
+                    first_reply = now_ms()
+        if ended is not None:
+            break
+        time.sleep(0.1)
+    return ended, first_row, first_reply
+
+
+def compact_events(host: Host, session: str, since: float) -> list:
+    """The case's live events for its agent, without text: type, the fields that say what
+    happened, and the time each arrived here."""
+    keep = ("type", "kind", "state", "phase", "status", "tool", "call_id", "client_msg_id", "queue_depth",
+            "queue_change", "started_at_ms", "turn_started_ms", "ts")
+    return [{"at": round(at), **{k: e[k] for k in keep if k in e}} for at, e in host.events_since(since, session)]
+
+
+def seconds(a, b):
+    return round((b - a) / 1000.0, 3) if a is not None and b is not None else None
+
+
+# ---------------------------------------------------------------------------------------------
+# The cases
+# ---------------------------------------------------------------------------------------------
+
+def case_plain(agent: Agent, n: int) -> dict:
+    before = agent.spools()
+    sent = agent.send(f"Timing check {n}. Reply with exactly one word: ok")
+    ended, first_row, first_reply = watch_turn(agent, sent)
+    agent.wait_idle(60)
+    found = {"sent": sent, "t_ended": ended}
+    spools = new_spools(agent, before)
+    marks = spool_marks(spools[0]) if spools else {}
+    found["spool"] = marks
+    # The end's own activity comes a moment after the state that ended the wait: include it.
+    ack, tool_sign, kind = first_activity(agent, sent["t_send"], (ended or now_ms()) + 1000)
+    found["measures"] = {
+        "host_ack": seconds(sent["t_send"], ack),
+        "first_activity": seconds(sent["t_send"], tool_sign),
+        "first_activity_kind": kind,
+        "first_reply_in_log": seconds(sent["t_send"], first_reply),
+        "end_to_end": seconds(sent["t_send"], ended),
+        "host_queue": seconds(sent["t_send"], marks.get("made")),
+        "launch": seconds(marks.get("made"), marks.get("spawned")),
+        "tool_start": seconds(marks.get("spawned"), marks.get("first_out")),
+        "tool_ready": seconds(marks.get("spawned"), marks.get("ready")),
+        "send_to_spawned": seconds(sent["t_send"], marks.get("spawned")),
+        "send_to_first_output": seconds(sent["t_send"], marks.get("first_out")),
+        "model_reply_in_spool": seconds(marks.get("ready"), marks.get("first_reply")),
+        "tool_turn_to_host_end": seconds(marks.get("turn_completed"), ended),
+        "process_exit_after_end": seconds(ended, marks.get("exited")),
+    }
+    return found
+
+
+def case_tool(agent: Agent, n: int) -> dict:
+    before = agent.spools()
+    sent = agent.send(f"Timing check {n}. Run the shell command `ls` once, then reply with exactly one word: done")
+    ended, first_row, first_reply = watch_turn(agent, sent)
+    agent.wait_idle(60)
+    events = [(at, e) for at, e in agent.host.events_since(sent["t_send"], agent.session)
+              if e.get("type") == "agent-activity"]
+    # The Host shows a call running, and its end as the next activity of the turn (a finished
+    # call is `thinking` with phase `tool_finished`, or whatever the turn does next).
+    running = finished = None
+    for at, e in events:
+        if running is None:
+            if e.get("status") == "running" and e.get("tool"):
+                running = at
+        else:
+            finished = at
+            break
+    spools = new_spools(agent, before)
+    marks = spool_marks(spools[0]) if spools else {}
+    return {"sent": sent, "t_ended": ended, "spool": marks, "measures": {
+        "tool_round_trip_host": seconds(running, finished),
+        "tool_round_trip_spool": seconds(marks.get("tool_started"), marks.get("tool_finished")),
+        "tool_shown_after_spool": seconds(marks.get("tool_started"), running),
+        "tool_end_shown_after_spool": seconds(marks.get("tool_finished"), finished),
+        "send_to_tool_shown": seconds(sent["t_send"], running),
+        "first_row_in_log": seconds(sent["t_send"], first_row),
+        "end_to_end": seconds(sent["t_send"], ended),
+        "host_showed_tool": running is not None,
+    }}
+
+
+def case_steer(agent: Agent, n: int) -> dict:
+    before = agent.spools()
+    sent = agent.send(f"Timing check {n}. Run the shell command `sleep 20`, then reply with exactly one word: slept")
+    running, _ = agent.wait_tool_running(sent["t_send"])
+    found = {"sent": sent, "t_tool_shown": running}
+    if running is None:
+        agent.wait_ended(sent["t_send"])
+        agent.wait_idle()
+        found["measures"] = {"steer_mode": "no_tool_shown"}
+        return found
+    time.sleep(1.0)
+    steer = agent.send("Also add the word steered to your reply.")
+    found["steer"] = steer
+    seen = None
+    first_end = None
+    deadline = time.monotonic() + TURN_TIMEOUT
+    while time.monotonic() < deadline:
+        if first_end is None:
+            first_end = agent.wait_ended(sent["t_send"], timeout=0.01)
+        if agent.row_seen(steer["client_msg_id"]):
+            seen = now_ms()
+            break
+        time.sleep(0.1)
+    # Did its own turn start (a queued send) or did the running turn take it?
+    own_start = None
+    for at, e in agent.host.events_since(steer["t_send"], agent.session):
+        if e.get("type") == "agent-state" and e.get("client_msg_id") == steer["client_msg_id"] \
+                and e.get("kind") not in ENDED:
+            own_start = at
+            break
+    if first_end is None:
+        first_end = agent.wait_ended(sent["t_send"], timeout=0.01)
+    steered = seen is not None and (first_end is None or seen < first_end) and own_start is None
+    agent.wait_ended(sent["t_send"], count=1 if steered else 2)
+    agent.wait_idle()
+    spools = new_spools(agent, before)
+    found["spools"] = [spool_marks(p) for p in spools]
+    found["measures"] = {
+        "steer_mode": "steered" if steered else ("queued" if seen is not None else "not_seen"),
+        "steer_answer_queued": steer["queued"],
+        "steer_to_effect": seconds(steer["t_send"], seen),
+        "steer_wait_for_own_turn": seconds(steer["t_send"], own_start),
+        "first_turn_end_after_steer": seconds(steer["t_send"], first_end),
+        "turns": len(spools),
+    }
+    return found
+
+
+def case_stop(agent: Agent, n: int) -> dict:
+    before = agent.spools()
+    sent = agent.send(f"Timing check {n}. Run the shell command `sleep 30`, then reply with exactly one word: woke")
+    running, _ = agent.wait_tool_running(sent["t_send"])
+    found = {"sent": sent, "t_tool_shown": running}
+    if running is None:
+        agent.wait_ended(sent["t_send"])
+        agent.wait_idle()
+        found["measures"] = {"stop_mode": "no_tool_shown"}
+        return found
+    time.sleep(1.0)
+    spools = new_spools(agent, before)
+    pid = spool_marks(spools[0]).get("pid") if spools else None
+    t_stop = now_ms()
+    status, answer = agent.host.ask("POST", "/stop", {"session": agent.session})
+    t_answered = now_ms()
+    gone = None
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        if pid_gone(pid):
+            gone = now_ms()
+            break
+        time.sleep(0.02)
+    ended = agent.wait_ended(t_stop, timeout=60)
+    agent.wait_idle(60)
+    marks = spool_marks(spools[0]) if spools else {}
+    found.update({"t_stop": t_stop, "stop_status": status,
+                  "terminated": answer.get("terminated") if isinstance(answer, dict) else None,
+                  "spool": marks})
+    found["measures"] = {
+        "stop_answered": seconds(t_stop, t_answered),
+        "stop_to_turn_over": seconds(t_stop, ended),
+        "stop_to_process_gone": seconds(t_stop, gone),
+        "stop_to_spool_exited": seconds(t_stop, marks.get("exited")),
+        "stop_to_signal": seconds(t_stop, marks.get("stopping")),
+    }
+    return found
+
+
+RUNNERS = {"plain": case_plain, "tool": case_tool, "steer": case_steer, "stop": case_stop}
+
+# The measures the summary shows, in order, per case.
+SHOWN = {
+    "plain": ["host_ack", "first_activity", "first_reply_in_log", "end_to_end", "send_to_spawned", "host_queue",
+              "launch", "tool_start", "tool_ready", "send_to_first_output", "model_reply_in_spool",
+              "tool_turn_to_host_end", "process_exit_after_end"],
+    "tool": ["tool_round_trip_host", "tool_round_trip_spool", "tool_shown_after_spool", "tool_end_shown_after_spool",
+             "send_to_tool_shown", "first_row_in_log", "end_to_end"],
+    "steer": ["steer_to_effect", "steer_wait_for_own_turn", "first_turn_end_after_steer"],
+    "stop": ["stop_answered", "stop_to_signal", "stop_to_turn_over", "stop_to_process_gone", "stop_to_spool_exited"],
+}
+
+
+# ---------------------------------------------------------------------------------------------
+# The tools' own settings: a trust entry naming the run's folder is undone
+# ---------------------------------------------------------------------------------------------
+
+SETTINGS = [HOME / ".claude.json", HOME / ".codex" / "config.toml", HOME / ".gemini" / "projects.json",
+            HOME / ".gemini" / "settings.json", HOME / ".claude" / "settings.json"]
+
+
+def mentions(root: pathlib.Path) -> dict:
+    found = {}
+    for path in SETTINGS:
+        try:
+            if str(root) in path.read_text(errors="replace"):
+                found[str(path)] = True
+        except OSError:
+            pass
+    return found
+
+
+def undo_mentions(root: pathlib.Path) -> list:
+    """Remove what a tool wrote about the run's folder from its settings; say what was done."""
+    done = []
+    for path in SETTINGS:
+        try:
+            text = path.read_text()
+        except OSError:
+            continue
+        if str(root) not in text:
+            continue
+        stamp = path.stat().st_mtime_ns
+        if path.suffix == ".json":
+            try:
+                data = json.loads(text)
+            except ValueError:
+                done.append(f"{path}: names the run's folder, not valid JSON, left alone")
+                continue
+            removed = prune_json(data, str(root))
+            new = json.dumps(data, indent=2) + "\n"
+        else:
+            # TOML: drop the table whose header names the folder, and its lines.
+            lines, keep, removed = text.splitlines(keepends=True), [], 0
+            skipping = False
+            for line in lines:
+                if line.lstrip().startswith("["):
+                    skipping = str(root) in line
+                    removed += 1 if skipping else 0
+                if not skipping:
+                    keep.append(line)
+            new = "".join(keep)
+        if not removed or path.stat().st_mtime_ns != stamp:
+            done.append(f"{path}: names the run's folder; not changed (nothing safe to remove, or it moved meanwhile)")
+            continue
+        temp = path.with_name(path.name + ".turn-timings.tmp")
+        temp.write_text(new)
+        os.chmod(temp, path.stat().st_mode & 0o777)
+        os.replace(temp, path)
+        done.append(f"{path}: removed {removed} entr{'y' if removed == 1 else 'ies'} naming the run's folder")
+    return done
+
+
+def drop_claude_sessions(root: pathlib.Path) -> list:
+    """Claude keeps a test agent's conversations in a folder named after its working folder,
+    which is the run's own: remove it. Codex's and agy's records of the run's conversations are
+    in folders shared with every other conversation and are left as they are."""
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(root / "ws"))
+    folder = HOME / ".claude" / "projects" / slug
+    if folder.is_dir() and slug.startswith("-var-tmp-turn-timings-"):
+        shutil.rmtree(folder, ignore_errors=True)
+        return [f"{folder}: removed (the Claude test agent's own conversations)"]
+    return []
+
+
+def prune_json(value, needle: str) -> int:
+    removed = 0
+    if isinstance(value, dict):
+        for key in [k for k in value if needle in k]:
+            del value[key]
+            removed += 1
+        for child in value.values():
+            removed += prune_json(child, needle)
+    elif isinstance(value, list):
+        for item in [i for i in value if isinstance(i, str) and needle in i]:
+            value.remove(item)
+            removed += 1
+        for child in value:
+            removed += prune_json(child, needle)
+    return removed
+
+
+# ---------------------------------------------------------------------------------------------
+# The run
+# ---------------------------------------------------------------------------------------------
+
+def make_agent(host: Host, backend: str, model: str, effort: str) -> Agent:
+    body = {"name": f"tt-{backend}", "backend": backend, "cwd": str(host.root / "ws")}
+    if model:
+        body["model"] = model
+    if effort:
+        body["effort"] = effort
+    status, answer = host.ask("POST", "/agents", body, timeout=60)
+    if status != 200 or not isinstance(answer, dict) or not answer.get("session"):
+        raise RuntimeError(f"could not make the {backend} agent: {status} {str(answer)[:300]}")
+    session = answer["session"]
+    agent_id = answer.get("agent_id") or (answer.get("agent") or {}).get("agent_id") or ""
+    if not agent_id:
+        status, snap = host.ask("GET", "/agents/snapshot")
+        for row in (snap.get("agents") or []) if isinstance(snap, dict) else []:
+            if row.get("session") == session:
+                agent_id = row.get("agent_id") or row.get("id") or ""
+    return Agent(host, backend, session, agent_id)
+
+
+def pairs(given: list) -> dict:
+    out = {}
+    for item in given or []:
+        key, _, value = item.partition("=")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def run(args) -> int:
+    run_id = time.strftime("%Y%m%d-%H%M%S")
+    folder = pathlib.Path(args.out) / run_id
+    folder.mkdir(parents=True, exist_ok=True)
+    root = folder / "host"
+    bin_dir = pathlib.Path(args.bin).expanduser() if args.bin else RELEASE_BIN
+    backends = [b for b in args.backends.split(",") if b]
+    cases = [c for c in args.cases.split(",") if c]
+    models = {**MODELS, **pairs(args.model)}
+    efforts = {**EFFORTS, **pairs(args.effort)}
+    settings_before = mentions(root)
+    result = {"run_id": run_id, "started": load(), "bin": str(bin_dir), "rounds": args.rounds,
+              "host_version": "", "backends": {}, "settings": {"before": settings_before}}
+    commit = bin_dir / "COMMIT"
+    if commit.exists():
+        result["commit"] = commit.read_text().strip()
+    elif bin_dir == RELEASE_BIN:
+        result["commit"] = installed_release()
+    host = Host(root, bin_dir)
+    out_json = folder / "timings.json"
+
+    def save():
+        out_json.write_text(json.dumps(result, indent=1))
+
+    try:
+        host.start()
+        status, peers = host.ask("GET", "/peers")
+        result["peers"] = peers
+        if status != 200 or peers != []:
+            raise SystemExit(f"GET /peers did not answer [] ({status} {str(peers)[:200]}): stopping")
+        status, info = host.ask("GET", "/server-info")
+        result["host_version"] = str(info.get("version") or info.get("host_version") or info.get("build") or "") \
+            if isinstance(info, dict) else ""
+        result["host_contract"] = info.get("host_contract") if isinstance(info, dict) else None
+        print(f"disposable Host {host.address} pid {host.proc.pid} version {result['host_version']}", flush=True)
+        for backend in backends:
+            entry = result["backends"][backend] = {"model": models.get(backend, ""),
+                                                   "effort": efforts.get(backend, ""), "cases": []}
+            try:
+                agent = make_agent(host, backend, models.get(backend, ""), efforts.get(backend, ""))
+            except RuntimeError as failed:
+                entry["error"] = str(failed)
+                print(failed, flush=True)
+                save()
+                continue
+            entry["session"], entry["agent_id"] = agent.session, agent.agent_id
+            for n in range(1, args.rounds + 1):
+                for case in cases:
+                    started = load()
+                    began = time.monotonic()
+                    case_began = now_ms()
+                    try:
+                        found = RUNNERS[case](agent, n)
+                    except Exception as failed:  # One case failing is a result, not the end of the run.
+                        found = {"error": f"{type(failed).__name__}: {failed}"}
+                        agent.wait_idle()
+                    found["events"] = compact_events(host, agent.session, case_began)
+                    found.update({"case": case, "round": n, "load_before": started, "load_after": load(),
+                                  "seconds": round(time.monotonic() - began, 1)})
+                    entry["cases"].append(found)
+                    shown = {k: v for k, v in (found.get("measures") or {}).items()}
+                    print(f"{backend} {case} #{n} load {started['load1']:.2f}: {json.dumps(shown)}", flush=True)
+                    save()
+    finally:
+        result["ended"] = load()
+        result["left_after_host"] = host.stop()
+        result["settings"]["after"] = mentions(root)
+        result["settings"]["undone"] = undo_mentions(root) + drop_claude_sessions(root)
+        save()
+        if not args.keep_host and root.exists():
+            shutil.rmtree(root, ignore_errors=True)
+    (folder / "summary.md").write_text(summary(result))
+    print(f"wrote {out_json} and {folder / 'summary.md'}", flush=True)
+    return 0
+
+
+# ---------------------------------------------------------------------------------------------
+# The summary
+# ---------------------------------------------------------------------------------------------
+
+def p90(values: list) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    rank = 0.9 * (len(ordered) - 1)
+    low = int(rank)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (rank - low)
+
+
+def summary(result: dict) -> str:
+    lines = [f"# Turn timings {result['run_id']}", "",
+             f"Host {result.get('host_version', '')} from `{result.get('bin', '')}`"
+             + (f", commit {result['commit']}" if result.get("commit") else "")
+             + f"; {result.get('rounds')} rounds per case.",
+             f"Load at start: {result['started']['uptime']}",
+             f"Load at end: {(result.get('ended') or {}).get('uptime', '')}", "",
+             "Seconds; median and p90 over the rounds that measured it (n). Load is the one-minute load "
+             "average before each case: its range is given per backend.", ""]
+    for backend, entry in result["backends"].items():
+        lines.append(f"## {backend} ({entry.get('model') or 'default model'}, effort {entry.get('effort') or 'default'})")
+        lines.append("")
+        if entry.get("error"):
+            lines += [f"Not measured: {entry['error']}", ""]
+            continue
+        loads = [c["load_before"]["load1"] for c in entry["cases"] if c.get("load_before")]
+        if loads:
+            lines += [f"Load (1 min) over its cases: {min(loads):.2f} to {max(loads):.2f}.", ""]
+        lines.append("| case | measure | median | p90 | n |")
+        lines.append("|---|---|---|---|---|")
+        for case, measures in SHOWN.items():
+            rows = [c for c in entry["cases"] if c.get("case") == case]
+            if not rows:
+                continue
+            for measure in measures:
+                values = [c["measures"][measure] for c in rows
+                          if isinstance(c.get("measures"), dict) and isinstance(c["measures"].get(measure), (int, float))
+                          and not isinstance(c["measures"].get(measure), bool)]
+                if values:
+                    lines.append(f"| {case} | {measure} | {statistics.median(values):.2f} | {p90(values):.2f} | {len(values)} |")
+                else:
+                    lines.append(f"| {case} | {measure} | - | - | 0 |")
+        modes = [c["measures"].get("steer_mode") for c in entry["cases"]
+                 if c.get("case") == "steer" and isinstance(c.get("measures"), dict)]
+        kinds = [c["measures"].get("first_activity_kind") for c in entry["cases"]
+                 if c.get("case") == "plain" and isinstance(c.get("measures"), dict)]
+        errors = [f"{c.get('case')} #{c.get('round')}: {c['error']}" for c in entry["cases"] if c.get("error")]
+        lines.append("")
+        if modes:
+            lines.append("Steer: " + ", ".join(f"{m} {modes.count(m)}" for m in sorted(set(map(str, modes)))) + ".")
+        if kinds:
+            lines.append("First activity was: " + ", ".join(f"{k or 'none'} {kinds.count(k)}" for k in sorted(set(kinds), key=str)) + ".")
+        for error in errors:
+            lines.append(f"Error: {error}")
+        lines.append("")
+    settings = result.get("settings") or {}
+    lines.append("## The tools' settings")
+    lines.append("")
+    if settings.get("undone"):
+        lines += [f"- {u}" for u in settings["undone"]]
+    else:
+        lines.append("No settings file of claude, codex or agy named the run's folder after the run.")
+    lines.append("")
+    lines.append("Codex and agy keep their own record of the test conversations among all others; those are left.")
+    lines.append("")
+    lines.append("## Measures")
+    lines.append("")
+    lines += [
+        "- host_ack: send to the Host's first `agent-activity` of the turn (its own `thinking`, made at dispatch).",
+        "- first_activity: send to the first `agent-activity` that comes from the tool (a tool call, a reply, "
+        "the end), not the dispatch's `thinking`.",
+        "- first_reply_in_log: send to the reply row appearing in `GET /log` (polled every 0.1 s).",
+        "- end_to_end: send to the `agent-state` event that ends the turn.",
+        "- send_to_spawned: send to the shim's `spawned` (the tool's process up), from the spool.",
+        "- host_queue: send to the spool being made (its birth time): the Host's own part.",
+        "- launch: spool made to `spawned`: the shim starting the tool.",
+        "- tool_start: `spawned` to the tool's first line of output: the tool's own start.",
+        "- tool_ready: `spawned` to the tool saying it is ready for the model (Codex `turn.started`, "
+        "Claude's `system` init line, agy's `init`).",
+        "- model_reply_in_spool: tool ready to its first reply line: the model's own time.",
+        "- tool_turn_to_host_end: the tool's own end of turn line to the Host's end of turn event.",
+        "- process_exit_after_end: the Host's end of turn to the shim's `exited` (negative: the process left first).",
+        "- tool_round_trip_host: the `agent-activity` that shows the command running to the turn's next activity "
+        "(the Host shows a finished call so).",
+        "- tool_round_trip_spool: the same span in the tool's own lines in the spool.",
+        "- tool_shown_after_spool: the tool's own line that the command started to the Host showing it; "
+        "tool_end_shown_after_spool the same for its end.",
+        "- first_row_in_log: send to the first row after the message in `GET /log` (a tool row or the reply).",
+        "- steer_to_effect: the second send to its row in `GET /log` (polled every 0.1 s).",
+        "- steer_wait_for_own_turn: for a send that waited, the second send to its own turn starting.",
+        "- stop_to_turn_over: Stop to the `agent-state` that ends the turn; stop_to_process_gone: Stop to the "
+        "tool's process id being gone (polled every 20 ms).",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def first_activity_again(case: dict):
+    """A plain case's first activity, read again from its stored events (the run's own reading
+    may have closed its window before the end's activity arrived)."""
+    sent, ended = case.get("sent") or {}, case.get("t_ended")
+    if not sent or case.get("case") != "plain" or not isinstance(case.get("measures"), dict):
+        return
+    until = (ended or float("inf")) + 1000
+    for e in case.get("events") or []:
+        if e.get("type") == "agent-activity" and e["at"] >= sent["t_send"] and e["at"] <= until and \
+                ((e.get("state") or e.get("kind")) != "thinking" or e.get("phase") == "tool_finished"):
+            case["measures"]["first_activity"] = seconds(sent["t_send"], e["at"])
+            case["measures"]["first_activity_kind"] = str(e.get("state") or e.get("kind") or "")
+            return
+
+
+def report(args) -> int:
+    folder = pathlib.Path(args.run_dir)
+    result = json.loads((folder / "timings.json").read_text())
+    for entry in result["backends"].values():
+        for case in entry.get("cases") or []:
+            first_activity_again(case)
+    (folder / "timings.json").write_text(json.dumps(result, indent=1))
+    (folder / "summary.md").write_text(summary(result))
+    print(folder / "summary.md")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+    go = sub.add_parser("run")
+    go.add_argument("--backends", default=",".join(BACKENDS))
+    go.add_argument("--cases", default=",".join(CASES))
+    go.add_argument("--rounds", type=int, default=5)
+    go.add_argument("--bin", default="", help="a folder with clarp-host and clarp-shim (default: the installed release)")
+    go.add_argument("--out", default=str(OUT))
+    go.add_argument("--model", action="append", help="BACKEND=MODEL")
+    go.add_argument("--effort", action="append", help="BACKEND=EFFORT")
+    go.add_argument("--keep-host", action="store_true", help="keep the disposable Host's folders afterwards")
+    again = sub.add_parser("report")
+    again.add_argument("run_dir")
+    args = parser.parse_args()
+    return run(args) if args.command == "run" else report(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -78,6 +78,19 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 `docs/differences.md`, checked by the reviewer, signed by the lead); a defect in the reference (registered in
 `docs/reference-defects.md`, reported to the release owner).
 
+**How responsive a turn is** (issue 742) is measured by hand, never as a gate:
+`server-rs/tools/turn-timings run [--backends codex,claude,agy] [--rounds 5] [--bin DIST]`. It starts a
+disposable Host as hard rule 2 asks (its own data, port and token, an empty configuration folder, no relay or
+push, the direct launcher; it stops if `GET /peers` is not `[]`), makes one test agent per backend on a cheap
+model at low effort (Claude on Sonnet, rule 8), and runs four cases per round: a one-word reply (time to first
+activity, launch overhead split into the Host's queue, the launch and the tool's own start from the spool, and
+end to end), a turn that runs `ls` (the call's round trip as the Host shows it), a second message during
+`sleep 20` (steer to effect, or how long it waits when the turn cannot take it) and a Stop during `sleep 30`
+(until the turn is over and its process gone). A full run is about 75 turns and 15 minutes. It writes
+`timings.json` and `summary.md` (median and p90 per measure) under `/var/tmp/turn-timings/<run-id>/`, with the
+machine's load beside every case: compare only runs taken at similar loads. `--bin` takes a dist folder;
+without it the installed release runs. Nothing is built. `turn-timings report <run dir>` writes the summary again.
+
 ## 3. Hard rules
 
 1. **Rust compiles in two places only: the XPS 15, through `server-rs/tools/build`, and GitHub Actions.** Never
