@@ -922,7 +922,6 @@ impl Desk {
     pub async fn header(&self, app: &App, session: &str) -> String {
         use clarp_actor::conversation::Which;
         use clarp_kernel::calls::Said;
-        use clarp_kernel::conversation::Entry;
         use clarp_speech::markup;
 
         let found = self
@@ -950,12 +949,8 @@ impl Desk {
                 if row.ts_ms < call.started_at || row.live {
                     continue;
                 }
-                let (by_user, text) = match &row.entry {
-                    // A goal's wake is the Host's own, never what a person said (issue 732).
-                    Entry::Message(_) if row.entry.is_goal_wake() => continue,
-                    Entry::Message(message) => (true, &message.text),
-                    Entry::Reply(reply) if !row.commentary => (false, &reply.text),
-                    _ => continue,
+                let Some((by_user, text)) = spoken(&row.entry, row.commentary) else {
+                    continue;
                 };
                 let text = markup::clean_for_display(text, true);
                 if !text.is_empty() {
@@ -985,6 +980,20 @@ impl Desk {
                 .map(str::to_owned)
         };
         call.header_with_opening(session, &said, opening.as_deref())
+    }
+}
+
+/// What a row of a call's agent's conversation says in the call, and whether the user said
+/// it: the user's own words (sent by them, or carried by the Oracle), and an agent's answer at
+/// the end of its turn. Another agent's message, a goal's wake, a scheduled prompt or the
+/// Host's own prompt is no one in the call, and is not quoted as the user's (issues 732, 734;
+/// the Python Host quotes all but its routine automation so).
+fn spoken(entry: &clarp_kernel::conversation::Entry, commentary: bool) -> Option<(bool, &str)> {
+    use clarp_kernel::conversation::Entry;
+    match entry {
+        Entry::Message(message) if message.origin.is_user_send() => Some((true, &message.text)),
+        Entry::Reply(reply) if !commentary => Some((false, &reply.text)),
+        _ => None,
     }
 }
 
@@ -1402,5 +1411,51 @@ mod due_work_tests {
                 ]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod spoken_tests {
+    use clarp_kernel::conversation::{Entry, Message, Reply};
+    use clarp_kernel::turn::Origin;
+
+    use super::spoken;
+
+    fn message(origin: Origin) -> Entry {
+        Entry::Message(Message {
+            id: "u-1".into(),
+            text: "words".into(),
+            origin,
+            ..Message::default()
+        })
+    }
+
+    /// Issue 734: a call quotes as the user's only what the user said; another agent's
+    /// message, a goal's wake and the Host's own prompts are no one in the call.
+    #[test]
+    fn a_call_quotes_as_the_users_only_what_the_user_said() {
+        let trigger = |name: &str| Origin::Trigger { name: name.into() };
+        assert_eq!(spoken(&message(Origin::User), false), Some((true, "words")));
+        assert_eq!(
+            spoken(&message(trigger("oracle")), false),
+            Some((true, "words"))
+        );
+        for origin in [
+            Origin::Agent {
+                agent_id: "a-2".into(),
+            },
+            trigger("automation"),
+            trigger("schedule"),
+            trigger("janitor"),
+        ] {
+            assert_eq!(spoken(&message(origin.clone()), false), None, "{origin:?}");
+        }
+        let reply = Entry::Reply(Reply {
+            id: "r-1".into(),
+            text: "an answer".into(),
+            ..Reply::default()
+        });
+        assert_eq!(spoken(&reply, false), Some((false, "an answer")));
+        assert_eq!(spoken(&reply, true), None, "commentary is not an answer");
     }
 }

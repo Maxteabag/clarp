@@ -627,6 +627,14 @@ message of the user's makes it `user` again. The note, the user's messages and
 what was written before the note stay visible. The Python Host never gives such a
 turn back to the agents.
 
+A call's header (what an agent the user speaks to in a call is told was said since it last
+spoke) quotes as the user's only what the user said: a message of origin `user`, or the
+Oracle carrying their words. Another agent's message, a goal's wake, a scheduled prompt and
+the Host's own prompts are left out (issues 732 and 734). The Python Host quotes every message
+but its routine automation (heartbeat, leader tick, dreaming, janitor, system) as
+"User -> <persona>: …". Since issue 732 the hands-free router, too, leaves a goal's wake out of
+what an agent was last told.
+
 Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP recipients
 a bounded ring answer grace through the existing answer route. The Python Host
 still settles the ring at 45 seconds.
