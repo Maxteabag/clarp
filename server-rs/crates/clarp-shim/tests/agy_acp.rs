@@ -51,6 +51,14 @@ impl Place {
 
     /// Starts the driver with this order on its standard input, as the shim gives it.
     fn start(&self, order: &Order, more: &[(&str, &str)]) -> Child {
+        let (child, input) = self.open(order, more);
+        drop(input);
+        child
+    }
+
+    /// Starts the driver with its order as the first line of an input that stays open, as the
+    /// shim keeps it for a turn that may be steered: the Host's messages are written after it.
+    fn open(&self, order: &Order, more: &[(&str, &str)]) -> (Child, std::process::ChildStdin) {
         let mut env = clarp_sealed::sealed(&clarp_sealed::runner(), &self.dir, &[], &[]);
         env.insert("GEMINI_API_KEY".into(), "stray".into());
         for (name, value) in more {
@@ -68,10 +76,11 @@ impl Place {
             .unwrap();
         let mut input = child.stdin.take().unwrap();
         input
-            .write_all(order.to_json().to_string().as_bytes())
+            // One line: the Host's messages, if any, are the lines after it.
+            .write_all(format!("{}\n", order.to_json()).as_bytes())
             .unwrap();
-        drop(input);
-        child
+        input.flush().unwrap();
+        (child, input)
     }
 
     /// Runs the driver to its end: what it printed, and how it ended.
@@ -575,4 +584,297 @@ fn a_permission_asked_after_a_stop_is_declined() {
         .find(|message| message["id"] == "perm-1")
         .unwrap();
     assert_eq!(answer["result"]["outcome"], json!({"outcome": "cancelled"}));
+}
+
+/// What the driver prints, read on a thread of its own as it comes.
+struct Printed {
+    lines: std::sync::mpsc::Receiver<Value>,
+    seen: Vec<Value>,
+}
+
+impl Printed {
+    fn of(child: &mut Child) -> Self {
+        let output = BufReader::new(child.stdout.take().unwrap());
+        let (tell, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in output.lines() {
+                let Ok(line) = line else { break };
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if tell.send(serde_json::from_str(&line).unwrap()).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            lines,
+            seen: Vec::new(),
+        }
+    }
+
+    /// Reads on until a line says `until`.
+    fn until(&mut self, what: &str, until: impl Fn(&Value) -> bool) {
+        let end = Instant::now() + Duration::from_secs(30);
+        while !self.seen.iter().any(&until) {
+            let left = end.saturating_duration_since(Instant::now());
+            let line = self
+                .lines
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("{what}: {:?}", self.seen));
+            self.seen.push(line);
+        }
+    }
+
+    /// Reads to the end.
+    fn rest(&mut self) {
+        while let Ok(line) = self.lines.recv_timeout(Duration::from_secs(30)) {
+            self.seen.push(line);
+        }
+    }
+
+    fn at(&self, what: impl Fn(&Value) -> bool) -> usize {
+        self.seen
+            .iter()
+            .position(what)
+            .unwrap_or_else(|| panic!("not printed: {:?}", self.seen))
+    }
+}
+
+fn wait_file(place: &Place, name: &str) {
+    let end = Instant::now() + Duration::from_secs(30);
+    while !place.dir.join(name).exists() {
+        assert!(Instant::now() < end, "{name}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The Host's line for a message sent while the turn runs.
+fn steer(input: &mut std::process::ChildStdin, uuid: &str, text: &str) {
+    let line = json!({"type": "user", "uuid": uuid,
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]}});
+    writeln!(input, "{line}").unwrap();
+    input.flush().unwrap();
+}
+
+fn read_of(line: &Value) -> Option<&str> {
+    clarp_acp::agy::steer::read_of(line)
+}
+
+fn settled(printed: &[Value]) -> Vec<&Value> {
+    printed
+        .iter()
+        .filter(|line| line["type"] == "result")
+        .collect()
+}
+
+fn steering(place: &Place, case: &str) -> Order {
+    let mut order = place.order("");
+    order.prompt = case.into();
+    order.uuid = "u-own".into();
+    order
+}
+
+#[test]
+fn a_message_sent_while_a_prompt_runs_is_read_when_antigravity_works_on_it_and_answered_with_it() {
+    for mode in ["tool", "writing"] {
+        let place = Place::new(&format!("steer-{mode}"), "steer");
+        let (mut child, mut input) = place.open(&steering(&place, &format!("case-{mode}")), &[]);
+        let mut printed = Printed::of(&mut child);
+        wait_file(&place, &format!("working-{mode}"));
+        steer(&mut input, "u-add", &format!("add-{mode}"));
+        wait_file(&place, &format!("received-add-{mode}"));
+        // agy answered the running prompt at once; the message is not read on the sending.
+        printed.until("the steer sent", |line| line["clarp"] == "steer");
+        // The hand-over answer comes at once and is printed as nothing: give it the time.
+        std::thread::sleep(Duration::from_millis(200));
+        while let Ok(line) = printed.lines.try_recv() {
+            printed.seen.push(line);
+        }
+        assert!(
+            printed.seen.iter().all(|line| read_of(line).is_none()),
+            "{:?}",
+            printed.seen
+        );
+        std::fs::write(place.dir.join(format!("taken-{mode}")), "").unwrap();
+        printed.until("the read", |line| read_of(line) == Some("u-add"));
+        let read = printed.at(|line| read_of(line) == Some("u-add"));
+        assert_eq!(
+            printed
+                .seen
+                .get(read + 1)
+                .map(|line| &line["params"]["update"]["sessionUpdate"]),
+            Some(&json!("agent_thought_chunk")),
+            "the read comes just before Antigravity's first word under the new prompt"
+        );
+        std::fs::write(place.dir.join(format!("release-{mode}")), "").unwrap();
+        printed.until("the settled answer", |line| line["type"] == "result");
+        drop(input);
+        printed.rest();
+        assert!(child.wait().unwrap().success());
+        let seen = &printed.seen;
+        let read = printed.at(|line| read_of(line) == Some("u-add"));
+        let after = printed
+            .at(|line| line["params"]["update"]["content"]["text"] == format!("after-{mode}"));
+        assert!(
+            read < after,
+            "the read comes before the work for it: {seen:?}"
+        );
+        if mode == "tool" {
+            let ended = printed.at(|line| line["params"]["update"]["status"] == "completed");
+            assert!(read < ended, "{seen:?}");
+        }
+        // One answer, covering both, with what both prompts spent.
+        let answers = settled(seen);
+        assert_eq!(answers.len(), 1, "{seen:?}");
+        assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+        assert_eq!(answers[0]["is_error"], false);
+        assert!(
+            answers[0]["result"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("after-{mode}"))
+        );
+        let prompted = driver(seen, "prompted");
+        assert_eq!(prompted.len(), 1);
+        // The answer is the newer prompt's; its result names the turn's own message too.
+        assert_eq!(prompted[0]["uuid"], "u-add");
+        assert!(
+            printed.at(|line| line["clarp"] == "prompted")
+                < printed.at(|line| line["type"] == "result")
+        );
+        assert_eq!(
+            prompted[0]["result"]["usage"],
+            json!({"inputTokens": 13, "outputTokens": 6})
+        );
+        let prompts = place.sent_of("session/prompt");
+        assert_eq!(prompts.len(), 2);
+        assert_eq!(prompts[1]["params"]["sessionId"], "conv-new");
+        assert_eq!(
+            prompts[1]["params"]["prompt"],
+            json!([{"type": "text", "text": format!("add-{mode}")}])
+        );
+    }
+}
+
+#[test]
+fn a_message_antigravity_refuses_is_never_read_and_the_first_answer_stands() {
+    let place = Place::new("steer-refused", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-refused"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-refused");
+    // The turn's own message is never taken in again: only the steered one is sent.
+    steer(&mut input, "u-own", "case-refused");
+    steer(&mut input, "u-add", "add-refused");
+    wait_file(&place, "received-add-refused");
+    // Given twice, it is sent once.
+    steer(&mut input, "u-add", "add-refused");
+    std::fs::write(place.dir.join("release-refused"), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let seen = &printed.seen;
+    assert!(seen.iter().all(|line| read_of(line).is_none()), "{seen:?}");
+    let answers = settled(seen);
+    assert_eq!(answers.len(), 1, "{seen:?}");
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
+    let refused = seen
+        .iter()
+        .find(|line| line["type"] == "steer_refused")
+        .unwrap();
+    assert_eq!(refused["uuid"], "u-add");
+    // Nothing that reads as an answer names it: only the record of its sending and refusal.
+    assert!(seen.iter().all(|line| {
+        line.to_string().contains("u-add")
+            == (line["clarp"] == "steer" || line["type"] == "steer_refused")
+    }));
+    assert_eq!(driver(seen, "prompted")[0]["uuid"], "u-own");
+    assert_eq!(place.sent_of("session/prompt").len(), 2);
+    assert!(seen.iter().all(|line| read_of(line).is_none()));
+}
+
+#[test]
+fn a_stop_ends_one_message_read_and_leaves_one_unread() {
+    let place = Place::new("steer-stop", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-stop"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-stop");
+    steer(&mut input, "u-1", "add-stop-1");
+    wait_file(&place, "received-add-stop-1");
+    std::fs::write(place.dir.join("taken-stop"), "").unwrap();
+    printed.until("the first message read", |line| {
+        read_of(line) == Some("u-1")
+    });
+    steer(&mut input, "u-2", "add-stop-2");
+    wait_file(&place, "received-add-stop-2");
+    kill(Pid::from_raw(child.id() as i32), Signal::SIGUSR1).unwrap();
+    printed.rest();
+    drop(input);
+    let status = child.wait().unwrap();
+    assert_eq!(status.signal(), Some(Signal::SIGTERM as i32), "{status:?}");
+    let seen = &printed.seen;
+    let reads: Vec<&str> = seen.iter().filter_map(read_of).collect();
+    assert_eq!(reads, ["u-1"], "{seen:?}");
+    // What is said after the Stop names nothing that was not read.
+    for answer in settled(seen) {
+        assert_eq!(
+            answer["user_message_uuids"],
+            json!(["u-own", "u-1"]),
+            "{seen:?}"
+        );
+    }
+    // Cancelled once, and again if the prompt sent before the Stop became agy's next.
+    assert!(!place.sent_of("session/cancel").is_empty());
+    assert_eq!(place.sent_of("session/prompt").len(), 3);
+}
+
+#[test]
+fn a_message_that_comes_after_the_answer_is_answered_as_a_prompt_of_its_own() {
+    let place = Place::new("steer-after", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-after"), &[]);
+    let mut printed = Printed::of(&mut child);
+    printed.until("the first answer", |line| line["type"] == "result");
+    // The Host wrote it before it read that answer: the shim closes the input on that line.
+    steer(&mut input, "u-late", "add-after");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let seen = &printed.seen;
+    let answers = settled(seen);
+    assert_eq!(answers.len(), 2, "{seen:?}");
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
+    assert_eq!(answers[1]["user_message_uuids"], json!(["u-late"]));
+    let prompted = driver(seen, "prompted");
+    assert_eq!(
+        (&prompted[0]["uuid"], &prompted[1]["uuid"]),
+        (&json!("u-own"), &json!("u-late"))
+    );
+    assert_eq!(driver(seen, "bound")[0]["uuid"], "u-own");
+    let first = printed.at(|line| line["type"] == "result");
+    let read = printed.at(|line| read_of(line) == Some("u-late"));
+    let later =
+        printed.at(|line| line["params"]["update"]["content"]["text"] == "separate-add-after");
+    assert!(first < read && read < later, "{seen:?}");
+    assert_eq!(driver(seen, "prompted").len(), 2);
+}
+
+#[test]
+fn a_turn_that_fails_before_its_prompt_settles_its_own_message_and_never_waits_for_the_input() {
+    let place = Place::new("steer-signed-out", "signed-out");
+    let mut order = place.order("");
+    order.uuid = "u-own".into();
+    // The input stays open, as the shim keeps it for a turn that may be steered: the shim
+    // closes it only on a settled line, so the driver must print one and leave by itself.
+    let (mut child, input) = place.open(&order, &[]);
+    let mut printed = Printed::of(&mut child);
+    printed.rest();
+    let status = child.wait().unwrap();
+    drop(input);
+    assert_eq!(status.code(), Some(1), "{:?}", printed.seen);
+    assert_eq!(driver(&printed.seen, "failed")[0]["stage"], "auth");
+    let answers = settled(&printed.seen);
+    assert_eq!(answers.len(), 1, "{:?}", printed.seen);
+    assert_eq!(answers[0]["is_error"], true);
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
 }

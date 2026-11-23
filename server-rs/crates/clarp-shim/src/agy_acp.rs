@@ -8,21 +8,28 @@
 //! interpreter reads both from the spool. When the prompt is answered, agy is ended and the
 //! driver leaves. The protocol itself is `clarp-acp`'s.
 //!
+//! The order is the first line of its standard input. Each line after it is a message the Host
+//! sends while the turn runs: it goes to Antigravity as a prompt of its own on the open
+//! conversation, and the driver prints when it was read and which messages each answer covers
+//! ([`prompts`]; the lines are `clarp_acp::agy::steer`'s).
+//!
 //! A Stop reaches the driver as SIGUSR1. It sends `session/cancel`, waits a bounded time for
 //! Antigravity to answer the prompt, prints what it said, ends agy (its input closed, then
 //! TERM, then KILL only if it stays), and ends itself with SIGTERM, so that the turn ends as
 //! stopped. Every permission Antigravity asks for is answered at once by Clarp's policy
 //! ([`clarp_acp::schema::chosen`]): nobody is waited for.
 
+mod prompts;
+
 use std::collections::BTreeSet;
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::time::{Duration, Instant};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use clarp_acp::agy::{self as shared, Failure, Kind, Order};
+use clarp_acp::agy::{self as shared, Failure, Kind, Order, steer};
 use clarp_acp::client::{self, Answer, Client, Ended, Handler, Inbound};
 use clarp_acp::{code, method, schema};
 use nix::sys::signal::{SigSet, Signal, kill, killpg};
@@ -81,6 +88,15 @@ struct Record {
     open_tools: BTreeSet<String>,
     /// The prompt was cancelled: what Antigravity asks after that is declined.
     stopping: bool,
+    /// A message whose read is printed before Antigravity's next update: it is at work on the
+    /// prompt that carries it ([`prompts`]).
+    read_next: Option<String>,
+    /// The message whose read was printed, for the prompts to take up.
+    took: Option<String>,
+    /// What Antigravity has said in answer since the last answer was settled.
+    answer_text: String,
+    /// A settled line was printed: the shim has closed the Host's input on it.
+    settled: bool,
 }
 
 impl Handler for Record {
@@ -92,7 +108,16 @@ impl Handler for Record {
         if update && self.prompting && self.first_update_ms.is_none() {
             self.first_update_ms = Some(ms(self.launched));
         }
+        // Antigravity is at work on the prompt whose message waits to be read: the read comes
+        // before what it does with it.
+        if update && let Some(uuid) = self.read_next.take() {
+            read_out(&uuid)?;
+            self.took = Some(uuid);
+        }
         match schema::SessionUpdate::of_notification(message) {
+            Some(schema::SessionUpdate::AgentMessageChunk { content }) => {
+                self.answer_text.push_str(content.text());
+            }
             Some(
                 schema::SessionUpdate::ToolCall(call) | schema::SessionUpdate::ToolCallUpdate(call),
             ) if !call.tool_call_id.is_empty() => {
@@ -148,6 +173,10 @@ struct Turn {
     record: Record,
     /// A Stop came: the prompt is cancelled, and the wait for its answer is bounded.
     stopping: Option<Instant>,
+    /// Lines of the Host's that came before the turn's own prompt was sent.
+    waiting: Vec<Value>,
+    /// The Host has closed the driver's input: no more messages come.
+    owner_done: bool,
 }
 
 /// How the turn went, in the driver's exit: nought for an answered prompt.
@@ -158,53 +187,32 @@ enum Outcome {
 }
 
 impl Turn {
-    /// A request answered within the setup bound. A Stop before the prompt ends the turn.
+    /// A request answered within the setup bound. A Stop before the prompt ends the turn; a
+    /// message the Host sends meanwhile waits for the prompt.
     fn setup(&mut self, asked: &str, params: Value) -> Result<std::result::Result<Answer, Ended>> {
         let id = self.client.send_request(asked, params)?;
-        Ok(self.client.wait(id, SETUP_WAIT, None, &mut self.record)?)
-    }
-
-    /// The prompt, answered; a Stop cancels it and waits a bounded time for the answer.
-    fn prompt(
-        &mut self,
-        session: &str,
-        blocks: Vec<Value>,
-        silence: Duration,
-    ) -> Result<std::result::Result<Answer, Ended>> {
-        let id = self.client.send_request(
-            method::SESSION_PROMPT,
-            json!({"sessionId": session, "prompt": blocks}),
-        )?;
-        self.record.prompting = true;
-        let tool_silence = Duration::from_secs(shared::TOOL_SILENCE_MOST_SECS);
         loop {
-            // A tool that runs says nothing until it ends: a build or a test suite. The short
-            // bound holds only while no tool call is open.
-            let short = self.record.open_tools.is_empty();
-            let bound = if short { silence } else { tool_silence };
-            match self
-                .client
-                .wait(id, bound, self.stopping, &mut self.record)?
-            {
-                Err(Ended::Silent)
-                    if short && self.stopping.is_none() && !self.record.open_tools.is_empty() => {}
-                Err(Ended::Interrupted) => {
-                    self.record.stopping = true;
-                    if self.stopping.is_none() {
-                        self.stopping =
-                            Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
-                        let _ = self
-                            .client
-                            .notify(method::SESSION_CANCEL, json!({"sessionId": session}));
-                        emit(&said("cancel", json!({"session": session})))?;
-                    }
-                }
-                other => {
-                    self.record.prompting = false;
-                    return Ok(other);
-                }
+            match self.client.wait(id, SETUP_WAIT, None, &mut self.record)? {
+                Err(Ended::Owner(Some(line))) => self.waiting.push(line),
+                Err(Ended::Owner(None)) => self.owner_done = true,
+                other => return Ok(other),
             }
         }
+    }
+
+    /// A Stop: the prompt that runs is cancelled, and the wait for its answer bounded. After
+    /// it, what Antigravity asks is declined and no message is read.
+    fn stop(&mut self, session: &str) -> Result<()> {
+        self.record.stopping = true;
+        self.record.read_next = None;
+        if self.stopping.is_none() {
+            self.stopping = Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
+            let _ = self
+                .client
+                .notify(method::SESSION_CANCEL, json!({"sessionId": session}));
+            emit(&said("cancel", json!({"session": session})))?;
+        }
+        Ok(())
     }
 }
 
@@ -459,26 +467,50 @@ fn mark_poisoned(session: &str) {
     }
 }
 
-/// Prints a failure the way the interpreter reads it.
+/// Prints a failure the way the interpreter reads it. A failure of a prompt names the message
+/// whose prompt it was (`uuid`); one before the prompt names none: it is the turn's own.
 fn failed(stage: &str, error: &Value) -> io::Result<()> {
+    failed_for(stage, error, "")
+}
+
+fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<()> {
     let text = shared::error_text(error);
-    emit(&said(
+    let mut line = said(
         "failed",
         json!({"stage": stage, "error": error, "text": text}),
-    ))
+    );
+    if !uuid.is_empty() {
+        line["uuid"] = json!(uuid);
+    }
+    emit(&line)
+}
+
+/// The read of a message: the one place it is printed. When it is printed is the prompts'
+/// rule ([`prompts`]): once Antigravity has taken the message, before anything it says of it.
+fn read_out(uuid: &str) -> io::Result<()> {
+    emit(&steer::read_line(uuid))
 }
 
 /// The turn ends before its answer: why, as the interpreter reads it.
 fn early(stage: &str, how: Ended) -> io::Result<Outcome> {
+    early_for(stage, how, "")
+}
+
+fn early_for(stage: &str, how: Ended, uuid: &str) -> io::Result<Outcome> {
     let text = match how {
-        Ended::Closed => "Antigravity ended before it answered",
+        // The Host's lines never end a wait of the setup's, which keeps them for the prompt.
+        Ended::Closed | Ended::Owner(_) => "Antigravity ended before it answered",
         Ended::Silent => "Antigravity stopped answering",
         Ended::Interrupted => return Ok(Outcome::Stopped),
     };
-    emit(&said(
+    let mut line = said(
         "failed",
         json!({"stage": stage, "text": text, "silent": how == Ended::Silent}),
-    ))?;
+    );
+    if !uuid.is_empty() {
+        line["uuid"] = json!(uuid);
+    }
+    emit(&line)?;
     Ok(Outcome::Failed)
 }
 
@@ -516,7 +548,10 @@ fn open(
         turn.record.resume_ms = Some(ms(began));
         match answer {
             Ok(Answer::Result(opened)) => {
-                emit(&said("bound", json!({"session": named, "resumed": true})))?;
+                emit(&said(
+                    "bound",
+                    json!({"session": named, "resumed": true, "uuid": order.uuid}),
+                ))?;
                 return Ok(Ok((named.to_string(), opened)));
             }
             // A conversation agy no longer has is not begun anew here, empty: it is marked,
@@ -548,7 +583,10 @@ fn open(
         Ok(Answer::Result(opened)) => {
             match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
                 Some(id) => {
-                    emit(&said("bound", json!({"session": id, "resumed": false})))?;
+                    emit(&said(
+                        "bound",
+                        json!({"session": id, "resumed": false, "uuid": order.uuid}),
+                    ))?;
                     Ok(Ok((id.to_string(), opened)))
                 }
                 None => {
@@ -614,7 +652,7 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
         0 => Duration::from_secs(shared::SILENCE_MOST_SECS),
         ms => Duration::from_millis(ms),
     };
-    let answer = turn.prompt(&session, prompt, silence)?;
+    let outcome = prompts::converse(turn, &session, order.uuid.trim(), prompt, silence)?;
     emit(&said(
         "timing",
         json!({
@@ -622,32 +660,7 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
             "resume_ms": turn.record.resume_ms,
         }),
     ))?;
-    let stopped = turn.stopping.is_some();
-    Ok(match answer {
-        Ok(Answer::Result(result)) => {
-            emit(&said("prompted", json!({"result": result})))?;
-            if stopped {
-                Outcome::Stopped
-            } else {
-                Outcome::Answered
-            }
-        }
-        Ok(Answer::Error(error)) => {
-            if shared::classify(&shared::error_text(&error)) == Failure::Signature {
-                mark_poisoned(&session);
-            }
-            failed("prompt", &error)?;
-            if stopped {
-                Outcome::Stopped
-            } else {
-                Outcome::Failed
-            }
-        }
-        // A Stop whose cancel was not answered in time: agy is ended below.
-        // After a Stop, however agy ends, the turn was stopped.
-        Err(_) if stopped => Outcome::Stopped,
-        Err(how) => early("prompt", how)?,
-    })
+    Ok(outcome)
 }
 
 /// Ends what agy left behind in the driver's process group: a server or a command it started,
@@ -697,7 +710,15 @@ pub fn run(program: &str) -> Result<u8> {
     let (inbound, received) = mpsc::channel();
     // Before any thread starts: the threads take the mask, and only the watch takes SIGUSR1.
     stop_watch(inbound.clone())?;
-    let order = Order::from_json(&serde_json::from_reader(io::stdin().lock())?);
+    // The order is the first line. Each line after it is a message of the Host's for the turn,
+    // read on a thread of its own for as long as the Host writes: the shim closes the input on
+    // the first settled line, or right after the order where the turn is not steered. Nothing
+    // ever waits for its end.
+    let mut from_host = io::BufReader::new(io::stdin());
+    let mut first = String::new();
+    from_host.read_line(&mut first)?;
+    let order = Order::from_json(&serde_json::from_str(&first)?);
+    let owner = inbound.clone();
     let cwd = if order.cwd.trim().is_empty() {
         std::env::current_dir()?
     } else {
@@ -708,6 +729,18 @@ pub fn run(program: &str) -> Result<u8> {
     let output = child.stdout.take().ok_or("agy's output is missing")?;
     let input = child.stdin.take().ok_or("agy's input is missing")?;
     client::read_into(output, inbound);
+    std::thread::spawn(move || {
+        for line in from_host.lines() {
+            let Ok(line) = line else { break };
+            if let Ok(said) = serde_json::from_str::<Value>(&line)
+                && said.is_object()
+                && owner.send(Inbound::Owner(Some(said))).is_err()
+            {
+                return;
+            }
+        }
+        let _ = owner.send(Inbound::Owner(None));
+    });
     let mut turn = Turn {
         client: Client::new(input, received),
         record: Record {
@@ -718,11 +751,30 @@ pub fn run(program: &str) -> Result<u8> {
             resume_ms: None,
             open_tools: BTreeSet::new(),
             stopping: false,
+            read_next: None,
+            took: None,
+            answer_text: String::new(),
+            settled: false,
         },
         stopping: None,
+        waiting: Vec::new(),
+        owner_done: false,
     };
     let mut agent = Agent { child };
     let outcome = run_turn(&mut turn, &order, &cwd.display().to_string());
+    // A turn that failed before any answer was settled says so in a settled line naming its
+    // own message: the Host reads its end from it, and the shim closes the input on it.
+    if !matches!(outcome, Ok(Outcome::Answered | Outcome::Stopped)) && !turn.record.settled {
+        let own: Vec<String> = Some(order.uuid.trim().to_string())
+            .filter(|uuid| !uuid.is_empty())
+            .into_iter()
+            .collect();
+        let why = match &outcome {
+            Err(error) => error.to_string(),
+            Ok(_) => "Antigravity's turn failed before it answered".to_string(),
+        };
+        let _ = emit(&steer::settled_line(true, &why, &own));
+    }
     agent.end(&mut turn.client);
     reap();
     match outcome? {
