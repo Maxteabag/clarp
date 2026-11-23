@@ -575,3 +575,35 @@ fn a_permission_asked_after_a_stop_is_declined() {
         .unwrap();
     assert_eq!(answer["result"]["outcome"], json!({"outcome": "cancelled"}));
 }
+
+#[test]
+fn what_an_agent_left_running_on_purpose_outlives_the_turn() {
+    let place = Place::new("detached", "detached");
+    let (printed, status) = place.run(&place.order(""));
+    assert!(status.success(), "{printed:?}");
+    let pids: Vec<i32> = std::fs::read_to_string(place.dir.join("detached.pids"))
+        .unwrap()
+        .split_whitespace()
+        .map(|pid| pid.parse().unwrap())
+        .collect();
+    assert_eq!(pids.len(), 2);
+    // Neither holds the turn's pipes: a server in a session of its own and one `nohup`-style in
+    // agy's group both go on after the turn has ended.
+    let alive: Vec<bool> = pids
+        .iter()
+        .map(|pid| {
+            // Running or sleeping, not ended and waiting to be reaped.
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    stat.rsplit_once(')')
+                        .map(|(_, after)| after.trim_start().to_string())
+                })
+                .is_some_and(|after| !after.starts_with('Z'))
+        })
+        .collect();
+    for pid in &pids {
+        let _ = kill(Pid::from_raw(*pid), Signal::SIGKILL);
+    }
+    assert_eq!(alive, [true, true], "{pids:?}");
+}

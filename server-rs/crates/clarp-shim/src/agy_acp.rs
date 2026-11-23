@@ -25,8 +25,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use clarp_acp::agy::{self as shared, Failure, Kind, Order};
 use clarp_acp::client::{self, Answer, Client, Ended, Handler, Inbound};
 use clarp_acp::{code, method, schema};
-use nix::sys::signal::{SigSet, Signal, kill, killpg};
-use nix::unistd::{Pid, getpgrp, getpid};
+use nix::sys::signal::{SigSet, Signal, kill};
+use nix::unistd::{Pid, getpid};
 use serde_json::{Value, json};
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
@@ -246,12 +246,6 @@ impl Agent {
 
 /// SIGUSR1, the shim's way to ask for a Stop, becomes an interrupt of the client's wait.
 fn stop_watch(inbound: Sender<Inbound>) -> Result<()> {
-    // SIGTERM is held by every thread of the driver, so that the driver can end what agy left
-    // in its process group without ending itself ([`reap`]); agy and its children start with
-    // nothing held. A stopped turn lets it through to end itself by it.
-    let mut held = SigSet::empty();
-    held.add(Signal::SIGTERM);
-    held.thread_block()?;
     let mut signals = SigSet::empty();
     signals.add(Signal::SIGUSR1);
     signals.thread_block()?;
@@ -650,27 +644,37 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
     })
 }
 
-/// Ends what agy left behind in the driver's process group: a server or a command it started,
-/// which would outlive the turn, and, holding the shim's standard error, keep the turn from
-/// ending. Only where the driver leads a group of its own, as the shim starts it: never the
-/// group of whoever started the driver otherwise. TERM first (the driver holds it), then KILL
-/// to what is still there.
+/// Ends what agy left behind that would keep the turn from ending: a process that still holds
+/// the driver's standard output or error (the shim's pipes), which the shim waits for to close.
+/// Only those: a process an agent started on purpose to outlive the turn (`nohup … > log &`, a
+/// dev server, a watcher) writes elsewhere and is left running, as with the `agy` card. TERM
+/// first, then KILL to whatever still holds them after a grace.
 fn reap() {
-    let group = getpgrp();
-    if group != getpid() || others_of(group).is_empty() {
+    let ours = own_pipes();
+    if ours.is_empty() || holders(&ours).is_empty() {
         return;
     }
-    if killpg(group, Signal::SIGTERM).is_err() {
-        return;
+    for pid in holders(&ours) {
+        let _ = kill(pid, Signal::SIGTERM);
     }
     std::thread::sleep(REAP_GRACE);
-    for pid in others_of(group) {
+    for pid in holders(&ours) {
         let _ = kill(pid, Signal::SIGKILL);
     }
 }
 
-/// The processes of a group but the driver, as `/proc` lists them.
-fn others_of(group: Pid) -> Vec<Pid> {
+/// What the driver's standard output and error are, as `/proc` names them (`pipe:[…]`): only
+/// pipes, which are the shim's, never a terminal or a file somebody else may share.
+fn own_pipes() -> Vec<std::path::PathBuf> {
+    [1, 2]
+        .into_iter()
+        .filter_map(|fd| std::fs::read_link(format!("/proc/self/fd/{fd}")).ok())
+        .filter(|link| link.to_str().is_some_and(|link| link.starts_with("pipe:")))
+        .collect()
+}
+
+/// The processes but the driver whose standard output or error is one of `ours`.
+fn holders(ours: &[std::path::PathBuf]) -> Vec<Pid> {
     let me = getpid();
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Vec::new();
@@ -681,14 +685,10 @@ fn others_of(group: Pid) -> Vec<Pid> {
         .map(Pid::from_raw)
         .filter(|pid| *pid != me)
         .filter(|pid| {
-            // The fields after the name in parentheses: state, parent, group.
-            std::fs::read_to_string(format!("/proc/{pid}/stat"))
-                .ok()
-                .and_then(|stat| {
-                    let after = stat.rsplit_once(')')?.1;
-                    after.split_whitespace().nth(2)?.parse::<i32>().ok()
-                })
-                .is_some_and(|of| of == group.as_raw())
+            [1, 2].into_iter().any(|fd| {
+                std::fs::read_link(format!("/proc/{pid}/fd/{fd}"))
+                    .is_ok_and(|link| ours.contains(&link))
+            })
         })
         .collect()
 }
@@ -730,9 +730,6 @@ pub fn run(program: &str) -> Result<u8> {
         Outcome::Failed => Ok(1),
         Outcome::Stopped => {
             // A stopped turn ends by signal, as the shim's own stop would end a tool.
-            let mut held = SigSet::empty();
-            held.add(Signal::SIGTERM);
-            let _ = held.thread_unblock();
             let _ = kill(Pid::this(), Signal::SIGTERM);
             loop {
                 std::thread::park();
