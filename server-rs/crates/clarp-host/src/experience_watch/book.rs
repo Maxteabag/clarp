@@ -14,9 +14,14 @@ const DETAIL_CHARS: usize = 2_000;
 const HOUR: i64 = 60 * 60 * 1_000;
 
 /// A finding that tells of what changed while it is open, at most hourly: the apps' scroll
-/// flashes (one per device, while new flashes come).
+/// flashes (one per device, while new flashes come), and a backend whose turns go wrong.
 fn retold(kind: &str) -> bool {
-    kind.starts_with("scroll_flash_")
+    kind.starts_with("scroll_flash_") || kind == super::backends::KIND
+}
+
+/// A finding whose subject is a paired device.
+fn of_a_device(kind: &str) -> bool {
+    kind.starts_with("app_crash_") || kind.starts_with("scroll_flash_")
 }
 
 pub(super) type Key = (String, String);
@@ -92,7 +97,8 @@ impl Owed {
             Notice::Summary(day) => format!("daily-{day}"),
             Notice::Update(id, at) => format!("update-{id}-{at}"),
         };
-        format!("experience-watch-{step}-{}", self.to)
+        // A recipient of a paired Host (`session@host`) is named without the `@`.
+        format!("experience-watch-{step}-{}", self.to.replace('@', "-at-"))
     }
 }
 
@@ -102,6 +108,9 @@ pub(super) struct Book {
     pub owed: Vec<Owed>,
     next: u64,
     summary_date: String,
+    /// The turns that ended on this Host in the last two hours, as their agents told them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<super::backends::Ended>,
 }
 
 pub(super) fn agent_label(name: &str, session: &str) -> String {
@@ -114,7 +123,7 @@ pub(super) fn agent_label(name: &str, session: &str) -> String {
 
 impl Row {
     pub fn refresh_subject(&mut self, directory: &Directory) {
-        if self.kind.starts_with("app_crash_") || retold(&self.kind) {
+        if of_a_device(&self.kind) {
             if let Some(device) = directory
                 .devices
                 .values()

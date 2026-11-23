@@ -18,6 +18,8 @@ const KEEP_MS: i64 = 5 * 60 * 1000;
 const KEEP_MAX: usize = 20_000;
 /// How far a listening client may fall behind before it is cut off and has to reconnect.
 const BEHIND_MAX: usize = 4_096;
+/// How many ended turns wait at most for the experience watcher to take them, the newest kept.
+const TURN_ENDS_MAX: usize = 4_096;
 
 /// An event as it was sent: its number, and its JSON, written once for everyone.
 #[derive(Debug)]
@@ -80,6 +82,9 @@ pub struct Hub {
     pub profiles: crate::profile::Slot,
     /// A queue event resolves names when it is published. The fleet owns the roster.
     queue_roster: OnceLock<Weak<watch::Receiver<Arc<Directory>>>>,
+    /// The turns that ended, as their agents judged them, until the experience watcher takes
+    /// them.
+    turn_ends: Mutex<VecDeque<crate::experience_watch::Ended>>,
 }
 
 impl Hub {
@@ -107,7 +112,29 @@ impl Hub {
             waiting: Mutex::new(BTreeMap::new()),
             profiles: crate::profile::Slot::new(),
             queue_roster: OnceLock::new(),
+            turn_ends: Mutex::new(VecDeque::new()),
         }
+    }
+
+    /// An agent's turn ended: kept for the experience watcher. Does not wait.
+    pub(crate) fn turn_ended(&self, ended: crate::experience_watch::Ended) {
+        let mut ends = self
+            .turn_ends
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if ends.len() >= TURN_ENDS_MAX {
+            ends.pop_front();
+        }
+        ends.push_back(ended);
+    }
+
+    /// The turns that ended since they were last taken.
+    pub(crate) fn take_turn_ends(&self) -> Vec<crate::experience_watch::Ended> {
+        let mut ends = self
+            .turn_ends
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        std::mem::take(&mut *ends).into()
     }
 
     pub(crate) fn queue_roster(

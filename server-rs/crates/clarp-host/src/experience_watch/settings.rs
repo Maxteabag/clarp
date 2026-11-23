@@ -13,7 +13,9 @@ pub(super) struct Settings {
     pub interval: Duration,
     pub summary_hour: i8,
     pub front_desk: String,
-    pub owners: BTreeMap<String, String>,
+    /// Who owns each kind of finding: a session of this Host, or `session@host` for an agent of
+    /// a paired Host (written as one, or as a list).
+    pub owners: BTreeMap<String, Vec<String>>,
     pub wait_ms: i64,
     pub wait_count: usize,
     pub stuck_ms: i64,
@@ -57,8 +59,22 @@ impl Settings {
             .and_then(toml::Value::as_table)
             .into_iter()
             .flatten()
-            .filter_map(|(kind, session)| Some((kind.clone(), session.as_str()?.trim().to_owned())))
-            .filter(|(_, session)| !session.is_empty())
+            .map(|(kind, named)| {
+                let named: Vec<&str> = match named {
+                    toml::Value::Array(items) => {
+                        items.iter().filter_map(toml::Value::as_str).collect()
+                    }
+                    other => other.as_str().into_iter().collect(),
+                };
+                let named: Vec<String> = named
+                    .into_iter()
+                    .map(str::trim)
+                    .filter(|session| !session.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                (kind.clone(), named)
+            })
+            .filter(|(_, named)| !named.is_empty())
             .collect();
         let release_kinds = field("release_kinds")
             .and_then(toml::Value::as_array)
@@ -117,14 +133,18 @@ impl Settings {
                 .get(&format!("app_crash_{platform}"))
                 .or_else(|| self.owners.get("app_crash"))
         });
-        let mut all = Vec::new();
-        if let Some(owner) = self
+        let mut all: Vec<String> = Vec::new();
+        for owner in self
             .owners
             .get(kind)
             .or_else(|| self.owners.get(family))
             .or(app_owner)
+            .into_iter()
+            .flatten()
         {
-            all.push(owner.clone());
+            if !all.contains(owner) {
+                all.push(owner.clone());
+            }
         }
         if !self.front_desk.is_empty() && !all.contains(&self.front_desk) {
             all.push(self.front_desk.clone());

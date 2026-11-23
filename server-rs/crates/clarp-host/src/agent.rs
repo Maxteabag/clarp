@@ -4729,6 +4729,31 @@ impl Worker {
         }
         if turn_ended {
             self.ended = self.last_end();
+            // How the turn ended, for whether its backend works (the experience watcher's
+            // `backend_failures`): a done turn answered when the row that closed it is a reply
+            // with words in it, or it left a note.
+            if let Some(last) = ended
+                && !self.setup.record.is_test
+                && let Some(end) = self.ended.as_ref().filter(|end| end.turn == last.id.0)
+            {
+                let answered = end.note_count > 0
+                    || matches!(
+                        actor.row(&end.closes),
+                        Ok(Some(row)) if matches!(&row.entry, Entry::Reply(reply) if !reply.text.trim().is_empty())
+                    );
+                if let Some(how) =
+                    crate::experience_watch::judged(&last.outcome, &last.origin, answered)
+                {
+                    self.setup.hub.turn_ended(crate::experience_watch::Ended {
+                        agent_id: self.setup.record.agent_id.clone(),
+                        session: self.setup.record.session.clone(),
+                        backend: backend.to_owned(),
+                        turn: last.id.0,
+                        at: last.ended_at_ms,
+                        how,
+                    });
+                }
+            }
             // What the turn used is told to the Host's tally, under the turn's own name: a
             // Host that starts again tells an agent's last turn once more, and it is still
             // counted once. What is too old to be counted is not told again.

@@ -18,6 +18,7 @@ front_desk = "SESSION"
 release_kinds = ["check", "test"]
 
 [experience_watch.owners]
+backend_failures = ["SESSION", "SESSION@HOST"]
 app_crash_ios = "SESSION"
 app_crash_android = "SESSION"
 scroll_flash = "SESSION"
@@ -92,6 +93,27 @@ when a chat view jumps and comes back without a gesture. Its `detail` is
 "insert" | "remove" | "height" | "live", "note": short}] (at most 30)}`.
 The Host keeps it like an important event (7 days, with its context) and
 lets its detail run to 16 KB (4 KB for other events).
+
+A recipient (an owner or the front desk) is a session of this Host, or
+`session@host` for an agent of the paired Host registered under that name: it is
+sent through that Host's own send, as `clarp-admin prompt --server host` does,
+so one Host's watcher can tell agents on another. An owner is one recipient or a
+list of them; each gets one copy.
+
+`backend_failures` tells whether each backend's turns on this Host work, from real
+use (no test turns). An agent's turn that ends is counted against its backend when
+it failed (any failure but a usage limit, which the Hotseat handles, or a Stop),
+when it ended done with nothing reaching the chat (no reply with words and no note;
+a compaction is exempt), or when it failed on the backend's sign-in. A user's Stop,
+a cut-off and a replaced or withdrawn turn are not counted at all. Test agents are
+left out. The finding, one per backend, opens when two or more of the backend's
+turns of the last hour went wrong, or when every turn of the hour (one at least)
+did. It reads "N of M <backend> turns on <host> in the last hour did not reach the
+chat: failed: <reason>; empty; sign-in. The newest at HH:MM, agent <session>.",
+tells its owners (`owners.backend_failures`) and the front desk at once, tells them
+again at most hourly while it stays open and its text changed, and clears when the
+last hour holds no such turn. The watcher keeps the turns of the last two hours
+with its findings, so a restart forgets none it has taken.
 
 A release finding requires a running job registered as `check` or `test`
 and a recognized check step in that job's live worker process tree. Builds,

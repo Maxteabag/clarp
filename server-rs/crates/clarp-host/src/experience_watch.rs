@@ -1,10 +1,12 @@
 //! The Host's experience watcher and its HTTP-only signals.
 
+mod backends;
 mod book;
 mod checks;
 mod release;
 mod settings;
 
+pub(crate) use backends::{Ended, judged};
 pub(crate) use checks::AgentFacts;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -211,14 +213,8 @@ fn in_window(at: i64, since: i64, now: i64) -> bool {
     (since.max(now.saturating_sub(KEEP_MS))..=now).contains(&at)
 }
 
-/// The watcher is a Host-owned sender, with no provider turn or roster identity.
-pub async fn tell(
-    app: &App,
-    session: &str,
-    message_id: String,
-    text: String,
-) -> Result<SendResponse, ApiError> {
-    let request = SendRequest {
+fn request(session: &str, message_id: String, text: String) -> SendRequest {
+    SendRequest {
         session: session.to_owned(),
         text,
         client_msg_id: Some(message_id),
@@ -228,13 +224,76 @@ pub async fn tell(
         origin: Some("agent".into()),
         sender: Some(json!(SENDER)),
         ..SendRequest::default()
-    };
+    }
+}
+
+/// The watcher is a Host-owned sender, with no provider turn or roster identity.
+pub async fn tell(
+    app: &App,
+    session: &str,
+    message_id: String,
+    text: String,
+) -> Result<SendResponse, ApiError> {
+    let request = request(session, message_id, text);
     let made = Made {
         // The Host itself authorizes this fixed sender.
         internal_sender: Some(SENDER),
         ..Made::default()
     };
     edge::send_from(app, request, &made).await
+}
+
+/// Where a recipient is: a session of this Host, or `session@host`, an agent of the paired Host
+/// of that name (`clarp-admin prompt --server`'s way).
+fn addressed(to: &str) -> (&str, Option<&str>) {
+    match to.rsplit_once('@') {
+        Some((session, host)) if !session.is_empty() && !host.is_empty() => (session, Some(host)),
+        _ => (to, None),
+    }
+}
+
+/// Tells a recipient of this Host or of a paired one.
+async fn deliver(app: &App, to: &str, message_id: String, text: String) -> Result<(), String> {
+    deliver_by(
+        to,
+        message_id,
+        text,
+        async |session, message_id, text| {
+            tell(app, session, message_id, text)
+                .await
+                .map(drop)
+                .map_err(|why| why.message().to_owned())
+        },
+        async |host, payload| {
+            crate::peers::send(app, host, payload)
+                .await
+                .map(drop)
+                .map_err(|why| match why {
+                    crate::peers::Failed::Unknown(name) => {
+                        format!("unknown or disabled peer: {name}")
+                    }
+                    crate::peers::Failed::Refused { status, detail } => {
+                        format!("the Host {host} refused it (HTTP {status}): {detail}")
+                    }
+                    crate::peers::Failed::Down(why) => why,
+                })
+        },
+    )
+    .await
+}
+
+/// A recipient of this Host is told here; one of a paired Host is sent that Host's own send.
+async fn deliver_by(
+    to: &str,
+    message_id: String,
+    text: String,
+    here: impl AsyncFnOnce(&str, String, String) -> Result<(), String>,
+    peer: impl AsyncFnOnce(&str, serde_json::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    match addressed(to) {
+        (session, None) => here(session, message_id, text).await,
+        (session, Some(host)) => peer(host, json!(request(session, message_id, text))).await,
+    }
 }
 
 const KIND: &str = "experience-watch";
@@ -269,9 +328,17 @@ async fn save(app: &App, book: &Book) -> Result<(), String> {
 
 async fn pass(app: &App, settings: &Settings, previous: i64, now: i64) -> Result<(), String> {
     let mut book = load(app).await?;
-    let seen = checks::collect(app, settings, settings.window_start(now, previous), now).await;
+    let mut seen = checks::collect(app, settings, settings.window_start(now, previous), now).await;
     let directory = app.fleet.directory();
     let zone = TimeZone::system();
+    backends::fold(&mut book.turns, app.hub.take_turn_ends(), now);
+    let open = book
+        .rows
+        .iter()
+        .filter(|row| row.kind == backends::KIND && row.cleared_at.is_none())
+        .map(|row| row.subject.clone())
+        .collect();
+    backends::findings(&mut seen, &book.turns, &open, &app.config.name, &zone, now);
     book.reconcile(seen, settings, &directory, &zone, now);
     // Record pending notices before sending, with stable IDs across a restart.
     save(app, &book).await?;
@@ -285,13 +352,12 @@ async fn pass(app: &App, settings: &Settings, previous: i64, now: i64) -> Result
             continue;
         }
         let id = owed.message_id();
-        match tell(app, &owed.to, id, owed.text.clone()).await {
-            Ok(_) => book.told(owed),
+        match deliver(app, &owed.to, id, owed.text.clone()).await {
+            Ok(()) => book.told(owed),
             Err(why) => {
                 eprintln!(
-                    "clarp-host: experience-watch could not tell {}: {}",
+                    "clarp-host: experience-watch could not tell {}: {why}",
                     owed.to,
-                    why.message(),
                 );
                 // A summary can be retried in its hour using its original text and id.
                 if matches!(owed.notice, book::Notice::Summary(_)) {
@@ -446,4 +512,52 @@ fn render(
         ));
     }
     ToolAnswer::printed(0, lines.join("\n"))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_recipient_of_a_paired_host_goes_through_the_peer_send() {
+        assert_eq!(
+            addressed("hazel-74f6@elitebook"),
+            ("hazel-74f6", Some("elitebook"))
+        );
+        assert_eq!(addressed("nori-5aac"), ("nori-5aac", None));
+        assert_eq!(addressed("@elitebook"), ("@elitebook", None));
+        let went = std::sync::Mutex::new(Vec::new());
+        for to in ["hazel-74f6@elitebook", "nori-5aac"] {
+            deliver_by(
+                to,
+                format!("id-{to}"),
+                "Experience watch: x".into(),
+                async |session, id, _| {
+                    went.lock()
+                        .unwrap()
+                        .push(json!({"here": session, "id": id}));
+                    Ok(())
+                },
+                async |host, payload| {
+                    went.lock()
+                        .unwrap()
+                        .push(json!({"peer": host, "payload": payload}));
+                    Ok(())
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let went = went.into_inner().unwrap();
+        assert_eq!(went[0]["peer"], "elitebook");
+        let payload = &went[0]["payload"];
+        assert_eq!(payload["session"], "hazel-74f6");
+        assert_eq!(payload["text"], "Experience watch: x");
+        assert_eq!(payload["client_msg_id"], "id-hazel-74f6@elitebook");
+        assert_eq!(payload["force_session"], true);
+        assert_eq!(payload["origin"], "agent");
+        assert_eq!(payload["sender"], SENDER);
+        assert_eq!(went[1], json!({"here": "nori-5aac", "id": "id-nori-5aac"}));
+    }
 }

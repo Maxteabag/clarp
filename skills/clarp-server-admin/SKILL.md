@@ -23,12 +23,17 @@ toolchain paths.
 On a Rust Host, `clarp-admin experience --open` lists outstanding findings.
 Use `--since 1h` to limit the time window and `--json` for stored rows. The
 watcher reads late sends, stuck or paused queues, app crash reports and
-crash events, failed sends, skill links, old decision cards, and release-blocking
-jobs. Relaunch counts provide context for a crash finding.
+crash events, failed sends, skill links, old decision cards, release-blocking
+jobs, and backends whose turns go wrong (`backend_failures`, one per backend:
+two or more turns of the last hour that failed, ended done with no reply or
+note, or failed on sign-in, or every turn of the hour; usage limits and Stops do
+not count). Relaunch counts provide context for a crash finding.
 
 The watcher is off unless `[experience_watch] enabled = true` is set in
 the Host configuration. Each finding's owner and the configured front
-desk hear once on open and once on clear, from `experience-watch`. The
+desk hear once on open and once on clear, from `experience-watch`. An owner
+may be a list, and a recipient may be `session@host` for an agent of a paired
+Host (delivered as `clarp-admin prompt --server host` does). The
 front desk also gets one daily summary. Findings are stored even without
 a configured recipient. See [the watcher configuration](../../server-rs/docs/experience-watch.md).
 
