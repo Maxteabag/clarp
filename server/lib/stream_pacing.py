@@ -7,7 +7,7 @@ Here:
 
 * ``stable_prefix`` is the part of a growing markdown text that will not be
   re-flowed: everything up to the last blank line, closed fence or list-item
-  start, never inside an open fence (T3 Code's "paragraph" filter).
+  start, never inside an open fence (a "paragraph" filter).
 * ``LivePacer`` writes that prefix at most every ``interval``, releases a long
   paragraph line by line (or word by word) once it has been held for
   ``hold``, always ends a burst with a trailing write, and writes the final

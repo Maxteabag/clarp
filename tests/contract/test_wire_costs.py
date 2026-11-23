@@ -1,6 +1,6 @@
 """What the wire costs: byte budgets and cache headers on the real server.
 
-Like T3 Code's `test:perf:v2-wire`, these pin how many bytes a client pays
+These pin how many bytes a client pays
 for the common paths, so a change that quietly fattens every page (a new
 per-row field, a duplicated body, lost compression) fails here instead of
 showing up as a slower phone weeks later. The budgets are measured values

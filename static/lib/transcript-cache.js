@@ -1,4 +1,4 @@
-// Cache-first chat open (T3 Code's pattern): the newest page of each chat is
+// Cache-first chat open: the newest page of each chat is
 // kept on the device with its revision cursor, so opening a chat paints from
 // it at once and asks /log only for what changed after the cursor.
 //

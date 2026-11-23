@@ -4,8 +4,7 @@ The tail and `before` pages take the newest rows of one conversation in
 display order, ``COALESCE(timestamp, ''), seq``. Without an index in that
 order SQLite read every row of the conversation and sorted it in a temporary
 B-tree on every page (about 40 ms per open on a 12k-row chat). The plan is
-asserted on the SQL `list_messages` actually runs, like T3 Code's
-OrchestrationEventStore.sequence.test.ts does for its cursor reads.
+asserted on the SQL `list_messages` actually runs.
 """
 from __future__ import annotations
 

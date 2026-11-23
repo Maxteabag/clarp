@@ -1,6 +1,6 @@
 // The status line must not flash: a status that clears within 400 ms is
-// never shown, and one that is shown stays at least 400 ms (T3's
-// createDelayedStatus). A change of headline inside the same state shows at
+// never shown, and one that is shown stays at least 400 ms (a delayed
+// status). A change of headline inside the same state shows at
 // once; a change of state waits like a new status.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
