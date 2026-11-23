@@ -1,19 +1,21 @@
-//! One process owns a goal-enabled thread between its turns. The Host's
-//! reservation, Codex's request replies, and the spool writer meet here.
+//! One process owns an agent's Codex thread between its turns: its chat turns, and a native
+//! goal's. The Host's reservation, Codex's request replies, and the spool writer meet here.
 
 use std::collections::VecDeque;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
 use clarp_shim::Reply;
 use clarp_shim::codex_app::{AppServer, Frame};
-use clarp_shim::codex_lane::{Claim, GoalAction, Request, Reservation, Snapshot};
+use clarp_shim::codex_lane::{
+    Claim, GoalAction, LOGIN_CHANGED, Request, Reservation, Snapshot, thread_lock,
+};
 use serde_json::{Value, json};
 
 use crate::codex_lane_login::Login;
@@ -22,13 +24,76 @@ use crate::codex_lane_turns::Slot;
 
 const RPC_LIMIT: Duration = Duration::from_secs(12);
 const BUFFER_MOST: usize = 512;
+/// How long Codex has to end a turn after `turn/interrupt` when the Stop named no time.
+const STOP_GRACE: Duration = Duration::from_secs(5);
 
 pub(super) enum Input {
     Provider(io::Result<Frame>),
     ProviderGone,
     Control(Request, UnixStream),
     Follow((u64, u32), UnixStream),
-    Stop((u64, u32), UnixStream),
+    /// A Stop on the attempt's socket, with how long Codex has to end the turn itself.
+    Stop((u64, u32), u64, UnixStream),
+    /// Steered words for the attempt, under the id their reading is told by.
+    Steer((u64, u32), String, String, UnixStream),
+}
+
+/// What the Host starts a lane with that is the lane's own, taken out of Codex's options.
+struct Own {
+    /// Where the locks of native threads are: the thread a lane starts is locked there.
+    thread_locks: Option<PathBuf>,
+    /// A thread's lock, named by the Host for a lane that resumes it.
+    thread_lock: Option<PathBuf>,
+    /// How long the lane lives with no claim and no goal that may continue.
+    idle: Option<Duration>,
+    /// Where the identity of the lane's running turn is kept for the Clarp tools it calls.
+    turn_file: Option<PathBuf>,
+    /// The Host's digest of the options, told back in every snapshot.
+    digest: String,
+}
+
+impl Own {
+    fn take(options: &mut Value) -> Self {
+        let Some(fields) = options.as_object_mut() else {
+            return Self {
+                thread_locks: None,
+                thread_lock: None,
+                idle: None,
+                turn_file: None,
+                digest: String::new(),
+            };
+        };
+        let path = |value: Option<Value>| value?.as_str().map(PathBuf::from);
+        Self {
+            thread_locks: path(fields.remove("_clarpThreadLockDir")),
+            thread_lock: path(fields.remove("_clarpThreadLock")),
+            idle: fields
+                .remove("_clarpIdleMs")
+                .and_then(|ms| ms.as_u64())
+                .filter(|ms| *ms > 0)
+                .map(Duration::from_millis),
+            turn_file: path(fields.remove("_clarpTurnFile")),
+            digest: fields
+                .remove("_clarpOptionsDigest")
+                .and_then(|digest| digest.as_str().map(str::to_owned))
+                .unwrap_or_default(),
+        }
+    }
+}
+
+fn lock_exclusive(path: &Path) -> io::Result<File> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(path)?;
+    file.try_lock().map_err(io::Error::other)?;
+    Ok(file)
 }
 
 pub(super) fn from_args(mut args: impl Iterator<Item = String>) -> io::Result<()> {
@@ -45,11 +110,9 @@ pub(super) fn from_args(mut args: impl Iterator<Item = String>) -> io::Result<()
 
 fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     let _ = nix::unistd::setsid();
-    let thread = options["threadId"]
-        .as_str()
-        .filter(|thread| !thread.is_empty())
-        .ok_or_else(|| io::Error::other("a Codex lane needs a native thread"))?
-        .to_owned();
+    // Empty for a new conversation: the lane starts the thread with its first prompt.
+    let thread = options["threadId"].as_str().unwrap_or_default().to_owned();
+    let own = Own::take(&mut options);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -61,23 +124,12 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         .mode(0o600)
         .open(path.with_extension("lock"))?;
     lock.try_lock().map_err(io::Error::other)?;
-    let thread_lock = options
-        .as_object_mut()
-        .and_then(|fields| fields.remove("_clarpThreadLock"));
-    let thread_lock = match thread_lock.as_ref().and_then(Value::as_str) {
-        Some(path) => {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .mode(0o600)
-                .open(path)?;
-            file.try_lock().map_err(io::Error::other)?;
-            Some(file)
-        }
-        None => None,
+    let named_lock = match (&own.thread_lock, &own.thread_locks) {
+        (Some(path), _) => Some(path.clone()),
+        (None, Some(dir)) if !thread.is_empty() => Some(thread_lock(dir, &thread)),
+        _ => None,
     };
+    let held_thread = named_lock.as_deref().map(lock_exclusive).transpose()?;
     match fs::remove_file(path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -99,8 +151,15 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
             let _ = relay.send(Input::ProviderGone);
         })?;
 
+    let model = options["model"].as_str().map(str::to_owned);
     let mut lane = Lane {
         server,
+        _thread_lock: held_thread,
+        own,
+        model,
+        effort: None,
+        idle_since: Instant::now(),
+        stop_deadline: None,
         revision: 0,
         input,
         send,
@@ -136,9 +195,9 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         .retire_reply
         .take()
         .map(|stream| (stream, lane.inspect()));
-    // The lock witnesses the app-server's real lifetime, including shutdown.
+    // The locks witness the app-server's real lifetime, including shutdown: the lane's
+    // fields drop in order, the app-server before the thread's lock.
     drop(lane);
-    drop(thread_lock);
     drop(lock);
     if let Some((mut stream, state)) = retired {
         let _ = write(&mut stream, &json!({"ok": true, "state": state}));
@@ -147,7 +206,18 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
 }
 
 struct Lane {
+    /// Dropped first: Codex is reaped before any lock is let go.
     server: AppServer,
+    /// Held, never read: let go only after `server` has been reaped.
+    _thread_lock: Option<File>,
+    own: Own,
+    /// The model and effort Codex was last given, which it keeps for the turns after.
+    model: Option<String>,
+    effort: Option<String>,
+    /// Since when the lane has held no claim.
+    idle_since: Instant,
+    /// The attempt a Stop interrupted, and when Codex is ended if the turn still runs.
+    stop_deadline: Option<(Instant, (u64, u32))>,
     revision: u64,
     input: Receiver<Input>,
     send: SyncSender<Input>,
@@ -185,6 +255,14 @@ impl Lane {
             goal: self.goal.clone(),
             claim: self.slot.claim().cloned(),
             native_turn: self.slot.native_turn().map(str::to_owned),
+            options: self.own.digest.clone(),
+            model: self.model.clone(),
+            effort: self.effort.clone(),
+            idle_ms: if self.slot.claim().is_none() {
+                u64::try_from(self.idle_since.elapsed().as_millis()).unwrap_or(u64::MAX)
+            } else {
+                0
+            },
         }
     }
 
@@ -202,9 +280,78 @@ impl Lane {
             });
     }
 
+    /// When the lane next has something to do by itself: end a turn that did not answer a
+    /// Stop, or leave after its idle time.
+    fn deadline(&self) -> Option<Instant> {
+        if let Some((at, _)) = self.stop_deadline {
+            return Some(at);
+        }
+        self.own
+            .idle
+            .filter(|_| self.retirable())
+            .map(|idle| self.idle_since + idle)
+    }
+
+    fn retirable(&self) -> bool {
+        self.slot.claim().is_none() && self.rejected_turn.is_none() && !self.may_continue()
+    }
+
+    /// True: the lane's idle time is over, and it leaves as if it were retired.
+    fn expired(&mut self) -> io::Result<bool> {
+        if let Some((at, attempt)) = self.stop_deadline {
+            if Instant::now() < at {
+                return Ok(false);
+            }
+            self.stop_deadline = None;
+            if self.holds(attempt) && self.slot.native_turn().is_some() {
+                // D26: the tool's own way first, bounded, then its group.
+                self.server.kill_group();
+                self.slot.killed(super::now_ms())?;
+                self.hint();
+                self.followers.clear();
+                self.turn_socket = None;
+                return Err(io::Error::other("Codex did not end its turn after a Stop"));
+            }
+            return Ok(false);
+        }
+        Ok(self.retirable()
+            && self
+                .own
+                .idle
+                .is_some_and(|idle| self.idle_since.elapsed() >= idle))
+    }
+
+    fn next_input(&mut self) -> io::Result<Option<Input>> {
+        loop {
+            if let Some(input) = self.deferred.pop_front() {
+                return Ok(Some(input));
+            }
+            let Some(at) = self.deadline() else {
+                return Ok(self.input.recv().ok());
+            };
+            match self
+                .input
+                .recv_timeout(at.saturating_duration_since(Instant::now()))
+            {
+                Ok(input) => return Ok(Some(input)),
+                Err(RecvTimeoutError::Disconnected) => return Ok(None),
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.expired()? {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "idle"));
+                    }
+                }
+            }
+        }
+    }
+
     fn serve(&mut self) -> io::Result<()> {
         loop {
-            let input = self.deferred.pop_front().or_else(|| self.input.recv().ok());
+            let input = match self.next_input() {
+                Ok(input) => input,
+                // A lane that was idle for its time leaves as a retired one does.
+                Err(error) if error.kind() == io::ErrorKind::TimedOut => return Ok(()),
+                Err(error) => return Err(error),
+            };
             match input {
                 Some(Input::Provider(frame)) => {
                     self.frame(frame?, None)?;
@@ -221,8 +368,15 @@ impl Lane {
                         self.followers.push(stream);
                     }
                 }
-                Some(Input::Stop(attempt, mut stream)) => {
-                    let reply = match self.stop(attempt) {
+                Some(Input::Stop(attempt, grace_ms, mut stream)) => {
+                    let reply = match self.stop(attempt, Duration::from_millis(grace_ms)) {
+                        Ok(()) => Reply::ok(None),
+                        Err(error) => Reply::failed(error.to_string()),
+                    };
+                    let _ = write(&mut stream, &reply);
+                }
+                Some(Input::Steer(attempt, id, text, mut stream)) => {
+                    let reply = match self.steer(attempt, &id, &text) {
                         Ok(()) => Reply::ok(None),
                         Err(error) => Reply::failed(error.to_string()),
                     };
@@ -252,16 +406,17 @@ impl Lane {
                 return Ok(false);
             }
             Request::Probe => self.probe(),
-            Request::Reserve { claim } => self.reserve(claim),
+            Request::Reserve { claim, token } => self.reserve(claim, token.as_deref()),
             Request::Prompt {
                 claim,
                 text,
                 model,
                 effort,
-            } => self.prompt(claim, text, model, effort),
+                token,
+            } => self.prompt(claim, text, model, effort, token.as_deref()),
             Request::Goal { action, objective } => self.goal(action, objective),
             Request::Recover => self.recover(),
-            Request::Stop { turn, attempt } => self.stop((turn, attempt)),
+            Request::Stop { turn, attempt } => self.stop((turn, attempt), STOP_GRACE),
             Request::Retire
                 if self.slot.claim().is_none()
                     && self.rejected_turn.is_none()
@@ -274,6 +429,11 @@ impl Lane {
         };
         let reply = match result {
             Ok(()) => json!({"ok": true, "state": self.inspect()}),
+            // A changed login is said with a code: nothing reached Codex, and the Host may
+            // give the same attempt to the lane that starts after this one.
+            Err(error) if self.stale_login => {
+                json!({"ok": false, "error": error.to_string(), "code": LOGIN_CHANGED})
+            }
             Err(error) => json!({"ok": false, "error": error.to_string()}),
         };
         let _ = write(&mut stream, &reply);
@@ -294,7 +454,7 @@ impl Lane {
         Ok(())
     }
 
-    fn reserve(&mut self, claim: Claim) -> io::Result<()> {
+    fn reserve(&mut self, claim: Claim, token: Option<&str>) -> io::Result<()> {
         if self.slot.claim() == Some(&claim) {
             return Ok(());
         }
@@ -303,9 +463,35 @@ impl Lane {
         }
         let socket = Socket::turn(&claim, self.send.clone())?;
         self.use_login()?;
+        self.keep_token(token);
         self.slot.reserve(Reservation::Goal(claim))?;
         self.turn_socket = Some(socket);
+        self.idle_since = Instant::now();
         Ok(())
+    }
+
+    /// The identity of the turn the lane now runs, for the Clarp tools it calls: written whole
+    /// by rename, readable by the owner only, so a tool never reads half of one. A file that
+    /// cannot be written leaves the turn to run: its tools then present the one before.
+    fn keep_token(&self, token: Option<&str>) {
+        let (Some(path), Some(token)) = (self.own.turn_file.as_deref(), token) else {
+            return;
+        };
+        let written = (|| {
+            let partial = path.with_extension(format!("{}.part", std::process::id()));
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&partial)?;
+            file.write_all(token.as_bytes())?;
+            file.sync_all()?;
+            fs::rename(&partial, path)
+        })();
+        if let Err(error) = written {
+            eprintln!("clarp-shim: Codex lane: the turn's identity was not written: {error}");
+        }
     }
 
     fn prompt(
@@ -314,6 +500,7 @@ impl Lane {
         text: String,
         model: Option<String>,
         effort: Option<String>,
+        token: Option<&str>,
     ) -> io::Result<()> {
         if self.slot.claim() == Some(&claim) {
             return Ok(());
@@ -324,16 +511,18 @@ impl Lane {
         let socket = Socket::turn(&claim, self.send.clone())?;
         self.use_login()?;
         self.load()?;
+        self.keep_token(token);
+        self.idle_since = Instant::now();
         let mut params = json!({
             "threadId": self.thread,
             "input": [{"type": "text", "text": text}],
             "approvalPolicy": "never",
             "sandboxPolicy": {"type": "dangerFullAccess"},
         });
-        if let Some(model) = model {
+        if let Some(model) = &model {
             params["model"] = json!(model);
         }
-        if let Some(effort) = effort {
+        if let Some(effort) = &effort {
             params["effort"] = json!(effort);
         }
         if let Some(cwd) = self.options.get("cwd") {
@@ -349,6 +538,11 @@ impl Lane {
             .as_ref()
             .ok()
             .and_then(|result| result["turn"]["id"].as_str());
+        if accepted.is_some() {
+            // Codex keeps what a turn was given for the turns after it.
+            self.model = model.or(self.model.take());
+            self.effort = effort.or(self.effort.take());
+        }
         if let Some(native) = accepted {
             self.slot.bind(
                 Some(id),
@@ -432,14 +626,40 @@ impl Lane {
     }
 
     fn load(&mut self) -> io::Result<()> {
-        if !self.loaded {
-            let options = self.options.clone();
-            let result = self.rpc("thread/resume", options)?;
-            if result["thread"]["id"].as_str() != Some(&self.thread) {
-                return Err(io::Error::other("Codex resumed a different thread"));
-            }
-            self.loaded = true;
+        if self.loaded {
+            return Ok(());
         }
+        if self.thread.is_empty() {
+            return self.start_thread();
+        }
+        let options = self.options.clone();
+        let result = self.rpc("thread/resume", options)?;
+        if result["thread"]["id"].as_str() != Some(&self.thread) {
+            return Err(io::Error::other("Codex resumed a different thread"));
+        }
+        self.loaded = true;
+        Ok(())
+    }
+
+    /// A new conversation's thread, started with the options a resumed one is given. Nobody
+    /// else knows its name yet; the lane takes its lock before it names it to anyone.
+    fn start_thread(&mut self) -> io::Result<()> {
+        let mut params = self.options.clone();
+        if let Some(fields) = params.as_object_mut() {
+            fields.remove("threadId");
+            fields.remove("excludeTurns");
+        }
+        let result = self.rpc("thread/start", params)?;
+        let thread = result["thread"]["id"]
+            .as_str()
+            .filter(|thread| !thread.is_empty())
+            .ok_or_else(|| io::Error::other("Codex started no thread"))?
+            .to_owned();
+        if let Some(dir) = &self.own.thread_locks {
+            self._thread_lock = Some(lock_exclusive(&thread_lock(dir, &thread))?);
+        }
+        self.thread = thread;
+        self.loaded = true;
         Ok(())
     }
 
@@ -483,7 +703,7 @@ impl Lane {
         }
     }
 
-    fn stop(&mut self, attempt: (u64, u32)) -> io::Result<()> {
+    fn stop(&mut self, attempt: (u64, u32), grace: Duration) -> io::Result<()> {
         if !self.holds(attempt) {
             return Ok(());
         }
@@ -511,17 +731,102 @@ impl Lane {
             Ok(())
         };
         if let Some(native) = native {
-            self.rpc(
+            let interrupted = self.rpc(
                 "turn/interrupt",
                 json!({"threadId": self.thread, "turnId": native}),
-            )?;
+            );
+            // Codex has the Stop's time to end the turn: at once when it did not answer.
+            if self.holds(attempt) {
+                let grace = if interrupted.is_ok() {
+                    grace
+                } else {
+                    Duration::ZERO
+                };
+                self.stop_deadline = Some((Instant::now() + grace, attempt));
+            }
+            interrupted?;
         } else {
             self.clear_slot()?;
         }
         paused
     }
 
+    /// More of the user's words for the running turn. Codex refuses them when that turn is
+    /// no longer the active one (`expectedTurnId`), and then they wait for a turn of their
+    /// own. Accepted, they are read once their receipt is in the spool.
+    fn steer(&mut self, attempt: (u64, u32), id: &str, text: &str) -> io::Result<()> {
+        if !self.holds(attempt) {
+            return Err(io::Error::other(
+                "the Codex lane does not hold this attempt",
+            ));
+        }
+        if self.stop_deadline.is_some() {
+            return Err(io::Error::other("the turn is being stopped"));
+        }
+        let Some(native) = self.slot.native_turn().map(str::to_owned) else {
+            return Err(io::Error::other("the Codex turn has not started"));
+        };
+        if id.is_empty() || text.trim().is_empty() {
+            return Err(io::Error::other("steered words need an id and a text"));
+        }
+        self.rpc(
+            "turn/steer",
+            json!({
+                "threadId": self.thread,
+                "expectedTurnId": native,
+                "clientUserMessageId": id,
+                "input": [{"type": "text", "text": text}],
+            }),
+        )?;
+        self.slot.steered(id);
+        Ok(())
+    }
+
+    /// Before a turn's end is written: whether Codex took in steered words it did not say it
+    /// read. Codex 0.167.1 says each at once, and drops what an interrupt caught before it
+    /// was read (23 Nov 2026); asking keeps a message from being lost or run twice should a
+    /// later Codex differ. Returns what Codex said meanwhile, to be handled after the end.
+    fn check_reads(&mut self) -> Vec<(String, Value)> {
+        let unread = self.slot.unread();
+        let Some(native) = self.slot.native_turn().map(str::to_owned) else {
+            return Vec::new();
+        };
+        if unread.is_empty() {
+            return Vec::new();
+        }
+        let Ok(id) = self
+            .server
+            .request("thread/turns/list", json!({"threadId": self.thread}))
+        else {
+            return Vec::new();
+        };
+        let outer = std::mem::take(&mut self.early);
+        let result = self.response(id, Some(id));
+        let later = std::mem::replace(&mut self.early, outer);
+        let Ok(result) = result else {
+            return later;
+        };
+        let turns = result["data"].as_array().cloned().unwrap_or_default();
+        let read: Vec<String> = turns
+            .iter()
+            .filter(|turn| turn["id"] == native.as_str())
+            .flat_map(|turn| turn["items"].as_array().cloned().unwrap_or_default())
+            .filter(|item| item["type"] == "userMessage")
+            .filter_map(|item| item["clientId"].as_str().map(str::to_owned))
+            .filter(|id| unread.contains(id))
+            .collect();
+        let now = super::now_ms();
+        for id in read {
+            if let Err(error) = self.slot.receipt(&id, now) {
+                eprintln!("clarp-shim: Codex lane: a reading was not kept: {error}");
+            }
+        }
+        later
+    }
+
     fn clear_slot(&mut self) -> io::Result<()> {
+        self.idle_since = Instant::now();
+        self.stop_deadline = None;
         self.slot.cancel(super::now_ms())?;
         self.hint();
         self.followers.clear();
@@ -631,10 +936,21 @@ impl Lane {
             self.show();
             return Ok(());
         }
+        let later = if method == "turn/completed"
+            && self.slot.native_turn().is_some()
+            && self.slot.native_turn() == params["turn"]["id"].as_str()
+        {
+            self.check_reads()
+        } else {
+            Vec::new()
+        };
         if self.slot.notification(method, params, now)? {
             self.clear_slot()?;
         } else {
             self.hint();
+        }
+        for (method, params) in later {
+            self.notice(&method, &params, None)?;
         }
         Ok(())
     }

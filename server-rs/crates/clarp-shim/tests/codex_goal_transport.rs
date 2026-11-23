@@ -44,6 +44,8 @@ printf '%s\n' \
   '{"method":"turn/started","params":{"threadId":"thread","turn":{"id":"ours"}}}' \
   '{"id":2,"result":{"goal":{"status":"active"}}}' \
   '{"method":"item/agentMessage/delta","params":{"threadId":"thread","turnId":"ours","itemId":"item","delta":"working"}}' \
+  '{"method":"item/started","params":{"threadId":"thread","turnId":"ours","item":{"id":"said","type":"userMessage","clientId":"steer-1","content":[]}}}' \
+  '{"method":"item/completed","params":{"threadId":"thread","turnId":"ours","item":{"id":"said","type":"userMessage","clientId":"steer-1","content":[]}}}' \
   '{"method":"item/completed","params":{"threadId":"thread","turnId":"other","item":{"id":"wrong","type":"agentMessage","text":"other turn"}}}' \
   '{"method":"item/completed","params":{"threadId":"thread","turnId":"ours","item":{"id":"item","type":"agentMessage","text":"done"}}}' \
   '{"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"ours","status":"completed"}}}'
@@ -113,8 +115,11 @@ printf '%s\n' \
     assert_eq!(
         output,
         vec![
+            json!({"type":"thread.started","thread_id":"thread"}),
             json!({"type":"turn.started"}),
-            json!({"type":"item.updated","item":{"type":"agent_message","id":"item","text":"working"}}),
+            json!({"type":"steer.open"}),
+            // A delta is not kept; the user's words are a receipt, once, and no item.
+            json!({"type":"steer.read","id":"steer-1"}),
             json!({"type":"item.completed","item":{"type":"agent_message","id":"item","text":"done"}}),
             json!({"type":"turn.completed","usage":null}),
         ]

@@ -59,6 +59,13 @@ pub enum Request {
     },
     /// Let a held tool go on. A tool that is not held is left as it is.
     Release,
+    /// Give the running turn more of the user's words, under the id that tells when it read
+    /// them. Only a Codex lane takes this: success acknowledges that Codex accepted the input,
+    /// and the spool says when it was read.
+    Steer {
+        id: String,
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

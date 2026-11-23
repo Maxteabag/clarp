@@ -1173,6 +1173,20 @@ fn host_in(config: &str) -> Option<(String, String)> {
 
 /// Find the first configuration that names this Rust Host. A tool forwarded from the
 /// Python Host may inherit settings that point to the Python installation.
+/// The token in a lane's turn file: one line, a few hundred bytes at most. Anything else is no
+/// token.
+fn turn_from_file(path: &std::path::Path) -> Option<String> {
+    use std::io::Read as _;
+    let mut text = String::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(4096)
+        .read_to_string(&mut text)
+        .ok()?;
+    let token = text.trim();
+    (!token.is_empty() && !token.contains(char::is_whitespace)).then(|| token.to_string())
+}
+
 fn installed_host(env: impl Fn(&'static str) -> Option<OsString>) -> Option<(String, String)> {
     let named = |variable| env(variable).filter(|value| !value.is_empty());
     let read = |path: PathBuf| host_in(&std::fs::read_to_string(path).ok()?);
@@ -1233,10 +1247,19 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     };
     let token = token.as_str();
     // What the Host may need to know of where the tool was called. Never a token.
-    let env: std::collections::BTreeMap<String, String> = std::env::vars()
+    let mut env: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(key, _)| key.starts_with("CLARP_") || key.starts_with("CLAUDE_PWA_"))
         .filter(|(key, _)| !key.ends_with("_TOKEN"))
         .collect();
+    // A turn of a Codex lane is told who it is in a file its lane rewrites at each turn: its
+    // app-server's environment cannot change between turns (issue 742).
+    if !env.contains_key(crate::turn_identity::TURN_ENV)
+        && let Some(token) = std::env::var(crate::codex_goal_lane::TURN_FILE_ENV)
+            .ok()
+            .and_then(|path| turn_from_file(std::path::Path::new(&path)))
+    {
+        env.insert(crate::turn_identity::TURN_ENV.to_string(), token);
+    }
     let cwd = std::env::current_dir()
         .map(|dir| dir.display().to_string())
         .unwrap_or_default();

@@ -301,16 +301,17 @@ change for the release owner, not this change.
 
 ## 5. Rollout and rollback
 
-The lane sits behind a Host setting, `codex_chat_lane`, with values `off` and `on`. Decision 1
-is its default.
+The lane sits behind a Host setting: `codex_chat_lane = true` or `false`, a top-level key of
+the Rust Host's `config.toml`, read at each launch. It defaults to false.
 
-- **Off.** Codex chat turns run on exec, as today. A goal still gets its lane. An idle chat
-  lane that is still alive is retired before the next exec turn, through the existing
-  `after_retire` path.
-- **On.** Every Codex agent's chat turns run on its lane.
-- **Rollback.** Set it to `off`. Lanes retire as they go idle, and the next turn runs exec on
-  the same thread: the lane and exec share Codex's thread and rollout, so the conversation
-  continues. No data migrates either way. A running lane turn is never cut by the switch.
+- **False.** Codex chat turns run on exec, as today. A goal still gets its lane. A lane that is
+  still alive is retired before the agent's next exec turn starts (`Lane::retire` on the turn's
+  launch thread).
+- **True.** Every Codex agent's chat turns run on its lane. A call's opening turn keeps exec.
+- **Rollback.** Set it to false. Lanes leave as their agents' next turns start, or when idle,
+  and the next turn runs exec on the same thread: the lane and exec share Codex's thread and
+  rollout, so the conversation continues. No data migrates either way. A running lane turn is
+  never cut by the switch.
 
 ## 6. What it should move
 
@@ -356,20 +357,42 @@ measures each backend on a disposable Host. This change should move these Codex 
 Rust builds go through `server-rs/tools/build`, one batch per crate (D13). Tests run once at
 the end.
 
-## Decisions for the lead
+## Step 0: what Codex 0.167.1 does (23 Nov 2026)
 
-1. **Rollout default.** `codex_chat_lane` lands `off`. It is turned `on` on the Rust Host after
-   the before/after harness run on a disposable Host (recommended). The alternative is to land
-   it `on` for every Codex agent.
-2. **Idle policy.** A lane retires itself after **15 min** without a turn, and the Host keeps at
-   most **8** live lanes, retiring the least recently used idle one (recommended). This is
-   about 1.2 GB at the cap. The alternative is longer life and more memory, or no cap.
-3. **The turn token inside a lane.** A persistent app-server cannot carry each turn's
-   `CLARP_PROVIDER_TURN` in its environment. Today's goal lane removes the token, so Clarp tools
-   inside lane turns lose the signed turn identity. The options are:
-   - (a) *Recommended.* The lane's environment names a per-agent token file
-     (`CLARP_PROVIDER_TURN_FILE`). The lane rewrites it, mode 0600, when it binds each claim,
-     and Clarp's tools read it when the variable is absent. A worker left behind by an earlier
-     turn then presents the agent's newest turn, which is the same agent.
-   - (b) A new token version that names the agent and the lane instance.
-   - (c) Accept the loss, as the goal lane does now.
+Run against a local stand-in Responses endpoint, with an empty `CODEX_HOME` and no
+account:
+
+- **The read.** `turn/steer` during a model request: Codex answers `{turnId}` and at once
+  says a `userMessage` item whose `clientId` is the `clientUserMessageId` sent. It abandons the
+  request in flight and asks again with the steered words in its input. The echo is the
+  reading, as designed.
+- **Interrupted before the read.** `turn/steer` accepted, `turn/interrupt` right after: the turn
+  ends `interrupted`, no `userMessage` with that id is said, and the next turn's request does
+  not carry the words. They are dropped, never run twice. `thread/turns/list` returns the turn's
+  items with their `clientId`s, and the lane asks it before a turn's end when an accepted id
+  has no reading. A completed turn did not leave accepted words unread in any run.
+- **Refusals.** Error -32600 has two texts: `no active turn to steer` after the turn ended, and
+  ``expected active turn id `A` but found `B` `` for a stale id.
+- **The first turn of a thread.** `turn/started` came 0.5 to 1 s after `turn/start`'s reply.
+  Later turns started at once.
+
+## Build notes
+
+- Two defects of the goal lane's spool were fixed with it. A `userMessage` item was stored as a
+  tool call named `userMessage`. And each `item/agentMessage/delta` rewrote the whole reply so
+  far into the spool, so the spool grew with the square of the reply.
+- Settings are top-level keys of the Rust Host's own `config.toml`, read at each launch, as
+  `conversation_forks` and `experience_watch` are read. The fleet's settings need a dot in their
+  key and a route to write them, and routes are frozen.
+- An opening turn (a call's) keeps its own gated exec launch.
+
+## Decisions (the lead, 23 Nov 2026)
+
+1. `codex_chat_lane` lands off. It is turned on for both Rust Hosts after the harness's before
+   and after runs on a disposable Host.
+2. `codex_lane_idle_minutes = 15`, `codex_lane_most = 8`. Both are settings. Idle memory is to be
+   measured on a real lane with the owner's Codex configuration: it starts an MCP server that a
+   lane keeps alive between turns.
+3. The turn token is (a): `CLARP_PROVIDER_TURN_FILE`, per agent in its run folder, mode 0600,
+   written whole by rename at each claim. It is set only in a lane's environment and read only
+   where `CLARP_PROVIDER_TURN` is absent.

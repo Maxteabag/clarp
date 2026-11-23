@@ -152,7 +152,8 @@ read -r end || :
         ask(
             &socket,
             &Request::Reserve {
-                claim: claim.clone()
+                claim: claim.clone(),
+                token: None,
             }
         )["ok"],
         true
@@ -198,6 +199,7 @@ read -r end || :
             &socket,
             &Request::Reserve {
                 claim: claim.clone(),
+                token: None,
             },
         );
         assert_eq!(answer["ok"], true, "{answer}");

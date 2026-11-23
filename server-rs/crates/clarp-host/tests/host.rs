@@ -39,6 +39,8 @@ mod bounded_close;
 mod cartesia_language;
 #[path = "host/chat_view.rs"]
 mod chat_view;
+#[path = "host/codex_chat_lane.rs"]
+mod codex_chat_lane;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
 #[path = "host/contacts.rs"]

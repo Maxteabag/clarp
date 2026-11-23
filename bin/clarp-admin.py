@@ -168,6 +168,24 @@ RETRYABLE_HTTP = {502, 503, 504}
 RETRY_DELAY_MAX = 16.0
 
 
+def _provider_turn() -> str:
+    """The Host-issued identity of the running turn. A Codex lane's turn finds it in the
+    file its lane rewrites at each turn (CLARP_PROVIDER_TURN_FILE), read only where the
+    variable itself is not set."""
+    token = os.environ.get("CLARP_PROVIDER_TURN", "")
+    if token:
+        return token
+    path = os.environ.get("CLARP_PROVIDER_TURN_FILE", "")
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read(4096).strip()
+    except OSError:
+        return ""
+    return text if text and not any(c.isspace() for c in text) else ""
+
+
 def api_request(method: str, path: str, body=None, *, retries: int = 0,
                 retry_delay: float = 1.0, sleep=time.sleep, timeout: float = 15):
     base, token = server_connection()
@@ -180,8 +198,9 @@ def api_request(method: str, path: str, body=None, *, retries: int = 0,
         if token: request.add_header("Authorization", f"Bearer {token}")
         # The Host-issued identity of the turn running this command, so the
         # Host can tell which agent is acting (lib.turn_identity).
-        if os.environ.get("CLARP_PROVIDER_TURN"):
-            request.add_header("X-Clarp-Turn", os.environ["CLARP_PROVIDER_TURN"])
+        turn = _provider_turn()
+        if turn:
+            request.add_header("X-Clarp-Turn", turn)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read()

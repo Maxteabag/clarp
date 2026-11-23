@@ -1,4 +1,5 @@
-//! The actor's view of the extra user inputs of one Claude process.
+//! The actor's view of the extra user inputs of one running turn: a Claude process's input, or
+//! the steered words of a Codex lane's turn.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -13,8 +14,8 @@ use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
 
 use super::{
-    Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, conversation, message_at,
-    written,
+    Action, Actor, ActorError, Facts, JoinedRead, Outputs, QueueState, Steering, conversation,
+    message_at, written,
 };
 
 #[derive(Default)]
@@ -31,6 +32,10 @@ pub(super) struct State {
     crossed: bool,
     pub(super) joined_speech: bool,
     pub(super) mixed: bool,
+    /// The turn is Codex's: what it can take is told by its lane's lines, not a process's.
+    codex: bool,
+    /// A Codex lane runs the turn and takes steered words until the turn ends.
+    lane_open: bool,
 }
 
 pub(super) struct Sharing {
@@ -56,9 +61,10 @@ impl Separate {
 }
 
 impl State {
-    pub(super) fn for_prompt(primary_uuid: Option<String>) -> Self {
+    pub(super) fn for_prompt(backend: &str, primary_uuid: Option<String>) -> Self {
         Self {
             primary_uuid,
+            codex: backend == "codex",
             ..Self::default()
         }
     }
@@ -112,6 +118,20 @@ impl State {
                     group: *group,
                     projects: projects.clone(),
                 });
+            }
+            // A lane says it takes steered words, which of them Codex read, and when the turn
+            // ended. An exec turn prints none of the first two.
+            Line::Out(line) if self.codex => {
+                let event: Value = serde_json::from_str(line).ok()?;
+                match event["type"].as_str() {
+                    Some("steer.open") => self.lane_open = true,
+                    Some("steer.read") => return Some(event),
+                    Some("turn.completed" | "turn.failed") => {
+                        self.lane_open = false;
+                        return Some(event);
+                    }
+                    _ => {}
+                }
             }
             Line::Out(line) if self.primary_uuid.is_some() || self.owner.is_some() => {
                 let event = serde_json::from_str(line).ok()?;
@@ -456,7 +476,8 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        if self.backend.id() != "claude"
+        let codex = self.backend.id() == "codex";
+        if !(codex || self.backend.id() == "claude")
             || !live.steering.stream.can_join()
             || live.steering.input_skipped
             || live.steering.prompt_uuid() == Some(uuid.as_str())
@@ -466,11 +487,24 @@ impl Actor {
         {
             return Ok(None);
         }
-        let Some(owner) = live.steering.owner.clone() else {
-            return Ok(None);
-        };
-        let Some(session) = self.recorder.agent().backend_session() else {
-            return Ok(None);
+        // Claude: the process that reads it, and where it says it did, for a restart. Codex:
+        // a lane's turn that said it takes steered words; its reading is in the spool alone.
+        let recovery = if codex {
+            if !live.steering.lane_open {
+                return Ok(None);
+            }
+            None
+        } else {
+            let Some(owner) = live.steering.owner.clone() else {
+                return Ok(None);
+            };
+            let Some(session) = self.recorder.agent().backend_session() else {
+                return Ok(None);
+            };
+            Some(Recovery {
+                owner,
+                session: session.to_owned(),
+            })
         };
         // The reference steers with team instructions and the inbox only. Its coordination
         // reminder belongs to a new attempt's protocol.
@@ -489,15 +523,20 @@ impl Actor {
         let prompt = brief
             .as_ref()
             .map_or_else(|| text.to_owned(), |brief| brief.prompt(text));
-        let mut input = takeover::claude_user_line(&uuid, &[&prompt]).to_string();
-        input.push('\n');
+        let input = if codex {
+            Steering::Words {
+                id: uuid.clone(),
+                text: prompt,
+            }
+        } else {
+            let mut line = takeover::claude_user_line(&uuid, &[&prompt]).to_string();
+            line.push('\n');
+            Steering::Stdin(line)
+        };
         let join = Join {
             into: live.turn,
             uuid,
-            recovery: Some(Recovery {
-                owner,
-                session: session.to_owned(),
-            }),
+            recovery,
         };
         let socket = self.profile.socket_path_of(live.turn, live.attempt);
         let mut batch = self.recorder.batch();

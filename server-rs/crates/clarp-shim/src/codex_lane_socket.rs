@@ -44,8 +44,11 @@ impl Socket {
                 Ok(TurnRequest::Follow) => {
                     let _ = input.send(Input::Follow(attempt, stream));
                 }
-                Ok(TurnRequest::Stop { .. }) => {
-                    let _ = input.send(Input::Stop(attempt, stream));
+                Ok(TurnRequest::Stop { grace_ms }) => {
+                    let _ = input.send(Input::Stop(attempt, grace_ms, stream));
+                }
+                Ok(TurnRequest::Steer { id, text }) => {
+                    let _ = input.send(Input::Steer(attempt, id, text, stream));
                 }
                 _ => {
                     let _ = write(&mut stream, &Reply::failed("Unsupported lane turn request"));

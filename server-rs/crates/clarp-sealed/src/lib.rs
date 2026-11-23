@@ -182,6 +182,7 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLAUDE_PWA_SESSION", "caller"),
     ("CLAUDE_CODE_SESSION_ID", "caller"),
     ("CLARP_PROVIDER_TURN", "caller"),
+    ("CLARP_PROVIDER_TURN_FILE", "caller"),
     ("CLARP_BACKGROUND_ORIGIN", "caller"),
     ("CLARP_BACKGROUND_WORKER_PID", "caller"),
     ("CLARP_RUST_MANAGED_TURN", "caller"),

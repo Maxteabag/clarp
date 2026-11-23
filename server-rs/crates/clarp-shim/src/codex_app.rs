@@ -5,6 +5,7 @@
 //! before answering the request that prompted it.
 
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 
@@ -39,9 +40,12 @@ impl AppServer {
     /// The caller configures the command's cwd, environment and stderr as
     /// it would for the thread's ordinary Codex launcher.
     pub fn spawn(command: &mut Command) -> io::Result<(Self, Receiver<io::Result<Frame>>)> {
+        // A group of its own: what Codex started for a turn can be ended with it when it does
+        // not answer a Stop, and nothing of the supervisor's goes with it.
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .process_group(0)
             .spawn()?;
         let (Some(input), Some(output)) = (child.stdin.take(), child.stdout.take()) else {
             let _ = child.kill();
@@ -78,6 +82,18 @@ impl AppServer {
 
     pub fn pid(&self) -> u32 {
         self.child.id()
+    }
+
+    /// End Codex and every process of its group where they stand.
+    pub fn kill_group(&mut self) {
+        if let Ok(pid) = i32::try_from(self.child.id()) {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 
     pub fn initialize(&mut self) -> io::Result<u64> {

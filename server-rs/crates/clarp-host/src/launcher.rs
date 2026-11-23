@@ -520,10 +520,14 @@ impl Launches {
 }
 
 /// Try once. After an ambiguous socket outcome the actor still waits for stdout evidence.
-pub async fn steer(socket: &Path, input: String) {
+pub async fn steer(socket: &Path, input: clarp_actor::Steering) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
-    let Ok(line) = serde_json::to_string(&Request::Stdin { data: input }) else {
+    let request = match input {
+        clarp_actor::Steering::Stdin(data) => Request::Stdin { data },
+        clarp_actor::Steering::Words { id, text } => Request::Steer { id, text },
+    };
+    let Ok(line) = serde_json::to_string(&request) else {
         return;
     };
     let attempt = async {
