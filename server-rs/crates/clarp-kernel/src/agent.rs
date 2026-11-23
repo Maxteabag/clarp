@@ -46,7 +46,9 @@ fn preempted(by: &str) -> bool {
 }
 
 /// Whether a turn that ended so gives back the user's messages it took into its prompt, when
-/// it had not begun to answer them: the user did not give up on them. Anyone's Stop but the
+/// its tool had done nothing for them yet (no words of an answer, no tool: what a retry asks
+/// of a turn, `nothing_done`): the user did not give up on them. A turn that had begun its work
+/// ends them with it, whoever stopped it, so that nothing it did (a send, a commit) is done twice. Anyone's Stop but the
 /// user's own, a newer message that took the turn's place, and a process lost under it
 /// (Maximus's ruling of 23 Nov 2026: nothing the user wrote ends unanswered because someone
 /// else stopped the turn). The user's own Stop ends them with the turn, as it ends a message
@@ -427,8 +429,9 @@ pub struct Agent {
     live_takeover: Option<crate::takeover::Start>,
     /// Whether the live turn started with an existing provider session to continue.
     live_resumed_session: bool,
-    /// The live turn's tool has begun to write its answer, in any attempt of it.
-    live_responded: bool,
+    /// The live turn's tool has begun its work, in any attempt of it: it wrote words of its
+    /// answer or used a tool. Such a turn is not given again from nothing.
+    live_worked: bool,
     selected_takeover: Option<crate::takeover::Selection>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
@@ -522,7 +525,7 @@ impl Default for Agent {
             handoff_launch_failures: 0,
             live_takeover: None,
             live_resumed_session: false,
-            live_responded: false,
+            live_worked: false,
             selected_takeover: None,
             unheld: BTreeSet::new(),
             stop_released: BTreeSet::new(),
@@ -1912,7 +1915,7 @@ impl Agent {
                     }
                     self.joins.clear();
                     let gathered = self.gathered.remove(&turn).unwrap_or_default();
-                    if !self.live_responded && gives_back(&ended.outcome) {
+                    if !self.live_worked && gives_back(&ended.outcome) {
                         self.give_back(gathered);
                     } else {
                         // What the turn took into its prompt is over with it, also where no
@@ -1921,7 +1924,7 @@ impl Agent {
                             self.deliveries.over(gathered.turn.0);
                         }
                     }
-                    self.live_responded = false;
+                    self.live_worked = false;
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -1945,11 +1948,11 @@ impl Agent {
                     if matches!(
                         change,
                         TurnEvent::Moved {
-                            activity: Activity::Responding,
+                            activity: Activity::Responding | Activity::Tool { .. },
                             ..
                         }
                     ) {
-                        self.live_responded = true;
+                        self.live_worked = true;
                     }
                     if let Turn::Parked(parked) = &next {
                         if self.live_from_queue
@@ -2003,7 +2006,7 @@ impl Agent {
             next => {
                 if let TurnEvent::Started { at_ms, takeover } = change {
                     self.live_resumed_session = self.backend_session.is_some();
-                    self.live_responded = false;
+                    self.live_worked = false;
                     self.live_takeover.clone_from(takeover);
                     if let Some(start) = takeover {
                         self.bind_session(Some(&start.session));
@@ -4202,5 +4205,35 @@ mod tests {
             .unwrap();
         ended_after_a_stop(&mut answered, Some(an_agent()));
         assert!(answered.waiting().is_empty());
+
+        // So does one that only used a tool for them, in an attempt before this one: what it
+        // did (a send, a commit) is not done a second time from nothing.
+        let mut worked = two_gathered();
+        worked
+            .send(Command::TurnMoved {
+                turn: TurnId(2),
+                activity: Activity::Tool {
+                    name: "Bash".into(),
+                },
+            })
+            .unwrap();
+        worked.send(dropped(2)).unwrap();
+        worked
+            .send(Command::TurnRetried { turn: TurnId(2) })
+            .unwrap();
+        worked
+            .send(Command::TurnStarted { turn: TurnId(2) })
+            .unwrap();
+        worked.send(Command::Stop { by: an_agent() }).unwrap();
+        worked
+            .send(Command::TurnEnded {
+                turn: TurnId(2),
+                outcome: RunOutcome::Interrupted {
+                    reason: "the tool was ended by signal 15".into(),
+                },
+            })
+            .unwrap();
+        assert!(worked.waiting().is_empty(), "nothing given back");
+        assert!(gathered(&worked, 2).is_empty());
     }
 }
