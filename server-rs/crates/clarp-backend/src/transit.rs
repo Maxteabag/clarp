@@ -142,12 +142,17 @@ pub trait Writer: Send + Sync {
 }
 
 /// The writer of a tool, for a tool a conversation can be written into natively.
+///
+/// OpenCode has none for now: a session handed to its import is taken, but OpenCode's own
+/// free models then refuse every turn on it ("Free usage limit reached") while they answer a
+/// session OpenCode began itself (issue 720, measured with 1.18.33). Its next turn begins a
+/// session of its own with the Host's record at its head, as Antigravity's does.
+/// [`OpenCodeWriter`] stays, tested against a genuine export, for when that is understood.
 pub fn writer(backend: &str) -> Option<&'static dyn Writer> {
     match backend {
         "claude" => Some(&ClaudeWriter),
         "codex" => Some(&CodexWriter),
         "grok" => Some(&GrokWriter),
-        "opencode" => Some(&OpenCodeWriter),
         _ => None,
     }
 }
