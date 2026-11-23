@@ -49,11 +49,17 @@ user's messages, the agent's posts, each turn's final reply and cards; the
 rows the Host tags `session` (commentary, tools, turns between agents) leave.
 A working agent is one Running box (the live step and its clock; opened, its
 steps), with the agent's own turn as a quiet second line while a conversation
-fork answers (`main_turn`, contract 153). A finished turn's reply offers Show
-work (its hover button, or a right-click), which opens the turn's left-out rows
-in place. The chat's ⋯ menu picks its view (kept on this device and written to
-the Host's agent setting); Settings › Clean chat puts every chat without its
-own choice in Conversation. `--check conversation-view` exercises it.
+fork answers (`main_turn`, contract 153). A turn another agent started reads
+"Working with <Name>" with only the kind of step under it, and does not open. A
+stalled turn (#249) reads "Seems stuck · no progress for N min" in the box,
+with Stop inside it, in place of the pane's own stalled line. A finished turn's
+reply offers Show work (its hover button, a right-click, W for the message the
+keyboard is on or the latest turn, or vim's `zo`/`zc`/`za`), which opens the
+turn's left-out rows in place; W on the Running box opens its steps. The chat's
+⋯ menu and its profile pick its view (kept on this device and written to the
+Host's agent setting; C in the chat shows the other one); Settings › Clean chat
+puts every chat without its own choice in Conversation. `--check
+conversation-view` exercises it.
 
 ## Build and run
 

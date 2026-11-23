@@ -277,12 +277,20 @@ fn fold(app: &App, window: &AppWindow, open: Option<bool>) {
     let rows: Vec<crate::MessageRow> = messages.iter().collect();
     let ids: Vec<(String, String, String)> = rows.iter().map(|r| (r.id.to_string(), r.author.to_string(), String::new())).collect();
     let Some(at) = anchor(app, &ids) else { return };
-    let foldable = |r: &crate::MessageRow| !r.activity_label.is_empty();
+    // A finished turn's Show work folds as tool activity does
+    // (Conversation view, #702).
+    let foldable = |r: &crate::MessageRow| !r.activity_label.is_empty() || !r.work_key.is_empty();
     let Some(index) = (at..rows.len()).find(|i| foldable(&rows[*i])).or_else(|| (0..at).rev().find(|i| foldable(&rows[*i]))) else {
         return say("No tool activity to fold");
     };
     let row = &rows[index];
     STATE.with(|s| s.borrow_mut().cursor = row.id.to_string());
+    if !row.work_key.is_empty() {
+        if open.is_none_or(|open| open != row.work_open) {
+            crate::artifacts_view::toggle_live(app, &row.work_key);
+        }
+        return;
+    }
     if open.is_none_or(|open| open != row.expanded) {
         window.invoke_toggle_activity(app.active_id(), row.id.clone(), row.group_id.clone());
     }

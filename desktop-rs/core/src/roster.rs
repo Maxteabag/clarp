@@ -424,10 +424,18 @@ impl Roster {
         agent.busy = is_busy_state(&agent.latest_state);
         // A turn that starts between snapshots counts from its first busy
         // state; the next snapshot brings the Host's own start.
+        // A working state carries its turn's audience and, for a turn
+        // another agent started, who (Host contract 124): "Working with".
+        if let Some(audience) = event.get("audience").and_then(Value::as_str).filter(|_| agent.busy) {
+            agent.working_audience = audience.trim().to_ascii_lowercase();
+            agent.working_with = json::string(event, "sender_name").trim().to_owned();
+        }
         if !agent.busy {
             agent.turn_started_at = None;
             agent.stalled_since = None;
             agent.stalled_action = None;
+            agent.working_audience.clear();
+            agent.working_with.clear();
         } else if !was_busy && agent.turn_started_at.is_none() && turn_clock && agent.latest_state_timestamp > 0 {
             agent.turn_started_at = Some(agent.latest_state_timestamp);
         }

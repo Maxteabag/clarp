@@ -71,6 +71,9 @@ export struct LiveRow {
     // for none) and the label letter by letter for the glow.
     shimmer: string,
     letters: [string],
+    // A stalled turn's Running box (#702, #249): the key that stops the
+    // agent, drawn as Stop inside the box ("" for none).
+    stop: string,
 }
 
 // The Host's resolved-decision prompt, shown as what the user decided
@@ -341,14 +344,14 @@ component LiveItem inherits Rectangle {
     in property <length> view-bottom;
     in property <bool> measuring;
     property <bool> selected: root.live.expandable && ArtifactBridge.cursor == root.live.key;
-    property <bool> running: root.live.status == "running" || root.live.status == "pending";
+    property <bool> running: root.live.status == "running" || root.live.status == "pending" || root.live.status == "stalled";
     // Only while it works, is drawn (not measured), the window shows and
     // motion is not reduced: nothing else asks for frames. A row scrolled
     // away is not drawn at all (the list keeps only those on screen).
     property <bool> shimmering: root.live.shimmer != "" && root.live.letters.length > 0 && !root.measuring
         && !ChatLook.reduced-motion && ChatLook.window-shown;
     property <color> mark: root.live.status == "failed" ? Palette.danger
-        : root.live.status == "interrupted" ? Palette.warning
+        : root.live.status == "interrupted" || root.live.status == "stalled" ? Palette.warning
         : root.running ? Palette.accent : Palette.success;
     border-radius: 3px;
     border-width: root.selected ? 1px : 0px;
@@ -389,7 +392,8 @@ component LiveItem inherits Rectangle {
             // explorer; only the colours change, so the chat never moves.
             if !root.shimmering: Text {
                 text: root.live.title;
-                color: root.live.shimmer == "accent" ? Palette.accent
+                color: root.live.status == "stalled" ? Palette.warning
+                    : root.live.shimmer == "accent" ? Palette.accent
                     : root.live.shimmer == "muted" || root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted
                     : Palette.chrome-text;
                 font-size: ChatText.label;
@@ -432,6 +436,16 @@ component LiveItem inherits Rectangle {
                 font-size: ChatText.detail;
                 font-family: Palette.code-family;
                 vertical-alignment: center;
+            }
+            // A stalled turn's Stop, inside its Running box: the same stop
+            // as the composer's key and the chat's stalled line.
+            if root.live.stop != "": KeyHint {
+                chat: true;
+                key: root.live.stop;
+                label: "Stop";
+                emphasised: true;
+                accessible-id: root.measuring ? "" : "box-stop:" + root.live.key;
+                clicked => { ArtifactBridge.open("live:stop:" + root.live.key); }
             }
             if root.live.expandable: Text {
                 text: root.live.expanded ? "▾" : "▸";

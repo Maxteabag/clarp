@@ -80,6 +80,9 @@ pub struct Entry {
     /// When the earliest of its items began (Host time): no row written
     /// before then goes below it.
     pub started_at_ms: Option<i64>,
+    /// The key that stops the agent, drawn as Stop inside the row (a
+    /// stalled turn's Running box, #702); empty for none.
+    pub stop: String,
 }
 
 #[derive(Debug, Clone, Default)]

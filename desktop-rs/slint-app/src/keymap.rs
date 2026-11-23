@@ -215,6 +215,12 @@ fn state(name: &str) -> Vec<Binding> {
             b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], "Balance panes", false, Always, false),
             // Slint's rich text cannot be selected: the chat as plain text.
             b("select-text", &["V"], "Select text", false, Agent, false),
+            // Conversation view (#702): W opens or folds the work of the
+            // message the keyboard is on (or the latest turn's), as a click
+            // on its wrench or a right-click does; C shows the chat the
+            // other way, as its own choice.
+            b("show-work", &["W"], "Show work", false, Agent, false),
+            b("chat-view", &["C"], "Conversation / Session", false, Agent, false),
         ],
         "sidebar" => vec![
             b("agent-next", &["J", "Down"], "Next", false, Rows, false),
@@ -1279,6 +1285,15 @@ mod tests {
         let none = Overrides::new();
         assert_eq!(action_for("pane", "V", &none, all()), Some("select-text"));
         assert_eq!(action_for("sidebar", "V", &none, all()), Some("toggle-compact"), "V in the explorer stays the compact view");
+    }
+
+    #[test]
+    fn w_shows_work_and_c_the_other_view_in_the_chat() {
+        let none = Overrides::new();
+        assert_eq!(action_for("pane", "W", &none, all()), Some("show-work"));
+        assert_eq!(action_for("pane", "C", &none, all()), Some("chat-view"));
+        assert_eq!(action_for("composer", "W", &none, all()), None, "never while typing");
+        assert_eq!(action_for("sidebar", "C", &none, all()), None, "nor in the explorer");
     }
 
     #[test]
