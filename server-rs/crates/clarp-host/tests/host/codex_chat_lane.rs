@@ -319,6 +319,8 @@ for line in sys.stdin:
         continue
     elif method == "thread/turns/list":
         result = {"data": []}
+    elif method == "thread/backgroundTerminals/clean":
+        note("cleaned", params["threadId"])
     else:
         raise SystemExit("unexpected " + method)
     emit({"id": request_id, "result": result})
@@ -457,6 +459,9 @@ fn a_stop_interrupts_the_lane_turn_at_once_and_the_next_message_runs_on_the_same
         "the held turn was interrupted"
     );
     assert_eq!(answers(&host, "stopper", "said-hold-stop"), 0);
+    wait_for("the stopped turn's commands to be ended", || {
+        noted(&place, "cleaned").lines().count() == 1
+    });
     assert!(
         lane_lives(&socket),
         "a Codex that ended its turn keeps its lane"
