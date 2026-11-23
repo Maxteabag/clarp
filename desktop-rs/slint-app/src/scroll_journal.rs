@@ -582,7 +582,9 @@ mod tests {
         let mut t = 0;
         let mut flash = |cam: &mut Dashcam, now: Instant| {
             let mut found = Vec::new();
-            for shot in [&end, &up, &end] {
+            // Away and back, then still at the end (or the way back up
+            // from the end would look like a flash too).
+            for shot in [&end, &up, &end, &end, &end, &end, &end] {
                 cam.shot("pane-1", shot.clone());
                 cam.event("pane-1", "live");
                 t += 16;
