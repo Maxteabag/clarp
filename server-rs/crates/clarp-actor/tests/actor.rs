@@ -2230,8 +2230,14 @@ impl Pool {
 }
 
 impl clarp_actor::Pooled for Pool {
-    fn failed(&self, turn: TurnId, plan: bool, _now_ms: i64) -> bool {
-        let said = format!("turn {} failed on its account, plan: {plan}", turn.0);
+    fn failed(&self, turn: TurnId, plan: bool, resets_at_ms: Option<i64>, _now_ms: i64) -> bool {
+        let said = match resets_at_ms {
+            None => format!("turn {} failed on its account, plan: {plan}", turn.0),
+            Some(at) => format!(
+                "turn {} failed on its account, plan: {plan}, resets at {at}",
+                turn.0
+            ),
+        };
         self.told.lock().unwrap().push(said);
         true
     }
@@ -2297,6 +2303,112 @@ fn a_turn_the_pool_holds_for_its_plan_waits_and_ends_with_what_the_provider_said
     // And the next message runs.
     world.send(&mut actor, "u-2", "and this", Admission::Queue);
     assert_eq!(world.took, vec![1, 2]);
+}
+
+/// A turn whose tool refuses it with the account's five-hour window spent, and says when the
+/// window begins anew: what happens to it on a Host that treats accounts this way. When it
+/// was refused, and when the account resets.
+fn out_of_usage(world: &mut World, actor: &mut Actor) -> (i64, i64) {
+    world.send(actor, "u-1", "go", Admission::Queue);
+    let resets = world.now_ms + 5 * 3_600_000;
+    let words = "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)";
+    world.says(
+        1,
+        &serde_json::json!({ "fail": words, "out_until_ms": resets }).to_string(),
+    );
+    world.exits(1, Some(1), None);
+    let refused_at = world.now_ms;
+    world.hint(actor);
+    (refused_at, resets)
+}
+
+#[test]
+fn a_turn_whose_account_resets_at_a_time_it_was_told_waits_until_then_where_it_may() {
+    use clarp_kernel::recovery::{self, Accounts};
+
+    // A Host that follows the login: the turn waits until a minute after the reset, and
+    // is taken up then by itself, however long that is.
+    let mut world = World::new("out-until-follow");
+    world.profile.accounts = Accounts::Follow;
+    let mut actor = world.open();
+    let (_, resets) = out_of_usage(&mut world, &mut actor);
+    let taken_up = resets + recovery::RESET_MARGIN_MS;
+    assert_eq!(actor.retry_at(), Some(taken_up));
+    assert_eq!(actor.waits_until_reset(), Some(resets));
+    assert_eq!(actor.status().last, None);
+    assert_eq!(shown(&actor), vec![pair("u-1", "user: go")]);
+    let early = actor.retry_due(taken_up - 1).unwrap();
+    assert!(early.actions.is_empty(), "{:?}", early.actions);
+    let out = actor.retry_due(taken_up).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(1) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    world.says(1, r#"{"reply": "Done."}"#);
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        actor.status().last.map(|last| last.outcome),
+        Some(Outcome::Completed)
+    );
+    assert_eq!(world.took, vec![1, 1]);
+
+    // A Host that runs the selector: the pool is told when the account resets, and the
+    // turn's own wait lasts until then and the pool's margin.
+    let mut world = World::new("out-until-select");
+    world.profile.accounts = Accounts::Select;
+    let mut actor = world.open();
+    let pool = Arc::new(Pool::default());
+    actor.pooled(pool.clone());
+    let (refused_at, resets) = out_of_usage(&mut world, &mut actor);
+    assert_eq!(
+        pool.told(),
+        vec![format!(
+            "turn 1 failed on its account, plan: false, resets at {resets}"
+        )]
+    );
+    assert_eq!(actor.waits_until_reset(), Some(resets));
+    let until = actor.retry_at().expect("the turn waits");
+    assert_eq!(
+        until,
+        recovery::pool_wait_until(Some(resets), refused_at) + 300_000
+    );
+    assert!(until > resets);
+
+    // A Host that waits for no account: the turn ends at once, and the row under the
+    // message says when the account resets, with the tool's own words below.
+    let mut world = World::new("out-until-none");
+    let mut actor = world.open();
+    let (refused_at, resets) = out_of_usage(&mut world, &mut actor);
+    assert_eq!(actor.retry_at(), None);
+    let last = actor.status().last.expect("the turn is over");
+    assert!(
+        matches!(&last.outcome, Outcome::Failed { kind, .. } if kind == "usage_limit"),
+        "{:?}",
+        last.outcome
+    );
+    let row = actor
+        .tail(1_000)
+        .unwrap()
+        .entries
+        .iter()
+        .find_map(|version| match &version.entry {
+            Entry::Notice(notice) => Some(notice.text.clone()),
+            _ => None,
+        })
+        .expect("a row says why");
+    let resets = clarp_kernel::failures::Resets {
+        at_ms: resets,
+        said_at_ms: refused_at,
+    };
+    let sentence = clarp_kernel::failures::with_reset("Usage limit reached", Some(resets));
+    assert!(sentence.contains(" · resets "), "{sentence}");
+    assert_eq!(
+        row,
+        format!("{sentence}.\n\nYou've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)")
+    );
 }
 
 #[test]

@@ -14,7 +14,8 @@ clarp-speech.workspace = true
 http.workspace = true
 url.workspace = true
 hmac.workspace = true
-jiff.workspace = true
+# The Host's own zone, for the time a usage limit resets (`failures::with_reset`).
+jiff = { workspace = true, features = ["tz-system"] }
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

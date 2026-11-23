@@ -413,20 +413,42 @@ pub enum Wait {
     },
     /// An account that serves the turn: the attempt failed on its account (a limit that was
     /// reached, a sign-in that ran out). The turn is tried when the tool's login has changed,
-    /// and at `until_ms` at the latest, on whatever account is there then.
-    Account { until_ms: i64 },
+    /// and at `until_ms` at the latest, on whatever account is there then. `resets_at_ms`:
+    /// when the tool said the account it ran out on has usage again, where it said so. Absent
+    /// in a log written before it was kept.
+    Account {
+        until_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resets_at_ms: Option<i64>,
+    },
 }
 
 impl Wait {
+    /// A wait for an account whose reset nobody named.
+    pub fn account(until_ms: i64) -> Self {
+        Self::Account {
+            until_ms,
+            resets_at_ms: None,
+        }
+    }
+
     /// When the wait is over at the latest.
     pub fn until_ms(&self) -> i64 {
         match self {
-            Self::Retry { until_ms, .. } | Self::Account { until_ms } => *until_ms,
+            Self::Retry { until_ms, .. } | Self::Account { until_ms, .. } => *until_ms,
         }
     }
 
     pub fn is_for_an_account(&self) -> bool {
         matches!(self, Self::Account { .. })
+    }
+
+    /// When the account the turn waits on has usage again, where the tool said so.
+    pub fn resets_at_ms(&self) -> Option<i64> {
+        match self {
+            Self::Account { resets_at_ms, .. } => *resets_at_ms,
+            Self::Retry { .. } => None,
+        }
     }
 }
 

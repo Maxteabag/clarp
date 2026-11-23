@@ -375,6 +375,45 @@ pub struct Known {
     pub quota_confirmed: Option<bool>,
     /// The account was switched already, and the switch waits for the tool's other agents.
     pub switch_pending: bool,
+    /// When the account that ran out has usage again, where the tool said so.
+    pub resets: Option<Resets>,
+}
+
+/// When an account that ran out has usage again, and when that was said: what the time is
+/// told against. A time on the day it was said is told as a time of day, and one on another
+/// day with its day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resets {
+    pub at_ms: i64,
+    pub said_at_ms: i64,
+}
+
+/// The text, and after it when the account has usage again, in the Host's own time: "Usage
+/// limit reached · resets 18:27". The text alone where no reset is known.
+pub fn with_reset(text: &str, resets: Option<Resets>) -> String {
+    let zone = jiff::tz::TimeZone::system();
+    match resets.and_then(|resets| reset_time_in(resets, &zone)) {
+        Some(time) => format!("{text} · resets {time}"),
+        None => text.to_string(),
+    }
+}
+
+/// The time an account has usage again, in this zone: "18:27" on the day it was said,
+/// "Wed 18:27" within the week after, "30 Nov 18:27" beyond. `None` for a time that is no time.
+pub fn reset_time_in(resets: Resets, zone: &jiff::tz::TimeZone) -> Option<String> {
+    let zoned = |ms: i64| {
+        jiff::Timestamp::from_millisecond(ms)
+            .ok()
+            .map(|at| at.to_zoned(zone.clone()))
+    };
+    let (at, said) = (zoned(resets.at_ms)?, zoned(resets.said_at_ms)?);
+    let clock = at.strftime("%H:%M").to_string();
+    let ahead = said.date().until(at.date()).ok()?.get_days();
+    Some(match ahead {
+        0 => clock,
+        1..=6 => format!("{} {clock}", at.strftime("%a")),
+        _ => format!("{} {} {clock}", at.day(), at.strftime("%b")),
+    })
 }
 
 /// The sentence of a kind of failure whose words explain nothing by themselves.
@@ -417,6 +456,8 @@ pub fn told(kind: &str, said: &str, model: &str, known: Known) -> Told {
     };
     if kind == USAGE_LIMIT && known.quota_confirmed == Some(false) {
         message = QUOTA_UNCONFIRMED_MESSAGE.to_string();
+    } else if kind == USAGE_LIMIT && explained.is_empty() {
+        message = with_reset(&message, known.resets);
     }
     if known.switch_pending {
         message.push_str(
@@ -707,6 +748,7 @@ pub fn keeper_code(failure: &CliFailure) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -786,6 +828,70 @@ mod tests {
             USAGE_LIMIT
         );
         assert_eq!(classify_error("Claude usage limit reached"), USAGE_LIMIT);
+    }
+
+    #[test]
+    fn the_time_a_limit_resets_is_told_in_the_hosts_zone_with_its_day_when_not_today() {
+        let oslo = jiff::tz::TimeZone::get("Europe/Oslo").unwrap();
+        // 23 Nov 2026, 14:00 in Oslo (UTC+1), and 6:27 pm the same day.
+        let said = 1_795_438_800_000;
+        let at = 1_795_454_832_000;
+        let time_of = |at_ms, zone: &jiff::tz::TimeZone| {
+            reset_time_in(
+                Resets {
+                    at_ms,
+                    said_at_ms: said,
+                },
+                zone,
+            )
+        };
+        assert_eq!(time_of(at, &oslo).as_deref(), Some("18:27"));
+        assert_eq!(
+            time_of(at, &jiff::tz::TimeZone::UTC).as_deref(),
+            Some("17:27")
+        );
+        let day = 86_400_000;
+        assert_eq!(time_of(at + day, &oslo).as_deref(), Some("Tue 18:27"));
+        assert_eq!(time_of(at + 6 * day, &oslo).as_deref(), Some("Sun 18:27"));
+        assert_eq!(
+            time_of(at + 7 * day, &oslo).as_deref(),
+            Some("30 Nov 18:27")
+        );
+        assert_eq!(time_of(i64::MAX, &oslo), None);
+        // The row and the agent's state say it after the sentence, and the tool's words stay
+        // below it. Without a reset, as before.
+        let words = "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)";
+        let resets = Resets {
+            at_ms: at,
+            said_at_ms: said,
+        };
+        let known = Known {
+            resets: Some(resets),
+            ..Known::default()
+        };
+        let row = told_limit(words, known);
+        let time = reset_time_in(resets, &jiff::tz::TimeZone::system()).unwrap();
+        assert_eq!(row.message, format!("Usage limit reached · resets {time}"));
+        assert_eq!(
+            row.row,
+            format!("Usage limit reached · resets {time}.\n\n{words}")
+        );
+        assert_eq!(
+            row.summary,
+            format!("Usage limit reached · resets {time}. Your message is saved.")
+        );
+        assert_eq!(
+            told_limit(words, Known::default()).message,
+            "Usage limit reached"
+        );
+        // Only a usage limit is told a reset.
+        let other = told(TRANSIENT, "overloaded", "", known);
+        assert_eq!(other.message, sentence(TRANSIENT, ""));
+        assert_eq!(with_reset("Waiting", None), "Waiting");
+    }
+
+    fn told_limit(words: &str, known: Known) -> Told {
+        told(USAGE_LIMIT, words, "", known)
     }
 
     #[test]

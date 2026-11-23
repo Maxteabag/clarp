@@ -13,6 +13,7 @@
 //! | `{"done": "t1", "output": "...", "error": false}` | a tool call ends |
 //! | `{"activity": "thinking"}` | thinking, responding, waiting or compacting |
 //! | `{"fail": "why"}` | the turn fails, whatever the exit code |
+//! | `{"fail": "why", "out_until_ms": 1800000000000}` | and the account is out until then |
 
 use std::collections::BTreeMap;
 
@@ -88,6 +89,7 @@ pub struct ScriptedInterpreter {
     replies: u32,
     tools: BTreeMap<String, ToolCall>,
     failure: Option<String>,
+    out_until_ms: Option<i64>,
     stderr: ErrorTail,
     ended: bool,
 }
@@ -101,6 +103,7 @@ impl ScriptedInterpreter {
             replies: 0,
             tools: BTreeMap::new(),
             failure: None,
+            out_until_ms: None,
             stderr: ErrorTail::default(),
             ended: false,
         }
@@ -224,6 +227,7 @@ impl ScriptedInterpreter {
         }
         if let Some(why) = text("fail") {
             self.failure = Some(why.to_string());
+            self.out_until_ms = instruction.get("out_until_ms").and_then(Value::as_i64);
         }
     }
 }
@@ -236,6 +240,9 @@ impl Interpreter for ScriptedInterpreter {
             Entry::Shim(ShimEvent::Exited { code, signal }) if !self.ended => {
                 self.ended = true;
                 self.settle(out);
+                if let Some(at_ms) = self.out_until_ms.filter(|_| self.failure.is_some()) {
+                    out.push(Signal::OutUntil { at_ms });
+                }
                 let outcome = match (self.failure.take(), signal, code) {
                     (Some(reason), _, _) => RunOutcome::Failed { reason },
                     (None, Some(signal), _) => RunOutcome::Interrupted {

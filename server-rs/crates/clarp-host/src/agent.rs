@@ -2286,6 +2286,9 @@ impl Worker {
                 let model = actor.turn_model().unwrap_or_default();
                 pool.carried(since, std::slice::from_ref(&agent));
                 pool.starting(&agent, turn, &model);
+                if let Some(at) = actor.waits_until_reset() {
+                    pool.out_until(&agent, turn, at);
+                }
                 self.pooled = Some(turn);
             }
         }

@@ -93,6 +93,7 @@ fn a_user_is_told_of_a_failed_turn_as_the_python_host_tells_it() {
         let known = Known {
             quota_confirmed: vector["quota_confirmed"].as_bool(),
             switch_pending: vector["switch_pending"].as_bool().unwrap(),
+            ..Known::default()
         };
         let ours = told(
             vector["kind"].as_str().unwrap(),

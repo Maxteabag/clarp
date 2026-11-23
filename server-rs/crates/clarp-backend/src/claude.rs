@@ -21,7 +21,8 @@ use crate::{
     Backend, ErrorTail, Interpreter, Launch, LiveReply, SESSION_ENV, Signal, TurnSpec, shorten,
 };
 
-/// What a turn that ran into the provider's limit failed with.
+/// What a turn that ran into the provider's limit failed with, where the tool's own words do
+/// not say so: before them.
 pub const USAGE_LIMIT: &str = "Claude usage limit reached";
 
 /// The most of a tool's output that is kept with the conversation.
@@ -488,6 +489,8 @@ pub struct ClaudeInterpreter {
     /// The tool calls whose start was reported as an activity.
     announced: HashSet<String>,
     usage_limit: bool,
+    /// When the account has usage again, where the refusal said so.
+    resets_at_ms: Option<i64>,
     /// What Claude Code itself said went wrong, in the place where the agent would have spoken.
     api_error: Option<String>,
     result: Option<ResultFacts>,
@@ -502,6 +505,16 @@ pub struct ClaudeInterpreter {
 
 fn text_of(value: &Value) -> &str {
     value.as_str().unwrap_or("")
+}
+
+/// When the window a refusal names begins anew, in milliseconds: its `resetsAt`, or that of
+/// the window by its name, in seconds since 1970.
+fn resets_at(info: &Value, window: &str) -> Option<i64> {
+    let seconds = info["resetsAt"]
+        .as_f64()
+        .or_else(|| info["unifiedWindows"][window]["resetsAt"].as_f64())?;
+    let ms = (seconds * 1_000.0).round();
+    (ms.is_finite() && ms > 0.0 && ms < 1e15).then_some(ms as i64)
 }
 
 /// The text of a tool result, which is a string or a list of blocks.
@@ -559,6 +572,7 @@ impl ClaudeInterpreter {
             helpers: BTreeMap::new(),
             announced: HashSet::new(),
             usage_limit: false,
+            resets_at_ms: None,
             api_error: None,
             result: None,
             stderr: ErrorTail::default(),
@@ -792,10 +806,19 @@ impl ClaudeInterpreter {
                 // turn ends on it, and its end says so: nothing is put into the conversation
                 // at this moment. A refusal that names none is the provider's servers holding
                 // requests back for a moment, which no other account helps with: Claude Code
-                // tries again by itself, and where it gives up its own words say why.
+                // tries again by itself, and where it gives up its own words say why. Nor is
+                // an account out that goes on with usage beyond its window (overage): the tool
+                // goes on with it.
                 let window = text_of(&info["rateLimitType"]);
-                if matches!(status, "rejected" | "blocked") && !window.trim().is_empty() {
+                let overage = info["isUsingOverage"].as_bool() == Some(true)
+                    || matches!(
+                        text_of(&info["overageStatus"]),
+                        "allowed" | "allowed_warning"
+                    );
+                if matches!(status, "rejected" | "blocked") && !window.trim().is_empty() && !overage
+                {
                     self.usage_limit = true;
+                    self.resets_at_ms = resets_at(info, window);
                 }
                 // What it says of the account's windows with that is told on.
                 if info["unifiedWindows"].is_object() {
@@ -1136,10 +1159,29 @@ impl ClaudeInterpreter {
                 _ => detail,
             },
         };
-        let outcome = if self.usage_limit {
-            RunOutcome::Failed {
-                reason: USAGE_LIMIT.to_string(),
+        let completed = signal.is_none()
+            && code == Some(0)
+            && self.result.as_ref().is_some_and(|result| !result.is_error);
+        // A turn that completed did so, whatever was said of the account on the way.
+        let outcome = if self.usage_limit && !completed {
+            // In the tool's own words, which say which window and when; read as a usage
+            // limit, as the refusal said it is.
+            let said = api_error
+                .clone()
+                .or_else(|| self.result.as_ref().map(|result| result.text.clone()))
+                .map(|said| shorten(said.trim(), 600))
+                .unwrap_or_default();
+            let reason = if said.is_empty() {
+                USAGE_LIMIT.to_string()
+            } else if failures::classify_error(&said) == failures::USAGE_LIMIT {
+                said
+            } else {
+                format!("{USAGE_LIMIT}: {said}")
+            };
+            if let Some(at_ms) = self.resets_at_ms {
+                out.push(Signal::OutUntil { at_ms });
             }
+            RunOutcome::Failed { reason }
         } else if let Some(signal) = signal {
             RunOutcome::Interrupted {
                 reason: format!("claude was ended by signal {signal}"),
@@ -1873,6 +1915,152 @@ mod tests {
                 ),
                 other => panic!("the turn fails: {other:?}"),
             }
+        }
+    }
+
+    /// What Claude Code 2.1.321 streams when the account's five-hour window is spent: the
+    /// refusal with the window and when it begins anew, the tool's own words where a message
+    /// would be, and a result that says it failed.
+    fn out_of_usage(info: &str) -> Vec<String> {
+        let said = "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)";
+        vec![
+            INIT.to_string(),
+            format!(r#"{{"type":"rate_limit_event","rate_limit_info":{info}}}"#),
+            format!(
+                r#"{{"type":"assistant","error":"rate_limit","is_api_error_message":true,"api_error_status":429,"message":{{"id":"msg_out","model":"<synthetic>","role":"assistant","content":[{{"type":"text","text":"{said}"}}]}}}}"#
+            ),
+            format!(
+                r#"{{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"api_error":"usage_limit_reached","result":"{said}","terminal_reason":"api_error"}}"#
+            ),
+        ]
+    }
+
+    const SPENT: &str = r#"{"status":"rejected","resetsAt":1795454832,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1795454832,"status":"rejected"}}}"#;
+
+    #[test]
+    fn a_usage_limit_keeps_when_the_account_resets_and_the_tools_own_words() {
+        let said = "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)";
+        for exit in [Some(0), Some(1)] {
+            let lines = out_of_usage(SPENT);
+            let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let signals = read(&lines, (exit, None));
+            let ended = &signals[signals.len() - 2..];
+            assert_eq!(
+                ended,
+                [
+                    Signal::OutUntil {
+                        at_ms: 1_795_454_832_000
+                    },
+                    Signal::Ended(RunOutcome::Failed {
+                        reason: said.to_string()
+                    })
+                ],
+                "exit {exit:?}"
+            );
+            assert_eq!(failures::classify_error(said), failures::USAGE_LIMIT);
+            assert!(
+                !signals
+                    .iter()
+                    .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Notice(_))),
+                "the tool's words are the turn's end, not a reply"
+            );
+        }
+        // Where the refusal gives its time only with the window, that is the time. Words
+        // that are not read as a usage limit say so before them.
+        let lines = [
+            INIT,
+            r#"{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","unifiedWindows":{"seven_day":{"resetsAt":1795800000.4}}}}"#,
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"out for now"}"#,
+        ];
+        let signals = read(&lines, (Some(1), None));
+        assert_eq!(
+            signals[signals.len() - 2..],
+            [
+                Signal::OutUntil {
+                    at_ms: 1_795_800_000_400
+                },
+                Signal::Ended(RunOutcome::Failed {
+                    reason: format!("{USAGE_LIMIT}: out for now")
+                })
+            ]
+        );
+    }
+
+    #[test]
+    fn an_account_that_goes_on_with_overage_is_not_out() {
+        for overage in [
+            r#""isUsingOverage":true"#,
+            r#""overageStatus":"allowed""#,
+            r#""overageStatus":"allowed_warning","isUsingOverage":false"#,
+        ] {
+            let info = format!(
+                r#"{{"status":"rejected","resetsAt":1795454832,"rateLimitType":"five_hour",{overage}}}"#
+            );
+            // The tool goes on, and the turn completes.
+            let refused = format!(r#"{{"type":"rate_limit_event","rate_limit_info":{info}}}"#);
+            let done = [
+                INIT,
+                refused.as_str(),
+                r#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#,
+            ];
+            let signals = read(&done, (Some(0), None));
+            assert_eq!(
+                signals.last(),
+                Some(&Signal::Ended(RunOutcome::Completed)),
+                "{overage}"
+            );
+            // Where it fails all the same, it fails on its own words, not on the account.
+            let lines = out_of_usage(&info);
+            let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+            let signals = read(&lines, (Some(1), None));
+            assert!(
+                !signals
+                    .iter()
+                    .any(|signal| matches!(signal, Signal::OutUntil { .. })),
+                "{overage}"
+            );
+            assert!(
+                matches!(signals.last(), Some(Signal::Ended(RunOutcome::Failed { reason })) if !reason.starts_with(USAGE_LIMIT)),
+                "{overage}: {:?}",
+                signals.last()
+            );
+        }
+    }
+
+    #[test]
+    fn a_turn_that_completed_is_not_failed_by_a_refusal_on_the_way() {
+        let refused = format!(r#"{{"type":"rate_limit_event","rate_limit_info":{SPENT}}}"#);
+        let done = [
+            INIT,
+            refused.as_str(),
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#,
+        ];
+        let signals = read(&done, (Some(0), None));
+        assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
+        assert!(
+            !signals
+                .iter()
+                .any(|signal| matches!(signal, Signal::OutUntil { .. }))
+        );
+        // Without a result, or with a code that says it failed, it did not complete.
+        for (lines, exit) in [(&done[..2], Some(0)), (&done[..], Some(1))] {
+            let signals = read(lines, (exit, None));
+            assert_eq!(
+                signals[signals.len() - 2..],
+                [
+                    Signal::OutUntil {
+                        at_ms: 1_795_454_832_000
+                    },
+                    Signal::Ended(RunOutcome::Failed {
+                        reason: if lines.len() == 3 {
+                            format!("{USAGE_LIMIT}: done")
+                        } else {
+                            USAGE_LIMIT.to_string()
+                        }
+                    })
+                ],
+                "{exit:?}"
+            );
         }
     }
 
