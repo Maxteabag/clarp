@@ -24010,7 +24010,10 @@ fn the_owner_makes_changes_and_removes_a_persona_and_an_agent_can_be_it() {
 fn a_portrait_has_small_square_thumbnails_made_once_and_kept_by_its_version() {
     let place = Place::new("thumbnails");
     let claude = place.root.join("claude");
-    program(&claude, &["#!/bin/sh\nread -r message\n", STAND_IN_ANSWERS].concat());
+    program(
+        &claude,
+        &["#!/bin/sh\nread -r message\n", STAND_IN_ANSWERS].concat(),
+    );
     let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
     // Pictures the Host ships: a PNG of a name and a JPEG of a name on a model.
     let pictures = place.root.join("static");
@@ -24033,7 +24036,9 @@ fn a_portrait_has_small_square_thumbnails_made_once_and_kept_by_its_version() {
         let snapshot = host.get("/agents/snapshot");
         let agents = snapshot["agents"].as_array().unwrap();
         let found = agents.iter().find(|agent| agent["session"] == session);
-        found.unwrap_or_else(|| panic!("{session} is not listed")).clone()
+        found
+            .unwrap_or_else(|| panic!("{session} is not listed"))
+            .clone()
     };
     let encoded = |picture: image::RgbImage, format: image::ImageFormat| {
         let mut out = std::io::Cursor::new(Vec::new());
@@ -24143,7 +24148,10 @@ fn a_portrait_has_small_square_thumbnails_made_once_and_kept_by_its_version() {
         let thumb = fetch(&host, "", "GET", &small, &[], b"");
         assert_eq!(thumb.status, 200, "{small}");
         assert_eq!(thumb.header("content-type"), "image/jpeg", "{small}");
-        assert_eq!(thumb.header("cache-control"), "public, max-age=31536000, immutable");
+        assert_eq!(
+            thumb.header("cache-control"),
+            "public, max-age=31536000, immutable"
+        );
         let read = image::load_from_memory_with_format(&thumb.body, image::ImageFormat::Jpeg);
         let read = read.unwrap();
         assert_eq!((read.width(), read.height()), (128, 128), "{small}");
@@ -24161,8 +24169,18 @@ fn a_portrait_has_small_square_thumbnails_made_once_and_kept_by_its_version() {
         std::fs::write(&kept, b"\xff\xd8\xff kept once").unwrap();
         let again = fetch(&host, "", "GET", &small, &[], b"");
         assert_eq!(again.body, b"\xff\xd8\xff kept once");
-        let other = fetch(&host, "", "GET", &format!("{shipped}?v={version}&px=100"), &[], b"");
-        assert_eq!(other.body, whole.body, "a size not offered is the picture whole");
+        let other = fetch(
+            &host,
+            "",
+            "GET",
+            &format!("{shipped}?v={version}&px=100"),
+            &[],
+            b"",
+        );
+        assert_eq!(
+            other.body, whole.body,
+            "a size not offered is the picture whole"
+        );
     }
 }
 
@@ -24267,7 +24285,11 @@ fn an_agent_made_as_a_persona_takes_on_what_the_persona_has_and_keeps_it() {
         );
         assert_eq!(picture.header("content-type"), "image/jpeg");
         // Kept a year by an address that names its version, else not kept.
-        let kept = if way == face { "private, max-age=31536000, immutable" } else { "no-store" };
+        let kept = if way == face {
+            "private, max-age=31536000, immutable"
+        } else {
+            "no-store"
+        };
         assert_eq!(picture.header("cache-control"), kept, "{way}");
     }
     let part = fetch(&host, "secret", "GET", &face, &[("Range", "bytes=-7")], b"");

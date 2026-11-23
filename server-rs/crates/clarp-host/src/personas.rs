@@ -169,7 +169,8 @@ async fn send_face(
     let small = match thumbnails::size(asked.get("px").map(String::as_str)) {
         Some(px) => {
             let (blobs, digest) = (app.blobs.clone(), digest.to_owned());
-            let made = tokio::task::spawn_blocking(move || thumbnails::kept(blobs.as_ref(), &digest, px));
+            let made =
+                tokio::task::spawn_blocking(move || thumbnails::kept(blobs.as_ref(), &digest, px));
             made.await.ok().flatten()
         }
         None => None,
@@ -181,7 +182,9 @@ async fn send_face(
     };
     if fresh && response.status().is_success() {
         let kept_a_year = HeaderValue::from_static(IMMUTABLE);
-        response.headers_mut().insert(header::CACHE_CONTROL, kept_a_year);
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, kept_a_year);
     }
     response
 }

@@ -171,7 +171,10 @@ mod tests {
 
     #[test]
     fn a_png_and_a_jpeg_become_small_square_jpegs() {
-        let png = encoded(DynamicImage::ImageRgba8(gradient(600, 400)), ImageFormat::Png);
+        let png = encoded(
+            DynamicImage::ImageRgba8(gradient(600, 400)),
+            ImageFormat::Png,
+        );
         let tall = DynamicImage::ImageRgba8(gradient(400, 900)).to_rgb8();
         let jpeg = encoded(DynamicImage::ImageRgb8(tall), ImageFormat::Jpeg);
         for source in [png, jpeg] {
