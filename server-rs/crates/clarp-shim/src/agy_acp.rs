@@ -255,98 +255,89 @@ fn notice(text: String) -> io::Result<()> {
     emit(&said("notice", json!({"code": "agy-model", "text": text})))
 }
 
-/// Chooses the model and the effort, where the order names them and Antigravity offers
-/// them. What is not offered is said, and the turn goes on with what Antigravity chose.
+/// Sets the model and the thinking level the order asks for, as Antigravity offers them
+/// ([`shared::choose`]). A model that is not offered, or that Antigravity will not take, fails
+/// the turn: it never runs on another model without a word. A thinking level that is not
+/// offered is said, and the turn goes on.
 fn configure(
     turn: &mut Turn,
     session: &str,
     order: &Order,
     opened: &Value,
-) -> Result<std::result::Result<(), Ended>> {
+) -> Result<std::result::Result<(), Outcome>> {
     let mut options = opened
         .get("configOptions")
         .filter(|options| options.is_array())
         .cloned()
         .unwrap_or(Value::Null);
     let models = &opened["models"];
+    let choice = match shared::choose(&options, models, &order.model, &order.effort) {
+        Ok(choice) => choice,
+        Err(why) => {
+            failed("config", &json!({"message": why}))?;
+            return Ok(Err(Outcome::Failed));
+        }
+    };
+    for note in &choice.notes {
+        notice(note.clone())?;
+    }
     let mut set_model = None;
-    for (category, wanted) in [
-        ("model", order.model.trim()),
-        ("thought_level", order.effort.trim()),
-    ] {
-        if wanted.is_empty() {
-            continue;
-        }
-        if let Some(found) = schema::option(&options, category).cloned() {
-            let Some(value) = schema::matching(&found, wanted) else {
-                let names: Vec<String> = schema::offered(&found)
-                    .into_iter()
-                    .map(|(value, _)| value)
-                    .collect();
-                notice(format!(
-                    "Antigravity does not offer {wanted} as its {category} (it offers {}); it runs on its own choice.",
-                    names.join(", ")
-                ))?;
-                continue;
-            };
-            if found["currentValue"] == json!(value) {
-                continue;
-            }
-            let config = found["id"].as_str().unwrap_or(category).to_string();
-            let params = json!({"sessionId": session, "configId": config, "value": value});
-            match turn.setup(method::SESSION_SET_CONFIG_OPTION, params)? {
-                Err(ended) => return Ok(Err(ended)),
-                Ok(Answer::Error(error)) => notice(format!(
-                    "Antigravity did not take {value} as its {category}: {}",
-                    shared::error_text(&error)
-                ))?,
-                Ok(Answer::Result(answer)) => {
-                    match answer.get("configOptions").filter(|all| all.is_array()) {
-                        Some(changed) => options = changed.clone(),
-                        None => {
-                            if let Some(entry) = options.as_array_mut().and_then(|all| {
-                                all.iter_mut().find(|option| option["id"] == json!(config))
-                            }) {
-                                entry["currentValue"] = json!(value);
-                            }
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-        // An agy without options says its models apart (`models`), and takes one by its id.
-        let listed = models["availableModels"]
-            .as_array()
-            .filter(|_| category == "model");
-        let Some(listed) = listed else {
-            notice(format!(
-                "Antigravity offers no choice of {category}; {wanted} was not applied."
-            ))?;
+    let asked = [
+        (true, choice.model.clone()),
+        (false, choice.thought.clone()),
+    ];
+    for (is_model, wanted) in asked {
+        let Some((config, value)) = wanted else {
             continue;
         };
-        let known = listed.iter().find_map(|model| {
-            let id = model["modelId"].as_str()?;
-            let name = model["name"].as_str().unwrap_or(id);
-            (id.eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted))
-                .then(|| id.to_string())
-        });
-        match known {
-            None => notice(format!(
-                "Antigravity does not offer the model {wanted} here; it runs on its own choice."
-            ))?,
-            Some(id) if models["currentModelId"] == json!(id) => {}
-            Some(id) => match turn.setup(
+        let current = if config.is_empty() {
+            models["currentModelId"].clone()
+        } else {
+            schema::option(&options, &config)
+                .map_or(Value::Null, |option| option["currentValue"].clone())
+        };
+        if current == json!(value) {
+            continue;
+        }
+        let (asked_for, params) = if config.is_empty() {
+            (
                 method::SESSION_SET_MODEL,
-                json!({"sessionId": session, "modelId": id}),
-            )? {
-                Err(ended) => return Ok(Err(ended)),
-                Ok(Answer::Error(error)) => notice(format!(
-                    "Antigravity did not take the model {wanted}: {}",
+                json!({"sessionId": session, "modelId": value}),
+            )
+        } else {
+            (
+                method::SESSION_SET_CONFIG_OPTION,
+                json!({"sessionId": session, "configId": config, "value": value}),
+            )
+        };
+        match turn.setup(asked_for, params)? {
+            Err(how) => return Ok(Err(early("config", how)?)),
+            Ok(Answer::Error(error)) if is_model => {
+                let why = format!(
+                    "Antigravity did not take the model {value}: {}",
                     shared::error_text(&error)
-                ))?,
-                Ok(Answer::Result(_)) => set_model = Some(id),
-            },
+                );
+                failed("config", &json!({"message": why}))?;
+                return Ok(Err(Outcome::Failed));
+            }
+            Ok(Answer::Error(error)) => notice(format!(
+                "Antigravity did not take {value} as its thinking level: {}",
+                shared::error_text(&error)
+            ))?,
+            Ok(Answer::Result(answer)) => {
+                if config.is_empty() {
+                    set_model = Some(value);
+                } else if let Some(changed) =
+                    answer.get("configOptions").filter(|all| all.is_array())
+                {
+                    options = changed.clone();
+                } else if let Some(entry) = options
+                    .as_array_mut()
+                    .and_then(|all| all.iter_mut().find(|option| option["id"] == json!(config)))
+                {
+                    entry["currentValue"] = json!(value);
+                }
+            }
         }
     }
     let model = set_model
@@ -563,8 +554,8 @@ fn run_turn(turn: &mut Turn, order: &Order, cwd: &str) -> Result<Outcome> {
         Ok(open) => open,
         Err(outcome) => return Ok(outcome),
     };
-    if let Err(how) = configure(turn, &session, order, &opened)? {
-        return Ok(early("config", how)?);
+    if let Err(outcome) = configure(turn, &session, order, &opened)? {
+        return Ok(outcome);
     }
     let text = if meta.is_some() || order.headed.is_empty() {
         &order.prompt

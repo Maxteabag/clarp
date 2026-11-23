@@ -152,6 +152,123 @@ pub fn poisoned_mark(dir: &Path, session: &str) -> Option<PathBuf> {
     crate::session_name(session).then(|| dir.join(session))
 }
 
+/// What a turn sets of the conversation's options: the model and the thinking level, each as
+/// the option's id and the value to give it (an empty id: the model is set the older way,
+/// `session/set_model`), and what the user is told of what could not be applied.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Choice {
+    pub model: Option<(String, String)>,
+    pub thought: Option<(String, String)>,
+    pub notes: Vec<String>,
+}
+
+/// The values an option offers, for a sentence.
+fn listed(option: &Value) -> String {
+    let values: Vec<String> = crate::schema::offered(option)
+        .into_iter()
+        .map(|(value, _)| value)
+        .collect();
+    values.join(", ")
+}
+
+/// The model and thinking level a turn asks for, as Antigravity offers them over ACP. The
+/// Host's own list of Antigravity's models (`agy models`) names a model with its effort in one
+/// id (`gemini-3.8-flash-low`), while ACP offers the model (`gemini-3.8-flash`) and its thinking
+/// level (`low`) apart: an id that is no model offered is read as a model offered followed by
+/// one of the thinking levels offered. `Err`: why the turn cannot run as asked. A model that is
+/// not offered is never replaced by another one without a word.
+pub fn choose(
+    options: &Value,
+    models: &Value,
+    model: &str,
+    effort: &str,
+) -> Result<Choice, String> {
+    use crate::schema::{matching, offered, option};
+    let (model, effort) = (model.trim(), effort.trim());
+    let mut choice = Choice::default();
+    let thoughts = option(options, "thought_level");
+    let mut folded = None;
+    if !model.is_empty() {
+        if let Some(models_offered) = option(options, "model") {
+            let id = models_offered["id"].as_str().unwrap_or("model").to_string();
+            let direct = matching(models_offered, model);
+            let split = || {
+                let levels = thoughts.map(offered).unwrap_or_default();
+                levels.into_iter().find_map(|(level, _)| {
+                    let cut = model.len().checked_sub(level.len() + 1)?;
+                    let (base, tail) = (model.get(..cut)?, model.get(cut..)?);
+                    let named = tail.strip_prefix('-')?.eq_ignore_ascii_case(&level);
+                    named
+                        .then(|| matching(models_offered, base))
+                        .flatten()
+                        .map(|value| (value, level))
+                })
+            };
+            match direct
+                .map(|value| (value, None))
+                .or_else(|| split().map(|(value, level)| (value, Some(level))))
+            {
+                Some((value, level)) => {
+                    choice.model = Some((id, value));
+                    folded = level;
+                }
+                None => {
+                    let levels = thoughts.map(listed).filter(|levels| !levels.is_empty());
+                    return Err(format!(
+                        "Antigravity does not offer the model {model} over ACP; it offers {}{}.",
+                        listed(models_offered),
+                        levels.map_or_else(String::new, |levels| format!(
+                            ", each with a thinking level of {levels}"
+                        )),
+                    ));
+                }
+            }
+        } else if let Some(available) = models["availableModels"].as_array() {
+            let found = available.iter().find_map(|offer| {
+                let id = offer["modelId"].as_str()?;
+                let name = offer["name"].as_str().unwrap_or(id);
+                (id.eq_ignore_ascii_case(model) || name.eq_ignore_ascii_case(model))
+                    .then(|| id.to_string())
+            });
+            let Some(id) = found else {
+                let ids: Vec<&str> = available
+                    .iter()
+                    .filter_map(|offer| offer["modelId"].as_str())
+                    .collect();
+                return Err(format!(
+                    "Antigravity does not offer the model {model} over ACP; it offers {}.",
+                    ids.join(", ")
+                ));
+            };
+            choice.model = Some((String::new(), id));
+        } else {
+            return Err(format!(
+                "Antigravity offers no choice of model over ACP, so {model} cannot be used."
+            ));
+        }
+    }
+    // The thinking level a model's id carries is the one asked for; else the effort named.
+    let level = folded.or_else(|| (!effort.is_empty()).then(|| effort.to_string()));
+    if let Some(level) = level {
+        match thoughts {
+            Some(offered_levels) => match matching(offered_levels, &level) {
+                Some(value) => {
+                    let id = offered_levels["id"].as_str().unwrap_or("thought_level").to_string();
+                    choice.thought = Some((id, value));
+                }
+                None => choice.notes.push(format!(
+                    "Antigravity does not offer {level} as a thinking level (it offers {}); it thinks as it chooses.",
+                    listed(offered_levels)
+                )),
+            },
+            None => choice.notes.push(format!(
+                "Antigravity offers no choice of thinking level; {level} was not applied."
+            )),
+        }
+    }
+    Ok(choice)
+}
+
 /// What the driver gives agy of its environment, besides what it inherits.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChildEnv {
@@ -243,5 +360,76 @@ mod tests {
                 .iter()
                 .all(|(name, _)| *name != "SSH_CONNECTION")
         );
+    }
+
+    fn acp_options() -> Value {
+        json!([
+            {"id": "model", "category": "model", "currentValue": "gemini-4-neon", "options": [
+                {"value": "gemini-4-neon", "name": "Gemini 4 Neon"},
+                {"value": "gemini-3.8-flash", "name": "Gemini 3.8 Flash"},
+                {"value": "claude-sonnet-x", "name": "Claude Sonnet X"}]},
+            {"id": "thought_level", "category": "thought_level", "currentValue": "medium",
+             "options": [{"value": "low"}, {"value": "medium"}, {"value": "high"}]}
+        ])
+    }
+
+    #[test]
+    fn an_id_with_its_effort_is_the_model_offered_and_its_thinking_level() {
+        let options = acp_options();
+        let chosen = choose(&options, &Value::Null, "gemini-3.8-flash-low", "").unwrap();
+        assert_eq!(
+            chosen.model,
+            Some(("model".into(), "gemini-3.8-flash".into()))
+        );
+        assert_eq!(chosen.thought, Some(("thought_level".into(), "low".into())));
+        assert!(chosen.notes.is_empty());
+        // A model offered as it is, with the effort named apart.
+        let plain = choose(&options, &Value::Null, "Claude Sonnet X", "HIGH").unwrap();
+        assert_eq!(
+            plain.model,
+            Some(("model".into(), "claude-sonnet-x".into()))
+        );
+        assert_eq!(plain.thought, Some(("thought_level".into(), "high".into())));
+        // The level in the id wins over an effort named beside it.
+        let both = choose(&options, &Value::Null, "gemini-3.8-flash-high", "low").unwrap();
+        assert_eq!(both.thought, Some(("thought_level".into(), "high".into())));
+        // Nothing asked: nothing set.
+        assert_eq!(
+            choose(&options, &Value::Null, "", "").unwrap(),
+            Choice::default()
+        );
+    }
+
+    #[test]
+    fn a_model_not_offered_is_refused_with_what_is_offered() {
+        let options = acp_options();
+        for asked in [
+            "gemini-9-ultra",
+            "gemini-3.8-flash-extreme",
+            "gemini-3.8-flash-",
+        ] {
+            let refused = choose(&options, &Value::Null, asked, "").unwrap_err();
+            assert!(refused.contains(asked), "{refused}");
+            assert!(
+                refused.contains("gemini-4-neon, gemini-3.8-flash, claude-sonnet-x"),
+                "{refused}"
+            );
+            assert!(refused.contains("low, medium, high"), "{refused}");
+        }
+        let older = json!({"availableModels": [{"modelId": "m-1", "name": "One"}], "currentModelId": "m-1"});
+        assert_eq!(
+            choose(&Value::Null, &older, "one", "").unwrap().model,
+            Some((String::new(), "m-1".into()))
+        );
+        assert!(
+            choose(&Value::Null, &older, "m-2", "")
+                .unwrap_err()
+                .contains("m-1")
+        );
+        assert!(choose(&Value::Null, &Value::Null, "m-2", "").is_err());
+        // An effort that is not offered is said, and the model still runs.
+        let noted = choose(&options, &Value::Null, "gemini-4-neon", "max").unwrap();
+        assert_eq!(noted.thought, None);
+        assert_eq!(noted.notes.len(), 1);
     }
 }
