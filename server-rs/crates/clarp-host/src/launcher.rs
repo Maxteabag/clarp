@@ -341,6 +341,66 @@ fn ask_to_stop(socket: &Path, grace_ms: u64) {
     }
 }
 
+/// How lately a turn's spool was written for the shim that wrote it to be taken as one that may
+/// still be starting (issue 728): a shim makes its spool before it listens.
+pub const STARTING_SPOOL: Duration = Duration::from_secs(30);
+
+/// Whether a shim of this turn may still be starting: one of these spools was written within
+/// [`STARTING_SPOOL`]. Only the files' times are read: a spool is never opened, and its lock
+/// is never taken or tested, since a shim that starts could lose its turn to that.
+pub fn may_be_starting(spools: &[PathBuf]) -> bool {
+    let now = std::time::SystemTime::now();
+    spools.iter().any(|spool| {
+        std::fs::metadata(spool)
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| now.duration_since(at).unwrap_or_default() < STARTING_SPOOL)
+    })
+}
+
+/// The spools of every attempt of a turn in this agent's spool directory (`7.jsonl`,
+/// `7.2.jsonl`, the fork's `7.1001.jsonl`), as the directory lists them.
+pub fn spools_of(dir: &Path, turn: TurnId) -> Vec<PathBuf> {
+    let (whole, attempts) = (format!("{}.jsonl", turn.0), format!("{}.", turn.0));
+    let Ok(listed) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    listed
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name == whole
+                        || name.strip_prefix(&attempts).is_some_and(|rest| {
+                            rest.strip_suffix(".jsonl").is_some_and(|n| {
+                                !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())
+                            })
+                        })
+                })
+        })
+        .collect()
+}
+
+/// Follows the shim of a turn that this Host did not launch: one that ran on while the Host was
+/// away (issue 728). A shim that may still be starting is given until it listens, as a launch
+/// that found its turn taken gives it (issue 726); one long gone is found gone at once.
+pub fn follow_rejoined(socket: &Path, starting: bool, tell: &dyn Fn(Told)) {
+    if starting {
+        let _ = listens_within(socket, TAKEN_LISTENS_WITHIN);
+    }
+    follow(socket, tell);
+}
+
+/// Stops the shim of a turn that this Host did not launch: a shim that may still be starting is
+/// told once it listens, so that the Stop is not lost in the moment before it does.
+pub fn stop_rejoined(socket: &Path, grace_ms: u64, starting: bool) {
+    if starting {
+        let _ = listens_within(socket, TAKEN_LISTENS_WITHIN);
+    }
+    ask_to_stop(socket, grace_ms);
+}
+
 /// Whether a shim answers at this socket, asked again for up to `within` while none does.
 fn listens_within(socket: &Path, within: Duration) -> bool {
     let until = std::time::Instant::now() + within;
@@ -941,6 +1001,104 @@ except socket.timeout:
             panic!("the first stand-in was to say it is ready");
         };
         assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_rejoined_shim_that_listens_late_is_followed_and_stopped_once_it_listens() {
+        // A Host started again while a turn's shim was starting: the shim has made its spool
+        // and listens two seconds later (728). A Stop and a follow without the wait find
+        // nothing; with it, both reach the shim.
+        let shim = StandIn::new("rejoin-late", 2.0, None);
+        let launch = shim.launch_in_background(&Starting::default());
+        let spool = shim.dir.join("7.jsonl");
+        std::fs::write(&spool, "").unwrap();
+        assert!(may_be_starting(std::slice::from_ref(&spool)));
+        let socket = shim.order.socket.clone();
+        stop_rejoined(&socket, 1, false);
+        let (at, began) = (socket.clone(), std::time::Instant::now());
+        let stopping = std::thread::spawn(move || stop_rejoined(&at, 4_321, true));
+        let told = Mutex::new(Vec::new());
+        follow_rejoined(&socket, true, &|what| told.lock().unwrap().push(what));
+        stopping.join().unwrap();
+        assert!(
+            began.elapsed() < Duration::from_secs(8),
+            "the shim answered: nothing waited out its ten seconds"
+        );
+        let asked = shim.read("asked");
+        assert!(
+            asked.iter().any(|line| line.contains(r#""op":"follow""#)),
+            "followed: {asked:?}"
+        );
+        let stops: Vec<serde_json::Value> = asked
+            .iter()
+            .filter(|line| line.contains(r#""op":"stop""#))
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            stops.len(),
+            1,
+            "the Stop sent in the gap without waiting is lost: {asked:?}"
+        );
+        assert_eq!(stops[0]["grace_ms"], 4_321);
+        assert_eq!(told.lock().unwrap().last(), Some(&Told::Gone));
+        let Launched::Ready(mut child) = launch.join().unwrap() else {
+            panic!("the stand-in was to say it is ready");
+        };
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn a_rejoined_turn_whose_shim_is_long_gone_is_found_gone_at_once() {
+        let dir = std::env::temp_dir().join(format!("clarp-launcher-gone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let spool = dir.join("7.jsonl");
+        std::fs::write(&spool, "").unwrap();
+        let long_ago = std::time::SystemTime::now() - Duration::from_secs(600);
+        std::fs::File::options()
+            .write(true)
+            .open(&spool)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        assert!(!may_be_starting(std::slice::from_ref(&spool)));
+        assert!(!may_be_starting(&[dir.join("8.jsonl")]), "no spool at all");
+        let began = std::time::Instant::now();
+        let told = Mutex::new(Vec::new());
+        follow_rejoined(&dir.join("7.sock"), false, &|what| {
+            told.lock().unwrap().push(what);
+        });
+        stop_rejoined(&dir.join("7.sock"), 1_000, false);
+        assert!(began.elapsed() < Duration::from_secs(1));
+        assert_eq!(*told.lock().unwrap(), vec![Told::SpoolChanged, Told::Gone]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_spools_of_a_turn_are_those_of_its_attempts_and_its_fork() {
+        let dir =
+            std::env::temp_dir().join(format!("clarp-launcher-spools-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "7.jsonl",
+            "7.2.jsonl",
+            "7.1001.jsonl",
+            "70.jsonl",
+            "7.stdin",
+            "7.x.jsonl",
+            "8.jsonl",
+        ] {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+        let mut found: Vec<String> = spools_of(&dir, TurnId(7))
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        found.sort();
+        assert_eq!(found, ["7.1001.jsonl", "7.2.jsonl", "7.jsonl"]);
+        assert!(spools_of(&dir.join("none"), TurnId(7)).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

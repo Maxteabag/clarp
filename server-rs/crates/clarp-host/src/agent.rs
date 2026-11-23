@@ -4228,25 +4228,41 @@ impl Worker {
                         }
                     })
             }
+            // A turn this Host did not launch, whose shim ran on while the Host was away. One
+            // whose spool was written a moment ago may have a shim that has not begun to listen
+            // yet: it is waited for (issue 728).
             Action::Follow {
                 turn,
                 attempt,
                 socket,
-            } => std::thread::Builder::new()
-                .name(format!("turn-{}", turn.0))
-                .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, attempt, told))),
+            } => {
+                let starting = self.shim_may_be_starting(turn, Some(attempt));
+                std::thread::Builder::new()
+                    .name(format!("turn-{}", turn.0))
+                    .spawn(move || {
+                        launcher::follow_rejoined(&socket, starting, &|told| {
+                            tell(&tx, turn, attempt, told)
+                        })
+                    })
+            }
             // A turn whose shim is still starting is stopped by its launch: nothing is started,
-            // or the shim is told as soon as it is ready. Any other is told at its socket.
+            // or the shim is told as soon as it is ready. Any other is told at its socket, once
+            // it listens where its shim may still be starting (issue 728).
             Action::Stop {
                 turn,
                 socket,
                 grace_ms,
             } if self.launches.stop(turn, &socket, grace_ms) => return,
             Action::Stop {
-                socket, grace_ms, ..
-            } => std::thread::Builder::new()
-                .name("stop".to_string())
-                .spawn(move || launcher::stop(&socket, grace_ms)),
+                turn,
+                socket,
+                grace_ms,
+            } => {
+                let starting = self.shim_may_be_starting(turn, None);
+                std::thread::Builder::new()
+                    .name("stop".to_string())
+                    .spawn(move || launcher::stop_rejoined(&socket, grace_ms, starting))
+            }
             Action::Steer { socket, input } => {
                 self.write_followup(socket, input);
                 return;
@@ -4256,13 +4272,38 @@ impl Worker {
                 turn,
                 attempt,
                 socket,
-            } => std::thread::Builder::new()
-                .name(format!("fork-{}", turn.0))
-                .spawn(move || launcher::follow(&socket, &|told| tell(&tx, turn, attempt, told))),
+            } => {
+                let starting = self.shim_may_be_starting(turn, Some(attempt));
+                std::thread::Builder::new()
+                    .name(format!("fork-{}", turn.0))
+                    .spawn(move || {
+                        launcher::follow_rejoined(&socket, starting, &|told| {
+                            tell(&tx, turn, attempt, told)
+                        })
+                    })
+            }
         };
         if let Err(error) = spawned {
             eprintln!("clarp-host: a turn's thread could not be started: {error}");
         }
+    }
+
+    /// Whether a shim of this turn may still be starting, by when its spool was last written:
+    /// that attempt's, or any attempt's of the turn. Reads the files' times only.
+    fn shim_may_be_starting(&self, turn: TurnId, attempt: Option<u32>) -> bool {
+        let Some(actor) = self.actor.as_ref() else {
+            return false;
+        };
+        let profile = actor.profile();
+        let spools = match attempt {
+            Some(attempt) => vec![profile.spool_path_of(turn, attempt)],
+            None => profile
+                .spool_path(turn)
+                .parent()
+                .map(|dir| launcher::spools_of(dir, turn))
+                .unwrap_or_default(),
+        };
+        launcher::may_be_starting(&spools)
     }
 
     /// Starts a turn of the agent's conversation fork: with the agent's own tool settings, so
