@@ -40,6 +40,7 @@ mod panels;
 pub mod profile;
 pub mod roster_freshness;
 mod teams;
+pub mod transit;
 mod updates;
 mod artifact_summary;
 mod render_spec;
@@ -269,6 +270,7 @@ pub struct Engine {
     catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     coordination: coordination::Coordination,
+    transits: transit::Transits,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -422,6 +424,7 @@ impl Engine {
             catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
             coordination: coordination::Coordination::default(),
+            transits: transit::Transits::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -1077,6 +1080,7 @@ impl Engine {
         }
         self.schedule_agent_conversations();
         self.coordination_reloads();
+        self.transit_snapshot();
         self.open_shown_panes();
         if self.lifecycle_snapshot(object) {
             return;
@@ -1595,7 +1599,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.coordination_json(tag, object) {
+        if self.live_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1615,6 +1619,7 @@ impl Engine {
             self.live_server_info(object);
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
             self.coordination_server_info(object);
+            self.transit_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1651,7 +1656,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
@@ -1791,6 +1796,7 @@ impl Engine {
                 }
             }
             "agent-roster" => self.request_snapshot(),
+            "agent-transit" => self.transit_event(event),
             "delivery-updated" => {
                 // F4: a send's delivery state changed without a new revision;
                 // the hint carries no state, so re-read the chat's tail.

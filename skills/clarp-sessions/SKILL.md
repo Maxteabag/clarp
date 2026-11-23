@@ -46,7 +46,8 @@ clarp-admin agent transit --session lena-1a3f --backend claude --model opus --ef
 row lists (`""` for the tool's default). The command waits until the move is
 done or failed and prints its last state. The Host refuses while a turn of the
 agent runs or messages wait in its queue, so never move yourself from inside
-your own turn: ask another agent or the user's app. What is carried is the text
+your own turn: ask another agent or the user's app (the Backend row in an
+agent's profile, in the iOS, Android and Rust desktop apps). What is carried is the text
 of the user's and the agent's turns (the newest 400,000 characters); tool calls,
 their results and thinking are not. The agent's name, voice, goals and chat
 history stay. To move an agent to another Host instead, use

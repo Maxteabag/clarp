@@ -40,7 +40,26 @@ export struct ProfileInfo {
     agent-messages-shown: bool,
     agent-messages-index: int,
     tool-activity-index: int,
+    // The Backend row (feature agent_backend_transit): shown on a Host that
+    // can move the agent; its value "Claude · Opus 5.5"; the line under it
+    // (why it cannot move now, the move's phase, or why it failed).
+    backend-shown: bool,
+    backend-value: string,
+    backend-detail: string,
+    backend-enabled: bool,
+    backend-moving: bool,
+    backend-failed: bool,
     error: string,
+}
+
+// A backend or a model in the Backend picker: dimmed with its reason when
+// it cannot be chosen; `current` is what the agent runs now.
+export struct TransitChoice {
+    id: string,
+    label: string,
+    detail: string,
+    enabled: bool,
+    current: bool,
 }
 
 export struct PlanItem {
@@ -110,6 +129,17 @@ export global ProfileBridge {
     callback set-schedule(string, bool);
     callback compact();
     callback release();
+    // The Backend picker: "" (closed), "backends", "models" or "confirm".
+    in property <string> transit-step;
+    in property <string> transit-title;
+    in property <string> transit-body;
+    in property <bool> transit-loading;
+    in property <string> transit-error;
+    in property <[TransitChoice]> transit-choices;
+    callback open-transit();
+    callback pick-transit(string);
+    callback transit-back();
+    callback confirm-transit();
 }
 
 component Card inherits VerticalLayout {
@@ -297,6 +327,35 @@ export component AgentProfile inherits Modal {
                         }
                     }
                 }
+                if root.info.backend-shown: Card {
+                    title: "BACKEND";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Backend"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                        Text {
+                            text: root.info.backend-value;
+                            color: root.info.backend-enabled ? Palette.text : Palette.muted;
+                            font-size: 12 * Look.unit;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            accessible-label: "Backend, " + root.info.backend-value;
+                        }
+                        if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                        IconButton {
+                            icon: @image-url("icons/swap.svg");
+                            tip: "Change backend";
+                            enabled: root.info.backend-enabled;
+                            clicked => { ProfileBridge.open-transit(); }
+                        }
+                    }
+                    if root.info.backend-detail != "": Text {
+                        text: root.info.backend-detail;
+                        color: root.info.backend-failed ? Palette.danger : Palette.muted;
+                        font-size: 11 * Look.unit;
+                        wrap: word-wrap;
+                    }
+                }
                 Card {
                     title: "MODEL & EFFORT";
                     HorizontalLayout {
@@ -461,8 +520,96 @@ export component AgentProfile inherits Modal {
     }
 }
 
+// The Backend picker (clarp-ios#140's sheet): the backends, dimmed with
+// their reason when they cannot be chosen; then the chosen one's models,
+// the default marked and the current one ticked; then Move or Cancel.
+// Escape steps back one level.
+component TransitPicker inherits Modal {
+    card-width: 460px;
+    card-height: ProfileBridge.transit-step == "confirm" ? 190px : 420px;
+    dismissed => { ProfileBridge.transit-back(); }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: ProfileBridge.transit-title; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; wrap: word-wrap; horizontal-stretch: 1; }
+            IconButton {
+                icon: @image-url("icons/close.svg");
+                tip: ProfileBridge.transit-step == "backends" ? "Cancel" : "Back";
+                clicked => { ProfileBridge.transit-back(); }
+            }
+        }
+        if ProfileBridge.transit-step == "confirm": Text {
+            text: ProfileBridge.transit-body;
+            color: Palette.muted;
+            font-size: 12 * Look.unit;
+            wrap: word-wrap;
+        }
+        if ProfileBridge.transit-step == "confirm": Rectangle { vertical-stretch: 1; }
+        if ProfileBridge.transit-step == "confirm": HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { ProfileBridge.transit-back(); } }
+            IconButton { icon: @image-url("icons/check.svg"); tip: "Move"; clicked => { ProfileBridge.confirm-transit(); } }
+        }
+        if ProfileBridge.transit-step != "confirm" && (ProfileBridge.transit-loading || ProfileBridge.transit-error != "" || ProfileBridge.transit-choices.length == 0): HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: ProfileBridge.transit-loading ? "Loading…" : ProfileBridge.transit-error != "" ? ProfileBridge.transit-error : "Nothing to move to";
+                color: ProfileBridge.transit-error != "" ? Palette.danger : Palette.muted;
+                font-size: 12 * Look.unit;
+                horizontal-stretch: 1;
+            }
+            if ProfileBridge.transit-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+        }
+        if ProfileBridge.transit-step != "confirm": ScrollView {
+            vertical-stretch: 1;
+            content-width: self.visible-width;
+            content-height: choices.preferred-height;
+            choices := VerticalLayout {
+                width: parent.width;
+                spacing: 2px;
+                for choice in ProfileBridge.transit-choices: Rectangle {
+                    border-radius: 2px;
+                    background: touch.has-hover && choice.enabled ? Palette.hover : transparent;
+                    accessible-role: button;
+                    accessible-label: choice.detail != "" ? choice.label + ", " + choice.detail : choice.label;
+                    accessible-enabled: choice.enabled;
+                    accessible-action-default => { if (choice.enabled) { ProfileBridge.pick-transit(choice.id); } }
+                    HorizontalLayout {
+                        padding: 7px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 2px;
+                            Text { text: choice.label; color: choice.enabled ? Palette.text : Palette.faint; font-size: 13 * Look.unit; overflow: elide; }
+                            if choice.detail != "": Text { text: choice.detail; color: choice.enabled ? Palette.muted : Palette.faint; font-size: 11 * Look.unit; overflow: elide; }
+                        }
+                        if choice.current: Image {
+                            source: @image-url("icons/check.svg");
+                            width: 14px;
+                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            colorize: Palette.accent;
+                        }
+                    }
+                    touch := TouchArea {
+                        enabled: choice.enabled;
+                        clicked => { ProfileBridge.pick-transit(choice.id); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // The profile's confirmations and its image viewer, over the whole window.
 export component ProfileLayers inherits Rectangle {
+    if ProfileBridge.transit-step != "": TransitPicker {
+        width: root.width;
+        height: root.height;
+    }
     if ProfileBridge.confirm == "compact": Confirm {
         width: root.width;
         height: root.height;

@@ -11,8 +11,10 @@ use clarp_engine::Change;
 use serde_json::Value;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
+use clarp_core::transit::{self, Step};
+
 use crate::{
-    App, AppWindow, MediaItem, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, commands, pump_now,
+    App, AppWindow, MediaItem, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
 };
 
 /// The overlays this group owns.
@@ -68,6 +70,13 @@ pub fn show(app: &App, window: &AppWindow, name: &str) {
 
 /// Closes the shown dialog, back to the one below it (if any).
 pub fn close(app: &App, window: &AppWindow) {
+    if app.overlay.borrow().as_str() == "profile" {
+        let session = session();
+        if !session.is_empty() && !window.global::<ProfileBridge>().get_transit_step().is_empty() {
+            app.engine.borrow_mut().reset_transit(&session);
+        }
+        window.global::<ProfileBridge>().set_transit_step("".into());
+    }
     let below = STATE.with(|s| s.borrow_mut().below.pop());
     match below {
         Some(name) => commands::open_overlay(app, window, &name),
@@ -87,7 +96,11 @@ pub fn escape(app: &App, window: &AppWindow) {
     let bridge = window.global::<ProfileBridge>();
     let overview = window.global::<crate::OverviewBridge>();
     let overlay = app.overlay.borrow().clone();
-    if overlay == "profile" && bridge.get_viewing() >= 0 {
+    if overlay == "profile" && !bridge.get_transit_step().is_empty() {
+        let session = session();
+        app.engine.borrow_mut().transit_back(&session);
+        fill(app, window, &session);
+    } else if overlay == "profile" && bridge.get_viewing() >= 0 {
         bridge.set_viewing(-1);
     } else if overlay == "profile" && !bridge.get_confirm().is_empty() {
         bridge.set_confirm("".into());
@@ -380,6 +393,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         })
         .collect();
 
+    let transit_row = backend_row(&engine, session, &name, &backend, &value("model"));
+
     // Unknown usage (null) stays unknown: no gauge and no "0 tokens" (#403).
     let (tokens, window_size) = (details.get("context_tokens").and_then(Value::as_i64), count("context_window"));
     let queue = count("queue_count");
@@ -422,6 +437,12 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         agent_messages_shown: engine.chat_hidden_coordination(session),
         agent_messages_index: crate::chat_menu::COORDINATION.iter().position(|(v, _)| *v == engine.chat_coordination_choice(session)).unwrap_or(0) as i32,
         tool_activity_index: engine.chat_activity_choice(session).map_or(0, |mode| mode + 1),
+        backend_shown: transit_row.shown,
+        backend_value: transit_row.value.into(),
+        backend_detail: transit_row.detail.into(),
+        backend_enabled: transit_row.enabled,
+        backend_moving: transit_row.moving,
+        backend_failed: transit_row.failed,
         error: engine.profile_error().into(),
     };
     drop(engine);
@@ -429,6 +450,142 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         media.into_iter().map(|(caption, source, loading)| MediaItem { id: SharedString::new(), caption: caption.into(), image: image(&source), loading }).collect();
     bridge.set_media(ModelRc::new(VecModel::from(media)));
     bridge.set_info(info);
+    bridge.set_transit_step(transit_row.picker.step.into());
+    bridge.set_transit_title(transit_row.picker.title.into());
+    bridge.set_transit_body(transit_row.picker.body.into());
+    bridge.set_transit_loading(transit_row.picker.loading);
+    bridge.set_transit_error(transit_row.picker.error.into());
+    bridge.set_transit_choices(ModelRc::new(VecModel::from(transit_row.picker.choices)));
+}
+
+// ---- the Backend row (feature agent_backend_transit) ---------------------------
+
+#[derive(Default)]
+struct BackendRow {
+    shown: bool,
+    value: String,
+    detail: String,
+    enabled: bool,
+    moving: bool,
+    failed: bool,
+    picker: Picker,
+}
+
+#[derive(Default)]
+struct Picker {
+    /// "", "backends", "models" or "confirm".
+    step: &'static str,
+    title: String,
+    body: String,
+    loading: bool,
+    error: String,
+    choices: Vec<TransitChoice>,
+}
+
+/// The Backend row and its picker, from the agent's roster row, its flow and
+/// the options the Host offered it. Nothing without the feature.
+fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend: &str, model: &str) -> BackendRow {
+    if !engine.transit_offered(session) {
+        return BackendRow::default();
+    }
+    let options = engine.transit_options(session);
+    let flow = engine.transit_flow(session);
+    // A backend and a model in words: the picker's labels, else the catalog's.
+    let backend_label = |id: &str| -> String {
+        options
+            .backends
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| b.label.clone())
+            .or_else(|| engine.backend_options().iter().find(|o| text(o, "id") == id).map(|o| text(o, "label")))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| id.to_owned())
+    };
+    let model_label = |backend: &str, id: &str| -> String {
+        if id.is_empty() {
+            return String::new();
+        }
+        options
+            .backends
+            .iter()
+            .find(|b| b.id == backend)
+            .and_then(|b| b.models.iter().find(|m| m.id == id).map(|m| m.label.clone()))
+            .or_else(|| engine.models_for_backend(backend).iter().find(|m| text(m, "id") == id).map(|m| text(m, "label")))
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| id.to_owned())
+    };
+    let blocked = engine.transit_blocked(session);
+    let mut row = BackendRow { shown: true, value: transit::value(&backend_label(backend), &model_label(backend, model)), ..BackendRow::default() };
+    match &flow.step {
+        Step::Moving { backend: target, phase, .. } => {
+            row.moving = true;
+            let target_model = model_label(target, &flow.target_model);
+            let shown_model = if target_model.is_empty() { "the default model".to_owned() } else { target_model };
+            row.detail = transit::progress(&backend_label(target), &shown_model, target == backend, *phase);
+        }
+        _ if blocked => row.detail = transit::TURN_BLOCKED.to_owned(),
+        Step::Failed { reason, .. } => {
+            row.detail = reason.clone();
+            row.failed = true;
+        }
+        _ => {}
+    }
+    row.enabled = !blocked && !row.moving;
+    let picker = &mut row.picker;
+    picker.loading = options.loading;
+    picker.error = options.error.clone();
+    match &flow.step {
+        Step::Picking => {
+            picker.step = "backends";
+            picker.title = transit::ROW_TITLE.to_owned();
+            picker.choices = options
+                .backends
+                .iter()
+                .map(|b| TransitChoice {
+                    id: b.id.as_str().into(),
+                    label: b.label.as_str().into(),
+                    detail: b.reason.as_str().into(),
+                    enabled: b.available,
+                    current: b.id == backend,
+                })
+                .collect();
+        }
+        Step::Model { backend: chosen } => {
+            picker.step = "models";
+            picker.title = format!("{} · Model", backend_label(chosen));
+            let models = options.backends.iter().find(|b| b.id == *chosen).map(|b| b.models.clone()).unwrap_or_default();
+            let current = |id: &str| chosen == backend && id == model;
+            picker.choices = if models.is_empty() {
+                // A tool that lists no models runs its own default ("").
+                vec![TransitChoice { id: "".into(), label: transit::DEFAULT_MARK.into(), enabled: !current(""), current: current(""), ..TransitChoice::default() }]
+            } else {
+                models
+                    .iter()
+                    .map(|m| TransitChoice {
+                        id: m.id.as_str().into(),
+                        label: m.label.as_str().into(),
+                        detail: if m.default { transit::DEFAULT_MARK } else { "" }.into(),
+                        enabled: !current(&m.id),
+                        current: current(&m.id),
+                    })
+                    .collect()
+            };
+        }
+        Step::Confirming { backend: chosen, model: target } => {
+            picker.step = "confirm";
+            let label = model_label(chosen, target);
+            let label = if label.is_empty() { transit::DEFAULT_MARK.to_lowercase() + " model" } else { label };
+            if chosen == backend {
+                picker.title = transit::switch_title(name, &label);
+                picker.body = transit::SWITCH_BODY.to_owned();
+            } else {
+                picker.title = transit::confirm_title(name, &backend_label(chosen), &label);
+                picker.body = transit::CONFIRM_BODY.to_owned();
+            }
+        }
+        _ => {}
+    }
+    row
 }
 
 fn with_session(act: impl FnOnce(&Rc<App>, &AppWindow, &str)) {
@@ -509,6 +666,35 @@ pub fn wire(window: &AppWindow) {
             let model = detail(app, session, "model").as_str().unwrap_or_default().to_owned();
             let effort = STATE.with(|s| s.borrow().effort_ids.get(index as usize).cloned()).unwrap_or_default();
             app.engine.borrow_mut().set_agent_llm(session, &model, &effort);
+        });
+    });
+    bridge.on_open_transit(|| {
+        with_session(|app, window, session| {
+            app.engine.borrow_mut().open_transit(session);
+            fill(app, window, session);
+        });
+    });
+    bridge.on_pick_transit(|id| {
+        with_session(|app, window, session| {
+            let step = window.global::<ProfileBridge>().get_transit_step();
+            if step == "backends" {
+                app.engine.borrow_mut().pick_transit_backend(session, &id);
+            } else if step == "models" {
+                app.engine.borrow_mut().pick_transit_model(session, &id);
+            }
+            fill(app, window, session);
+        });
+    });
+    bridge.on_transit_back(|| {
+        with_session(|app, window, session| {
+            app.engine.borrow_mut().transit_back(session);
+            fill(app, window, session);
+        });
+    });
+    bridge.on_confirm_transit(|| {
+        with_session(|app, window, session| {
+            app.engine.borrow_mut().confirm_transit(session);
+            fill(app, window, session);
         });
     });
     bridge.on_set_heartbeat(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_heartbeat(session, on)));

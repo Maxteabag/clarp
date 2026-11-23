@@ -447,3 +447,225 @@ pub(super) fn extras_check(out: String) {
     ];
     run_stages(stages);
 }
+
+/// What the profile's Backend row and its picker show now.
+fn backend_now(window: &crate::AppWindow) -> (crate::ProfileInfo, String, Vec<crate::TransitChoice>) {
+    let bridge = window.global::<ProfileBridge>();
+    (bridge.get_info(), bridge.get_transit_step().to_string(), bridge.get_transit_choices().iter().collect())
+}
+
+/// `--check backend-row --out DIR` (feature agent_backend_transit, issue
+/// 720): a Host without the feature shows no Backend row; with it the row
+/// says "Claude · Opus", is held while messages wait, and opens the picker:
+/// the Host's backends for this agent (unavailable ones dimmed with their
+/// reason), the chosen one's models (the default marked), then Move. The
+/// move's phases land on the moved row, the Host's one line is in the chat
+/// beside the old rows (never cleared); a refused start and a failed move
+/// read in plain words. Escape steps back one level.
+pub(super) fn backend_row_check(out: String) {
+    let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, window, _| {
+            if !ready(app) {
+                return false;
+            }
+            let catalog = json!({"providers": {
+                "claude": {"label": "Claude", "sort_index": 1, "available": true, "models": [
+                    {"id": "opus", "label": "Opus", "default": true, "supported_efforts": ["low", "high"]},
+                    {"id": "sonnet", "label": "Sonnet", "default": false, "supported_efforts": ["medium"]}]},
+                "codex": {"label": "Codex", "sort_index": 2, "available": true, "models": [
+                    {"id": "gpt-5.5", "label": "GPT-5.5", "default": true, "supported_efforts": ["low", "medium", "high"]},
+                    {"id": "gpt-5.5-mini", "label": "GPT-5.5 mini", "default": false}]},
+                "agy": {"label": "Antigravity", "sort_index": 3, "available": false, "unavailable_reason": "signed_out", "models": []},
+                "muse": {"label": "Muse", "sort_index": 4, "available": false, "unavailable_reason": "not_supported", "models": []}}});
+            let rachel = json!({"session": "rachel", "set": {"model": "opus"}});
+            check(control("/__control/catalog", &catalog).is_ok() && control("/__control/agent", &rachel).is_ok(), "the Host takes a catalog with availability");
+            window.global::<ProfileBridge>().invoke_open_for_pane(app_now().active_id());
+            true
+        })),
+        ("no feature", Box::new(|app, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!app.engine.borrow().transit_offered("rachel") && !backend_now(window).0.backend_shown, "a Host without agent_backend_transit shows no Backend row");
+            headless::press(Key::Escape);
+            check(control("/__control/transit", &json!({"on": true})).is_ok(), "the Host offers moving agents");
+            // The feature is read from /server-info on connecting.
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("feature", Box::new(|app, window, _| {
+            let engine = app.engine.borrow();
+            let ready = engine.transit_offered("rachel") && engine.model_catalog_loaded() && engine.connection_state() == "live"
+                && engine.roster().find("rachel").is_some_and(|a| a.model == "opus");
+            if !ready || !window.get_overlay().is_empty() {
+                return false;
+            }
+            drop(engine);
+            window.global::<ProfileBridge>().invoke_open_for_pane(app_now().active_id());
+            true
+        })),
+        ("row", Box::new(move |_, window, elapsed| {
+            let (info, step, _) = backend_now(window);
+            if window.get_overlay() != "profile" || !info.backend_shown || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(info.backend_value == "Claude · Opus" && info.backend_enabled && info.backend_detail.is_empty() && step.is_empty(),
+                &format!("the Backend row shows the agent's backend and model: {:?} {}", info.backend_value, info.backend_enabled));
+            shot(&out1, "backend-01-row");
+            check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 1}})).is_ok(), "a message waits for Rachel");
+            true
+        })),
+        ("held", Box::new(|_, window, _| {
+            let (info, _, _) = backend_now(window);
+            if info.backend_enabled {
+                return false;
+            }
+            check(info.backend_detail == clarp_core::transit::TURN_BLOCKED, &format!("while messages wait it cannot move: {:?}", info.backend_detail));
+            window.global::<ProfileBridge>().invoke_open_transit();
+            check(backend_now(window).1.is_empty(), "and the picker does not open");
+            check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 0}})).is_ok(), "the message has gone");
+            true
+        })),
+        ("free", Box::new(|_, window, _| {
+            if !backend_now(window).0.backend_enabled {
+                return false;
+            }
+            window.global::<ProfileBridge>().invoke_open_transit();
+            true
+        })),
+        ("backends", Box::new(move |_, window, elapsed| {
+            let bridge = window.global::<ProfileBridge>();
+            let (_, step, choices) = backend_now(window);
+            if step != "backends" || bridge.get_transit_loading() || choices.len() != 4 || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let asked = requests("GET", "/agent-model-options").last().map(|r| r["query"]["session"].clone());
+            check(asked == Some(json!("rachel")), &format!("the picker asks the Host for this agent's options: {asked:?}"));
+            let labels: Vec<String> = choices.iter().map(|c| c.label.to_string()).collect();
+            check(labels == ["Claude", "Codex", "Antigravity", "Muse"], &format!("in the Host's order: {labels:?}"));
+            check(choices[0].current && choices[1].enabled && !choices[1].current, "Claude is current, Codex can be chosen");
+            check(!choices[2].enabled && choices[2].detail == "Not signed in", &format!("a signed-out tool is dimmed with its reason: {:?}", choices[2].detail));
+            check(!choices[3].enabled && choices[3].detail == "Can't carry a conversation there yet", &format!("so is one that cannot take a conversation: {:?}", choices[3].detail));
+            shot(&out2, "backend-02-picker");
+            bridge.invoke_pick_transit("agy".into());
+            check(backend_now(window).1 == "backends", "a dimmed backend cannot be chosen");
+            bridge.invoke_pick_transit("codex".into());
+            true
+        })),
+        ("models", Box::new(move |_, window, elapsed| {
+            let bridge = window.global::<ProfileBridge>();
+            let (_, step, choices) = backend_now(window);
+            if step != "models" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(bridge.get_transit_title() == "Codex · Model", &format!("the model step names the backend: {}", bridge.get_transit_title()));
+            let labels: Vec<(String, String)> = choices.iter().map(|c| (c.label.to_string(), c.detail.to_string())).collect();
+            check(labels == [("GPT-5.5".into(), "Default".into()), ("GPT-5.5 mini".into(), String::new())], &format!("its models, the default marked: {labels:?}"));
+            shot(&out3, "backend-03-models");
+            bridge.invoke_pick_transit("gpt-5.5".into());
+            true
+        })),
+        ("confirm", Box::new(move |_, window, elapsed| {
+            let bridge = window.global::<ProfileBridge>();
+            if backend_now(window).1 != "confirm" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(bridge.get_transit_title() == "Move Rachel to Codex · GPT-5.5?", &format!("Move asks first: {}", bridge.get_transit_title()));
+            check(bridge.get_transit_body().contains("takes the conversation's messages along"), "and says what comes along");
+            shot(&out4, "backend-04-confirm");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("escape steps back", Box::new(|_, window, _| {
+            if backend_now(window).1 != "models" {
+                return false;
+            }
+            check(window.get_overlay() == "profile", "Escape steps back to the models, the profile stays");
+            let bridge = window.global::<ProfileBridge>();
+            bridge.invoke_pick_transit("gpt-5.5".into());
+            bridge.invoke_confirm_transit();
+            true
+        })),
+        ("moved", Box::new(move |app, window, elapsed| {
+            let (info, step, _) = backend_now(window);
+            let engine = app.engine.borrow();
+            let moved = engine.roster().find("rachel").is_some_and(|a| a.backend == "codex" && a.model == "gpt-5.5");
+            let line = engine.conversation("rachel").is_some_and(|c| c.rows().iter().any(|r| r.text.starts_with("Now on Codex")));
+            if !moved || !line || info.backend_moving || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let body = posts("/agent-transit").last().map(|p| p["body"].clone()).unwrap_or(Value::Null);
+            check(body["session"] == "rachel" && body["backend"] == "codex" && body["model"] == "gpt-5.5" && body["request_id"].as_str().is_some_and(|r| !r.is_empty()) && body.get("effort").is_none(),
+                &format!("Move starts it with a request id: {body}"));
+            check(step.is_empty() && info.backend_value == "Codex · GPT-5.5" && info.backend_detail.is_empty(), &format!("the row lands on the moved agent: {:?} {:?}", info.backend_value, info.backend_detail));
+            let rows: Vec<&str> = engine.conversation("rachel").map(|c| c.rows().iter().map(|r| r.text.as_str()).collect()).unwrap_or_default();
+            check(rows.contains(&"Hello") && rows.contains(&"Now on Codex · GPT-5.5. The conversation came along."), &format!("the chat keeps its rows and gains the Host's one line: {rows:?}"));
+            check(rows.iter().filter(|r| r.starts_with("Now on")).count() == 1, "the app adds no line of its own");
+            drop(engine);
+            shot(&out5, "backend-05-moved");
+            let refusal = json!({"respond": {"status": 409, "body": {"error": "messages_waiting"}}});
+            check(control("/__control/transit", &refusal).is_ok(), "the Host will refuse the next start");
+            let bridge = window.global::<ProfileBridge>();
+            bridge.invoke_open_transit();
+            true
+        })),
+        ("open again", Box::new(|_, window, _| {
+            let bridge = window.global::<ProfileBridge>();
+            let (_, step, choices) = backend_now(window);
+            if step != "backends" || bridge.get_transit_loading() || choices.len() != 4 {
+                return false;
+            }
+            check(choices[1].current && !choices[0].current, "Codex is current now");
+            bridge.invoke_pick_transit("claude".into());
+            bridge.invoke_pick_transit("sonnet".into());
+            bridge.invoke_confirm_transit();
+            true
+        })),
+        ("refused", Box::new(move |_, window, elapsed| {
+            let (info, step, _) = backend_now(window);
+            if !info.backend_failed || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(step.is_empty() && info.backend_detail == "Messages are waiting for this agent. Try again once they have gone." && info.backend_value == "Codex · GPT-5.5",
+                &format!("a refused start says why in plain words, nothing changed: {:?}", info.backend_detail));
+            shot(&out6, "backend-06-refused");
+            let fail = json!({"fail": "the conversation couldn't be imported into Claude"});
+            check(control("/__control/transit", &fail).is_ok(), "the next move will fail");
+            let bridge = window.global::<ProfileBridge>();
+            bridge.invoke_open_transit();
+            true
+        })),
+        ("retry", Box::new(|_, window, _| {
+            let bridge = window.global::<ProfileBridge>();
+            let (info, step, choices) = backend_now(window);
+            if step != "backends" || bridge.get_transit_loading() || choices.len() != 4 {
+                return false;
+            }
+            check(!info.backend_failed, "opening the picker again clears the old refusal");
+            bridge.invoke_pick_transit("claude".into());
+            bridge.invoke_pick_transit("sonnet".into());
+            bridge.invoke_confirm_transit();
+            true
+        })),
+        ("failed", Box::new(|app, window, _| {
+            let (info, _, _) = backend_now(window);
+            let line = app.engine.borrow().conversation("rachel").is_some_and(|c| c.rows().iter().any(|r| r.text.starts_with("Couldn't move to Claude")));
+            if !info.backend_failed || !line {
+                return false;
+            }
+            check(info.backend_detail == "the conversation couldn't be imported into Claude" && info.backend_value == "Codex · GPT-5.5",
+                &format!("a failed move says why and the agent stays: {:?} {:?}", info.backend_detail, info.backend_value));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "Escape closes the profile");
+            true
+        })),
+    ];
+    run_stages(stages);
+}

@@ -91,6 +91,10 @@ pub struct Agent {
     /// The Host the row belongs to, as a merged chat list names it; empty
     /// while the list holds one Host's agents (`clarp_core::all_hosts`).
     pub host: String,
+    /// The move to another backend running now (`transit` {transit_id,
+    /// phase, backend, model}, feature `agent_backend_transit`); None
+    /// otherwise.
+    pub transit: Option<Object>,
 }
 
 impl Default for Agent {
@@ -148,6 +152,7 @@ impl Default for Agent {
             moved_to: String::new(),
             moved_to_host: String::new(),
             host: String::new(),
+            transit: None,
         }
     }
 }
@@ -236,6 +241,7 @@ impl Agent {
                 .trim()
                 .to_owned(),
             host: String::new(),
+            transit: object.get("transit").and_then(Value::as_object).cloned(),
         }
     }
 

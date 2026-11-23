@@ -191,6 +191,55 @@ tool_explanation_settings = {"enabled": True, "detail_level": 2}
 # Coordination between agents (feature hidden_coordination, Host contract
 # 120): off until a check turns it on; the Host's value, and each chat's own.
 coordination = {"on": False, "visibility": "hide", "overrides": {}}
+# Moving an agent to another backend (feature agent_backend_transit, Rust
+# Host contract 158): off until /__control/transit turns it on. `respond`
+# answers the next POST /agent-transit instead ({status, body}); `fail`
+# makes the next move fail with that error; moves are kept by transit id
+# (GET /agent-transit) and by request id (a repeated start is the same).
+transit = {"on": False, "respond": None, "fail": None, "by_request": {}, "states": {}, "count": 0}
+
+
+def transit_label(backend, model):
+    """A backend's and a model's labels, as /agent-model-options names them."""
+    row = model_options.get("providers", {}).get(backend, {}) if isinstance(model_options.get("providers"), dict) else {}
+    label = row.get("label") or backend.title()
+    names = {m.get("id"): m.get("label") or m.get("id") for m in row.get("models", [])}
+    return label, names.get(model) or model or "default"
+
+
+def run_transit(transit_id, session, backend, model, fail):
+    """The move's phases as events, then its result in the agent's row and chat."""
+    global revision
+    with state_lock:
+        agent = next(a for a in agents if a["session"] == session)
+        before = (agent.get("backend", ""), agent.get("model", ""))
+    state = {"agent_id": agent["agent_id"], "session": session, "transit_id": transit_id, "backend": backend,
+             "model": model, "error": None, "previous_backend": before[0], "previous_model": before[1], "carried": None}
+    for phase in ["reading", "translating", "registering", "switching"]:
+        state["phase"] = phase
+        transit["states"][transit_id] = dict(state)
+        broadcast({"type": "agent-transit", **state})
+        time.sleep(0.05)
+    label, model_label = transit_label(backend, model)
+    old_label, old_model = transit_label(*before)
+    with state_lock:
+        if fail:
+            text = f"Couldn't move to {label}: {fail}. Still on {old_label} · {old_model}."
+        else:
+            agent["backend"], agent["model"] = backend, model
+            text = f"Now on {label} · {model_label}. The conversation came along."
+        revision += 1
+        turns.setdefault(session, []).append({"id": f"transit-{transit_id}", "role": "system", "origin": "system",
+                                              "kind": "agent-transit", "text": text, "revision": revision,
+                                              "timestamp": "2026-09-29T10:01:00Z"})
+        agent["head_revision"] = revision
+    state["phase"] = "failed" if fail else "done"
+    state["error"] = fail
+    state["carried"] = None if fail else {"turns": 1, "user": 1, "assistant": 1, "omitted": 0}
+    transit["states"][transit_id] = dict(state)
+    broadcast({"type": "agent-transit", **state})
+    broadcast({"type": "transcript-updated", "session": session})
+    broadcast({"type": "agent-roster", "session": session, "kind": "agent-transit"})
 
 
 def coordination_effective(session):
@@ -1155,6 +1204,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if coordination["on"]:
                 features.append("hidden_coordination")
+            if transit["on"]:
+                features.append("agent_backend_transit")
             if stall_feature:
                 features.append("stalled_turn")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
@@ -1292,6 +1343,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
             return self.reply(200, model_options)
+        if url.path == "/agent-transit":
+            state = transit["states"].get(query.get("transit_id", ""))
+            return self.reply(200, state) if state else self.reply(404, {"error": "unknown transit"})
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
         if url.path.startswith("/static/avatars/") and (AVATAR_DIR / url.path.rsplit("/", 1)[1]).is_file():
@@ -1768,6 +1822,29 @@ class Handler(BaseHTTPRequestHandler):
             coordination["visibility"] = body.get("coordination_visibility", "hide")
             broadcast({"type": "agent-roster", "kind": "coordination-changed"})
             return self.reply(200, {"coordination_visibility": coordination["visibility"]})
+        if url.path == "/__control/transit":
+            # Test control: the agent_backend_transit feature on or off (read
+            # from /server-info on connecting), the next start's answer, the
+            # next move's failure.
+            transit["on"] = bool(body.get("on", transit["on"]))
+            transit["respond"] = body.get("respond")
+            transit["fail"] = body.get("fail")
+            return self.reply(200, {"ok": True})
+        if url.path == "/agent-transit":
+            record({"method": "POST", "path": url.path, "body": body})
+            if transit["respond"]:
+                answer, transit["respond"] = transit["respond"], None
+                return self.reply(int(answer.get("status", 409)), answer.get("body", {}))
+            request_id = body.get("request_id", "")
+            if request_id in transit["by_request"]:
+                return self.reply(202, {"transit_id": transit["by_request"][request_id]})
+            transit["count"] += 1
+            transit_id = f"t-{transit['count']}"
+            transit["by_request"][request_id] = transit_id
+            fail, transit["fail"] = transit["fail"], None
+            threading.Thread(target=run_transit, daemon=True,
+                             args=(transit_id, body.get("session", ""), body.get("backend", ""), body.get("model", ""), fail)).start()
+            return self.reply(202, {"transit_id": transit_id})
         if url.path == "/agent-coordination":
             record({"method": "POST", "path": url.path, "body": body})
             session, visibility = body.get("session", ""), body.get("visibility", "default")
