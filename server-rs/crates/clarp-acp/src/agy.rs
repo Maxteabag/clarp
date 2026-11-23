@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 mod failure;
 mod place;
+pub mod steer;
 
 pub use failure::{Failure, classify, error_text, reason};
 pub use place::{here, poisoned_dir, profile};
