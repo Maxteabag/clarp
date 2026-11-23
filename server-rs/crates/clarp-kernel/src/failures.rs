@@ -28,6 +28,10 @@ pub const USAGE_LIMIT: &str = "usage_limit";
 pub const AUTH: &str = "auth";
 /// The account's plan does not include the model.
 pub const ACCOUNT_PLAN: &str = "account_plan";
+/// The conversation no longer fits the model: asked again, it fits no better, and no other
+/// account has a longer one. A kind of this Host's own: the Python Host reads it as the tool's
+/// exit.
+pub const PROMPT_TOO_LONG: &str = "prompt_too_long";
 /// The tool's process ended badly, without a word that says why.
 pub const RUNNER_EXIT: &str = "runner_exit";
 pub const TIMEOUT: &str = "timeout";
@@ -38,18 +42,39 @@ pub const UNKNOWN: &str = "unknown";
 pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
 
 /// The kinds the user is told of, once the Host has stopped trying.
-pub const NOTIFY: [&str; 10] = [
+pub const NOTIFY: [&str; 11] = [
     CONNECTION,
     TRANSIENT,
     INTERRUPTED,
     USAGE_LIMIT,
     AUTH,
     ACCOUNT_PLAN,
+    PROMPT_TOO_LONG,
     RUNNER_EXIT,
     TIMEOUT,
     NOT_STARTED,
     MUSE_SESSION_LOCKED,
 ];
+
+/// The kinds this Host reads that the Python Host does not (`docs/differences.md`).
+pub const OWN_KINDS: [&str; 1] = [PROMPT_TOO_LONG];
+
+/// The words a turn ends with whose tool said the conversation is too long for its model:
+/// the tool's own, after the Host's where they do not say it themselves, so that they are
+/// read as that kind whatever the tool's wording.
+pub fn prompt_too_long(said: &str) -> String {
+    let said = said.trim();
+    if PROMPT_TOO_LONG_RE.is_match(said) {
+        said.to_string()
+    } else if said.is_empty() {
+        PROMPT_TOO_LONG_SAID.to_string()
+    } else {
+        format!("{PROMPT_TOO_LONG_SAID}: {said}")
+    }
+}
+
+/// How the Host says it, where the tool's words do not.
+const PROMPT_TOO_LONG_SAID: &str = "Prompt is too long";
 
 /// What a Codex turn says when its failure reads like a usage limit and the provider did
 /// not confirm that the quota is spent.
@@ -135,6 +160,9 @@ static ACCOUNT_PLAN_RE: LazyLock<Regex> = LazyLock::new(|| {
         r"your (?:current )?plan does not (?:include|support|have access)",
     ))
 });
+// Claude Code 2.1.321: "Prompt is too long · the request is ~1050000 tokens (limit 1000000)
+// ...", with `terminal_reason` `prompt_too_long` on its result.
+static PROMPT_TOO_LONG_RE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bprompt is too long\b"));
 static RUNNER_EXIT_RE: LazyLock<Regex> = LazyLock::new(|| {
     pattern(concat!(
         r"\b(codex|clarp|agy|claude|agent|opencode)\s+exited\s+rc=\d+|",
@@ -192,10 +220,13 @@ pub fn classify_error(message: &str) -> &'static str {
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
     // stop. A turn that was stopped often also prints a broken pipe as it goes, and must
-    // not be tried again. A usage limit that advertises a plan is a usage limit.
-    let order: [(&LazyLock<Regex>, &str); 8] = [
+    // not be tried again. A prompt that is too long counts its tokens, and a count can read
+    // as a server's error (`1,529,000`); the tool exits badly on it as well. A usage limit
+    // that advertises a plan is a usage limit.
+    let order: [(&LazyLock<Regex>, &str); 9] = [
         (&TIMEOUT_RE, TIMEOUT),
         (&INTERRUPTED_RE, INTERRUPTED),
+        (&PROMPT_TOO_LONG_RE, PROMPT_TOO_LONG),
         (&USAGE_LIMIT_RE, USAGE_LIMIT),
         (&ACCOUNT_PLAN_RE, ACCOUNT_PLAN),
         (&AUTH_RE, AUTH),
@@ -358,6 +389,9 @@ fn sentence(kind: &str, model: &str) -> String {
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
         NOT_STARTED => "The turn could not be started".to_string(),
+        PROMPT_TOO_LONG => "This conversation is too long for the model. Compact it or start \
+             a new one"
+            .to_string(),
         ACCOUNT_PLAN => format!(
             "This account's plan does not include {}. Switch to an account that has it or \
              choose another model",
@@ -675,6 +709,37 @@ pub fn keeper_code(failure: &CliFailure) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prompt_too_long_for_the_model_is_read_before_what_its_count_looks_like() {
+        // Claude Code 2.1.321's words, and the same with a count that reads as a server error,
+        // after the tool's bad exit.
+        for said in [
+            "Prompt is too long · the request is ~1050000 tokens (limit 1000000)",
+            "Prompt is too long · the request is ~1,529,000 tokens (limit 1,000,000)\nclaude exited with code 1",
+        ] {
+            assert_eq!(classify_error(said), PROMPT_TOO_LONG, "{said}");
+            assert_eq!(prompt_too_long(said), said);
+        }
+        assert_eq!(prompt_too_long(""), "Prompt is too long");
+        assert_eq!(
+            prompt_too_long(" Request too large "),
+            "Prompt is too long: Request too large"
+        );
+        // The other words of a long context are not this Host's to read differently.
+        assert_eq!(
+            classify_error(
+                r#"{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}"#
+            ),
+            UNKNOWN
+        );
+        let told = told(PROMPT_TOO_LONG, "Prompt is too long", "m", Known::default());
+        assert_eq!(
+            told.summary,
+            "This conversation is too long for the model. Compact it or start a new one. Your \
+             message is saved."
+        );
+    }
 
     #[test]
     fn the_order_of_the_wordings_is_the_reading() {

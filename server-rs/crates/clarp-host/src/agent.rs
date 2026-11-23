@@ -5191,6 +5191,8 @@ fn told_state(status: &Status) -> ToldState {
         _ if live.is_some_and(waits_for_an_account) => "an account".to_string(),
         Some(Activity::Tool { name }) => name.clone(),
         Some(Activity::Responding) => wire::RESPONDING.to_string(),
+        // Each try of a provider that would not answer changes the line the apps show.
+        Some(Activity::Retrying(retry)) => retry.headline(),
         _ => String::new(),
     };
     (

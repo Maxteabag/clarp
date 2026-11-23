@@ -92,7 +92,9 @@ pub fn to_the_second(ms: i64) -> String {
 pub fn state_kind(status: &Status) -> AgentStateKind {
     match (&status.live, &status.last) {
         (Some(live), _) => match &live.activity {
-            Activity::Thinking | Activity::Responding => AgentStateKind::Thinking,
+            Activity::Thinking | Activity::Responding | Activity::Retrying(_) => {
+                AgentStateKind::Thinking
+            }
             Activity::Tool { .. } => AgentStateKind::Tool,
             Activity::Waiting => AgentStateKind::Waiting,
             Activity::Compacting => AgentStateKind::Compacting,
@@ -573,6 +575,11 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         running.map(|live| &live.activity),
         Some(Activity::Responding)
     );
+    // The tool asks a provider again that would not answer: thinking, in words that say why.
+    let retrying = match running.map(|live| &live.activity) {
+        Some(Activity::Retrying(retry)) => Some(retry.headline()),
+        _ => None,
+    };
     let (action, phase, state, outcome, summary) = match (&kind, status.last.as_ref()) {
         (AgentStateKind::Thinking, _)
             if running.is_some_and(|live| reconnecting(live).is_some()) =>
@@ -592,9 +599,13 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
             "running",
             "Responding",
         ),
-        (AgentStateKind::Thinking, _) => {
-            ("thinking", "thinking", "thinking", "running", "Thinking")
-        }
+        (AgentStateKind::Thinking, _) => (
+            "thinking",
+            "thinking",
+            "thinking",
+            "running",
+            retrying.as_deref().unwrap_or("Thinking"),
+        ),
         (AgentStateKind::Tool, _) => {
             let (action, summary) = tool_words.unwrap_or(("tool", "Using a tool"));
             (action, "tool", "tool", "running", summary)
@@ -1970,6 +1981,9 @@ pub fn summary(
         let (state, headline) = match (live.map(|live| &live.activity), tools.last(), completed) {
             // A turn that waits for an account: limited, and what it waits for.
             (Some(_), ..) if waiting.is_some() => ("limited", waiting),
+            // The provider would not answer and the tool asks it again: thinking, to the
+            // apps, in words that say why it takes so long.
+            (Some(Activity::Retrying(retry)), ..) => ("thinking", Some(retry.headline())),
             (Some(_), Some(tool), _) => ("tool", line(&tool.name, tool.category, &tool.label)),
             // A tool this Host was told of by its name alone.
             (Some(Activity::Tool { name }), None, _) => {
@@ -2888,6 +2902,21 @@ mod tests {
                 json!("compacting"),
                 json!("Compacting"),
                 json!("compacting")
+            )
+        );
+        // A provider that would not answer, asked again by the tool: thinking, to the apps,
+        // in words that say why it takes so long.
+        assert_eq!(
+            doing(Activity::Retrying(clarp_kernel::turn::ProviderRetry {
+                attempt: 2,
+                of: 10,
+                error: "overloaded".to_string(),
+                status: Some(529),
+            })),
+            (
+                json!("thinking"),
+                json!("API overloaded, retrying 2/10"),
+                json!("thinking")
             )
         );
         // A tool it was told of by name alone, and one it follows: the line says what it runs.

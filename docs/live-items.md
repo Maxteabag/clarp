@@ -175,7 +175,7 @@ in `GET /live` and on `/agents/snapshot` agents as `live_activity`:
 | `state` | meaning | busy |
 |---|---|---|
 | `idle` | no turn running | no |
-| `thinking` | the model is working without visible output (or reasoning) | yes |
+| `thinking` | the model is working without visible output (or reasoning). On a Rust Host, while the tool asks a provider that would not answer again, `headline` says so: "API overloaded, retrying 2/10" (also "API rate limited", "An API error") | yes |
 | `responding` | assistant text is streaming | yes |
 | `tool` | a tool is running; `tool` names it with its start time | yes |
 | `compacting` | context compaction | yes |
@@ -221,7 +221,10 @@ A `failed` turn adds `"error": {"reason": "account_plan", "message": "This
 account's plan does not include gpt-6-astra. …", "detail": "<the provider's own
 words>"}` (Host contract 54). Show `message` (and `detail` on demand) with the
 fold; never render a failed turn as if it had answered. The same text lands in
-`/log` as a `system`-origin row under the prompt.
+`/log` as a `system`-origin row under the prompt. From Rust Host contract 166 (feature
+`prompt_too_long`), a turn whose conversation no longer fits its model fails with `reason`
+`prompt_too_long` and the message "This conversation is too long for the model. Compact it
+or start a new one"; before, it was `runner_exit`.
 
 ## 2. Identity
 

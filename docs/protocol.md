@@ -431,6 +431,11 @@ Rules:
   among its newest rows that were written before its Host showed them so are sent once more,
   at a newer revision, so a delta gives an app that holds one the row as it is now, to replace
   where it stands; one the app does not hold belongs where its timestamp puts it.
+- **A conversation too long for its model is a failure of its own (Rust Host contract 166,
+  feature `prompt_too_long`).** Such a turn fails with the kind `prompt_too_long`, and its
+  reason is "This conversation is too long for the model. Compact it or start a new one",
+  with the tool's own words after it. It is never tried again and waits for no account.
+  Before contract 166 it was `runner_exit`.
 - **A turn's end says why it did not complete (Rust Host contract 162, feature
   `turn_end_reason`).** The row that closes a turn carries `turn` (`turn_id`, `status`,
   `started_at_ms`, `ended_at_ms`, `worked_ms`, `tool_count`). When `status` is not

@@ -312,3 +312,49 @@ fn a_hub_continued_past_another_sends_its_clients_to_the_snapshot() {
     assert_eq!(client.turn().unwrap()["turn_id"], json!("t-fork"));
     assert_eq!(client.lseq(), Some(fork.lseq()));
 }
+
+/// While the tool asks a provider again that would not answer, the status line is thinking in
+/// the words of the retry, until the tool goes on or the turn ends.
+#[test]
+fn a_provider_asked_again_is_shown_until_it_answers() {
+    let mut hub = Hub::new("e1", "a1", "s1");
+    let mut client = View::new();
+    let begun = hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    let (snapshot, _) = hub.snapshot(10).unwrap();
+    client.apply_snapshot(&snapshot);
+    for event in &begun {
+        assert!(client.apply_event(event).is_empty());
+    }
+    let line = |hub: &mut Hub, now: i64| hub.snapshot(now).unwrap().0["activity"].clone();
+    let told = hub.provider_retry(Some("API overloaded, retrying 1/10"), 20);
+    assert_eq!(told.len(), 1, "the status line is sent");
+    for event in &told {
+        assert!(client.apply_event(event).is_empty());
+    }
+    let shown = line(&mut hub, 21);
+    assert_eq!(
+        (&shown["state"], &shown["headline"]),
+        (&json!("thinking"), &json!("API overloaded, retrying 1/10"))
+    );
+    assert!(
+        hub.provider_retry(Some("API overloaded, retrying 1/10"), 22)
+            .is_empty(),
+        "the same try is told once"
+    );
+    let next = hub.provider_retry(Some("API overloaded, retrying 2/10"), 30);
+    assert_eq!(next.len(), 1);
+    assert_eq!(
+        line(&mut hub, 31)["since_ms"],
+        shown["since_ms"],
+        "it has thought since the first try"
+    );
+    assert_eq!(hub.provider_retry(None, 40).len(), 1, "its end is told");
+    let answered = line(&mut hub, 41);
+    assert_eq!(
+        (&answered["state"], &answered["headline"]),
+        (&json!("thinking"), &json!("Thinking"))
+    );
+    let _ = hub.provider_retry(Some("API rate limited, retrying 1/2"), 1_010);
+    let _ = hub.end_turn("failed", None, 1_020);
+    assert_eq!(line(&mut hub, 1_021)["state"], "interrupted");
+}
