@@ -197,6 +197,12 @@ pub enum Signal {
     TurnCost {
         micros: u64,
     },
+    /// The account the turn ran on is out of usage until this time, in milliseconds since
+    /// the epoch: the tool said so when it refused the turn. Told just before the turn's end,
+    /// which says that the account is out.
+    OutUntil {
+        at_ms: i64,
+    },
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }

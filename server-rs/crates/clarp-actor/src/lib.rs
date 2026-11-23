@@ -719,6 +719,8 @@ struct LiveTurn {
     tool_count: u32,
     /// The turn is a call's (its opening, or a message spoken in a call): someone listens.
     in_call: bool,
+    /// The attempt's tool said its account is out until then.
+    out_until_ms: Option<i64>,
 }
 
 impl LiveTurn {
@@ -760,8 +762,9 @@ impl LiveTurn {
 pub trait Pooled: Send + Sync {
     /// An attempt of the agent's turn failed on its account. Whether the turn waits for
     /// another account: where it does not, it ends on that failure. `plan`: the provider
-    /// said that the account does not offer the turn's model.
-    fn failed(&self, turn: TurnId, plan: bool, now_ms: i64) -> bool;
+    /// said that the account does not offer the turn's model. `resets_at_ms`: when the
+    /// account has usage again, where the tool said so.
+    fn failed(&self, turn: TurnId, plan: bool, resets_at_ms: Option<i64>, now_ms: i64) -> bool;
     /// Nothing of the agent's turn runs any more, as the pool had asked.
     fn stopped(&self, now_ms: i64);
 }
@@ -1046,6 +1049,8 @@ struct Failure<'a> {
     reason: &'a str,
     model: &'a str,
     trace_id: Option<String>,
+    /// When the account has usage again, where the tool said so: the row says when.
+    resets: Option<failures::Resets>,
 }
 
 /// The row that says, under the message that caused it, why its turn failed: the sentence for
@@ -1145,7 +1150,10 @@ fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
         failed.kind,
         failed.reason,
         failed.model,
-        failures::Known::default(),
+        failures::Known {
+            resets: failed.resets,
+            ..failures::Known::default()
+        },
     );
     Some(Entry::Notice(Notice {
         id: format!("marker-{}", failed.message_id),
@@ -1154,6 +1162,15 @@ fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
         text: told.row,
         trace_id: failed.trace_id,
     }))
+}
+
+/// When the account a turn waits on has usage again, and when its wait began: what the time
+/// is told against.
+fn resets_of(parked: &Parked) -> Option<failures::Resets> {
+    parked.wait.resets_at_ms().map(|at_ms| failures::Resets {
+        at_ms,
+        said_at_ms: parked.since_ms,
+    })
 }
 
 /// Whether the row that says why a turn failed closes the turn: it does when the turn put
@@ -1641,6 +1658,7 @@ impl Actor {
                 for_account: false,
                 tool_count: 0,
                 in_call,
+                out_until_ms: None,
             });
         }
         // A compaction whose turn ended and whose outcome an actor before this one did not
@@ -1821,8 +1839,15 @@ impl Actor {
                 let model = Some(model.as_str()).filter(|model| !model.is_empty());
                 failures::account_wait_message(self.backend.id(), model)
             });
-            let said = plan.as_deref().unwrap_or(ACCOUNT_WAIT);
-            let events = self.shown.account_recovery(waits.then_some(said), now_ms);
+            // One that waits for a reset it was told says when.
+            let resets = match self.recorder.agent().live() {
+                Some(Turn::Parked(parked)) => resets_of(parked),
+                _ => None,
+            };
+            let said = failures::with_reset(plan.as_deref().unwrap_or(ACCOUNT_WAIT), resets);
+            let events = self
+                .shown
+                .account_recovery(waits.then_some(said.as_str()), now_ms);
             self.shown_events.extend(events);
             // The tool asks a provider again that would not answer: the status line says so.
             let retry = match self.recorder.agent().live() {
@@ -4456,9 +4481,7 @@ impl Actor {
             let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
             let parked = Command::TurnParked {
                 turn,
-                wait: Wait::Account {
-                    until_ms: now_ms + most,
-                },
+                wait: Wait::account(now_ms + most),
                 kind: failures::USAGE_LIMIT.to_string(),
                 reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
             };
@@ -4563,6 +4586,7 @@ impl Actor {
                 reason,
                 model: &model,
                 trace_id: facts.trace_id.clone(),
+                resets: None,
             })
             .map(|marker| (marker, false)),
             Command::TurnEnded {
@@ -5034,6 +5058,7 @@ impl Actor {
             for_account: false,
             tool_count: 0,
             in_call,
+            out_until_ms: None,
         });
         // Never two sessions answer the user at once: a turn of the user's waits while the
         // agent's fork answers, and begins once the fork's turn is over, told what it said.
@@ -5331,6 +5356,7 @@ impl Actor {
             for_account: false,
             tool_count: 0,
             in_call,
+            out_until_ms: None,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
@@ -5474,6 +5500,15 @@ impl Actor {
         }
     }
 
+    /// When the account the turn that waits for one ran out on has usage again, where its
+    /// tool said so.
+    pub fn waits_until_reset(&self) -> Option<i64> {
+        match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => parked.wait.resets_at_ms(),
+            _ => None,
+        }
+    }
+
     /// The launch of the turn's attempt is held until an account serves it, or is no
     /// longer: those who watch the turn are shown that it waits for an account.
     pub fn held_for_an_account(&mut self, held: bool, now_ms: i64) {
@@ -5521,12 +5556,15 @@ impl Actor {
     /// found no account whose plan does. A turn that waits for anything else waits on.
     pub fn end_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
         let waits = match self.recorder.agent().live() {
-            Some(Turn::Parked(parked)) if parked.wait.is_for_an_account() => {
-                Some((parked.id, parked.kind.clone(), parked.reason.clone()))
-            }
+            Some(Turn::Parked(parked)) if parked.wait.is_for_an_account() => Some((
+                parked.id,
+                parked.kind.clone(),
+                parked.reason.clone(),
+                resets_of(parked),
+            )),
             _ => None,
         };
-        let Some((turn, kind, reason)) = waits else {
+        let Some((turn, kind, reason, resets)) = waits else {
             return Ok(Outputs::default());
         };
         let model = self.turn_model().unwrap_or_default();
@@ -5542,6 +5580,7 @@ impl Actor {
             reason: &reason,
             model: &model,
             trace_id: live.trace_id.clone(),
+            resets,
         });
         self.finish_waiting(turn, told, now_ms)
     }
@@ -5783,6 +5822,7 @@ impl Actor {
                                 reason: error,
                                 model: &model,
                                 trace_id: live.trace_id.clone(),
+                                resets: None,
                             })
                         {
                             batch.item(written(&marker, t)?);
@@ -5866,7 +5906,7 @@ impl Actor {
                                 let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
                                 let parked = Command::TurnParked {
                                     turn,
-                                    wait: Wait::Account { until_ms: t + most },
+                                    wait: Wait::account(t + most),
                                     kind: failures::USAGE_LIMIT.to_string(),
                                     reason: STOPPED_FOR_AN_ACCOUNT.to_string(),
                                 };
@@ -5889,6 +5929,10 @@ impl Actor {
                                 let kind = failures::classify_error(reason);
                                 let waits = batch.agent().live().map(Turn::account_waits);
                                 let waits = waits.unwrap_or_default();
+                                // When the account has usage again, where the tool said so
+                                // with a usage limit.
+                                let resets_at_ms =
+                                    live.out_until_ms.filter(|_| kind == failures::USAGE_LIMIT);
                                 // Its last row is still its message only while no attempt
                                 // has said or begun anything; and the turn's own record
                                 // counts the tools of every attempt, across a restart too.
@@ -5911,6 +5955,7 @@ impl Actor {
                                         nothing_done,
                                         busy: failures::provider_busy(reason),
                                         in_call: live.in_call,
+                                        resets_at_ms,
                                         now_ms: t,
                                     },
                                     accounts,
@@ -5921,15 +5966,21 @@ impl Actor {
                                             resume,
                                         })
                                     }
-                                    recovery::Next::Account { until_ms } => {
-                                        Some(Wait::Account { until_ms })
-                                    }
+                                    recovery::Next::Account { until_ms } => Some(Wait::Account {
+                                        until_ms,
+                                        resets_at_ms,
+                                    }),
                                     recovery::Next::Pool { plan } => {
                                         let pool = self.pool.as_ref();
-                                        let waits =
-                                            pool.is_some_and(|pool| pool.failed(turn, plan, t));
-                                        let most = recovery::ACCOUNT_WAIT_MOST_MS + POOL_MARGIN_MS;
-                                        waits.then_some(Wait::Account { until_ms: t + most })
+                                        let waits = pool.is_some_and(|pool| {
+                                            pool.failed(turn, plan, resets_at_ms, t)
+                                        });
+                                        let until_ms = recovery::pool_wait_until(resets_at_ms, t)
+                                            + POOL_MARGIN_MS;
+                                        waits.then_some(Wait::Account {
+                                            until_ms,
+                                            resets_at_ms,
+                                        })
                                     }
                                     recovery::Next::Fail => None,
                                 };
@@ -5966,6 +6017,10 @@ impl Actor {
                                     reason,
                                     model: &model,
                                     trace_id: live.trace_id.clone(),
+                                    resets: live.out_until_ms.map(|at_ms| failures::Resets {
+                                        at_ms,
+                                        said_at_ms: t,
+                                    }),
                                 })
                                 .map(|marker| {
                                     let closes = closed_by_marker(&live.last_row, &live.message_id);
@@ -6054,6 +6109,10 @@ impl Actor {
                         }
                         Signal::Limits(said) => {
                             live.limits = Some((t, said));
+                            continue;
+                        }
+                        Signal::OutUntil { at_ms } => {
+                            live.out_until_ms = Some(at_ms);
                             continue;
                         }
                         Signal::TurnCost { micros } => {

@@ -184,9 +184,31 @@ impl Service {
 
     /// An attempt of an agent's turn failed on its account. Whether the turn waits.
     /// `plan`: the provider said that the account does not offer the turn's model.
-    pub fn failed(self: &Arc<Self>, agent: &str, turn: TurnId, plan: bool) -> bool {
+    /// `resets_at_ms`: when the account has usage again, where the tool said so.
+    pub fn failed(
+        self: &Arc<Self>,
+        agent: &str,
+        turn: TurnId,
+        plan: bool,
+        resets_at_ms: Option<i64>,
+    ) -> bool {
         let trace = turn.0.to_string();
-        self.told(|pool, now| pool.request(agent, &trace, true, plan, now))
+        self.told(|pool, now| {
+            if let Some(at) = resets_at_ms {
+                pool.out_until(agent, &trace, at, now);
+            }
+            pool.request(agent, &trace, true, plan, now)
+        })
+    }
+
+    /// The agent's turn, carried over a restart, waits for an account that has usage again
+    /// at this time, as its tool said before the Host stopped.
+    pub fn out_until(self: &Arc<Self>, agent: &str, turn: TurnId, resets_at_ms: i64) {
+        let trace = turn.0.to_string();
+        self.told(|pool, now| {
+            pool.out_until(agent, &trace, resets_at_ms, now);
+            ((), Vec::new())
+        });
     }
 
     /// Nothing of the agent's turn runs any more.
@@ -397,8 +419,8 @@ struct OfAgent {
 }
 
 impl Pooled for OfAgent {
-    fn failed(&self, turn: TurnId, plan: bool, _now_ms: i64) -> bool {
-        self.service.failed(&self.agent, turn, plan)
+    fn failed(&self, turn: TurnId, plan: bool, resets_at_ms: Option<i64>, _now_ms: i64) -> bool {
+        self.service.failed(&self.agent, turn, plan, resets_at_ms)
     }
 
     fn stopped(&self, _now_ms: i64) {

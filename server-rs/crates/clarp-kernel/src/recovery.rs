@@ -9,8 +9,10 @@
 //! that had begun its work is told that it is taken up again and goes on from where it
 //! stands ([`continue_prompt`]). A call is not kept waiting so long: its turn ends at once.
 //! An account that is out passes when another account is put in its place, or when its limit
-//! is over: the turn waits for that, when this Host is told to. Everything else ends the turn,
-//! and the user is told why (`failures::told`).
+//! is over: the turn waits for that, when this Host is told to. Where the tool said when the
+//! account has usage again, the turn waits until then (and a minute more) and is taken up by
+//! itself; where it did not, it is tried now and then, for half an hour at most. Everything
+//! else ends the turn, and the user is told why (`failures::told`).
 
 use crate::failures;
 
@@ -39,16 +41,45 @@ pub const ACCOUNT_RECHECK_MOST_MS: i64 = 480_000;
 /// a Host for three and a half hours.)
 pub const ACCOUNT_WAIT_MOST_MS: i64 = 1_800_000;
 
+/// How long after the time the tool said its account has usage again the turn is tried: the
+/// provider's clock and this Host's are not one, and a turn tried a moment early is refused
+/// again.
+pub const RESET_MARGIN_MS: i64 = 60_000;
+
+/// The furthest reset a turn waits for. A window is a week long at most: a time later than
+/// this was not said of a window, and a turn does not wait for it.
+pub const RESET_FURTHEST_MS: i64 = 8 * 24 * 3_600_000;
+
+/// When a turn whose account ran out is tried again, where the tool said when the account has
+/// usage again: then, and a minute more. `None` where it said nothing, or a time that is no
+/// reset to wait for (one that is over, or one further than a week away).
+pub fn after_reset(resets_at_ms: Option<i64>, now_ms: i64) -> Option<i64> {
+    let at = resets_at_ms?.checked_add(RESET_MARGIN_MS)?;
+    (now_ms < at && at - now_ms <= RESET_FURTHEST_MS).then_some(at)
+}
+
+/// The latest a turn that waits in the pool of its tool's accounts waits on its own: half an
+/// hour, or until its account has usage again where that is later. The pool takes it up or
+/// lets it go before then.
+pub fn pool_wait_until(resets_at_ms: Option<i64>, now_ms: i64) -> i64 {
+    let half_hour = now_ms + ACCOUNT_WAIT_MOST_MS;
+    after_reset(resets_at_ms, now_ms).map_or(half_hour, |reset| reset.max(half_hour))
+}
+
 /// Whether this Host waits for an account when a turn fails on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Accounts {
     /// It does not: the turn ends and says why. A Host whose tools have one login, and
-    /// nobody to put another in its place.
+    /// nobody to put another in its place. Also where the tool said when the account has
+    /// usage again: such a Host does not follow the login, so a wait of hours would outlast
+    /// a sign-in to another account, and the agent's next messages would queue behind it. The
+    /// user is told when it resets (`failures::told`) and sends again.
     #[default]
     None,
     /// Someone else on the machine puts another login in place when an account is out: a
     /// Host beside this one that runs the owner's selector. The turn waits, and is tried
-    /// again when the login has changed, and now and then meanwhile. This Host never changes
+    /// again when the login has changed, and now and then meanwhile; or, where the tool said
+    /// when the account has usage again, then and not before. This Host never changes
     /// a login itself, and never stops a turn because another turn's account is out.
     Follow,
     /// This Host runs the owner's selector itself: it is alone on its machine, and nobody
@@ -97,6 +128,8 @@ pub struct Failed<'a> {
     pub busy: bool,
     /// The turn is a call's: someone listens, and is not kept in silence for a minute.
     pub in_call: bool,
+    /// When the account has usage again, where the tool said so with its refusal.
+    pub resets_at_ms: Option<i64>,
     pub now_ms: i64,
 }
 
@@ -148,6 +181,14 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
             }
         }
         failures::USAGE_LIMIT | failures::AUTH if accounts == Accounts::Follow => {
+            // The tool said when the account has usage again: the turn is not tried before,
+            // unless the login changes, and nothing but a Stop ends the wait, however long
+            // the turn has waited already.
+            if failed.kind == failures::USAGE_LIMIT
+                && let Some(until_ms) = after_reset(failed.resets_at_ms, failed.now_ms)
+            {
+                return Next::Account { until_ms };
+            }
             let since = failed.account_wait_since_ms.unwrap_or(failed.now_ms);
             let left = since + ACCOUNT_WAIT_MOST_MS - failed.now_ms;
             if left <= 0 {
@@ -214,6 +255,7 @@ mod tests {
             nothing_done: false,
             busy: false,
             in_call: false,
+            resets_at_ms: None,
             now_ms: 10_000,
         }
     }
@@ -356,6 +398,7 @@ mod tests {
                     nothing_done: false,
                     busy: false,
                     in_call: false,
+                    resets_at_ms: None,
                     now_ms: now,
                 },
                 Accounts::Follow,
@@ -381,6 +424,73 @@ mod tests {
             after_failed_attempt(failed(failures::AUTH, 1), Accounts::Follow),
             Next::Account { until_ms: 70_000 }
         );
+    }
+
+    #[test]
+    fn a_turn_whose_account_resets_at_a_time_it_was_told_waits_until_then_and_no_longer() {
+        let hour = 3_600_000;
+        let resets = |now_ms: i64, at: i64, waits: u32| Failed {
+            account_waits: waits,
+            account_wait_since_ms: (waits > 0).then_some(10_000),
+            resets_at_ms: Some(at),
+            now_ms,
+            ..failed(failures::USAGE_LIMIT, waits + 1)
+        };
+        // Five hours away: the turn is tried a minute after the reset, not now and then.
+        let at = 10_000 + 5 * hour;
+        assert_eq!(
+            after_failed_attempt(resets(10_000, at, 0), Accounts::Follow),
+            Next::Account {
+                until_ms: at + RESET_MARGIN_MS
+            }
+        );
+        // Out again when it is tried, after it waited far longer than half an hour: it waits
+        // for the next reset all the same.
+        let later = at + RESET_MARGIN_MS;
+        assert_eq!(
+            after_failed_attempt(resets(later, later + 2 * hour, 3), Accounts::Follow),
+            Next::Account {
+                until_ms: later + 2 * hour + RESET_MARGIN_MS
+            }
+        );
+        // A reset that is over, or one beyond a week, is waited for as a limit that said no
+        // time: now and then, and half an hour in all.
+        for at in [5_000 - RESET_MARGIN_MS, 10_000 + 9 * 24 * hour] {
+            assert_eq!(
+                after_failed_attempt(resets(10_000, at, 0), Accounts::Follow),
+                Next::Account { until_ms: 70_000 },
+                "{at}"
+            );
+        }
+        // Said of a sign-in, a time is no reset.
+        let auth = Failed {
+            kind: failures::AUTH,
+            ..resets(10_000, 10_000 + hour, 0)
+        };
+        assert_eq!(
+            after_failed_attempt(auth, Accounts::Follow),
+            Next::Account { until_ms: 70_000 }
+        );
+        // On a Host that waits for no account the turn ends at once, and on one that runs
+        // the selector the pool says what follows.
+        assert_eq!(
+            after_failed_attempt(resets(10_000, at, 0), Accounts::None),
+            Next::Fail
+        );
+        assert_eq!(
+            after_failed_attempt(resets(10_000, at, 0), Accounts::Select),
+            Next::Pool { plan: false }
+        );
+        // The turn's own wait in the pool lasts half an hour, or to the reset where that is
+        // later.
+        assert_eq!(pool_wait_until(None, 0), ACCOUNT_WAIT_MOST_MS);
+        assert_eq!(pool_wait_until(Some(60_000), 0), ACCOUNT_WAIT_MOST_MS);
+        assert_eq!(
+            pool_wait_until(Some(5 * hour), 0),
+            5 * hour + RESET_MARGIN_MS
+        );
+        assert_eq!(after_reset(Some(-RESET_MARGIN_MS), 0), None);
+        assert_eq!(after_reset(Some(i64::MAX), 0), None);
     }
 
     #[test]
@@ -426,6 +536,7 @@ mod tests {
             nothing_done: false,
             busy: false,
             in_call: false,
+            resets_at_ms: None,
             now_ms: 500_000,
         };
         assert_eq!(

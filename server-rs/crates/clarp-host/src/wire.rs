@@ -308,7 +308,16 @@ fn waiting_for_account(live: &LiveStatus, backend: &str) -> Option<String> {
         Some(model) if model.is_empty() => None,
         Some(model) => Some(model.as_str()),
     };
-    (waits || live.held_for_an_account).then(|| failures::account_wait_message(backend, model))
+    // One that waits for a reset its tool said says when.
+    let resets = parked.and_then(|parked| {
+        let at_ms = parked.wait.resets_at_ms()?;
+        Some(failures::Resets {
+            at_ms,
+            said_at_ms: parked.since_ms,
+        })
+    });
+    (waits || live.held_for_an_account)
+        .then(|| failures::with_reset(&failures::account_wait_message(backend, model), resets))
 }
 
 /// What the user is told of a turn that failed: its kind, and the Python Host's words for it
