@@ -358,7 +358,7 @@ GET /log?…&include_automated=0&include_tool_details=0
 | `limit` | 1–5000, default 100 |
 | *(none of the below)* | **Tail snapshot**: the newest `limit` messages in display order. |
 | `after_revision=N` | **Delta**: every message whose `revision > N`, ascending by revision. Includes messages that changed, not only new ones. |
-| `before=<message_id>` | **Older history**: the `limit` messages older than that message. |
+| `before=<message_id>` | **Older history**: the `limit` messages older than that message. An older page may hold again a row the newer page had: merge by `id` (rules below). |
 | `include_automated=0` | Hide heartbeat, leader, dreaming, and watcher traffic. |
 | `include_tool_details=0` | Collapse tool cards to one summary card per message; fetch `/message-tool-details?session=&message_id=` on demand. |
 | `coordination=auto\|hide\|show` | Feature `hidden_coordination`: leave coordination between agents out (`hide`), keep it (`show`), or follow the chat's setting (`auto`). Absent: every row, as before. |
@@ -430,6 +430,12 @@ Rules:
   user is told it, who stopped it and why, what interrupted it, or that a newer message's
   turn replaced it. It is absent on a completed turn and on ends written before contract
   162. It adds no row: an automated turn that fails stays quiet in the chat.
+- **Pages read back with `before` can share rows; merge them by `id`.** A page holds each
+  row once, with its newest version, at its place in the conversation. A row that was written
+  again after its place (a tool call that ended after later rows were written, a row the Host
+  updated) can come again on the older page read with `before`, with the same or a lower
+  `revision`. Merge pages by `id` and keep the higher `revision`, as for any two copies of a
+  row: a row two pages hold is one row, never shown or counted twice (issue 730).
 - **`has_more`** on a tail snapshot or an older-history page means older
   messages exist before the first one returned. On a delta it means more
   changed messages exist after the last one returned; call again.
