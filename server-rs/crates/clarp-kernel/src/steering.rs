@@ -50,10 +50,13 @@ pub struct FollowUp {
 
 /// A message of the user's that went to the tool in the prompt of another turn, with the
 /// message that turn began for ([`Join::together`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Gathered {
     pub turn: TurnId,
     pub message_seq: u64,
+    /// What it had as it waited: it waits so again if the turn gives it back.
+    pub origin: crate::turn::Origin,
+    pub accepted_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1133,12 +1133,20 @@ and so on, with nothing else added. Each of them leaves the queue as a started i
 (`queue-updated` with `queue_started: true` and its `client_msg_id`) and is a `/log` row of
 its own, in order after the first and before the answer, with its original `sent_at`. The
 answer is one turn: its rows and its end are on the first message's turn. The run stops at the
-first item that is not such a message (an agent's message, one left for later, one a Stop
-holds, one in a call), which keeps its own turn. A retry of the turn gives the tool the same
-prompt again. While a turn runs that cannot take such a message now (the tool cannot be steered,
+first item that is not such a message (an agent's message, one left for later, one sent now,
+one a Stop holds, one in a call), which keeps its own turn. A retry of the turn gives the tool
+the same prompt again, and no takeover replaces such a turn. When the turn ends before its tool
+began to write an answer, by anyone's Stop but the user's own (an agent's, a routine's, a newer
+message sent now) or because its process was lost, the messages it took after the first go back
+to the head of the queue, in order (behind a message sent now): each is an item of
+`GET /turn-queue` again, announced by `queue-updated`, while its `/log` row stays where it was,
+and the turn that takes them again writes no second row. The user's own Stop ends them with the
+turn, as it ends a message steered into it. While a turn runs that cannot take such a message now (the tool cannot be steered,
 as on Antigravity, or on Codex without its chat lane, or a steer was not possible), its `GET /turn-queue` item carries
 `read_together: true`, as does the `queue-updated` event it joined the queue with: draw it as
-queued, to be read with the user's other waiting messages when the turn is over. The field is
+queued, to be read with the user's other waiting messages when the turn is over. It is also
+`true` while a turn waits for its next attempt: such a message heads the next turn, with the ones
+behind it. The field is
 `false` on every other item and absent on other events; an older Host sends neither, and takes
 one item per turn.
 
