@@ -1809,6 +1809,16 @@ impl Actor {
             let said = plan.as_deref().unwrap_or(ACCOUNT_WAIT);
             let events = self.shown.account_recovery(waits.then_some(said), now_ms);
             self.shown_events.extend(events);
+            // The tool asks a provider again that would not answer: the status line says so.
+            let retry = match self.recorder.agent().live() {
+                Some(Turn::Running(turn)) => match &turn.activity {
+                    Activity::Retrying(retry) => Some(retry.headline()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let events = self.shown.provider_retry(retry.as_deref(), now_ms);
+            self.shown_events.extend(events);
         }
     }
 

@@ -1233,7 +1233,9 @@ impl Actor {
             Some(Activity::Responding) => json!({"state": "responding"}),
             Some(Activity::Waiting) => json!({"state": "waiting"}),
             Some(Activity::Compacting) => json!({"state": "compacting"}),
-            Some(Activity::Thinking) | None => json!({"state": "thinking"}),
+            Some(Activity::Thinking | Activity::Retrying(_)) | None => {
+                json!({"state": "thinking"})
+            }
         };
         Some(json!({
             "turn_id": name,

@@ -159,6 +159,8 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
                 until_ms: failed.now_ms + step.min(left),
             }
         }
+        // Everything else ends the turn and says why: a conversation too long for its model
+        // among it, which no try and no account makes fit.
         _ => Next::Fail,
     }
 }
@@ -302,6 +304,7 @@ mod tests {
             failures::USAGE_LIMIT,
             failures::AUTH,
             failures::ACCOUNT_PLAN,
+            failures::PROMPT_TOO_LONG,
             failures::RUNNER_EXIT,
             failures::NOT_STARTED,
             failures::UNKNOWN,
@@ -314,11 +317,21 @@ mod tests {
                 "{kind}"
             );
         }
+        // A conversation too long for its model fits no better asked again, also where the
+        // turn has done nothing yet.
+        for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
+            let untouched = Failed {
+                nothing_done: true,
+                ..failed(failures::PROMPT_TOO_LONG, 1)
+            };
+            assert_eq!(after_failed_attempt(untouched, accounts), Next::Fail);
+        }
         // And where one is waited for, a plan without the model still ends the turn: no
-        // wait puts a model into a plan.
+        // wait puts a model into a plan. Nor does any account make a conversation fit.
         for kind in [
             failures::ACCOUNT_PLAN,
             failures::TRANSIENT,
+            failures::PROMPT_TOO_LONG,
             failures::RUNNER_EXIT,
         ] {
             assert_eq!(
@@ -390,6 +403,7 @@ mod tests {
         for kind in [
             failures::TRANSIENT,
             failures::INTERRUPTED,
+            failures::PROMPT_TOO_LONG,
             failures::RUNNER_EXIT,
             failures::NOT_STARTED,
             failures::UNKNOWN,

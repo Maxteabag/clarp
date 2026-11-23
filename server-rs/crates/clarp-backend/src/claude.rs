@@ -9,10 +9,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
+use clarp_kernel::failures;
 use clarp_kernel::live::Glimpse;
 use clarp_kernel::takeover::{self, Input};
 use clarp_kernel::told;
-use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_kernel::turn::{Activity, ProviderRetry, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
@@ -253,6 +254,8 @@ impl Draft {
 struct ResultFacts {
     is_error: bool,
     text: String,
+    /// Why the tool says the turn ended (`completed`, `api_error`, `prompt_too_long`, ...).
+    terminal_reason: String,
 }
 
 /// What the ids of Claude Code's live items begin with.
@@ -774,6 +777,7 @@ impl ClaudeInterpreter {
                 self.result = Some(ResultFacts {
                     is_error: event["is_error"].as_bool().unwrap_or(false),
                     text: text_of(&event["result"]).to_string(),
+                    terminal_reason: text_of(&event["terminal_reason"]).to_string(),
                 });
                 out.push(Signal::Concluded);
             }
@@ -820,6 +824,26 @@ impl ClaudeInterpreter {
                     over: false,
                 }));
             }
+            // The provider would not answer (busy, limited, an error of its own), and Claude
+            // Code waits to ask it again by itself: the turn says so until its stream goes on.
+            "api_retry" => {
+                let count = |name: &str| {
+                    event[name]
+                        .as_u64()
+                        .and_then(|count| u32::try_from(count).ok())
+                };
+                self.moved(
+                    Activity::Retrying(ProviderRetry {
+                        attempt: count("attempt").unwrap_or(1),
+                        of: count("max_retries").unwrap_or(0),
+                        error: text_of(&event["error"]).to_string(),
+                        status: event["error_status"]
+                            .as_u64()
+                            .and_then(|status| u16::try_from(status).ok()),
+                    }),
+                    out,
+                );
+            }
             "compact_boundary" => {
                 self.moved(Activity::Thinking, out);
                 out.push(Signal::Glimpse(Glimpse::Compacting {
@@ -844,6 +868,10 @@ impl ClaudeInterpreter {
         let index = piece["index"].as_u64().unwrap_or(0);
         match text_of(&piece["type"]) {
             "message_start" => {
+                // The provider answers: whatever it was retried for is over.
+                if matches!(self.activity, Some(Activity::Retrying(_))) {
+                    self.moved(Activity::Thinking, out);
+                }
                 let id = text_of(&piece["message"]["id"]).to_string();
                 if id.is_empty() {
                     // A message start is a new boundary even when neither message has an id.
@@ -918,6 +946,10 @@ impl ClaudeInterpreter {
                 self.api_error = Some(said);
             }
             return;
+        }
+        // A message of the agent's that was not seen streaming: the provider answered.
+        if matches!(self.activity, Some(Activity::Retrying(_))) {
+            self.moved(Activity::Thinking, out);
         }
         // How full the conversation is: what this answer was made from, sent anew, read from
         // the cache and written to it. The sum a turn's result says counts every step of the
@@ -1099,6 +1131,20 @@ impl ClaudeInterpreter {
         } else if let Some(signal) = signal {
             RunOutcome::Interrupted {
                 reason: format!("claude was ended by signal {signal}"),
+            }
+        } else if let Some(result) = self
+            .result
+            .as_ref()
+            .filter(|result| result.terminal_reason == "prompt_too_long")
+        {
+            // The conversation no longer fits the model. The tool exits badly on it, which
+            // says nothing more: its own words say how much too long it is.
+            let said = match result.text.trim() {
+                "" => api_error.as_deref().unwrap_or_default(),
+                said => said,
+            };
+            RunOutcome::Failed {
+                reason: failures::prompt_too_long(&shorten(said, 600)),
             }
         } else if code != Some(0) {
             failed(
@@ -1643,6 +1689,100 @@ mod tests {
                 Signal::Ended(RunOutcome::Completed)
             ]
         );
+    }
+
+    #[test]
+    fn a_provider_asked_again_is_the_turns_activity_until_it_answers() {
+        let retry = |attempt: u32, error: &str, status: u16| {
+            format!(
+                r#"{{"type":"system","subtype":"api_retry","attempt":{attempt},"max_retries":10,"retry_delay_ms":1191,"error_status":{status},"error":"{error}"}}"#
+            )
+        };
+        let lines = [
+            INIT.to_string(),
+            retry(1, "overloaded", 529),
+            retry(2, "overloaded", 529),
+            stream(r#"{"type":"message_start","message":{"id":"msg_1","role":"assistant"}}"#),
+            stream(
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            ),
+            stream(
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}"#,
+            ),
+            stream(r#"{"type":"message_stop"}"#),
+            RESULT.to_string(),
+        ];
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let moves: Vec<Activity> = read(&lines, (Some(0), None))
+            .into_iter()
+            .filter_map(|signal| match signal {
+                Signal::Moved(activity) => Some(activity),
+                _ => None,
+            })
+            .collect();
+        let tried = |attempt: u32| {
+            Activity::Retrying(ProviderRetry {
+                attempt,
+                of: 10,
+                error: "overloaded".to_string(),
+                status: Some(529),
+            })
+        };
+        assert_eq!(
+            moves,
+            vec![tried(1), tried(2), Activity::Thinking, Activity::Responding],
+            "each try is told, and the provider's answer ends them"
+        );
+        // A try of which the tool says little is told all the same.
+        let bare = read(
+            &[INIT, r#"{"type":"system","subtype":"api_retry"}"#, RESULT],
+            (Some(0), None),
+        );
+        assert!(
+            bare.contains(&Signal::Moved(Activity::Retrying(ProviderRetry {
+                attempt: 1,
+                of: 0,
+                error: String::new(),
+                status: None,
+            })))
+        );
+    }
+
+    #[test]
+    fn a_prompt_too_long_for_the_model_is_a_failure_of_its_own() {
+        let said = "Prompt is too long · the request is ~1050000 tokens (limit 1000000) but this conversation is only ~2648 tokens";
+        let result = |said: &str| {
+            format!(
+                r#"{{"type":"result","subtype":"success","is_error":true,"result":"{said}","api_error_status":400,"terminal_reason":"prompt_too_long"}}"#
+            )
+        };
+        let refused = format!(
+            r#"{{"type":"assistant","error":"invalid_request","message":{{"id":"x","model":"<synthetic>","role":"assistant","content":[{{"type":"text","text":"{said}"}}]}}}}"#
+        );
+        for exit in [Some(0), Some(1)] {
+            let ended = read(
+                &[INIT, refused.as_str(), result(said).as_str()],
+                (exit, None),
+            );
+            let Some(Signal::Ended(RunOutcome::Failed { reason })) = ended.last() else {
+                panic!("the turn fails: {ended:?}");
+            };
+            assert_eq!(
+                reason, said,
+                "the tool's own words, and nothing of its exit"
+            );
+            assert_eq!(failures::classify_error(reason), failures::PROMPT_TOO_LONG);
+        }
+        // Words that do not say it themselves are read as the kind the tool named.
+        let ended = read(
+            &[INIT, result("Request too large").as_str()],
+            (Some(1), None),
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = ended.last() else {
+            panic!("the turn fails: {ended:?}");
+        };
+        assert_eq!(reason, "Prompt is too long: Request too large");
+        assert_eq!(failures::classify_error(reason), failures::PROMPT_TOO_LONG);
     }
 
     #[test]
