@@ -749,6 +749,10 @@ impl ClaudeInterpreter {
                 // work behind it answers that first, with a result of its own. The turn is over
                 // when the process is, and the last result is the one that counts.
                 self.settle(out);
+                // Whatever the provider was asked again for is over with the result.
+                if matches!(self.activity, Some(Activity::Retrying(_))) {
+                    self.moved(Activity::Thinking, out);
+                }
                 // What the turn took in is what was sent, what was written to the cache and
                 // what was read from it, as the Python Host counts it
                 // (`turn_stop._result_detail`): a turn that goes on in a long conversation
@@ -826,7 +830,14 @@ impl ClaudeInterpreter {
             }
             // The provider would not answer (busy, limited, an error of its own), and Claude
             // Code waits to ask it again by itself: the turn says so until its stream goes on.
-            "api_retry" => {
+            // A tool that runs or a compaction says more of what the turn does, and nothing of
+            // theirs would end the retry's words.
+            "api_retry"
+                if !matches!(
+                    self.activity,
+                    Some(Activity::Tool { .. } | Activity::Compacting)
+                ) =>
+            {
                 let count = |name: &str| {
                     event[name]
                         .as_u64()
@@ -937,6 +948,11 @@ impl ClaudeInterpreter {
         let Some(content) = message["content"].as_array() else {
             return;
         };
+        // A message, the agent's or the tool's own about the provider: the retries are over,
+        // answered or given up.
+        if matches!(self.activity, Some(Activity::Retrying(_))) {
+            self.moved(Activity::Thinking, out);
+        }
         // When the provider cannot be reached or refuses, Claude Code writes the error where a
         // message of the agent would be. The agent did not say it: it is why the turn failed.
         let marked = |value: &Value| value["isApiErrorMessage"].as_bool() == Some(true);
@@ -946,10 +962,6 @@ impl ClaudeInterpreter {
                 self.api_error = Some(said);
             }
             return;
-        }
-        // A message of the agent's that was not seen streaming: the provider answered.
-        if matches!(self.activity, Some(Activity::Retrying(_))) {
-            self.moved(Activity::Thinking, out);
         }
         // How full the conversation is: what this answer was made from, sent anew, read from
         // the cache and written to it. The sum a turn's result says counts every step of the
@@ -1746,6 +1758,52 @@ mod tests {
                 status: None,
             })))
         );
+    }
+
+    #[test]
+    fn a_retry_never_takes_the_place_of_a_compaction_or_a_tool() {
+        let retry = r#"{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":600,"error_status":529,"error":"overloaded"}"#;
+        let moves = |lines: &[&str]| -> Vec<Activity> {
+            read(lines, (Some(0), None))
+                .into_iter()
+                .filter_map(|signal| match signal {
+                    Signal::Moved(activity) => Some(activity),
+                    _ => None,
+                })
+                .collect()
+        };
+        let compacted = moves(&[
+            INIT,
+            r#"{"type":"system","subtype":"status","status":"compacting"}"#,
+            retry,
+            r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":30000,"post_tokens":9000}}"#,
+            RESULT,
+        ]);
+        assert_eq!(compacted, [Activity::Compacting, Activity::Thinking]);
+        let tool = r#"{"type":"assistant","message":{"id":"msg_t","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        let working = moves(&[INIT, tool, retry, RESULT]);
+        assert_eq!(
+            working,
+            [Activity::Tool {
+                name: "Bash".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_prompt_too_long_said_without_its_reason_is_read_from_the_words() {
+        // How a tool that names no reason on its result, or writes no result, ends such a turn:
+        // its error in the place of a message, and a bad exit.
+        let said = "Prompt is too long · the request is ~1,529,000 tokens (limit 1,000,000)";
+        let refused = format!(
+            r#"{{"type":"assistant","error":"invalid_request","message":{{"id":"x","model":"<synthetic>","role":"assistant","content":[{{"type":"text","text":"{said}"}}]}}}}"#
+        );
+        let ended = read(&[INIT, refused.as_str()], (Some(1), None));
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = ended.last() else {
+            panic!("the turn fails: {ended:?}");
+        };
+        assert!(reason.starts_with(said), "{reason}");
+        assert_eq!(failures::classify_error(reason), failures::PROMPT_TOO_LONG);
     }
 
     #[test]

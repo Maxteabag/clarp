@@ -1264,6 +1264,80 @@ fn a_message_of_the_agent_is_one_row_with_the_tools_it_calls() {
     );
 }
 
+/// The headlines of the status lines among live events, in order.
+fn status_headlines(events: &[serde_json::Value]) -> Vec<String> {
+    events
+        .iter()
+        .flat_map(|event| event["ops"].as_array().cloned().unwrap_or_default())
+        .filter(|op| op["op"] == "status")
+        .map(|op| {
+            op["activity"]["headline"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn a_provider_asked_again_is_on_the_live_status_line_until_it_answers() {
+    let mut world = World::new("provider-retry");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    let now = world.tick();
+    let _ = actor.take_shown(now);
+
+    // What Claude Code 2.1.321 said while its provider stayed overloaded: it starts, asks, and
+    // is told twice to wait.
+    let recorded = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../clarp-backend/tests/fixtures/claude-2.1.321-overloaded.jsonl"
+    ))
+    .unwrap();
+    for line in recorded
+        .lines()
+        .filter(|line| line.contains("\"type\":\"system\""))
+    {
+        world.says(1, line);
+    }
+    world.hint(&mut actor);
+    let now = world.tick();
+    let told = status_headlines(&actor.take_shown(now));
+    assert_eq!(
+        told.last().map(String::as_str),
+        Some("API overloaded, retrying 2/2"),
+        "{told:?}"
+    );
+    let now = world.tick();
+    assert_eq!(
+        actor.shown_whole(now)["activity"]["headline"],
+        "API overloaded, retrying 2/2"
+    );
+
+    // The provider answers: the line says what the turn does now.
+    claude_message(&mut world, 1, "a", "Here.", &[]);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let told = status_headlines(&actor.take_shown(now));
+    assert!(
+        told.last()
+            .is_some_and(|headline| !headline.contains("retrying")),
+        "{told:?}"
+    );
+    let now = world.tick();
+    let whole = actor.shown_whole(now);
+    let headline = whole["activity"]["headline"].as_str().unwrap_or("");
+    assert!(!headline.contains("retrying"), "{whole:#}");
+    assert!(
+        !matches!(
+            actor.status().live.map(|live| live.activity),
+            Some(clarp_kernel::turn::Activity::Retrying(_))
+        ),
+        "the turn's own activity has moved on"
+    );
+}
+
 #[test]
 fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
     let mut world = World::new("message-rows-restart");

@@ -391,6 +391,8 @@ fn a_real_turn_whose_provider_stays_overloaded_says_each_try() {
         }))
     };
     assert_eq!(&stored[1..3], [&tried(1), &tried(2)], "{stored:#?}");
+    // Once it has given up, the turn no longer says it tries again.
+    assert_eq!(stored[3], &Signal::Moved(Activity::Thinking), "{stored:#?}");
     // The tool gives up in its own words, which say the provider is busy: a failure that
     // passes, asked again by the Host only where the turn has done nothing.
     let Some(Signal::Ended(RunOutcome::Failed { reason })) = signals.last() else {
