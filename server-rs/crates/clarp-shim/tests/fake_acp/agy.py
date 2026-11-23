@@ -95,6 +95,15 @@ def prompt(mid, sid):
     if scenario == "signature":
         return error(mid, -32603, "messages.3.content.0: Invalid `signature` in `thinking` block")
     text(sid, "agent_thought_chunk", "Considering")
+    if scenario == "detached":
+        # What an agent leaves running on purpose: one in a session of its own, one `nohup`-style
+        # in agy's group, both writing elsewhere than agy's pipes.
+        log = open(os.path.join(here, "server.log"), "a")
+        own = subprocess.Popen(["sleep", "120"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, start_new_session=True)
+        kept = subprocess.Popen(["sleep", "120"], stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+        with open(os.path.join(here, "detached.pids"), "w") as pids:
+            pids.write("%d %d" % (own.pid, kept.pid))
     if scenario == "orphan":
         # A child that outlives agy and holds its standard error.
         subprocess.Popen(["sleep", "120"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
