@@ -64,11 +64,15 @@ agent's name, voice, goals and chat history stay.
 
 `agy-acp` ("Antigravity (ACP)" in the pickers, on a Rust Host with the feature
 `backend_agy_acp`, contract 165) is Antigravity driven over the Agent Client
-Protocol (`agy acp`): the same program, sign-in, models and conversations as `agy`,
-but its message has no 60 KB limit, files a user attached (pictures, sounds, PDFs)
-reach the model as themselves, and Stop cancels the turn cleanly. It cannot yet be
-steered while a turn runs: a message sent then waits for the next turn. Moving
-between `agy` and `agy-acp` carries the conversation like any other move. To move an agent to another Host instead, use
+Protocol (`agy acp`): the same program, sign-in, models and conversations as `agy`
+(unless the Host sets `CLARP_AGY_ACP_PROFILE`, which gives it a sign-in and store of
+its own), but its message has no 60 KB limit, a picture a user attached reaches the
+model as itself, a PDF is given to Antigravity as a link to the file, and Stop
+cancels the turn cleanly. Sounds stay a path in the message for now (agy 1.5 takes no
+audio over ACP). It cannot yet be steered while a turn runs: a message sent then
+waits for the next turn. Moving between `agy` and `agy-acp` carries the conversation
+like any other move. A Host without the feature leaves an `agy-acp` agent out until
+it is updated. To move an agent to another Host instead, use
 `clarp-switch-agent-host`.
 
 ## An agent stays busy with no process
