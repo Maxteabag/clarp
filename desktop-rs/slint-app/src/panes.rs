@@ -152,6 +152,39 @@ fn live_source(entry: &clarp_core::live_present::Entry) -> Shown {
     (source, entry.expanded, crate::live_view::signature(entry), entry.key.clone())
 }
 
+/// One quiet line under each turn that did not complete, in the Host's
+/// words (`turn_end_reason`, #731): drawn as the Host's own system lines are.
+fn splice_turn_reasons(lines: &[clarp_core::turn_reason::Line], fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
+    if lines.is_empty() {
+        return;
+    }
+    let placed = {
+        let shown: Vec<clarp_core::turn_reason::Shown<'_>> = fresh.iter().map(|(row, ..)| clarp_core::turn_reason::Shown::of(&row.message, &row.body)).collect();
+        clarp_core::turn_reason::place(lines, &shown)
+    };
+    // Last first, so the earlier places still hold.
+    for (at, line) in placed.into_iter().rev() {
+        let source = clarp_core::presentation::PresentedRow {
+            source_row: usize::MAX,
+            message: clarp_core::protocol::Message { id: line.key.clone(), role: "system".into(), text: line.text.clone(), display_text: line.text.clone(), ..Default::default() },
+            body: line.text.clone(),
+            activity: false,
+            tools: Vec::new(),
+            display_cells: Vec::new(),
+            activity_count: 0,
+            group_ids: Vec::new(),
+            group_label: String::new(),
+            group_expanded: false,
+            activity_inline: false,
+            activity_label: String::new(),
+            explanation_repeat: 0,
+        };
+        let row = crate::view::message_row(&source, false, &std::collections::HashSet::new());
+        rows.insert(at, row);
+        fresh.insert(at, (source, false, format!("turn-reason|{}", line.text), line.key));
+    }
+}
+
 impl App {
     /// Brings every pane's scroll book up to its rows; true while rows
     /// remain to be measured. A pane busy elsewhere is left for next time.
@@ -595,16 +628,18 @@ impl App {
         // its tools) the item rows show instead.
         // Finished turns fold the same way (§7.6): their rows show as the
         // fold, their tools as its rows.
-        let (live, history, projection) = {
+        let (live, history, projection, reasons) = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
+            // Why each turn that did not complete ended (`turn_end_reason`, #731).
+            let reasons = if engine.turn_end_reason(&pane.session) { clarp_core::turn_reason::ended(&rows) } else { Vec::new() };
             let expanded = self.expanded.borrow();
             let live = crate::live_view::present(&engine, &pane.session, &rows, &expanded);
             let history = crate::live_view::history(&engine, &pane.session, &rows, &expanded, live.as_ref());
             // Conversation view (#702): the rows it leaves out, and each
             // finished turn's Show work on its reply.
             let projection = crate::live_view::conversation_view(&engine, &pane.session, &rows).then(|| clarp_core::chat_view::project(&rows, &expanded));
-            (live, history, projection)
+            (live, history, projection, reasons)
         };
         let mut hide = history.hidden_rows.clone();
         if let Some(projection) = &projection {
@@ -793,6 +828,7 @@ impl App {
             self.splice_live(pane, &live, &mut fresh, &mut rows);
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
+        splice_turn_reasons(&reasons, &mut fresh, &mut rows);
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         let (removed, inserted, updated) = sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
