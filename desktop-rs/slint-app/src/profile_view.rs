@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use clarp_engine::Change;
 use serde_json::Value;
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use clarp_core::transit::{self, Step};
 
