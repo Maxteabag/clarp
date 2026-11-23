@@ -233,6 +233,9 @@ pub fn conversation_view_check(out: String) {
             check(has("w-1") && app.engine.borrow().chat_view(SESSION) == "session", "the chat's own Session still wins over it");
             menu_open(window);
             crate::chat_menu::pick(&app_now(), window, "view", "default");
+            // Picked on the menu directly: apply it now, as the menu's own
+            // callback does (no Host reply wakes the engine for this one).
+            crate::pump();
             true
         })),
         ("follow settings", Box::new(move |app, _window, elapsed| {
