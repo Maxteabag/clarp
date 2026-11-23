@@ -6,6 +6,9 @@ and its checks, every stage of the validator, every cap at and one over, every b
 told, which client may see a spec; and the Host's part: the threshold and the header, each of the row's forms, the
 single read, publish, revision and validate-only, the submission, the catalog's route and the agent's tool.
 """
+import pathlib
+import re
+
 import runner
 
 RUNS = {
@@ -27,6 +30,9 @@ F = 'clarp-kernel/src/artifacts/forms.rs'
 H = 'clarp-host/src/render_spec.rs'
 L = 'clarp-host/src/library.rs'
 E = 'clarp-host/src/edge.rs'
+# The contract the Host speaks, read where it is set, so that the plant on it follows a renumbering.
+CONTRACT = int(re.search(r'pub const HOST_CONTRACT: u64 = (\d+);',
+                         (pathlib.Path(__file__).resolve().parents[2] / 'crates' / E).read_text())[1])
 T = 'clarp-host/src/artifact_tool.rs'
 # NOT PLANTED, each with its reason:
 #   that the catalog cannot be loaded (`CATALOG_UNAVAILABLE => 503`, the `Err` arms of `published`, `submit`,
@@ -371,7 +377,7 @@ PLANTS = [
     (L, 'host', 'what is done with a spec is answered as to a client that cannot see', '    let artifact = shown(app, done.artifact, "", capable).await;', '    let artifact = shown(app, done.artifact, "", render_spec::Access::default()).await;'),
     (L, 'host', 'Updates are answered as to a client that cannot see', '        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::capable(&app, &headers)).await,', '        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::Access::default()).await,'),
     (L, 'host', 'the catalog is at another address', '        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))', '        .route("/artifact-catalogs/clarp.form/2", get(render_spec::catalog))'),
-    (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 167;', 'pub const HOST_CONTRACT: u64 = 166;'),
+    (E, 'host', 'the contract is the one before', f'pub const HOST_CONTRACT: u64 = {CONTRACT};', f'pub const HOST_CONTRACT: u64 = {CONTRACT - 1};'),
     (E, 'host', 'the feature came with the contract before', '    ("render_spec", 102),', '    ("render_spec", 101),'),
     # The texts besides a payload (the reference's PR 438: R71, R72).
     (R, 'vectors', 'a text of the envelope with half a pair is text', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(_))'),

@@ -154,7 +154,7 @@ impl Launcher {
         if order.prompt_as_file {
             command.arg("--prompt-as-file");
         }
-        if order.args.iter().any(|arg| arg == REPLAY_USER_MESSAGES) {
+        if order.streams_input {
             command.args(["--stdin-until", "result"]);
         }
         if let Some(session) = &order.named_session {
@@ -274,6 +274,8 @@ pub(crate) async fn gate_steering(order: &mut ShimOrder, versions: &crate::cli_v
     let version = versions.answer(PathBuf::from(&order.program)).await;
     if !version.is_some_and(|version| clarp_kernel::steering::supported_version(&version)) {
         order.args.retain(|arg| arg != REPLAY_USER_MESSAGES);
+        // A Claude Code that would not say what it read is given its one message and no more.
+        order.streams_input = false;
     }
 }
 
@@ -553,6 +555,7 @@ mod tests {
             model: None,
             effort: None,
             prompt_as_file: false,
+            streams_input: false,
             before_stop: None,
             turn: TurnId(7),
             attempt: 1,
@@ -571,6 +574,25 @@ mod tests {
             .chain(command.get_args())
             .map(|word| word.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn a_turn_that_takes_more_messages_keeps_its_input_open_until_its_first_result() {
+        let direct = Launcher::by_name("direct", PathBuf::from("/bin/clarp-shim")).unwrap();
+        let mut order = order();
+        order.program = "clarp-shim".into();
+        order.args = vec!["agy-acp-turn".into(), "agy".into()];
+        order.streams_input = true;
+        let given = words(&direct.command(&order));
+        let at = given
+            .iter()
+            .position(|word| word == "--stdin-until")
+            .unwrap();
+        assert_eq!(given[at + 1], "result");
+        assert!(at < given.iter().position(|word| word == "--").unwrap());
+        order.streams_input = false;
+        let given = words(&direct.command(&order));
+        assert!(!given.iter().any(|word| word == "--stdin-until"));
     }
 
     #[test]

@@ -45,7 +45,8 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// `steering.rs`). Nobody signs in from an app (but on the Host that keeps the machine's
 /// tools: `told`), and what an account has used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
-/// conversation is not made shorter from an app; over ACP, its turn is not steered either.
+/// conversation is not made shorter from an app; over ACP, steering is not advertised, as for
+/// Claude Code, and a message sent to a running turn is read into it all the same.
 const NOT_YET: [(&str, &[&str]); 5] = [
     (
         "claude",
@@ -63,8 +64,9 @@ const NOT_YET: [(&str, &[&str]); 5] = [
         ],
     ),
     ("agy", &["supports_compact"]),
-    // Antigravity over ACP is not steered in its first version, whatever the `agy` row it is
-    // made from says: a message sent while its turn runs waits for the next turn.
+    // Antigravity over ACP does not advertise steering, whatever the `agy` row it is made
+    // from says: as for Claude Code, a message sent while its turn runs is offered to that turn
+    // by the Host (`Backend::steers`), and no app asks for it.
     ("agy-acp", &["supports_compact", "supports_steer"]),
     ("grok", &["supports_compact", "supports_auth"]),
 ];

@@ -29,6 +29,8 @@ mod agent_read_parity;
 mod agent_transit;
 #[path = "host/agy_acp.rs"]
 mod agy_acp;
+#[path = "host/agy_acp_steer.rs"]
+mod agy_acp_steer;
 #[path = "host/backend_auth.rs"]
 mod backend_auth;
 #[path = "host/body_text.rs"]

@@ -229,6 +229,43 @@ pub trait Backend: Send + Sync {
         false
     }
 
+    /// Whether a running turn of this tool takes another message of the user's. The Host
+    /// writes it on the turn's standard input, which it keeps open until the tool's first
+    /// result, and the tool says on its output when it read the message and which result
+    /// answers it (`clarp_kernel::steering`). A message it does not read runs as a turn of its
+    /// own afterwards.
+    fn steers(&self) -> bool {
+        false
+    }
+
+    /// Whether this message can go to a running turn as it is. A message the tool would be
+    /// given as more than its words waits for a turn of its own.
+    fn steers_message(&self, text: &str) -> bool {
+        !text.trim().is_empty() && self.steers()
+    }
+
+    /// Whether the tool keeps a record of its own of the messages it read, beside its output:
+    /// a message given to a running turn then names the tool's process and session, so that a
+    /// Host that restarts fences that process and reads the record ([`Backend::followups_read`]).
+    /// For any other tool the spool is the record: a message it took and did not yet say it
+    /// took when it died is unread, and runs as a turn of its own.
+    fn records_reads(&self) -> bool {
+        false
+    }
+
+    /// The messages given to a turn that the tool's own record says it read, where its output
+    /// may not say so ([`Backend::records_reads`]). `None` where there is no such record, or it
+    /// could not be read.
+    fn followups_read(
+        &self,
+        _owner: &clarp_kernel::steering::InputOwner,
+        _cwd: &Path,
+        _session: &str,
+        _waiting: &std::collections::BTreeSet<String>,
+    ) -> Option<std::collections::BTreeMap<String, past::ReadFollowup>> {
+        None
+    }
+
     /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
     /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
     /// when the tool gives it none. (A turn's number is not such a name: an agent that moves

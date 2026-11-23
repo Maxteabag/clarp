@@ -2971,14 +2971,14 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
-        // A Codex turn takes steered words only on its lane, and only while the owner's
-        // setting runs chat turns there: with it off, a goal turn is not steered, as before
-        // (review of 23 Nov 2026). The actor reads from the turn's spool whether it can.
-        let can_offer_steering = match self.setup.record.backend.as_str() {
-            "claude" => true,
-            "codex" => self.chat_lane(),
-            _ => false,
-        } && match &ask {
+        // A tool whose running turn takes another message on its input (Claude Code, agy-acp)
+        // is offered the user's. A Codex turn takes steered words only on its lane, and only
+        // while the owner's setting runs chat turns there: with it off, a goal turn is not
+        // steered, as before (review of 23 Nov 2026). The actor reads from the turn's spool
+        // whether it can, and decides by the message's text.
+        let can_offer_steering = (self.setup.backend.steers()
+            || (self.setup.record.backend == "codex" && self.chat_lane()))
+            && match &ask {
             Ask::Send {
                 message,
                 admission,

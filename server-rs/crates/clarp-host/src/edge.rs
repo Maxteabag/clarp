@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 167;
+pub const HOST_CONTRACT: u64 = 168;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -378,6 +378,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // where no other seat of its tool would take its turn (`clarp_kernel::quota_near`). The
     // apps are told when it appears, changes or clears (`agent-roster`, `backend-quota`).
     ("backend_quota_near", 167),
+    // A message the user sends to a busy `agy-acp` agent is offered to its running turn, as
+    // one to a busy Claude agent is: read into it, or answered as a turn of its own in the
+    // same process, and otherwise run after it.
+    ("agy_acp_steering", 168),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by

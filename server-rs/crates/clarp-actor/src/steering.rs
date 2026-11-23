@@ -1,5 +1,6 @@
-//! The actor's view of the extra user inputs of one running turn: a Claude process's input, or
-//! the steered words of a Codex lane's turn.
+//! The actor's view of the extra user inputs of one running turn: those written to its tool's
+//! input (Claude Code, and the agy-acp driver, which say alike when they read a message and
+//! which result answers it), or the steered words of a Codex lane's turn.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -284,7 +285,7 @@ impl State {
                     reason: event["result"]
                         .as_str()
                         .filter(|text| !text.trim().is_empty())
-                        .unwrap_or("claude reported an error")
+                        .unwrap_or("the tool reported an error")
                         .to_owned(),
                 }
             } else {
@@ -388,10 +389,12 @@ pub(super) fn inactive_owner(agent: &Agent) -> Result<bool, ActorError> {
     })
 }
 
-/// Recover input that Claude logged without a corresponding durable stdout echo. Only call
-/// after the shim recorded the tool's exit, or after its exact group was fenced.
+/// Recover input that the tool logged without a corresponding durable stdout echo, where it
+/// keeps such a log (`Backend::followups_read`). Only call after the shim recorded the tool's
+/// exit, or after its exact group was fenced.
 pub(super) fn recover_reads(
     batch: &mut Batch<'_>,
+    backend: &dyn clarp_backend::Backend,
     cwd: &Path,
     open: conversation::OpenRows<'_>,
     now_ms: i64,
@@ -424,13 +427,11 @@ pub(super) fn recover_reads(
         .iter()
         .map(|(_, _, uuid, _, _)| uuid.clone())
         .collect();
-    let Some(read) = clarp_backend::past::claude_read_followups(
-        &recovery.owner.projects,
-        &cwd.to_string_lossy(),
-        &recovery.session,
-        &uuids,
-    ) else {
-        eprintln!("clarp-host: could not read Claude's follow-up receipts in its session file");
+    let Some(read) = backend.followups_read(&recovery.owner, cwd, &recovery.session, &uuids) else {
+        eprintln!(
+            "clarp-host: could not read the follow-up receipts {} keeps",
+            backend.id()
+        );
         return Ok(false);
     };
     let mut revealed = false;
@@ -474,7 +475,7 @@ pub(super) fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, 
 }
 
 impl Actor {
-    /// Reserve the already accepted row before handing its bytes to Claude's stdin. A restart
+    /// Reserve the already accepted row before handing its bytes to the tool's stdin. A restart
     /// replays echoes but never attempts an uncertain write a second time.
     pub fn steer_active(
         &mut self,
@@ -486,8 +487,9 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
+        // A Codex lane takes steered words; a tool that steers takes the message on its input.
         let codex = self.backend.id() == "codex";
-        if !(codex || self.backend.id() == "claude")
+        if !(codex || self.backend.steers_message(text))
             || !live.steering.stream.can_join()
             || live.steering.input_skipped
             || live.steering.prompt_uuid() == Some(uuid.as_str())
@@ -497,8 +499,9 @@ impl Actor {
         {
             return Ok(None);
         }
-        // Claude: the process that reads it, and where it says it did, for a restart. Codex:
-        // a lane's turn that said it takes steered words; its reading is in the spool alone.
+        // A tool that keeps its own record of what it read (Claude): the process that reads
+        // it, and where it says it did, for a restart. Any other (agy-acp, a Codex lane's turn
+        // that said it takes steered words): its reading is in the spool alone.
         let recovery = if codex {
             if !live.steering.lane_open {
                 return Ok(None);
@@ -511,7 +514,7 @@ impl Actor {
             let Some(session) = self.recorder.agent().backend_session() else {
                 return Ok(None);
             };
-            Some(Recovery {
+            self.backend.records_reads().then(|| Recovery {
                 owner,
                 session: session.to_owned(),
             })

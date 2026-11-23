@@ -1009,10 +1009,14 @@ Rules:
   the turn has not ended: the follow-up is written to the running CLI, which
   reads it at its next boundary, after the running or next tool call, inside
   the same turn, or right after the turn's result, answering it in the same
-  process. Until the CLI reads it the send answers `queued: true` and is a
+  process. On a Rust Host with feature `agy_acp_steering` (contract 168) an
+  `agy-acp` turn takes it the same way: Antigravity is given it inside the same
+  turn, or right after the turn's answer in the same process, and it is answered
+  there. Only words go so: a send that names a file the user attached (a picture,
+  a sound, a PDF), or that begins with `/`, waits for its own turn. Until the CLI reads it the send answers `queued: true` and is a
   queue item that can no longer be edited or deleted; its `/log` row appears
   when it is read, with a `queue-updated` event. A send that cannot be steered
-  (another backend, a Claude turn that has already ended, a terminal session)
+  (another backend, a Claude or `agy-acp` turn that has already ended, a terminal session)
   waits for the running turn and runs as the next turn as soon as it ends; a
   `queue-updated` event follows, as for a send with `queue_if_busy`. A send
   that waits is a queue item until its turn starts and only then a `/log` row
@@ -1318,7 +1322,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   sign-in. On a Rust Host with feature `backend_agy_acp` (contract 165) the list has `agy-acp`,
   "Antigravity (ACP)": `agy` driven over the Agent Client Protocol, `runs_through` `agy`, with
   `agy`'s models and sign-in. An agent can be made on it or moved to and from it like any
-  backend; `supports_steer` is false, so a message sent while its turn runs waits for the next.
+  backend. `supports_steer` is false, as for Claude: with feature `agy_acp_steering`
+  (contract 168) a message sent while its turn runs is read into that turn all the same (see
+  [Send a message](#4-send-a-message-post-send)); without it, it waits for the next turn.
 - `GET /voices?for=<session>` — voice catalogue with availability.
 - `GET /dirs?path=` — directory completion for the start dialog. Answers `{"base", "matches"}`: a path that
   ends in a slash lists the visible directories inside it (absolute paths only); any other path completes its last

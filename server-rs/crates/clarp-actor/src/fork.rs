@@ -568,6 +568,7 @@ impl Actor {
             socket: self.fork_socket(turn),
             stdin_file,
             prompt_as_file: launch.prompt_as_file,
+            streams_input: false,
             named_session: None,
             model: preferences.model,
             effort: preferences.effort,

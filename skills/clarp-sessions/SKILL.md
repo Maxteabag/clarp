@@ -69,8 +69,13 @@ Protocol (`agy acp`): the same program, sign-in, models and conversations as `ag
 its own), but its message has no 60 KB limit, a picture a user attached reaches the
 model as itself, a PDF is given to Antigravity as a link to the file, and Stop
 cancels the turn cleanly. Sounds stay a path in the message for now (agy 1.5 takes no
-audio over ACP). It cannot yet be steered while a turn runs: a message sent then
-waits for the next turn. A move between `agy` and `agy-acp` carries nothing: they
+audio over ACP). On a Host with the feature `agy_acp_steering` (contract 168) a
+message the user sends while its turn runs (or a front desk relays for them) reaches
+that turn, as one to a busy Claude agent does: Antigravity takes it into the turn, or
+answers it right after the turn's answer, and a message it does not take runs as the
+next turn, as does one sent before the turn has opened its conversation. Another
+agent's own message, and one that names an attached picture, sound or PDF or begins
+with `/`, wait for the next turn, as on an older Host every message does. A move between `agy` and `agy-acp` carries nothing: they
 share one store, so the agent goes on in the same agy conversation (the row says "The
 same conversation goes on."). If agy has let that conversation go, the first turn after
 the move fails as "Antigravity no longer has this conversation" (or, on `agy`, finds it

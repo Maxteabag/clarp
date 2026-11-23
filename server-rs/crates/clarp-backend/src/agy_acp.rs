@@ -15,12 +15,21 @@
 //!
 //! ```text
 //! {"clarp":"initialized","agent":{"name":"agy","version":"1.5.15"},"prompt":{"image":true},"appends":true}
-//! {"clarp":"bound","session":"…","resumed":true}
+//! {"clarp":"bound","session":"…","resumed":true,"uuid":"…"}
 //! {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"…","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"…"}}}}
 //! {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"…","update":{"sessionUpdate":"tool_call","toolCallId":"…","title":"…","kind":"execute","status":"pending","rawInput":{"CommandLine":"ls"}}}}
 //! {"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"…","update":{"sessionUpdate":"tool_call_update","toolCallId":"…","status":"completed","rawOutput":{"combinedOutput":"…"}}}}
-//! {"clarp":"prompted","result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":5}}}
+//! {"clarp":"prompted","uuid":"…","result":{"stopReason":"end_turn","usage":{"inputTokens":10,"outputTokens":5}}}
+//! {"type":"result","subtype":"success","is_error":false,"result":"…","user_message_uuids":["…"]}
 //! ```
+//!
+//! A message the user sends while the turn runs reaches it through the driver's input
+//! (`Backend::steers`). The driver says when agy took one (`{"type":"user","isReplay":true,
+//! "uuid":…}`), before anything agy says of it, and follows each answer with a result that
+//! names the messages it answers: the steering evidence the actor reads
+//! (`clarp_kernel::steering`), as it reads Claude Code's. Each answer line names the message
+//! it answers (`uuid`; the turn's own is named on `bound`): the turn's outcome is its own
+//! message's answer, and its output goes on until every message agy took is answered.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -29,7 +38,7 @@ use clarp_acp::agy::{self as shared, Order};
 use clarp_acp::schema::{self, PromptResponse, SessionUpdate, StopReason};
 use clarp_kernel::conversation::{Notice, Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
-use clarp_kernel::takeover::Input;
+use clarp_kernel::takeover::{self, Input};
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, Origin, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -140,6 +149,12 @@ pub fn order(spec: &TurnSpec) -> Order {
         // Only the new message's files: a record carried before it names old ones.
         attachments: attached(&told::without_restored(&spec.prompt)),
         silence_ms: 0,
+        uuid: takeover::attempt_prompt_uuid(
+            &spec.agent_id,
+            spec.turn,
+            spec.trace_id.as_deref(),
+            spec.attempt,
+        ),
     }
 }
 
@@ -157,6 +172,25 @@ impl Backend for AgyAcp {
         self.agy.efforts()
     }
 
+    /// The driver gives agy a message the Host writes while the turn runs, says when agy took
+    /// it (before anything agy says of it), and names it in the result that answers it. The
+    /// turn's output alone tells what was read: a Host that restarts reads it in the spool, and
+    /// a message the driver never said it took (it refused it, or died before) runs as a turn
+    /// of its own (`Backend::records_reads` is false).
+    fn steers(&self) -> bool {
+        true
+    }
+
+    /// Only words: the driver gives a steered message as text, and the files a message names
+    /// go to agy as themselves only with a prompt of its own. A command to agy (`/compact`)
+    /// is no words to add to the work: it waits for a turn of its own too.
+    fn steers_message(&self, text: &str) -> bool {
+        let text = text.trim();
+        !text.is_empty()
+            && !text.starts_with('/')
+            && attached(&told::without_restored(text)).is_empty()
+    }
+
     fn launch(&self, spec: &TurnSpec) -> Launch {
         Launch {
             prompt_as_file: false,
@@ -167,7 +201,9 @@ impl Backend for AgyAcp {
                 (SESSION_ENV.to_string(), spec.session.clone()),
                 (MANAGED.to_string(), "1".to_string()),
             ],
-            stdin: order(spec).to_json().to_string().into_bytes(),
+            // One line: a turn the Host steers keeps the driver's input open after it, for
+            // the messages the user sends while it runs (`Backend::steers`).
+            stdin: format!("{}\n", order(spec).to_json()).into_bytes(),
         }
     }
 
@@ -205,6 +241,16 @@ fn text_of(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
 
+/// Which message of the turn an answer answers.
+enum Answers {
+    /// The turn's own.
+    Own,
+    /// One agy took while the turn ran, by its name.
+    Steered(String),
+    /// One agy never took.
+    Neither,
+}
+
 /// How a turn ended, as far as the lines tell it.
 #[derive(Debug, Clone, PartialEq)]
 enum Told {
@@ -227,7 +273,24 @@ pub struct AcpInterpreter {
     activity: Option<Activity>,
     notices: u64,
     model: Option<String>,
+    /// How the answer to the turn's own message went: what the turn's outcome is. A message
+    /// the user sent while it ran is settled by the result that names it, which is the
+    /// actor's to read (`clarp_kernel::steering`).
     told: Option<Told>,
+    /// The name of the turn's own message, where the driver says it (`bound`), and whether
+    /// it is answered.
+    primary: Option<String>,
+    answered: bool,
+    /// The messages the driver says agy took while the turn ran, by their names, in order,
+    /// and those of them that are answered. The turn's output goes on until each is.
+    steered: Vec<String>,
+    settled: std::collections::BTreeSet<String>,
+    /// How the newest answer line went, whichever message it named: a result that settles
+    /// the turn's own message with it (an answer that carried the work on for both) says
+    /// the turn went so.
+    last_answer: Option<Told>,
+    /// What the answers so far took in and gave out, together.
+    tokens: Option<(u64, u64)>,
     cancelled: bool,
     stderr: ErrorTail,
     ended: bool,
@@ -247,6 +310,12 @@ impl AcpInterpreter {
             notices: 0,
             model: None,
             told: None,
+            primary: None,
+            answered: false,
+            steered: Vec::new(),
+            settled: std::collections::BTreeSet::new(),
+            last_answer: None,
+            tokens: None,
             cancelled: false,
             stderr: ErrorTail::default(),
             ended: false,
@@ -298,12 +367,112 @@ impl AcpInterpreter {
         }
     }
 
+    /// Whether every prompt of the turn is answered, or it failed before one could be: what
+    /// comes after is not of the turn.
+    fn over(&self) -> bool {
+        (self.answered && self.steered.iter().all(|name| self.settled.contains(name)))
+            || matches!(&self.told, Some(Told::Failed { stage, .. }) if stage != "prompt")
+    }
+
+    /// The message an answer answers, by the name the driver gives it.
+    fn answers(&self, name: &str) -> Answers {
+        if let Some(steered) = self.steered.iter().find(|steered| *steered == name) {
+            return Answers::Steered(steered.clone());
+        }
+        match &self.primary {
+            Some(primary) if primary != name => Answers::Neither,
+            _ => Answers::Own,
+        }
+    }
+
+    /// The message an answer line answers: the one it names, else, for a line that names
+    /// none, the turn's own message while that waits, else the oldest message that waits.
+    fn answered_by(&self, line: &Value) -> Answers {
+        let name = text_of(&line["uuid"]);
+        if !name.is_empty() {
+            return self.answers(name);
+        }
+        if !self.answered {
+            return Answers::Own;
+        }
+        self.steered
+            .iter()
+            .find(|name| !self.settled.contains(*name))
+            .map_or(Answers::Own, |name| Answers::Steered(name.clone()))
+    }
+
+    /// One answer is in: the turn's own message's, which says how the turn went, or that of a
+    /// message agy took while the turn ran. An answer to a message agy never took (one it
+    /// refused) is none of the turn's.
+    fn settle(&mut self, which: Answers, told: Told, out: &mut Vec<Signal>) {
+        match which {
+            Answers::Steered(name) => {
+                self.settled.insert(name);
+            }
+            Answers::Own if !self.answered => {
+                self.answered = true;
+                // A failure the driver told before the prompt (its stage says which: the
+                // model, the conversation, the sign-in) stays what the turn ended on, in its
+                // own words; the result that settles it says no more, and nothing was asked of
+                // the model.
+                if matches!(&self.told, Some(Told::Failed { stage, .. }) if stage != "prompt") {
+                    return;
+                }
+                out.push(Signal::Concluded);
+                self.told = Some(told);
+            }
+            Answers::Own | Answers::Neither => {}
+        }
+    }
+
     fn on_line(&mut self, line: &str, t: i64, out: &mut Vec<Signal>) {
         let Ok(message) = serde_json::from_str::<Value>(line) else {
             return;
         };
-        if self.told.is_some() {
-            return; // nothing after the answer is of the turn
+        // What the driver says of a message the Host gave the running turn is the actor's to
+        // read (`clarp_kernel::steering`): that it took it, and which answer settles it. Here
+        // a message it took is one more prompt whose answer belongs to the turn's output.
+        if message["type"] == "user" {
+            let name = text_of(&message["uuid"]);
+            if message["isReplay"] == true
+                && !name.is_empty()
+                && !self.steered.iter().any(|seen| seen == name)
+            {
+                self.steered.push(name.to_string());
+                // What agy said before it took the message answered what came before: it is
+                // whole here, and what agy says next is for the new message.
+                self.close_thought(out);
+                self.close_message(out);
+            }
+            return;
+        }
+        if message["type"] == "result" {
+            // A result settles each message it names: one answer may cover more than one
+            // prompt.
+            let failed = message["is_error"] == true;
+            let names = message["user_message_uuids"]
+                .as_array()
+                .into_iter()
+                .flatten();
+            for name in names
+                .filter_map(Value::as_str)
+                .filter(|name| !name.is_empty())
+            {
+                let which = self.answers(name);
+                let told = match &self.last_answer {
+                    Some(answer) => answer.clone(),
+                    None if failed => Told::Failed {
+                        stage: "prompt".to_string(),
+                        text: text_of(&message["result"]).to_string(),
+                    },
+                    None => Told::Answered(StopReason::EndTurn),
+                };
+                self.settle(which, told, out);
+            }
+            return;
+        }
+        if self.over() {
+            return; // nothing after the last answer is of the turn
         }
         if let Some(what) = message["clarp"].as_str() {
             self.on_driver(what, &message, out);
@@ -318,6 +487,10 @@ impl AcpInterpreter {
         match what {
             "initialized" => self.moved(Activity::Thinking, out),
             "bound" => {
+                let primary = text_of(&line["uuid"]);
+                if !primary.is_empty() {
+                    self.primary = Some(primary.to_string());
+                }
                 let session = text_of(&line["session"]).trim();
                 if !self.bound && !session.is_empty() {
                     self.bound = true;
@@ -356,29 +529,45 @@ impl AcpInterpreter {
                 self.notice("agy-question", text, out);
             }
             "cancel" => self.cancelled = true,
+            // An answer to a message agy never took (one it refused) leaves the turn as it was.
+            "prompted" | "failed"
+                if (what == "prompted" || line["stage"] == "prompt")
+                    && matches!(self.answered_by(line), Answers::Neither) => {}
             "prompted" => {
                 self.close_thought(out);
                 self.close_message(out);
                 let answer = PromptResponse::read(&line["result"]);
                 if let Some((tokens_in, tokens_out)) = answer.usage.and_then(|usage| usage.tokens())
                 {
+                    let (had_in, had_out) = self.tokens.unwrap_or_default();
+                    let (tokens_in, tokens_out) = (
+                        had_in.saturating_add(tokens_in),
+                        had_out.saturating_add(tokens_out),
+                    );
+                    self.tokens = Some((tokens_in, tokens_out));
                     out.push(Signal::Usage {
                         tokens_in,
                         tokens_out,
                     });
                 }
-                out.push(Signal::Concluded);
-                self.told = Some(Told::Answered(answer.stop_reason));
+                let which = self.answered_by(line);
+                let told = Told::Answered(answer.stop_reason);
+                self.last_answer = Some(told.clone());
+                self.settle(which, told, out);
             }
             "failed" => {
                 self.close_thought(out);
                 self.close_message(out);
                 let stage = text_of(&line["stage"]).to_string();
-                if stage == "prompt" {
-                    out.push(Signal::Concluded);
-                }
                 let text = text_of(&line["text"]).to_string();
-                self.told = Some(Told::Failed { stage, text });
+                if stage == "prompt" {
+                    let which = self.answered_by(line);
+                    let told = Told::Failed { stage, text };
+                    self.last_answer = Some(told.clone());
+                    self.settle(which, told, out);
+                } else {
+                    self.told = Some(Told::Failed { stage, text });
+                }
             }
             _ => {}
         }

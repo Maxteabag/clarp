@@ -208,6 +208,9 @@ pub struct ShimOrder {
     pub socket: PathBuf,
     pub stdin_file: PathBuf,
     pub prompt_as_file: bool,
+    /// The tool's standard input stays open after its first message, until its first result:
+    /// the user's messages can reach the running turn (`Backend::steers`).
+    pub streams_input: bool,
     pub named_session: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -4495,6 +4498,7 @@ impl Actor {
             let mut batch = self.recorder.batch();
             steering::recover_reads(
                 &mut batch,
+                self.backend.as_ref(),
                 &self.profile.cwd,
                 self.live
                     .as_ref()
@@ -4552,6 +4556,7 @@ impl Actor {
         let mut batch = self.recorder.batch();
         steering::recover_reads(
             &mut batch,
+            self.backend.as_ref(),
             &self.profile.cwd,
             conversation::OpenRows {
                 drafts: &unfinished,
@@ -4963,7 +4968,10 @@ impl Actor {
                 call: message.call.clone(),
             }),
         });
-        if self.backend.id() == "claude" && !bare && opening.is_none() {
+        // A goal lane sends no prompt and an opening of a call is answered by itself: neither
+        // takes the user's messages while it runs.
+        let streams_input = self.backend.steers() && !bare && opening.is_none();
+        if streams_input && self.backend.id() == "claude" {
             launch
                 .args
                 .push(clarp_kernel::steering::REPLAY_USER_MESSAGES.to_owned());
@@ -5016,7 +5024,7 @@ impl Actor {
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt(
                 self.backend.id(),
-                (self.backend.id() == "claude").then(|| {
+                self.backend.steers().then(|| {
                     clarp_kernel::takeover::attempt_prompt_uuid(
                         &self.profile.agent_id,
                         turn.0,
@@ -5082,6 +5090,7 @@ impl Actor {
             socket: self.profile.socket_path_of(turn, attempt),
             stdin_file,
             prompt_as_file: launch.prompt_as_file,
+            streams_input,
             named_session,
             model: preferences.model,
             effort: preferences.effort,
@@ -5150,6 +5159,7 @@ impl Actor {
             let mut batch = self.recorder.batch();
             steering::recover_reads(
                 &mut batch,
+                self.backend.as_ref(),
                 &self.profile.cwd,
                 conversation::OpenRows::default(),
                 now_ms,
@@ -5185,8 +5195,9 @@ impl Actor {
         let mut first_written = HashMap::new();
         let mut signals = Vec::new();
         // Attach to the UUID actually sent to this process, including attempts
-        // launched by an older Host before each retry had its own name.
-        let uuid = if self.backend.id() == "claude" {
+        // launched by an older Host before each retry had its own name. Its first line names
+        // it: Claude's message, or the order of agy-acp's driver.
+        let uuid = if self.backend.steers() {
             std::fs::read(self.profile.stdin_path_of(turn, attempt))
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
@@ -5888,6 +5899,7 @@ impl Actor {
                             };
                             if steering::recover_reads(
                                 &mut batch,
+                                self.backend.as_ref(),
                                 &self.profile.cwd,
                                 live.open_rows(),
                                 t,
@@ -6281,6 +6293,7 @@ impl Actor {
                 let reason = "the tool ended and nothing said how";
                 if steering::recover_reads(
                     &mut batch,
+                    self.backend.as_ref(),
                     &self.profile.cwd,
                     live.open_rows(),
                     now_ms,

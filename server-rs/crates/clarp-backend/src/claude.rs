@@ -65,6 +65,33 @@ impl Backend for Claude {
         &["low", "medium", "high", "xhigh", "max"]
     }
 
+    /// Claude Code echoes a message it reads and names it in the result that answers it, when
+    /// it is started with `--replay-user-messages`.
+    fn steers(&self) -> bool {
+        true
+    }
+
+    /// A message Claude Code read inside a tool call can be in its session file without an
+    /// echo on its output.
+    fn records_reads(&self) -> bool {
+        true
+    }
+
+    fn followups_read(
+        &self,
+        owner: &clarp_kernel::steering::InputOwner,
+        cwd: &Path,
+        session: &str,
+        waiting: &std::collections::BTreeSet<String>,
+    ) -> Option<BTreeMap<String, crate::past::ReadFollowup>> {
+        crate::past::claude_read_followups(
+            &owner.projects,
+            &cwd.to_string_lossy(),
+            session,
+            waiting,
+        )
+    }
+
     /// Claude Code takes its own command for it as a message, also outside its screen: it
     /// sums the conversation up, goes on under the same name, and ends without a word
     /// (measured with 2.1.321 on 17 Nov 2026, `tests/fixtures/claude-2.1.321-compact.jsonl`).
