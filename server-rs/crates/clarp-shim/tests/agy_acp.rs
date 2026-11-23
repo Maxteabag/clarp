@@ -62,7 +62,9 @@ impl Place {
             .spawn()
             .unwrap();
         let mut input = child.stdin.take().unwrap();
-        input.write_all(order.to_json().to_string().as_bytes()).unwrap();
+        input
+            .write_all(order.to_json().to_string().as_bytes())
+            .unwrap();
         drop(input);
         child
     }
@@ -102,7 +104,10 @@ fn lines(bytes: &[u8]) -> Vec<Value> {
 }
 
 fn driver<'a>(printed: &'a [Value], what: &str) -> Vec<&'a Value> {
-    printed.iter().filter(|line| line["clarp"] == what).collect()
+    printed
+        .iter()
+        .filter(|line| line["clarp"] == what)
+        .collect()
 }
 
 fn updates<'a>(printed: &'a [Value], kind: &str) -> Vec<&'a Value> {
@@ -129,14 +134,22 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
 
     // The Host's head went into Antigravity's instructions, and the message is the user's.
     let opened = &place.sent_of("session/new")[0]["params"];
-    assert_eq!(opened["_meta"]["antigravity"]["systemPrompt"]["append"], "HEAD");
+    assert_eq!(
+        opened["_meta"]["antigravity"]["systemPrompt"]["append"],
+        "HEAD"
+    );
     assert_eq!(opened["mcpServers"], json!([]));
     let asked = &place.sent_of("session/prompt")[0]["params"];
     assert_eq!(asked["prompt"], json!([{"type": "text", "text": "hi"}]));
     let chosen: Vec<(Value, Value)> = place
         .sent_of("session/set_config_option")
         .iter()
-        .map(|set| (set["params"]["configId"].clone(), set["params"]["value"].clone()))
+        .map(|set| {
+            (
+                set["params"]["configId"].clone(),
+                set["params"]["value"].clone(),
+            )
+        })
         .collect();
     assert_eq!(
         chosen,
@@ -150,10 +163,18 @@ fn a_turn_opens_a_conversation_chooses_its_model_and_streams_what_antigravity_sa
     assert_eq!(init["clientCapabilities"]["fs"]["writeTextFile"], false);
 
     // agy is started as an ACP server that asks no permission, without a stray key.
-    let argv: Value =
-        serde_json::from_str(std::fs::read_to_string(place.dir.join("argv")).unwrap().lines().next().unwrap())
-            .unwrap();
-    assert_eq!(argv["argv"], json!(["acp", "--dangerously-skip-permissions"]));
+    let argv: Value = serde_json::from_str(
+        std::fs::read_to_string(place.dir.join("argv"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        argv["argv"],
+        json!(["acp", "--dangerously-skip-permissions"])
+    );
     assert_eq!(argv["env"]["GEMINI_API_KEY"], Value::Null);
     assert_eq!(argv["env"]["AGY_CLI_DISABLE_AUTO_UPDATE"], "1");
     assert_eq!(argv["env"]["AGY_ACP_FORCE_FILE_STORAGE"], Value::Null);
@@ -166,7 +187,10 @@ fn a_conversation_is_resumed_and_one_antigravity_lost_is_begun_anew() {
     assert!(status.success());
     assert_eq!(driver(&printed, "bound")[0]["session"], "conv-old");
     assert_eq!(driver(&printed, "bound")[0]["resumed"], true);
-    assert_eq!(place.sent_of("session/resume")[0]["params"]["sessionId"], "conv-old");
+    assert_eq!(
+        place.sent_of("session/resume")[0]["params"]["sessionId"],
+        "conv-old"
+    );
     assert_eq!(
         place.sent_of("session/resume")[0]["params"]["_meta"]["antigravity"]["systemPrompt"]["append"],
         "HEAD"
@@ -177,7 +201,10 @@ fn a_conversation_is_resumed_and_one_antigravity_lost_is_begun_anew() {
     let (printed, status) = lost.run(&lost.order("conv-gone"));
     assert!(status.success());
     let bound = driver(&printed, "bound")[0];
-    assert_eq!((&bound["session"], &bound["lost"]), (&json!("conv-new"), &json!("conv-gone")));
+    assert_eq!(
+        (&bound["session"], &bound["lost"]),
+        (&json!("conv-new"), &json!("conv-gone"))
+    );
 }
 
 #[test]
@@ -185,7 +212,10 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
     let place = Place::new("tool", "tool");
     let (printed, status) = place.run(&place.order(""));
     assert!(status.success());
-    assert_eq!(updates(&printed, "tool_call")[0]["params"]["update"]["toolCallId"], "t-1");
+    assert_eq!(
+        updates(&printed, "tool_call")[0]["params"]["update"]["toolCallId"],
+        "t-1"
+    );
     assert_eq!(updates(&printed, "tool_call_update").len(), 1);
     let permission = driver(&printed, "permission")[0];
     assert_eq!(permission["answer"], "allow_once");
@@ -194,7 +224,10 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
         .into_iter()
         .find(|message| message["id"] == "perm-1")
         .unwrap();
-    assert_eq!(answer["result"]["outcome"], json!({"outcome": "selected", "optionId": "yes"}));
+    assert_eq!(
+        answer["result"]["outcome"],
+        json!({"outcome": "selected", "optionId": "yes"})
+    );
 
     // A question with no way to allow it is declined, and the turn goes on.
     let question = Place::new("question", "question");
@@ -219,7 +252,11 @@ fn attached_files_go_as_pictures_sounds_and_links_within_their_limits() {
         std::fs::write(&path, bytes).unwrap();
         path.display().to_string()
     };
-    let (png, mp3, pdf) = (file("a.png", b"PNG"), file("b.mp3", b"ID3"), file("c.pdf", b"%PDF"));
+    let (png, mp3, pdf) = (
+        file("a.png", b"PNG"),
+        file("b.mp3", b"ID3"),
+        file("c.pdf", b"%PDF"),
+    );
     let missing = uploads.join("gone.png").display().to_string();
     let mut order = place.order("");
     order.attachments = vec![png.clone(), mp3, pdf.clone(), missing];
@@ -263,8 +300,14 @@ fn a_stop_cancels_the_prompt_and_the_driver_ends_by_signal() {
     let status = child.wait().unwrap();
     assert_eq!(status.signal(), Some(Signal::SIGTERM as i32), "{status:?}");
     assert_eq!(driver(&printed, "cancel")[0]["session"], "conv-new");
-    assert_eq!(driver(&printed, "prompted")[0]["result"]["stopReason"], "cancelled");
-    assert_eq!(place.sent_of("session/cancel")[0]["params"]["sessionId"], "conv-new");
+    assert_eq!(
+        driver(&printed, "prompted")[0]["result"]["stopReason"],
+        "cancelled"
+    );
+    assert_eq!(
+        place.sent_of("session/cancel")[0]["params"]["sessionId"],
+        "conv-new"
+    );
 }
 
 #[test]
@@ -301,12 +344,22 @@ fn a_profile_of_its_own_keeps_the_login_in_a_file_there() {
         &[("CLARP_AGY_ACP_PROFILE", profile.to_str().unwrap())],
     );
     assert!(child.wait_with_output().unwrap().status.success());
-    let argv: Value =
-        serde_json::from_str(std::fs::read_to_string(place.dir.join("argv")).unwrap().lines().next().unwrap())
-            .unwrap();
+    let argv: Value = serde_json::from_str(
+        std::fs::read_to_string(place.dir.join("argv"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         argv["argv"],
-        json!(["acp", "--dangerously-skip-permissions", "--gemini-dir", profile.to_str().unwrap()])
+        json!([
+            "acp",
+            "--dangerously-skip-permissions",
+            "--gemini-dir",
+            profile.to_str().unwrap()
+        ])
     );
     assert_eq!(argv["env"]["AGY_ACP_FORCE_FILE_STORAGE"], "1");
     assert_eq!(argv["env"]["SSH_CONNECTION"], "127.0.0.1 0 127.0.0.1 0");

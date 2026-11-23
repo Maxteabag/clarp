@@ -596,7 +596,9 @@ impl AcpInterpreter {
                     };
                     self.notice(
                         "agy-turn-limit",
-                        format!("Antigravity stopped: it reached its limit of {what} for one turn."),
+                        format!(
+                            "Antigravity stopped: it reached its limit of {what} for one turn."
+                        ),
                         out,
                     );
                     RunOutcome::Completed
@@ -619,13 +621,17 @@ impl AcpInterpreter {
             }
             (None, _) if code != Some(0) => RunOutcome::Failed {
                 reason: self.stderr.text().unwrap_or_else(|| {
-                    format!("the Antigravity driver exited with code {}", code.unwrap_or(-1))
+                    format!(
+                        "the Antigravity driver exited with code {}",
+                        code.unwrap_or(-1)
+                    )
                 }),
             },
             (None, _) => RunOutcome::Failed {
-                reason: self.stderr.text().unwrap_or_else(|| {
-                    "agy ended without saying how its turn ended".to_string()
-                }),
+                reason: self
+                    .stderr
+                    .text()
+                    .unwrap_or_else(|| "agy ended without saying how its turn ended".to_string()),
             },
         };
         out.push(Signal::Ended(outcome));
@@ -774,7 +780,10 @@ mod tests {
         assert_eq!(order.cwd, "/work");
         assert_eq!(order.effort, "high");
         assert_eq!(order.attachments, ["/d/uploads/s/a.png"]);
-        assert_eq!(order.headed, order.prompt, "no head without what the Host tells");
+        assert_eq!(
+            order.headed, order.prompt,
+            "no head without what the Host tells"
+        );
         assert!(AgyAcp::new().message_most().is_none());
         assert_eq!(AgyAcp::new().runs_through(), Some("agy"));
     }

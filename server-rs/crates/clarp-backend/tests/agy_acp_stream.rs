@@ -111,15 +111,23 @@ fn a_tool_call_is_named_as_the_conversation_names_tools_and_ends_with_its_output
     let lines = [
         json!({"clarp": "bound", "session": "conv-new", "resumed": false}),
         chunk("agent_message_chunk", "Looking."),
-        update(json!({"sessionUpdate": "tool_call", "toolCallId": "t-1", "title": "run_command",
-                      "kind": "execute", "status": "pending", "rawInput": {"CommandLine": "ls", "Cwd": "/w"}})),
+        update(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "t-1", "title": "run_command",
+                      "kind": "execute", "status": "pending", "rawInput": {"CommandLine": "ls", "Cwd": "/w"}}),
+        ),
         json!({"clarp": "permission", "title": "Run ls?", "answer": "allow_once"}),
-        update(json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-1", "status": "completed",
-                      "rawOutput": {"combinedOutput": "Output:\na\nb"}})),
-        update(json!({"sessionUpdate": "tool_call", "toolCallId": "t-2", "title": "Reading notes.md",
-                      "kind": "read", "status": "in_progress", "locations": [{"path": "/w/notes.md"}]})),
-        update(json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-2", "status": "failed",
-                      "content": [{"type": "content", "content": {"type": "text", "text": "no such file"}}]})),
+        update(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-1", "status": "completed",
+                      "rawOutput": {"combinedOutput": "Output:\na\nb"}}),
+        ),
+        update(
+            json!({"sessionUpdate": "tool_call", "toolCallId": "t-2", "title": "Reading notes.md",
+                      "kind": "read", "status": "in_progress", "locations": [{"path": "/w/notes.md"}]}),
+        ),
+        update(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "t-2", "status": "failed",
+                      "content": [{"type": "content", "content": {"type": "text", "text": "no such file"}}]}),
+        ),
         chunk("agent_message_chunk", "Done."),
         json!({"clarp": "prompted", "result": {"stopReason": "end_turn"}}),
     ];
@@ -141,7 +149,10 @@ fn a_tool_call_is_named_as_the_conversation_names_tools_and_ends_with_its_output
     assert_eq!(calls[1].status, ToolStatus::Error);
     // A message before a tool and one after it are two messages.
     assert_eq!(replies(&signals), ["Looking.", "Done."]);
-    assert!(notices(&signals).is_empty(), "an allowed permission says nothing");
+    assert!(
+        notices(&signals).is_empty(),
+        "an allowed permission says nothing"
+    );
 }
 
 #[test]
@@ -156,7 +167,12 @@ fn a_declined_question_a_lost_conversation_and_a_turn_limit_are_told() {
     let codes: Vec<&str> = notices(&signals).iter().map(|(code, _)| *code).collect();
     assert_eq!(
         codes,
-        ["agy-new-conversation", "agy-model", "agy-question", "agy-turn-limit"]
+        [
+            "agy-new-conversation",
+            "agy-model",
+            "agy-question",
+            "agy-turn-limit"
+        ]
     );
     assert!(notices(&signals)[0].1.contains("conv-gone"));
     assert!(notices(&signals)[2].1.contains("Which colour?"));

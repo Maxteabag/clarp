@@ -22,7 +22,9 @@ fn an_agent_on_antigravity_over_acp_answers_and_continues_its_conversation() {
     let session = made["session"].as_str().unwrap().to_string();
 
     host.send(&session, "hello there", "m-1");
-    wait_for("the first turn to finish", || host.state(&session) == "done");
+    wait_for("the first turn to finish", || {
+        host.state(&session) == "done"
+    });
     let conversation = host.conversation(&session);
     assert_eq!(
         conversation.last().unwrap(),
