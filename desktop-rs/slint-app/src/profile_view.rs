@@ -86,6 +86,44 @@ pub fn close(app: &App, window: &AppWindow) {
     window.global::<ProfileBridge>().set_confirm("".into());
 }
 
+/// Whether the Backend picker is open: the keymap's "transit" context.
+pub fn transit_open(app: &App, window: &AppWindow) -> bool {
+    app.overlay.borrow().as_str() == "profile" && !window.global::<ProfileBridge>().get_transit_step().is_empty()
+}
+
+/// Up/Down in the Backend picker: to the next choice that can be chosen,
+/// skipping dimmed ones; at either end it stays.
+pub fn transit_move(window: &AppWindow, step: i32) {
+    let bridge = window.global::<ProfileBridge>();
+    let enabled: Vec<bool> = bridge.get_transit_choices().iter().map(|c| c.enabled).collect();
+    let from = bridge.get_transit_cursor();
+    let mut at = from;
+    let next = loop {
+        at += step;
+        if at < 0 || at as usize >= enabled.len() {
+            break if from >= 0 && (from as usize) < enabled.len() { from } else { enabled.iter().position(|e| *e).map_or(-1, |i| i as i32) };
+        }
+        if enabled[at as usize] {
+            break at;
+        }
+    };
+    bridge.set_transit_cursor(next);
+}
+
+/// Enter in the Backend picker: picks the highlighted choice, or moves on
+/// the last step.
+pub fn transit_enter(window: &AppWindow) {
+    let bridge = window.global::<ProfileBridge>();
+    if bridge.get_transit_step() == "confirm" {
+        bridge.invoke_confirm_transit();
+        return;
+    }
+    let cursor = bridge.get_transit_cursor();
+    if let Some(choice) = (cursor >= 0).then(|| bridge.get_transit_choices().row_data(cursor as usize)).flatten().filter(|c| c.enabled) {
+        bridge.invoke_pick_transit(choice.id);
+    }
+}
+
 pub fn owns(app: &App) -> bool {
     OWNED.contains(&app.overlay.borrow().as_str())
 }
@@ -682,23 +720,7 @@ pub fn wire(window: &AppWindow) {
             fill(app, window, session);
         });
     });
-    bridge.on_next_transit(|from, step| {
-        // The next choice that can be chosen from `from`, stepping by
-        // `step`; at either end it stays where it is.
-        let Some(window) = crate::window() else { return from };
-        let choices: Vec<bool> = window.global::<ProfileBridge>().get_transit_choices().iter().map(|c| c.enabled).collect();
-        let mut at = from;
-        loop {
-            at += step;
-            if at < 0 || at as usize >= choices.len() {
-                return if from >= 0 && (from as usize) < choices.len() { from } else { choices.iter().position(|e| *e).map_or(-1, |i| i as i32) };
-            }
-            if choices[at as usize] {
-                return at;
-            }
-        }
-    });
-        bridge.on_pick_transit(|id| {
+    bridge.on_pick_transit(|id| {
         with_session(|app, window, session| {
             let step = window.global::<ProfileBridge>().get_transit_step();
             if step == "backends" {

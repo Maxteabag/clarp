@@ -281,6 +281,13 @@ fn state(name: &str) -> Vec<Binding> {
             b("escape", &["Escape"], "Back", true, Always, false),
         ],
         "modal" => vec![b("escape", &["Escape"], "Close", true, Always, false)],
+        // The agent profile's Backend picker (#720): keys move, pick and step back.
+        "transit" => vec![
+            b("transit-down", &["Down", "J"], "Next", true, Always, false),
+            b("transit-up", &["Up", "K"], "Previous", true, Always, false),
+            b("transit-enter", &["Return"], "Choose", true, Always, false),
+            b("escape", &["Escape"], "Back", true, Always, false),
+        ],
         // Link hints show: digits pick a link (the bar says which), Enter
         // opens a number that also starts a longer one; any other key
         // cancels.
@@ -294,7 +301,7 @@ fn state(name: &str) -> Vec<Binding> {
     }
 }
 
-pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "settings-search", "updates", "teams", "launch", "modal", "blocked", "hints"];
+pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "settings-search", "updates", "teams", "launch", "modal", "transit", "blocked", "hints"];
 
 /// What the guards test.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -348,6 +355,7 @@ pub const CONTEXTS: &[(&str, &str)] = &[
     ("updates", "Updates"),
     ("teams", "Teams"),
     ("launch", "New agent hub"),
+    ("transit", "Backend picker"),
 ];
 
 pub fn context_name(state: &str) -> &str {

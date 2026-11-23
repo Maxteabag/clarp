@@ -140,10 +140,8 @@ export global ProfileBridge {
     callback pick-transit(string);
     callback transit-back();
     callback confirm-transit();
-    // The keyboard's place in the picker: the choice Up/Down reached
-    // (-1: none), and the next enabled one from `from` in direction `step`.
+    // The keyboard's place in the picker: the choice Up/Down reached (-1: none).
     in-out property <int> transit-cursor: -1;
-    pure callback next-transit(int, int) -> int;
 }
 
 component Card inherits VerticalLayout {
@@ -528,31 +526,12 @@ export component AgentProfile inherits Modal {
 // their reason when they cannot be chosen; then the chosen one's models,
 // the default marked and the current one ticked; then Move or Cancel.
 // Escape steps back one level; Up/Down move between the choices that can
-// be chosen and Enter picks one, or moves on the last step.
+// be chosen and Enter picks one, or moves on the last step (the keymap's
+// "transit" context, so focus never moves).
 component TransitPicker inherits Modal {
     card-width: 460px;
     card-height: ProfileBridge.transit-step == "confirm" ? 190px : 420px;
     dismissed => { ProfileBridge.transit-back(); }
-    keys := FocusScope {
-    init => { self.focus(); }
-    capture-key-pressed(event) => {
-        if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
-            if (ProfileBridge.transit-step != "confirm") {
-                ProfileBridge.transit-cursor = ProfileBridge.next-transit(ProfileBridge.transit-cursor, event.text == Key.DownArrow ? 1 : -1);
-            }
-            return accept;
-        }
-        if (event.text == Key.Return) {
-            if (ProfileBridge.transit-step == "confirm") {
-                ProfileBridge.confirm-transit();
-            } else if (ProfileBridge.transit-cursor >= 0 && ProfileBridge.transit-cursor < ProfileBridge.transit-choices.length
-                    && ProfileBridge.transit-choices[ProfileBridge.transit-cursor].enabled) {
-                ProfileBridge.pick-transit(ProfileBridge.transit-choices[ProfileBridge.transit-cursor].id);
-            }
-            return accept;
-        }
-        reject
-    }
     VerticalLayout {
         padding: 18px;
         spacing: 10px;
@@ -626,7 +605,6 @@ component TransitPicker inherits Modal {
                 }
             }
         }
-    }
     }
 }
 

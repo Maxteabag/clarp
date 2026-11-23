@@ -32,6 +32,9 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
             return "launch";
         }
+        if !app.switcher.borrow().open && crate::profile_view::transit_open(app, window) {
+            return "transit";
+        }
         return "modal";
     }
     match window.get_surface().as_str() {
@@ -417,6 +420,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             }
         }
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
+        "transit-down" => crate::profile_view::transit_move(window, 1),
+        "transit-up" => crate::profile_view::transit_move(window, -1),
+        "transit-enter" => crate::profile_view::transit_enter(window),
         "overview" => crate::overview_view::open(app, window),
         // The selected agent's background work, or every job on Updates.
         "agent-processes" => crate::processes_view::toggle(app, window),
