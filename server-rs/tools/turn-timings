@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How responsive a turn is, per backend, measured on a disposable Host. Run by hand, never a gate.
 
-    server-rs/tools/turn-timings run    [--backends codex,codex-lane,claude,agy] [--rounds N] [--cases LIST]
+    server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--codex-lane] [--rounds N] [--cases LIST]
                                         [--bin DIR] [--out DIR] [--model ROW=MODEL ...]
                                         [--effort ROW=EFFORT ...] [--keep-host]
                                         [--lane-idle-minutes N] [--lane-most N] [--lane-settle SECONDS]
@@ -27,7 +27,8 @@ times (default 5). The cases, and what each measures:
           turn is over, and Stop to the tool's process being gone (the spool's `exited`, and the
           process id no longer there).
 
-The `codex-lane` row is Codex with the Host's `codex_chat_lane` setting on (written to the
+`--codex-lane` adds the `codex-lane` row (as does naming it in `--backends`). It is Codex with the
+Host's `codex_chat_lane` setting on (written to the
 disposable Host's own config.toml, read at each turn), so its chat turns run on the agent's
 long-lived app-server lane. It makes one unmeasured warm-up turn first, so that its cases measure
 a warm lane, and adds a case:
@@ -83,7 +84,7 @@ import urllib.parse
 HOME = pathlib.Path.home()
 RELEASE_BIN = HOME / ".local/share/clarp-host/bin"
 OUT = pathlib.Path("/var/tmp/turn-timings")
-BACKENDS = ("codex", "codex-lane", "claude", "agy")
+BACKENDS = ("codex", "claude", "agy")
 # A row is a backend, or a backend run another way: `codex-lane` is Codex with the Host's
 # `codex_chat_lane` on, so its chat turns run on the agent's long-lived app-server lane.
 TOOL_OF = {"codex-lane": "codex"}
@@ -1032,6 +1033,8 @@ def run(args) -> int:
     root = folder / "host"
     bin_dir = pathlib.Path(args.bin).expanduser() if args.bin else RELEASE_BIN
     backends = [b for b in args.backends.split(",") if b]
+    if args.codex_lane and "codex-lane" not in backends:
+        backends.insert(backends.index("codex") + 1 if "codex" in backends else len(backends), "codex-lane")
     cases = [c for c in args.cases.split(",") if c]
     models = {**MODELS, **pairs(args.model)}
     efforts = {**EFFORTS, **pairs(args.effort)}
@@ -1316,6 +1319,8 @@ def main() -> int:
     go.add_argument("--model", action="append", help="BACKEND=MODEL")
     go.add_argument("--effort", action="append", help="BACKEND=EFFORT")
     go.add_argument("--keep-host", action="store_true", help="keep the disposable Host's folders afterwards")
+    go.add_argument("--codex-lane", action="store_true",
+                    help="add the codex-lane row: Codex with codex_chat_lane on in the disposable Host's config")
     go.add_argument("--lane-idle-minutes", type=int, default=None, help="codex_lane_idle_minutes for the lane row")
     go.add_argument("--lane-most", type=int, default=None, help="codex_lane_most for the lane row")
     go.add_argument("--lane-settle", type=float, default=30.0,
