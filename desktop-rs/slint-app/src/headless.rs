@@ -74,6 +74,108 @@ thread_local! {
     static WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
     /// The last frame drawn (width, height, pixels) and how many so far.
     static FRAME: RefCell<(usize, usize, Vec<PremultipliedRgbaColor>, u64)> = const { RefCell::new((0, 0, Vec::new(), 0)) };
+    static VERIFY: RefCell<Option<Verify>> = const { RefCell::new(None) };
+    static AFTER_DRAW: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
+}
+
+/// Runs `hook` after every frame drawn from now on (None: no longer).
+pub fn after_draw(hook: Option<Box<dyn Fn()>>) {
+    AFTER_DRAW.with(|h| *h.borrow_mut() = hook);
+}
+
+/// A partial frame that differs from a whole repaint of the same state:
+/// what the screen showed was not what the window holds.
+#[derive(Debug, Clone)]
+pub struct Stale {
+    /// The frame's number (`frames_drawn`).
+    pub frame: u64,
+    /// How many pixels differ, and the box around them (x, y, width,
+    /// height, in physical pixels).
+    pub pixels: u64,
+    pub rect: [usize; 4],
+}
+
+/// What the paint check found so far: partial frames compared, and those
+/// that differed.
+#[derive(Debug, Clone, Default)]
+pub struct Paint {
+    pub compared: u64,
+    pub stale: Vec<Stale>,
+}
+
+struct Verify {
+    found: Paint,
+    /// The last frame was partial and left the renderer's cache as a
+    /// partial frame does (a whole repaint empties it, and the next partial
+    /// frame then repaints everything).
+    primed: bool,
+    /// Where the first stale frames are saved (partial and whole).
+    out: Option<String>,
+}
+
+/// The paint check: from now on every other partial frame is repainted
+/// whole into a scratch buffer and compared with what the partial repaint
+/// left in the kept buffer, as the real window's buffer would show it. A
+/// region the partial renderer did not know was dirty keeps an older
+/// frame's pixels there: a flash of another scroll state. The first few
+/// stale frames are saved in `out`. Off stops it.
+pub fn verify_paint(on: bool, out: Option<String>) {
+    VERIFY.with(|v| *v.borrow_mut() = on.then(|| Verify { found: Paint::default(), primed: false, out }));
+}
+
+/// What the paint check has found since it started.
+pub fn paint() -> Paint {
+    VERIFY.with(|v| v.borrow().as_ref().map(|v| v.found.clone()).unwrap_or_default())
+}
+
+fn verify(renderer: &slint::platform::software_renderer::SoftwareRenderer, shown: &[PremultipliedRgbaColor], width: usize, height: usize, stride: usize, full: bool, index: u64) {
+    VERIFY.with(|v| {
+        let mut v = v.borrow_mut();
+        let Some(v) = v.as_mut() else { return };
+        if full || !v.primed {
+            v.primed = !full;
+            return;
+        }
+        let mut whole = vec![PremultipliedRgbaColor::default(); shown.len()];
+        renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+        let _ = renderer.render(&mut whole, stride);
+        v.primed = false;
+        v.found.compared += 1;
+        let (mut pixels, mut left, mut top, mut right, mut bottom) = (0u64, usize::MAX, usize::MAX, 0, 0);
+        for y in 0..height {
+            for x in 0..width {
+                let (a, b) = (shown[y * stride + x], whole[y * stride + x]);
+                let near = |p: u8, q: u8| p.abs_diff(q) <= 2;
+                if !(near(a.red, b.red) && near(a.green, b.green) && near(a.blue, b.blue) && near(a.alpha, b.alpha)) {
+                    pixels += 1;
+                    (left, top, right, bottom) = (left.min(x), top.min(y), right.max(x), bottom.max(y));
+                }
+            }
+        }
+        // A few pixels of antialiasing at a repaint's edge are not a flash.
+        if pixels < 32 {
+            return;
+        }
+        let stale = Stale { frame: index, pixels, rect: [left, top, right + 1 - left, bottom + 1 - top] };
+        if let Some(out) = v.out.as_ref().filter(|_| v.found.stale.len() < 3) {
+            for (name, pixels) in [("partial", shown), ("whole", &whole[..])] {
+                let path = format!("{out}/stale-{index}-{name}.png");
+                if let Err(error) = save_pixels(pixels, width, height, stride, &path) {
+                    eprintln!("clarp-slint: {error}");
+                }
+            }
+        }
+        v.found.stale.push(stale);
+    });
+}
+
+fn save_pixels(pixels: &[PremultipliedRgbaColor], width: usize, height: usize, stride: usize, path: &str) -> Result<(), String> {
+    let mut image = image::RgbaImage::new(width as u32, height as u32);
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let color = pixels[y as usize * stride + x as usize];
+        *pixel = image::Rgba([color.red, color.green, color.blue, 255]);
+    }
+    image.save(path).map_err(|e| format!("cannot save {path}: {e}"))
 }
 
 impl Platform for Headless {
@@ -136,9 +238,16 @@ impl Platform for Headless {
                         let dirty = (painted as f64 / (width.max(1) * height.max(1)) as f64).min(1.0) as f32;
                         crate::perf::drawn(started, dirty, rects);
                         frame.3 += 1;
+                        let index = frame.3;
+                        verify(renderer, &frame.2, width, height, stride, full, index);
                     });
                 });
                 if drew {
+                    AFTER_DRAW.with(|hook| {
+                        if let Some(hook) = hook.borrow().as_ref() {
+                            hook();
+                        }
+                    });
                     LAST_DRAWN.with(|l| l.set(Some(std::time::Instant::now())));
                 }
             }
@@ -309,12 +418,6 @@ pub fn save_frame(path: &str) -> Result<(), String> {
         if pixels.is_empty() {
             return Err("nothing has been drawn yet".into());
         }
-        let stride = width + MARGIN;
-        let mut image = image::RgbaImage::new(width as u32, height as u32);
-        for (x, y, pixel) in image.enumerate_pixels_mut() {
-            let color = pixels[y as usize * stride + x as usize];
-            *pixel = image::Rgba([color.red, color.green, color.blue, 255]);
-        }
-        image.save(path).map_err(|e| format!("cannot save {path}: {e}"))
+        save_pixels(pixels, width, height, width + MARGIN, path)
     })
 }
