@@ -243,6 +243,9 @@ impl Platform for Headless {
                     });
                 });
                 if drew {
+                    // The dashcam records the frame as drawn, then the paint check
+                    // (scroll-paint) looks at it.
+                    crate::scroll_journal::frame_drawn();
                     AFTER_DRAW.with(|hook| {
                         if let Some(hook) = hook.borrow().as_ref() {
                             hook();

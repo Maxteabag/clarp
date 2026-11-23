@@ -489,16 +489,19 @@ pub(crate) fn sync_stats() -> (usize, usize) {
     SYNC_STATS.with(std::cell::Cell::get)
 }
 
-pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fresh: Vec<Shown>, rows: Vec<MessageRow>) {
+/// What it did: rows (removed, inserted, updated in place).
+pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fresh: Vec<Shown>, rows: Vec<MessageRow>) -> (usize, usize, usize) {
     use slint::Model;
     let id = |row: &Shown| row.3.clone();
     let prefix = shown.iter().zip(&fresh).take_while(|(a, b)| id(a) == id(b)).count();
     let most = shown.len().min(fresh.len()) - prefix;
     let suffix = shown.iter().rev().zip(fresh.iter().rev()).take(most).take_while(|(a, b)| id(a) == id(b)).count();
     let mut rows: Vec<Option<MessageRow>> = rows.into_iter().map(Some).collect();
+    let mut updated = 0;
     for index in (0..prefix).chain(fresh.len() - suffix..fresh.len()) {
         let old = if index < prefix { index } else { index + shown.len() - fresh.len() };
         if shown[old] != fresh[index] {
+            updated += 1;
             model.set_row_data(old, rows[index].take().expect("each row is used once"));
             SYNC_STATS.with(|s| s.set((s.get().0 + 1, s.get().1)));
         }
@@ -512,6 +515,7 @@ pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fr
         SYNC_STATS.with(|s| s.set((s.get().0, s.get().1 + 1)));
     }
     *shown = fresh;
+    (old_middle, new_middle, updated)
 }
 
 pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {

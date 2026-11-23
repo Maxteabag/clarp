@@ -222,6 +222,14 @@ fn watch_window() {
             // thing the loop runs after it ends the frame's clock.
             WindowEvent::RedrawRequested => {
                 crate::perf::redraw_started();
+                // The dashcam keeps what this frame shows: Slint settles the
+                // lists and their change handlers (as it would first thing
+                // in the draw) and the draw shows exactly that.
+                if let Some(window) = crate::window() {
+                    let inner = i_slint_core::window::WindowInner::from_pub(window.window());
+                    i_slint_core::properties::evaluate_no_tracking(|| inner.ensure_tree_instantiated());
+                    crate::scroll_journal::frame_drawn();
+                }
                 if let Err(error) = slint::invoke_from_event_loop(crate::perf::redraw_finished) {
                     eprintln!("clarp-slint: dropped a frame's clock: {error}");
                 }
