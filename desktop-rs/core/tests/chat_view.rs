@@ -265,3 +265,20 @@ fn a_box_whose_reply_is_not_drawn_leaves_its_rows_alone() {
     assert_eq!(order, [0, 1]);
     assert_eq!(edges, [Edge::None, Edge::None]);
 }
+
+/// Peter's own message stays in the conversation from send to read-back:
+/// pending, then delivered (the /send answer) while the Host has not sent
+/// the row back yet (a message steered into a running turn comes back only
+/// when the turn reads it), then as the Host's tagged row.
+#[test]
+fn an_own_message_never_leaves_the_conversation_before_the_host_sends_it_back() {
+    let mut own = row(json!({"id": "u-1", "role": "user", "text": "Is the server under load?"}));
+    own.pending = true;
+    assert!(chat_view::in_conversation(&own), "pending");
+    own.pending = false;
+    assert!(chat_view::in_conversation(&own), "delivered, not yet read back by the Host");
+    let back = row(json!({"id": "u-1", "role": "user", "text": "Is the server under load?", "revision": 24750587904_i64, "view": CONVERSATION}));
+    assert!(chat_view::in_conversation(&back), "the Host's row, tagged conversation");
+    let untagged_host_row = row(json!({"id": "u-2", "role": "user", "text": "from another agent", "revision": 7}));
+    assert!(!chat_view::in_conversation(&untagged_host_row), "a Host row without a tag still reads as Session");
+}
