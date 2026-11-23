@@ -1,0 +1,375 @@
+# Codex chat turns on a long-lived lane
+
+Issue 742. Owner's decision of 23 Nov 2026: a message sent to a running Codex turn reaches it
+(`turn/steer`), Stop uses `turn/interrupt`, a chat turn no longer starts a fresh `codex exec`,
+and the apps still show no text as it is written.
+
+## What exists, and what this changes
+
+The goal lane (`codex-goal-lane`, `codex_lane_*.rs`) already does most of the work for one
+kind of thread. One shim process supervises one `codex app-server --stdio` for one native
+thread. It holds the thread's exclusive lock (`run/codex-threads/<sha>.lock`) for as long as
+the app-server lives. It takes the actor's reserved attempt (`Claim`) and creates that
+attempt's spool before it hands Codex anything. It writes the ordinary Codex spool format
+(`TurnSpool`), which the Codex interpreter already reads. It answers `Follow` and `Stop` on
+the attempt's own socket, so a restarted Host rejoins the turn as it rejoins an exec turn.
+It already accepts `Request::Prompt` (`turn/start`) for ordinary turns while a goal holds
+the thread.
+
+So this is not a new runtime. The changes are:
+
+1. **The lane is per agent, not per goal.** Any Codex agent's chat turn can run on it, and
+   a thread with no goal no longer goes back to exec while the setting is on.
+2. **A lane can start the thread.** A new conversation calls `thread/start`. The thread id
+   reaches the actor through the spool's `Session` record, as exec's `thread.started` does
+   today.
+3. **Steering.** The lane accepts a steer for the claimed attempt and sends `turn/steer` with
+   `expectedTurnId` and `clientUserMessageId`. The read receipt is written to the spool.
+4. **Idle life.** A lane with no claim and no active goal retires by itself after a set time.
+   The Host also caps how many lanes stay alive.
+5. **Settings between turns.** Model, effort and identity are compared on every turn. A change
+   Codex cannot apply per turn restarts the lane while it is idle.
+
+The Python Host's lesson stays in force (`server/lib/codex_app_server.py`, header). There,
+one app-server per agent left writers behind that blocked `thread/resume` with -32600. Here
+the thread lock is held until the app-server child has been reaped, and the lane's own
+`.lock` holds until shutdown (`run()` drops `lane` before both locks). A new lane for the
+thread cannot start while an old writer lives.
+
+## 1. Data and invariants
+
+**One lane per agent.** Its socket is `run/<agent>-cxg.sock` and its owner lock is
+`<agent>-cxg.lock` (`codex_goal_lane::Lane`). A lane serves exactly one thread for its whole
+life. A different thread for the agent (a new conversation, a reset, a moved session) means
+the old lane retires while idle and a new lane starts.
+
+**One writer per thread.** An exec turn takes the thread lock shared (`guard_exec`), and a lane
+takes it exclusive. Both are non-blocking, so a collision fails the attempt before Codex
+receives anything. That failure is a `NoShim`-style refusal: the attempt is retried after the
+lane is released, never run on two writers.
+
+**A turn is never run twice.** This rests on the same three facts as an exec turn (D16):
+
+- The actor commits the attempt (turn, attempt, spool path, socket path) before the Host
+  writes anything to the lane.
+- The lane creates the attempt's spool exclusively (`SpoolWriter::create`, `create_new`) before
+  it writes `turn/start`. A spool that exists means the attempt may have reached Codex, so the
+  Host follows it and never relaunches it (`launch_on_native_lane`: `spool.try_exists()`).
+- A second `Prompt` for the same claim is answered from the slot (`slot.claim() == claim`) and
+  is not sent again. A different claim while one is held is refused.
+
+**A steered message is read at most once.** The actor commits `Join { into, uuid }` before the
+Host sends the steer (as for Claude). `uuid` becomes `clientUserMessageId`. Only a read receipt
+in the spool moves it to `JoinRead` and out of the mailbox. A join that was never read is
+cleared when the turn ends (`joins.clear()` in the kernel), and the message runs as the next
+turn. Section 4 covers the one ambiguous case: a steer that was accepted but the turn was
+interrupted.
+
+**What is durable, and where:**
+
+- The agent's log holds the turn and its attempt, the `Join`, and the lane record. The record
+  is today's `native-codex-goal` item (`NativeGoal { thread, goal, lane: Ownership }`), widened
+  as described below.
+- Each attempt's spool holds Codex's events in exec format, plus new `steer.read` lines and
+  the terminal `Exited` record.
+- The filesystem holds the lane's owner lock and the thread lock. These locks are the truth
+  about who may write the thread. The log record is the Host's memory of what it asked for.
+- Nothing about the lane lives only in the Host's memory.
+
+**The lane record.** `Ownership` keeps its meaning (`Acquiring`, `Owned`, `Stopping`,
+`AccountHold`, `SchedulerHold`, `Exec`). With the setting on, a chat turn goes through
+`Acquiring` → `Owned` like a goal activation. `Exec` means only that no lane holds the thread.
+The field `goal` stays optional, so a chat lane is a lane record with `goal: None`.
+Retirement of a goal-less lane is driven by the idle policy, not by the goal completing.
+
+**What a Host restart finds, and how it rejoins.** The lane's process runs in its own systemd
+scope (`goal_lane_command` → `shim_command`), so a Host restart does not touch it.
+
+- **A turn was running.** The actor's rejoin emits `Action::Follow` on the attempt socket. The
+  lane answers `Follow` for its claim, and the actor reads the spool from where it stopped. A
+  steer that was in flight is settled by the spool alone: its receipt is there or it is not.
+- **The lane is idle.** The next launch calls `Lane::start`, whose `Inspect` succeeds, so the
+  lane is reused. If it serves another thread, it is retired and replaced.
+- **The lane died while the Host was down.** If the shim lived, the spool has its terminal
+  record (`Slot::lost`: `turn.failed` + `Exited(1)`). If the shim was killed too, the spool has
+  no terminal record, the socket is gone and its pid is dead. The existing orphan path ends the
+  turn as failed, and the next turn starts a fresh lane.
+- **The lane outlived a moved or archived agent.** The worker retires it when it opens the
+  agent and finds the agent moved or on another backend (section 2).
+
+## 2. Failure cases
+
+**The app-server dies mid-turn.** The frames thread sends `ProviderGone`, and `serve()` returns
+an error. `Slot::lost` writes `turn.failed` ("Codex app-server disconnected") and `Exited(1)`,
+then the shim exits. The turn ends Failed through the ordinary interpreter. A pending join is
+cleared, so its message runs as the next turn on a new lane. Nothing is retried in place:
+Codex may have done half the work, and the user decides.
+
+**The app-server dies between turns.** The lane exits and its socket goes away. The next
+launch's `Inspect` fails, `released()` is true (the owner lock is free), and a fresh lane
+starts. That costs one cold start (section 2, idle agents). No turn is lost, because no claim
+was held.
+
+**The app-server hangs.**
+
+- *A request hangs.* Every lane RPC has `RPC_LIMIT` (12 s). A timeout on `turn/start` fails
+  the attempt. The spool exists, so the Host follows the attempt instead of relaunching it.
+  Without a terminal record, Stop (below) ends it.
+- *A turn goes silent.* The Host's stall flag applies as for any turn. A Stop sends
+  `turn/interrupt` and waits for `turn/completed` up to the Stop's `grace_ms`. If that does not
+  come, the lane kills the app-server's process group and writes the terminal record
+  (`Exited` with SIGKILL). The lane then exits, and the next turn gets a fresh one. This keeps
+  D26: the tool's own way first, bounded, then the group.
+
+**A steer arrives as the turn ends.** `turn/steer` carries `expectedTurnId`, and Codex refuses
+it if that turn is no longer active ("no active turn", or the id differs). There are three
+outcomes, each with one meaning:
+
+- *Refused.* The join stays Pending until the turn ends, then it is cleared. The message runs
+  as the next turn, at once, ahead of later work (its place in the mailbox never changed).
+- *Accepted and echoed.* Codex records steered input as a `userMessage` item whose `clientId`
+  is our uuid. The lane writes `{"type":"steer.read","uuid":…}` to the spool, and the actor
+  commits `JoinRead`.
+- *Accepted, not echoed, and the turn completed.* Codex completes a turn only after it has
+  drained pending input. **This must be verified (build step 0).** If verified, the lane
+  writes the receipt at `turn/completed` for every accepted, unechoed steer of that turn. If
+  not, it falls back to the next case.
+- *Accepted, not echoed, and the turn was interrupted or failed.* Before it writes the terminal
+  record, the lane asks Codex for that turn's items (`thread/turns/list`, or `thread/read` on
+  this toolchain). It writes a receipt for each `userMessage` with one of the pending
+  `clientId`s. With no receipt the message is not read, and it runs next. Codex holding it for
+  a later turn would double it, so build step 0 also checks what Codex does with pending input
+  on interrupt.
+
+**Stop while starting.**
+
+- *Before the lane has the claim.* `launch_permitted` is false and nothing is sent (today's
+  code).
+- *While `turn/start`'s reply is outstanding.* The lane processes inputs one at a time. The
+  Stop from the attempt socket is queued in `deferred` until the reply binds the native turn id,
+  then it interrupts exactly that turn. If `turn/start` failed, the slot is clear, and the
+  Stop is acknowledged with nothing to do.
+- *A Stop on a goal thread.* It pauses the goal first, as today.
+- The attempt's spool records an `Exited` with SIGINT either way, so the turn ends Stopped
+  once.
+
+**A login or account switch.** Codex reads `auth.json` when it starts. `Login` already compares
+the account id (not the token, so a refresh does not count) at each claim. A change sets
+`stale_login`, and the lane refuses the claim *before* it reserves the spool, then exits. New
+in this change, the refusal carries a stable code (`lane-login-changed`). On that code the
+Host waits for `released()`, starts a fresh lane and submits the same attempt once. This is
+safe because no spool exists. The lane holds the pool's login lock shared only while it holds
+a claim, so an account switch between turns is never blocked by an idle lane.
+`AccountHold` keeps its meaning for goals.
+
+**A model or effort change between turns.** `turn/start` takes `model` and `effort` "for this
+turn and subsequent turns". The lane therefore:
+
+- sends both on every `turn/start` when the agent has them set;
+- remembers the last pair it applied;
+- restarts while idle when a turn asks for the *default* after an explicit value (Codex has
+  no "reset to config default"). That turn then pays one cold start.
+
+The identity (`developerInstructions`) and the turn's environment are fixed at
+`thread/resume`/`thread/start`, so a persona change restarts the lane the same way. The lane
+keeps a digest of its start options, and the Host compares it before each submission (see
+decision 3 for the turn token).
+
+**The agent moves to another backend or Host.**
+
+- *Another backend.* The worker sees `record.backend != "codex"` with a lane record that is
+  not `Exec`. It retires the lane once it is idle, and the record goes to `Exec`. While the lane
+  still runs a turn, the move waits for that turn, as a move waits for any live turn today.
+- *Another Host.* `actor.moved()` already stops new launches. The worker additionally sends
+  `Retire` to an idle lane of a moved agent. The thread lock is per Host (`run/`), and Codex's
+  rollout is per machine, so the other Host runs its own lane. An active native goal still
+  blocks a move, as now.
+
+**Many idle agents.** A probe on this machine found the cost of one lane. It ran
+`codex app-server`, 0.167.1, with an empty `CODEX_HOME`, `initialize` followed by
+`thread/start`.
+
+- *Memory.* About 150 MB RSS per idle app-server with a thread loaded, before any MCP server
+  starts. The shim adds a few MB. Twenty idle agents would hold about 3 GB.
+- *Cold start.* `initialize` took 126 ms and `thread/start` 10 ms. A `thread/resume` of a long
+  rollout costs more (`excludeTurns` keeps the reply small, but Codex still reads the file).
+  The harness measures it.
+- *Warm turn.* A turn on a warm lane costs one socket round trip and `turn/start`.
+
+The idle policy has two parts:
+
+- *The lane retires itself.* After `CODEX_LANE_IDLE` with no claim and no active or uncertain
+  goal, it exits (`may_continue()` false). This needs no Host, so lanes never pile up while a
+  Host is down.
+- *The Host caps live lanes.* Above `CODEX_LANE_MOST` live lanes, the worker sends `Retire` to
+  the idle lane whose last turn is oldest. Lanes with a running turn or an active goal never
+  count as retirable.
+
+The first turn after a retirement pays the cold start. That is still far below an exec start,
+and the harness shows by how much. The numbers are decision 2.
+
+## 3. Boundaries
+
+**The shim (lane process)** owns:
+
+- the app-server child, the thread lock and the login check;
+- the claim and its spool;
+- `turn/start`, `turn/steer` and `turn/interrupt`, and the goal RPCs;
+- read receipts, the bounded stop escalation and the idle self-retirement.
+
+It never waits for the Host and never decides admission. It only refuses what breaks an
+invariant (a second claim, a steer for an attempt it does not hold, a stale login).
+
+**The backend** (`clarp-backend/src/codex.rs`) owns:
+
+- the lane's start options (cwd, model, effort, identity, environment), today built in
+  `codex_goal_lane::spawn`; they move behind a `Codex::lane_options(&TurnSpec)` so exec and
+  the lane share one description of an agent's Codex;
+- the input of a turn (the headed prompt the exec path builds);
+- the interpreter, which already reads the lane's spool. It gains one line kind
+  (`steer.read`) that it hands to the actor as read evidence;
+- whether Codex can be steered (`steers() -> bool`) instead of the actor's
+  `backend.id() == "claude"`.
+
+**The actor** owns:
+
+- admission: which messages steer, the `Join` before the write, `JoinRead` on a receipt and
+  the clearing at turn end. This is `steer_active`, generalized from Claude.
+- turn states and rejoin, unchanged;
+- the lane record in the log.
+
+For Codex, `Recovery` carries no `InputOwner`. The kernel's `Join.recovery` is optional
+already, and Codex's recovery is the spool receipt plus the lane's end-of-turn check.
+
+**The Host worker** (`agent/native_goal.rs`, to be renamed `agent/codex_lane.rs`) owns:
+
+- the lane's lifecycle: start, reuse, retire, the idle cap and the setting;
+- routing `Action::Launch` to the lane or to exec;
+- delivering `Action::Steer` and `Action::Stop` to the attempt socket.
+
+The edge and the contract do not change.
+
+## 4. Steering, Stop, and what the apps see
+
+**Which messages steer.** The rule is the same as for Claude, and `can_offer_steering` widens
+from `backend == "claude"` to the backend's `steers()`:
+
+- a direct user send (`Queue`, a user origin, not coordination);
+- a front-desk relay of the user's word (`Later`, `user_word`, coordination).
+
+They do not steer:
+
+- an opening turn;
+- a compaction turn (Codex refuses those itself: `NonSteerableTurnKind` is review or compact);
+- an empty text;
+- a turn whose lane has no native turn id yet (`turn/start`'s reply not bound).
+
+**The mapping.** `steer_active` commits `Join { into: live.turn, uuid }` and emits
+`Action::Steer { socket, input }` as today. For Codex, `input` is the steered text with the
+team brief, exactly as the prompt is headed. The attempt socket accepts a new
+`Request::Steer { uuid, text }` alongside `Follow` and `Stop`. The lane sends:
+
+```
+turn/steer { threadId, expectedTurnId: <bound native turn>, clientUserMessageId: uuid,
+             input: [{type: "text", text}] }
+```
+
+The lane replies `ok` once Codex accepted it, or `failed` with Codex's reason. The Host keeps
+no state for it: the receipt in the spool is the only thing that moves the join forward.
+
+**Stop** is `Action::Stop` on the attempt socket, and becomes `turn/interrupt { threadId,
+turnId }`. A goal thread pauses first. The escalation is bounded (section 2). A Stop also
+holds what waits, as D14 says. A steered message whose join is still Pending stays in the
+mailbox, and the hold holds it.
+
+**What the apps see** is what they see for a steered Claude turn:
+
+- The message is queued at once (its delivery receipt says queued).
+- When the receipt lands, `JoinRead` takes it out of the queue, the queue changes, and the row
+  is written into the conversation at that point. `conversation::split` closes the reply so far
+  and opens a new one after the row.
+- The turn's end tells the steered message's own `TurnEnd`.
+- `busy` and `turn_started_at` stay the parent turn's.
+
+No delta reaches an app. The lane writes `item/agentMessage/delta` to the spool as it does now.
+The Host may read the deltas for activity, but the live view stays the stored reply, as for
+exec (streaming display off, as decided).
+
+**`supports_steer` for Codex.** It stays out of `FEATURES` until both Hosts run the lane with
+the setting on, as the Claude note in `models.rs` explains. Advertising it is a contract
+change for the release owner, not this change.
+
+## 5. Rollout and rollback
+
+The lane sits behind a Host setting, `codex_chat_lane`, with values `off` and `on`. Decision 1
+is its default.
+
+- **Off.** Codex chat turns run on exec, as today. A goal still gets its lane. An idle chat
+  lane that is still alive is retired before the next exec turn, through the existing
+  `after_retire` path.
+- **On.** Every Codex agent's chat turns run on its lane.
+- **Rollback.** Set it to `off`. Lanes retire as they go idle, and the next turn runs exec on
+  the same thread: the lane and exec share Codex's thread and rollout, so the conversation
+  continues. No data migrates either way. A running lane turn is never cut by the switch.
+
+## 6. What it should move
+
+The harness of issue 742 (branch `rebuild/turn-timings`, not yet pushed when this was written)
+measures each backend on a disposable Host. This change should move these Codex numbers:
+
+- **Launch overhead.** The time from the actor's launch to the spool's `Spawned`, and to
+  `turn/started`. Today it is 1.6 to 11.5 s per exec. The target is under 100 ms on a warm lane.
+  A cold lane is measured as its own row.
+- **Time to first activity.** The first item in the spool. This falls by the launch overhead.
+- **Steer-to-effect latency.** The time from the send's acceptance to the spool's `steer.read`,
+  and to the first item after it. Today there is none: the message waits for the whole turn.
+- **Stop latency.** The time from Stop to the terminal `Exited`. Today this is an exec process
+  signal. The target is at most the same.
+- **End-to-end turn time.** This falls by the launch overhead.
+- **Tool-call round trip.** It should be unchanged. It is measured to show that the lane costs
+  nothing there.
+- **Memory.** RSS of idle lanes per Host, with the cap reached.
+
+## Build plan (after approval)
+
+0. **Verification, no account needed.** Point a lane's Codex at a local stub Responses
+   endpoint (`model_providers` with a `base_url` on 127.0.0.1, with an empty `CODEX_HOME`).
+   Record three things: whether steered input is echoed as a `userMessage` with `clientId`;
+   whether a turn completes before it drains steered input; and what happens to pending input
+   on interrupt. The steer refusal texts are recorded at the same time. The answers fix the
+   receipt rules in section 2 before code depends on them.
+1. **Shim.**
+   - A thread-less lane with `thread/start`.
+   - `Request::Steer` on the attempt socket, with `steer.read` receipts and the end-of-turn
+     check.
+   - The bounded stop escalation and the idle self-retirement.
+   - The stable refusal codes, and the model, effort and options digest.
+   - Tests on the existing fake (`tests/codex_goal_lane.rs`, `tests/qa/fake_codex.py` already
+     answers `turn/steer`).
+2. **Backend.** `lane_options` and `steers()`, and `steer.read` in the interpreter.
+3. **Actor.** `steer_active` for Codex, with `Recovery` optional, and the routing rule.
+4. **Host worker.** The setting, lane routing for chat turns, the retry on `lane-login-changed`,
+   retirement on a backend or Host move, the idle cap and steer delivery.
+5. **Skill.** The `skills/` text saying a message to a busy Codex agent now reaches its running
+   turn on the Rust Host with the setting on. It ships in the same change (AGENTS.md rule).
+
+Rust builds go through `server-rs/tools/build`, one batch per crate (D13). Tests run once at
+the end.
+
+## Decisions for the lead
+
+1. **Rollout default.** `codex_chat_lane` lands `off`. It is turned `on` on the Rust Host after
+   the before/after harness run on a disposable Host (recommended). The alternative is to land
+   it `on` for every Codex agent.
+2. **Idle policy.** A lane retires itself after **15 min** without a turn, and the Host keeps at
+   most **8** live lanes, retiring the least recently used idle one (recommended). This is
+   about 1.2 GB at the cap. The alternative is longer life and more memory, or no cap.
+3. **The turn token inside a lane.** A persistent app-server cannot carry each turn's
+   `CLARP_PROVIDER_TURN` in its environment. Today's goal lane removes the token, so Clarp tools
+   inside lane turns lose the signed turn identity. The options are:
+   - (a) *Recommended.* The lane's environment names a per-agent token file
+     (`CLARP_PROVIDER_TURN_FILE`). The lane rewrites it, mode 0600, when it binds each claim,
+     and Clarp's tools read it when the variable is absent. A worker left behind by an earlier
+     turn then presents the agent's newest turn, which is the same agent.
+   - (b) A new token version that names the agent and the lane instance.
+   - (c) Accept the loss, as the goal lane does now.
