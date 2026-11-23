@@ -420,15 +420,14 @@ fn make_room(run: &Path, own: &Path, most: usize) {
         if !is_lane || path == own {
             continue;
         }
+        // Asked, not locked: taking another lane's owner lock, even for a moment, could make
+        // a lane of that agent that starts in that moment fail (review of 23 Nov 2026).
         let lane = Lane::new(path);
-        if lane.released().unwrap_or(true) {
+        let Ok(state) = lane.ask(Request::Inspect) else {
             continue;
-        }
+        };
         live += 1;
-        if let Ok(state) = lane.ask(Request::Inspect)
-            && state.claim.is_none()
-            && state.available
-        {
+        if state.claim.is_none() && state.available {
             idle.push((state.idle_ms, lane));
         }
     }
@@ -478,4 +477,39 @@ fn line(input: &mut impl BufRead) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(line)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::Settings;
+
+    fn of(text: &str) -> Settings {
+        Settings::of(Some(&text.parse::<toml::Table>().unwrap()))
+    }
+
+    #[test]
+    fn the_lane_settings_are_off_and_fifteen_minutes_and_eight_unless_the_owner_says() {
+        let default = Settings {
+            chat: false,
+            idle_ms: 15 * 60_000,
+            most: 8,
+        };
+        assert_eq!(Settings::of(None), default);
+        assert_eq!(of(""), default);
+        assert_eq!(
+            of("codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\n"),
+            Settings {
+                chat: true,
+                idle_ms: 120_000,
+                most: 3
+            }
+        );
+        // What is no setting keeps the default: a word, zero or less, or a key inside a table.
+        assert_eq!(
+            of("codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\ncodex_lane_most = -1\n"),
+            default
+        );
+        assert_eq!(of("[other]\ncodex_chat_lane = true\n"), default);
+    }
 }

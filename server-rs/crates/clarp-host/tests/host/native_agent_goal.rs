@@ -11,12 +11,13 @@ import threading
 root = Path(__file__).resolve().parent
 thread = "native-thread"
 if sys.argv[1] == "exec":
-    sys.stdin.read()
+    prompt = sys.stdin.read()
     with (root / "launches").open("a") as f:
         f.write("exec\n")
+    text = "Queued reply" if "said during the goal" in prompt else "Ordinary exec reply"
     print(json.dumps({"type": "thread.started", "thread_id": thread}), flush=True)
     print(json.dumps({"type": "item.completed", "item": {
-        "id": "answer", "type": "agent_message", "text": "Ordinary exec reply"
+        "id": "answer", "type": "agent_message", "text": text
     }}), flush=True)
     print('{"type":"turn.completed"}', flush=True)
     raise SystemExit(0)
@@ -71,6 +72,19 @@ for line in sys.stdin:
         result = {"goal": dict(goal)}
     elif method == "thread/goal/get":
         result = {"goal": goal}
+    elif method == "turn/steer":
+        # With the chat lane off, nothing is steered into a goal's turn.
+        (root / "steered").write_text(json.dumps(params))
+        emit({"id": request_id, "error": {"code": -32600, "message": "not expected"}})
+        continue
+    elif method == "turn/start":
+        result = {"turn": {"id": "prompted"}}
+        emit({"id": request_id, "result": result})
+        notify("turn/started", turn={"id": "prompted"})
+        notify("item/completed", turnId="prompted", item={
+            "id": "queued", "type": "agentMessage", "text": "Queued reply"})
+        notify("turn/completed", turn={"id": "prompted", "status": "completed"})
+        continue
     elif method == "turn/interrupt":
         assert params["turnId"] == turn and goal["status"] == "paused"
         cancel.set()
@@ -161,6 +175,11 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
             && host.state("ada") == "thinking"
     });
 
+    // The chat lane is off (no setting): a user's words to the busy goal agent wait for a turn
+    // of their own and are never steered into the goal's turn (review of 23 Nov 2026).
+    let during = host.send("ada", "said during the goal", "during");
+    assert_eq!(during["queued"], true, "{during}");
+
     host.kill();
     let host = place.start_in("", &[], &world);
     let snapshot = host.get("/agents/snapshot");
@@ -188,13 +207,25 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+    wait_for("the words said during the goal to be answered", || {
+        host.conversation("ada").contains(&said("assistant", "Queued reply"))
+            && host.state("ada") == "done"
+    });
+    assert!(
+        !place.root.join("steered").exists(),
+        "nothing was steered into the goal's turn"
+    );
     let conversation = host.conversation("ada");
     let user: Vec<_> = conversation
         .iter()
         .filter(|(role, _)| role == "user")
         .map(|(_, text)| text.as_str())
         .collect();
-    assert_eq!(user, ["open a Codex thread"], "{conversation:?}");
+    assert_eq!(
+        user,
+        ["open a Codex thread", "said during the goal"],
+        "{conversation:?}"
+    );
     assert!(conversation.contains(&said("assistant", "Ordinary exec reply")));
     assert_eq!(
         conversation
@@ -203,9 +234,12 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
             .count(),
         1
     );
+    // The waiting words ran on the lane or, once it had left, on exec: either way the next
+    // turn is exec's.
+    let before = std::fs::read_to_string(place.root.join("launches")).unwrap();
     host.send("ada", "ordinary turn after completion", "after");
     wait_for("exec to regain the thread", || {
-        std::fs::read_to_string(place.root.join("launches")).unwrap() == "exec\napp-server\nexec\n"
+        std::fs::read_to_string(place.root.join("launches")).unwrap() == format!("{before}exec\n")
             && host.state("ada") == "done"
     });
 }
