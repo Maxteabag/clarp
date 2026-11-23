@@ -711,6 +711,8 @@ pub(crate) fn message_row(
         // The pane fills in Show work (Conversation view, #702).
         work_key: SharedString::new(),
         work_open: false,
+        // The pane puts the rows of opened work in one box (#727).
+        work_box: SharedString::new(),
     }
 }
 

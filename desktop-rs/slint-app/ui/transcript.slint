@@ -138,6 +138,10 @@ export struct MessageRow {
     // view left out ("" for none): its key, and whether they show.
     work-key: string,
     work-open: bool,
+    // Conversation view (#727): the row's band of the one bordered box an
+    // opened turn's work is drawn in, as on iOS: "top", "middle", "bottom",
+    // "only" (a box of one row), "" for none.
+    work-box: string,
 }
 
 // A row handed to the transcript to measure off screen, and the batch it
@@ -815,6 +819,25 @@ component TranscriptRow inherits HorizontalLayout {
         // cannot be selected: the message's text is copied whole).
         // A right-click on a finished turn's reply opens or folds its work
         // (Conversation view, #702), as a long press does on the phone.
+        // Opened work (#727): each row of the box draws its band, the box's
+        // sides through its spacing so the bands join into one border.
+        if root.message.work-box != "": Rectangle {
+            property <length> gap: Look.message-spacing * Look.zoom / 2;
+            property <bool> is-top: root.message.work-box == "top" || root.message.work-box == "only";
+            property <bool> is-bottom: root.message.work-box == "bottom" || root.message.work-box == "only";
+            x: -8px;
+            y: self.is-top ? -self.gap / 2 : -self.gap;
+            width: parent.width + 16px;
+            height: parent.height + (self.is-top ? self.gap / 2 : self.gap) + (self.is-bottom ? self.gap / 2 : self.gap);
+            accessible-role: groupbox;
+            accessible-id: root.measuring ? "" : "work-box:" + root.message.id;
+            accessible-label: "Work";
+            background: Palette.raised.with-alpha(0.35);
+            Rectangle { x: 0; y: 0; width: 1px; height: parent.height; background: Palette.border; }
+            Rectangle { x: parent.width - 1px; y: 0; width: 1px; height: parent.height; background: Palette.border; }
+            if parent.is-top: Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: Palette.border; }
+            if parent.is-bottom: Rectangle { x: 0; y: parent.height - 1px; width: parent.width; height: 1px; background: Palette.border; }
+        }
         hover := TouchArea {
             pointer-event(event) => {
                 if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down && root.message.work-key != "" && !root.measuring) {

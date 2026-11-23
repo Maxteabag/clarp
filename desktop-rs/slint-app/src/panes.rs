@@ -152,6 +152,75 @@ fn live_source(entry: &clarp_core::live_present::Entry) -> Shown {
     (source, entry.expanded, crate::live_view::signature(entry), entry.key.clone())
 }
 
+/// Conversation view (#727): an opened turn's work is one bordered box,
+/// as on iOS. A finished turn's opened rows (its session rows and its fold's
+/// steps) move under its reply; an opened Running box holds its steps. Each
+/// row of a box is drawn as one band of it (`MessageRow.work-box`).
+fn box_work(
+    projection: &clarp_core::chat_view::Projection,
+    history: &clarp_core::history_fold::Folded,
+    live: Option<&clarp_core::live_present::Presented>,
+    fresh: &mut Vec<Shown>,
+    rows: &mut Vec<MessageRow>,
+) {
+    use clarp_core::chat_view::{self, WorkBox};
+    use clarp_core::history_fold::Piece;
+    use clarp_core::live_present::Kind;
+    let mut boxes: Vec<WorkBox> = Vec::new();
+    for (anchor, work) in projection.anchors.iter().filter(|(_, w)| w.open) {
+        let trace = work.key.strip_prefix(chat_view::WORK_PREFIX).unwrap_or_default();
+        if trace.is_empty() {
+            continue;
+        }
+        let mut members: std::collections::HashSet<String> = fresh
+            .iter()
+            .filter(|(row, ..)| row.source_row != usize::MAX && row.message.trace_id == trace && !chat_view::in_conversation(&row.message))
+            .map(|(row, ..)| row.message.id.clone())
+            .collect();
+        // The fold's own rows: its work row and steps, never its reply.
+        for fold in history.folds.iter().filter(|f| chat_view::fold_turn(&f.key) == trace) {
+            for piece in &fold.pieces {
+                if let Piece::Entry(entry) = piece
+                    && !(entry.kind == Kind::Message && entry.phase != "commentary")
+                {
+                    members.insert(entry.key.clone());
+                }
+            }
+        }
+        if !members.is_empty() {
+            boxes.push(WorkBox { anchor: anchor.clone(), inside: false, members });
+        }
+    }
+    // The Running box opened: its steps list inside it.
+    if let Some(first) = live.and_then(|l| l.entries.first()).filter(|e| e.kind == Kind::Fold && e.expanded && e.key.starts_with("live:fold:")) {
+        let members = live.map(|l| l.entries[1..].iter().map(|e| if e.row.is_empty() { e.key.clone() } else { e.row.clone() }).collect()).unwrap_or_default();
+        boxes.push(WorkBox { anchor: first.key.clone(), inside: true, members });
+    }
+    if boxes.is_empty() {
+        return;
+    }
+    let (order, edges) = {
+        let ids: Vec<&str> = fresh.iter().map(|(row, ..)| row.message.id.as_str()).collect();
+        chat_view::gather(&ids, &boxes)
+    };
+    let mut taken: Vec<Option<(Shown, MessageRow)>> = std::mem::take(fresh).into_iter().zip(std::mem::take(rows)).map(Some).collect();
+    for (index, edge) in order.into_iter().zip(edges) {
+        let (mut shown, mut row) = taken[index].take().expect("each row is drawn once");
+        if edge != chat_view::Edge::None {
+            row.work_box = edge.name().into();
+            shown.2 = boxed_signature(&shown.2, edge.name());
+        }
+        fresh.push(shown);
+        rows.push(row);
+    }
+}
+
+/// A row's signature with its band of a work box: a row that enters or
+/// leaves a box, or changes band, is drawn again.
+fn boxed_signature(signature: &str, edge: &str) -> String {
+    if edge.is_empty() { signature.to_owned() } else { format!("{signature}|box:{edge}") }
+}
+
 /// One quiet line under each turn that did not complete, in the Host's
 /// words (`turn_end_reason`, #731): drawn as the Host's own system lines are.
 fn splice_turn_reasons(lines: &[clarp_core::turn_reason::Line], fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
@@ -824,12 +893,15 @@ impl App {
         let mut rows = rows;
         let mut kept: std::collections::HashSet<String> = std::collections::HashSet::new();
         self.splice_history(pane, &history, &mut fresh, &mut rows, &mut kept);
-        if let Some(live) = live {
-            self.splice_live(pane, &live, &mut fresh, &mut rows);
+        if let Some(live) = &live {
+            self.splice_live(pane, live, &mut fresh, &mut rows);
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
         splice_turn_reasons(&reasons, &mut fresh, &mut rows);
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
+        if let Some(projection) = &projection {
+            box_work(projection, &history, live.as_ref(), &mut fresh, &mut rows);
+        }
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         let (removed, inserted, updated) = sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
         if removed + inserted + updated > 0 {
@@ -1040,12 +1112,15 @@ impl App {
                 // A durable row in an entry's place is the chat's, not the clock's.
                 for entry in live.entries.iter().filter(|e| e.row.is_empty()) {
                     let Some(at) = pane.shown.iter().position(|s| s.3 == entry.key) else { continue };
-                    let signature = crate::live_view::signature(entry);
+                    // A row keeps its band of a work box (#727) as it ticks.
+                    let edge = pane.messages.row_data(at).map(|r| r.work_box).unwrap_or_default();
+                    let signature = boxed_signature(&crate::live_view::signature(entry), &edge);
                     if pane.shown[at].2 == signature {
                         continue;
                     }
                     pane.shown[at].2 = signature;
-                    let row = pane.rows.live_row(entry);
+                    let mut row = pane.rows.live_row(entry);
+                    row.work_box = edge;
                     pane.messages.set_row_data(at, row);
                     crate::scroll_journal::event(&pane.id, "live");
                     crate::scroll_book::measure_soon();

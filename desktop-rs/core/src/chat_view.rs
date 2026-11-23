@@ -414,3 +414,73 @@ pub fn busy_turn(rows: &[Message]) -> Option<String> {
     }
     Some(trace)
 }
+
+/// Where a row sits in an opened work box (#727, iOS `WorkBoxContent`): the
+/// rows of a turn's opened work are drawn inside one bordered box, each
+/// row one band of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Edge {
+    #[default]
+    None,
+    /// The box's first band (its top border).
+    Top,
+    Middle,
+    /// Its last band (its bottom border).
+    Bottom,
+    /// A box of one row.
+    Only,
+}
+
+impl Edge {
+    pub fn name(self) -> &'static str {
+        match self {
+            Edge::None => "",
+            Edge::Top => "top",
+            Edge::Middle => "middle",
+            Edge::Bottom => "bottom",
+            Edge::Only => "only",
+        }
+    }
+}
+
+/// One opened work box: the row it goes under (`anchor`, a finished turn's
+/// reply) or begins with (`inside`: the Running box, whose steps list under
+/// it), and the rows it holds, by id.
+#[derive(Debug, Clone, Default)]
+pub struct WorkBox {
+    pub anchor: String,
+    pub inside: bool,
+    pub members: HashSet<String>,
+}
+
+/// The rows (their ids, in drawing order) with each opened work box
+/// gathered: its rows move, in their order, to just under its anchor (an
+/// opened turn's work sits under its reply, as on iOS), and each row of a
+/// box gets its band. Returns the new order (indexes into `ids`) and each
+/// row's band in that order. A box whose anchor is not drawn leaves its
+/// rows where they are, unboxed.
+pub fn gather(ids: &[&str], boxes: &[WorkBox]) -> (Vec<usize>, Vec<Edge>) {
+    let anchored: Vec<&WorkBox> = boxes.iter().filter(|b| ids.contains(&b.anchor.as_str())).collect();
+    let moved = |i: usize| anchored.iter().any(|b| b.anchor != ids[i] && b.members.contains(ids[i]));
+    let mut order: Vec<usize> = (0..ids.len()).filter(|&i| !moved(i)).collect();
+    let mut edges = vec![Edge::None; order.len()];
+    for boxed in anchored {
+        let Some(at) = order.iter().position(|&i| ids[i] == boxed.anchor) else { continue };
+        let members: Vec<usize> = (0..ids.len()).filter(|&i| ids[i] != boxed.anchor && boxed.members.contains(ids[i]) && !order.contains(&i)).collect();
+        let first = if boxed.inside { at } else { at + 1 };
+        let count = members.len() + usize::from(boxed.inside);
+        for (offset, member) in members.into_iter().enumerate() {
+            order.insert(at + 1 + offset, member);
+            edges.insert(at + 1 + offset, Edge::None);
+        }
+        for (offset, edge) in edges[first..first + count].iter_mut().enumerate() {
+            *edge = match (count, offset) {
+                (1, _) => Edge::Only,
+                (_, 0) => Edge::Top,
+                (n, o) if o + 1 == n => Edge::Bottom,
+                _ => Edge::Middle,
+            };
+        }
+    }
+    (order, edges)
+}
