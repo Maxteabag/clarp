@@ -560,6 +560,10 @@ the daily schedule.
   `cli_probe`, Codex); the Python Host (and this Host before) added the bundled catalogue's
   models beside them (`known_too`), offering a model the login could not run. A row seen
   running one model (`cli_cache`, Claude Code) keeps the catalogue.
+  A move between `agy` and `agy-acp` (Rust contract 165), one program with one store, keeps
+  agy's own conversation and carries nothing; the next turn resumes it natively. Where agy no
+  longer has it, that turn fails as a lost conversation (`agy-acp`) or finds it gone from the
+  store (`agy`), and the next one opens a new conversation with the Host's record.
 
 - **Avatar thumbnails (Rust contract 160, feature `avatar_thumbnails`).** `&px=64`, `128` or
   `256` on the address of an agent's or a persona's picture (`/avatars/<agent>`,

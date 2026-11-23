@@ -762,7 +762,8 @@ reply and its posts reach the user and its text in between does not.
 #### Moving an agent to another backend
 
 Rust Host feature `agent_backend_transit` (issue 720, contract 158). An agent moves to another
-tool (`claude`, `codex`, `agy`, `grok`, `opencode`) and keeps its conversation.
+tool (`claude`, `codex`, `agy`, `grok`, `opencode`, and `agy-acp` with feature
+`backend_agy_acp`) and keeps its conversation.
 
 **What can be chosen.** `GET /agent-model-options?session=S` carries, on each tool's row
 (`providers.<backend>`), `available` (bool) and, when false, `unavailable_reason`, one of
@@ -800,6 +801,18 @@ unknown id answers 404. The Host keeps these in memory: after a restart it has f
 finished ones. While a change runs, the agent's snapshot row carries `transit` `{transit_id,
 phase, backend, model}`, null otherwise; an `agent-roster` with `kind: agent-transit` is sent
 when one begins and when it ends.
+
+**Same store (Rust Host contract 165, feature `backend_agy_acp`).** A move between two tools
+that are one program with one store of conversations (`agy` and `agy-acp`; a row's
+`runs_through` names the program) keeps the tool's own conversation and carries nothing: no
+summary turn, no record at the head. `reading` and the carrying phases pass at once, `carried`
+on `done` is all zeros, and the row reads "Now on <Backend> · <Model>. The same conversation
+goes on." The agent's next turn continues that conversation natively (`session/resume` over
+ACP, `--conversation` on `agy`). Should the tool no longer have it, that turn finds out: `agy`
+by its store (the conversation's file is gone), `agy-acp` by agy's own answer that it does not
+know it, which fails that turn ("Antigravity no longer has this conversation") and marks the
+conversation. The next turn then begins a new conversation that opens with the Host's record of
+the old one, as any move to a tool without a writer does.
 
 **Result.** On `done` the agent's row carries the new `backend`, `model` and `effort`, and the
 tool's session changes inside the Host. An agent set to no model (`""`) shows the model that answered last;
