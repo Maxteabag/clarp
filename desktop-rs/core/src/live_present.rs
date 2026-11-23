@@ -103,6 +103,10 @@ pub struct Options {
     /// phase `commentary`) stays in its place instead of folding into the
     /// work row as a working detail. The final reply never folds.
     pub show_commentary: bool,
+    /// The chat hides coordination between agents (its `/log` was read
+    /// hidden): what a turn wrote for other agents is left out
+    /// ([`LiveView::veiled`]).
+    pub veil: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -289,8 +293,12 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let mut presented = Presented::default();
     let turn = view.turn();
     let Some(turn_id) = turn.map(|t| text(t, "turn_id").to_owned()).filter(|t| !t.is_empty()) else { return presented };
-    let items: Vec<&Object> =
-        view.items().into_iter().filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind"))).collect();
+    let items: Vec<&Object> = view
+        .items()
+        .into_iter()
+        .filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind")))
+        .filter(|i| !(options.veil && turn.is_some_and(|t| view.veiled(t, i))))
+        .collect();
     let durable = durable(rows);
     let settled = turn.is_some_and(|t| !matches!(text(t, "status"), "running" | ""));
     // Taken over (§7.5): a durable row with the message's row_id, or a

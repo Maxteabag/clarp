@@ -3,7 +3,7 @@
 //! Host's reference reducer (`server/lib/live_items.py`) by the recorded
 //! streams in `contract/live/`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
 
@@ -55,6 +55,57 @@ fn append_output(item: &mut Object, lines: &[Value], total_lines: i64) {
     output.insert("truncated".into(), json!(total_lines > held));
 }
 
+/// Whether `turn` is one for other agents (`audience` `agents`, Host
+/// contract 108); a turn without an audience is the user's.
+pub fn for_agents(turn: Option<&Object>) -> bool {
+    turn.and_then(|t| t.get("audience")).and_then(Value::as_str).is_some_and(|a| a.trim().eq_ignore_ascii_case("agents"))
+}
+
+fn turn_id(turn: Option<&Object>) -> &str {
+    turn.and_then(|t| t.get("turn_id")).and_then(Value::as_str).unwrap_or_default()
+}
+
+/// What a turn wrote for other agents (docs/protocol.md "Live rows follow
+/// the same rule"; docs/live-items.md §1.4). A turn for other agents the
+/// user never saw is all theirs. Once the user has seen a turn, what was
+/// shown stays shown, also when the turn goes back to other agents
+/// (`turn_audience_returns`, Rust Host contract 164): only the items that
+/// begin while it is theirs again are theirs, and they stay theirs when the
+/// user steps in once more, as their `/log` rows stay `agents`.
+#[derive(Debug, Clone, Default)]
+struct Veil {
+    /// Turns the user has seen (`audience` `user`), newest last.
+    seen: Vec<String>,
+    /// Items that began in a seen turn while it was for other agents.
+    items: HashSet<String>,
+}
+
+/// How many seen turns a view remembers (more than it retires).
+const SEEN_TURNS: usize = 64;
+
+impl Veil {
+    fn seen(&self, turn: &str) -> bool {
+        !turn.is_empty() && self.seen.iter().any(|t| t == turn)
+    }
+    /// The turn as it stands now.
+    fn follow(&mut self, turn: Option<&Object>) {
+        let id = turn_id(turn);
+        if turn.is_none() || id.is_empty() || for_agents(turn) || self.seen(id) {
+            return;
+        }
+        self.seen.push(id.to_owned());
+        if self.seen.len() > SEEN_TURNS {
+            self.seen.remove(0);
+        }
+    }
+    /// Item `id` began while the turn stood as `turn`.
+    fn begin(&mut self, turn: Option<&Object>, id: &str) {
+        if for_agents(turn) && self.seen(turn_id(turn)) {
+            self.items.insert(id.to_owned());
+        }
+    }
+}
+
 /// One conversation's live state, built from snapshots and events.
 #[derive(Debug, Clone)]
 pub struct LiveView {
@@ -76,6 +127,7 @@ pub struct LiveView {
     /// Turns a newer one replaced, with their items (oldest first): history
     /// folds them as they read live.
     retired: Vec<(Object, Vec<Object>)>,
+    veil: Veil,
 }
 
 /// How many replaced turns a view keeps.
@@ -95,6 +147,7 @@ impl Default for LiveView {
             clock_offset_ms: 0,
             generation: 0,
             retired: Vec::new(),
+            veil: Veil::default(),
         }
     }
 }
@@ -149,6 +202,25 @@ impl LiveView {
         Some((turn, items.iter().collect()))
     }
 
+    /// Whether `item` of `turn` (the open turn, or one it retired) was
+    /// written for other agents: a chat that hides coordination between
+    /// agents leaves it out ([`Veil`]).
+    pub fn veiled(&self, turn: &Object, item: &Object) -> bool {
+        let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+        self.veil.items.contains(id) || (for_agents(Some(turn)) && !self.veil.seen(turn_id(Some(turn))))
+    }
+
+    /// Forgets veiled items neither the open turn nor a retired one holds.
+    fn prune_veil(&mut self) {
+        if self.veil.items.is_empty() {
+            return;
+        }
+        let held: HashSet<&str> = self.items.keys().map(String::as_str)
+            .chain(self.retired.iter().flat_map(|(_, items)| items.iter().filter_map(|i| i.get("id").and_then(Value::as_str))))
+            .collect();
+        self.veil.items.retain(|id| held.contains(id.as_str()));
+    }
+
     /// Retired live turns remain available until /log has caught up.
     pub fn retired_turns(&self) -> impl Iterator<Item = (&Object, &[Object])> {
         self.retired.iter().map(|(turn, items)| (turn, items.as_slice()))
@@ -196,8 +268,14 @@ impl LiveView {
         self.epoch = snapshot.get("epoch").and_then(Value::as_str).map(str::to_owned);
         self.lseq = snapshot.get("lseq").and_then(Value::as_i64);
         self.activity = snapshot.get("activity").and_then(Value::as_object).cloned().unwrap_or_else(idle);
-        self.retire(snapshot.get("turn").and_then(Value::as_object));
-        self.turn = snapshot.get("turn").and_then(Value::as_object).cloned();
+        let next = snapshot.get("turn").and_then(Value::as_object);
+        self.retire(next);
+        // Items of the same turn this view did not hold began while it
+        // stood as the snapshot says.
+        let same = turn_id(self.turn.as_ref()) == turn_id(next);
+        let known: HashSet<String> = if same { self.items.keys().cloned().collect() } else { HashSet::new() };
+        self.turn = next.cloned();
+        self.veil.follow(self.turn.as_ref());
         self.main_turn = snapshot.get("main_turn").and_then(Value::as_object).cloned();
         self.items = snapshot
             .get("items")
@@ -207,6 +285,11 @@ impl LiveView {
             .filter_map(Value::as_object)
             .filter_map(|item| Some((item.get("id")?.as_str()?.to_owned(), item.clone())))
             .collect();
+        let fresh: Vec<String> = self.items.keys().filter(|id| !known.contains(*id)).cloned().collect();
+        for id in fresh {
+            self.veil.begin(self.turn.as_ref(), &id);
+        }
+        self.prune_veil();
         if let Some(settings) = snapshot.get("tool_explanations").and_then(Value::as_object) {
             self.tool_explanations = Some(settings.clone());
         }
@@ -234,19 +317,30 @@ impl LiveView {
         }
         let mut staged = (self.activity.clone(), self.turn.clone(), self.items.clone());
         let mut main_turn = self.main_turn.clone();
+        let mut veil = self.veil.clone();
         for op in event.get("ops").and_then(Value::as_array).into_iter().flatten() {
             let Some(op) = op.as_object() else { continue };
+            let name = op.get("op").and_then(Value::as_str).unwrap_or_default();
             // The agent's own turn beside a fork's: replaced whole (null: gone).
-            if op.get("op").and_then(Value::as_str) == Some("main_turn") {
+            if name == "main_turn" {
                 main_turn = op.get("main_turn").and_then(Value::as_object).cloned();
                 continue;
             }
+            let id = op.get("id").and_then(Value::as_str).unwrap_or_default();
+            let begins = name == "upsert" && !id.is_empty() && !staged.2.contains_key(id);
             if !apply_op(&mut staged, op) {
                 return self.need_snapshot();
+            }
+            if name == "turn" {
+                veil.follow(staged.1.as_ref());
+            } else if begins {
+                veil.begin(staged.1.as_ref(), id);
             }
         }
         self.retire(staged.1.as_ref());
         (self.activity, self.turn, self.items) = staged;
+        self.veil = veil;
+        self.prune_veil();
         self.main_turn = main_turn;
         self.lseq = Some(lseq);
         self.generation += 1;

@@ -40,6 +40,7 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         fold_running: conversation || folds_running(engine.chat_activity_mode(session)),
         hide_settled: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
         show_commentary: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
+        veil: veils(engine, session),
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     let running = view.turn().is_some_and(|t| matches!(t.get("status").and_then(|s| s.as_str()), Some("running") | None));
@@ -68,6 +69,14 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
     }
     pace(&mut presented);
     Some(presented)
+}
+
+/// Whether the chat's rows were read with coordination between agents left
+/// out (`hidden_coordination`'s echo): its live items leave out what a turn
+/// wrote for other agents the same way (docs/protocol.md "Live rows follow
+/// the same rule"). A visit that shows them reads them shown.
+pub(crate) fn veils(engine: &Engine, session: &str) -> bool {
+    engine.conversation(session).and_then(|c| c.coordination()).and_then(|e| e.get("hidden")).and_then(|h| h.as_bool()).unwrap_or(false)
 }
 
 /// Whether the chat draws its Conversation view: the Host offers it, the
@@ -189,6 +198,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         hide_settled: engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
         show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
+        veil: veils(engine, session),
     };
     let mut folded = clarp_core::history_fold::present(rows, view, &options);
     if conversation_view(engine, session, rows) {

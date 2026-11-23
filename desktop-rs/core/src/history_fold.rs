@@ -36,6 +36,9 @@ pub struct Options<'a> {
     pub hide_settled: bool,
     /// Always visible: commentary stays in its place (#653).
     pub show_commentary: bool,
+    /// The chat hides coordination between agents: a retired turn's items
+    /// written for other agents are left out ([`LiveView::veiled`]).
+    pub veil: bool,
     /// A cached explanation of a `/log` tool call (never asks for one).
     pub explain: Option<&'a dyn Fn(&Object) -> String>,
 }
@@ -142,7 +145,7 @@ fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &
     let Some(live) = live else { return };
     let known: HashSet<&str> = rows.iter().filter(|row| row.kind != "live" && !row.pending)
         .map(|row| row.id.as_str()).collect();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary, veil: options.veil };
     for (turn, items) in live.retired_turns() {
         let trace = turn.get("turn_id").and_then(Value::as_str).unwrap_or_default();
         // A matching prompt admits this retained turn into this transcript.
@@ -152,7 +155,8 @@ fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &
         }
         let pieces: Vec<Piece> = items.iter().filter(|item| {
             let id = item.get("row_id").and_then(Value::as_str).unwrap_or_default();
-            item.get("kind").and_then(Value::as_str) == Some("message")
+            !(options.veil && live.veiled(turn, item))
+                && item.get("kind").and_then(Value::as_str) == Some("message")
                 && item.get("status").and_then(Value::as_str) == Some("completed")
                 && item.get("phase").and_then(Value::as_str) == Some("final")
                 && !id.is_empty() && !known.contains(id)
@@ -315,7 +319,12 @@ fn turn(
         "commentary" => false,
         _ => answer == Some(index),
     };
-    let retired = (!turn_id.is_empty()).then(|| live.and_then(|v| v.retired(turn_id))).flatten();
+    // What a turn wrote for other agents stays out of its fold in a chat
+    // that hides them, as its rows do.
+    let retired = (!turn_id.is_empty()).then(|| live.and_then(|v| v.retired(turn_id))).flatten().map(|(turn, items)| {
+        let items: Vec<&Object> = items.into_iter().filter(|i| !(options.veil && live.is_some_and(|v| v.veiled(turn, i)))).collect();
+        (turn, items)
+    });
     let remembered: HashMap<&str, &Object> = retired
         .iter()
         .flat_map(|(_, items)| items.iter())
@@ -329,7 +338,7 @@ fn turn(
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
     let mut unexplained: Vec<(String, Object)> = Vec::new();
-    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary };
+    let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary, veil: options.veil };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
         // The row's text as written says whether it was spoken (a `<speak>` block); the
         // shown text has the markup taken out.

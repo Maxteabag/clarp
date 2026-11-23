@@ -450,3 +450,255 @@ pub fn conversation_view_check(out: String) {
     ];
     run_stages(stages);
 }
+
+/// What the agent writes for Bella after its note (the fake Host's
+/// `FOR_BELLA`): never drawn in a chat that hides coordination.
+const FOR_BELLA: &str = "Bella, the build is green, as you asked.";
+const FLIP_C: &str = "t-flip-c";
+const FLIP_S: &str = "t-flip-s";
+
+/// Every word the chat draws: rows' blocks and live rows' lines.
+fn drawn_text() -> String {
+    let mut all = String::new();
+    for r in shown() {
+        for b in r.blocks.iter() {
+            all.push_str(&b.text);
+            all.push('\n');
+        }
+        for part in [&r.live.title, &r.live.secondary, &r.live.text, &r.live.meta] {
+            all.push_str(part);
+            all.push('\n');
+        }
+        for line in r.live.lines.iter() {
+            all.push_str(&line);
+            all.push('\n');
+        }
+    }
+    all
+}
+
+/// Step `step` of the fake Host's sequence for turn `turn`.
+fn flip(turn: &str, step: i64) -> bool {
+    control("/__control/audience-flip", &json!({"session": SESSION, "turn_id": turn, "step": step})).is_ok()
+}
+
+/// The live turn's audience and whether it holds item `id`, as the desktop
+/// has them.
+fn live_turn(app: &crate::App, turn: &str, item: &str) -> Option<String> {
+    let engine = app.engine.borrow();
+    let view = engine.live_view(SESSION)?;
+    let held = view.turn()?;
+    if held.get("turn_id").and_then(|v| v.as_str()) != Some(turn) || (!item.is_empty() && view.item(item).is_none()) {
+        return None;
+    }
+    Some(held.get("audience").and_then(|v| v.as_str()).unwrap_or("user").to_owned())
+}
+
+fn not_for_bella(what: &str) {
+    let text = drawn_text();
+    check(!text.contains(FOR_BELLA), &format!("{what}: what the agent wrote for Bella after its note is not drawn"));
+}
+
+/// The rows drawn before the flip that are gone now (the Running box's
+/// own key aside: its words change with the audience).
+fn gone(before: &[String], fold: &str) -> Vec<String> {
+    let now = ids();
+    before.iter().filter(|id| id.as_str() != fold && !now.contains(id)).cloned().collect()
+}
+
+/// `--check audience-flip`: a live turn whose audience goes back from the
+/// user to other agents (#733, Rust Host contract 164, feature
+/// `turn_audience_returns`), in a chat that hides coordination between
+/// agents, in Conversation view and then in Session view. Bella starts the
+/// turn; the user's message is read in (the turn is the user's); the agent
+/// leaves a note and the turn is Bella's again: what was drawn stays drawn
+/// with no gap, the note shows, and nothing it writes for Bella is drawn;
+/// the user's next message makes it the user's again (the Running box says
+/// Running and opens); the end keeps the note and the user's answer and
+/// still leaves Bella's words out. The flips run only with the feature on:
+/// the fake Host refuses step 3 without it.
+pub fn audience_flip_check(out: String) {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let (out1, out2, out3, out4, out5, out6, out7, out8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let before: Rc<RefCell<Vec<String>>> = Rc::default();
+    let gaps: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (before1, before2, before3, before4) = (before.clone(), before.clone(), before.clone(), before.clone());
+    let (gaps1, gaps2) = (gaps.clone(), gaps.clone());
+    let fold_c = format!("live:fold:{FLIP_C}");
+    let fold_s = format!("live:fold:{FLIP_S}");
+    let (fold_c1, fold_c2, fold_c3, fold_c4, fold_c5) = (fold_c.clone(), fold_c.clone(), fold_c.clone(), fold_c.clone(), fold_c.clone());
+    let fold_s1 = fold_s.clone();
+    let id = |turn: &str, suffix: &str| format!("{turn}-{suffix}");
+    let stages: Vec<Stage> = vec![
+        ("open", Box::new(|app, _window, _| {
+            if !app.engine.borrow().conversation(SESSION).is_some_and(|c| !c.rows().is_empty()) {
+                return false;
+            }
+            check(!flip(FLIP_C, 3), "without turn_audience_returns the Host never turns a turn back to agents");
+            let rows = json!([
+                {"id": "r1", "role": "user", "text": "Hello", "origin": "user", "view": "conversation", "timestamp": "2026-11-23T10:00:00Z"},
+                {"id": "r2", "role": "assistant", "text": "Hi, how can I help?", "phase": "final", "view": "conversation", "timestamp": "2026-11-23T10:00:05Z"},
+            ]);
+            check(control("/__control/turns", &json!({"session": SESSION, "turns": rows})).is_ok(), "the chat's rows land with the Host's view tags");
+            check(control("/__control/agent", &json!({"session": SESSION, "set": {"chat_view": "conversation"}})).is_ok(), "the agent's chat view is Conversation on the Host");
+            check(control("/__control/chat-view", &json!({"on": true})).is_ok(), "the Host turns chat_view on");
+            check(control("/__control/live", &json!({"on": true})).is_ok(), "and live items");
+            check(control("/__control/coordination", &json!({"on": true})).is_ok(), "and hidden_coordination (its value: hide)");
+            check(control("/__control/audience-flip", &json!({"on": true})).is_ok(), "and turn_audience_returns");
+            // Session view draws each item in its row.
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("ready", Box::new(|app, _window, elapsed| {
+            let subscribed = requests("GET", "/events").iter().any(|r| r["query"].get("live").and_then(|l| l.as_str()).is_some_and(|l| l.split(',').any(|s| s == SESSION)));
+            let engine = app.engine.borrow();
+            let ready = engine.chat_view_offered(SESSION) && engine.live_items() && engine.hidden_coordination() && subscribed
+                && engine.live_view(SESSION).and_then(|v| v.lseq()).is_some() && crate::live_view::veils(&engine, SESSION) && has("r2");
+            drop(engine);
+            if !ready || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(app.engine.borrow().chat_view(SESSION) == "conversation", "the chat is in Conversation view");
+            check(flip(FLIP_C, 1), "Bella starts a turn");
+            true
+        })),
+        ("conversation: for bella", Box::new(move |app, _window, elapsed| {
+            let Some(boxed) = row(&fold_c1) else { return false };
+            if live_turn(app, FLIP_C, &id(FLIP_C, "m0")).as_deref() != Some("agents") || boxed.live.title != "Working with Bella" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!boxed.live.expandable, "the turn is Bella's: its box does not open");
+            check(!drawn_text().contains("Bella asked me to look at the build."), "and nothing of it is drawn");
+            check(flip(FLIP_C, 2), "the user's message is read into the turn");
+            true
+        })),
+        ("conversation: stepped in", Box::new(move |app, _window, elapsed| {
+            let Some(boxed) = row(&fold_c2) else { return false };
+            if live_turn(app, FLIP_C, &id(FLIP_C, "c4")).as_deref() != Some("user") || !boxed.live.title.starts_with("Running") || !has(&id(FLIP_C, "u1")) || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(boxed.live.expandable, &format!("the turn is the user's: its Running box opens ({:?})", boxed.live.title));
+            *before1.borrow_mut() = ids();
+            shot(&out1, "audience-flip-01-conversation-user");
+            check(flip(FLIP_C, 3), "the agent leaves a note and goes on for Bella");
+            true
+        })),
+        ("conversation: note", Box::new(move |app, _window, elapsed| {
+            let missing = gone(&before2.borrow(), &fold_c3);
+            if !missing.is_empty() {
+                gaps1.borrow_mut().extend(missing);
+            }
+            if drawn_text().contains(FOR_BELLA) {
+                gaps1.borrow_mut().push("FOR_BELLA".into());
+            }
+            let flipped = live_turn(app, FLIP_C, &id(FLIP_C, "c6")).as_deref() == Some("agents");
+            if !flipped || !has(&id(FLIP_C, "note")) || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            check(gaps1.borrow().is_empty(), &format!("from the flip on, what was drawn stays drawn and nothing for Bella is: {:?} (before {:?})", gaps1.borrow(), before2.borrow()));
+            let boxed = row(&fold_c3).unwrap_or_default();
+            check(boxed.live.title == "Working with Bella" && !boxed.live.expandable, &format!("the box says the turn is Bella's again: {:?}", boxed.live.title));
+            check(has(&id(FLIP_C, "note")), "the note shows");
+            check(!has(&id(FLIP_C, "live")) && !has(&format!("live:{FLIP_C}-m5")) && !has(&format!("live:{FLIP_C}-c6")), &format!("no row of Bella's is drawn: {:?}", ids()));
+            not_for_bella("Conversation, after the note");
+            shot(&out2, "audience-flip-02-conversation-note");
+            gaps1.borrow_mut().clear();
+            check(flip(FLIP_C, 4), "the user's next message is read in");
+            true
+        })),
+        ("conversation: user again", Box::new(move |app, _window, elapsed| {
+            let Some(boxed) = row(&fold_c4) else { return false };
+            if live_turn(app, FLIP_C, &id(FLIP_C, "m7")).as_deref() != Some("user") || !boxed.live.title.starts_with("Running") || !has(&id(FLIP_C, "u2")) || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(boxed.live.expandable, &format!("the turn reads as the user's again: the box says Running and opens ({:?})", boxed.live.title));
+            check(has(&id(FLIP_C, "note")), "the note still shows");
+            not_for_bella("Conversation, the user's again");
+            shot(&out3, "audience-flip-03-conversation-user-again");
+            check(flip(FLIP_C, 5), "the turn ends");
+            true
+        })),
+        ("conversation: ended", Box::new(move |_app, window, elapsed| {
+            if has(&fold_c5) || !has(&id(FLIP_C, "final")) || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(has(&id(FLIP_C, "note")) && has(&id(FLIP_C, "u1")) && has(&id(FLIP_C, "u2")), &format!("the note and the user's messages stay: {:?}", ids()));
+            not_for_bella("Conversation, the turn over");
+            shot(&out4, "audience-flip-04-conversation-ended");
+            menu_open(window);
+            crate::chat_menu::pick(&app_now(), window, "view", "session");
+            true
+        })),
+        ("session: the turn before", Box::new(move |app, _window, elapsed| {
+            if app.engine.borrow().chat_view(SESSION) != "session" || !has(&id(FLIP_C, "r1")) || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(has(&id(FLIP_C, "note")), "Session view: the finished turn's note shows");
+            not_for_bella("Session, the finished turn");
+            check(flip(FLIP_S, 1), "Bella starts the next turn");
+            true
+        })),
+        ("session: for bella", Box::new(move |app, _window, elapsed| {
+            if live_turn(app, FLIP_S, &id(FLIP_S, "m0")).as_deref() != Some("agents") || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(!has(&format!("live:{FLIP_S}-m0")) && !has(&id(FLIP_S, "ask")), &format!("a turn of Bella's the user never saw is not drawn: {:?}", ids()));
+            check(flip(FLIP_S, 2), "the user's message is read into the turn");
+            true
+        })),
+        ("session: stepped in", Box::new(move |app, _window, elapsed| {
+            if live_turn(app, FLIP_S, &id(FLIP_S, "c4")).as_deref() != Some("user") || !has(&format!("live:{FLIP_S}-c4")) || !has(&id(FLIP_S, "u1")) || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(has(&format!("live:{FLIP_S}-m0")) && has(&format!("live:{FLIP_S}-m1")) && has(&id(FLIP_S, "ask")), &format!("the user's turn is drawn from then on: {:?}", ids()));
+            *before3.borrow_mut() = ids();
+            shot(&out5, "audience-flip-05-session-user");
+            check(flip(FLIP_S, 3), "the agent leaves a note and goes on for Bella");
+            true
+        })),
+        ("session: note", Box::new(move |app, _window, elapsed| {
+            let missing = gone(&before4.borrow(), &fold_s1);
+            if !missing.is_empty() {
+                gaps2.borrow_mut().extend(missing);
+            }
+            if drawn_text().contains(FOR_BELLA) {
+                gaps2.borrow_mut().push("FOR_BELLA".into());
+            }
+            let flipped = live_turn(app, FLIP_S, &id(FLIP_S, "c6")).as_deref() == Some("agents");
+            if !flipped || !has(&id(FLIP_S, "note")) || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            check(gaps2.borrow().is_empty(), &format!("from the flip on, what was drawn stays drawn and nothing for Bella is: {:?} (before {:?})", gaps2.borrow(), before4.borrow()));
+            check(has(&id(FLIP_S, "note")), "the note shows");
+            check(!has(&id(FLIP_S, "live")) && !has(&format!("live:{FLIP_S}-m5")) && !has(&format!("live:{FLIP_S}-c6")), &format!("no row of Bella's is drawn: {:?}", ids()));
+            not_for_bella("Session, after the note");
+            shot(&out6, "audience-flip-06-session-note");
+            check(flip(FLIP_S, 4), "the user's next message is read in");
+            true
+        })),
+        ("session: user again", Box::new(move |app, _window, elapsed| {
+            if live_turn(app, FLIP_S, &id(FLIP_S, "m7")).as_deref() != Some("user") || !has(&id(FLIP_S, "u2")) || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(has(&format!("live:{FLIP_S}-m7")), &format!("the turn is the user's again: what it says now is drawn: {:?}", ids()));
+            check(!has(&format!("live:{FLIP_S}-m5")) && !has(&format!("live:{FLIP_S}-c6")), "what it wrote for Bella stays out");
+            check(has(&id(FLIP_S, "note")), "the note still shows");
+            not_for_bella("Session, the user's again");
+            shot(&out7, "audience-flip-07-session-user-again");
+            check(flip(FLIP_S, 5), "the turn ends");
+            true
+        })),
+        ("session: ended", Box::new(move |_app, _window, elapsed| {
+            if !has(&id(FLIP_S, "final")) || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(has(&id(FLIP_S, "note")), &format!("the note stays: {:?}", ids()));
+            not_for_bella("Session, the turn over");
+            shot(&out8, "audience-flip-08-session-ended");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
