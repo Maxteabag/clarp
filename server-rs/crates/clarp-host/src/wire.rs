@@ -18,7 +18,7 @@ use clarp_kernel::notify;
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
-use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
+use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait};
 use clarp_protocol::events::AgentStateKind;
 use clarp_speech::markup;
 use serde_json::{Map, Value, json};
@@ -718,9 +718,13 @@ pub fn queue_item(message: &Waiting, directory: &Directory) -> Value {
     } else {
         "waiting"
     };
+    // A goal's wake waits as the Host's own business, not as the long prompt it is.
+    let automated =
+        clarp_kernel::turn::message_automation_kind(message.origin.name(), &message.message_id);
+    let text = automated_prompt(automated).map_or_else(|| message.text.clone(), str::to_string);
     let mut item = Map::from_iter([
         ("client_msg_id".into(), json!(message.told_id)),
-        ("text".into(), json!(message.text)),
+        ("text".into(), json!(text)),
         ("sent_at".into(), json!(iso(message.accepted_at_ms))),
         ("kind".into(), json!(kind)),
         ("status".into(), json!(message.status.name())),
@@ -1389,8 +1393,24 @@ fn automated_prompt(kind: &str) -> Option<&'static str> {
         "leader_tick" => Some("Automated leader check"),
         "dreaming" => Some("Automated dreaming run"),
         "watcher" => Some("Automated watcher event"),
+        clarp_kernel::turn::GOAL_WAKE => Some("Goal check-in"),
         _ => None,
     }
+}
+
+/// Whether a row the other Host served is a goal's wake: by its id, as this Host files one.
+fn imported_goal_wake(row: &Value) -> bool {
+    row["role"] == "user"
+        && row["id"].as_str().is_some_and(|id| {
+            clarp_kernel::turn::message_automation_kind("", id) == clarp_kernel::turn::GOAL_WAKE
+        })
+}
+
+/// A goal's wake as a chat shows it: automated, filed as one, the prompt left out.
+fn quiet_goal_wake(row: &mut Value) {
+    row["automated"] = json!(true);
+    row["automation_kind"] = json!(clarp_kernel::turn::GOAL_WAKE);
+    row["text"] = json!(automated_prompt(clarp_kernel::turn::GOAL_WAKE).unwrap_or_default());
 }
 
 /// What a chat shows in place of an automated turn's reply that only says there was nothing
@@ -1411,7 +1431,7 @@ pub fn previewed(version: &Versioned) -> bool {
 }
 
 pub(crate) fn previewed_entry(entry: &Entry) -> bool {
-    let by_hand = automation_kind(entry.origin_name()).is_empty();
+    let by_hand = entry.automation_kind().is_empty();
     match entry {
         Entry::Message(message) => by_hand && !message.text.is_empty(),
         Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
@@ -1419,6 +1439,9 @@ pub(crate) fn previewed_entry(entry: &Entry) -> bool {
         Entry::Note(note) => !note.text.is_empty(),
         Entry::Imported(imported) => {
             let row = &imported.row;
+            if imported_goal_wake(row) {
+                return false;
+            }
             let said = row["text"].as_str().is_some_and(|text| !text.is_empty());
             let tool = row["tool_name"]
                 .as_str()
@@ -1483,6 +1506,10 @@ pub fn row(version: &Versioned) -> Value {
         let mut row = imported.row.clone();
         if row.is_object() {
             row["revision"] = json!(version.revision);
+            // A goal's wake the other Host showed as typed is the Host's own business here too.
+            if imported_goal_wake(&row) {
+                quiet_goal_wake(&mut row);
+            }
         }
         return row;
     }
@@ -1510,7 +1537,7 @@ pub fn row(version: &Versioned) -> Value {
         "audience": coordination::USER,
     });
     // What a watcher or the Host's own routine began is marked, for an app to fold away.
-    let kind = automation_kind(version.entry.origin_name());
+    let kind = version.entry.automation_kind();
     row["automated"] = json!(!kind.is_empty());
     row["automation_kind"] = json!(kind);
     match &version.entry {
@@ -2031,13 +2058,50 @@ pub fn summary(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use clarp_kernel::conversation::{Message, Reply, ToolCall};
+    use clarp_kernel::conversation::{Imported, Message, Reply, ToolCall};
     use clarp_kernel::turn::{Origin, TurnId};
     use clarp_protocol::events::{Envelope, Event};
     use clarp_protocol::log::LogResponse;
     use clarp_protocol::snapshot::AgentSummary;
 
     use super::*;
+
+    /// A goal's wake waits in the queue as a quiet check-in, and keeps the item's own kind.
+    #[test]
+    fn a_goals_wake_waits_in_the_queue_as_a_check_in() {
+        let waiting = |message_id: &str, text: &str| Waiting {
+            turn: TurnId(1),
+            message_id: message_id.into(),
+            client_id: message_id.into(),
+            told_id: String::new(),
+            text: text.into(),
+            speak: false,
+            accepted_at_ms: 1,
+            admission: clarp_kernel::turn::Admission::Later,
+            status: clarp_actor::QueueItemStatus::Queued,
+            origin: Origin::Trigger {
+                name: "automation".into(),
+            },
+            sender_agent_id: None,
+        };
+        let directory = Directory::default();
+        let wake = queue_item(
+            &waiting(
+                "u-task-goal-0123",
+                "Continue your durable outcome commitment.",
+            ),
+            &directory,
+        );
+        assert_eq!(
+            (&wake["text"], &wake["kind"]),
+            (&json!("Goal check-in"), &json!("later"))
+        );
+        let note = queue_item(&waiting("u-9", "[Clarp decision resolved]"), &directory);
+        assert_eq!(
+            (&note["text"], &note["kind"]),
+            (&json!("[Clarp decision resolved]"), &json!("later"))
+        );
+    }
 
     #[test]
     fn queue_provenance_uses_the_pythons_item_and_event_shapes() {
@@ -3368,6 +3432,99 @@ mod tests {
         );
         let no_message = answer(user.clone(), said);
         assert_eq!(finished(&record(), &rests, &no_message, &no_message), None);
+    }
+
+    /// The prompt a goal's owner is woken with never shows as something the user typed: it is
+    /// a quiet automated row in every view, on rows kept before this rule and on rows the other
+    /// Host served, and in the queue while it waits. What the agent answers is shown as ever.
+    #[test]
+    fn a_goals_wake_is_the_hosts_own_business_in_every_view() {
+        let automation = Origin::Trigger {
+            name: "automation".to_string(),
+        };
+        let prompt = "Continue your durable outcome commitment. Reassess current conditions.";
+        let wake = version(
+            Entry::Message(Message {
+                id: "u-task-goal-0123456789abcdef".to_string(),
+                text: prompt.to_string(),
+                origin: automation.clone(),
+                trace_id: Some("task-goal-0123456789abcdef".to_string()),
+                sender: None,
+                client: None,
+                ..Message::default()
+            }),
+            1,
+            None,
+        );
+        let shown = row(&wake);
+        assert_eq!(
+            (
+                &shown["role"],
+                &shown["text"],
+                &shown["automated"],
+                &shown["automation_kind"]
+            ),
+            (
+                &json!("user"),
+                &json!("Goal check-in"),
+                &json!(true),
+                &json!("goal")
+            )
+        );
+        assert!(
+            !previewed(&wake),
+            "no list of chats shows it as the last thing said"
+        );
+        let answer = version(
+            Entry::Reply(Reply {
+                origin: automation.clone(),
+                id: "r-1".to_string(),
+                turn: 1,
+                text: "Train GT is live.".to_string(),
+                trace_id: None,
+                ..Reply::default()
+            }),
+            2,
+            None,
+        );
+        let answered = row(&answer);
+        assert_eq!(
+            (&answered["text"], &answered["automated"]),
+            (&json!("Train GT is live."), &json!(false)),
+            "the agent's answer is shown as ever"
+        );
+        let carried = version(
+            Entry::Imported(Imported {
+                id: "u-task-goal-fedcba9876543210".to_string(),
+                row: json!({"id": "u-task-goal-fedcba9876543210", "role": "user",
+                            "text": prompt, "automated": false, "automation_kind": ""}),
+            }),
+            3,
+            None,
+        );
+        let from_before = row(&carried);
+        assert_eq!(
+            (
+                &from_before["text"],
+                &from_before["automated"],
+                &from_before["automation_kind"]
+            ),
+            (&json!("Goal check-in"), &json!(true), &json!("goal"))
+        );
+        assert!(!previewed(&carried));
+        let typed = version(
+            Entry::Imported(Imported {
+                id: "u-7".to_string(),
+                row: json!({"id": "u-7", "role": "user", "text": "Hello", "automated": false}),
+            }),
+            4,
+            None,
+        );
+        assert_eq!(
+            row(&typed)["text"],
+            "Hello",
+            "what the user typed stays as it was"
+        );
     }
 
     #[test]

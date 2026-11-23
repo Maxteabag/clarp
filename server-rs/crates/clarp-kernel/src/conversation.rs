@@ -521,6 +521,18 @@ impl Entry {
         }
     }
 
+    /// What of the automation this thing is filed under ([`crate::turn::automation_kind`]):
+    /// a message by its origin and id ([`crate::turn::message_automation_kind`]), anything
+    /// else by its origin. Empty for what a person or an agent said.
+    pub fn automation_kind(&self) -> &str {
+        match self {
+            Self::Message(message) => {
+                crate::turn::message_automation_kind(message.origin.name(), &message.id)
+            }
+            other => crate::turn::automation_kind(other.origin_name()),
+        }
+    }
+
     pub fn turn(&self) -> Option<u64> {
         match self {
             Self::Message(_) => None,

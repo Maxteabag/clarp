@@ -81,6 +81,25 @@ pub fn automation_kind(origin: &str) -> &str {
     }
 }
 
+/// What a chat files the prompt a goal's owner is woken with under: the Host's own business,
+/// as a heartbeat's prompt is, never a message the user typed (the owner, 23 Nov 2026: it
+/// "should not appear in chat"). What the agent answers in that turn is shown as ever.
+pub const GOAL_WAKE: &str = "goal";
+
+/// The automation kind of a message by its origin and its id: a goal's wake, whose id is
+/// `u-` and the wake's own id (whatever origin it was filed with, before this rule too), is
+/// [`GOAL_WAKE`]; any other message is its origin's ([`automation_kind`]).
+pub fn message_automation_kind<'a>(origin: &'a str, id: &str) -> &'a str {
+    let wake = id
+        .strip_prefix("u-")
+        .is_some_and(|rest| rest.starts_with(crate::goals::WAKE_PREFIX));
+    if wake {
+        GOAL_WAKE
+    } else {
+        automation_kind(origin)
+    }
+}
+
 /// Whether the turns of an origin are left out of a chat that is read without automation.
 /// A janitor's are automated and stay: it works in a chat of its own.
 pub fn left_out_of_chats(origin: &str) -> bool {
@@ -934,6 +953,22 @@ impl Turn {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_goals_wake_is_filed_as_the_hosts_own_whatever_its_origin() {
+        assert_eq!(
+            message_automation_kind("automation", "u-task-goal-0123"),
+            GOAL_WAKE
+        );
+        assert_eq!(message_automation_kind("", "u-task-goal-0123"), GOAL_WAKE);
+        assert_eq!(message_automation_kind("automation", "u-1"), "");
+        assert_eq!(message_automation_kind("heartbeat", "u-1"), "heartbeat");
+        assert_eq!(
+            message_automation_kind("automation", "task-goal-0123"),
+            "",
+            "a wake's id is the message's"
+        );
+    }
 
     fn accepted() -> (Queued, TurnEvent) {
         Queued::accept(TurnId(7), 41, Origin::User, Admission::Queue, 1_000)
