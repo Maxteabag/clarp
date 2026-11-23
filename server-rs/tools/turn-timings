@@ -357,12 +357,15 @@ class Agent:
         return False
 
     def wait_tool_running(self, since: float, timeout: float = 90.0):
-        """The time the Host first showed a running tool call in this turn, or None."""
+        """The time the Host first showed a running tool call in this turn, or None: also at once
+        when the turn ended without one (the model answered without running the command)."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             for at, e in self.host.events_since(since, self.session):
                 if e.get("type") == "agent-activity" and e.get("status") == "running" and e.get("tool"):
                     return at, e
+                if e.get("type") == "agent-state" and e.get("kind") in ENDED:
+                    return None, None
             time.sleep(0.05)
         return None, None
 
