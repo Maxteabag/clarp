@@ -205,8 +205,8 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_TRANSIT_PROOF_DIR", "switch"),
     ("CLARP_TRANSIT_PROOF_WORD", "switch"),
     ("CLARP_TRANSIT_PROOF_CWD", "switch"),
-    // Antigravity over ACP: a profile of its own only where one is named; a login over SSH only
-    // where whoever started the Host came over SSH.
+    // Antigravity over ACP: a profile of its own only where one is named; told it runs over SSH
+    // only where whoever started the Host did not (the driver reads whether they did).
     ("CLARP_AGY_ACP_PROFILE", "switch"),
     ("SSH_CONNECTION", "caller"),
 ];
@@ -237,20 +237,4 @@ pub const NOT_READ: &[&str] = &[
     "SIGTERM",
     "SIGUSR1",
     "SUCCESS",
-    // Antigravity over ACP: what its driver sets or strips for agy and never reads, the words
-    // of its errors and its tests, and its version, which the compiler reads.
-    "AGY_ACP_FORCE_FILE_STORAGE",
-    "AGY_CLI_DISABLE_AUTO_UPDATE",
-    "BROWSER",
-    "CARGO_PKG_VERSION",
-    "GEMINI_HOME",
-    "GOOGLE_API_KEY",
-    "GOOGLE_CLOUD_LOCATION",
-    "GOOGLE_CLOUD_PROJECT",
-    "GOOGLE_GENAI_USE_VERTEXAI",
-    "HIGH",
-    "PERMISSION_DENIED",
-    "PYTHONUNBUFFERED",
-    "QUOTA_EXHAUSTED",
-    "UNAVAILABLE",
 ];
