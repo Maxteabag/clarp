@@ -326,8 +326,12 @@ fn requests_held_back_for_a_moment_are_a_busy_provider_and_no_account_is_out() {
 
 #[test]
 fn a_used_up_window_is_a_usage_limit() {
+    // Claude Code's own words, which say when the window resets, are the reason.
     let reason = failed_with("claude-2.1.321-window-spent.jsonl");
-    assert_eq!(reason, clarp_backend::claude::USAGE_LIMIT);
+    assert!(
+        reason.contains("limit") && reason.contains("resets"),
+        "{reason}"
+    );
     assert_eq!(failures::classify_error(&reason), failures::USAGE_LIMIT);
 }
 
