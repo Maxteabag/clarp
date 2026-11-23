@@ -81,11 +81,13 @@ after the device's newest flash. Its owner is `owners.<kind>`, else
 (`app_crash_<platform>`, else `app_crash`), and the front desk as for every
 finding.
 
-The apps' scroll dashcam sends `scroll_flash` (level `fault`) to `POST /clog`
+The apps' scroll dashcam sends `scroll_flash` (level `warning` or `fault`; the
+Host keeps it by its name, whatever the level) to `POST /clog`
 when a chat view jumps and comes back without a gesture. Its `detail` is
-`{"chat": session, "window": pane, "screen": viewport height px,
+`{"chat": session, "window": pane (iOS: `uikit` or `swiftui`), "screen": viewport height px,
 "rule": "jump_back" | "top_flip", "frames": [{"t": ms, "y": offset px,
-"h": content height px, "top": top visible message id, "g": gesture}]
+"h": content height px, "top": top visible message id, "g": gesture,
+"d": frame duration ms}]
 (changed frames only, at most 60), "events": [{"t": ms, "kind": "reload" |
 "insert" | "remove" | "height" | "live", "note": short}] (at most 30)}`.
 The Host keeps it like an important event (7 days, with its context) and

@@ -46,10 +46,12 @@ clarp-admin client-log --event metrickit_report --since 7d  # crash reports (fil
 ```
 
 Chat-view scroll flashes (the apps' scroll dashcam, Rust Host from main
-after e98202b6): the apps send `scroll_flash`, level `fault`, when a chat
+after e98202b6): the apps send `scroll_flash` (level `warning` or `fault`; kept by its name
+whatever the level) when a chat
 jumps and comes back without a gesture. Its detail names the chat, the pane,
 the viewport height, the rule (`jump_back` or `top_flip`), up to 60 changed
-frames (`t`, `y`, `h`, `top`, `g`) and up to 30 nearby events (`reload`,
+frames (`t`, `y`, `h`, `top`, `g`, and `d`, the frame's duration in ms; iOS names
+the pane `uikit` or `swiftui`) and up to 30 nearby events (`reload`,
 `insert`, `remove`, `height`, `live`). The Host keeps it 7 days like an error,
 with up to 16 KB of detail. The experience watcher opens one finding per device
 (`scroll_flash_<platform>`) on its first flash and tells the app's owner and the
