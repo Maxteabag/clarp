@@ -1279,52 +1279,6 @@ pub(super) fn scroll_paint_check(out: String) {
         steps.push((format!("turn {turn}: back to the streaming chat"), Box::new(|| {
             app_now().engine.borrow_mut().select(SESSION);
             crate::pump();
-/// What the dashcam saw while a check streamed into a following chat: its
-/// frames (by when they were drawn) and the flashes found before it began.
-#[derive(Default)]
-struct Dash {
-    frames: Vec<crate::scroll_journal::Frame>,
-    flashes: usize,
-    posted: usize,
-    pane: String,
-    done: usize,
-}
-
-impl Dash {
-    /// Takes the frames drawn since the last look.
-    fn look(&mut self) {
-        let last = self.frames.last().map(|f| f.at);
-        let new: Vec<_> = crate::scroll_journal::frames(&self.pane).into_iter().filter(|f| last.is_none_or(|at| f.at > at)).collect();
-        self.frames.extend(new);
-    }
-}
-
-/// `--check scroll-flash --out DIR`: a chat following its end never draws
-/// a frame anywhere else. Agent turns stream into a 200-row chat (tools
-/// come and go, rows are filed, a live reply grows and is replaced by the
-/// durable one, new rows land in bursts) while the dashcam keeps every
-/// frame drawn: none may leave the end, and its flash detector finds none.
-pub(super) fn scroll_flash_check(out: String) {
-    const SESSION: &str = "flash";
-    const TALL: &str = "flash-tall";
-    const SHORT: &str = "flash-short";
-    const ROWS: usize = 200;
-    let state = Rc::new(RefCell::new(Dash::default()));
-    let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
-    let mut steps: Vec<(String, Box<dyn Fn()>)> = Vec::new();
-    for turn in 0..3 {
-        steps.extend(agent_turn(SESSION, turn));
-        // A burst: three new rows at once, then a reply that grows fast.
-        steps.push((format!("turn {turn}: three rows land at once"), Box::new(move || {
-            upsert(SESSION, json!((0..3).map(|n| json!({"id": format!("flash-burst-{turn}-{n}"), "role": if n == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(1 + n)})).collect::<Vec<_>>()));
-        })));
-        for n in 0..6 {
-            steps.push((format!("turn {turn}: a fast reply grows ({n})"), Box::new(move || {
-                upsert(SESSION, json!([{"id": format!("flash-fast-{turn}"), "role": "assistant", "kind": "live", "text": streamed(n)}]));
-            })));
-        }
-        steps.push((format!("turn {turn}: the fast reply is filed"), Box::new(move || {
-            upsert(SESSION, json!([{"id": format!("flash-fast-done-{turn}"), "role": "assistant", "text": streamed(6)}]));
         })));
     }
     let steps = Rc::new(steps);
@@ -1338,15 +1292,6 @@ pub(super) fn scroll_flash_check(out: String) {
                 return false;
             }
             check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Paint"})).is_ok(), "the Host takes a new chat");
-            check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Flash"})).is_ok(), "the Host takes a new chat");
-            // Two more to switch to: one of a few very tall rows, one of
-            // many short ones (the list's estimate of a row's height differs
-            // most between them).
-            check(control("/__control/add-agent", &json!({"session": TALL, "persona": "Tall"})).is_ok(), "the Host takes a chat of tall rows");
-            check(control("/__control/add-agent", &json!({"session": SHORT, "persona": "Short"})).is_ok(), "the Host takes a chat of short rows");
-            check(control("/__control/rich", &json!({"session": SHORT, "count": 300})).is_ok(), "the Host fills the short chat");
-            upsert(TALL, json!((0..24).map(|n| json!({"id": format!("tall-{n}"), "role": if n % 4 == 0 { "user" } else { "assistant" },
-                "text": if n % 4 == 0 { format!("Short question {n}?") } else { format!("Long answer {n}. {}", LOREM.repeat(20 + 7 * (n % 5))) }})).collect::<Vec<_>>()));
             true
         })),
         ("select", Box::new(|app, _, _| {
@@ -1427,6 +1372,101 @@ pub(super) fn scroll_flash_check(out: String) {
             let (visible, numbers) = last_row_visible();
             check(report().follows && visible, &format!("the chat still follows and shows its last row whole: {numbers}"));
             shot(&out, "scroll-paint-01-streamed");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// What the dashcam saw while a check streamed into a following chat: its
+/// frames (by when they were drawn) and the flashes found before it began.
+#[derive(Default)]
+struct Dash {
+    frames: Vec<crate::scroll_journal::Frame>,
+    flashes: usize,
+    posted: usize,
+    pane: String,
+    done: usize,
+}
+
+impl Dash {
+    /// Takes the frames drawn since the last look.
+    fn look(&mut self) {
+        let last = self.frames.last().map(|f| f.at);
+        let new: Vec<_> = crate::scroll_journal::frames(&self.pane).into_iter().filter(|f| last.is_none_or(|at| f.at > at)).collect();
+        self.frames.extend(new);
+    }
+}
+
+/// `--check scroll-flash --out DIR`: a chat following its end never draws
+/// a frame anywhere else. Agent turns stream into a 200-row chat (tools
+/// come and go, rows are filed, a live reply grows and is replaced by the
+/// durable one, new rows land in bursts) while the dashcam keeps every
+/// frame drawn: none may leave the end, and its flash detector finds none.
+pub(super) fn scroll_flash_check(out: String) {
+    const SESSION: &str = "flash";
+    const TALL: &str = "flash-tall";
+    const SHORT: &str = "flash-short";
+    const ROWS: usize = 200;
+    let state = Rc::new(RefCell::new(Dash::default()));
+    let (s1, s2, s3) = (state.clone(), state.clone(), state.clone());
+    let mut steps: Vec<(String, Box<dyn Fn()>)> = Vec::new();
+    for turn in 0..3 {
+        steps.extend(agent_turn(SESSION, turn));
+        // A burst: three new rows at once, then a reply that grows fast.
+        steps.push((format!("turn {turn}: three rows land at once"), Box::new(move || {
+            upsert(SESSION, json!((0..3).map(|n| json!({"id": format!("flash-burst-{turn}-{n}"), "role": if n == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(1 + n)})).collect::<Vec<_>>()));
+        })));
+        for n in 0..6 {
+            steps.push((format!("turn {turn}: a fast reply grows ({n})"), Box::new(move || {
+                upsert(SESSION, json!([{"id": format!("flash-fast-{turn}"), "role": "assistant", "kind": "live", "text": streamed(n)}]));
+            })));
+        }
+        steps.push((format!("turn {turn}: the fast reply is filed"), Box::new(move || {
+            upsert(SESSION, json!([{"id": format!("flash-fast-done-{turn}"), "role": "assistant", "text": streamed(6)}]));
+        })));
+    }
+    let steps = Rc::new(steps);
+    let count = steps.len();
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Flash"})).is_ok(), "the Host takes a new chat");
+            // Two more to switch to: one of a few very tall rows, one of
+            // many short ones (the list's estimate of a row's height differs
+            // most between them).
+            check(control("/__control/add-agent", &json!({"session": TALL, "persona": "Tall"})).is_ok(), "the Host takes a chat of tall rows");
+            check(control("/__control/add-agent", &json!({"session": SHORT, "persona": "Short"})).is_ok(), "the Host takes a chat of short rows");
+            check(control("/__control/rich", &json!({"session": SHORT, "count": 300})).is_ok(), "the Host fills the short chat");
+            upsert(TALL, json!((0..24).map(|n| json!({"id": format!("tall-{n}"), "role": if n % 4 == 0 { "user" } else { "assistant" },
+                "text": if n % 4 == 0 { format!("Short question {n}?") } else { format!("Long answer {n}. {}", LOREM.repeat(20 + 7 * (n % 5))) }})).collect::<Vec<_>>()));
+            true
+        })),
+        ("select", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find(SESSION).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(SESSION);
+            crate::pump();
+            true
+        })),
+        ("fill", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().conversation(SESSION).is_none() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(control("/__control/rich", &json!({"session": SESSION, "count": ROWS})).is_ok(), &format!("the Host fills the chat with {ROWS} varied rows"));
+            true
+        })),
+        ("at the end", Box::new(move |app, window, elapsed| {
+            if rows(window).len() < ROWS || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            if !(report().follows && report().at_end && last_row_visible().0) {
+                app.to_latest();
+                return false;
+            }
             let mut st = s1.borrow_mut();
             st.pane = app.active_id().to_string();
             st.flashes = crate::scroll_journal::flashes_seen();
