@@ -487,7 +487,13 @@ def lanes(host: Host) -> list:
         socket_path = next((word for word in line.split() if word.endswith("-cxg.sock")), "")
         children = [p for p, i in stats.items() if i["ppid"] == pid]
         groups = {stats[c]["pgid"] for c in children}
-        group = sorted({p for p, i in stats.items() if i["pgid"] in groups} | set(children))
+        # The app-server's group, and every process below the shim besides: a helper the
+        # app-server put in a group of its own is still the lane's.
+        below, frontier = set(), set(children)
+        while frontier:
+            below |= frontier
+            frontier = {p for p, i in stats.items() if i["ppid"] in frontier} - below
+        group = sorted({p for p, i in stats.items() if i["pgid"] in groups} | below)
         members = [pid] + group
         rss = pss = 0
         for member in members:
