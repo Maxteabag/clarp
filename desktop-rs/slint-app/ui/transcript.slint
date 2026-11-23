@@ -1318,22 +1318,6 @@ export component Transcript inherits FocusScope {
     changed view-height => {
         if (root.flight-pinning && root.follow) {
             root.pin("follow");
-        } else {
-            root.keep-end();
-        }
-    }
-    // Following, the chat stays at its very end through the list's own
-    // layout. A change handler runs in the pass Slint makes with the layout
-    // before it draws a frame, so the frame shows the end; the Timer below
-    // pinned it only after a frame had been drawn wherever the list's
-    // re-estimate of its rows had put it (up to the chat's middle). The end
-    // is exact: past it (blank below the last row, which the list leaves
-    // when its last rows are shorter than it estimated) counts as at the end
-    // for the reader, but is pinned back too.
-    property <length> end-y: Math.min(0px, list.visible-height - list.content-height);
-    function keep-end() {
-        if (root.follow && !root.dragging && Math.abs((list.content-y - root.end-y) / 1px) > 0.5) {
-            root.pin("follow");
         }
     }
     // Following also tracks rows that grow while streaming.
@@ -1435,7 +1419,6 @@ export component Transcript inherits FocusScope {
         }
         root.seen-y = list.content-y;
         root.seen-place = root.place();
-        root.keep-end();
     }
     function pin(cause: string) {
         root.follow = true;
