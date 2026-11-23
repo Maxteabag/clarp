@@ -205,6 +205,11 @@ impl Launcher {
             let _ = BufReader::new(out).read_line(&mut said);
         }
         if said.trim() == "ready" {
+            // A Stop that came while the shim was starting found nothing listening. The shim
+            // listens now: it is told what it missed before anyone follows it.
+            if let Some(grace_ms) = early_stops::take(&order.socket) {
+                ask_to_stop(&order.socket, grace_ms);
+            }
             return Launched::Ready(child);
         }
         match child.wait() {
@@ -282,19 +287,58 @@ pub(crate) fn takeover_request(socket: &Path, request: Request) -> Option<Reply>
     serde_json::from_str(&answer).ok()
 }
 
-/// Asks the shim at this socket to end its tool. A shim that is not there has nothing to end.
+/// Asks the shim at this socket to end its tool. A shim that is not listening yet may still be
+/// starting: the Stop is kept for it, and its launch tells it as soon as it says it is ready
+/// (issue 722: a Stop that came first was lost, and the turn it said it had ended ran on). A
+/// shim that has already gone has nothing to end, and what was kept for it is let go in time.
 pub fn stop(socket: &Path, grace_ms: u64) {
+    early_stops::keep(socket, grace_ms);
+    if ask_to_stop(socket, grace_ms) {
+        early_stops::take(socket);
+    }
+}
+
+/// Sends a Stop to the shim at this socket. Answers whether a shim was there to take it.
+fn ask_to_stop(socket: &Path, grace_ms: u64) -> bool {
     let Ok(mut shim) = UnixStream::connect(socket) else {
-        return;
+        return false;
     };
     let _ = shim.set_read_timeout(Some(STOP_TIMEOUT));
     let _ = shim.set_write_timeout(Some(STOP_TIMEOUT));
     let Ok(line) = serde_json::to_string(&Request::Stop { grace_ms }) else {
-        return;
+        return true;
     };
     if shim.write_all(format!("{line}\n").as_bytes()).is_ok() {
         let mut reply = String::new();
         let _ = BufReader::new(shim).read_line(&mut reply);
+    }
+    true
+}
+
+/// The Stops that found no shim listening at their socket, by socket. A turn's socket names
+/// one attempt of it, and is never launched again once that attempt has ended.
+mod early_stops {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, PoisonError};
+    use std::time::{Duration, Instant};
+
+    /// Longer than any shim takes to start; a Stop kept longer was for a shim already gone.
+    const KEPT: Duration = Duration::from_secs(600);
+
+    static KEPT_STOPS: Mutex<Vec<(PathBuf, u64, Instant)>> = Mutex::new(Vec::new());
+
+    /// Keeps a Stop for the shim at this socket, in place of any kept before.
+    pub(super) fn keep(socket: &Path, grace_ms: u64) {
+        let mut kept = KEPT_STOPS.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.retain(|(other, _, at)| other != socket && at.elapsed() < KEPT);
+        kept.push((socket.to_path_buf(), grace_ms, Instant::now()));
+    }
+
+    /// The grace of the Stop kept for the shim at this socket, which is no longer kept.
+    pub(super) fn take(socket: &Path) -> Option<u64> {
+        let mut kept = KEPT_STOPS.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = kept.iter().position(|(other, _, _)| other == socket)?;
+        Some(kept.swap_remove(at).1)
     }
 }
 

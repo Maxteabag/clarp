@@ -578,6 +578,25 @@ fn group_motion(proc: &Path, group: i32) -> GroupMotion {
     GroupMotion::Still
 }
 
+/// How often a Stop's grace looks whether anything of the tool's group is left.
+const GROUP_LOOKED_AT: Duration = Duration::from_millis(50);
+
+/// Whether a process of the group `group` still lives: one that has not ended (a zombie has,
+/// and the tool's own stays one until the shim reaps it). Where `/proc` cannot be read, it may.
+fn group_lives(proc: &Path, group: i32) -> bool {
+    let Ok(all) = std::fs::read_dir(proc) else {
+        return true;
+    };
+    all.flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<i32>().ok())
+            .and_then(|pid| state_and_group(&proc.join(format!("{pid}/stat"))))
+            .is_some_and(|(state, member)| member == group && !matches!(state, 'Z' | 'X'))
+    })
+}
+
 /// The state and the process group in a `stat` of `/proc`. The name before them is in brackets
 /// and may hold anything, brackets and spaces too: what follows the last bracket is read.
 fn state_and_group(stat: &Path) -> Option<(char, i32)> {
@@ -709,9 +728,21 @@ impl Control {
         let term_at = Instant::now();
         Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
         drop(stage);
-        // The deadline belongs to the whole group, even if its leader has exited.
-        std::thread::sleep(Duration::from_millis(grace_ms).saturating_sub(term_at.elapsed()));
-        Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
+        // The deadline belongs to the whole group, even if its leader has exited. A group with
+        // nothing left in it has nothing more to wait for, and nothing to kill: the shim ends
+        // with its tool instead of outliving the turn by the whole grace (issue 722).
+        let grace = Duration::from_millis(grace_ms);
+        let group = self.group().as_raw();
+        while group_lives(&self.proc, group) {
+            let left = grace.saturating_sub(term_at.elapsed());
+            if left.is_zero() {
+                break;
+            }
+            std::thread::sleep(left.min(GROUP_LOOKED_AT));
+        }
+        if group_lives(&self.proc, group) {
+            Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
+        }
         let mut stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
         *stage = StopStage::Signalled;
         self.changed.notify_all();

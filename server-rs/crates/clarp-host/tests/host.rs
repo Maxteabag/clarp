@@ -137,6 +137,8 @@ mod stand_ins;
 mod start_tolerance;
 #[path = "host/steer_c.rs"]
 mod steer_c;
+#[path = "host/stop_early.rs"]
+mod stop_early;
 #[path = "host/stop_resume.rs"]
 mod stop_resume;
 #[path = "host/takeover_b.rs"]

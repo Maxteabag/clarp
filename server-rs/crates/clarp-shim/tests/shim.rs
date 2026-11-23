@@ -793,7 +793,6 @@ while True: signal.pause()
         });
         if mode == "fast" {
             assert_fast_end(&run.spool, requested_ms);
-            assert!(run.shim.try_wait().unwrap().is_none());
         } else if mode != "unstopped" {
             assert!(
                 (Duration::from_millis(970)..Duration::from_secs(4)).contains(&began.elapsed())
@@ -830,6 +829,36 @@ while True: signal.pause()
         assert_eq!(all.iter().filter(|r| r.is_final()).count(), 1);
         std::fs::remove_dir_all(run.dir).unwrap();
     }
+}
+
+/// A Stop's grace is for what is left of the tool's group. Once nothing of it is left, the shim
+/// has nothing more to wait for and ends with its tool (issue 722: every stopped turn's shim
+/// lived on for the whole grace after its turn had been said to end, and was found still
+/// running when the tests ended).
+#[test]
+fn a_stopped_shim_ends_once_its_group_is_gone_without_waiting_out_the_grace() {
+    let mut run = start("stop-empty-group", "echo up; exec sleep 60");
+    wait_for("the tool to be up", || {
+        outs(&records(&run.spool)).contains(&"up")
+    });
+    let began = Instant::now();
+    assert!(ask(&run.socket, &Request::Stop { grace_ms: 30_000 }).ok);
+    let status = ends(&mut run.shim);
+    assert!(
+        began.elapsed() < Duration::from_secs(10),
+        "the shim waited out the grace of a group with nothing left in it: {:?}",
+        began.elapsed()
+    );
+    assert_eq!(status.code(), Some(1));
+    let signals: Vec<String> = records(&run.spool)
+        .into_iter()
+        .filter_map(|r| match r.entry {
+            Entry::Shim(ShimEvent::Stopping { signal }) => Some(signal),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(signals, ["SIGTERM"], "nothing was left to kill");
+    std::fs::remove_dir_all(run.dir).unwrap();
 }
 
 // A hold: the tool stands still, and the answer says how far the spool goes with all it printed.
