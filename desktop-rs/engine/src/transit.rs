@@ -221,7 +221,7 @@ impl Engine {
             }
             let Some(id) = self.transits.flows.get(&session).and_then(|f| f.transit_id()).map(str::to_owned) else { continue };
             if self.transits.asked.insert(id.clone()) {
-                self.api.get(&format!("transit-status:{session}"), "/agent-transit", &[("session", &session), ("transit_id", &id)]);
+                self.api.get(&format!("transit-status:{session}"), "/agent-transit", &[("session", session.as_str()), ("transit_id", id.as_str())]);
             }
         }
     }
