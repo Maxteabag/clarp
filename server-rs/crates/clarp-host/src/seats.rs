@@ -286,7 +286,7 @@ impl Desk {
         let _ = done.send(Some(made));
         if made {
             // Whether another seat would take a turn of a tool near its limit.
-            crate::quota::seats_changed(app).await;
+            crate::quota::look_again(app).await;
         }
         if made { Outcome::Read } else { Outcome::Failed }
     }

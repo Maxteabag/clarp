@@ -360,7 +360,7 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
     }
     drop(state);
     // Whether another seat would take a turn of a tool near its limit, read just now.
-    crate::quota::seats_changed(app).await;
+    crate::quota::look_again(app).await;
     let serving = if switched {
         &decision["target"]
     } else {

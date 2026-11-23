@@ -978,12 +978,14 @@ impl Kept {
 
     /// Whether the account the Host is on stands near a limit of its usage, and what an
     /// agent's row says of its tool then (`crate::quota_near`): of the five hours and of the
-    /// week as they are shown, the one nearest its end among those that stand near.
+    /// week as they are shown, the most used among those that stand near. On no login that can
+    /// be named (another kind of login, or none), what was said of an account is not known to
+    /// be of the one in use: only a fresh word counts then.
     pub fn near(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Option<Value> {
         let shown = self.shown(login, now_ms);
         let windows = shown
             .iter()
-            .filter(|one| one.kind != "unknown")
+            .filter(|one| one.kind != "unknown" && (login.is_some() || one.fresh))
             .filter_map(|one| {
                 Some(crate::quota_near::Window {
                     kind: one.kind,

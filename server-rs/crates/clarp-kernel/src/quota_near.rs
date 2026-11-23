@@ -19,7 +19,9 @@
 //!
 //! A warning that another account would take the turn from is noise, so the row warns only
 //! where no other seat of the tool would take it ([`failover`]). Where the Host cannot know,
-//! it warns and says that it could not know (`failover: unknown`).
+//! it warns and says that it could not know (`failover: unknown`): a warning that a switch
+//! then makes needless costs a glance, and a limit reached without one stops the agent's
+//! work, which is what the warning is for.
 
 use serde_json::{Value, json};
 
@@ -65,8 +67,9 @@ impl Window<'_> {
 }
 
 /// What an agent's row says of a tool whose account stands near a limit, before it is known
-/// whether another seat would take the turn: the window nearest its end among those that
-/// stand near (of two as near, the first given), or `None`.
+/// whether another seat would take the turn: the most used window among those that stand
+/// near (of two as used, the first given), or `None`. When it begins anew is written as
+/// every moment of the row is (UTC, to the second), whatever form the tool gave it in.
 pub fn nearest<'a>(
     provider: &str,
     windows: impl IntoIterator<Item = Window<'a>>,
@@ -85,7 +88,7 @@ pub fn nearest<'a>(
         "reason": "usage_limit",
         "window": window.kind,
         "used_percentage": window.used,
-        "resets_at": window.resets_at.filter(|at| !at.is_empty()),
+        "resets_at": window.resets_at.and_then(from_text).map(moment),
         "observed_at": moment(window.observed_at_ms),
     }))
 }
@@ -122,10 +125,13 @@ impl Failover {
 ///   tool (`selector`) or the switcher of the seats is on and switches by itself (`desk`, the
 ///   strict reading of the seats as `GET /hotseat/status` serves it). Where neither is, none
 ///   would. Else by the desk: unknown where its reading of the tool is old, failed or not
-///   there; spare where an account other than the one in use is read as ok, with every window
-///   that bears on the agent fresh and below its share ([`near_at`]: the five hours and the
-///   week, and the window of the model's family where the account has one); none where every
-///   other account is read and none is so; unknown where one of them could not be judged.
+///   there; none where it read no account at all; spare where an account other than the one in
+///   use is read as ok, with every window that bears on the agent below its share
+///   ([`near_at`]: the five hours and the week, and the window of the model's family where the
+///   account has one; of every family where the model's is not known) and read fresh or begun
+///   anew since; none where every other account is read and none is so; unknown where one of
+///   them could not be judged. `model` is the model the tool runs for the agent: its own, else
+///   the tool's default.
 pub fn failover(
     accounts: Accounts,
     provider: &str,
@@ -152,12 +158,17 @@ pub fn failover(
         .into_iter()
         .flatten()
         .find(|read| read["provider"] == provider);
-    let Some(read) = read.filter(|read| {
-        read["stale"] == false && read["read_state"] == "ok" && read["inventory"] == "ok"
-    }) else {
+    let Some(read) = read.filter(|read| read["stale"] == false && read["read_state"] == "ok")
+    else {
         return Failover::Unknown;
     };
+    match read["inventory"].as_str() {
+        Some("ok") => {}
+        Some("empty") => return Failover::None,
+        _ => return Failover::Unknown,
+    }
     let family = crate::seats::family(&json!(model));
+    let served_at = desk["served_at"].as_i64().unwrap_or(0);
     let mut unjudged = false;
     let others = read["accounts"]
         .as_array()
@@ -165,7 +176,7 @@ pub fn failover(
         .flatten()
         .filter(|account| account["active_default"] != true);
     for account in others {
-        match room(account, family) {
+        match room(account, family, served_at) {
             Some(true) => return Failover::Spare,
             Some(false) => {}
             None => unjudged = true,
@@ -180,16 +191,16 @@ pub fn failover(
 
 /// Whether an account of the desk has room for a turn of a model's family: `None` where it
 /// cannot be told (its state is not known, or a window that bears on it is old or has no
-/// number).
-fn room(account: &Value, family: Option<&str>) -> Option<bool> {
+/// number). A window that began anew since it was read has nothing of it used.
+fn room(account: &Value, family: Option<&str>, served_at: i64) -> Option<bool> {
     match account["state"].as_str() {
         Some("ok") => {}
         Some("exhausted" | "auth_error") => return Some(false),
         _ => return None,
     }
-    let bears = |kind: &str| {
-        matches!(kind, "5h" | "7d")
-            || family.is_some_and(|family| kind.strip_prefix("model:") == Some(family))
+    let bears = |kind: &str| match kind.strip_prefix("model:") {
+        Some(of) => family.is_none_or(|family| of == family),
+        None => matches!(kind, "5h" | "7d"),
     };
     let mut general = false;
     for window in account["windows"].as_array().into_iter().flatten() {
@@ -197,9 +208,17 @@ fn room(account: &Value, family: Option<&str>) -> Option<bool> {
         if !bears(kind) {
             continue;
         }
-        let used = window["used_ratio"]
-            .as_f64()
-            .filter(|_| window["stale"] == false)?;
+        let begun_anew = window["used_ratio"].is_null()
+            && window["resets_at"]
+                .as_i64()
+                .is_some_and(|reset| reset <= served_at);
+        let used = if begun_anew {
+            0.0
+        } else {
+            window["used_ratio"]
+                .as_f64()
+                .filter(|_| window["stale"] == false)?
+        };
         let span = if kind == "5h" {
             "five_hour"
         } else {
@@ -261,7 +280,7 @@ mod tests {
         assert!(nearest("claude", [window("seven_day", 85.0, later, true)], NOW).is_none());
         let week = nearest("claude", [window("seven_day", 90.0, later, true)], NOW).unwrap();
         assert_eq!(week["window"], "seven_day");
-        // Of two near, the one nearer its end.
+        // Of two near, the more used.
         let both = [
             window("five_hour", 82.0, later, true),
             window("seven_day", 95.5, Some("2030-03-20T00:00:00Z"), true),
@@ -361,13 +380,11 @@ mod tests {
             failover(Accounts::Follow, "claude", "", true, &any),
             Failover::Unknown
         );
-        // A seat with room, and the switcher moves to it, or the pool's selector does.
+        // A seat with room, and the switcher moves to it, or the pool's selector does (with a
+        // selector the desk is on, whatever the switcher's lane says).
         assert_eq!(select(&any, false), Failover::Spare);
         assert_eq!(
-            select(
-                &desk(false, "automatic", read(json!([in_use, spare]))),
-                true
-            ),
+            select(&desk(true, "notify", read(json!([in_use, spare]))), true),
             Failover::Spare
         );
         // Nothing moves the tool: none would, whatever seat has room.
@@ -415,6 +432,31 @@ mod tests {
             Failover::Unknown
         );
         assert_eq!(select(&json!({}), true), Failover::Unknown);
+        // A reading of no account at all: no other seat.
+        let mut empty = read(json!([]));
+        empty["inventory"] = json!("empty");
+        assert_eq!(
+            select(&desk(true, "automatic", empty), false),
+            Failover::None
+        );
+    }
+
+    #[test]
+    fn a_seat_whose_window_began_anew_since_it_was_read_has_room() {
+        let in_use = seat(true, "ok", &[("5h", Some(0.85), false)]);
+        // As the desk serves a window whose reset passed since it was read: no number, stale.
+        let anew = json!({ "active_default": false, "state": "ok", "windows": [
+            { "kind": "5h", "used_ratio": null, "stale": true, "resets_at": NOW - 1_000 },
+            { "kind": "7d", "used_ratio": 0.3, "stale": false, "resets_at": NOW + 1_000_000 },
+        ]});
+        let mut served = desk(true, "automatic", read(json!([in_use, anew])));
+        served["served_at"] = json!(NOW);
+        let of = failover(Accounts::Select, "claude", "", false, &served);
+        assert_eq!(of, Failover::Spare);
+        // Not yet begun anew, and no number: it cannot be judged.
+        served["served_at"] = json!(NOW - 2_000);
+        let of = failover(Accounts::Select, "claude", "", false, &served);
+        assert_eq!(of, Failover::Unknown);
     }
 
     #[test]
@@ -433,7 +475,9 @@ mod tests {
         let of = |model: &str| failover(Accounts::Select, "claude", model, false, &desk);
         assert_eq!(of("claude-opus-5-5"), Failover::None);
         assert_eq!(of("claude-sonnet-5-5"), Failover::Spare);
-        assert_eq!(of(""), Failover::Spare);
+        // A model of no family that is known: every family's window bears on it.
+        assert_eq!(of(""), Failover::None);
+        assert_eq!(of("some-model"), Failover::None);
     }
 
     #[test]
@@ -454,5 +498,15 @@ mod tests {
         let unknown = row(&near, Failover::Unknown);
         assert_eq!(unknown["failover"], "unknown");
         assert_eq!(unknown["used_percentage"], 84.0);
+        // A reset the tool gave with parts of a second or another offset is written in UTC to
+        // the second.
+        let odd = window(
+            "five_hour",
+            84.0,
+            Some("2030-03-17T21:00:00.597645+02:00"),
+            true,
+        );
+        let near = nearest("claude", [odd], NOW).unwrap();
+        assert_eq!(near["resets_at"], "2030-03-17T19:00:00Z");
     }
 }

@@ -182,9 +182,13 @@ impl Standing {
 
     /// Whether the account the Host is on stands near a limit of its usage, and what an
     /// agent's row says of its tool then (`crate::quota_near`). A word of another account than
-    /// the one the Host is on says nothing of it.
+    /// the one the Host is on says nothing of it; on no account that can be named, only a fresh
+    /// word counts.
     pub fn near(&self, tool: Tool<'_>, active: Option<&str>, now_ms: i64) -> Option<Value> {
         let fresh = self.fresh(active, now_ms)?;
+        if active.is_none() && !fresh {
+            return None;
+        }
         let windows = KINDS.iter().filter_map(|kind| {
             let window = self.windows.get(*kind)?;
             Some(crate::quota_near::Window {

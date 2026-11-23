@@ -245,13 +245,6 @@ async fn serve(config: Config) -> Result<(), String> {
         server_id: server_id.clone(),
     };
     tokio::spawn(clarp_host::usage::keep(fleet.clone(), used, counts));
-    tokio::spawn(clarp_host::quota::watch(
-        limits.clone(),
-        fleet.clone(),
-        hub.clone(),
-        clock.clone(),
-        server_id.clone(),
-    ));
     let desks = Arc::new(Mutex::new(Presence::new()));
     // The relay tells what paces the chip when it is asked too much, by an alert as well.
     let (limited, is_limited) = tokio::sync::mpsc::unbounded_channel();
@@ -461,6 +454,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // And a janitor's scheduled task is run when its schedule says.
     clarp_host::janitors::run(&app);
     clarp_host::seats::start_switcher(&app);
+    // And whether an account is used up or near a limit is looked at again as it may change.
+    clarp_host::quota::watch(&app);
     // And what waits to be explained of the use of tools is asked of its janitor's model.
     clarp_host::explain::run(&app);
     // And the open goals are kept current beside their owners, where a keeper is on.
