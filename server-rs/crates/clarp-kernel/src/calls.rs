@@ -23,6 +23,10 @@ use crate::{difflib, python};
 
 /// Who the Host's own tools act as: for whichever phone's call.
 pub const ADMINISTRATOR: &str = "administrator";
+
+/// What the trace of a call's opening turn begins with: the turn in which an agent that rang
+/// says its opening line.
+pub const OPENING_TRACE: &str = "callopen-";
 /// How many agents a call holds.
 pub const MOST: usize = 8;
 /// How many ended calls are kept for each phone.

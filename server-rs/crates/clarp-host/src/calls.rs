@@ -945,16 +945,10 @@ impl Desk {
             let Ok(page) = member.agent.tail(LOOKED_AT, Which::WithoutAutomated).await else {
                 continue;
             };
-            for row in page.entries {
-                if row.ts_ms < call.started_at || row.live {
-                    continue;
-                }
-                let Some((by_user, text)) = spoken(&row.entry, row.commentary) else {
-                    continue;
-                };
+            for (at, by_user, text) in said_in_the_call(&page.entries, call.started_at) {
                 let text = markup::clean_for_display(text, true);
                 if !text.is_empty() {
-                    said.push((row.ts_ms, said.len(), part.agent_id.clone(), by_user, text));
+                    said.push((at, said.len(), part.agent_id.clone(), by_user, text));
                 }
             }
         }
@@ -983,18 +977,58 @@ impl Desk {
     }
 }
 
-/// What a row of a call's agent's conversation says in the call, and whether the user said
-/// it: the user's own words (sent by them, or carried by the Oracle), and an agent's answer at
-/// the end of its turn. Another agent's message, a goal's wake, a scheduled prompt or the
-/// Host's own prompt is no one in the call, and is not quoted as the user's (issues 732, 734;
-/// the Python Host quotes all but its routine automation so).
-fn spoken(entry: &clarp_kernel::conversation::Entry, commentary: bool) -> Option<(bool, &str)> {
+/// What an agent's rows say was said in a call since it began, in their order: each with its
+/// time, whether the user said it, and its words. The user's own words (sent by them, or carried
+/// by the Oracle) are the user's. An answer is the agent's when it was said in the call: in a
+/// turn the user began, after the user's words joined a turn of another origin (they are spoken
+/// from then on, to the turn's end), or as the opening line of a call the agent placed. Another
+/// agent's message, a goal's wake, a scheduled prompt or the Host's own prompt is no one in the
+/// call, and what the agent answered them before the user joined was never said in it: it is
+/// not quoted, nor counted as the agent having spoken (issues 732, 734, 735).
+fn said_in_the_call(
+    rows: &[clarp_actor::conversation::Versioned],
+    since_ms: i64,
+) -> Vec<(i64, bool, &str)> {
     use clarp_kernel::conversation::Entry;
-    match entry {
-        Entry::Message(message) if message.origin.is_user_send() => Some((true, &message.text)),
-        Entry::Reply(reply) if !commentary => Some((false, &reply.text)),
-        _ => None,
+    let mut said = Vec::new();
+    // The user's words are in the turn that runs: what the agent answers is said in the call
+    // until that turn ends.
+    let mut answering = false;
+    for row in rows {
+        if row.ts_ms >= since_ms && !row.live {
+            match &row.entry {
+                Entry::Message(message) if message.origin.is_user_send() => {
+                    answering = true;
+                    said.push((row.ts_ms, true, message.text.as_str()));
+                }
+                // A reply the agents' turn wrote for another agent while the conversation fork
+                // answered the user is the agents', whatever the fork read: never said in the call.
+                Entry::Reply(reply)
+                    if !row.commentary
+                        && ((answering && row.coordination.is_none())
+                            || reply.origin.is_user_send()
+                            || opening_line(reply)) =>
+                {
+                    said.push((row.ts_ms, false, reply.text.as_str()));
+                }
+                _ => {}
+            }
+        }
+        if row.turn.is_some() {
+            answering = false;
+        }
     }
+    said
+}
+
+/// The opening line of a call the agent placed: its answer in the turn the Host began with the
+/// call's opening, of origin `automation` under the opening's trace.
+fn opening_line(reply: &clarp_kernel::conversation::Reply) -> bool {
+    matches!(&reply.origin, clarp_kernel::turn::Origin::Trigger { name } if name == "automation")
+        && reply
+            .trace_id
+            .as_deref()
+            .is_some_and(|trace| trace.starts_with(clarp_kernel::calls::OPENING_TRACE))
 }
 
 /// Who asks, as the calls know a caller: a phone by its id, or the administrator. A phone
@@ -1415,47 +1449,152 @@ mod due_work_tests {
 }
 
 #[cfg(test)]
-mod spoken_tests {
-    use clarp_kernel::conversation::{Entry, Message, Reply};
+#[allow(clippy::unwrap_used)]
+mod said_tests {
+    use clarp_actor::conversation::Versioned;
+    use clarp_kernel::conversation::{Entry, Message, Reply, TurnEnd};
     use clarp_kernel::turn::Origin;
+    use serde_json::json;
 
-    use super::spoken;
+    use super::said_in_the_call;
 
-    fn message(origin: Origin) -> Entry {
-        Entry::Message(Message {
-            id: "u-1".into(),
-            text: "words".into(),
-            origin,
-            ..Message::default()
-        })
+    fn trigger(name: &str) -> Origin {
+        Origin::Trigger { name: name.into() }
     }
 
-    /// Issue 734: a call quotes as the user's only what the user said; another agent's
-    /// message, a goal's wake and the Host's own prompts are no one in the call.
-    #[test]
-    fn a_call_quotes_as_the_users_only_what_the_user_said() {
-        let trigger = |name: &str| Origin::Trigger { name: name.into() };
-        assert_eq!(spoken(&message(Origin::User), false), Some((true, "words")));
-        assert_eq!(
-            spoken(&message(trigger("oracle")), false),
-            Some((true, "words"))
+    fn row(entry: Entry, at: i64) -> Versioned {
+        Versioned::of(entry, at as u64, at)
+    }
+
+    fn message(id: &str, origin: Origin, at: i64) -> Versioned {
+        row(
+            Entry::Message(Message {
+                id: id.into(),
+                text: id.into(),
+                origin,
+                ..Message::default()
+            }),
+            at,
+        )
+    }
+
+    fn reply(id: &str, origin: Origin, trace: Option<&str>, at: i64) -> Versioned {
+        row(
+            Entry::Reply(Reply {
+                id: id.into(),
+                text: id.into(),
+                origin,
+                trace_id: trace.map(str::to_owned),
+                ..Reply::default()
+            }),
+            at,
+        )
+    }
+
+    /// The row that closed its turn.
+    fn closing(mut row: Versioned) -> Versioned {
+        row.turn = Some(
+            serde_json::from_value::<TurnEnd>(json!({
+                "id": "t-1", "turn": 1, "closes": row.entry.id(), "status": "completed",
+                "ended_at_ms": 0, "tool_count": 0, "note_count": 0,
+            }))
+            .unwrap(),
         );
-        for origin in [
-            Origin::Agent {
-                agent_id: "a-2".into(),
+        row
+    }
+
+    fn texts(rows: &[Versioned], since: i64) -> Vec<(bool, &str)> {
+        said_in_the_call(rows, since)
+            .into_iter()
+            .map(|(_, by_user, text)| (by_user, text))
+            .collect()
+    }
+
+    /// Issues 734 and 735: a call quotes what was said in it. The user's words, and what the
+    /// agent answered them, also after they joined a turn a goal's wake began; never another
+    /// agent's message, a goal's wake, or what was answered them before the user joined.
+    #[test]
+    fn a_call_quotes_what_was_said_in_it() {
+        let opening = format!("{}abc", clarp_kernel::calls::OPENING_TRACE);
+        let rows = vec![
+            // Before the call began: not quoted.
+            message("u-before", Origin::User, 5),
+            // The agent rang: its opening line was said.
+            message("u-open", trigger("automation"), 10),
+            closing(reply("r-open", trigger("automation"), Some(&opening), 11)),
+            // The user answered, and was answered.
+            message("u-yes", Origin::User, 20),
+            closing(reply("r-yes", Origin::User, None, 21)),
+            // A goal's wake: what the agent said to it was not said in the call ...
+            message("u-task-goal-1", trigger("automation"), 30),
+            reply("r-goal", trigger("automation"), Some("task-goal-1"), 31),
+            // ... until the user's words joined that turn: spoken from then on, to its end.
+            message("u-joined", trigger("oracle"), 32),
+            closing(reply(
+                "r-joined",
+                trigger("automation"),
+                Some("task-goal-1"),
+                33,
+            )),
+            // Another agent's message and its answer: no one in the call.
+            message(
+                "u-peer",
+                Origin::Agent {
+                    agent_id: "a-2".into(),
+                },
+                40,
+            ),
+            closing(reply(
+                "r-peer",
+                Origin::Agent {
+                    agent_id: "a-2".into(),
+                },
+                None,
+                41,
+            )),
+            // The conversation fork read the user's words while the agent's own turn worked
+            // for another agent: what that turn wrote for the agent was not said in the call.
+            message("u-forked", Origin::User, 45),
+            {
+                let mut for_the_peer = reply(
+                    "r-for-the-peer",
+                    Origin::Agent {
+                        agent_id: "a-2".into(),
+                    },
+                    None,
+                    46,
+                );
+                for_the_peer.coordination = Some("a-2".into());
+                closing(for_the_peer)
             },
-            trigger("automation"),
-            trigger("schedule"),
-            trigger("janitor"),
-        ] {
-            assert_eq!(spoken(&message(origin.clone()), false), None, "{origin:?}");
-        }
-        let reply = Entry::Reply(Reply {
-            id: "r-1".into(),
-            text: "an answer".into(),
-            ..Reply::default()
-        });
-        assert_eq!(spoken(&reply, false), Some((false, "an answer")));
-        assert_eq!(spoken(&reply, true), None, "commentary is not an answer");
+            // A trace that looks like an opening, of another origin: not an opening line.
+            closing(reply(
+                "r-fake",
+                Origin::Agent {
+                    agent_id: "a-2".into(),
+                },
+                Some(&opening),
+                50,
+            )),
+        ];
+        assert_eq!(
+            texts(&rows, 10),
+            [
+                (false, "r-open"),
+                (true, "u-yes"),
+                (false, "r-yes"),
+                (true, "u-joined"),
+                (false, "r-joined"),
+                (true, "u-forked"),
+            ]
+        );
+        // Work between a reply's parts is not an answer.
+        let mut commentary = reply("r-work", Origin::User, None, 60);
+        commentary.commentary = true;
+        assert!(
+            texts(&[message("u-go", Origin::User, 59), commentary], 0)
+                .iter()
+                .all(|(by_user, _)| *by_user)
+        );
     }
 }

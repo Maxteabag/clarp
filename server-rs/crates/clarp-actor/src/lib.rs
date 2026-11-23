@@ -182,7 +182,7 @@ fn opening_message(message: &Message) -> bool {
         && message
             .trace_id
             .as_deref()
-            .is_some_and(|t| t.starts_with("callopen-"))
+            .is_some_and(|t| t.starts_with(clarp_kernel::calls::OPENING_TRACE))
 }
 
 /// The model and effort defaults available at the moment an attempt is built.

@@ -630,10 +630,14 @@ turn back to the agents.
 A call's header (what an agent the user speaks to in a call is told was said since it last
 spoke) quotes as the user's only what the user said: a message of origin `user`, or the
 Oracle carrying their words. Another agent's message, a goal's wake, a scheduled prompt and
-the Host's own prompts are left out (issues 732 and 734). The Python Host quotes every message
-but its routine automation (heartbeat, leader tick, dreaming, janitor, system) as
-"User -> <persona>: …". Since issue 732 the hands-free router, too, leaves a goal's wake out of
-what an agent was last told.
+the Host's own prompts are left out (issues 732 and 734). An answer of the agent is quoted,
+and counts as the agent having spoken, when it was said in the call: in a turn the user
+began, after the user's words joined a turn of another origin (to that turn's end), or as
+the opening line of a call it placed; what it answered the others is left out (issue 735).
+The Python Host quotes every message and answer but those of its routine automation
+(heartbeat, leader tick, dreaming, janitor, system), a message as "User -> <persona>: …",
+and counts every such answer as the agent having spoken. Since issue 732 the hands-free
+router, too, leaves a goal's wake out of what an agent was last told.
 
 Issue 217 (feature contract 150) gives the Rust Host's original paired VoIP recipients
 a bounded ring answer grace through the existing answer route. The Python Host

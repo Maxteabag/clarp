@@ -80,7 +80,11 @@ impl Desk {
             });
             let generation = proven(with);
             let nonce = format!("own_{}", crate::ids::hex(16));
-            let trace = format!("callopen-{}", crate::ids::hex(6));
+            let trace = format!(
+                "{}{}",
+                clarp_kernel::calls::OPENING_TRACE,
+                crate::ids::hex(6)
+            );
             let w = rules::World {
                 generation: &generation,
                 now,

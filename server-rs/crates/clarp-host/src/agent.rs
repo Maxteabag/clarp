@@ -4800,7 +4800,7 @@ impl Worker {
             && let Some(trace) = message
                 .trace_id
                 .as_deref()
-                .filter(|s| s.starts_with("callopen-"))
+                .filter(|s| s.starts_with(clarp_kernel::calls::OPENING_TRACE))
         {
             self.setup.opening_gate.failed(message.client_id(), trace);
         }
