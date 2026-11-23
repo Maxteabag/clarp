@@ -135,6 +135,11 @@ fn speaker_thread(inbox: std::sync::mpsc::Receiver<Command>, device: bool) {
     use std::sync::mpsc::RecvTimeoutError;
     let mut output: Option<(rodio::MixerDeviceSink, rodio::Player)> = None;
     let mut playing: Option<Sink> = None;
+    // Since when the open device has had nothing to play. A quiet app holds
+    // no stream: an open sink keeps a running playback stream in the sound
+    // server (mixing silence, resampled), which Peter heard as noise
+    // (23 Nov 2026). It closes after IDLE_CLOSE and opens again for the next clip.
+    let mut idle_since: Option<std::time::Instant> = None;
     loop {
         match inbox.recv_timeout(Duration::from_millis(50)) {
             Ok(Command::Play { playback, rate, events }) => {
@@ -207,8 +212,23 @@ fn speaker_thread(inbox: std::sync::mpsc::Receiver<Command>, device: bool) {
         if finished && let Some(events) = playing.take() {
             events(OutputEvent::Ended { result: Ok(()), missing_backend: false });
         }
+        // A paused clip is not empty and keeps the device; an empty player does not.
+        if finished {
+            let since = *idle_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= IDLE_CLOSE {
+                output = None;
+                idle_since = None;
+            }
+        } else {
+            idle_since = None;
+        }
     }
 }
+
+/// How long the output device stays open with nothing to play: long enough
+/// that clips played back to back share one stream, short enough that a
+/// quiet app holds none.
+const IDLE_CLOSE: Duration = Duration::from_secs(2);
 
 /// Plays nothing, for tests: starts at once and ends after a short while
 /// unless stopped; pausing holds the end.
