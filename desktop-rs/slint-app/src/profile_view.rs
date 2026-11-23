@@ -630,7 +630,7 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
                 picker.body = transit::SWITCH_BODY.to_owned();
             } else {
                 picker.title = transit::confirm_title(name, &backend_label(chosen), &label);
-                picker.body = transit::CONFIRM_BODY.to_owned();
+                picker.body = transit::confirm_body(engine.transit_carries_tools(session)).to_owned();
             }
         }
         _ => {}

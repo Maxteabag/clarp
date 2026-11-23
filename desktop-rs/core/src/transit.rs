@@ -17,15 +17,33 @@ pub const DEFAULT_MARK: &str = "Default";
 pub const CONFIRM_BODY: &str =
     "It keeps its persona and goals and takes the conversation's messages along (not tool output, thinking or attachments). This takes about a minute.";
 pub const SWITCH_BODY: &str = "Its conversation stays as it is.";
+/// A Host that carries the tools too (feature `agent_backend_transit_tools`,
+/// contract 161) says so in the move's confirmation.
+pub const TOOLS_FEATURE: &str = "agent_backend_transit_tools";
+pub const CONFIRM_BODY_TOOLS: &str = "The conversation comes along: what you and the agent said, the tools it used and what they returned (long results shortened), and attached files as paths to the files. A very long conversation keeps its newest part and a summary of the rest. Thinking is not carried.";
+
+/// What a move's confirmation says comes along, by what the Host carries.
+pub fn confirm_body(carries_tools: bool) -> &'static str {
+    if carries_tools { CONFIRM_BODY_TOOLS } else { CONFIRM_BODY }
+}
 pub const NO_ANSWER: &str = "Couldn't reach the Host. Try again.";
 pub const OPTIONS_FAILED: &str = "Couldn't read the backends";
 
 /// Whether a `/server-info` answer offers the feature.
 pub fn offered_by(info: &Object) -> bool {
+    has_feature(info, FEATURE)
+}
+
+/// Whether a `/server-info` answer says a move carries the tools too.
+pub fn tools_offered_by(info: &Object) -> bool {
+    has_feature(info, TOOLS_FEATURE)
+}
+
+fn has_feature(info: &Object, feature: &str) -> bool {
     info.get("capabilities")
         .and_then(|c| c.get("features"))
         .and_then(Value::as_array)
-        .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)))
+        .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(feature)))
 }
 
 /// The row's value: "Claude · Opus 5.5" (the backend alone without a model).
@@ -525,5 +543,24 @@ mod tests {
         assert!(flow.request_id.is_empty());
         assert_eq!(progress("Codex", "", false, Phase::Translating), "Moving to Codex… translating");
         assert_eq!(progress("Claude", "Sonnet", true, Phase::Switching), "Switching to Sonnet…");
+    }
+}
+
+#[cfg(test)]
+mod tools_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A Host that carries the tools says so in the move's confirmation; an
+    /// older one keeps the older text.
+    #[test]
+    fn the_confirmation_says_what_the_host_carries() {
+        let both = json!({"capabilities": {"features": [FEATURE, TOOLS_FEATURE]}});
+        let older = json!({"capabilities": {"features": [FEATURE]}});
+        assert!(tools_offered_by(both.as_object().unwrap()));
+        assert!(!tools_offered_by(older.as_object().unwrap()));
+        assert!(offered_by(older.as_object().unwrap()));
+        assert!(confirm_body(true).starts_with("The conversation comes along: what you and the agent said, the tools it used"));
+        assert_eq!(confirm_body(false), CONFIRM_BODY);
     }
 }

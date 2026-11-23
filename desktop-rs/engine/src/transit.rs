@@ -19,6 +19,8 @@ use crate::{Change, Engine};
 pub(crate) struct Transits {
     /// `agent_backend_transit` was in the last `/server-info`.
     pub feature: bool,
+    /// `agent_backend_transit_tools` too: a move carries the tools.
+    pub tools: bool,
     /// Each agent's flow, by session (idle when absent).
     flows: HashMap<String, Flow>,
     /// The options read for an agent's picker, by session.
@@ -41,6 +43,12 @@ impl Engine {
     pub fn transit_offered(&self, session: &str) -> bool {
         on_peer!(self.peer_ref(session), |engine, local| engine.transit_offered(local));
         self.transits.feature
+    }
+
+    /// The chat's own Host carries the tools along in a move.
+    pub fn transit_carries_tools(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.transit_carries_tools(local));
+        self.transits.tools
     }
 
     /// The agent's flow (idle when none).
@@ -130,6 +138,11 @@ impl Engine {
         let has = transit::offered_by(info);
         if has != self.transits.feature {
             self.transits.feature = has;
+            self.changes.push(Change::Profile);
+        }
+        let tools = transit::tools_offered_by(info);
+        if tools != self.transits.tools {
+            self.transits.tools = tools;
             self.changes.push(Change::Profile);
         }
     }
