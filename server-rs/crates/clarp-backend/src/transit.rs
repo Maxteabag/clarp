@@ -209,7 +209,10 @@ pleasantries and what no longer matters. At most 1,500 words, plain text.";
 /// What the agent itself is asked, in one more turn on its old tool, just before it moves:
 /// the summary of its conversation up to its newest part, which goes along as it was.
 pub fn summary_turn(to: &str, newest_begins: &str) -> String {
-    let begins: String = newest_begins.split_whitespace().collect::<Vec<_>>().join(" ");
+    let begins: String = newest_begins
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let begins: String = begins.chars().take(160).collect();
     format!(
         "[Clarp] You are about to move to {to}. Your conversation is too long to carry whole: \
@@ -1754,7 +1757,11 @@ mod tests {
     fn long_said() -> Vec<Said> {
         (0..10)
             .map(|at| {
-                let role = if at % 2 == 0 { Role::User } else { Role::Assistant };
+                let role = if at % 2 == 0 {
+                    Role::User
+                } else {
+                    Role::Assistant
+                };
                 Said::new(role, format!("{at}:{}", "x".repeat(9_998)), at)
             })
             .collect()
@@ -1763,7 +1770,14 @@ mod tests {
     #[test]
     fn what_fits_goes_whole_and_nothing_stands_at_its_head() {
         let fitted = fitted(&long_said(), 1_000_000, None, "Claude Code", "Codex");
-        assert_eq!(fitted, Fitted { from: 0, head: None, summarized: false });
+        assert_eq!(
+            fitted,
+            Fitted {
+                from: 0,
+                head: None,
+                summarized: false
+            }
+        );
         assert_eq!(with_head(&long_said(), &fitted), long_said());
     }
 
@@ -1796,7 +1810,11 @@ mod tests {
         let left = super::fitted(&said, budget, None, "Claude Code", "Codex");
         assert!(!left.summarized);
         assert_eq!(left.from, fitted.from);
-        assert!(left.head.unwrap().contains("were left out: no summary of them could be written"));
+        assert!(
+            left.head
+                .unwrap()
+                .contains("were left out: no summary of them could be written")
+        );
         let by_model = Summary {
             text: "x".repeat(SUMMARY_MOST * 2),
             by: SummaryBy::Model("Claude Code (haiku)".into()),
@@ -1804,7 +1822,10 @@ mod tests {
         let cut = super::fitted(&said, budget, Some(&by_model), "Claude Code", "Codex");
         let head = cut.head.unwrap();
         assert!(head.contains("written by Claude Code (haiku), from Clarp's record:]"));
-        assert!(head.chars().count() < SUMMARY_MOST + 1_000, "a long summary is cut");
+        assert!(
+            head.chars().count() < SUMMARY_MOST + 1_000,
+            "a long summary is cut"
+        );
     }
 
     #[test]
@@ -1820,6 +1841,60 @@ mod tests {
         assert!(turn.contains("move to Codex"));
         assert!(turn.contains("\u{201c}Fix the parser, please.\u{201d}"));
         assert!(turn.contains("Do not use any tool"));
+    }
+
+    /// Writes, with the writers themselves, a Claude session and a Codex rollout in which a
+    /// tool returned a code word that no text holds, followed by another prompt of the user's:
+    /// what a live resume is to read back (issue 720). Only when asked:
+    /// `CLARP_BUILD_ENV="CLARP_TRANSIT_PROOF_DIR=/dir CLARP_TRANSIT_PROOF_WORD=word
+    /// CLARP_TRANSIT_PROOF_CWD=/cwd" tools/build test -p clarp-backend proof -- --ignored`.
+    #[test]
+    #[ignore = "writes sessions for a live resume"]
+    fn proof_sessions_for_a_live_resume() {
+        let dir = PathBuf::from(std::env::var("CLARP_TRANSIT_PROOF_DIR").unwrap());
+        let word = std::env::var("CLARP_TRANSIT_PROOF_WORD").unwrap();
+        let cwd = std::env::var("CLARP_TRANSIT_PROOF_CWD").unwrap();
+        let mut said = vec![
+            Said::new(
+                Role::User,
+                "Please look at the note file in this folder.",
+                1_800_000_000_000,
+            ),
+            Said::new(Role::Assistant, "I'll read it.", 1_800_000_001_000),
+            Said::new(
+                Role::User,
+                "Thanks. Keep what it says in mind.",
+                1_800_000_003_000,
+            ),
+            Said::new(Role::Assistant, "Noted.", 1_800_000_004_000),
+        ];
+        said[1].tools = vec![Used {
+            id: "toolu_01ProofRead".into(),
+            name: "Read".into(),
+            input: json!({"file_path": format!("{cwd}/note.txt")}),
+            output: Some(format!("The code word is {word}.")),
+            failed: false,
+            shortened: false,
+            session: None,
+        }];
+        for (backend, writer) in [
+            ("claude", &ClaudeWriter as &dyn Writer),
+            ("codex", &CodexWriter),
+        ] {
+            let mut place = place(&dir.join(backend));
+            place.cwd = cwd.clone();
+            place.model = None;
+            place.tool_version = Some(
+                if backend == "claude" {
+                    "2.1.321"
+                } else {
+                    "0.167.1"
+                }
+                .into(),
+            );
+            let written = writer.write(&said, &place).unwrap();
+            println!("{backend} session {}", written.session);
+        }
     }
 
     #[test]

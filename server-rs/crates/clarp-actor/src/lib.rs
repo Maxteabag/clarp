@@ -59,8 +59,8 @@ use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
 use clarp_kernel::turn::{
-    Activity, Admission, COMPACTION, Origin, TRANSIT_SUMMARY, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
-    Wait, silent_when_failed,
+    Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, TRANSIT_SUMMARY,
+    Turn, TurnId, Wait, silent_when_failed,
 };
 use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
@@ -4832,9 +4832,7 @@ impl Actor {
                     .args
                     .extend(["--settings".to_owned(), fork::edit_guard().to_string()]);
             }
-            launch
-                .env
-                .push((fork::FORK_ENV.to_owned(), "1".to_owned()));
+            launch.env.push((fork::FORK_ENV.to_owned(), "1".to_owned()));
         }
         let stdin_file = self.profile.stdin_path_of(turn, attempt);
         write_whole(&stdin_file, &launch.stdin)?;

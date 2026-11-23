@@ -125,9 +125,9 @@ fn done_row(backend: &str, model: &str, omitted: usize, summarized: bool) -> Str
         (_, true) => format!(
             "Now on {backend} · {model}. The conversation came along, {turns} as a summary."
         ),
-        (_, false) => format!(
-            "Now on {backend} · {model}. The conversation came along, except {turns}."
-        ),
+        (_, false) => {
+            format!("Now on {backend} · {model}. The conversation came along, except {turns}.")
+        }
     }
 }
 

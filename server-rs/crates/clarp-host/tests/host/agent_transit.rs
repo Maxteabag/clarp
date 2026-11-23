@@ -266,7 +266,9 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
                 role == "assistant" && text.starts_with(&format!("Heard: Long part {part}:"))
             })
         });
-        wait_for("the agent to be done", || row(&host, &session)["busy"] == false);
+        wait_for("the agent to be done", || {
+            row(&host, &session)["busy"] == false
+        });
     }
     let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
                      "request_id": "move-long"});
@@ -295,15 +297,25 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
     assert!(head.contains("written by the agent itself, just before the move:]"));
     assert!(head.contains("Heard: [Clarp] You are about to move to Codex."));
     let written = std::fs::read_to_string(&rollouts[0]).unwrap();
-    assert!(written.contains("Long part 3: "), "the newest goes as it was");
-    assert!(!written.contains("Long part 0: "), "the oldest is in the summary");
+    assert!(
+        written.contains("Long part 3: "),
+        "the newest goes as it was"
+    );
+    assert!(
+        !written.contains("Long part 0: "),
+        "the oldest is in the summary"
+    );
     assert_eq!(
         written.matches("You are about to move").count(),
         1,
         "the summary's own turn is no turn of the conversation"
     );
-    assert!(host.conversation(&session).iter().any(|(role, text)| role == "system"
-        && text.ends_with(&format!("its oldest {omitted} turns as a summary."))));
+    assert!(
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "system"
+                && text.ends_with(&format!("its oldest {omitted} turns as a summary.")))
+    );
 }
 
 #[test]

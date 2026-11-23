@@ -718,7 +718,9 @@ impl Agent {
     /// What that turn opens with, where the change said: the record of the conversation as
     /// it was carried, made when the agent moved.
     pub fn carried_opening(&self) -> Option<&str> {
-        self.carried_from.as_ref().and(self.carried_opening.as_deref())
+        self.carried_from
+            .as_ref()
+            .and(self.carried_opening.as_deref())
     }
 
     /// The tools the agent's log last changed it from and to, since it was last started

@@ -754,8 +754,8 @@ mod tests {
         let newer = "n".repeat(30_000);
         let said = [(true, older.as_str()), (false, newer.as_str())];
         let head = format!("[Clarp: summary]\n{}", "s".repeat(20_000));
-        let opening = carried_opening("Antigravity", "Claude Code", Some(&head), &said, 40_000)
-            .unwrap();
+        let opening =
+            carried_opening("Antigravity", "Claude Code", Some(&head), &said, 40_000).unwrap();
         assert!(opening.starts_with(RESTORED_OPEN));
         assert!(opening.ends_with(RESTORED_CLOSE));
         assert!(opening.contains(&head), "the head is never cut");
@@ -764,7 +764,10 @@ mod tests {
         assert!(opening.contains("Assistant: nnn"));
         assert!(!opening.contains("User: ooo"));
         assert!(head_at < opening.find("Assistant: ").unwrap());
-        assert_eq!(opened(Some(&opening), "Next?"), format!("{opening}\n\nNext?"));
+        assert_eq!(
+            opened(Some(&opening), "Next?"),
+            format!("{opening}\n\nNext?")
+        );
         assert_eq!(opened(None, "Next?"), "Next?");
         assert_eq!(carried_opening("A", "B", None, &[], 60_000), None);
     }
