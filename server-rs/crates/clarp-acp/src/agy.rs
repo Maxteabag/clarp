@@ -106,6 +106,10 @@ pub struct Order {
     /// is not [`SILENCE_MOST_SECS`]: for tests, which cannot wait a quarter of an hour. Nought:
     /// the bound itself.
     pub silence_ms: u64,
+    /// The name of the turn's first message, which the driver names again in the result
+    /// that answers it (`clarp_kernel::steering`): what tells the Host which answer is the
+    /// turn's own and which one answers a message it was given while it ran.
+    pub uuid: String,
 }
 
 impl Order {
@@ -120,6 +124,7 @@ impl Order {
             "effort": self.effort,
             "attachments": self.attachments,
             "silence_ms": self.silence_ms,
+            "uuid": self.uuid,
         })
     }
 
@@ -144,6 +149,7 @@ impl Order {
                 })
                 .unwrap_or_default(),
             silence_ms: value["silence_ms"].as_u64().unwrap_or(0),
+            uuid: text("uuid"),
         }
     }
 }
@@ -336,6 +342,7 @@ mod tests {
             effort: "low".into(),
             attachments: vec!["/d/uploads/a.png".into()],
             silence_ms: 250,
+            uuid: "u-1".into(),
         };
         assert_eq!(Order::from_json(&order.to_json()), order);
     }

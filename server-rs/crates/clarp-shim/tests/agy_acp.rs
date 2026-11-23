@@ -45,6 +45,7 @@ impl Place {
             effort: "high".into(),
             attachments: Vec::new(),
             silence_ms: 0,
+            uuid: String::new(),
         }
     }
 
