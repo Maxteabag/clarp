@@ -77,10 +77,11 @@ interrupted.
 - Nothing about the lane lives only in the Host's memory.
 
 **The lane record.** `Ownership` keeps its meaning (`Acquiring`, `Owned`, `Stopping`,
-`AccountHold`, `SchedulerHold`, `Exec`). With the setting on, a chat turn goes through
-`Acquiring` → `Owned` like a goal activation. `Exec` means only that no lane holds the thread.
-The field `goal` stays optional, so a chat lane is a lane record with `goal: None`.
-Retirement of a goal-less lane is driven by the idle policy, not by the goal completing.
+`AccountHold`, `SchedulerHold`, `Exec`) and is written for goals only. A chat lane writes no
+record: the setting routes the agent's launches to it, and the lane's owner and thread locks
+say who may write the thread. A goal that completes while the setting is on is marked `Exec`
+without retiring the lane, which the chat turns keep. A goal-less lane leaves by the idle
+policy.
 
 **What a Host restart finds, and how it rejoins.** The lane's process runs in its own systemd
 scope (`goal_lane_command` → `shim_command`), so a Host restart does not touch it.
@@ -177,11 +178,11 @@ decision 3 for the turn token).
 
 **The agent moves to another backend or Host.**
 
-- *Another backend.* The worker sees `record.backend != "codex"` with a lane record that is
-  not `Exec`. It retires the lane once it is idle, and the record goes to `Exec`. While the lane
-  still runs a turn, the move waits for that turn, as a move waits for any live turn today.
-- *Another Host.* `actor.moved()` already stops new launches. The worker additionally sends
-  `Retire` to an idle lane of a moved agent. The thread lock is per Host (`run/`), and Codex's
+- *Another backend.* Every exec launch first asks a live lane of the agent to retire
+  (`Lane::retire` on the turn's launch thread), so the new tool's first turn finds the lane
+  gone. A lane that still runs work refuses, and that launch fails as it would today.
+- *Another Host.* `actor.moved()` already stops new launches. The lane of a moved agent is not
+  sent `Retire`: it leaves by its idle time. The thread lock is per Host (`run/`), and Codex's
   rollout is per machine, so the other Host runs its own lane. An active native goal still
   blocks a move, as now.
 
@@ -385,6 +386,18 @@ account:
   `conversation_forks` and `experience_watch` are read. The fleet's settings need a dot in their
   key and a route to write them, and routes are frozen.
 - An opening turn (a call's) keeps its own gated exec launch.
+
+## After review (23 Nov 2026)
+
+- Steering is offered to a Codex agent only while `codex_chat_lane` is on, so with it off a goal
+  turn is not steered, as before.
+- An attempt that never reached Codex (no spool) goes to a new lane once, whatever the lane
+  said.
+- A reply that arrives while another request is waited on is kept for that request.
+- The Stop deadline is looked at before queued input is taken.
+- Left as they are, for the lead:
+  - the turn file is not cleared when a turn ends (decision 3 as written);
+  - a paused goal keeps its lane from leaving by idle.
 
 ## Decisions (the lead, 23 Nov 2026)
 
