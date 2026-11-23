@@ -15,6 +15,13 @@ pub struct Join {
     pub uuid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<Recovery>,
+    /// The message goes to the tool in the prompt the turn starts with, together with the
+    /// message the turn began for, rather than into a process that already runs. Such a
+    /// join is made only while the turn's first attempt is being started, and its read is
+    /// written in the same append: the user's messages that waited behind the turn's own
+    /// are one turn, read at once.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub together: bool,
 }
 
 /// What owns this stdin line, kept before attempting the write.
@@ -39,6 +46,14 @@ pub struct FollowUp {
     pub join: Join,
     pub message_seq: u64,
     pub stage: Stage,
+}
+
+/// A message of the user's that went to the tool in the prompt of another turn, with the
+/// message that turn began for ([`Join::together`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Gathered {
+    pub turn: TurnId,
+    pub message_seq: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

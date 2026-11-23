@@ -71,8 +71,9 @@ approval policy `never`, and shell, plugins and configured MCP tools disabled.
 - **No traces.** `--fork-session --no-session-persistence`, with the Clarp session
   variables removed, so nothing is written to disk or to Clarp's messages.
 - **Live fact sheet.** Before forking, it reads the database read-only: the current
-  time, busy or idle and queue, helper agents and their state, background jobs of the
-  last 12 hours, and the agent's cards to the user (pending or recently resolved). It
+  time, busy or idle and queue (on a Rust Host from contract 169, how many of the user's
+  queued messages go to the agent together, as one turn, when its turn ends), helper agents
+  and their state, background jobs of the last 12 hours, and the agent's cards to the user (pending or recently resolved). It
   goes after the question (cache-safe) with "these override what you remember; say
   where they differ". Without it, a fork reports the agent's belief, which can be an
   hour old when the agent is waiting on a timer.

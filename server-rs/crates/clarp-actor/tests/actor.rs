@@ -43,6 +43,8 @@ struct World {
     turned_away: u32,
     followed: Vec<u64>,
     stopped: Vec<u64>,
+    /// What each launch gave its tool, in order.
+    prompts: Vec<String>,
 }
 
 impl World {
@@ -79,6 +81,7 @@ impl World {
             turned_away: 0,
             followed: Vec::new(),
             stopped: Vec::new(),
+            prompts: Vec::new(),
         }
     }
 
@@ -128,6 +131,8 @@ impl World {
             order.stdin_file.is_file(),
             "the message is on disk before a shim is asked to read it"
         );
+        self.prompts
+            .push(std::fs::read_to_string(&order.stdin_file).unwrap());
         match SpoolWriter::create(&order.spool) {
             Ok(writer) => {
                 self.shims.insert(order.turn.0, writer);
@@ -6464,4 +6469,104 @@ fn every_row_says_which_session_of_the_tool_it_came_from() {
         panic!("the second row is the reply: {:?}", page.entries[1]);
     };
     assert_eq!(reply.backend_session.as_deref(), Some("tool-session-1"));
+}
+
+/// The owner, on 23 Nov 2026, of an agent that answered his waiting messages one turn at a
+/// time: the user's messages that waited behind a turn are one turn, with all of them in its
+/// prompt, and every attempt of it is given all of them, also after a restart.
+#[test]
+fn the_users_waiting_messages_are_one_turn_and_its_retry_is_given_all_of_them() {
+    let mut world = World::new("together");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    for (id, text) in [
+        ("u-2", "first words"),
+        ("u-3", "second words"),
+        ("u-4", "third words"),
+    ] {
+        world.send(&mut actor, id, text, Admission::Queue);
+    }
+    let waiting: Vec<(String, bool)> = actor
+        .queue()
+        .unwrap()
+        .into_iter()
+        .map(|waiting| (waiting.message_id, waiting.read_together))
+        .collect();
+    assert_eq!(
+        waiting,
+        ["u-2", "u-3", "u-4"].map(|id| (id.to_string(), true)),
+        "the tool that runs cannot take them: they wait to be read together"
+    );
+
+    world.says(1, "One.");
+    world.exits(1, Some(0), None);
+    let out = world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2], "one turn for the three");
+    let together = clarp_kernel::told::together(&["first words", "second words", "third words"]);
+    assert!(world.prompts[1].contains(&together), "{:?}", world.prompts);
+    let read: Vec<u64> = out.joined_reads.iter().map(|read| read.turn.0).collect();
+    assert_eq!(read, vec![3, 4], "the queue tells each started");
+    assert!(actor.queue().unwrap().is_empty());
+    let said = |actor: &Actor| -> Vec<(String, String)> {
+        shown(actor)
+            .into_iter()
+            .filter(|(_, says)| says.starts_with("user: ") || says.starts_with("agent: "))
+            .collect()
+    };
+    assert_eq!(
+        said(&actor),
+        vec![
+            pair("u-1", "user: go"),
+            pair("r-1-1", "agent: One."),
+            pair("u-2", "user: first words"),
+            pair("u-3", "user: second words"),
+            pair("u-4", "user: third words"),
+        ],
+        "each is a row of its own, in order"
+    );
+
+    // The connection drops before the tool did anything: the turn waits for its next attempt,
+    // and the Host is started again meanwhile.
+    world.write(2, Line::Err("API Error: socket hang up".to_string()));
+    world.exits(2, Some(1), None);
+    world.hint(&mut actor);
+    let at = actor
+        .retry_at()
+        .expect("the turn waits for its next attempt");
+    drop(actor);
+    let mut actor = world.open();
+    world.now_ms = world.now_ms.max(at);
+    let out = actor.retry_due(world.now_ms).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(2) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.took, vec![1, 2, 2]);
+    assert!(
+        world.prompts[2].contains(&together),
+        "the next attempt is given all three, not the first alone: {:?}",
+        world.prompts
+    );
+
+    world.says(2, "All three.");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let rows = said(&actor);
+    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert_eq!(
+        rows[5].1, "agent: All three.",
+        "one answer, after the three"
+    );
+    let (asked, answer) = actor
+        .last_finished_for(|by| by == "user", 0)
+        .unwrap()
+        .expect("what the agent last finished for its user is the turn the three went into");
+    assert_eq!(
+        (asked.entry.id(), answer.entry.id()),
+        ("u-4", rows[5].0.as_str())
+    );
+    assert!(actor.queue().unwrap().is_empty());
+    assert_eq!(actor.status().waiting, vec![]);
 }

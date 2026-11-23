@@ -32,6 +32,9 @@ struct Send {
     read: Option<i64>,
     wait_message: Option<u64>,
     count_failure: bool,
+    /// Taken into the prompt of the turn that started before it: it waited for that start, as
+    /// a turn of its own would have, and was not steered.
+    together: bool,
 }
 
 #[derive(Default)]
@@ -67,6 +70,7 @@ impl History {
                             read: None,
                             wait_message: coordination.is_none().then_some(*message_seq),
                             count_failure: origin.is_user(),
+                            together: false,
                         },
                     );
                 }
@@ -128,6 +132,11 @@ impl History {
                 }
                 _ => {}
             },
+            AgentEvent::Joined { turn, join } => {
+                if let Some(send) = self.pending.get_mut(turn) {
+                    send.together = join.together;
+                }
+            }
             AgentEvent::JoinRead { turn, at_ms } => {
                 if let Some(send) = self.pending.remove(turn)
                     && let Some(message) = send.wait_message
@@ -142,7 +151,7 @@ impl History {
                                 message,
                                 Read {
                                     waited_ms: duration,
-                                    steered: true,
+                                    steered: !send.together,
                                 },
                             ),
                         );

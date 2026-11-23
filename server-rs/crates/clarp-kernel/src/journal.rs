@@ -904,8 +904,15 @@ impl Batch<'_> {
         match waiting {
             Ok(found) => {
                 if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
-                    let body = if self.work.joins().contains_key(&turn) {
-                        // The queue record keeps the send time. A steer enters at its read.
+                    let steered = self
+                        .work
+                        .joins()
+                        .get(&turn)
+                        .is_some_and(|join| !join.join.together);
+                    // The queue record keeps the send time. A steer enters at its read. A
+                    // message taken into a turn's prompt is told as one whose own turn
+                    // started: it waited until then.
+                    let body = if steered {
                         stored.body
                     } else {
                         let sent_at = self
@@ -2355,6 +2362,7 @@ mod tests {
                             into: TurnId(1),
                             uuid: uuid.to_string(),
                             recovery: None,
+                            together: false,
                         },
                     },
                     3,
