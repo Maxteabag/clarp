@@ -1127,3 +1127,21 @@ fn lines_with_no_paragraph_break_are_read_at_the_new_prompts_answer() {
         "{seen:?}"
     );
 }
+
+#[test]
+fn a_blank_line_in_a_code_block_is_passed_over_and_the_read_goes_after_the_block() {
+    let seen = written_through_the_hand_over("fence");
+    // The block opened before the hand-over; its blank line is no break, the one after it is.
+    assert_eq!(
+        as_read(&seen),
+        [
+            "Here:\n```sh\necho a\n",
+            "\necho b\n```\n\n",
+            "<read>",
+            "The answer",
+            " is 42.",
+            "<prompted>"
+        ],
+        "{seen:?}"
+    );
+}

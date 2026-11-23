@@ -133,6 +133,8 @@ WRITTEN = {
     "straddle": ("5 plus 4 is 9.\n", ["\n7 times 6 is 42."]),
     # Lines, but no paragraph break.
     "lines": ("one\ntwo", ["\nthree\n", "four"]),
+    # A blank line inside a code block begun before the hand-over, then a break after it closes.
+    "fence": ("Here:\n```sh\necho a\n", ["\necho b\n```\n\nThe answer", " is 42."]),
 }
 
 

@@ -103,9 +103,9 @@ struct Record {
     /// Antigravity is writing a message: its last word was a piece of one, and no thought or
     /// tool call has ended it since. The Host shows such pieces as one reply.
     writing: bool,
-    /// How many line breaks the message being written ends with, at most two: a paragraph
-    /// break can begin in one piece and end in the next.
-    breaks: usize,
+    /// Where the message being written stands: its paragraph breaks and code blocks can begin
+    /// in one piece and end in the next.
+    written: Written,
 }
 
 impl Handler for Record {
@@ -127,7 +127,8 @@ impl Handler for Record {
         // first paragraph break, so that the reply before the message stays whole (seen live on
         // 23 Nov 2026: "5 plus" | the message | " 4 is 9"). agy 1.5 may answer the message
         // inside the text it goes on writing, with no other sign until the answer; the break
-        // is where that answer can begin. Where none comes, the read waits for what comes
+        // is where that answer can begin. A blank line inside a code block is no such break: it
+        // would cut the block in two. Where none comes, the read waits for what comes
         // after the message, or for the newer prompt's answer.
         let kind = message["params"]["update"]["sessionUpdate"].as_str();
         let chunk = update && kind == Some("agent_message_chunk");
@@ -135,23 +136,19 @@ impl Handler for Record {
         let words = message["params"]["update"]["content"]["text"]
             .as_str()
             .filter(|_| chunk);
-        let breaks = if goes_on { self.breaks } else { 0 };
+        if chunk && !goes_on {
+            self.written = Written::default();
+        }
+        let found = words.and_then(|words| self.written.take(words));
         // Where in this update the read goes: before it (0), or after the paragraph break.
         let read_at = if update && self.read_next.is_some() && works(message, &self.seen_tools) {
-            if goes_on {
-                words.and_then(|words| paragraph_break(breaks, words))
-            } else {
-                Some(0)
-            }
+            if goes_on { found } else { Some(0) }
         } else {
             None
         };
         // What ends a message being written, as the Host reads it: a thought or a tool call.
         match kind {
-            Some("agent_message_chunk") if update => {
-                self.writing = true;
-                self.breaks = words.map_or(breaks, |words| ends_with_breaks(breaks, words));
-            }
+            Some("agent_message_chunk") if update => self.writing = true,
             Some("agent_thought_chunk" | "tool_call" | "tool_call_update") if update => {
                 self.writing = false;
             }
@@ -572,30 +569,65 @@ fn works(message: &Value, seen_tools: &BTreeSet<String>) -> bool {
     }
 }
 
-/// Where a paragraph break in a piece of a message ends, for a message that ended with
-/// `breaks` line breaks before it: just after the break's last line break, so that the rest
-/// begins with words. None when the piece holds no paragraph break.
-fn paragraph_break(breaks: usize, words: &str) -> Option<usize> {
-    let mut run = breaks;
-    for (at, c) in words.char_indices() {
-        match c {
-            '\n' => run += 1,
-            '\r' => {}
-            _ if run >= 2 => return Some(at),
-            _ => run = 0,
-        }
-    }
-    (run >= 2).then_some(words.len())
+/// What the driver knows of the message being written, for where a paragraph break in it ends.
+#[derive(Default)]
+struct Written {
+    /// How many line breaks the message ends with, at most two.
+    breaks: usize,
+    /// Inside a code block: an odd number of fence lines (three backticks first on the line,
+    /// after spaces) so far. A blank line in it is no paragraph break.
+    fenced: bool,
+    /// Backticks first on the line being written, after spaces.
+    ticks: u8,
+    /// The line being written is known to be a fence line or not.
+    line_known: bool,
 }
 
-/// How many line breaks, at most two, a message ends with once a piece is added to one that
-/// ended with `breaks`.
-fn ends_with_breaks(breaks: usize, words: &str) -> usize {
-    words.chars().fold(breaks, |run, c| match c {
-        '\n' => (run + 1).min(2),
-        '\r' => run,
-        _ => 0,
-    })
+impl Written {
+    /// Takes in a piece of the message: where in it the first paragraph break outside a code
+    /// block ends, just after its last line break so that the rest begins with words. None
+    /// when the piece holds no such break.
+    fn take(&mut self, words: &str) -> Option<usize> {
+        let mut found = None;
+        for (at, c) in words.char_indices() {
+            match c {
+                '\n' => {
+                    self.breaks = (self.breaks + 1).min(2);
+                    self.ticks = 0;
+                    self.line_known = false;
+                }
+                '\r' => {}
+                _ => {
+                    if self.breaks >= 2 && !self.fenced && found.is_none() {
+                        found = Some(at);
+                    }
+                    self.breaks = 0;
+                    self.first_on_line(c);
+                }
+            }
+        }
+        if found.is_none() && self.breaks >= 2 && !self.fenced {
+            found = Some(words.len());
+        }
+        found
+    }
+
+    /// A character of the line being written: the third backtick first on it opens or closes
+    /// a code block.
+    fn first_on_line(&mut self, c: char) {
+        if self.line_known || (c == ' ' && self.ticks == 0) {
+            return;
+        }
+        if c != '`' {
+            self.line_known = true;
+            return;
+        }
+        self.ticks += 1;
+        if self.ticks == 3 {
+            self.fenced = !self.fenced;
+            self.line_known = true;
+        }
+    }
 }
 
 /// A piece of a message with other words: a part of it, printed on its own.
@@ -868,7 +900,7 @@ pub fn run(program: &str) -> Result<u8> {
             answer_text: String::new(),
             settled: false,
             writing: false,
-            breaks: 0,
+            written: Written::default(),
         },
         stopping: None,
         waiting: Vec::new(),
@@ -945,24 +977,46 @@ mod tests {
         }
     }
 
+    /// Where the first paragraph break ends in the last piece, for a message written in these.
+    fn first_break(pieces: &[&str]) -> Option<usize> {
+        let mut written = Written::default();
+        let mut last = None;
+        for piece in pieces {
+            last = written.take(piece);
+        }
+        last
+    }
+
     #[test]
     fn the_read_goes_after_a_paragraph_break_never_inside_a_sentence() {
-        assert_eq!(paragraph_break(0, " 4 is 9.\n\n7 times"), Some(10));
-        assert_eq!(paragraph_break(0, "a\n\n\nb"), Some(4));
-        assert_eq!(paragraph_break(0, "a\r\n\r\nb"), Some(5));
-        assert_eq!(paragraph_break(0, "done.\n\n"), Some(7));
+        assert_eq!(first_break(&[" 4 is 9.\n\n7 times"]), Some(10));
+        assert_eq!(first_break(&["a\n\n\nb"]), Some(4));
+        assert_eq!(first_break(&["a\r\n\r\nb"]), Some(5));
+        assert_eq!(first_break(&["done.\n\n"]), Some(7));
         // Across two pieces: the first half ended the one before.
-        assert_eq!(paragraph_break(1, "\n7 times"), Some(1));
-        assert_eq!(paragraph_break(2, "7 times"), Some(0));
+        assert_eq!(first_break(&["9.\n", "\n7 times"]), Some(1));
+        assert_eq!(first_break(&["9.\n\n", "7 times"]), Some(0));
         for none in ["5 plus", " 4 is 9", "one\ntwo", "\nthree\n", ""] {
-            assert_eq!(paragraph_break(0, none), None, "{none:?}");
+            assert_eq!(first_break(&[none]), None, "{none:?}");
         }
-        assert_eq!(paragraph_break(1, "x\n"), None);
-        assert_eq!(ends_with_breaks(0, "one\ntwo"), 0);
-        assert_eq!(ends_with_breaks(0, "9.\n"), 1);
-        assert_eq!(ends_with_breaks(1, "\n"), 2);
-        assert_eq!(ends_with_breaks(2, "\n\n"), 2);
-        assert_eq!(ends_with_breaks(1, ""), 1);
+        assert_eq!(first_break(&["a\n", "x\n"]), None);
+    }
+
+    #[test]
+    fn a_blank_line_in_a_code_block_is_no_paragraph_break() {
+        // The blank line in the block is passed over; the one after it closes is the break.
+        assert_eq!(
+            first_break(&["Here:\n```rust\nlet a = 1;\n\nlet b = 2;\n```\n\nDone"]),
+            Some(42)
+        );
+        // The block opened in a piece before, with spaces before the fence; split fences.
+        assert_eq!(first_break(&["  ``", "`\nx\n", "\ny"]), None);
+        assert_eq!(first_break(&["```\nx\n", "\ny\n  ```\n", "\nz"]), Some(1));
+        // A block that never closes holds no break.
+        assert_eq!(first_break(&["```\nx\n\ny\n\nz"]), None);
+        // Backticks inside a line are no fence; a break before a block is one.
+        assert_eq!(first_break(&["say ```x``` then\n\nmore"]), Some(18));
+        assert_eq!(first_break(&["text\n\n```\ncode"]), Some(6));
     }
 
     #[test]
