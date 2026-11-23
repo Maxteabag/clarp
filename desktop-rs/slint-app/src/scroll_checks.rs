@@ -1433,6 +1433,12 @@ pub(super) fn scroll_flash_check(out: String) {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
             }
+            // The dashcam is off by default and records nothing then;
+            // Settings → Diagnostics turns it on.
+            check(!crate::scroll_journal::on(), "the scroll dashcam is off by default");
+            check(crate::scroll_journal::frames(&app.active_id()).is_empty(), "and keeps no frames while off");
+            app.engine.borrow_mut().settings_mut().set(crate::scroll_journal::SETTING, true);
+            check(crate::scroll_journal::on(), "Settings → Diagnostics turns it on");
             check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Flash"})).is_ok(), "the Host takes a new chat");
             // Two more to switch to: one of a few very tall rows, one of
             // many short ones (the list's estimate of a row's height differs

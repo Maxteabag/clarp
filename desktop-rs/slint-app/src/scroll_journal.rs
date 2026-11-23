@@ -457,7 +457,26 @@ pub fn flash_detail(chat: &str, pane: &str, flash: &Flash, frames: &[Frame]) -> 
     }
 }
 
+/// Settings → Diagnostics → "Scroll dashcam" (Peter, 23 Nov 2026, via Hazel:
+/// keep it, behind a diagnostics setting, off by default). While off the
+/// dashcam keeps no frames and posts nothing; the journal's log lines stay.
+pub const SETTING: &str = "diagnostics/scrollDashcam";
+
+/// Whether the dashcam records: the setting, as last read (the engine may
+/// be borrowed while a frame is drawn; then the last answer stands).
+pub fn on() -> bool {
+    let read = crate::app().and_then(|app| app.engine.try_borrow().ok().map(|engine| engine.settings().boolean(SETTING, false)));
+    match read {
+        Some(value) => {
+            DASHCAM_ON.with(|on| on.set(value));
+            value
+        }
+        None => DASHCAM_ON.with(|on| on.get()),
+    }
+}
+
 thread_local! {
+    static DASHCAM_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static DASHCAM: std::cell::RefCell<Dashcam> = std::cell::RefCell::default();
     /// The flash events posted (or that would have been, with no Host), for
     /// the checks.
@@ -466,11 +485,17 @@ thread_local! {
 
 /// What a pane's transcript would draw now.
 pub fn shot(pane: &str, shot: Shot) {
+    if !on() {
+        return;
+    }
     DASHCAM.with(|d| d.borrow_mut().shot(pane, shot));
 }
 
 /// Something happened to a pane's transcript before its next frame.
 pub fn event(pane: &str, what: &str) {
+    if !on() {
+        return;
+    }
     DASHCAM.with(|d| d.borrow_mut().event(pane, what));
 }
 
@@ -478,6 +503,11 @@ pub fn event(pane: &str, what: &str) {
 /// with everything that will be drawn settled). Cheap: a flash found is
 /// written and posted a moment later, off the frame.
 pub fn frame_drawn() {
+    if !on() {
+        // Off: nothing kept from before either.
+        DASHCAM.with(|d| *d.borrow_mut() = Dashcam::default());
+        return;
+    }
     let found = DASHCAM.with(|d| d.borrow_mut().drawn(crate::perf::now(), Instant::now()));
     for (pane, flash, skipped) in found {
         // A moment later: the frames after the flash come along.

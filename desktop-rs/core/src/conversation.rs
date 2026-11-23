@@ -249,7 +249,19 @@ impl Conversation {
         }
 
         self.emit(Signal::BatchStarted);
-        let turns = json::array(response, "turns");
+        // Automated rows (a heartbeat, a watcher, a goal check-in) are never
+        // drawn: the desktop reads /log without them and has no setting that
+        // shows them, so one that comes anyway (a delta, a cached snapshot, a
+        // row the Host marked automated later) is left out, and a row held
+        // from before it was marked goes.
+        let all = json::array(response, "turns");
+        let automated = |row: &Value| row.get("automated").and_then(Value::as_bool) == Some(true) || row.get("is_automated").and_then(Value::as_bool) == Some(true);
+        let marked: std::collections::HashSet<String> =
+            all.iter().filter(|row| automated(row)).filter_map(|row| row.get("id").and_then(Value::as_str)).map(str::to_owned).collect();
+        if !marked.is_empty() {
+            self.remove_where(|message| marked.contains(&message.id));
+        }
+        let turns: Vec<Value> = all.into_iter().filter(|row| !automated(row)).collect();
         let replaces = kind == LoadKind::Replace
             || (kind == LoadKind::Tail
                 && (self.conversation_id.is_empty() || next_id != self.conversation_id));

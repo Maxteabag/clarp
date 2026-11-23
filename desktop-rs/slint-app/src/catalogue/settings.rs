@@ -223,6 +223,18 @@ fn chats() -> Vec<Setting> {
 
 fn experiments() -> Vec<Setting> {
     vec![
+        Setting::stored_toggle(
+            e(
+                "scroll-dashcam",
+                "Scroll dashcam",
+                "diagnostics",
+                "Keeps the chat's last few seconds of scroll positions and reports a frame that jumps away and back (a flash) to the Host, for finding scroll bugs. Off records nothing.",
+                &["dashcam", "scroll", "flash", "jump", "diagnostics", "debug", "recorder", "jitter"],
+            ),
+            "DIAGNOSTICS",
+            crate::scroll_journal::SETTING,
+            false,
+        ),
         Setting::toggle(
             keyed(e("narration", "Plain-English tools", "experiment", "Describes tool calls in plain English with Spark (uses extra AI).", &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"]), &["tool-narration"]),
             "EXPERIMENTS",

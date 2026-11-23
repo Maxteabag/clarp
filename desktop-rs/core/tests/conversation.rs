@@ -587,3 +587,21 @@ fn an_acknowledgment_whose_revision_rises_after_the_answer_keeps_its_place() {
          "timestamp": "2026-11-01T10:00:02.000Z", "activity_count": 5}]}), LoadKind::Delta);
     assert_eq!(h.ids(), ["u-voice", "live-ack", "live-answer"]);
 }
+
+#[test]
+fn automated_rows_are_left_out_and_a_row_marked_later_goes() {
+    let mut h = Harness::new("s");
+    h.log(json!({"conversation_id": "c", "latest_revision": 2, "turns": [
+        turn("a", 1),
+        {"id": "check-in", "role": "user", "text": "Continue your durable outcome commitment", "revision": 2},
+    ]}), LoadKind::Tail);
+    assert_eq!(h.model.rows().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "check-in"]);
+    // The Host marks the held row automated (a goal check-in) and sends a
+    // new automated row: neither is drawn.
+    h.log(json!({"conversation_id": "c", "latest_revision": 4, "turns": [
+        {"id": "check-in", "role": "user", "text": "Goal check-in", "automated": true, "automation_kind": "goal", "revision": 3},
+        {"id": "beat", "role": "user", "text": "Heartbeat", "automated": true, "automation_kind": "heartbeat", "revision": 4},
+        turn("b", 4),
+    ]}), LoadKind::Delta);
+    assert_eq!(h.model.rows().iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+}
