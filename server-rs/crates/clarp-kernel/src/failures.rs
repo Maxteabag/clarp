@@ -391,15 +391,16 @@ pub struct Resets {
 /// The text, and after it when the account has usage again, in the Host's own time: "Usage
 /// limit reached · resets 18:27". The text alone where no reset is known.
 pub fn with_reset(text: &str, resets: Option<Resets>) -> String {
-    let zone = jiff::tz::TimeZone::system();
-    match resets.and_then(|resets| reset_time_in(resets, &zone)) {
+    // The zone is looked up only for a reset: this is asked for every agent's state.
+    match resets.and_then(|resets| reset_time_in(resets, &jiff::tz::TimeZone::system())) {
         Some(time) => format!("{text} · resets {time}"),
         None => text.to_string(),
     }
 }
 
 /// The time an account has usage again, in this zone: "18:27" on the day it was said,
-/// "Wed 18:27" within the week after, "30 Nov 18:27" beyond. `None` for a time that is no time.
+/// "Wed 18:27" within the week after, "30 Nov 18:27" beyond, and "2 Jan 2027 18:27" in
+/// another year. `None` for a time that is no time.
 pub fn reset_time_in(resets: Resets, zone: &jiff::tz::TimeZone) -> Option<String> {
     let zoned = |ms: i64| {
         jiff::Timestamp::from_millisecond(ms)
@@ -412,7 +413,8 @@ pub fn reset_time_in(resets: Resets, zone: &jiff::tz::TimeZone) -> Option<String
     Some(match ahead {
         0 => clock,
         1..=6 => format!("{} {clock}", at.strftime("%a")),
-        _ => format!("{} {} {clock}", at.day(), at.strftime("%b")),
+        _ if at.year() == said.year() => format!("{} {} {clock}", at.day(), at.strftime("%b")),
+        _ => format!("{} {} {} {clock}", at.day(), at.strftime("%b"), at.year()),
     })
 }
 
@@ -856,6 +858,10 @@ mod tests {
         assert_eq!(
             time_of(at + 7 * day, &oslo).as_deref(),
             Some("30 Nov 18:27")
+        );
+        assert_eq!(
+            time_of(at + 40 * day, &oslo).as_deref(),
+            Some("2 Jan 2027 18:27")
         );
         assert_eq!(time_of(i64::MAX, &oslo), None);
         // The row and the agent's state say it after the sentence, and the tool's words stay

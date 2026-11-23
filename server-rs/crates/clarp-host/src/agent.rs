@@ -2284,11 +2284,8 @@ impl Worker {
             if let Some((turn, since)) = actor.waits_for_an_account() {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
-                pool.carried(since, std::slice::from_ref(&agent));
-                pool.starting(&agent, turn, &model);
-                if let Some(at) = actor.waits_until_reset() {
-                    pool.out_until(&agent, turn, at);
-                }
+                let resets = actor.waits_until_reset();
+                pool.carried_turn(since, &agent, turn, &model, resets);
                 self.pooled = Some(turn);
             }
         }

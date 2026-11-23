@@ -1165,18 +1165,28 @@ impl ClaudeInterpreter {
         // A turn that completed did so, whatever was said of the account on the way.
         let outcome = if self.usage_limit && !completed {
             // In the tool's own words, which say which window and when; read as a usage
-            // limit, as the refusal said it is.
+            // limit, as the refusal said it is. A result that is no error is the agent's
+            // answer, not the tool's words on the refusal.
             let said = api_error
                 .clone()
-                .or_else(|| self.result.as_ref().map(|result| result.text.clone()))
+                .or_else(|| {
+                    let failed = self.result.as_ref().filter(|result| result.is_error);
+                    failed.map(|result| result.text.clone())
+                })
                 .map(|said| shorten(said.trim(), 600))
                 .unwrap_or_default();
+            let limit = |reason: &str| failures::classify_error(reason) == failures::USAGE_LIMIT;
+            let prefixed = format!("{USAGE_LIMIT}: {said}");
             let reason = if said.is_empty() {
                 USAGE_LIMIT.to_string()
-            } else if failures::classify_error(&said) == failures::USAGE_LIMIT {
+            } else if limit(&said) {
                 said
+            } else if limit(&prefixed) {
+                prefixed
             } else {
-                format!("{USAGE_LIMIT}: {said}")
+                // Words that read as another failure before they read as a limit would make
+                // the turn that: the refusal alone is said.
+                USAGE_LIMIT.to_string()
             };
             if let Some(at_ms) = self.resets_at_ms {
                 out.push(Signal::OutUntil { at_ms });
@@ -2042,7 +2052,8 @@ mod tests {
                 .iter()
                 .any(|signal| matches!(signal, Signal::OutUntil { .. }))
         );
-        // Without a result, or with a code that says it failed, it did not complete.
+        // Without a result, or with a code that says it failed, it did not complete. The
+        // answer of a result that is no error is not given as the tool's words on the limit.
         for (lines, exit) in [(&done[..2], Some(0)), (&done[..], Some(1))] {
             let signals = read(lines, (exit, None));
             assert_eq!(
@@ -2052,16 +2063,25 @@ mod tests {
                         at_ms: 1_795_454_832_000
                     },
                     Signal::Ended(RunOutcome::Failed {
-                        reason: if lines.len() == 3 {
-                            format!("{USAGE_LIMIT}: done")
-                        } else {
-                            USAGE_LIMIT.to_string()
-                        }
+                        reason: USAGE_LIMIT.to_string()
                     })
                 ],
                 "{exit:?}"
             );
         }
+        // Words that read as another failure first are not the turn's reason: the limit is.
+        let timed_out = [
+            INIT,
+            refused.as_str(),
+            r#"{"type":"result","subtype":"success","is_error":true,"result":"turn timed out"}"#,
+        ];
+        let signals = read(&timed_out, (Some(1), None));
+        assert_eq!(
+            signals.last(),
+            Some(&Signal::Ended(RunOutcome::Failed {
+                reason: USAGE_LIMIT.to_string()
+            }))
+        );
     }
 
     #[test]

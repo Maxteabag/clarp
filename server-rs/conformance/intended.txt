@@ -198,3 +198,22 @@ agent-row-field-added:conversation_fork  agent rows in the snapshot, archived ro
 # reference says nothing on a turn's end of why it did not complete. Match only text
 # added as `reason` on the `turn` of a row in a successful GET /log response.
 log-turn-field-added:reason  the Host's sentence of why a turn that did not complete ended
+
+# A Claude turn whose account ran out fails on the tool's own words, not on the fixed
+# "Claude usage limit reached" (docs/differences.md, "A Claude turn whose account ran out"). The
+# fake's reset is in 2100, beyond the eight days a turn waits for: no time is told.
+30e4759fca64  failed-turns: the row under the message that says why the turn failed (http [1].body.turns[1].text)
+c547dadfd603  failed-turns: the agent's last completed message, that row (http [2].body.agents[0].last_completed_message)
+2b7973780e4c  failed-turns: the agent's last message, that row (http [2].body.agents[0].last_message)
+3d262c5ae2dc  failed-turns: the row under the message that says why the turn failed (http [4].body.turns[1].text)
+7650a8211f2a  failed-turns: the row under the message that says why the turn failed (http [7].body.turns[1].text)
+8d6c94bf1f94  failed-turns: the row under the message that says why the turn failed (http [10].body.turns[1].text)
+b5d8060f9eea  failed-turns: the row under the message that says why the turn failed (http [10].body.turns[8].text)
+edca7e277fc2  failed-turns: the agent's last completed message, that row (http [11].body.agents[0].last_completed_message)
+05403f855ffc  failed-turns: the agent's last message, that row (http [11].body.agents[0].last_message)
+61b8bd121983  failed-turns: the row under the message that says why the turn failed (http [15].body.turns[1].text)
+3d651599ca0b  failed-turns: the row under the message that says why the turn failed (http [15].body.turns[8].text)
+fd3a74b42012  failed-turns: detail.error of the turn that met the limit (sse lane[agent-state@0952e1][2].data.detail.error)
+840a66ee390d  failed-turns: detail.provider_message of the same (sse lane[agent-state@0952e1][2].data.detail.provider_message)
+2ebc818156ad  failed-turns: detail.error of the turn that met the limit (sse lane[agent-state@0952e1][14].data.detail.error)
+7c5e1f2f0075  failed-turns: detail.provider_message of the same (sse lane[agent-state@0952e1][14].data.detail.provider_message)
