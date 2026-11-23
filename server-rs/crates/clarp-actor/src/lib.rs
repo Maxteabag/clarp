@@ -4970,8 +4970,7 @@ impl Actor {
         });
         // A goal lane sends no prompt and an opening of a call is answered by itself: neither
         // takes the user's messages while it runs.
-        let streams_input =
-            self.backend.steers() == Steers::Stdin && !bare && opening.is_none();
+        let streams_input = self.backend.steers() == Steers::Stdin && !bare && opening.is_none();
         if streams_input && self.backend.id() == "claude" {
             launch
                 .args
