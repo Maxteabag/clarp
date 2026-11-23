@@ -70,8 +70,11 @@ its own), but its message has no 60 KB limit, a picture a user attached reaches 
 model as itself, a PDF is given to Antigravity as a link to the file, and Stop
 cancels the turn cleanly. Sounds stay a path in the message for now (agy 1.5 takes no
 audio over ACP). It cannot yet be steered while a turn runs: a message sent then
-waits for the next turn. Moving between `agy` and `agy-acp` carries the conversation
-like any other move. A Host without the feature leaves an `agy-acp` agent out until
+waits for the next turn. A move between `agy` and `agy-acp` carries nothing: they
+share one store, so the agent goes on in the same agy conversation (the row says "The
+same conversation goes on."). If agy has let that conversation go, the first turn after
+the move fails as "Antigravity no longer has this conversation" (or, on `agy`, finds it
+gone), and the next turn begins a new one with the Host's record of the old. A Host without the feature leaves an `agy-acp` agent out until
 it is updated. To move an agent to another Host instead, use
 `clarp-switch-agent-host`.
 
