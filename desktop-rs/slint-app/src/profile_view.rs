@@ -481,6 +481,10 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         backend_enabled: transit_row.enabled,
         backend_moving: transit_row.moving,
         backend_failed: transit_row.failed,
+        // The chat's view (#702), as its menu offers it.
+        chat_view_shown: engine.chat_view_offered(session),
+        chat_view_index: clarp_core::chat_view::MENU.iter().position(|(v, _)| *v == engine.chat_view_menu_value(session)).unwrap_or(0) as i32,
+        tool_activity_applies: !(engine.chat_view_offered(session) && engine.chat_view_conversation(session)),
         error: engine.profile_error().into(),
     };
     drop(engine);
@@ -753,6 +757,15 @@ pub fn wire(window: &AppWindow) {
             let choice = crate::chat_menu::COORDINATION.get(index.max(0) as usize).map_or("default", |(v, _)| v);
             if app.engine.borrow().chat_coordination_choice(session) != choice {
                 app.engine.borrow_mut().set_chat_coordination(session, choice);
+            }
+        });
+    });
+    // The chat's view (#702): this device's own choice, written to its Host.
+    bridge.on_set_chat_view(|index| {
+        with_session(|app, _, session| {
+            let value = clarp_core::chat_view::MENU.get(index.max(0) as usize).map_or("default", |(v, _)| v);
+            if app.engine.borrow().chat_view_menu_value(session) != value {
+                app.engine.borrow_mut().set_chat_view(session, value);
             }
         });
     });

@@ -400,6 +400,21 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "escape" if crate::mention_view::is_open(app) => crate::mention_view::dismiss_active(app),
         // V in the chat: the whole loaded chat as plain text to select from.
         "select-text" => crate::select_text::open_conversation(app, window),
+        // W in the chat (#702): the work of the message the keyboard is
+        // on, or of the latest turn, opens or folds (Conversation view).
+        "show-work" => {
+            if !crate::artifacts_view::show_work(app) {
+                return false;
+            }
+        }
+        // C in the chat (#702): the other view, as the chat's own choice;
+        // nothing on a Host without the views.
+        "chat-view" => {
+            let session = app.active_session();
+            if !app.engine.borrow_mut().toggle_chat_view(&session) {
+                return false;
+            }
+        }
         // Ctrl+F: message search, in the switcher.
         "search-messages" => {
             open_switcher(app, window);
