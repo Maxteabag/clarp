@@ -34,6 +34,8 @@ pub struct AppServer {
     child: Child,
     input: BufWriter<ChildStdin>,
     next_id: u64,
+    /// Codex was ended and reaped: its pid may belong to another process now.
+    ended: bool,
 }
 
 impl AppServer {
@@ -57,6 +59,7 @@ impl AppServer {
             child,
             input: BufWriter::new(input),
             next_id: 1,
+            ended: false,
         };
         std::thread::Builder::new()
             .name("codex-app-server-reader".to_owned())
@@ -84,13 +87,35 @@ impl AppServer {
         self.child.id()
     }
 
-    /// End Codex and every process of its group where they stand.
+    /// End Codex, every process of its group, and every group below it, where they stand.
     pub fn kill_group(&mut self) {
+        self.end();
+    }
+
+    /// Codex runs each command in a process group of its own (seen with 0.167.1, 23 Nov
+    /// 2026), which a signal to Codex's group does not reach and which Codex's death leaves
+    /// running. The groups are read before anything is signalled: once Codex is gone its
+    /// commands are no longer found below it. A process that left on purpose (a daemon that
+    /// forked away from its parent) is not below Codex and is not touched.
+    fn end(&mut self) {
+        if std::mem::replace(&mut self.ended, true) {
+            return;
+        }
+        let below = groups_below(self.child.id());
         if let Ok(pid) = i32::try_from(self.child.id()) {
             let _ = nix::sys::signal::killpg(
                 nix::unistd::Pid::from_raw(pid),
                 nix::sys::signal::Signal::SIGKILL,
             );
+        }
+        let own = nix::unistd::getpgrp();
+        for group in below {
+            if group > 1 && group != own.as_raw() {
+                let _ = nix::sys::signal::killpg(
+                    nix::unistd::Pid::from_raw(group),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
+            }
         }
         let _ = self.child.kill();
         let _ = self.child.wait();
@@ -137,10 +162,54 @@ impl AppServer {
 }
 
 impl Drop for AppServer {
+    /// A lane that leaves ends what its Codex still runs: a turn of exec leaves nothing of
+    /// its commands running when its process is gone either.
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.end();
     }
+}
+
+/// The process groups of every process below `root`, its own group included, read from
+/// `/proc`. Empty where there is no `/proc`.
+fn groups_below(root: u32) -> Vec<i32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut parent_of = std::collections::HashMap::new();
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // The name is in brackets and may hold anything: the fields after the last bracket
+        // are the state, the parent and the group.
+        let Some(after) = stat.rfind(')').map(|end| &stat[end + 1..]) else {
+            continue;
+        };
+        let mut fields = after.split_whitespace().skip(1);
+        let (Some(ppid), Some(group)) = (
+            fields.next().and_then(|ppid| ppid.parse::<u32>().ok()),
+            fields.next().and_then(|group| group.parse::<i32>().ok()),
+        ) else {
+            continue;
+        };
+        parent_of.insert(pid, (ppid, group));
+    }
+    let mut groups = std::collections::BTreeSet::new();
+    let mut below = vec![root];
+    let mut seen = std::collections::HashSet::from([root]);
+    while let Some(parent) = below.pop() {
+        for (&pid, &(ppid, group)) in &parent_of {
+            if ppid == parent && seen.insert(pid) {
+                groups.insert(group);
+                below.push(pid);
+            }
+        }
+    }
+    groups.into_iter().collect()
 }
 
 fn read(reader: &mut impl BufRead) -> io::Result<Option<Frame>> {
