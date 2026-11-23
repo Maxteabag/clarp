@@ -660,6 +660,17 @@ impl Recorder {
         let Some(stored) = kept.into_iter().find(|item| item.seq == message_seq) else {
             return Ok(Reworded::InConversation);
         };
+        // A message a turn gave back to the queue (`Agent::give_back`) waits with its row
+        // already in the conversation: new words would part the row from what the tool is
+        // given. It stands as it was said, as `enter` finds it.
+        if let Some(key) = stored.key.as_deref()
+            && self
+                .log
+                .find(key)?
+                .is_some_and(|row| row.kind == kind::MESSAGE)
+        {
+            return Ok(Reworded::InConversation);
+        }
         let body = rewrite(&stored.body)?;
         // This recorder is the log's one writer: the item it writes first is the next one.
         let anew = self.last_seq + 1;
