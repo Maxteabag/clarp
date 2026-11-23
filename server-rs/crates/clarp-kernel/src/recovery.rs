@@ -417,9 +417,9 @@ mod tests {
         assert_eq!(
             after_failed_attempt(after_two_waits, Accounts::Follow),
             Next::Retry {
-                        after_ms: 1_000,
-                        resume: false
-                    }
+                after_ms: 1_000,
+                resume: false
+            }
         );
     }
 

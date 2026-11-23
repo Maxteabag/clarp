@@ -14,9 +14,9 @@
 use clarp_backend::claude::ClaudeInterpreter;
 use clarp_backend::{Interpreter, Signal};
 use clarp_kernel::compaction::Boundary;
+use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::failures;
 use clarp_kernel::live::Glimpse;
-use clarp_kernel::conversation::ToolStatus;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 
@@ -347,9 +347,16 @@ fn thinking_in_words_is_the_turns_reasoning_and_never_its_reply() {
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .filter(|event| event["event"]["delta"]["type"] == "thinking_delta")
-        .filter_map(|event| event["event"]["delta"]["thinking"].as_str().map(str::to_string))
+        .filter_map(|event| {
+            event["event"]["delta"]["thinking"]
+                .as_str()
+                .map(str::to_string)
+        })
         .collect();
-    assert!(whole.starts_with("I'm checking that 40 is the answer"), "{whole}");
+    assert!(
+        whole.starts_with("I'm checking that 40 is the answer"),
+        "{whole}"
+    );
     let signals = read(fixture);
     let shown = signals
         .iter()
@@ -358,7 +365,11 @@ fn thinking_in_words_is_the_turns_reasoning_and_never_its_reply() {
             _ => None,
         })
         .last();
-    assert_eq!(shown, Some(whole.as_str()), "the summary is shown whole, as reasoning");
+    assert_eq!(
+        shown,
+        Some(whole.as_str()),
+        "the summary is shown whole, as reasoning"
+    );
     assert!(
         !signals
             .iter()

@@ -23,7 +23,9 @@
 #                  machine runs (read from its unit, clarp-runtime.service), so that an agent
 #                  that moves is run by the same tool it was run by; without either, the ones on
 #                  the path. A toolchain of the Python Host's that this Host runs is copied to its
-#                  own (~/.local/share/clarp-host/toolchains), and run from there
+#                  own (~/.local/share/clarp-host/toolchains), and run from there. An update keeps
+#                  the versions it has: to move the agents to another Claude Code or Codex, name
+#                  it here. Claude Code must take --thinking-display (2.1.285 and later do)
 #   --push-relay   the relay that carries pushes to phones (default: the one the Python Host
 #                  uses, Clarp Audio Central), or `off`. A phone that gave this Host a grant of
 #                  its own is reached with nothing more. To reach phones that gave none, the
@@ -172,11 +174,11 @@ port="${listen##*:}"; address="${listen%:*}"
 own_unit="$units/clarp-host.service"
 unit_sets() {
     [ -f "$own_unit" ] || return 0
-    sed -n "s/^Environment=\"\{0,1\}$1=\(.*\)/\1/p" "$own_unit" | sed 's/"$//' | head -1
+    sed -n "s/^Environment=\"\{0,1\}$1=\(.*\)/\1/;T;s/\"\$//;p;q" "$own_unit"
 }
 unit_option() {
     [ -f "$own_unit" ] || return 0
-    sed -n "s/^ExecStart=.* $1 \"\([^\"]*\)\".*/\1/p" "$own_unit" | head -1
+    sed -n "s/^ExecStart=.* $1 \"\([^\"]*\)\".*/\1/;T;p;q" "$own_unit"
 }
 # The world an agent's commands run in: the one this Host gave them before; at a first install
 # the one the Python Host on this machine gives them, so that an agent that moves finds what it
@@ -200,7 +202,7 @@ own_copy() {
         *) printf '%s\n' "$path"; return 0 ;;
     esac
     rest="${path#"$python_share"/}"; kind="${rest%%/*}"; rest="${rest#*/}"; id="${rest%%/*}"
-    case "$id" in .|..|*[!A-Za-z0-9._-]*) printf '%s\n' "$path"; return 0 ;; esac
+    case "$id" in ''|.|..|*[!A-Za-z0-9._-]*) printf '%s\n' "$path"; return 0 ;; esac
     from="$python_share/$kind/$id"; to="$share/$kind/$id"
     if [ ! -d "$to" ]; then
         if [ ! -d "$from" ]; then
@@ -247,10 +249,10 @@ for entry in "${entries[@]}"; do
 done
 # This Host's own tools first: a name found there is never looked for further.
 tools_path="$share/tools:$own_path"
-claude="${claude:-$(own_copy "$(unit_sets CLARP_CLAUDE_PROGRAM)")}"
-codex="${codex:-$(own_copy "$(unit_sets CLARP_CODEX_PROGRAM)")}"
-agy="${agy:-$(own_copy "$(unit_sets CLARP_AGY_PROGRAM)")}"
-opencode="${opencode:-$(own_copy "$(unit_sets CLARP_OPENCODE_PROGRAM)")}"
+claude="$(own_copy "${claude:-$(unit_sets CLARP_CLAUDE_PROGRAM)}")"
+codex="$(own_copy "${codex:-$(unit_sets CLARP_CODEX_PROGRAM)}")"
+agy="$(own_copy "${agy:-$(unit_sets CLARP_AGY_PROGRAM)}")"
+opencode="$(own_copy "${opencode:-$(unit_sets CLARP_OPENCODE_PROGRAM)}")"
 # A program this Host ran before that is gone is not quietly replaced by another of the name.
 for program in "$claude" "$codex" "$agy" "$opencode"; do
     if [ -n "$program" ] && [ ! -x "$program" ]; then
@@ -262,6 +264,16 @@ claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 agy="${agy:-$(PATH="$tools_path" command -v agy || true)}"
 opencode="${opencode:-$(PATH="$tools_path" command -v opencode || true)}"
+# Every Claude turn asks for its thinking in words (--thinking-display summarized). A Claude
+# Code that does not take the option would fail every turn, so it is refused here, at the
+# update: one that takes it refuses a wrong value and names the right ones.
+if [ -n "$claude" ]; then
+    said_back="$(timeout 30 "$claude" --thinking-display nonsense --version 2>&1 || true)"
+    case "$said_back" in
+        *summarized*) ;;
+        *) echo "install-host: $claude does not take --thinking-display, which every Claude turn passes: name a newer Claude Code with --claude" >&2; exit 2 ;;
+    esac
+fi
 # The owner's tool that knows the seats of the machine's accounts, where there is one: on the
 # path the agents' tools are found on, or on the path of whoever installs.
 seats_tool="${chosen[seats-tool]:-$(PATH="$tools_path:$PATH" command -v hotseat || true)}"
@@ -313,15 +325,31 @@ fi
 # its numbers are kept are read from that Host's config, nothing else), loaded from the files
 # this machine has already.
 whisper="${chosen[whisper]:-}"
+[ -n "$whisper" ] && [ "$whisper" != off ] && whisper="$(own_copy "$whisper")"
 if [ -z "$whisper" ]; then
-    for candidate in "$(unit_option --whisper-python)" "$(sed -n 1p "$python_share/current/SERVICE_PYTHON" 2>/dev/null || true)"; do
+    ran_before="$(unit_option --whisper-python)"
+    for candidate in "$ran_before" "$(sed -n 1p "$python_share/current/SERVICE_PYTHON" 2>/dev/null || true)"; do
         [ -n "$candidate" ] || continue
         for python in "$(own_copy "$candidate")" "$candidate"; do
             if "$python" -c 'import faster_whisper' > /dev/null 2>&1; then whisper="$python"; break 2; fi
         done
     done
+    # The engine this Host listened with is not quietly turned off.
+    if [ -z "$whisper" ] && [ -n "$ran_before" ]; then
+        echo "install-host: $ran_before, the Python this Host listened with, is gone or has no faster-whisper now: name one with --whisper, or --whisper off" >&2
+        exit 2
+    fi
     whisper="${whisper:-off}"
 fi
+# Nothing this Host runs is left in the Python Host's install: a copy that failed is said here,
+# before anything is written, so that the Python Host's files can go once this Host runs.
+for runs in "$tools_path" "$claude" "$codex" "$agy" "$opencode" "$whisper"; do
+    case ":$runs" in
+        *":$python_share/toolchains/"*|*":$python_share/environments/"*)
+            echo "install-host: this Host would still run $runs from $python_share: its copy failed (see above)" >&2
+            exit 2 ;;
+    esac
+done
 whisper_model=small.en; whisper_compute=int8; whisper_source=""
 if [ "$whisper" != off ]; then
     [ -x "$whisper" ] || { echo "install-host: --whisper $whisper: not a program" >&2; exit 2; }

@@ -759,10 +759,11 @@ fn home() -> std::path::PathBuf {
 /// Where this Host's files are (`CLARP_SHARE_DIR`, which its unit sets), else where its
 /// installer puts them.
 fn share_dir() -> std::path::PathBuf {
+    // A place that is not absolute is no place a timer can be started from.
     let from_env = |name| {
         std::env::var_os(name)
-            .filter(|path| !path.is_empty())
             .map(std::path::PathBuf::from)
+            .filter(|path| path.is_absolute())
     };
     from_env("CLARP_SHARE_DIR").unwrap_or_else(|| {
         from_env("XDG_DATA_HOME")
