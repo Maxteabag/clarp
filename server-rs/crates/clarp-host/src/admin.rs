@@ -1209,6 +1209,7 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     // Job monitors stop their workers on exit 1. Only a valid Host answer may name
     // a terminal or superseded job. A failure to get that answer leaves it unknown.
     let job_active = name == "clarp-agent-bg" && argv.get(1).is_some_and(|arg| arg == "job-active");
+    let only_reads = reads_only(&name, &argv);
     let unavailable = |why: String| ToolOutcome {
         exit: if job_active { 2 } else { 69 },
         stdout: String::new(),
@@ -1353,6 +1354,8 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     }
     let mut retries = if tell_user { 6 } else { 0 };
     let mut delay = Duration::from_secs(1);
+    // Since when the Host has not answered a tool that only reads.
+    let mut unanswered_since: Option<std::time::Instant> = None;
     loop {
         let result = post(&address, "/tools/run", token, &asked);
         let retryable = match &result {
@@ -1364,6 +1367,17 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             retries -= 1;
             std::thread::sleep(delay);
             delay = (delay * 2).min(Duration::from_secs(16));
+            continue;
+        }
+        if !retryable {
+            unanswered_since = None;
+        } else if asks_again(
+            only_reads,
+            unanswered_since
+                .get_or_insert_with(std::time::Instant::now)
+                .elapsed(),
+        ) {
+            std::thread::sleep(Duration::from_secs(2));
             continue;
         }
         let answer = match result {
@@ -1402,6 +1416,23 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
         };
     }
+}
+
+/// How long a tool that only reads asks again a Host that does not answer: a release restarts
+/// the Host, and it is away for seconds.
+const RESTART_GRACE: Duration = Duration::from_secs(120);
+
+/// Whether a tool call only reads, so that asking it again changes nothing: a wait for the
+/// answer of a card, whose every ask carries the time it began ([`crate::artifact_tool`]). A
+/// ring is not: asked again after a restart, it would ring once more.
+fn reads_only(name: &str, argv: &[String]) -> bool {
+    name == "clarp-agent-artifacts" && argv.first().is_some_and(|arg| arg == "wait")
+}
+
+/// Whether a call the Host did not answer is asked again: one that only reads, while the Host
+/// has been away for less than [`RESTART_GRACE`].
+fn asks_again(reads_only: bool, away_for: Duration) -> bool {
+    reads_only && away_for < RESTART_GRACE
 }
 
 /// `clarp-host peer`: names another Host for the running Host, lists the ones it knows, or
@@ -1647,6 +1678,36 @@ pub fn network(mut args: impl Iterator<Item = String>, token: &str) -> Result<St
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wait_for_a_card_is_asked_again_through_a_restart_and_nothing_else_is() {
+        let args = |list: &[&str]| {
+            list.iter()
+                .map(|arg| (*arg).to_string())
+                .collect::<Vec<_>>()
+        };
+        let wait = args(&["wait", "card-1", "--timeout", "300"]);
+        assert!(reads_only("clarp-agent-artifacts", &wait));
+        assert!(!reads_only(
+            "clarp-agent-artifacts",
+            &args(&["input", "s", "t", "q"])
+        ));
+        assert!(!reads_only(
+            "clarp-admin",
+            &args(&["call", "ring", "oak", "--wait"])
+        ));
+        assert!(!reads_only("clarp-agent-artifacts", &[]));
+        assert!(asks_again(true, Duration::ZERO));
+        assert!(asks_again(true, RESTART_GRACE - Duration::from_secs(1)));
+        assert!(
+            !asks_again(true, RESTART_GRACE),
+            "a Host away this long is down"
+        );
+        assert!(
+            !asks_again(false, Duration::ZERO),
+            "a ring asked again would ring again"
+        );
+    }
 
     #[test]
     fn a_tool_finds_its_host_in_the_file_the_installer_wrote_and_in_no_other() {
