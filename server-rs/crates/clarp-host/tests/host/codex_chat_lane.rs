@@ -750,13 +750,20 @@ fn a_stop_ends_the_long_command_of_a_lane_turn_within_its_grace_and_the_lane_ans
     let instance = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
 
     host.send("sleeper", "hold-cmdstop", "cmd");
-    wait_for("the turn's command", || place.root.join("holding-cmdstop").exists());
+    wait_for("the turn's command", || {
+        place.root.join("holding-cmdstop").exists()
+    });
     let command = noted(&place, "command-cmdstop");
     assert!(runs(&command), "the command runs while the turn runs");
     let began = Instant::now();
     host.post("/stop", json!({"session": "sleeper"}));
-    wait_within("the command to be ended", Duration::from_secs(5), || !runs(&command));
-    assert!(began.elapsed() < Duration::from_secs(5), "within the Stop's grace");
+    wait_within("the command to be ended", Duration::from_secs(5), || {
+        !runs(&command)
+    });
+    assert!(
+        began.elapsed() < Duration::from_secs(5),
+        "within the Stop's grace"
+    );
     wait_for("the turn to end interrupted", || {
         host.state("sleeper") == "interrupted"
     });
@@ -784,12 +791,16 @@ fn a_stop_codex_does_not_answer_ends_codex_and_its_long_command_and_a_new_lane_a
     // when the Stop's grace (5 s) is over.
     std::fs::write(place.root.join("deaf"), "").unwrap();
     host.send("deafened", "hold-cmddeaf", "cmd");
-    wait_for("the turn's command", || place.root.join("holding-cmddeaf").exists());
+    wait_for("the turn's command", || {
+        place.root.join("holding-cmddeaf").exists()
+    });
     let command = noted(&place, "command-cmddeaf");
     assert!(runs(&command), "the command runs while the turn runs");
     let began = Instant::now();
     host.post("/stop", json!({"session": "deafened"}));
-    wait_within("the command to be ended", Duration::from_secs(10), || !runs(&command));
+    wait_within("the command to be ended", Duration::from_secs(10), || {
+        !runs(&command)
+    });
     let took = began.elapsed();
     assert!(
         took >= Duration::from_secs(4) && took < Duration::from_secs(10),
