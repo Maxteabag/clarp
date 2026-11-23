@@ -958,3 +958,32 @@ fn a_command_begun_before_the_message_that_ends_after_it_is_no_read() {
     assert_eq!(answers.len(), 1);
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
 }
+
+#[test]
+fn a_sentence_agy_goes_on_writing_after_the_hand_over_is_whole_before_the_read() {
+    let place = Place::new("steer-sentence", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-sentence"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-sentence");
+    steer(&mut input, "u-add", "add-sentence");
+    wait_file(&place, "received-add-sentence");
+    std::fs::write(place.dir.join("taken-sentence"), "").unwrap();
+    printed.until("agy's first thought under the new prompt", |line| {
+        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+    });
+    let rest = printed.at(|line| line["params"]["update"]["content"]["text"] == " 4 is 9");
+    let read = printed.at(|line| read_of(line) == Some("u-add"));
+    let thought = printed.at(|line| {
+        line["params"]["update"]["sessionUpdate"] == "agent_thought_chunk"
+    });
+    // "5 plus" and " 4 is 9" are one reply; the message is read after it, before the thought.
+    assert!(rest < read && read + 1 == thought, "{:?}", printed.seen);
+    std::fs::write(place.dir.join("release-sentence"), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let answers = settled(&printed.seen);
+    assert_eq!(answers.len(), 1);
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+}

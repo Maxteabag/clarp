@@ -100,6 +100,9 @@ struct Record {
     answer_text: String,
     /// A settled line was printed: the shim has closed the Host's input on it.
     settled: bool,
+    /// Antigravity is writing a message: its last word was a piece of one, and no thought or
+    /// tool call has ended it since. The Host shows such pieces as one reply.
+    writing: bool,
 }
 
 impl Handler for Record {
@@ -115,12 +118,28 @@ impl Handler for Record {
         // before what it does with it. Only work counts: agy also says, on its own, which
         // commands it offers, what the conversation is called and how full it is, before it has
         // touched the message (seen in a stopped turn's spool, 23 Nov 2026).
+        //
+        // A piece that goes on with the message agy was writing when it took the new prompt is
+        // the rest of that message, not work on the new one: the read waits for what comes
+        // after it, so that the reply before the message stays whole (seen live on 23 Nov 2026:
+        // "5 plus" | the message | " 4 is 9").
+        let kind = message["params"]["update"]["sessionUpdate"].as_str();
+        let goes_on = self.writing && kind == Some("agent_message_chunk");
         if update
+            && !goes_on
             && works(message, &self.seen_tools)
             && let Some(uuid) = self.read_next.take()
         {
             read_out(&uuid)?;
             self.took = Some(uuid);
+        }
+        // What ends a message being written, as the Host reads it: a thought or a tool call.
+        match kind {
+            Some("agent_message_chunk") if update => self.writing = true,
+            Some("agent_thought_chunk" | "tool_call" | "tool_call_update") if update => {
+                self.writing = false;
+            }
+            _ => {}
         }
         if let Some(id) = message["params"]["update"]["toolCallId"]
             .as_str()
@@ -783,6 +802,7 @@ pub fn run(program: &str) -> Result<u8> {
             took: None,
             answer_text: String::new(),
             settled: false,
+            writing: false,
         },
         stopping: None,
         waiting: Vec::new(),
