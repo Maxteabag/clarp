@@ -124,7 +124,8 @@ component Row inherits Rectangle {
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
-    accessible-label: root.chat.name;
+    // "Rachel on laptopstudio" when the row names its Host (as on iOS).
+    accessible-label: root.chat.host != "" ? root.chat.name + " on " + root.chat.host : root.chat.name;
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
         padding-left: 10px + root.chat.depth * 18px;

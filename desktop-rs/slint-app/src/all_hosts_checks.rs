@@ -249,6 +249,16 @@ pub fn all_hosts_check(out: String) {
             );
             check(view().host == "Fake Host", &format!("and so does the header: {:?}", view().host));
             check(!window.get_roster_note().contains("unreachable"), "and the quiet line is gone");
+            // The one-time default (as on iOS): with two Hosts saved, a launch
+            // that has not decided yet switches the option on, once.
+            let mut engine = app.engine.borrow_mut();
+            engine.settings_mut().remove(clarp_core::all_hosts::DEFAULTED_SETTING);
+            engine.default_all_hosts_once();
+            check(engine.all_hosts(), "the first launch with two Hosts saved switches all Hosts on");
+            check(engine.settings().boolean(clarp_core::all_hosts::DEFAULTED_SETTING, false), "and remembers it decided");
+            engine.set_all_hosts(false);
+            engine.default_all_hosts_once();
+            check(!engine.all_hosts(), "a later launch leaves it off when it was turned off");
             true
         })),
     ];

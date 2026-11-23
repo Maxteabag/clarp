@@ -268,27 +268,6 @@ impl Engine {
         self.apply_badges();
     }
 
-    /// How many Hosts this desktop is paired with: the primary and every
-    /// other saved Host with a device token, one per server id.
-    pub fn paired_hosts(&self) -> usize {
-        let mut seen: Vec<String> = vec![self.base_url.clone()];
-        if !self.server_id.is_empty() {
-            seen.push(self.server_id.clone());
-        }
-        let mut count = 1;
-        for host in clarp_core::hosts::list(&self.settings) {
-            if host.url == self.base_url || !self.peers.tokens.contains_key(&host.url) {
-                continue;
-            }
-            let identity = if host.server_id.is_empty() { host.url.clone() } else { host.server_id.clone() };
-            if !seen.contains(&identity) {
-                seen.push(identity);
-                count += 1;
-            }
-        }
-        count
-    }
-
     /// "Show the Host on each chat" (on unless set off).
     pub fn host_badges_setting(&self) -> bool {
         self.settings.boolean(all_hosts::BADGES_SETTING, true)
@@ -302,10 +281,50 @@ impl Engine {
         self.apply_badges();
     }
 
+    /// How many Hosts this desktop has saved: the primary and every other
+    /// saved Host, one per server id (paired or not, as on iOS).
+    pub fn saved_hosts(&self) -> usize {
+        let mut seen: Vec<String> = vec![self.base_url.clone()];
+        if !self.server_id.is_empty() {
+            seen.push(self.server_id.clone());
+        }
+        let mut count = 1;
+        for host in clarp_core::hosts::list(&self.settings) {
+            if host.url == self.base_url {
+                continue;
+            }
+            let identity = if host.server_id.is_empty() { host.url.clone() } else { host.server_id.clone() };
+            if !seen.contains(&identity) {
+                seen.push(identity);
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Whether rows and chat headers name their Host: the setting is on and
-    /// this desktop is paired with more than one Host (#651).
+    /// this desktop has saved more than one Host (#651; iOS counts saved
+    /// Hosts, AllHostsReading.swift).
     pub fn host_badges(&self) -> bool {
-        !self.peer && self.host_badges_setting() && self.paired_hosts() > 1
+        !self.peer && self.host_badges_setting() && self.saved_hosts() > 1
+    }
+
+    /// The first launch of a build with the option switches "Chats from all
+    /// paired Hosts" on once when more than one Host is saved, never again.
+    /// Not while the saved Hosts cannot be read (none listed): it waits for
+    /// a launch that can read them.
+    pub fn default_all_hosts_once(&mut self) {
+        if self.peer || self.settings.boolean(all_hosts::DEFAULTED_SETTING, false) {
+            return;
+        }
+        if clarp_core::hosts::list(&self.settings).is_empty() {
+            return;
+        }
+        if self.saved_hosts() > 1 && !self.all_hosts() {
+            self.settings.set(all_hosts::SETTING, true);
+            self.changes.push(Change::Preferences);
+        }
+        self.settings.set(all_hosts::DEFAULTED_SETTING, true);
     }
 
     /// The rows are rebuilt when whether they show badges changed.
@@ -665,8 +684,19 @@ impl Engine {
 
     /// The quiet line for peers that cannot be reached ("laptopstudio
     /// unreachable"); empty when every Host answers or the option is off.
+    /// Only while more than one Host is listed (a single Host keeps the
+    /// app's own connection banner), and a Host still connecting is quiet.
     pub fn unreachable_hosts_note(&self) -> String {
-        let labels: Vec<&str> = self.peers.list.iter().filter(|p| !Self::reachable(&p.engine)).map(|p| p.label.as_str()).collect();
+        if self.peers.merged.is_none() {
+            return String::new();
+        }
+        let labels: Vec<&str> = self
+            .peers
+            .list
+            .iter()
+            .filter(|p| matches!(p.engine.connection_state(), "offline" | "unauthorized"))
+            .map(|p| p.label.as_str())
+            .collect();
         all_hosts::unreachable_note(&labels)
     }
 

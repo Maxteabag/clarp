@@ -806,6 +806,7 @@ impl Engine {
     pub fn start(&mut self) {
         self.restored_session = self.panes.tree.active_session();
         self.restore_startup_cache();
+        self.default_all_hosts_once();
         self.apply_all_hosts();
         if !self.token.is_empty() {
             self.reconnect();

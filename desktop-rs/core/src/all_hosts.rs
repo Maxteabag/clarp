@@ -14,6 +14,9 @@ use crate::protocol::Agent;
 /// The device preference (never a Host's): off unless set.
 pub const SETTING: &str = "connection/allHosts";
 
+/// Set once the one-time default for SETTING was decided on this device.
+pub const DEFAULTED_SETTING: &str = "connection/allHostsDefaulted";
+
 /// "Show Host badges", a device preference: on unless set off. With more
 /// than one Host listed the badges always show; this hides them only while
 /// the list holds one Host's chats.
