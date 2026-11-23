@@ -6624,6 +6624,12 @@ fn an_agents_stop_gives_the_users_messages_back_and_the_users_stop_ends_them() {
         .collect();
     assert_eq!(back, ["u-3", "u-4"], "back in the queue, in order");
     assert_eq!(user_rows(&actor), ["u-1", "u-2", "u-3", "u-4"]);
+    // Their rows are in the conversation: new words would part a row from what the tool is
+    // given, and stand refused.
+    let (reworded, _) = actor
+        .reword(TurnId(3), "other words", world.tick())
+        .unwrap();
+    assert_eq!(reworded, clarp_kernel::journal::Reworded::InConversation);
 
     let (_, out) = actor.resume("user", world.tick()).unwrap();
     world.carry_out(&mut actor, out);
