@@ -540,7 +540,9 @@ the daily schedule.
   another tool with its conversation, rebuilt from the `transit` tool's writers: the Host writes
   its own record of the conversation, with the tools the agent used and what they gave back
   (Claude's blocks, Codex's function calls, quoted blocks elsewhere; each cut past 8 KB, a result
-  the record shortened read whole from Claude Code's transcript where it was Claude's), as a
+  the record shortened read whole from Claude Code's transcript where it was Claude's; within
+  about 60% of the target model's context, the older part summarized at the head by the agent in
+  one more read-only turn, else by a cheap model, else left out under a note), as a
   native Claude, Codex or Grok session, or opens the
   agent's next turn with that record for Antigravity, whose database it never opens, and for
   OpenCode, whose free models refuse every turn on a session handed to `opencode import`

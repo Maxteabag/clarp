@@ -252,6 +252,61 @@ fn an_agent_moves_to_codex_with_its_conversation_and_keeps_its_name() {
 }
 
 #[test]
+fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
+    let setting = Setting::new("agent-transit-long");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Long", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    // Four messages and their answers of 150,000 signs each: more than Codex is given.
+    for part in 0..4 {
+        let text = format!("Long part {part}: {}", "x".repeat(150_000));
+        host.send(&session, &text, &format!("long-{part}"));
+        wait_for("the answer", || {
+            host.conversation(&session).iter().any(|(role, text)| {
+                role == "assistant" && text.starts_with(&format!("Heard: Long part {part}:"))
+            })
+        });
+        wait_for("the agent to be done", || row(&host, &session)["busy"] == false);
+    }
+    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                     "request_id": "move-long"});
+    let done = transit(&host, ask);
+    assert_eq!(done["phase"], "done", "{done}");
+    assert_eq!(done["carried"]["summary"], "agent", "{done}");
+    let omitted = done["carried"]["omitted"].as_u64().unwrap();
+    assert!(omitted > 0, "{done}");
+
+    // The rollout opens with the summary the agent wrote (the stand-in answers with the
+    // first line of what it was asked), then the newest part as it was.
+    let rollouts = setting.rollouts();
+    assert_eq!(rollouts.len(), 1, "{rollouts:?}");
+    let items: Vec<Value> = std::fs::read_to_string(&rollouts[0])
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap()["payload"].clone())
+        .collect();
+    let head = items[1]["content"][0]["text"].as_str().unwrap();
+    assert_eq!(items[1]["role"], "user");
+    assert!(
+        head.starts_with("[Clarp: this conversation moved from Claude to Codex."),
+        "{}",
+        &head[..200.min(head.len())]
+    );
+    assert!(head.contains("written by the agent itself, just before the move:]"));
+    assert!(head.contains("Heard: [Clarp] You are about to move to Codex."));
+    let written = std::fs::read_to_string(&rollouts[0]).unwrap();
+    assert!(written.contains("Long part 3: "), "the newest goes as it was");
+    assert!(!written.contains("Long part 0: "), "the oldest is in the summary");
+    assert_eq!(
+        written.matches("You are about to move").count(),
+        1,
+        "the summary's own turn is no turn of the conversation"
+    );
+    assert!(host.conversation(&session).iter().any(|(role, text)| role == "system"
+        && text.ends_with(&format!("its oldest {omitted} turns as a summary."))));
+}
+
+#[test]
 fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
     let setting = Setting::new("agent-transit-refused");
     let host = setting.start();

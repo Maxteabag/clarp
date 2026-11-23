@@ -290,6 +290,12 @@ enum Ask {
     Shown {
         answer: Answer<Value>,
     },
+    /// What was said in the conversation, up to `most` signs of its end and one more thing
+    /// ([`clarp_actor::Actor::said_so_far`]).
+    SaidSoFar {
+        most: usize,
+        answer: Answer<Vec<clarp_backend::transit::Said>>,
+    },
     /// Go on with another tool, carrying the conversation ([`crate::agent_transit`]).
     ChangeTool {
         change: crate::agent_transit::Change,
@@ -919,6 +925,15 @@ impl AgentHandle {
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
         self.ask(|answer| Ask::Shown { answer }).await
+    }
+
+    /// What was said in the agent's conversation, the newest `most` signs of it and one more
+    /// thing, with the tools each answer used.
+    pub async fn said_so_far(
+        &self,
+        most: usize,
+    ) -> Result<Vec<clarp_backend::transit::Said>, Unavailable> {
+        self.ask(|answer| Ask::SaidSoFar { most, answer }).await
     }
 
     /// Goes on with another tool, its conversation carried into it: while no turn runs and
@@ -3339,6 +3354,7 @@ impl Worker {
             Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
             Ask::RunningTrace { turn, answer } => return read(actor.running_trace(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
+            Ask::SaidSoFar { most, answer } => return read(actor.said_so_far(most), answer),
             Ask::Import {
                 from,
                 backend_session,
@@ -4072,7 +4088,9 @@ impl Worker {
                         .launcher
                         .claude_settings(&self.setup.record.agent_id)
                     {
-                        order.args.extend(["--settings".into(), settings]);
+                        // Joined with what the turn has already (the edit guard of a turn
+                        // that only reads), as a fork's are.
+                        crate::conversation_forks::add_settings(&mut order.args, &settings);
                     }
                     let at = self.now_ms();
                     if let Some(actor) = self.actor.as_mut() {
@@ -5349,6 +5367,7 @@ fn refuse_for(
             Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RunningTrace { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::SaidSoFar { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
             }

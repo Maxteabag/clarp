@@ -237,28 +237,55 @@ pub fn restored(tool: &str, said: &[(bool, &str)], message: &str) -> String {
          one. Below is Clarp's record of it, most recent last; carry on from it. The new message \
          follows the record."
     );
-    recorded(&note, said, message, RESTORED_OF_ONE, RESTORED_MOST)
+    opened(
+        record(&note, None, said, RESTORED_OF_ONE, RESTORED_MOST).as_deref(),
+        message,
+    )
 }
 
 /// A turn's message with the most recent part of the conversation before it, for an agent
 /// that changed its tool from `from` to `tool` and whose new tool has no session of the
 /// conversation: its first turn there opens with the Host's record, as [`restored`] does.
 pub fn carried(tool: &str, from: &str, said: &[(bool, &str)], message: &str) -> String {
+    opened(
+        carried_opening(tool, from, None, said, CARRIED_MOST).as_deref(),
+        message,
+    )
+}
+
+/// What the first turn of such an agent opens with, before its message: the record of the
+/// conversation, its newest part within `most` bytes under `head` (what stands for its older
+/// part), which is kept whole. `None` where nothing was said.
+pub fn carried_opening(
+    tool: &str,
+    from: &str,
+    head: Option<&str>,
+    said: &[(bool, &str)],
+    most: usize,
+) -> Option<String> {
     let note = format!(
         "This conversation moved from {from} to {tool}, which continues it in a new session. \
          Below is Clarp's record of it, most recent last; carry on from it. The new message \
          follows the record."
     );
-    recorded(&note, said, message, CARRIED_OF_ONE, CARRIED_MOST)
+    record(&note, head, said, CARRIED_OF_ONE, most)
 }
 
-fn recorded(
+/// A turn's message after what it opens with.
+pub fn opened(opening: Option<&str>, message: &str) -> String {
+    match opening {
+        Some(opening) if !opening.is_empty() => format!("{opening}\n\n{message}"),
+        _ => message.to_string(),
+    }
+}
+
+fn record(
     note: &str,
+    head: Option<&str>,
     said: &[(bool, &str)],
-    message: &str,
     of_one: usize,
     most: usize,
-) -> String {
+) -> Option<String> {
     let mut blocks: Vec<String> = Vec::new();
     for (by_user, text) in said {
         let shown = clarp_speech::markup::clean_for_display(text, false);
@@ -277,8 +304,9 @@ fn recorded(
             blocks.push(format!("{who}: {body}"));
         }
     }
+    let head = head.filter(|head| !head.trim().is_empty());
     let mut kept: Vec<&str> = Vec::new();
-    let mut size = 0;
+    let mut size = head.map_or(0, |head| head.len() + 2);
     for block in blocks.iter().rev() {
         let cost = block.len() + 2;
         if size + cost > most {
@@ -287,14 +315,15 @@ fn recorded(
         kept.push(block);
         size += cost;
     }
-    if kept.is_empty() {
-        return message.to_string();
+    if kept.is_empty() && head.is_none() {
+        return None;
     }
+    kept.extend(head);
     kept.reverse();
-    format!(
-        "{RESTORED_OPEN}\n[{note}]\n\n{}\n{RESTORED_CLOSE}\n\n{message}",
+    Some(format!(
+        "{RESTORED_OPEN}\n[{note}]\n\n{}\n{RESTORED_CLOSE}",
         kept.join("\n\n")
-    )
+    ))
 }
 
 /// A user's words without the Host's own record of a conversation before them: what stands
@@ -717,5 +746,26 @@ mod tests {
             !kept.contains(&answer),
             "a restored one keeps both ends of 4,000 signs"
         );
+    }
+
+    #[test]
+    fn a_carried_opening_keeps_its_head_whole_and_the_newest_within_its_room() {
+        let older = "o".repeat(30_000);
+        let newer = "n".repeat(30_000);
+        let said = [(true, older.as_str()), (false, newer.as_str())];
+        let head = format!("[Clarp: summary]\n{}", "s".repeat(20_000));
+        let opening = carried_opening("Antigravity", "Claude Code", Some(&head), &said, 40_000)
+            .unwrap();
+        assert!(opening.starts_with(RESTORED_OPEN));
+        assert!(opening.ends_with(RESTORED_CLOSE));
+        assert!(opening.contains(&head), "the head is never cut");
+        let head_at = opening.find("[Clarp: summary]").unwrap();
+        // The newest fits beside the head; the older does not. Each is cut to both its ends.
+        assert!(opening.contains("Assistant: nnn"));
+        assert!(!opening.contains("User: ooo"));
+        assert!(head_at < opening.find("Assistant: ").unwrap());
+        assert_eq!(opened(Some(&opening), "Next?"), format!("{opening}\n\nNext?"));
+        assert_eq!(opened(None, "Next?"), "Next?");
+        assert_eq!(carried_opening("A", "B", None, &[], 60_000), None);
     }
 }

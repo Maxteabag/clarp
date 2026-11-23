@@ -28,10 +28,200 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-/// How many signs of the conversation are carried at most: the newest turns that fit. A tool
-/// given more than its model can hold would fail its next turn, or shorten what it was given
-/// at once; a quarter of a million tokens is far more than any agent needs to go on.
-pub const CARRIED_MOST: usize = 400_000;
+/// How many signs of the conversation are read at most to carry it: more than the largest
+/// budget of any target ([`budget`]), so that what is left out is known.
+pub const CARRIED_MOST: usize = 3_000_000;
+
+/// How many signs a token is reckoned at. Prose has about four; code, JSON and paths fewer:
+/// three keeps a budget on the safe side.
+const SIGNS_PER_TOKEN: usize = 3;
+
+/// How many tokens a model takes in: what its tool's catalogue says of it
+/// (`context_tokens`), else what its tool's models take, as the tools say. A tool given more
+/// than its model can hold would fail its next turn, or shorten what it was given at once.
+pub fn context_tokens(backend: &str, model: &str) -> usize {
+    let declared = crate::catalogue::declared(backend);
+    let listed = declared["models"].as_array().and_then(|models| {
+        models
+            .iter()
+            .find(|row| row["id"] == model)
+            .and_then(|row| row["context_tokens"].as_u64())
+    });
+    if let Some(tokens) = listed.and_then(|tokens| usize::try_from(tokens).ok()) {
+        return tokens;
+    }
+    match backend {
+        "claude" if model.contains("[1m]") => 1_000_000,
+        "claude" => 200_000,
+        "codex" => 272_000,
+        "grok" => 256_000,
+        "agy" => 1_000_000,
+        _ => 128_000,
+    }
+}
+
+/// How many signs of the conversation are carried into a model at most: about 60% of what it
+/// takes in, the rest left for the tool's own instructions and the turns to come.
+pub fn budget(backend: &str, model: &str) -> usize {
+    context_tokens(backend, model) * 6 / 10 * SIGNS_PER_TOKEN
+}
+
+/// How long the summary of what did not fit may be, in signs: what it is asked for is much
+/// shorter, and what is longer is cut.
+pub const SUMMARY_MOST: usize = 16_000;
+
+/// Who wrote the summary of what did not fit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SummaryBy {
+    /// The agent itself, in one more turn on its old tool just before it moved.
+    Agent,
+    /// Another model, of this name, from the Host's record.
+    Model(String),
+}
+
+impl SummaryBy {
+    /// As an app is told it.
+    pub fn word(&self) -> &'static str {
+        match self {
+            SummaryBy::Agent => "agent",
+            SummaryBy::Model(_) => "model",
+        }
+    }
+}
+
+/// A summary of the oldest part of a conversation, which did not fit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Summary {
+    pub text: String,
+    pub by: SummaryBy,
+}
+
+/// What is carried of a conversation within a budget: from which thing that was said it is
+/// carried as it was, and what stands at its head when something older did not fit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fitted {
+    pub from: usize,
+    /// The summary of what did not fit, or a note that it was left out.
+    pub head: Option<String>,
+    pub summarized: bool,
+}
+
+/// What of `said` is carried within `budget` signs, from the tool `from` (as a person reads
+/// it) to `to`: all of it where it fits; else its newest part, under the `summary` of the
+/// older part where there is one, else under a note that the older part was left out.
+pub fn fitted(
+    said: &[Said],
+    budget: usize,
+    summary: Option<&Summary>,
+    from: &str,
+    to: &str,
+) -> Fitted {
+    let whole = kept_from(said, budget);
+    if whole == 0 {
+        return Fitted {
+            from: 0,
+            head: None,
+            summarized: false,
+        };
+    }
+    let at = kept_from(said, budget.saturating_sub(SUMMARY_MOST + 1_000));
+    let turns = match at {
+        1 => "oldest turn".to_string(),
+        n => format!("{n} oldest turns"),
+    };
+    let head = match summary.filter(|summary| !summary.text.trim().is_empty()) {
+        Some(summary) => {
+            let who = match &summary.by {
+                SummaryBy::Agent => "the agent itself, just before the move".to_string(),
+                SummaryBy::Model(model) => format!("{model}, from Clarp's record"),
+            };
+            let text: String = summary.text.trim().chars().take(SUMMARY_MOST).collect();
+            format!(
+                "[Clarp: this conversation moved from {from} to {to}. Its {turns} did not fit \
+                 and are summarized here; what follows the summary is carried as it was. \
+                 Summary, written by {who}:]\n\n{text}"
+            )
+        }
+        None => format!(
+            "[Clarp: this conversation moved from {from} to {to}. Its {turns} did not fit and \
+             were left out: no summary of them could be written. What follows is its most \
+             recent part.]"
+        ),
+    };
+    Fitted {
+        from: at,
+        summarized: summary.is_some_and(|summary| !summary.text.trim().is_empty()),
+        head: Some(head),
+    }
+}
+
+/// What a writer is given of `said` as it was [`fitted`]: the head first, as something the
+/// user said, then the newest part.
+pub fn with_head(said: &[Said], fitted: &Fitted) -> Vec<Said> {
+    let kept = &said[fitted.from..];
+    let mut carried = Vec::with_capacity(kept.len() + 1);
+    if let Some(head) = &fitted.head {
+        let at_ms = kept.first().map_or(0, |one| one.at_ms);
+        carried.push(Said::new(Role::User, head.clone(), at_ms));
+    }
+    carried.extend_from_slice(kept);
+    carried
+}
+
+/// What another model is asked when the agent cannot summarize its own conversation, with
+/// the shape of its answer: the older part of the conversation, as quoted blocks, newest
+/// last, as much of its end as `most` signs hold.
+pub fn summary_reading(older: &[Said], most: usize) -> (String, String, String) {
+    let mut blocks: Vec<String> = Vec::new();
+    let mut size = 0usize;
+    for one in older.iter().rev() {
+        let who = match one.role {
+            Role::User => "User",
+            Role::Assistant => "Assistant",
+        };
+        let block = format!("{who}: {}", with_quoted(one));
+        size += block.chars().count() + 2;
+        if size > most && !blocks.is_empty() {
+            break;
+        }
+        blocks.push(block);
+    }
+    blocks.reverse();
+    let instructions = SUMMARY_ASK.to_string();
+    let asked = format!("The conversation:\n\n{}", blocks.join("\n\n"));
+    let schema = json!({
+        "type": "object",
+        "properties": {"summary": {"type": "string"}},
+        "required": ["summary"],
+        "additionalProperties": false,
+    })
+    .to_string();
+    (instructions, asked, schema)
+}
+
+/// What a summary of the older part of a conversation is to hold.
+pub const SUMMARY_ASK: &str = "Summarize this conversation between a user and an AI agent \
+for the agent, which goes on with it without having it. Keep what it needs to go on: what \
+the user wants and asked it to remember, decisions made and why, facts learned, files, paths, \
+commands, ids and names that matter, what was done and what is still open. Leave out \
+pleasantries and what no longer matters. At most 1,500 words, plain text.";
+
+/// What the agent itself is asked, in one more turn on its old tool, just before it moves:
+/// the summary of its conversation up to its newest part, which goes along as it was.
+pub fn summary_turn(to: &str, newest_begins: &str) -> String {
+    let begins: String = newest_begins.split_whitespace().collect::<Vec<_>>().join(" ");
+    let begins: String = begins.chars().take(160).collect();
+    format!(
+        "[Clarp] You are about to move to {to}. Your conversation is too long to carry whole: \
+         its older part will be replaced by a summary that you write now, and its newest part, \
+         from the message that begins \u{201c}{begins}\u{201d}, goes along as it was. Write that \
+         summary of everything before it, for yourself, to go on from: what the user wants and \
+         asked you to remember, decisions made and why, facts learned, files, paths, commands, \
+         ids and names that matter, what was done and what is still open. Do not use any tool \
+         and do not change anything: answer with the summary alone, at most 1,500 words, \
+         plain text."
+    )
+}
 
 /// Who said it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1551,6 +1741,85 @@ mod tests {
             "a session Claude does not have leaves the record's"
         );
         std::fs::remove_dir_all(projects).unwrap();
+    }
+
+    #[test]
+    fn a_target_is_given_about_sixty_percent_of_its_model() {
+        assert_eq!(budget("claude", "opus"), 200_000 * 6 / 10 * 3);
+        assert_eq!(budget("claude", "opus[1m]"), 1_000_000 * 6 / 10 * 3);
+        assert_eq!(budget("codex", "gpt-5.5"), 272_000 * 6 / 10 * 3);
+        assert!(budget("opencode", "anything") < budget("grok", "grok-4.6"));
+    }
+
+    fn long_said() -> Vec<Said> {
+        (0..10)
+            .map(|at| {
+                let role = if at % 2 == 0 { Role::User } else { Role::Assistant };
+                Said::new(role, format!("{at}:{}", "x".repeat(9_998)), at)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn what_fits_goes_whole_and_nothing_stands_at_its_head() {
+        let fitted = fitted(&long_said(), 1_000_000, None, "Claude Code", "Codex");
+        assert_eq!(fitted, Fitted { from: 0, head: None, summarized: false });
+        assert_eq!(with_head(&long_said(), &fitted), long_said());
+    }
+
+    #[test]
+    fn what_does_not_fit_is_summarized_at_the_head_within_the_budget() {
+        let said = long_said();
+        let budget = 60_000;
+        let summary = Summary {
+            text: "The user wants the parser fixed.".into(),
+            by: SummaryBy::Agent,
+        };
+        let fitted = fitted(&said, budget, Some(&summary), "Claude Code", "Codex");
+        assert!(fitted.summarized);
+        // Room is kept for the summary: what goes as it was is the newest that fit beside it.
+        assert_eq!(fitted.from, kept_from(&said, budget - SUMMARY_MOST - 1_000));
+        let head = fitted.head.clone().unwrap();
+        assert!(head.starts_with(&format!(
+            "[Clarp: this conversation moved from Claude Code to Codex. Its {} oldest turns",
+            fitted.from
+        )));
+        assert!(head.contains("written by the agent itself, just before the move:]"));
+        assert!(head.ends_with("The user wants the parser fixed."));
+        let carried = with_head(&said, &fitted);
+        assert_eq!(carried[0].role, Role::User);
+        assert_eq!(carried[0].text, head);
+        assert_eq!(&carried[1..], &said[fitted.from..]);
+        assert!(carried.iter().map(Said::size).sum::<usize>() <= budget);
+
+        // No summary: a note that the oldest were left out.
+        let left = super::fitted(&said, budget, None, "Claude Code", "Codex");
+        assert!(!left.summarized);
+        assert_eq!(left.from, fitted.from);
+        assert!(left.head.unwrap().contains("were left out: no summary of them could be written"));
+        let by_model = Summary {
+            text: "x".repeat(SUMMARY_MOST * 2),
+            by: SummaryBy::Model("Claude Code (haiku)".into()),
+        };
+        let cut = super::fitted(&said, budget, Some(&by_model), "Claude Code", "Codex");
+        let head = cut.head.unwrap();
+        assert!(head.contains("written by Claude Code (haiku), from Clarp's record:]"));
+        assert!(head.chars().count() < SUMMARY_MOST + 1_000, "a long summary is cut");
+    }
+
+    #[test]
+    fn another_model_reads_the_end_of_the_older_part() {
+        let said = long_said();
+        let (instructions, asked, schema) = summary_reading(&said, 25_000);
+        assert_eq!(instructions, SUMMARY_ASK);
+        assert!(asked.contains("Assistant: 9:x") && asked.contains("User: 8:x"));
+        assert!(!asked.contains("7:x"), "only what fits, newest kept");
+        let schema: Value = serde_json::from_str(&schema).unwrap();
+        assert_eq!(schema["required"][0], "summary");
+        let turn = summary_turn("Codex", "Fix   the\nparser, please.");
+        assert!(turn.contains("move to Codex"));
+        assert!(turn.contains("\u{201c}Fix the parser, please.\u{201d}"));
+        assert!(turn.contains("Do not use any tool"));
     }
 
     #[test]

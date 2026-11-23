@@ -77,6 +77,12 @@ pub struct Change {
     pub tool_version: Option<String>,
     /// The tool and the model as a person reads them, for the row the change leaves.
     pub shown_as: (String, String),
+    /// The tool the agent moves from, as a person reads it.
+    pub shown_from: String,
+    /// How many signs of the conversation the new tool is given at most ([`budget_of`]).
+    pub budget: usize,
+    /// What stands for the older part of the conversation where it does not all fit.
+    pub summary: Option<transit::Summary>,
     pub progress: Progress,
 }
 
@@ -88,8 +94,10 @@ pub struct Changed {
     pub carried: usize,
     pub user: usize,
     pub assistant: usize,
-    /// What was said that was read and left out, the oldest, beyond the budget.
+    /// What was said that was read and not carried as it was, the oldest, beyond the budget.
     pub omitted: usize,
+    /// Who summarized what was not carried as it was (`agent` or `model`), where it was.
+    pub summary: Option<&'static str>,
 }
 
 /// Why it did not happen. Nothing changed.
@@ -107,16 +115,33 @@ pub enum Refused {
 }
 
 /// The row every app shows when the change is done.
-fn done_row(backend: &str, model: &str, omitted: usize) -> String {
-    match omitted {
-        0 => format!("Now on {backend} · {model}. The conversation came along."),
-        1 => format!(
-            "Now on {backend} · {model}. The conversation came along, except its oldest turn."
+fn done_row(backend: &str, model: &str, omitted: usize, summarized: bool) -> String {
+    let turns = match omitted {
+        1 => "its oldest turn".to_string(),
+        _ => format!("its oldest {omitted} turns"),
+    };
+    match (omitted, summarized) {
+        (0, _) => format!("Now on {backend} · {model}. The conversation came along."),
+        (_, true) => format!(
+            "Now on {backend} · {model}. The conversation came along, {turns} as a summary."
         ),
-        _ => format!(
-            "Now on {backend} · {model}. The conversation came along, except its oldest \
-             {omitted} turns."
+        (_, false) => format!(
+            "Now on {backend} · {model}. The conversation came along, except {turns}."
         ),
+    }
+}
+
+/// How many signs of the conversation `backend` is given at most on `model`: about 60% of
+/// what the model takes in ([`transit::budget`]); for a tool whose first turn opens with the
+/// record on its command line, as much as fits there ([`clarp_kernel::told::CARRIED_MOST`]).
+pub fn budget_of(backend: &str, model: &str) -> usize {
+    let budget = transit::budget(backend, model);
+    let on_its_command_line = transit::writer(backend).is_none()
+        && clarp_backend::by_id(backend).is_some_and(|tool| tool.message_most().is_some());
+    if on_its_command_line {
+        budget.min(clarp_kernel::told::CARRIED_MOST)
+    } else {
+        budget
     }
 }
 
@@ -132,14 +157,22 @@ pub(crate) fn carry(
     if let Some((live, waiting)) = actor.busy_for_change() {
         return Ok((Err(Refused::Busy { live, waiting }), Outputs::default()));
     }
-    let mut said = actor.said_so_far(CARRIED_MOST)?;
+    let mut said = actor.said_so_far(CARRIED_MOST.min(change.budget))?;
     // Claude keeps whole the results the Host kept only the start of.
     if record.backend == "claude" {
         let projects = transit::tool_home("claude", &crate::config::home()).join("projects");
         transit::whole_results(&mut said, &projects, &record.cwd);
     }
-    let from = transit::kept_from(&said, CARRIED_MOST);
+    let fitted = transit::fitted(
+        &said,
+        change.budget,
+        change.summary.as_ref(),
+        &change.shown_from,
+        &change.shown_as.0,
+    );
+    let from = fitted.from;
     let kept = &said[from..];
+    let carried = transit::with_head(&said, &fitted);
     change.progress.tell("translating");
     let written = match transit::writer(&change.backend) {
         Some(writer) if !kept.is_empty() => {
@@ -151,7 +184,7 @@ pub(crate) fn carry(
                 model: Some(change.model.clone()).filter(|model| !model.is_empty()),
                 program: clarp_backend::program(&change.backend).map(std::path::PathBuf::from),
             };
-            match writer.write(kept, &place) {
+            match writer.write(&carried, &place) {
                 Ok(written) => Some(written),
                 Err(failed) => {
                     let refused = Refused::Failed {
@@ -166,6 +199,27 @@ pub(crate) fn carry(
     };
     change.progress.tell("registering");
     let session = written.as_ref().map(|written| written.session.clone());
+    // A tool given no session opens its first turn with the record as it is carried now,
+    // with the tools each answer used as quoted blocks.
+    let opening = if written.is_none() {
+        let quoted: Vec<(bool, String)> = kept
+            .iter()
+            .map(|one| (one.role == transit::Role::User, transit::with_quoted(one)))
+            .collect();
+        let quoted: Vec<(bool, &str)> = quoted
+            .iter()
+            .map(|(by_user, text)| (*by_user, text.as_str()))
+            .collect();
+        clarp_kernel::told::carried_opening(
+            &change.shown_as.0,
+            &change.shown_from,
+            fitted.head.as_deref(),
+            &quoted,
+            change.budget,
+        )
+    } else {
+        None
+    };
     let user = kept
         .iter()
         .filter(|one| one.role == transit::Role::User)
@@ -176,11 +230,16 @@ pub(crate) fn carry(
         user,
         assistant: kept.len() - user,
         omitted: from,
+        summary: change
+            .summary
+            .as_ref()
+            .filter(|_| fitted.summarized)
+            .map(|summary| summary.by.word()),
     };
     change.progress.tell("switching");
     let (backend, model) = &change.shown_as;
-    let row = done_row(backend, model, from);
-    match actor.change_tool(&change.backend, session, &row, now_ms) {
+    let row = done_row(backend, model, from, fitted.summarized);
+    match actor.change_tool(&change.backend, session, opening, &row, now_ms) {
         Ok((Ok(()), out)) => Ok((Ok(changed), out)),
         Ok((Err(why), _)) => {
             if let Some(written) = written {
@@ -644,12 +703,17 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
             reach(&hub, clock.now_ms(), &id, phase, &[])
         }))
     };
+    let budget = budget_of(&goal.backend, &goal.model);
+    let summary = summarized(app, member, &goal, budget).await;
     let change = Change {
         backend: goal.backend.clone(),
         model: goal.model.clone(),
         effort: goal.effort.clone(),
         tool_version: goal.tool_version.clone(),
         shown_as: (goal.shown.backend.clone(), goal.shown.model.clone()),
+        shown_from: goal.shown.old_backend.clone(),
+        budget,
+        summary,
         progress,
     };
     let carried = match member.agent.change_tool(change).await {
@@ -690,6 +754,7 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
         "user": carried.user,
         "assistant": carried.assistant,
         "omitted": carried.omitted,
+        "summary": carried.summary,
     });
     reach(
         &app.hub,
@@ -698,6 +763,143 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
         "done",
         &[("carried", counts)],
     );
+}
+
+// ---- what stands for what does not fit ------------------------------------------------------
+
+/// How long the agent is given to summarize its own conversation, and another model after it.
+const SUMMARY_WITHIN: Duration = Duration::from_secs(240);
+const MODEL_WITHIN: Duration = Duration::from_secs(180);
+/// How much of the older part of the conversation another model is given to summarize.
+const MODEL_READS: usize = 300_000;
+/// Who summarizes when the agent cannot: the cheap models of two tools, in turn.
+const SUMMARIZERS: [(&str, &str); 2] = [("claude", "haiku"), ("codex", "")];
+
+/// The summary of the part of the conversation that does not fit in `budget`: written by the
+/// agent itself, in one more turn on its old tool that only reads; where that cannot be, by a
+/// cheap model from the Host's record. `None` where it all fits, or neither could write one:
+/// the newest part goes alone, under a note that the rest was left out.
+async fn summarized(
+    app: &App,
+    member: &crate::fleet::Member,
+    goal: &Goal,
+    budget: usize,
+) -> Option<transit::Summary> {
+    let said = member.agent.said_so_far(budget).await.ok()?;
+    let fitted = transit::fitted(&said, budget, None, "", "");
+    if fitted.from == 0 {
+        return None;
+    }
+    let newest = &said[fitted.from..];
+    if let Some(text) = by_the_agent(member, goal, newest).await {
+        return Some(transit::Summary {
+            text,
+            by: transit::SummaryBy::Agent,
+        });
+    }
+    by_a_model(app, &said[..fitted.from]).await
+}
+
+/// The agent's own summary: one more turn of it, filed as nobody's message, which only reads
+/// (`clarp_kernel::turn::TRANSIT_SUMMARY`). A turn that takes too long is stopped.
+async fn by_the_agent(
+    member: &crate::fleet::Member,
+    goal: &Goal,
+    newest: &[transit::Said],
+) -> Option<String> {
+    use clarp_actor::TurnFate;
+    use clarp_kernel::conversation::Message;
+    use clarp_kernel::turn::{Admission, Origin, TRANSIT_SUMMARY};
+    let begins = newest
+        .iter()
+        .find(|one| !one.text.trim().is_empty())
+        .map_or("", |one| one.text.as_str());
+    let request = crate::ids::hex(8);
+    let (id, marked) = Message::filed(&format!("{TRANSIT_SUMMARY}-{request}"));
+    let message = Message {
+        id: id.clone(),
+        marked,
+        unminted: true,
+        text: transit::summary_turn(&goal.shown.backend, begins),
+        origin: Origin::Trigger {
+            name: TRANSIT_SUMMARY.to_string(),
+        },
+        trace_id: Some(request),
+        ..Message::default()
+    };
+    member.agent.send(message, Admission::Queue).await.ok()?;
+    let began = std::time::Instant::now();
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        match member.agent.fate(id.clone()).await.ok()? {
+            TurnFate::Ended { status, text, .. } => {
+                return (status == "completed" && !text.trim().is_empty()).then_some(text);
+            }
+            TurnFate::Waits | TurnFate::Runs if began.elapsed() < SUMMARY_WITHIN => {}
+            TurnFate::Waits | TurnFate::Runs => {
+                eprintln!(
+                    "clarp-host: agent {} did not summarize its conversation in time",
+                    member.record.session
+                );
+                let _ = member.agent.stop("transit".to_string()).await;
+                // Its turn ends before the change is made, or the change finds it busy.
+                for _ in 0..40 {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    if matches!(
+                        member.agent.fate(id.clone()).await,
+                        Ok(TurnFate::Ended { .. } | TurnFate::Gone)
+                    ) {
+                        break;
+                    }
+                }
+                return None;
+            }
+            TurnFate::Unknown | TurnFate::Gone => return None,
+        }
+    }
+}
+
+/// A summary by a cheap model, of the older part of the conversation as the Host recorded it.
+async fn by_a_model(app: &App, older: &[transit::Said]) -> Option<transit::Summary> {
+    let (instructions, asked, schema) = transit::summary_reading(older, MODEL_READS);
+    for (backend, model) in SUMMARIZERS {
+        let reading = clarp_backend::Reading {
+            instructions: instructions.clone(),
+            asked: asked.clone(),
+            schema: schema.clone(),
+            model: (!model.is_empty()).then(|| model.to_string()),
+            effort: None,
+        };
+        match crate::once::read_on(app, backend, &reading, MODEL_WITHIN).await {
+            Ok(answer) => {
+                let text = clarp_kernel::router::extract_json(&answer)
+                    .ok()
+                    .and_then(|object| object.get("summary")?.as_str().map(str::to_string))
+                    .filter(|text| !text.trim().is_empty());
+                if let Some(text) = text {
+                    let tool = clarp_backend::catalogue::declared(backend)["shown"]["label"]
+                        .as_str()
+                        .unwrap_or(backend)
+                        .to_string();
+                    let by = if model.is_empty() {
+                        tool
+                    } else {
+                        format!("{tool} ({model})")
+                    };
+                    return Some(transit::Summary {
+                        text,
+                        by: transit::SummaryBy::Model(by),
+                    });
+                }
+                eprintln!("clarp-host: {backend} gave no summary of a moving conversation");
+            }
+            Err(why) => eprintln!(
+                "clarp-host: {backend} could not summarize a moving conversation: {}",
+                why.words()
+            ),
+        }
+    }
+    None
 }
 
 async fn post(State(app): State<App>, body: Bytes) -> Response {
@@ -780,16 +982,20 @@ mod tests {
     #[test]
     fn the_row_of_a_change_says_what_was_left_out() {
         assert_eq!(
-            done_row("Codex", "GPT-5.5", 0),
+            done_row("Codex", "GPT-5.5", 0, false),
             "Now on Codex · GPT-5.5. The conversation came along."
         );
         assert_eq!(
-            done_row("Codex", "GPT-5.5", 3),
+            done_row("Codex", "GPT-5.5", 3, false),
             "Now on Codex · GPT-5.5. The conversation came along, except its oldest 3 turns."
         );
         assert_eq!(
-            done_row("Codex", "GPT-5.5", 1),
+            done_row("Codex", "GPT-5.5", 1, false),
             "Now on Codex · GPT-5.5. The conversation came along, except its oldest turn."
+        );
+        assert_eq!(
+            done_row("Codex", "GPT-5.5", 3, true),
+            "Now on Codex · GPT-5.5. The conversation came along, its oldest 3 turns as a summary."
         );
     }
 

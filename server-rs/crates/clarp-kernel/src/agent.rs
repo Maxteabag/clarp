@@ -146,6 +146,9 @@ pub enum Command {
         from: String,
         backend: String,
         backend_session: Option<String>,
+        /// Where there is no session: what its next turn opens with, the record of the
+        /// conversation as it was carried. `None`: the record is read when the turn begins.
+        opening: Option<String>,
     },
     /// The agent is started again: its next turn begins a conversation with its tool
     /// instead of continuing the one it has. Only when no turn runs: a turn that runs is
@@ -274,6 +277,8 @@ pub enum AgentEvent {
         from: String,
         backend: String,
         backend_session: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opening: Option<String>,
         at_ms: i64,
     },
     /// What the user's compaction did, the turn it ran as having ended: what the agent's row
@@ -424,6 +429,8 @@ pub struct Agent {
     /// The tool the agent had before it changed to the one it has, while it has no session
     /// of the new one: its next turn begins one with the Host's record of the conversation.
     carried_from: Option<String>,
+    /// What that turn opens with, where the change said ([`Command::ChangeTool`]).
+    carried_opening: Option<String>,
     /// The tool the agent's log last changed it from and to, since it was last started
     /// again: a record elsewhere that still says the first lost the change.
     changed: Option<(String, String)>,
@@ -498,6 +505,7 @@ impl Default for Agent {
             resting: None,
             arrived: false,
             carried_from: None,
+            carried_opening: None,
             changed: None,
             at: 0,
             user_stop_generation: 0,
@@ -705,6 +713,12 @@ impl Agent {
     /// yet: its next turn begins one that opens with the Host's record of it.
     pub fn carried_from(&self) -> Option<&str> {
         self.carried_from.as_deref()
+    }
+
+    /// What that turn opens with, where the change said: the record of the conversation as
+    /// it was carried, made when the agent moved.
+    pub fn carried_opening(&self) -> Option<&str> {
+        self.carried_from.as_ref().and(self.carried_opening.as_deref())
     }
 
     /// The tools the agent's log last changed it from and to, since it was last started
@@ -1112,6 +1126,7 @@ impl Agent {
                 from,
                 backend,
                 backend_session,
+                opening,
             } => {
                 work.agent.require_here()?;
                 if work.agent.live.is_some() {
@@ -1124,6 +1139,7 @@ impl Agent {
                     from,
                     backend,
                     backend_session,
+                    opening,
                     at_ms: now_ms,
                 });
             }
@@ -1541,10 +1557,12 @@ impl Agent {
                 from,
                 backend,
                 backend_session,
+                opening,
                 ..
             } => {
                 self.bind_session(backend_session.as_deref());
                 self.carried_from = self.backend_session.is_none().then(|| from.clone());
+                self.carried_opening = opening.clone().filter(|_| self.carried_from.is_some());
                 self.changed = Some((from.clone(), backend.clone()));
             }
             AgentEvent::StartedAgain { .. } => {
@@ -3183,6 +3201,7 @@ mod tests {
             from: "claude".to_string(),
             backend: "codex".to_string(),
             backend_session: session.map(str::to_string),
+            opening: session.is_none().then(|| "the record".to_string()),
         };
         let bound = |turn: u64, session: &str| Command::TurnBound {
             turn: TurnId(turn),
@@ -3211,10 +3230,12 @@ mod tests {
         a.send(change(None)).unwrap();
         assert_eq!(a.agent.backend_session(), None);
         assert_eq!(a.agent.carried_from(), Some("claude"));
+        assert_eq!(a.agent.carried_opening(), Some("the record"));
         a.user(12);
         a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
         a.send(bound(3, "fresh-3")).unwrap();
         assert_eq!(a.agent.carried_from(), None);
+        assert_eq!(a.agent.carried_opening(), None);
         a.finish(3);
 
         // Started again, the change is no longer the agent's last word on its tool.
@@ -3239,6 +3260,7 @@ mod tests {
             from: "claude".to_string(),
             backend: "codex".to_string(),
             backend_session: Some("thread-1".to_string()),
+            opening: None,
         });
         assert_eq!(changed, Err(Refusal::Waiting));
         assert_eq!(a.agent.changed(), None);

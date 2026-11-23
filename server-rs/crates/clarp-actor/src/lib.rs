@@ -59,7 +59,7 @@ use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
 use clarp_kernel::turn::{
-    Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
+    Activity, Admission, COMPACTION, Origin, TRANSIT_SUMMARY, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
     Wait, silent_when_failed,
 };
 use clarp_kernel::turn_identity::Standing;
@@ -3952,6 +3952,13 @@ impl Actor {
                         continue;
                     }
                     Entry::Message(message) if Some(message.id.as_str()) == except => continue,
+                    // What an agent about to move was asked, and what it answered: carried at
+                    // the head of its new session, where it does not fit whole.
+                    Entry::Message(Message { origin, .. }) | Entry::Reply(Reply { origin, .. })
+                        if matches!(origin, Origin::Trigger { name } if name == TRANSIT_SUMMARY) =>
+                    {
+                        continue;
+                    }
                     Entry::Message(message) => {
                         Carried::new(Role::User, message.text.clone(), row.ts_ms)
                     }
@@ -4017,6 +4024,7 @@ impl Actor {
         &mut self,
         backend: &str,
         backend_session: Option<String>,
+        opening: Option<String>,
         notice: &str,
         now_ms: i64,
     ) -> Result<(Result<(), String>, Outputs), ActorError> {
@@ -4040,6 +4048,7 @@ impl Actor {
             from,
             backend: backend.to_string(),
             backend_session,
+            opening,
         };
         if let Err(refusal) = batch.command(change, now_ms) {
             return Ok((Err(refusal.to_string()), Outputs::default()));
@@ -4681,7 +4690,10 @@ impl Actor {
                     .map_or_else(|| id.to_string(), str::to_string)
             };
             let tool = label(self.backend.id());
+            let opening = self.recorder.agent().carried_opening().map(str::to_string);
             match carried_from.as_deref().filter(|_| !lost) {
+                // What was carried when the agent moved, made then.
+                Some(_) if opening.is_some() => told::opened(opening.as_deref(), &prompt),
                 // What moved with the agent is carried with the tools it used, as quoted
                 // blocks: the new tool has no form of its own for another's calls.
                 Some(from) => {
@@ -4810,6 +4822,19 @@ impl Actor {
             launch
                 .args
                 .push(clarp_kernel::steering::REPLAY_USER_MESSAGES.to_owned());
+        }
+        // The turn in which an agent about to move summarizes its conversation only reads:
+        // as for a fork, the Host's own tools refuse it helpers, jobs and new agents, and
+        // Claude Code refuses it file edits.
+        if matches!(&message.origin, Origin::Trigger { name } if name == TRANSIT_SUMMARY) {
+            if self.backend.id() == "claude" {
+                launch
+                    .args
+                    .extend(["--settings".to_owned(), fork::edit_guard().to_string()]);
+            }
+            launch
+                .env
+                .push((fork::FORK_ENV.to_owned(), "1".to_owned()));
         }
         let stdin_file = self.profile.stdin_path_of(turn, attempt);
         write_whole(&stdin_file, &launch.stdin)?;

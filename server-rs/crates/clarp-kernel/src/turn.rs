@@ -67,6 +67,12 @@ impl Origin {
 /// turn (it types into the tool's own screen), so the word is this Host's.
 pub const COMPACTION: &str = "compaction";
 
+/// What the turn is filed under in which an agent that is about to move to another tool
+/// summarizes the part of its conversation that does not fit, on its old tool: nobody's
+/// message, and what it answers is carried at the head of the new tool's session, not as a
+/// turn of the conversation.
+pub const TRANSIT_SUMMARY: &str = "transit-summary";
+
 /// [`Origin::automation_kind`] for an origin by its name.
 pub fn automation_kind(origin: &str) -> &str {
     match origin {
