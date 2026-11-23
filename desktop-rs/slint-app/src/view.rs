@@ -619,7 +619,19 @@ pub(crate) fn message_row(
     expanded: &std::collections::HashSet<String>,
 ) -> MessageRow {
     let m = &row.message;
-    let author = if row.activity { "activity" } else if m.role == "user" { "user" } else { "assistant" };
+    // A row the Host writes itself (role "system", e.g. "Now on Codex ·
+    // GPT-5.5. The conversation came along." after a backend move) reads as
+    // a quiet line, not as the agent's reply. Notices that only carry origin
+    // "system" (a failed turn) stay as they are, so a failure stays loud.
+    let author = if row.activity {
+        "activity"
+    } else if m.role == "user" {
+        "user"
+    } else if m.role == "system" {
+        "system"
+    } else {
+        "assistant"
+    };
     // A reply is only ever its written form: a row whose voice markup was
     // all there was shows nothing rather than the tags.
     let text = if row.body.is_empty() && !row.activity && author == "user" { m.text.clone() } else { row.body.clone() };

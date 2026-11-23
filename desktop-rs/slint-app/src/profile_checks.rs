@@ -607,10 +607,12 @@ pub(super) fn backend_row_check(out: String) {
             let (info, step, _) = backend_now(window);
             let engine = app.engine.borrow();
             let moved = engine.roster().find("rachel").is_some_and(|a| a.backend == "codex" && a.model == "gpt-5.5");
-            let line = engine.conversation("rachel").is_some_and(|c| c.rows().iter().any(|r| r.text.starts_with("Now on Codex")));
+            let line = engine.conversation("rachel").is_some_and(|c| c.rows().iter().any(|r| r.text.starts_with("Now on Codex") && r.role == "system"));
             if !moved || !line || info.backend_moving || elapsed < Duration::from_millis(300) {
                 return false;
             }
+            let drawn = rows(window).into_iter().find(|r| r.id.starts_with("transit-")).map(|r| r.author.to_string());
+            check(drawn.as_deref() == Some("system"), &format!("the Host's result line is drawn as a quiet system line, not as a reply: {drawn:?}"));
             let body = posts("/agent-transit").last().map(|p| p["body"].clone()).unwrap_or(Value::Null);
             check(body["session"] == "rachel" && body["backend"] == "codex" && body["model"] == "gpt-5.5" && body["request_id"].as_str().is_some_and(|r| !r.is_empty()) && body.get("effort").is_none(),
                 &format!("Move starts it with a request id: {body}"));

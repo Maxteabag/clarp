@@ -104,7 +104,7 @@ export struct PromptRow {
 
 export struct MessageRow {
     id: string,
-    // user, assistant, activity
+    // user, assistant, activity, system (a line the Host wrote itself)
     author: string,
     blocks: [MessageBlock],
     stamp: string,
@@ -851,8 +851,8 @@ component TranscriptRow inherits HorizontalLayout {
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
-                body-size: root.message.author == "activity" ? ChatText.label : ChatText.body;
-                body-color: root.message.author == "activity" ? Palette.muted : Palette.text;
+                body-size: root.message.author == "activity" || root.message.author == "system" ? ChatText.label : ChatText.body;
+                body-color: root.message.author == "activity" || root.message.author == "system" ? Palette.muted : Palette.text;
                 link-clicked(url) => { root.link-clicked(url); }
             }
             // A stopped answer says so under its text.
