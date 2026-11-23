@@ -1,0 +1,468 @@
+#!/usr/bin/env python3
+"""The week's audit: real agents' conversations on an installed Rust Host, read once by hand.
+
+    server-rs/tools/week-audit [--host ADDR:PORT] [--session S ...] [--since TIME] [--until TIME]
+                               [--out FILE] [--pause SECONDS] [--stuck-minutes N]
+
+The battle test's last proof is a week of real agents on the Host with no message lost and none
+doubled. This reads what the agents said and were told over a window (`--since`, an ISO time or
+epoch milliseconds; the last 24 hours by default) and says, for each agent and in total:
+
+  * DOUBLED: a message twice in the conversation (the same id; or the same sender, origin and
+    text within 60 seconds), a turn that ended twice, or a final answer stored twice in a turn;
+  * LOST: a message (from the user, an agent or an automation) with no turn that ended for it,
+    not joined into a turn that was running when it came, not waiting in the queue, not running
+    now, and with no word from the Host saying why (a Stop, a failure, an account it waits for).
+    A turn that ended without completing is not lost: it is counted under the Host's own word,
+    as `tools/soak` counts it;
+  * STUCK: a message older than `--stuck-minutes` (30) whose turn has neither ended nor says why
+    it waits: queued while turns of the agent end and the queue is not taken up, or running with
+    no state that says it waits.
+
+An agent that was moved to this Host brings its conversation with it: what was written before it
+came (its `created_at` on this Host) was the other Host's doing, and is read but not judged.
+
+It reads the Host's HTTP API only (`GET /agents/snapshot`, `GET /log` paged back with `before`,
+`GET /turn-queue`), one agent at a time, a page of 200 at most, with a pause between requests,
+and stops paging at the window's start. It never writes to the Host, and never opens a store.
+
+A finding is named by its message id, its trace and a short hash of its text: never the text.
+The JSON report (`--out`) holds ids and is kept off the repository (/var/tmp/week-audit/).
+A finding is a candidate: look at each by hand through the same API before calling it real (a
+Host restart, a Stop, a moved agent, a hidden coordination turn may explain it).
+
+It is run by hand, once, at the end of the week. It is never scheduled: the owner's rule of
+21 Nov 2026 forbids tests that start by themselves.
+
+The token is read from CLARP_HOST_TOKEN, or from the file the installer wrote
+(~/.config/clarp-host/env).
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import hashlib
+import json
+import os
+import pathlib
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HOME = pathlib.Path.home()
+CONFIG = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "clarp-host"
+PAGE = 200
+DOUBLE_SECONDS = 60
+# A message this young with nothing yet is on its way, not lost.
+GRACE_MS = 2 * 60 * 1000
+# What the Host's live state says when a turn waits for a reason of its own.
+WAITING_STATES = ("limited", "waiting", "waiting_for_account", "compacting", "stalled", "queued")
+
+
+def token() -> str:
+    given = os.environ.get("CLARP_HOST_TOKEN", "")
+    if given:
+        return given
+    try:
+        for line in (CONFIG / "env").read_text().splitlines():
+            if line.startswith("CLARP_HOST_TOKEN="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
+class Host:
+    """The Host, asked politely: GET only, a pause after every request."""
+
+    def __init__(self, address: str, secret: str, pause: float):
+        self.base, self.secret, self.pause = f"http://{address}", secret, pause
+        self.requests = 0
+
+    def get(self, path: str, timeout: float = 60):
+        request = urllib.request.Request(self.base + path, method="GET")
+        if self.secret:
+            request.add_header("Authorization", f"Bearer {self.secret}")
+        self.requests += 1
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as answer:
+                raw, status = answer.read(), answer.status
+        except urllib.error.HTTPError as refused:
+            raw, status = refused.read(), refused.code
+        except (urllib.error.URLError, OSError, TimeoutError) as failed:
+            return 0, str(getattr(failed, "reason", failed))
+        finally:
+            time.sleep(self.pause)
+        try:
+            return status, json.loads(raw)
+        except ValueError:
+            return status, raw.decode("utf-8", "replace")
+
+
+def ms_of(value) -> int | None:
+    """Epoch milliseconds of an ISO time, epoch seconds or epoch milliseconds."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return int(value if value > 1e11 else value * 1000)
+    text = str(value).strip()
+    if text.lstrip("-").isdigit():
+        return ms_of(int(text))
+    try:
+        when = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.astimezone()
+    return int(when.timestamp() * 1000)
+
+
+def iso(ms: int | None) -> str:
+    if not ms:
+        return ""
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def short_hash(text) -> str:
+    return hashlib.sha256(" ".join(str(text or "").split()).encode()).hexdigest()[:10]
+
+
+def window_rows(host: Host, session: str, since: int):
+    """The conversation from the window's start on, oldest first, read a page at a time the way an
+    app pages back, and the rows of the last page that reach before the window (for context).
+    None when the Host does not answer."""
+    q = urllib.parse.quote(session)
+    base = f"/log?session={q}&limit={PAGE}&include_tool_details=0"
+    status, body = host.get(base)
+    if status != 200 or not isinstance(body, dict):
+        return None, {"status": status}
+    page = list(body.get("turns") or [])
+    rows, pages, overlap = list(page), 1, 0
+    twice_in_a_page = sorted(row_id for row_id, count in counted(page).items() if count > 1)
+    while body.get("has_more") and page:
+        oldest = min((ms_of(row.get("timestamp")) or 0) for row in page)
+        if oldest and oldest < since:
+            break
+        first = urllib.parse.quote(str(page[0].get("id") or ""))
+        status, body = host.get(f"{base}&before={first}")
+        if status != 200 or not isinstance(body, dict):
+            return None, {"status": status, "pages": pages}
+        page = list(body.get("turns") or [])
+        pages += 1
+        if not page:
+            break
+        twice_in_a_page += sorted(row_id for row_id, count in counted(page).items() if count > 1)
+        # A page read with `before` may hold rows the newer page already had: the cursor is the
+        # row's newest version, and a row written again later (a tool item that ended, a row
+        # the Host updated) is older by its place and newer by its version. Such a row is read
+        # twice by the reader, not stored twice: the newer page's copy is kept.
+        have = {str(row.get("id")) for row in rows}
+        older = [row for row in page if str(row.get("id")) not in have]
+        overlap += len(page) - len(older)
+        rows = older + rows
+    meta = {"pages": pages, "rows_read": len(rows), "conversation_id": body.get("conversation_id", ""),
+            "rows_on_two_pages": overlap, "twice_in_a_page": twice_in_a_page}
+    return rows, meta
+
+
+def counted(page: list) -> dict:
+    seen: dict[str, int] = {}
+    for row in page:
+        if row.get("id"):
+            seen[str(row["id"])] = seen.get(str(row["id"]), 0) + 1
+    return seen
+
+
+def sender_of(row: dict) -> str:
+    return str(row.get("sender_agent_id") or row.get("sender_session") or row.get("sender_name") or "")
+
+
+def audit_agent(host: Host, session: str, agent: dict, since: int, until: int, now: int, stuck_ms: int) -> dict:
+    # An agent moved here from another Host brings its conversation: what it holds from before
+    # the agent came (`created_at`) was written by the Host it came from, and is not judged.
+    came = ms_of(agent.get("created_at")) or 0
+    since = max(since, came)
+    rows, meta = window_rows(host, session, since)
+    result = {"session": session, "backend": agent.get("backend", ""), "read": meta,
+              "judged_from": iso(since), "came_here": iso(came),
+              "messages": 0, "by_origin": {}, "turns": 0, "turn_status": {}, "reasons": {},
+              "joined": 0, "waiting": 0, "running": 0, "said_why": 0, "pending": 0,
+              "lost": [], "doubled": [], "stuck": [], "unfinished": [], "repeated": [], "notes": []}
+    if rows is None:
+        result["notes"].append(f"log not read: {meta}")
+        return result
+    status, queue = host.get(f"/turn-queue?session={urllib.parse.quote(session)}")
+    items = list(queue.get("items") or []) if status == 200 and isinstance(queue, dict) else []
+    paused = bool(queue.get("paused")) if isinstance(queue, dict) else False
+    live = agent.get("live_activity") or {}
+    live_turn = str(live.get("turn_id") or "")
+    busy = bool(agent.get("busy"))
+
+    def in_window(row) -> bool:
+        at = ms_of(row.get("timestamp"))
+        return at is not None and since <= at <= until
+
+    # Every turn end read, by the trace that names it; and the rows of each trace.
+    ends: dict[str, list[dict]] = {}
+    traced: dict[str, list[int]] = {}
+    for i, row in enumerate(rows):
+        turn = row.get("turn")
+        if isinstance(turn, dict):
+            ends.setdefault(str(turn.get("turn_id") or ""), []).append({"row": i, **turn})
+        if row.get("trace_id"):
+            traced.setdefault(str(row["trace_id"]), []).append(i)
+    spans = [end for found in ends.values() for end in found]
+
+    # The turns that ended in the window, and how.
+    for trace, found in ends.items():
+        for end in found:
+            at = end.get("ended_at_ms") or ms_of(rows[end["row"]].get("timestamp"))
+            if not at or not since <= at <= until:
+                continue
+            result["turns"] += 1
+            state = str(end.get("status") or "ended")
+            result["turn_status"][state] = result["turn_status"].get(state, 0) + 1
+            if state != "completed":
+                reason = host_word(rows, end["row"], trace) or (
+                    f"replaced by a later turn" if end.get("replaced_by") else "no sentence from the Host")
+                key = f"{state}: {reason}"
+                result["reasons"][key] = result["reasons"].get(key, 0) + 1
+                result["unfinished"].append({"trace_id": trace, "status": state, "reason": reason,
+                                             "end_row_id": rows[end["row"]].get("id"), "at": iso(at)})
+        if len([e for e in found if since <= (e.get("ended_at_ms") or 0) <= until]) > 1:
+            first = found[0]
+            result["doubled"].append({"kind": "turn_ended_twice", "trace_id": trace, "ends": len(found),
+                                      "statuses": [e.get("status") for e in found],
+                                      "end_row_ids": [rows[e["row"]].get("id") for e in found],
+                                      "at": iso(first.get("ended_at_ms"))})
+
+    # The same id twice in one page of the Host's answer: stored twice, not read twice.
+    for row_id in sorted(set(meta.get("twice_in_a_page") or [])):
+        row = next((r for r in rows if str(r.get("id")) == row_id), {})
+        if in_window(row):
+            result["doubled"].append({"kind": "same_id_twice", "message_id": row_id, "role": row.get("role"),
+                                      "trace_id": row.get("trace_id", ""),
+                                      "hash": short_hash(row.get("text")), "at": row.get("timestamp")})
+
+    # The same message twice under two ids: same sender, origin and text within 60 seconds.
+    users = [i for i, row in enumerate(rows) if row.get("role") == "user" and in_window(row)]
+    last_of: dict[tuple, int] = {}
+    for i in users:
+        row = rows[i]
+        text = " ".join(str(row.get("text") or "").split())
+        if not text:
+            continue
+        key = (str(row.get("origin") or ""), sender_of(row), text)
+        if key in last_of:
+            j = last_of[key]
+            gap = (ms_of(row.get("timestamp")) or 0) - (ms_of(rows[j].get("timestamp")) or 0)
+            if 0 <= gap <= DOUBLE_SECONDS * 1000 and rows[j].get("id") != row.get("id"):
+                both_ended = all(ends.get(str(rows[k].get("trace_id") or "")) for k in (i, j))
+                distinct = rows[j].get("trace_id") != row.get("trace_id")
+                (result["repeated"] if both_ended and distinct else result["doubled"]).append({"kind": "same_text_twice", "message_id": row.get("id"),
+                                          "first_id": rows[j].get("id"), "origin": key[0],
+                                          "trace_id": row.get("trace_id", ""), "first_trace_id": rows[j].get("trace_id", ""),
+                                          "seconds_apart": round(gap / 1000, 1), "hash": short_hash(text),
+                                          "at": row.get("timestamp")})
+        last_of[key] = i
+
+    # A final answer stored twice in one turn: the same text, a final, under one trace.
+    finals: dict[tuple, list[int]] = {}
+    for i, row in enumerate(rows):
+        if row.get("role") == "assistant" and row.get("phase") == "final" and in_window(row):
+            text = " ".join(str(row.get("text") or "").split())
+            if text:
+                finals.setdefault((str(row.get("trace_id") or ""), text), []).append(i)
+    for (trace, text), places in finals.items():
+        ids = {rows[i].get("id") for i in places}
+        if len(places) > 1 and len(ids) > 1:
+            result["doubled"].append({"kind": "final_twice", "trace_id": trace, "ids": sorted(map(str, ids)),
+                                      "hash": short_hash(text), "at": rows[places[0]].get("timestamp")})
+
+    # Each message in the window: what became of it.
+    queued_ids = {str(item.get("id") or item.get("client_msg_id") or "") for item in items}
+    for i in users:
+        row = rows[i]
+        result["messages"] += 1
+        origin = str(row.get("origin") or "user")
+        result["by_origin"][origin] = result["by_origin"].get(origin, 0) + 1
+        mid, trace = str(row.get("id") or ""), str(row.get("trace_id") or "")
+        at = ms_of(row.get("timestamp")) or 0
+        finding = {"message_id": mid, "trace_id": trace, "origin": origin, "at": row.get("timestamp"),
+                   "hash": short_hash(row.get("text"))}
+        if ends.get(trace):
+            continue
+        delivery = row.get("delivery") if isinstance(row.get("delivery"), dict) else {}
+        if delivery.get("state") == "stopped":
+            result["said_why"] += 1
+            key = "stopped before it was handed over"
+            result["reasons"][key] = result["reasons"].get(key, 0) + 1
+            continue
+        if mid.removeprefix("u-") in queued_ids or mid in queued_ids:
+            continue
+        if busy and trace and trace == live_turn:
+            result["running"] += 1
+            # A long turn that works is not stuck: one whose state has not moved for the limit,
+            # and that does not say it waits, is.
+            quiet = now - (ms_of(live.get("since_ms")) or at)
+            if now - at > stuck_ms and quiet > stuck_ms and str(live.get("state") or "") not in WAITING_STATES:
+                result["stuck"].append({**finding, "kind": "running_without_moving", "state": live.get("state"),
+                                        "minutes": round((now - at) / 60000), "quiet_minutes": round(quiet / 60000),
+                                        "running_tools": live.get("running_tools")})
+            continue
+        # Joined: a turn of another trace that was running when the message came, and ended after
+        # it (a follow-up read into a running process), or the live turn that is running now.
+        host_t = next((e for e in spans if (e.get("started_at_ms") or 0) <= at <= (e.get("ended_at_ms") or 0)
+                       and str(e.get("turn_id")) != trace), None)
+        if host_t is not None:
+            result["joined"] += 1
+            answered = any(rows[j].get("role") == "assistant" for j in traced.get(trace, []))
+            if not answered:
+                result["notes"].append({"kind": "joined_without_rows_of_its_own", "message_id": mid,
+                                        "into": host_t.get("turn_id"), "hash": finding["hash"]})
+            continue
+        if busy and live.get("turn_started_ms") and int(live["turn_started_ms"]) <= at:
+            result["joined"] += 1
+            continue
+        said = host_word(rows, i, trace)
+        if said:
+            result["said_why"] += 1
+            key = f"no end, said: {said}"
+            result["reasons"][key] = result["reasons"].get(key, 0) + 1
+            continue
+        if now - at < GRACE_MS:
+            result["pending"] += 1
+            continue
+        result["lost"].append({**finding, "kind": "lost", "rows_of_its_trace": len(traced.get(trace, [])),
+                               "next_rows": [rows[j].get("id") for j in range(i + 1, min(i + 3, len(rows)))]})
+
+    # Waiting in the queue. An agent that works through a backlog takes up one message at each
+    # turn's end: those wait behind it, and their age says nothing (a turn that does not move is
+    # found above). Stuck: older than the limit while the agent is idle and its queue not paused.
+    for item in items:
+        enqueued = ms_of(item.get("enqueued_at")) or ms_of(item.get("sent_at")) or 0
+        result["waiting"] += 1
+        if not enqueued or now - enqueued <= stuck_ms or paused:
+            continue
+        ended_since = sum(1 for e in spans if (e.get("ended_at_ms") or 0) > enqueued)
+        if not busy:
+            result["stuck"].append({"kind": "queued_not_taken_up", "message_id": f"u-{item.get('id')}",
+                                    "status": item.get("status"), "queue_kind": item.get("kind"),
+                                    "origin": item.get("origin"), "hash": short_hash(item.get("text")),
+                                    "at": iso(enqueued), "minutes": round((now - enqueued) / 60000),
+                                    "turns_ended_since": ended_since, "agent_busy": busy})
+    result["queue"] = {"items": len(items), "paused": paused}
+    return result
+
+
+def host_word(rows: list, start: int, trace: str) -> str:
+    """The Host's own sentence of why a turn did not finish: a row of its own (origin `system`)
+    under the same trace, or between the row and the next message. Numbers are taken out so that
+    like reasons count together."""
+    for j in range(start, len(rows)):
+        row = rows[j]
+        if j > start and row.get("role") == "user":
+            break
+        if row.get("role") == "assistant" and row.get("origin") == "system":
+            if not trace or str(row.get("trace_id") or "") in ("", trace):
+                text = " ".join(str(row.get("text") or "").split())
+                return "".join("#" if ch.isdigit() else ch for ch in text)[:120]
+    for j in range(start - 1, -1, -1):
+        row = rows[j]
+        if row.get("role") == "user":
+            break
+        if row.get("role") == "assistant" and row.get("origin") == "system" and str(row.get("trace_id") or "") == trace:
+            text = " ".join(str(row.get("text") or "").split())
+            return "".join("#" if ch.isdigit() else ch for ch in text)[:120]
+    return ""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="week-audit", description=__doc__.splitlines()[0])
+    parser.add_argument("--host", default="127.0.0.1:7690")
+    parser.add_argument("--session", action="append", default=[], help="only this agent (may be given again)")
+    parser.add_argument("--since", default="", help="ISO time or epoch ms (default: 24 hours ago)")
+    parser.add_argument("--until", default="", help="ISO time or epoch ms (default: now)")
+    parser.add_argument("--out", default="", help="the JSON report (default: /var/tmp/week-audit/<host>-<time>.json)")
+    parser.add_argument("--pause", type=float, default=0.15, help="seconds between two requests")
+    parser.add_argument("--stuck-minutes", type=float, default=30)
+    args = parser.parse_args()
+
+    now = int(time.time() * 1000)
+    since = ms_of(args.since) if args.since else now - 24 * 3600 * 1000
+    until = ms_of(args.until) if args.until else now
+    if since is None or until is None:
+        print("week-audit: --since and --until take an ISO time or epoch milliseconds", file=sys.stderr)
+        return 2
+    host = Host(args.host, token(), args.pause)
+    status, info = host.get("/server-info", timeout=10)
+    if status != 200 or not isinstance(info, dict):
+        print(f"week-audit: the Host at {args.host} did not answer ({status})", file=sys.stderr)
+        return 3
+    status, snap = host.get("/agents/snapshot")
+    if status != 200 or not isinstance(snap, dict):
+        print(f"week-audit: no snapshot ({status})", file=sys.stderr)
+        return 3
+    agents = {str(row.get("session")): row for row in snap.get("agents") or [] if row.get("session")}
+    chosen = args.session or sorted(agents)
+    report = {"host": str(info.get("name") or args.host), "host_version": info.get("version", ""),
+              "since": iso(since), "until": iso(until), "read_at": iso(now), "stuck_minutes": args.stuck_minutes,
+              "agents": {}, "totals": {}}
+    for session in chosen:
+        agent = agents.get(session)
+        if agent is None:
+            report["agents"][session] = {"session": session, "notes": ["not an agent of this Host"]}
+            continue
+        result = audit_agent(host, session, agent, since, until, now, int(args.stuck_minutes * 60000))
+        if args.session or result["messages"] or result["turns"] or result["lost"] or result["doubled"] or result["stuck"]:
+            if agent.get("moved"):
+                result["notes"].append({"kind": "moved", "moved": agent.get("moved")})
+            report["agents"][session] = result
+    totals = {"agents": 0, "messages": 0, "turns": 0, "joined": 0, "waiting": 0, "running": 0, "said_why": 0,
+              "pending": 0, "lost": 0, "doubled": 0, "stuck": 0, "repeated": 0, "rows_on_two_pages": 0,
+              "turn_status": {}, "reasons": {}}
+    for result in report["agents"].values():
+        if "messages" not in result:
+            continue
+        totals["agents"] += 1
+        for key in ("messages", "turns", "joined", "waiting", "running", "said_why", "pending"):
+            totals[key] += result[key]
+        for key in ("lost", "doubled", "stuck", "repeated"):
+            totals[key] += len(result[key])
+        totals["rows_on_two_pages"] += result["read"].get("rows_on_two_pages", 0)
+        for key in ("turn_status", "reasons"):
+            for name, count in result[key].items():
+                totals[key][name] = totals[key].get(name, 0) + count
+    report["totals"] = totals
+    report["requests"] = host.requests
+
+    out = pathlib.Path(args.out) if args.out else pathlib.Path("/var/tmp/week-audit") / (
+        f"{str(info.get('name') or 'host').replace(' ', '-')}-{time.strftime('%Y%m%d-%H%M')}.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
+    os.chmod(out, 0o600)
+
+    t = totals
+    print(f"{report['host']} ({report['host_version']}), {report['since']} to {report['until']}: "
+          f"{t['agents']} agents with activity, {t['messages']} messages, {t['turns']} turns ended")
+    print("  turns: " + (", ".join(f"{k} {v}" for k, v in sorted(t["turn_status"].items())) or "none"))
+    for reason, count in sorted(t["reasons"].items(), key=lambda item: -item[1])[:12]:
+        print(f"    {count} x {reason}")
+    print(f"  messages joined into a running turn {t['joined']}, waiting in the queue {t['waiting']}, "
+          f"running now {t['running']}, ended in the Host's word {t['said_why']}, just sent {t['pending']}")
+    print(f"  sent twice by their sender, each answered by a turn of its own: {t['repeated']}; "
+          f"rows the Host gave on two pages when paged back: {t['rows_on_two_pages']}")
+    print(f"LOST {t['lost']}   DOUBLED {t['doubled']}   STUCK {t['stuck']}")
+    for session, result in sorted(report["agents"].items()):
+        for key in ("lost", "doubled", "stuck"):
+            for finding in result.get(key) or []:
+                print(f"  {key}: {session} {finding.get('kind')} {finding.get('message_id') or finding.get('trace_id')} "
+                      f"#{finding.get('hash', '')} {finding.get('at', '')}")
+    print(f"report: {out} ({host.requests} requests)")
+    return 1 if t["lost"] or t["doubled"] or t["stuck"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

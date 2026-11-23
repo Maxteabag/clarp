@@ -1371,6 +1371,69 @@ door: it takes a call, which reaches a paid voice. It is held by the vectors of 
 module (15 stories, 568 steps), by the Host's test, and by the wrong rules those caught on the commit that
 is installed (handoffs 173 of 173, the call 93 of 93, what agents finished 78 of 78).
 
+## The week's audit
+
+The last proof is a week of real agents on the Host with no message lost and none doubled. The soak
+cannot say that: it writes its own messages. `tools/week-audit` reads what real agents were told and
+said, through the Host's HTTP API only (`GET /agents/snapshot`, `GET /log` paged back with `before`,
+`GET /turn-queue`), one agent at a time, a page of 200 at most with a pause between requests, and stops
+paging at the window's start. It writes nothing to the Host and opens no store. Python 3, the standard
+library only; nothing to build.
+
+For each agent, and in total, over the window (`--since`, `--until`: an ISO time or epoch ms; the last
+24 hours by default):
+
+* **doubled**: the same id twice in one page of the Host's answer; the same sender, origin and text
+  twice within 60 seconds where one of the two has no turn of its own; a turn that ended twice; a final
+  answer stored twice in one turn;
+* **lost**: a message (from the user, an agent or an automation) with no turn that ended for it, not
+  read into a turn that ran when it came, not waiting in the queue, not running now, and with no
+  sentence from the Host saying why. A turn that ended without completing is not lost: it is counted
+  under its status and the Host's own sentence, as the soak counts it;
+* **stuck**: a message older than 30 minutes whose turn has not ended and does not say why it waits:
+  in the queue of an agent that is idle with its queue not paused, or running with a state that has
+  not moved for 30 minutes and is not a wait (an account, a compaction).
+
+What it learned from its first runs, so that it does not count them as findings:
+
+* An agent moved to the Host brings its conversation. What was written before it came (its
+  `created_at` on this Host) was the other Host's doing: read, not judged.
+* `GET /log?before=<id>` gives again rows the newer page already had when a row (a Codex or
+  Antigravity tool item that ended later) was written again after its place: the cursor is the row's
+  newest version. Such a row is read twice, not stored twice; the newer page's copy is kept and the
+  number is in the report.
+* A user's follow-up that a running Claude turn read has no turn of its own: its row is written when
+  the tool has read it, inside the turn that ran when it came. It is counted as joined.
+* The same text twice under two ids, each answered by a turn of its own, is a sender that sent twice
+  (a retry under a new id, a probe), not a message the Host doubled. It is listed apart.
+* An agent working through a backlog takes up one queued message at each turn's end: an old queued
+  message behind a turn that moves is waiting, not stuck.
+
+Each finding is named by its message id, its trace and a short hash of its text, never the text. The
+JSON report holds ids and stays off the repository, in `/var/tmp/week-audit/` (mode 0600). Every
+finding is a candidate until it is looked at by hand through the same API: a Host restart, a Stop, a
+moved agent or a hidden coordination turn may explain it.
+
+It is run by hand, once, at the end of the week, on each Host. It is never scheduled: the owner's rule
+of 21 Nov 2026 forbids tests that start by themselves.
+
+```sh
+# the first agent moved to the elitebook Host, a week from when it came:
+server-rs/tools/week-audit --session <its session> --since 2026-11-21T18:49+01:00 --until 2026-11-28T18:49+01:00
+# the whole fleet, on elitebook and (by ssh, the same script) on laptopstudio, on 29 Nov at 20:00:
+server-rs/tools/week-audit --since 2026-11-22T20:00+01:00 --until 2026-11-29T20:00+01:00
+```
+
+The method was proved on 23 Nov 2026 over the last 24 hours of both Hosts, on the build of
+`49595e92`. elitebook: 98 agents with activity, 2,820 messages, 2,791 turns ended (2,770 completed,
+5 failed with the Host's sentence, 16 interrupted), 28 follow-ups read into running turns; no message
+doubled, none stuck, and one lost: a probe agent's message sent a few seconds after the agent was moved
+to Codex. It waited for a Codex account, the account selector answered that none served it, and the
+message ended with no turn end and no sentence. The lead was told. laptopstudio: 51 agents,
+556 messages, 556 turns ended (281 completed, 273 failed, 2 interrupted); none lost, doubled or stuck. Of
+the failed turns, 255 were automated heartbeat checks that waited for a Claude account and ended when the
+selector answered that none served them; the Host wrote no sentence under them.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
