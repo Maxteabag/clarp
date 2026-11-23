@@ -878,3 +878,31 @@ fn a_turn_that_fails_before_its_prompt_settles_its_own_message_and_never_waits_f
     assert_eq!(answers[0]["is_error"], true);
     assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
 }
+
+#[test]
+fn what_antigravity_says_by_itself_is_no_read_of_a_message() {
+    let place = Place::new("steer-meta", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-after"), &[]);
+    let mut printed = Printed::of(&mut child);
+    printed.until("the first answer", |line| line["type"] == "result");
+    // Sent where nothing runs: agy says which commands it offers, then refuses it.
+    steer(&mut input, "u-meta", "add-meta");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    let seen = &printed.seen;
+    assert!(
+        seen.iter()
+            .any(|line| line["params"]["update"]["sessionUpdate"] == "available_commands_update"),
+        "{seen:?}"
+    );
+    assert!(seen.iter().all(|line| read_of(line).is_none()), "{seen:?}");
+    let refused = seen
+        .iter()
+        .find(|line| line["type"] == "steer_refused")
+        .unwrap();
+    assert_eq!(refused["uuid"], "u-meta");
+    let answers = settled(seen);
+    assert_eq!(answers.len(), 1, "{seen:?}");
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own"]));
+}

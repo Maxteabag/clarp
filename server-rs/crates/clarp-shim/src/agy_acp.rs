@@ -109,8 +109,13 @@ impl Handler for Record {
             self.first_update_ms = Some(ms(self.launched));
         }
         // Antigravity is at work on the prompt whose message waits to be read: the read comes
-        // before what it does with it.
-        if update && let Some(uuid) = self.read_next.take() {
+        // before what it does with it. Only work counts: agy also says, on its own, which
+        // commands it offers, what the conversation is called and how full it is, before it has
+        // touched the message (seen in a stopped turn's spool, 23 Nov 2026).
+        if update
+            && works(message)
+            && let Some(uuid) = self.read_next.take()
+        {
             read_out(&uuid)?;
             self.took = Some(uuid);
         }
@@ -483,6 +488,22 @@ fn failed_for(stage: &str, error: &Value, uuid: &str) -> io::Result<()> {
         line["uuid"] = json!(uuid);
     }
     emit(&line)
+}
+
+/// Whether an update is Antigravity at work on its prompt: what it writes, thinks, runs or plans,
+/// or its own echo of the message. Not what it says by itself of the conversation.
+fn works(message: &Value) -> bool {
+    matches!(
+        message["params"]["update"]["sessionUpdate"].as_str(),
+        Some(
+            "agent_message_chunk"
+                | "agent_thought_chunk"
+                | "tool_call"
+                | "tool_call_update"
+                | "plan"
+                | "user_message_chunk"
+        )
+    )
 }
 
 /// The read of a message: the one place it is printed. When it is printed is the prompts'

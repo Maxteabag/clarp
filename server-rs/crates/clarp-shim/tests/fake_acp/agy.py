@@ -154,6 +154,10 @@ def prompt(mid, sid, words=""):
     if scenario == "steer":
         alone = re.search(r"add-[a-z0-9-]+", words)
         if alone and "case-" not in words:
+            # As agy does on its own: what it offers, before it touches the message.
+            update(sid, {"sessionUpdate": "available_commands_update", "availableCommands": []})
+            if "meta" in alone.group(0):
+                return error(mid, -32603, "a prompt it would not take")
             text(sid, "agent_message_chunk", "separate-" + alone.group(0))
             return result(mid, {"stopReason": "end_turn"})
         return steering(mid, sid, words)
