@@ -451,7 +451,19 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                             } else {
                                 format!("/audio/{now}__{}.mp3", admitted.caller().session)
                             };
+                            // Placed as the Host places it, through the phones it pushes a
+                            // call to: a live ring has no answer grace (issue 217 is for
+                            // classic rings), and rings its 45 seconds.
+                            let live = admitted.is_live();
+                            let admitted = if live {
+                                rings.for_voip(admitted, &world)
+                            } else {
+                                admitted
+                            };
                             let ring = rings.place(admitted, &voiced, &id(1), now, &mut out);
+                            if live {
+                                assert_eq!(ring.expires_at, now + clarp_kernel::rings::RING_MS);
+                            }
                             made += 1;
                             placed += 1;
                             let delivery = delivery(&rings, &ring, &world, &call_pushes);

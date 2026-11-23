@@ -691,9 +691,14 @@ impl Rings {
         }
     }
 
-    /// Freeze the actual VoIP push destinations while the ring is placed.
+    /// Freeze the actual VoIP push destinations while the ring is placed. A ring held as a
+    /// live voice call has no answer grace (issue 217 is for classic rings): it keeps its 45
+    /// seconds and its own grant identity.
     pub fn for_voip(&self, mut admitted: Admitted, world: &World) -> Admitted {
-        let phones = self.voip_recipients(admitted.is_live());
+        if admitted.is_live() {
+            return admitted;
+        }
+        let phones = self.voip_recipients(false);
         admitted.answer_devices = self
             .pushed_as_calls(&phones, world)
             .into_iter()
@@ -885,16 +890,22 @@ impl Rings {
         self.settle(now_ms, out);
         let place = self.place_of(asked.ring_id)?;
         let ring = &self.rings[place];
+        // A live ring is answered as before the grace: by its own refusals (`live_auth`,
+        // `live_owner_conflict`), which the apps draw for a live call. So is an answer that
+        // asks for a live call, or names a way of answering that is none: it is no classic
+        // answer, and is refused first for that (`live_mode_conflict`), as by the Python Host.
+        if ring.conversation_mode == LIVE || live_asked(asked.conversation_mode) != Ok(false) {
+            return self
+                .answer_uncached(calls, asked, given, world, at, (out, of_calls))
+                .map(|answer| project(calls, answer));
+        }
         let paired = asked.principal.starts_with("device_");
         if paired && !(world.device_ok)(asked.principal) {
             return Err(refused(403, "ring_not_for_device"));
         }
         // Classic CallKit retries supply the identity that older classic answers lacked.
         // Live has its own durable grant identity, and can report a retired grant safely.
-        let retry = if paired
-            && ring.conversation_mode != LIVE
-            && (!asked.request_id.is_null() || !asked.client_nonce.is_null())
-        {
+        let retry = if paired && (!asked.request_id.is_null() || !asked.client_nonce.is_null()) {
             Some(live::intent(asked.request_id, asked.client_nonce)?)
         } else {
             None
