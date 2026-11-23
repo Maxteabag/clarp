@@ -1,7 +1,7 @@
 //! One process owns an agent's Codex thread between its turns: its chat turns, and a native
 //! goal's. The Host's reservation, Codex's request replies, and the spool writer meet here.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -23,6 +23,11 @@ use crate::codex_lane_socket::{Socket, write};
 use crate::codex_lane_turns::Slot;
 
 const RPC_LIMIT: Duration = Duration::from_secs(12);
+/// Loading a thread reads its whole rollout: a long one takes longer than a request. Below
+/// the Host's own 30 s for a first request (`codex_goal_lane::RPC_TIMEOUT`).
+const LOAD_LIMIT: Duration = Duration::from_secs(25);
+/// Replies nobody waited for yet, kept for a request still being waited on further out.
+const STRAY_MOST: usize = 64;
 const BUFFER_MOST: usize = 512;
 /// How long Codex has to end a turn after `turn/interrupt` when the Stop named no time.
 const STOP_GRACE: Duration = Duration::from_secs(5);
@@ -160,6 +165,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         effort: None,
         idle_since: Instant::now(),
         stop_deadline: None,
+        stray: BTreeMap::new(),
         revision: 0,
         input,
         send,
@@ -218,6 +224,10 @@ struct Lane {
     idle_since: Instant,
     /// The attempt a Stop interrupted, and when Codex is ended if the turn still runs.
     stop_deadline: Option<(Instant, (u64, u32))>,
+    /// Replies that came while another request was waited on, by request id. A request made
+    /// while handling a notification (`check_reads`) must not swallow the reply that an
+    /// outer request waits for (review of 23 Nov 2026).
+    stray: BTreeMap<u64, Result<Value, String>>,
     revision: u64,
     input: Receiver<Input>,
     send: SyncSender<Input>,
@@ -323,6 +333,15 @@ impl Lane {
 
     fn next_input(&mut self) -> io::Result<Option<Input>> {
         loop {
+            // A Codex that keeps talking after a Stop must not put off its end: the deadline
+            // is looked at before anything that waits is taken (review of 23 Nov 2026).
+            if self
+                .stop_deadline
+                .is_some_and(|(at, _)| Instant::now() >= at)
+                && self.expired()?
+            {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "idle"));
+            }
             if let Some(input) = self.deferred.pop_front() {
                 return Ok(Some(input));
             }
@@ -479,10 +498,15 @@ impl Lane {
         };
         let written = (|| {
             let partial = path.with_extension(format!("{}.part", std::process::id()));
+            // A file left by a lane of the same pid before a crash is not written through.
+            match fs::remove_file(&partial) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
             let mut file = OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .mode(0o600)
                 .open(&partial)?;
             file.write_all(token.as_bytes())?;
@@ -633,7 +657,8 @@ impl Lane {
             return self.start_thread();
         }
         let options = self.options.clone();
-        let result = self.rpc("thread/resume", options)?;
+        let id = self.server.request("thread/resume", options)?;
+        let result = self.response_within(id, None, LOAD_LIMIT)?;
         if result["thread"]["id"].as_str() != Some(&self.thread) {
             return Err(io::Error::other("Codex resumed a different thread"));
         }
@@ -649,7 +674,8 @@ impl Lane {
             fields.remove("threadId");
             fields.remove("excludeTurns");
         }
-        let result = self.rpc("thread/start", params)?;
+        let id = self.server.request("thread/start", params)?;
+        let result = self.response_within(id, None, LOAD_LIMIT)?;
         let thread = result["thread"]["id"]
             .as_str()
             .filter(|thread| !thread.is_empty())
@@ -796,7 +822,10 @@ impl Lane {
         }
         let Ok(id) = self
             .server
-            .request("thread/turns/list", json!({"threadId": self.thread}))
+            .request(
+                "thread/turns/list",
+                json!({"threadId": self.thread, "limit": 3, "sortDirection": "desc", "itemsView": "full"}),
+            )
         else {
             return Vec::new();
         };
@@ -842,8 +871,20 @@ impl Lane {
     }
 
     fn response(&mut self, id: u64, starting: Option<u64>) -> io::Result<Value> {
-        let deadline = Instant::now() + RPC_LIMIT;
+        self.response_within(id, starting, RPC_LIMIT)
+    }
+
+    fn response_within(
+        &mut self,
+        id: u64,
+        starting: Option<u64>,
+        limit: Duration,
+    ) -> io::Result<Value> {
+        let deadline = Instant::now() + limit;
         loop {
+            if let Some(result) = self.stray.remove(&id) {
+                return result.map_err(io::Error::other);
+            }
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
@@ -878,6 +919,13 @@ impl Lane {
                         && let Some(goal) = reply.get("goal")
                     {
                         self.apply_goal(goal);
+                    }
+                } else {
+                    // Kept for a request still waited on further out. The oldest go first:
+                    // what nobody waits for (an interrupt sent and not awaited) cannot pile up.
+                    self.stray.insert(id, result);
+                    while self.stray.len() > STRAY_MOST {
+                        self.stray.pop_first();
                     }
                 }
                 Ok(())
