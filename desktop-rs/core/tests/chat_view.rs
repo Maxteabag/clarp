@@ -47,7 +47,7 @@ fn rows() -> Vec<Message> {
         row(json!({"id": "w-1", "role": "assistant", "text": "Checking.", "phase": "commentary", "trace_id": "t-1", "view": "session"})),
         row(json!({"id": "w-2", "role": "assistant", "text": "", "trace_id": "t-1", "view": "session", "tools": [{"id": "c-1", "name": "Bash"}]})),
         row(json!({"id": "f-1", "role": "assistant", "text": "Green.", "phase": "final", "trace_id": "t-1", "view": "conversation", "session_rows": 2})),
-        row(json!({"id": "a-1", "role": "user", "text": "Look at this", "origin": "agent", "trace_id": "t-a", "view": "session"})),
+        row(json!({"id": "a-1", "role": "user", "text": "Look at this", "origin": "agent", "sender_name": "Arnold", "trace_id": "t-a", "view": "session"})),
         row(json!({"id": "old", "role": "assistant", "text": "Untagged"})),
     ]
 }
@@ -114,7 +114,8 @@ fn entry(key: &str, kind: Kind, status: &str) -> Entry {
 fn a_running_turn_is_one_box_that_opens_to_its_steps() {
     let fold = Entry { expandable: true, items: vec!["i1".into()], ..entry("live:fold:t-2", Kind::Fold, "running") };
     let collapsed = vec![entry("live:m0", Kind::Message, "completed"), fold.clone(), entry("live:bad", Kind::Tool, "failed")];
-    let boxed = chat_view::running_box(&collapsed, "t-2", "Running npm test…", "0:05", Some("Also working"));
+    let look = |title: &str| chat_view::BoxLook { title: title.into(), ..Default::default() };
+    let boxed = chat_view::running_box(&collapsed, "t-2", &chat_view::BoxLook { meta: "0:05".into(), other: Some("Also working".into()), ..look("Running npm test…") });
     assert_eq!(boxed.len(), 1);
     assert_eq!(boxed[0].key, "live:fold:t-2");
     assert_eq!(boxed[0].title, "Running npm test…");
@@ -123,13 +124,62 @@ fn a_running_turn_is_one_box_that_opens_to_its_steps() {
 
     let open_fold = Entry { expanded: true, ..fold };
     let opened = vec![open_fold, entry("live:i1", Kind::Tool, "running"), entry("live:m1", Kind::Message, "completed")];
-    let boxed = chat_view::running_box(&opened, "t-2", "Running…", "", None);
+    let boxed = chat_view::running_box(&opened, "t-2", &look("Running…"));
     let keys: Vec<&str> = boxed.iter().map(|e| e.key.as_str()).collect();
     assert_eq!(keys, ["live:fold:t-2", "live:i1"], "opened: its steps under it, never its words in between");
 
-    let nothing = chat_view::running_box(&[], "busy", "Running…", "", None);
+    let nothing = chat_view::running_box(&[], "busy", &look("Running…"));
     assert_eq!(nothing.len(), 1);
     assert!(!nothing[0].expandable);
+    assert_eq!((nothing[0].status.as_str(), nothing[0].stop.as_str()), ("running", ""), "a working box holds no Stop");
+}
+
+#[test]
+fn a_stalled_turn_says_so_in_the_box_and_holds_stop() {
+    let fold = Entry { expandable: true, ..entry("live:fold:t-2", Kind::Fold, "running") };
+    let words = clarp_core::stall::indicator(0, 12 * 60_000, true);
+    let look = chat_view::BoxLook { title: "Running npm test…".into(), meta: "14:02".into(), stall: Some(words.clone()), stop_key: "Ctrl+.".into(), ..Default::default() };
+    let boxed = chat_view::running_box(&[fold.clone()], "t-2", &look);
+    assert_eq!(boxed[0].title, "Seems stuck · no progress for 12 min · Your message is waiting", "the desktop's own words");
+    assert_eq!((boxed[0].status.as_str(), boxed[0].stop.as_str(), boxed[0].meta.as_str()), (chat_view::STALLED, "Ctrl+.", "14:02"));
+    assert!(boxed[0].expandable, "it still opens to its steps");
+    // With no key bound, Stop still shows.
+    let unbound = chat_view::running_box(&[fold], "t-2", &chat_view::BoxLook { stop_key: String::new(), ..look.clone() });
+    assert!(!unbound[0].stop.is_empty());
+    // A stall that clears gives the box back its words.
+    let cleared = chat_view::running_box(&[], "t-2", &chat_view::BoxLook { stall: None, ..look });
+    assert_eq!((cleared[0].title.as_str(), cleared[0].stop.as_str()), ("Running npm test…", ""));
+}
+
+#[test]
+fn a_turn_between_agents_says_only_who_and_the_kind_of_step() {
+    assert_eq!(chat_view::working_with("Bella"), "Working with Bella");
+    assert_eq!(chat_view::working_with("  "), "Working with another agent");
+    assert!(chat_view::between_agents("Agents") && !chat_view::between_agents("user") && !chat_view::between_agents(""));
+    let fold = Entry { expandable: true, expanded: true, ..entry("live:fold:t-a", Kind::Fold, "running") };
+    let steps = vec![fold, entry("live:i1", Kind::Tool, "failed")];
+    let look = chat_view::BoxLook {
+        title: "Running clarp-admin prompt --to bella…".into(),
+        with: Some(chat_view::working_with("Bella")),
+        step: Some("Running a command".into()),
+        ..Default::default()
+    };
+    let boxed = chat_view::running_box(&steps, "t-a", &look);
+    assert_eq!(boxed.len(), 1, "its steps never open");
+    assert_eq!(boxed[0].title, "Working with Bella", "never the turn's activity");
+    assert_eq!(boxed[0].secondary, "Running a command · 1 step failed");
+    assert!(!boxed[0].expandable);
+    // Stuck wins over who: a stalled agent is never hidden.
+    let stuck = chat_view::running_box(&steps, "t-a", &chat_view::BoxLook { stall: Some("Seems stuck · no progress for 10 min".into()), ..look });
+    assert_eq!((stuck[0].title.as_str(), stuck[0].status.as_str()), ("Seems stuck · no progress for 10 min", chat_view::STALLED));
+}
+
+#[test]
+fn the_sender_is_the_turns_agent_prompt_else_the_agent_rows() {
+    let rows = rows();
+    assert_eq!(chat_view::sender_of(&rows, "t-a", "Mike"), "Arnold");
+    assert_eq!(chat_view::sender_of(&rows, "t-z", "Mike"), "Mike", "a turn whose prompt is not read yet");
+    assert_eq!(chat_view::sender_of(&rows, "", ""), "");
 }
 
 #[test]

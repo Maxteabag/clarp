@@ -16,6 +16,29 @@ pub(crate) struct ChatView {
     pub feature: bool,
     /// `conversation_fork` was in it.
     pub fork: bool,
+    /// What this engine's Host said of a chat's view, by its own session
+    /// name, for the primary engine to settle: it keeps every chat's own
+    /// choice and shows the errors, a peer chat's included.
+    pub outcomes: Vec<Outcome>,
+}
+
+/// What a Host said of a chat's view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    /// Another device chose `value` (`agent-roster` kind `chat_view`).
+    HostValue { session: String, value: &'static str },
+    /// The Host refused or failed the write.
+    Refused { session: String },
+}
+
+impl Outcome {
+    fn qualified(self, server_id: &str) -> Outcome {
+        let q = |s: String| if s.is_empty() || server_id.is_empty() || clarp_core::all_hosts::is_peer_session(&s) { s } else { clarp_core::all_hosts::qualify(server_id, &s) };
+        match self {
+            Outcome::HostValue { session, value } => Outcome::HostValue { session: q(session), value },
+            Outcome::Refused { session } => Outcome::Refused { session: q(session) },
+        }
+    }
 }
 
 fn has(info: &Object, name: &str) -> bool {
@@ -104,6 +127,17 @@ impl Engine {
         }
     }
 
+    /// C in the chat: the other view, as the chat's own choice; false on
+    /// a Host without the views.
+    pub fn toggle_chat_view(&mut self, session: &str) -> bool {
+        if session.is_empty() || !self.chat_view_offered(session) {
+            return false;
+        }
+        let other = if self.chat_view_conversation(session) { chat_view::SESSION } else { chat_view::CONVERSATION };
+        self.set_chat_view(session, other);
+        true
+    }
+
     fn write_chat_view(&mut self, session: &str, view: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.write_chat_view(local, view));
         if !self.chat_view.feature || session.is_empty() {
@@ -127,14 +161,24 @@ impl Engine {
     pub(crate) fn chat_view_server_info(&mut self, info: &Object) {
         let (feature, fork) = (has(info, chat_view::FEATURE), has(info, chat_view::FORK_FEATURE));
         if feature != self.chat_view.feature || fork != self.chat_view.fork {
-            self.chat_view = ChatView { feature, fork };
+            let gained = feature && !self.chat_view.feature;
+            (self.chat_view.feature, self.chat_view.fork) = (feature, fork);
             self.changes.push(Change::Preferences);
+            // Rows read before carry no tags: read the open chats again, so
+            // their view can split them.
+            if gained {
+                let open: Vec<String> = self.conversations.keys().cloned().collect();
+                for session in open {
+                    self.request_tail(&session, true);
+                    self.changes.push(Change::Conversation(session));
+                }
+            }
         }
     }
 
     /// `agent-roster` kind `chat_view`: another device's different choice
     /// replaces this device's own for that chat; the echo of this
-    /// device's own write keeps it.
+    /// device's own write keeps it (settled by the primary engine).
     pub(crate) fn chat_view_roster(&mut self, event: &Object) {
         let kind = event.get("kind").and_then(Value::as_str).unwrap_or_default();
         let session = event.get("session").and_then(Value::as_str).unwrap_or_default();
@@ -142,12 +186,43 @@ impl Engine {
         if kind != chat_view::ROSTER_KIND || session.is_empty() {
             return;
         }
-        if self.chat_view_own(session).is_some_and(|own| own != value) {
-            let key = self.chat_key(session);
-            chat_view::set_own(&mut self.settings, &key, None);
-            self.changes.push(Change::Preferences);
-            self.changes.push(Change::Conversation(session.to_owned()));
+        self.chat_view.outcomes.push(Outcome::HostValue { session: session.to_owned(), value });
+    }
+
+    /// The primary engine settles what its Host and its peers said: a
+    /// chat's own choice is its, kept by chat key, and so is the error line.
+    pub(crate) fn settle_chat_views(&mut self, outcomes: Vec<Outcome>) {
+        for outcome in outcomes {
+            match outcome {
+                Outcome::HostValue { session, value } => {
+                    if self.chat_view_own(&session).is_some_and(|own| own != value) {
+                        let key = self.chat_key(&session);
+                        chat_view::set_own(&mut self.settings, &key, None);
+                        self.changes.push(Change::Preferences);
+                        self.changes.push(Change::Conversation(session));
+                    }
+                }
+                Outcome::Refused { session } => {
+                    let host = match clarp_core::all_hosts::split(&session) {
+                        Some((server_id, _)) if server_id != self.server_id => {
+                            self.peers.list.iter().find(|p| p.server_id == server_id).map(|p| p.label.clone()).unwrap_or_default()
+                        }
+                        _ => self.server_name.clone(),
+                    };
+                    self.set_error(&chat_view::refused(&host));
+                }
+            }
         }
+    }
+
+    /// This engine's outcomes, for the primary.
+    pub(crate) fn take_chat_view_outcomes(&mut self) -> Vec<Outcome> {
+        std::mem::take(&mut self.chat_view.outcomes)
+    }
+
+    /// A peer's outcomes, its chats named as the primary names them.
+    pub(crate) fn qualified_chat_view_outcomes(&mut self, server_id: &str) -> Vec<Outcome> {
+        self.take_chat_view_outcomes().into_iter().map(|o| o.qualified(server_id)).collect()
     }
 
     /// Replies for the write; true when it was one.
@@ -162,11 +237,8 @@ impl Engine {
 
     /// A refused or failed write: the choice stays on this device.
     pub(crate) fn chat_view_failure(&mut self, tag: &str) -> bool {
-        if !tag.starts_with("agent-chat-view:") {
-            return false;
-        }
-        let host = self.server_name.clone();
-        self.set_error(&chat_view::refused(&host));
+        let Some(session) = tag.strip_prefix("agent-chat-view:") else { return false };
+        self.chat_view.outcomes.push(Outcome::Refused { session: session.to_owned() });
         true
     }
 }

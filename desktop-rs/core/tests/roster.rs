@@ -497,3 +497,27 @@ fn a_stalled_turn_reads_in_whole_minutes_with_waiting_words() {
     assert!(!offered_by(&obj(json!({"capabilities": {"features": ["live_items"]}}))));
     assert!(!offered_by(&obj(json!({}))));
 }
+
+/// #702: the Running box says "Working with <Name>" for a turn another
+/// agent started, from the snapshot's `working_audience` and
+/// `working_with` (Host contract 124) and from each working `agent-state`.
+#[test]
+fn whom_the_agent_works_with_follows_the_snapshot_and_its_states() {
+    use clarp_core::protocol::Agent;
+    let parse = |extra: Value| Agent::from_json(&obj(roster_row("a", "a-id", 10, extra)));
+    let with = parse(json!({"busy": true, "working_audience": "Agents", "working_with": {"agent_id": "b-id", "name": "Bella"}}));
+    assert_eq!((with.working_audience.as_str(), with.working_with.as_str()), ("agents", "Bella"));
+    let older = parse(json!({"busy": true}));
+    assert_eq!((older.working_audience.as_str(), older.working_with.as_str()), ("", ""), "an older Host says neither");
+
+    let mut h = Harness::new();
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"latest_state": "idle", "busy": false}))]));
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "thinking", "ts": 1_000, "audience": "agents", "sender_name": "Bella"}))));
+    assert_eq!((h.roster.find("sam").unwrap().working_audience.as_str(), h.roster.find("sam").unwrap().working_with.as_str()), ("agents", "Bella"));
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "tool", "ts": 2_000}))));
+    assert_eq!(h.roster.find("sam").unwrap().working_with, "Bella", "a state without the fields leaves them");
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "tool", "ts": 3_000, "audience": "user"}))));
+    assert_eq!((h.roster.find("sam").unwrap().working_audience.as_str(), h.roster.find("sam").unwrap().working_with.as_str()), ("user", ""), "the user stepped in");
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "idle", "ts": 4_000}))));
+    assert_eq!(h.roster.find("sam").unwrap().working_audience, "", "the turn ending ends it");
+}

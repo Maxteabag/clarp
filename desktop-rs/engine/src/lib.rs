@@ -510,6 +510,11 @@ impl Engine {
                 Message::PeersDue(generation) => self.peers_due(generation),
             }
         }
+        // What the Host said of a chat's view (#702): the primary keeps it.
+        if !self.peer {
+            let outcomes = self.take_chat_view_outcomes();
+            self.settle_chat_views(outcomes);
+        }
         self.pump_peers();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();

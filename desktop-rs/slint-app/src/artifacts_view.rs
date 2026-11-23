@@ -1362,6 +1362,15 @@ fn toggles(id: &str) -> bool {
 /// O on a live item row or a prompt (or a click): opens or folds it, kept
 /// by its key.
 pub fn toggle_live(app: &App, key: &str) {
+    // A stalled turn's Stop inside its Running box (#702): the chat's
+    // own stop, as its key and stalled line stop it.
+    if let Some(boxed) = key.strip_prefix(clarp_core::chat_view::STOP_PREFIX) {
+        if let Some(session) = app.session_showing(boxed) {
+            app.engine.borrow_mut().stop_session(&session);
+            app.refresh(&[Change::Live(session)]);
+        }
+        return;
+    }
     // Show work on a reply (Conversation view, #702) is the reply's, not a
     // card the keyboard is on.
     if !key.starts_with(clarp_core::chat_view::WORK_PREFIX) {
@@ -1383,6 +1392,51 @@ pub fn toggle_live(app: &App, key: &str) {
     }
     let session = app.active_session();
     app.refresh(&[Change::Live(session), Change::Updates]);
+}
+
+/// W in the chat (Conversation view, #702): opens or folds the work of the
+/// message the keyboard is on (the vim cursor's row, else the card or row
+/// J/K is on), else of the latest turn: a finished turn's Show work, or
+/// the running turn's Running box. False when the chat has neither.
+pub fn show_work(app: &App) -> bool {
+    let Some(messages) = app.active_messages() else { return false };
+    let rows: Vec<crate::MessageRow> = messages.iter().collect();
+    let session = app.active_session();
+    let conversation = app.engine.borrow().chat_view_conversation(&session);
+    let works: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            if !r.work_key.is_empty() {
+                r.work_key.to_string()
+            } else if conversation && r.live.kind == "fold" && r.live.expandable && matches!(r.live.status.as_str(), "running" | "stalled") {
+                r.live.key.to_string()
+            } else {
+                String::new()
+            }
+        })
+        .collect();
+    let vim = crate::vim_view::cursor();
+    let card = selected(app).unwrap_or_default();
+    let at = [vim, card].into_iter().filter(|c| !c.is_empty()).find_map(|c| {
+        rows.iter().position(|r| r.id == c || r.live.key == c || r.receipt.key == c || r.prompt.key == c || r.artifacts.iter().any(|a| a.id == c))
+    });
+    let keys: Vec<&str> = works.iter().map(String::as_str).collect();
+    let Some(index) = work_target(&keys, at) else { return false };
+    toggle_live(app, &works[index]);
+    true
+}
+
+/// Which row's work W opens: the row at the keyboard's place `at` when it
+/// has work, else the next one after it (a turn's reply ends the turn),
+/// else the latest; with no place, the latest. `works[i]` is row i's work
+/// key ("" for none).
+pub(crate) fn work_target(works: &[&str], at: Option<usize>) -> Option<usize> {
+    let has = |i: &usize| !works[*i].is_empty();
+    let latest = (0..works.len()).rev().find(has);
+    match at.filter(|a| *a < works.len()) {
+        Some(at) => (at..works.len()).find(has).or(latest),
+        None => latest,
+    }
 }
 
 /// The receipt `key` in the open chat.
@@ -2235,6 +2289,21 @@ mod picture_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn w_opens_the_work_at_the_keyboard_else_the_next_turns_else_the_latest() {
+        // Rows: a prompt, a reply with work, a card, a reply with work, the Running box.
+        let works = ["", "live:work:t-1", "", "live:work:t-2", "live:fold:t-3"];
+        assert_eq!(work_target(&works, None), Some(4), "no place: the latest turn, the running one");
+        assert_eq!(work_target(&works, Some(1)), Some(1), "on a reply: its own work");
+        assert_eq!(work_target(&works, Some(0)), Some(1), "on a prompt: its turn's reply");
+        assert_eq!(work_target(&works, Some(2)), Some(3), "on a card in a turn: that turn's reply");
+        let finished = ["", "live:work:t-1", "", ""];
+        assert_eq!(work_target(&finished, Some(3)), Some(1), "after the last reply: the latest");
+        assert_eq!(work_target(&finished, Some(9)), Some(1), "a place gone from the chat: the latest");
+        assert_eq!(work_target(&["", ""], None), None, "nothing to open");
+        assert_eq!(work_target(&[], Some(0)), None);
+    }
 
     #[test]
     fn a_countdown_counts_down_then_up() {

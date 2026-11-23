@@ -47,6 +47,12 @@ pub struct Agent {
     pub stalled_since: Option<i64>,
     /// What the Host offers for the stall: "stop", or None.
     pub stalled_action: Option<String>,
+    /// Who the running turn is for (`working_audience`, Host contract
+    /// 124): `user`, `agents`, or empty while idle or from an older Host.
+    pub working_audience: String,
+    /// The name of the agent whose message started the running turn
+    /// (`working_with.name`), or empty: "Working with <Name>".
+    pub working_with: String,
     pub last_activity: i64,
     pub head_revision: i64,
     /// What the conversation's context holds, in tokens; None while the
@@ -128,6 +134,8 @@ impl Default for Agent {
             turn_started_at: None,
             stalled_since: None,
             stalled_action: None,
+            working_audience: String::new(),
+            working_with: String::new(),
             last_activity: 0,
             head_revision: 0,
             context_tokens: None,
@@ -207,6 +215,8 @@ impl Agent {
             turn_started_at: object.get("turn_started_at").and_then(Value::as_i64).filter(|t| *t > 0),
             stalled_since: crate::stall::since(object),
             stalled_action: crate::stall::action(object),
+            working_audience: object.get("working_audience").and_then(Value::as_str).unwrap_or_default().trim().to_ascii_lowercase(),
+            working_with: object.get("working_with").and_then(|w| w.get("name")).and_then(Value::as_str).unwrap_or_default().trim().to_owned(),
             last_activity: i("last_activity"),
             head_revision: i("head_revision"),
             context_tokens: object.get("context_tokens").and_then(Value::as_i64),
