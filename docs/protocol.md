@@ -802,9 +802,9 @@ finished ones. While a change runs, the agent's snapshot row carries `transit` `
 phase, backend, model}`, null otherwise; an `agent-roster` with `kind: agent-transit` is sent
 when one begins and when it ends.
 
-**Same store (Rust Host contract 165, feature `backend_agy_acp`).** A move between two tools
-that are one program with one store of conversations (`agy` and `agy-acp`; a row's
-`runs_through` names the program) keeps the tool's own conversation and carries nothing: no
+**Same store (Rust Host contract 165, feature `backend_agy_acp`).** A move between `agy` and
+`agy-acp`, one program with one store of conversations, keeps the tool's own conversation and
+carries nothing (only this pair: `deepseek` and `opencode` move as any two tools do): no
 summary turn, no record at the head. `reading` and the carrying phases pass at once, `carried`
 on `done` is all zeros, and the row reads "Now on <Backend> · <Model>. The same conversation
 goes on." The agent's next turn continues that conversation natively (`session/resume` over
