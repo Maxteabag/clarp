@@ -505,7 +505,8 @@ def lanes(host: Host) -> list:
                       "names": sorted({stats[m]["name"] for m in group if m in stats}),
                       "processes": len(members), "rss_kb": rss, "pss_kb": pss,
                       "shim_rss_kb": memory_kb(pid)[0], "idle_ms": find_key(inspected, "idle_ms"),
-                      "thread": bool(find_key(inspected, "thread"))})
+                      "thread": bool(find_key(inspected, "thread")),
+                      "members": [{"pid": m, "name": stats[m]["name"]} for m in group if m in stats]})
     return found
 
 
@@ -828,6 +829,11 @@ def case_stop(agent: Agent, n: int) -> dict:
     time.sleep(1.0)
     spools = new_spools(agent, before)
     pid = spool_marks(spools[0]).get("pid") if spools else None
+    # On a lane the turn's command runs inside the lane's app-server group: note it (the `sleep`
+    # asked for) and the lane's other processes, to see the command end and the lane's own stay.
+    lane = lane_of(agent, lanes(agent.host)) if agent.row in SETTINGS_OF else None
+    commands = [m["pid"] for m in (lane or {}).get("members", []) if m["name"] == "sleep"]
+    helpers = [m for m in (lane or {}).get("members", []) if m["name"] not in ("sleep", "sh", "bash", "zsh")]
     t_stop = now_ms()
     status, answer = agent.host.ask("POST", "/stop", {"session": agent.session})
     t_answered = now_ms()
@@ -845,8 +851,17 @@ def case_stop(agent: Agent, n: int) -> dict:
         if exited_at is not None and time.monotonic() - exited_at > 3:
             break
         time.sleep(0.02)
+    command_gone = None
+    if commands:
+        deadline = time.monotonic() + 40
+        while time.monotonic() < deadline:
+            if all(pid_gone(c) for c in commands):
+                command_gone = now_ms()
+                break
+            time.sleep(0.02)
     ended = agent.wait_ended(t_stop, timeout=60)
     agent.wait_idle(60)
+    lost = [m["name"] for m in helpers if pid_gone(m["pid"])]
     marks = spool_marks(spools[0]) if spools else {}
     found.update({"t_stop": t_stop, "stop_status": status,
                   "terminated": answer.get("terminated") if isinstance(answer, dict) else None,
@@ -859,6 +874,12 @@ def case_stop(agent: Agent, n: int) -> dict:
         "stop_to_signal": seconds(t_stop, marks.get("stopping")),
         "process_kept": gone is None,
     }
+    if lane is not None:
+        found["measures"].update({
+            "stop_to_command_gone": seconds(t_stop, command_gone),
+            "command_seen": bool(commands),
+            "lane_helpers_lost": lost,
+        })
     return found
 
 
@@ -884,7 +905,8 @@ SHOWN = {
              "send_to_tool_shown", "first_row_in_log", "end_to_end"],
     "steer": ["steer_to_effect", "steer_to_read", "steer_to_next_item", "steer_wait_for_own_turn",
               "first_turn_end_after_steer"],
-    "stop": ["stop_answered", "stop_to_signal", "stop_to_turn_over", "stop_to_process_gone", "stop_to_spool_exited"],
+    "stop": ["stop_answered", "stop_to_signal", "stop_to_turn_over", "stop_to_process_gone", "stop_to_spool_exited",
+             "stop_to_command_gone"],
 }
 
 
@@ -1215,6 +1237,15 @@ def summary(result: dict) -> str:
         if any(kept):
             lines.append(f"Stop: the spool's process outlived the turn in {sum(1 for k in kept if k)} of {len(kept)} "
                          "(a lane's app-server stays).")
+        commands = [c["measures"] for c in entry["cases"] if c.get("case") == "stop" and isinstance(c.get("measures"), dict)
+                    and "command_seen" in c["measures"]]
+        if commands:
+            seen = [m for m in commands if m["command_seen"]]
+            outlived = [m for m in seen if m.get("stop_to_command_gone") is None]
+            lost = sorted({name for m in commands for name in m.get("lane_helpers_lost") or []})
+            lines.append(f"Stop on the lane: the turn's command was found in {len(seen)} of {len(commands)}; it outlived "
+                         f"the 40 s watch in {len(outlived)}. Lane processes that died with the Stop: "
+                         f"{', '.join(lost) if lost else 'none'}.")
         for look in entry.get("lanes_idle") or []:
             found = look["lanes"]
             if not found:
@@ -1274,6 +1305,8 @@ def summary(result: dict) -> str:
         "- Idle lanes: each lane's `clarp-shim codex-goal-lane`, its app-server child and that child's process "
         "group (an MCP server it started), RSS and PSS from /proc smaps_rollup, read twice, `--lane-settle` apart.",
         "- steer_wait_for_own_turn: for a send that waited, the second send to its own turn starting.",
+        "- stop_to_command_gone (lane row): Stop to the turn's command (the `sleep`, found in the lane's process "
+        "group before the Stop) being gone, polled every 20 ms for 40 s.",
         "- stop_to_turn_over: Stop to the `agent-state` that ends the turn; stop_to_process_gone: Stop to the "
         "tool's process id being gone (polled every 20 ms).",
     ]
