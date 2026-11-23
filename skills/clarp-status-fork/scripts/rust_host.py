@@ -113,6 +113,9 @@ def live_facts(host, rows, agent):
     queue = host.get("/turn-queue", session=agent["session"])
     waiting = queue["items"]
     oldest = min((item["enqueued_at"] for item in waiting if item.get("enqueued_at")), default=0)
+    # Rust Host contract 169: the user's messages a running turn cannot take go to the agent
+    # together, as one turn, when it ends. Older Hosts do not send the field.
+    together = sum(1 for item in waiting if item.get("read_together"))
     turn = ("turn running since " + clock(row.get("turn_started_at")) if row.get("busy")
             else "idle, no turn running")
     lines = [f"Now: {clock(now)} (local time).",
@@ -123,6 +126,8 @@ def live_facts(host, rows, agent):
                 if (row.get('activity') or {}).get('stalled_since') else "")
              + f"; {len(waiting)} queued message(s)"
              + (f", oldest {clock(oldest)}" if oldest else "")
+             + (f", {together} of the user's to be read together when the turn ends"
+                if together else "")
              + ("; queue paused" if queue.get("paused") else "")]
     children = [item for item in rows if item.get("parent_agent_id") == aid and not item.get("moved")]
     owners = {aid: "you", **{item["agent_id"]: item["session"] for item in children}}

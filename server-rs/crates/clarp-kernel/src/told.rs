@@ -374,6 +374,33 @@ pub fn unheard(prompt: &str) -> String {
     format!("{UNHEARD}{prompt}")
 }
 
+/// What opens a prompt that holds several of the user's messages: they waited while the agent
+/// was busy, and are given to it together, so that it sees all of them before it answers
+/// (the owner's word of 23 Nov 2026, of an agent that answered his waiting messages one turn
+/// at a time).
+pub const TOGETHER: &str = concat!(
+    "<clarp-queued-messages>\n",
+    "The user sent the messages below while you were busy. They are given to you together, ",
+    "numbered in the order they were sent. Read all of them before you answer.\n",
+    "</clarp-queued-messages>",
+);
+
+/// The prompt of a turn that took the user's waiting messages with its own: each in the order
+/// it was sent, numbered and set apart, and nothing else added. One message is its own words.
+pub fn together(texts: &[&str]) -> String {
+    match texts {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        many => {
+            let mut prompt = TOGETHER.to_string();
+            for (index, text) in many.iter().enumerate() {
+                prompt.push_str(&format!("\n\n[{}]\n{text}", index + 1));
+            }
+            prompt
+        }
+    }
+}
+
 /// What a turn's tool is told with its prompt.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Turn {
@@ -526,6 +553,15 @@ impl Humanness {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn messages_that_waited_together_are_numbered_in_order_and_one_is_its_own_words() {
+        assert_eq!(together(&["only"]), "only");
+        let prompt = together(&["first", "second\nline", "third"]);
+        assert!(prompt.starts_with(TOGETHER));
+        let body = &prompt[TOGETHER.len()..];
+        assert_eq!(body, "\n\n[1]\nfirst\n\n[2]\nsecond\nline\n\n[3]\nthird");
+    }
 
     #[test]
     fn a_users_words_are_read_back_without_the_record_before_them() {

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compaction::LastCompaction;
 use crate::control::Control;
-use crate::steering::{FollowUp, Join, Stage};
+use crate::steering::{FollowUp, Gathered, Join, Stage};
 
 use crate::turn::{
     Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
@@ -372,6 +372,10 @@ pub struct Agent {
     next_turn: u64,
     mailbox: VecDeque<Queued>,
     joins: BTreeMap<TurnId, FollowUp>,
+    /// The user's messages each turn took into its own prompt with the message it began for,
+    /// in the order they were read, until that turn ends. Unlike the joins, they outlast an
+    /// attempt: every attempt of the turn is given all of them again.
+    gathered: BTreeMap<TurnId, Vec<Gathered>>,
     /// The turn that holds the agent: starting or running, never anything else.
     live: Option<Turn>,
     /// Who asked the live turn to stop and why, while it has not gone yet.
@@ -478,6 +482,7 @@ impl Default for Agent {
             next_turn: 1,
             mailbox: VecDeque::new(),
             joins: BTreeMap::new(),
+            gathered: BTreeMap::new(),
             live: None,
             stopping: None,
             stopping_since_ms: None,
@@ -529,6 +534,53 @@ impl Agent {
 
     pub fn joins(&self) -> &BTreeMap<TurnId, FollowUp> {
         &self.joins
+    }
+
+    /// The user's messages this turn took into its own prompt, in order: none for a turn that
+    /// took none, or that has ended.
+    pub fn gathered(&self, turn: TurnId) -> &[Gathered] {
+        self.gathered.get(&turn).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether a waiting message would go to the tool together with the user's messages
+    /// beside it, once its turn comes: the user's own words, said to the agent (not left for
+    /// later, and not another agent's), given to no tool before, held by no Stop, and not
+    /// reserved for a process that runs. Whether one is the words of another agent the
+    /// kernel does not know; the actor asks the log.
+    pub fn goes_together(&self, queued: &Queued) -> bool {
+        queued.admission == Admission::Queue
+            && queued.origin.is_user_send()
+            && queued.attempt <= 1
+            && !self.holds(queued.id)
+            && !self.joins.contains_key(&queued.id)
+    }
+
+    /// The waiting messages that go to the tool with the message of the turn that is being
+    /// started, as [`Command::Join`] with [`Join::together`] takes them: those directly
+    /// behind it in the mailbox, in order, newer than it, while each [`goes_together`]. The
+    /// first that does not ends the run, and it and all after it keep their own turns.
+    ///
+    /// [`goes_together`]: Self::goes_together
+    pub fn waiting_together(&self) -> Vec<TurnId> {
+        let Some(Turn::Starting(starting)) = &self.live else {
+            return Vec::new();
+        };
+        if starting.attempt > 1 || starting.ran_before || !starting.origin.is_user_send() {
+            return Vec::new();
+        }
+        let mut newest = self
+            .gathered(starting.id)
+            .last()
+            .map_or(starting.id, |last| last.turn);
+        self.mailbox
+            .iter()
+            .take_while(|queued| {
+                let next = queued.id > newest && self.goes_together(queued);
+                newest = queued.id;
+                next
+            })
+            .map(|queued| queued.id)
+            .collect()
     }
 
     /// The position in the log of the event applied next.
@@ -841,9 +893,22 @@ impl Agent {
                 }
             })
             && !self.holds(turn)
+            && (!join.together || self.can_gather(turn, join.into))
             && !join.uuid.is_empty()
             && !self.joins.contains_key(&turn)
             && !self.joins.values().any(|held| held.join.uuid == join.uuid)
+    }
+
+    /// A message goes into the prompt of the turn that is being started only as the next of
+    /// [`Agent::waiting_together`], and only once the one before it was read: so the prompt
+    /// holds the user's messages in the order they were said, and none twice.
+    fn can_gather(&self, turn: TurnId, into: TurnId) -> bool {
+        self.live_id() == Some(into)
+            && !self
+                .joins
+                .values()
+                .any(|held| held.join.together && held.stage == Stage::Pending)
+            && self.waiting_together().first() == Some(&turn)
     }
 
     /// Whether a message admitted this way now would start at once, without waiting: and so
@@ -1413,6 +1478,15 @@ impl Agent {
                     .filter(|join| join.stage == Stage::Pending)
                     .ok_or(invalid)?;
                 join.stage = Stage::Read(*at_ms);
+                if join.join.together {
+                    self.gathered
+                        .entry(join.join.into)
+                        .or_default()
+                        .push(Gathered {
+                            turn: *turn,
+                            message_seq: join.message_seq,
+                        });
+                }
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
                 self.stop_released.remove(turn);
@@ -1776,6 +1850,11 @@ impl Agent {
                         _ => {}
                     }
                     self.joins.clear();
+                    // What the turn took into its prompt is over with it, also where no
+                    // process settled it (a turn held back for a move ends without one).
+                    for gathered in self.gathered.remove(&turn).unwrap_or_default() {
+                        self.deliveries.over(gathered.turn.0);
+                    }
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -1839,6 +1918,9 @@ impl Agent {
         self.stop_released.remove(&turn);
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
+                for gathered in self.gathered.remove(&turn).unwrap_or_default() {
+                    self.deliveries.over(gathered.turn.0);
+                }
                 self.settled += 1;
                 self.owe_compaction(&ended);
             }
@@ -2665,6 +2747,7 @@ mod tests {
                     into: TurnId(1),
                     uuid: format!("unread-{turn}"),
                     recovery: None,
+                    together: false,
                 },
             })
             .unwrap();
@@ -2688,6 +2771,7 @@ mod tests {
                     into: TurnId(2),
                     uuid: "newer".into(),
                     recovery: None,
+                    together: false,
                 },
             }),
             Err(Refusal::NotWaiting(TurnId(4))),
@@ -2711,6 +2795,7 @@ mod tests {
                 into: TurnId(1),
                 uuid: "pre-stop".into(),
                 recovery: None,
+                together: false,
             },
         })
         .unwrap();
@@ -2770,6 +2855,7 @@ mod tests {
                 into: TurnId(4),
                 uuid: "post-stop".into(),
                 recovery: None,
+                together: false,
             },
         })
         .unwrap();
@@ -3711,5 +3797,189 @@ mod tests {
                 "seed {seed}: no turn started twice"
             );
         }
+    }
+
+    /// The turn that is being started takes the user's messages that wait directly behind it,
+    /// as the actor does: each reserved and read at once.
+    fn take_together(a: &mut Driven, into: u64) -> Vec<u64> {
+        let mut taken = Vec::new();
+        for turn in a.agent.waiting_together() {
+            a.send(Command::Join {
+                turn,
+                join: together_join(into, turn.0),
+            })
+            .unwrap();
+            a.send(Command::JoinRead { turn }).unwrap();
+            taken.push(turn.0);
+        }
+        taken
+    }
+
+    fn together_join(into: u64, turn: u64) -> Join {
+        Join {
+            into: TurnId(into),
+            uuid: format!("together-{turn}"),
+            recovery: None,
+            together: true,
+        }
+    }
+
+    fn gathered(a: &Driven, turn: u64) -> Vec<(u64, u64)> {
+        a.agent
+            .gathered(TurnId(turn))
+            .iter()
+            .map(|gathered| (gathered.turn.0, gathered.message_seq))
+            .collect()
+    }
+
+    #[test]
+    fn three_waiting_user_messages_are_one_turn_and_every_attempt_is_given_all_of_them() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        for seq in [11, 12, 13] {
+            a.user(seq);
+        }
+        assert_eq!(a.waiting(), vec![2, 3, 4]);
+        // A turn that runs takes nothing into its prompt: that is steering's.
+        assert!(a.agent.waiting_together().is_empty());
+        assert_eq!(
+            a.send(Command::Join {
+                turn: TurnId(2),
+                join: together_join(1, 2),
+            }),
+            Err(Refusal::NotWaiting(TurnId(2)))
+        );
+        a.finish(1);
+        assert_eq!(a.live(), Some(2));
+        assert_eq!(a.agent.waiting_together(), [3, 4].map(TurnId));
+        // Only the next of them, and only once the one before it was read.
+        assert_eq!(
+            a.send(Command::Join {
+                turn: TurnId(4),
+                join: together_join(2, 4),
+            }),
+            Err(Refusal::NotWaiting(TurnId(4)))
+        );
+        a.send(Command::Join {
+            turn: TurnId(3),
+            join: together_join(2, 3),
+        })
+        .unwrap();
+        assert_eq!(
+            a.send(Command::Join {
+                turn: TurnId(4),
+                join: together_join(2, 4),
+            }),
+            Err(Refusal::NotWaiting(TurnId(4)))
+        );
+        a.send(Command::JoinRead { turn: TurnId(3) }).unwrap();
+        assert_eq!(take_together(&mut a, 2), vec![4]);
+        assert!(a.waiting().is_empty());
+        assert_eq!(gathered(&a, 2), vec![(3, 12), (4, 13)]);
+
+        // The attempt fails on something that passes: its process ended with them read, and
+        // the next attempt is given them again, also after a restart.
+        a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
+        for turn in [3, 4] {
+            a.send(Command::JoinSettled { turn: TurnId(turn) }).unwrap();
+        }
+        a.send(dropped(2)).unwrap();
+        assert!(a.agent.joins().is_empty());
+        assert_eq!(gathered(&a, 2), vec![(3, 12), (4, 13)]);
+        let effects = a.send(Command::TurnRetried { turn: TurnId(2) }).unwrap();
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::RetryTurn {
+                turn: TurnId(2),
+                attempt: 2,
+                ..
+            }]
+        ));
+        let restarted = Agent::replay(&a.history).unwrap();
+        assert_eq!(restarted.gathered(TurnId(2)), a.agent.gathered(TurnId(2)));
+        // A later attempt takes nothing more: what it is given is what the first took.
+        a.user(14);
+        assert!(a.agent.waiting_together().is_empty());
+
+        a.finish(2);
+        assert!(gathered(&a, 2).is_empty());
+        assert_eq!(
+            a.live(),
+            Some(5),
+            "the message sent after it has a turn of its own"
+        );
+        assert_eq!(a.started, [1, 2, 5].map(TurnId));
+        // Turns 1 and 2, and the two read into turn 2.
+        assert_eq!(a.agent.settled(), 4);
+    }
+
+    #[test]
+    fn a_relay_of_the_users_word_between_two_user_messages_keeps_its_own_turn() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        // The front desk relays a word of the user's: it waits behind the user's own.
+        a.send(Command::Accept {
+            message_seq: 12,
+            origin: Origin::Agent {
+                agent_id: "desk".into(),
+            },
+            admission: Admission::Later,
+            coordination: Some("desk".into()),
+            user_word: true,
+        })
+        .unwrap();
+        a.user(13);
+        assert_eq!(a.waiting(), vec![2, 3, 4]);
+        a.finish(1);
+        assert_eq!(a.live(), Some(2));
+        assert!(
+            take_together(&mut a, 2).is_empty(),
+            "the relay is not the user's own message, and nothing past it goes either"
+        );
+        a.finish(2);
+        assert_eq!(a.live(), Some(3));
+        assert!(take_together(&mut a, 3).is_empty(), "the relay's own turn");
+        a.finish(3);
+        assert_eq!(a.live(), Some(4));
+        assert_eq!(a.started, [1, 2, 3, 4].map(TurnId));
+    }
+
+    #[test]
+    fn a_queue_a_stop_holds_is_not_taken_together() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.user(12);
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        a.finish(1);
+        assert_eq!(a.live(), None);
+        a.send(Command::SendNow {
+            turn: TurnId(2),
+            by: "user".into(),
+        })
+        .unwrap();
+        assert_eq!(a.live(), Some(2));
+        assert!(a.agent.is_paused());
+        assert!(a.agent.waiting_together().is_empty());
+        assert_eq!(
+            a.send(Command::Join {
+                turn: TurnId(3),
+                join: together_join(2, 3),
+            }),
+            Err(Refusal::NotWaiting(TurnId(3)))
+        );
+        a.finish(2);
+        assert_eq!(a.waiting(), vec![3], "the held message still waits");
+
+        // A fresh message of the user's lets the hold go, but the older held message is not
+        // put behind it in its prompt: the order would be wrong.
+        a.user(13);
+        assert_eq!(a.live(), Some(4));
+        assert!(a.agent.waiting_together().is_empty());
     }
 }

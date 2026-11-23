@@ -1649,6 +1649,7 @@ mod tests {
                         into,
                         uuid: "steer".into(),
                         recovery: None,
+                        together: false,
                     },
                 },
                 130,

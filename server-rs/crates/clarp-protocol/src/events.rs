@@ -194,6 +194,11 @@ pub struct QueueUpdated {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_change: Option<String>,
+    /// On an item that joined the queue: it waits while a turn runs that cannot take it, and
+    /// goes to the tool with the user's other waiting messages, as one turn, when that turn
+    /// is over (contract 169).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_together: Option<bool>,
     /// The item's stored origin, when the event carries its provenance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,

@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 168;
+pub const HOST_CONTRACT: u64 = 169;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -382,6 +382,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // one to a busy Claude agent is: read into it, or answered as a turn of its own in the
     // same process, and otherwise run after it.
     ("agy_acp_steering", 168),
+    // The user's messages that wait behind a turn go to the tool together, in order and
+    // numbered, as one turn when it starts; a queue item and the event it joined with say
+    // `read_together` while a turn runs that cannot take it (owner, 23 Nov 2026).
+    ("queued_read_together", 169),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
