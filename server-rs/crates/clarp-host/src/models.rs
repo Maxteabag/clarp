@@ -39,10 +39,11 @@ const WITHIN: Duration = Duration::from_millis(2_500);
 /// How long what was found is told again without asking.
 const KEPT_FOR: Duration = Duration::from_secs(300);
 
-/// What is declared of a tool and this Host cannot do with it yet. Claude Code: a turn is
-/// not steered while it runs, nobody signs in from an app (but on the Host that keeps
-/// the machine's tools: `told`), and what an account has
-/// used is not read. Codex, beside those: a past session of
+/// What is declared of a tool and this Host does not offer from an app, or cannot do with it
+/// yet. Claude Code: steering is not advertised, as the Python Host does not advertise it
+/// either; a message sent to a running turn is still read into it (`clarp-kernel`
+/// `steering.rs`). Nobody signs in from an app (but on the Host that keeps the machine's
+/// tools: `told`), and what an account has used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app.
 const NOT_YET: [(&str, &[&str]); 4] = [
