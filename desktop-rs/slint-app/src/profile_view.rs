@@ -538,7 +538,7 @@ struct Picker {
 /// clears when the move is done or failed.
 pub(crate) fn moving_line(engine: &clarp_engine::Engine, session: &str) -> String {
     let Some(agent) = engine.roster().find(session) else { return String::new() };
-    let row = backend_row(engine, session, &agent.name, &agent.backend, &agent.model);
+    let row = backend_row(engine, session, &engine.chat_name(session), &agent.backend, &agent.model);
     if row.moving { row.detail } else { String::new() }
 }
 
