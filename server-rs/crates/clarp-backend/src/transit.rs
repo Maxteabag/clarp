@@ -63,7 +63,12 @@ pub fn context_tokens(backend: &str, model: &str) -> usize {
 /// How many signs of the conversation are carried into a model at most: about 60% of what it
 /// takes in, the rest left for the tool's own instructions and the turns to come.
 pub fn budget(backend: &str, model: &str) -> usize {
-    context_tokens(backend, model) * 6 / 10 * SIGNS_PER_TOKEN
+    budget_of_tokens(context_tokens(backend, model))
+}
+
+/// The budget of a model that takes in `tokens`: about 60% of it, in signs.
+pub fn budget_of_tokens(tokens: usize) -> usize {
+    tokens * 6 / 10 * SIGNS_PER_TOKEN
 }
 
 /// How long the summary of what did not fit may be, in signs: what it is asked for is much

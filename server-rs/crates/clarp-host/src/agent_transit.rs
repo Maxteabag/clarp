@@ -132,10 +132,21 @@ fn done_row(backend: &str, model: &str, omitted: usize, summarized: bool) -> Str
 }
 
 /// How many signs of the conversation `backend` is given at most on `model`: about 60% of
-/// what the model takes in ([`transit::budget`]); for a tool whose first turn opens with the
-/// record on its command line, as much as fits there ([`clarp_kernel::told::CARRIED_MOST`]).
+/// what the model takes in ([`transit::budget`]), or of what Codex's own configuration says
+/// its model takes in ([`codex_window`]); for a tool whose first turn opens with the record
+/// on its command line, as much as fits there ([`clarp_kernel::told::CARRIED_MOST`]).
 pub fn budget_of(backend: &str, model: &str) -> usize {
-    let budget = transit::budget(backend, model);
+    let configured = (backend == "codex")
+        .then(|| {
+            let file = crate::past::codex_home(&crate::config::home()).join("config.toml");
+            let config: toml::Table = std::fs::read_to_string(file).ok()?.parse().ok()?;
+            codex_window(&config, model)
+        })
+        .flatten();
+    let budget = configured.map_or_else(
+        || transit::budget(backend, model),
+        transit::budget_of_tokens,
+    );
     let on_its_command_line = transit::writer(backend).is_none()
         && clarp_backend::by_id(backend).is_some_and(|tool| tool.message_most().is_some());
     if on_its_command_line {
@@ -765,6 +776,35 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
     );
 }
 
+/// The context window Codex's configuration sets (`model_context_window`, in the active
+/// profile or at the top), which Codex itself holds its model to: for `model` where that is
+/// the model the configuration runs, or the tool's default (`""`). Another model is held to
+/// what the Host knows of it.
+fn codex_window(config: &toml::Table, model: &str) -> Option<usize> {
+    let profile = crate::owner::text_at(config, &["profile"]);
+    let in_profile = |key: &str| {
+        let profile = profile.as_deref()?;
+        config
+            .get("profiles")?
+            .as_table()?
+            .get(profile)?
+            .as_table()?
+            .get(key)
+            .cloned()
+    };
+    let runs = profile
+        .as_deref()
+        .and_then(|profile| crate::owner::text_at(config, &["profiles", profile, "model"]))
+        .or_else(|| crate::owner::text_at(config, &["model"]));
+    if !model.is_empty() && runs.as_deref() != Some(model) {
+        return None;
+    }
+    let window = in_profile("model_context_window")
+        .or_else(|| config.get("model_context_window").cloned())?
+        .as_integer()?;
+    usize::try_from(window).ok().filter(|window| *window > 0)
+}
+
 // ---- what stands for what does not fit ------------------------------------------------------
 
 /// How long the agent is given to summarize its own conversation, and another model after it.
@@ -976,6 +1016,34 @@ mod tests {
         assert_eq!(
             plain_reason("turn_running", "codex", "Codex"),
             "a turn started"
+        );
+    }
+
+    #[test]
+    fn codex_is_held_to_the_window_its_configuration_sets_for_the_model_it_runs() {
+        let config: toml::Table = "model = \"gpt-6-luna\"\nmodel_context_window = 1000000\n"
+            .parse()
+            .unwrap();
+        assert_eq!(codex_window(&config, "gpt-6-luna"), Some(1_000_000));
+        assert_eq!(
+            codex_window(&config, ""),
+            Some(1_000_000),
+            "the tool's default"
+        );
+        assert_eq!(codex_window(&config, "gpt-6.2-sol"), None, "another model");
+        let profiled: toml::Table = "profile = \"big\"\nmodel = \"gpt-6-luna\"\n\
+            model_context_window = 1000000\n[profiles.big]\nmodel = \"gpt-6.2-sol\"\n\
+            model_context_window = 400000\n"
+            .parse()
+            .unwrap();
+        assert_eq!(codex_window(&profiled, "gpt-6.2-sol"), Some(400_000));
+        assert_eq!(codex_window(&profiled, "gpt-6-luna"), None);
+        let none: toml::Table = "model = \"gpt-6-luna\"\n".parse().unwrap();
+        assert_eq!(codex_window(&none, "gpt-6-luna"), None);
+        assert_eq!(
+            transit::budget_of_tokens(1_000_000),
+            1_800_000,
+            "60% of a million tokens"
         );
     }
 

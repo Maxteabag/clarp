@@ -777,7 +777,8 @@ sessions.
 How much is carried (contract 161): about 60% of what the target's model takes in, reckoned at
 three characters a token (Claude 200,000 tokens, or 1,000,000 for a `[1m]` model; Codex
 272,000; Grok 256,000; Antigravity 1,000,000; OpenCode 128,000; a model's `context_tokens` in
-the catalogue wins). What does not fit is replaced by one summary at the head of what is
+the catalogue wins, and for Codex the `model_context_window` its own `config.toml` sets, in the
+active profile or at the top, for the model it runs, or for the tool's default). What does not fit is replaced by one summary at the head of what is
 carried, written by the agent itself just before the move: one more turn on its old tool,
 filed as nobody's message (`origin` trigger `transit-summary`, hidden like any automated turn),
 that only reads (the Host's own tools refuse it helpers, jobs and new agents, and Claude Code
