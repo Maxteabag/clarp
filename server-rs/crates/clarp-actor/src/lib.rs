@@ -3889,11 +3889,11 @@ impl Actor {
             .command(command, now_ms)
             .map_err(JournalError::Refused)?;
         let mut settled_parked = false;
-        if let Some((turn, closes, facts)) = parked {
-            if let Some(end) = closing(&mut batch, turn, &closes, facts) {
-                batch.item(written(&end, now_ms)?);
-                settled_parked = true;
-            }
+        if let Some((turn, closes, facts)) = parked
+            && let Some(end) = closing(&mut batch, turn, &closes, facts)
+        {
+            batch.item(written(&end, now_ms)?);
+            settled_parked = true;
         }
         let committed = batch.commit()?;
         if settled_parked {
