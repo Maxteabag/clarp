@@ -3840,11 +3840,41 @@ impl Actor {
             Command::Stop { by }
         };
         let conversation_before = self.recorder.conversation_seq();
+        // A turn that waits between two attempts has no process to end: the Stop settles it
+        // at once, and the end that a process's ending would have written is written here.
+        let parked = match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => Some((parked.id, parked.message_seq)),
+            _ => None,
+        };
+        let parked = match parked {
+            Some((turn, message_seq)) => {
+                let message = self.message_at(message_seq)?;
+                let live = self.live.as_ref().filter(|live| live.turn == turn);
+                let mut facts = live.map(LiveTurn::facts).unwrap_or_default();
+                facts.trace_id = message.trace_id;
+                facts.notes = notes_of(self.turn_notes, turn);
+                let closes = live.map_or(message.id, |live| live.last_row.clone());
+                Some((turn, closes, facts))
+            }
+            None => None,
+        };
         let mut batch = self.recorder.batch();
         batch
             .command(command, now_ms)
             .map_err(JournalError::Refused)?;
+        let mut settled_parked = false;
+        if let Some((turn, closes, facts)) = parked {
+            if let Some(end) = closing(&mut batch, turn, &closes, facts) {
+                batch.item(written(&end, now_ms)?);
+                settled_parked = true;
+            }
+        }
         let committed = batch.commit()?;
+        if settled_parked {
+            self.unstored_changes = 0;
+            self.held_for_an_account = false;
+            self.forget_live();
+        }
         let stop_released_waiting = committed
             .events
             .iter()
