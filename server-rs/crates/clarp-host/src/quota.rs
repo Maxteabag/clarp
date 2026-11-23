@@ -95,7 +95,8 @@ fn agy_in_use(directory: &crate::fleet::Directory, now: i64) -> bool {
         .members
         .iter()
         .chain(&directory.janitors)
-        .filter(|member| member.record.backend == "agy")
+        // Antigravity over ACP is the same program and account.
+        .filter(|member| matches!(member.record.backend.as_str(), "agy" | "agy-acp"))
         .any(|member| {
             let view = member.agent.view();
             view.broken.is_some()

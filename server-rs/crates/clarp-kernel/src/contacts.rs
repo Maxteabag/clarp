@@ -64,7 +64,7 @@ fn folded(text: &str) -> String {
 /// other.
 pub fn tier_of_tool(backend: &str) -> &'static str {
     match folded(backend.trim()).as_str() {
-        "gemini" | "agy" => "gemini",
+        "gemini" | "agy" | "agy-acp" => "gemini",
         "codex" | "opencode" => "codex",
         "grok" => "grok",
         "deepseek" => "deepseek",
@@ -98,7 +98,14 @@ pub fn allows(name: &str, backend: &str, persona_tier: &str) -> (bool, Option<&'
     };
     match tool_of_tier(tier) {
         None => (true, None),
-        Some(tool) => (folded(backend.trim()) == tool, Some(tool)),
+        // Antigravity's contacts run on it over ACP too: the same program and account.
+        Some(tool) => {
+            let given = folded(backend.trim());
+            (
+                given == tool || (tool == "agy" && given == "agy-acp"),
+                Some(tool),
+            )
+        }
     }
 }
 

@@ -43,7 +43,8 @@ pub fn terminal_of(tool: &str, session: &str) -> Result<Vec<String>, String> {
     let (always, taken_up_with): (&[&str], &str) = match tool {
         "claude" => (&["--dangerously-skip-permissions"], "--resume"),
         "codex" => (&[], "resume"),
-        "agy" => (&["--dangerously-skip-permissions"], "--conversation"),
+        // Over ACP it is the same program, and the same conversation.
+        "agy" | "agy-acp" => (&["--dangerously-skip-permissions"], "--conversation"),
         "muse" => (&["--yolo"], "resume"),
         _ => return Err(format!("no interactive terminal for the {tool} backend")),
     };
