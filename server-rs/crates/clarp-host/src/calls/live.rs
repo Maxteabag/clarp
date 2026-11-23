@@ -1088,6 +1088,7 @@ mod tests {
         std::fs::create_dir_all(folder).unwrap();
         let held = json!({
             "profile_id": name, "agent_session": session, "user_call_default": "live",
+            "user_call_opening": "Hei, det er Theo.",
         });
         std::fs::write(folder.join("profile.json"), held.to_string()).unwrap();
         std::fs::write(folder.join("PERSONA.md"), "You guard the pumps.\n").unwrap();
@@ -1149,6 +1150,19 @@ mod tests {
             .collect();
         assert_eq!(taken, [("theo-97e5", Some("pump-guard"))]);
         assert_eq!(shelf.takes_calls("theo-97e5").unwrap_err().status, 409);
+        std::fs::remove_dir_all(root).unwrap();
+
+        // A profile with no opening for a call of the user's offers no Live call, whatever its
+        // default (issue 216, Rust contract 151).
+        let (root, profiles) = scratch("no-opening");
+        let folder = profiles.join("quiet-desk");
+        std::fs::create_dir_all(&folder).unwrap();
+        let held = json!({
+            "profile_id": "quiet-desk", "agent_session": "theo-97e5", "user_call_default": "live",
+        });
+        std::fs::write(folder.join("profile.json"), held.to_string()).unwrap();
+        let shelf = Shelf::at(profiles, None);
+        assert_eq!(shelf.takes_calls("theo-97e5"), Ok(None));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

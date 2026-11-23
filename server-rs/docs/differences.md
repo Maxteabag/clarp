@@ -608,6 +608,9 @@ still settles the ring at 45 seconds.
 Issue 216 (feature contract 151) adds per-call mode selection to the Rust Host.
 The Python Host requires a Live default for user-started Live calls. The Rust Host
 advertises availability separately and accepts explicit Live through `/calls/live`.
+The default is not read for that: a profile with an opening offers a Live call whatever
+its `user_call_default` says, `"classic"`, none, or `"Live"` written with a capital,
+which the Python Host refuses as no Live default (`live_context_unavailable`).
 
 Every `/log` row carries `conversation_id` on the Rust Host (contract 153, feature
 `conversation_fork`), and `session_id` is present where the producing session is known.

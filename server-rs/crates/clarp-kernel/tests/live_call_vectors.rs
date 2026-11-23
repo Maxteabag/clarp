@@ -316,6 +316,19 @@ fn a_call_of_the_user_has_the_context_the_python_host_gives_it() {
     let vectors = vectors();
     let now = vectors["now"].as_str().unwrap();
     let mut made = 0;
+    // A registered difference (issue 216, Rust contract 151): the Rust Host takes a Live call
+    // of the user's whatever the profile's default, where it has an opening. These rows are
+    // refused by the Python Host for their default alone; here each is the usual call.
+    const ANY_DEFAULT: [&str; 3] = [
+        "an agent that does not take calls so",
+        "an agent that takes them the usual way",
+        "taken so, written large",
+    ];
+    let usual = rows(&vectors, "user_calls")
+        .into_iter()
+        .find(|row| row["name"] == "the usual call")
+        .unwrap()["context"]
+        .clone();
     for row in rows(&vectors, "user_calls") {
         let name = row["name"].as_str().unwrap();
         let (agent_id, session, persona) = (
@@ -330,6 +343,14 @@ fn a_call_of_the_user_has_the_context_the_python_host_gives_it() {
         };
         let held_there = row["profile"].as_str();
         let ours = live::user_call(held_there, "pump-guard", agent, &row["request_id"], now);
+        if ANY_DEFAULT.contains(&name) {
+            assert_eq!(
+                python::dumps(&ours.unwrap()),
+                python::dumps(&usual),
+                "{name}"
+            );
+            continue;
+        }
         if let Ok(ours) = &ours {
             made += 1;
             assert_eq!(

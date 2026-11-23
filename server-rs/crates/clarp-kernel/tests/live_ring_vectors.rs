@@ -667,9 +667,17 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                 }
                 Err(refused) => {
                     refusals += 1;
+                    let mut theirs = row["refused"].clone();
+                    // A registered difference (issue 216, Rust contract 151): the user's Live
+                    // call of an agent with no approved Live profile is refused as
+                    // `live_profile_unavailable`, the word the apps draw for it, where the
+                    // Python Host says `live_context_unavailable`.
+                    if do_ == "user_call" && theirs["body"]["error"] == "live_context_unavailable" {
+                        theirs["body"]["error"] = json!("live_profile_unavailable");
+                    }
                     assert_eq!(
                         json!({ "status": refused.status, "body": refused.body }),
-                        row["refused"],
+                        theirs,
                         "{here}"
                     );
                 }
