@@ -85,6 +85,9 @@ for line in sys.stdin:
             "id": "queued", "type": "agentMessage", "text": "Queued reply"})
         notify("turn/completed", turn={"id": "prompted", "status": "completed"})
         continue
+    elif method == "thread/backgroundTerminals/clean":
+        # A Stop ends the stopped turn's commands with it.
+        (root / "terminals-cleaned").write_text("yes")
     elif method == "turn/interrupt":
         assert params["turnId"] == turn and goal["status"] == "paused"
         cancel.set()
@@ -167,6 +170,9 @@ fn a_native_codex_goal_owns_its_thread_across_host_restart_and_returns_to_exec()
         std::fs::read_to_string(place.root.join("native-turns")).unwrap(),
         "1"
     );
+    wait_for("the stopped turn's commands to be ended", || {
+        place.root.join("terminals-cleaned").exists()
+    });
     host.post("/turn-queue/resume", json!({"session":"ada"}));
     let resumed = host.post("/agent-goal/resume", json!({"session":"ada"}));
     assert_eq!(resumed["goal"]["status"], "active", "{resumed}");

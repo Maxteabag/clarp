@@ -304,7 +304,7 @@ done
 }
 
 #[test]
-fn steered_words_codex_dropped_at_an_interrupt_are_not_read() {
+fn steered_words_codex_dropped_at_an_interrupt_are_not_read_and_the_turns_commands_end() {
     let fake = r#"#!/bin/sh
 set -eu
 read -r init
@@ -324,9 +324,12 @@ case "$interrupt" in (*'"method":"turn/interrupt"'*) ;; (*) exit 1 ;; esac
 printf '%s\n' \
     '{"id":5,"result":{}}' \
     '{"method":"turn/completed","params":{"threadId":"old-thread","turn":{"id":"t5","status":"interrupted"}}}'
+read -r clean
+case "$clean" in (*'"method":"thread/backgroundTerminals/clean"'*'"threadId":"old-thread"'*) ;; (*) exit 1 ;; esac
+printf '%s\n' '{"id":6,"result":{}}'
 read -r listed
 case "$listed" in (*'"method":"thread/turns/list"'*) ;; (*) exit 1 ;; esac
-printf '%s\n' '{"id":6,"result":{"data":[{"id":"t5","items":[{"type":"userMessage","clientId":"someone-else"}]}]}}'
+printf '%s\n' '{"id":7,"result":{"data":[{"id":"t5","items":[{"type":"userMessage","clientId":"someone-else"}]}]}}'
 read -r end || :
 "#;
     let lane = Lane::start("codex-chat-dropped", fake, |root| {

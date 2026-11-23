@@ -767,6 +767,17 @@ impl Lane {
                 "turn/interrupt",
                 json!({"threadId": self.thread, "turnId": native}),
             );
+            // Codex ends the turn on an interrupt but leaves the commands it started running,
+            // as the thread's background terminals (seen by the timing harness on 23 Nov 2026:
+            // a stopped turn's `sleep 30` lived on in the idle lane). A Stop of an exec turn
+            // ends its whole group, so the lane ends them too. Not waited for: its reply is
+            // kept with the other stray replies.
+            if interrupted.is_ok() {
+                let _ = self.server.request(
+                    "thread/backgroundTerminals/clean",
+                    json!({"threadId": self.thread}),
+                );
+            }
             // Codex has the Stop's time to end the turn: at once when it did not answer.
             if self.holds(attempt) {
                 let grace = if interrupted.is_ok() {
