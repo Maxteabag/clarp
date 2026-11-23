@@ -144,7 +144,12 @@ impl Peer {
 
     /// Sends a request and waits for its answer. What else agy says meanwhile is printed or
     /// answered. `wait` bounds the silence between two messages, not the whole request.
-    fn request(&mut self, method: &str, params: Value, wait: Duration) -> Result<std::result::Result<Answer, Ended>> {
+    fn request(
+        &mut self,
+        method: &str,
+        params: Value,
+        wait: Duration,
+    ) -> Result<std::result::Result<Answer, Ended>> {
         let id = self.next;
         self.next += 1;
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))?;
@@ -213,7 +218,10 @@ impl Peer {
                     None => ("cancelled", json!({"outcome": {"outcome": "cancelled"}})),
                 };
                 self.respond(&id, Ok(outcome));
-                let names: Vec<Value> = options.iter().map(|option| option["name"].clone()).collect();
+                let names: Vec<Value> = options
+                    .iter()
+                    .map(|option| option["name"].clone())
+                    .collect();
                 emit(&said(
                     "permission",
                     json!({
@@ -348,11 +356,17 @@ fn offered(option: &Value) -> Vec<(String, String)> {
         if let Some(group) = entry["options"].as_array() {
             for inner in group {
                 if let Some(value) = inner["value"].as_str() {
-                    values.push((value.to_string(), inner["name"].as_str().unwrap_or(value).to_string()));
+                    values.push((
+                        value.to_string(),
+                        inner["name"].as_str().unwrap_or(value).to_string(),
+                    ));
                 }
             }
         } else if let Some(value) = entry["value"].as_str() {
-            values.push((value.to_string(), entry["name"].as_str().unwrap_or(value).to_string()));
+            values.push((
+                value.to_string(),
+                entry["name"].as_str().unwrap_or(value).to_string(),
+            ));
         }
     }
     values
@@ -373,50 +387,88 @@ fn matching(option: &Value, wanted: &str) -> Option<String> {
     let wanted = wanted.trim();
     offered(option)
         .into_iter()
-        .find(|(value, name)| value.eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted))
+        .find(|(value, name)| {
+            value.eq_ignore_ascii_case(wanted) || name.eq_ignore_ascii_case(wanted)
+        })
         .map(|(value, _)| value)
 }
 
 /// The conversation's options after a change of them, where the answer says them.
 fn options_of(answer: &Value) -> Option<Value> {
-    answer.get("configOptions").filter(|options| options.is_array()).cloned()
+    answer
+        .get("configOptions")
+        .filter(|options| options.is_array())
+        .cloned()
 }
 
 /// Chooses the model and the effort, where the order names them and Antigravity offers
 /// them. What is not offered is said, and the turn goes on with what Antigravity chose.
-fn configure(peer: &mut Peer, session: &str, order: &Order, opened: &Value) -> Result<std::result::Result<(), Ended>> {
+fn configure(
+    peer: &mut Peer,
+    session: &str,
+    order: &Order,
+    opened: &Value,
+) -> Result<std::result::Result<(), Ended>> {
     let mut options = options_of(opened).unwrap_or(Value::Null);
-    for (category, wanted) in [("model", order.model.as_str()), ("thought_level", order.effort.as_str())] {
+    for (category, wanted) in [
+        ("model", order.model.as_str()),
+        ("thought_level", order.effort.as_str()),
+    ] {
         if wanted.trim().is_empty() {
             continue;
         }
         let Some(found) = option(&options, category).cloned() else {
             // An agy that has no options says its models apart (`models`).
             if category == "model" && opened["models"]["availableModels"].is_array() {
-                let known = opened["models"]["availableModels"].as_array().into_iter().flatten().find_map(|model| {
-                    let id = model["modelId"].as_str()?;
-                    let name = model["name"].as_str().unwrap_or(id);
-                    (id.eq_ignore_ascii_case(wanted.trim()) || name.eq_ignore_ascii_case(wanted.trim())).then(|| id.to_string())
-                });
+                let known = opened["models"]["availableModels"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find_map(|model| {
+                        let id = model["modelId"].as_str()?;
+                        let name = model["name"].as_str().unwrap_or(id);
+                        (id.eq_ignore_ascii_case(wanted.trim())
+                            || name.eq_ignore_ascii_case(wanted.trim()))
+                        .then(|| id.to_string())
+                    });
                 match known {
                     Some(id) if opened["models"]["currentModelId"] != json!(id) => {
-                        match peer.request("session/set_model", json!({"sessionId": session, "modelId": id}), SETUP_WAIT)? {
+                        match peer.request(
+                            "session/set_model",
+                            json!({"sessionId": session, "modelId": id}),
+                            SETUP_WAIT,
+                        )? {
                             Err(ended) => return Ok(Err(ended)),
-                            Ok(Answer::Error(error)) => emit(&said("notice", json!({"code": "agy-model", "text": format!("Antigravity did not take the model {wanted}: {}", shared::error_text(&error))})))?,
+                            Ok(Answer::Error(error)) => emit(&said(
+                                "notice",
+                                json!({"code": "agy-model", "text": format!("Antigravity did not take the model {wanted}: {}", shared::error_text(&error))}),
+                            ))?,
                             Ok(Answer::Result(_)) => emit(&said("model", json!({"model": id})))?,
                         }
                     }
                     Some(_) => {}
-                    None => emit(&said("notice", json!({"code": "agy-model", "text": format!("Antigravity does not offer the model {wanted} here; it runs on its own choice.")})))?,
+                    None => emit(&said(
+                        "notice",
+                        json!({"code": "agy-model", "text": format!("Antigravity does not offer the model {wanted} here; it runs on its own choice.")}),
+                    ))?,
                 }
             } else {
-                emit(&said("notice", json!({"code": "agy-model", "text": format!("Antigravity offers no choice of {category}; {wanted} was not applied.")})))?;
+                emit(&said(
+                    "notice",
+                    json!({"code": "agy-model", "text": format!("Antigravity offers no choice of {category}; {wanted} was not applied.")}),
+                ))?;
             }
             continue;
         };
         let Some(value) = matching(&found, wanted) else {
-            let names: Vec<String> = offered(&found).into_iter().map(|(value, _)| value).collect();
-            emit(&said("notice", json!({"code": "agy-model", "text": format!("Antigravity does not offer {wanted} as its {category} (it offers {}); it runs on its own choice.", names.join(", "))})))?;
+            let names: Vec<String> = offered(&found)
+                .into_iter()
+                .map(|(value, _)| value)
+                .collect();
+            emit(&said(
+                "notice",
+                json!({"code": "agy-model", "text": format!("Antigravity does not offer {wanted} as its {category} (it offers {}); it runs on its own choice.", names.join(", "))}),
+            ))?;
             continue;
         };
         if found["currentValue"] == json!(value) {
@@ -436,13 +488,17 @@ fn configure(peer: &mut Peer, session: &str, order: &Order, opened: &Value) -> R
             Ok(Answer::Result(answer)) => {
                 if let Some(changed) = options_of(&answer) {
                     options = changed;
-                } else if let Some(entry) = options.as_array_mut().and_then(|all| all.iter_mut().find(|option| option["id"] == json!(config))) {
+                } else if let Some(entry) = options
+                    .as_array_mut()
+                    .and_then(|all| all.iter_mut().find(|option| option["id"] == json!(config)))
+                {
                     entry["currentValue"] = json!(value);
                 }
             }
         }
     }
-    if let Some(model) = option(&options, "model").and_then(|model| model["currentValue"].as_str()) {
+    if let Some(model) = option(&options, "model").and_then(|model| model["currentValue"].as_str())
+    {
         emit(&said("model", json!({"model": model})))?;
     } else if let Some(model) = opened["models"]["currentModelId"].as_str() {
         emit(&said("model", json!({"model": model})))?;
@@ -482,7 +538,11 @@ fn blocks(order: &Order, text: &str, capabilities: &Value) -> Result<Vec<Value>>
             refused("too large")?;
             continue;
         }
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("file").to_string();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file")
+            .to_string();
         let block = match kind {
             Kind::Link => json!({
                 "type": "resource_link",
@@ -502,7 +562,10 @@ fn blocks(order: &Order, text: &str, capabilities: &Value) -> Result<Vec<Value>>
             }
         };
         blocks.push(block);
-        emit(&said("attached", json!({"path": path, "as": blocks.last().map(|block| block["type"].clone())})))?;
+        emit(&said(
+            "attached",
+            json!({"path": path, "as": blocks.last().map(|block| block["type"].clone())}),
+        ))?;
     }
     Ok(blocks)
 }
@@ -520,7 +583,10 @@ fn mark_poisoned(session: &str) {
 /// Prints a failure the way the interpreter reads it.
 fn failed(stage: &str, error: &Value) -> Result<()> {
     let text = shared::error_text(error);
-    emit(&said("failed", json!({"stage": stage, "error": error, "text": text})))
+    emit(&said(
+        "failed",
+        json!({"stage": stage, "error": error, "text": text}),
+    ))
 }
 
 fn ended(stage: &str, how: Ended) -> Result<()> {
@@ -529,7 +595,10 @@ fn ended(stage: &str, how: Ended) -> Result<()> {
         Ended::Silent => "Antigravity stopped answering",
         Ended::Stopped => return Ok(()),
     };
-    emit(&said("failed", json!({"stage": stage, "text": text, "silent": how == Ended::Silent})))
+    emit(&said(
+        "failed",
+        json!({"stage": stage, "text": text, "silent": how == Ended::Silent}),
+    ))
 }
 
 /// What became of the turn, in the driver's exit code: nought for an answered prompt.
@@ -539,7 +608,12 @@ enum Turn {
     Stopped,
 }
 
-fn open_session(peer: &mut Peer, order: &Order, cwd: &str, meta: Option<&Value>) -> Result<std::result::Result<(String, Value), Turn>> {
+fn open_session(
+    peer: &mut Peer,
+    order: &Order,
+    cwd: &str,
+    meta: Option<&Value>,
+) -> Result<std::result::Result<(String, Value), Turn>> {
     let mut params = json!({"cwd": cwd, "mcpServers": []});
     if let Some(meta) = meta {
         params["_meta"] = meta.clone();
@@ -550,7 +624,10 @@ fn open_session(peer: &mut Peer, order: &Order, cwd: &str, meta: Option<&Value>)
         resume["sessionId"] = json!(order.session.trim());
         match peer.request("session/resume", resume.clone(), SETUP_WAIT)? {
             Ok(Answer::Result(opened)) => {
-                emit(&said("bound", json!({"session": order.session.trim(), "resumed": true})))?;
+                emit(&said(
+                    "bound",
+                    json!({"session": order.session.trim(), "resumed": true}),
+                ))?;
                 return Ok(Ok((order.session.trim().to_string(), opened)));
             }
             Ok(Answer::Error(error)) if error["code"] == METHOD_NOT_FOUND => {
@@ -561,7 +638,10 @@ fn open_session(peer: &mut Peer, order: &Order, cwd: &str, meta: Option<&Value>)
                 peer.quiet = false;
                 match loaded {
                     Ok(Answer::Result(opened)) => {
-                        emit(&said("bound", json!({"session": order.session.trim(), "resumed": true})))?;
+                        emit(&said(
+                            "bound",
+                            json!({"session": order.session.trim(), "resumed": true}),
+                        ))?;
                         return Ok(Ok((order.session.trim().to_string(), opened)));
                     }
                     Ok(Answer::Error(error)) if gone(&error) => lost = true,
@@ -581,18 +661,33 @@ fn open_session(peer: &mut Peer, order: &Order, cwd: &str, meta: Option<&Value>)
         }
     }
     match peer.request("session/new", params, SETUP_WAIT)? {
-        Ok(Answer::Result(opened)) => match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
-            Some(id) => {
-                emit(&said("bound", json!({"session": id, "resumed": false, "lost": lost.then_some(order.session.trim())})))?;
-                Ok(Ok((id.to_string(), opened)))
+        Ok(Answer::Result(opened)) => {
+            match opened["sessionId"].as_str().filter(|id| !id.is_empty()) {
+                Some(id) => {
+                    emit(&said(
+                        "bound",
+                        json!({"session": id, "resumed": false, "lost": lost.then_some(order.session.trim())}),
+                    ))?;
+                    Ok(Ok((id.to_string(), opened)))
+                }
+                None => {
+                    failed(
+                        "session",
+                        &json!({"message": "Antigravity opened no conversation"}),
+                    )?;
+                    Ok(Err(Turn::Failed))
+                }
             }
-            None => {
-                failed("session", &json!({"message": "Antigravity opened no conversation"}))?;
-                Ok(Err(Turn::Failed))
-            }
-        },
+        }
         Ok(Answer::Error(error)) => {
-            failed(if error["code"] == AUTH_REQUIRED { "auth" } else { "session" }, &error)?;
+            failed(
+                if error["code"] == AUTH_REQUIRED {
+                    "auth"
+                } else {
+                    "session"
+                },
+                &error,
+            )?;
             Ok(Err(Turn::Failed))
         }
         Err(how) => Ok(Err(finish_early("session", how)?)),
@@ -606,7 +701,11 @@ fn gone(error: &Value) -> bool {
 
 fn finish_early(stage: &str, how: Ended) -> Result<Turn> {
     ended(stage, how)?;
-    Ok(if how == Ended::Stopped { Turn::Stopped } else { Turn::Failed })
+    Ok(if how == Ended::Stopped {
+        Turn::Stopped
+    } else {
+        Turn::Failed
+    })
 }
 
 fn turn(peer: &mut Peer, order: &Order) -> Result<Turn> {
@@ -658,10 +757,18 @@ fn turn(peer: &mut Peer, order: &Order) -> Result<Turn> {
     };
     let prompt = blocks(order, text, &capabilities["promptCapabilities"])?;
     let silence = Duration::from_secs(shared::SILENCE_MOST_SECS);
-    match peer.request("session/prompt", json!({"sessionId": session, "prompt": prompt}), silence)? {
+    match peer.request(
+        "session/prompt",
+        json!({"sessionId": session, "prompt": prompt}),
+        silence,
+    )? {
         Ok(Answer::Result(result)) => {
             emit(&said("prompted", json!({"result": result})))?;
-            Ok(if peer.stopping { Turn::Stopped } else { Turn::Answered })
+            Ok(if peer.stopping {
+                Turn::Stopped
+            } else {
+                Turn::Answered
+            })
         }
         Ok(Answer::Error(error)) => {
             let text = shared::error_text(&error);
@@ -669,7 +776,11 @@ fn turn(peer: &mut Peer, order: &Order) -> Result<Turn> {
                 mark_poisoned(&session);
             }
             failed("prompt", &error)?;
-            Ok(if peer.stopping { Turn::Stopped } else { Turn::Failed })
+            Ok(if peer.stopping {
+                Turn::Stopped
+            } else {
+                Turn::Failed
+            })
         }
         Err(how) => finish_early("prompt", how),
     }

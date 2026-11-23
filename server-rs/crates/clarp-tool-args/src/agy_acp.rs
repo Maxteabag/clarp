@@ -171,9 +171,13 @@ pub fn poisoned_mark(dir: &Path, session: &str) -> Option<PathBuf> {
 pub enum Failure {
     /// The account's quota is spent. `resets`: when it begins anew, as Antigravity says it (a
     /// moment) or how long until then (`in 3h2m`), where it says either.
-    Quota { resets: Option<String> },
+    Quota {
+        resets: Option<String>,
+    },
     /// The provider asked to be tried again later, after this long.
-    Retry { after: String },
+    Retry {
+        after: String,
+    },
     /// The conversation holds a thinking block without a valid signature: every later prompt
     /// of it fails the same way.
     Signature,
@@ -417,7 +421,9 @@ mod tests {
             assert_eq!(classify(said), Failure::Signature, "{said}");
         }
         assert_eq!(
-            classify("Error 503, Message: The model is overloaded, Status: UNAVAILABLE\ngoroutine 1"),
+            classify(
+                "Error 503, Message: The model is overloaded, Status: UNAVAILABLE\ngoroutine 1"
+            ),
             Failure::Api {
                 code: "503".into(),
                 status: "UNAVAILABLE".into(),
