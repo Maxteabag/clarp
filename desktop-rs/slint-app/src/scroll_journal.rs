@@ -40,9 +40,10 @@ pub struct Move {
 
 impl Move {
     /// How many viewports up (positive) or down the reader was carried.
+    /// From past the end (blank below the last row) back to it is not up.
     fn viewports_up(&self) -> f32 {
         let range = (self.content - self.viewport).max(0.0);
-        (self.old_place - self.new_place) * range / self.viewport.max(1.0)
+        (self.old_place.min(1.0) - self.new_place) * range / self.viewport.max(1.0)
     }
 
     /// Following pins the end on every streamed update: only a pin that
@@ -215,10 +216,13 @@ pub struct Flash {
     pub viewports: f32,
 }
 
-/// A move someone asked for (the reader's scroll and keys, End, a search,
-/// a seek, an older page, another chat): never a flash.
+/// A move someone asked for (the reader's scroll and keys, a search, a
+/// seek, an older page): never a flash. Opening another chat is not one:
+/// it starts at the end, so the old chat's end and the new one's are both
+/// place 1, and a frame of the new chat anywhere else between them is the
+/// flash this looks for.
 fn asked(event: &str) -> bool {
-    ["reader", "key:", "vim:", "jump-latest", "seek", "reveal", "load-older", "reset:"].iter().any(|p| event.starts_with(p))
+    ["reader", "key:", "vim:", "bar:", "seek", "reveal", "load-older"].iter().any(|p| event.starts_with(p))
 }
 
 /// The flash that `frames`' newest frame ends, if any: the chat was drawn a
@@ -553,6 +557,8 @@ mod tests {
         let up = Shot { offset: -3887.0, ..end.clone() };
         assert_eq!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["reader"][..]), (end.clone(), &[][..])])), None);
         assert_eq!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["key:Home"][..]), (end.clone(), &["jump-latest"][..])])), None);
+        // Another chat opened at its middle, then pinned to its end, is one.
+        assert!(detect(&frames(&[(end.clone(), &[][..]), (up.clone(), &["reset:chat", "rows -0 +78 ~0"][..]), (end.clone(), &["jump-latest"][..])])).is_some());
         let slow = [(end.clone(), &[][..]), (up.clone(), &[][..]), (up.clone(), &[][..]), (up.clone(), &[][..]), (up, &[][..]), (end.clone(), &[][..])];
         assert_eq!(detect(&frames(&slow)), None, "four frames away is a move, not a flash");
         // A re-estimate moves the offset a long way, the place not at all.
