@@ -211,12 +211,18 @@ fn codex_chat_turns_run_on_one_lane_and_take_steered_words() {
 /// A stand-in Codex for the lane's life: Stop, a Host restart, idle time, the cap, a changed
 /// login and a changed model. A word `ask-<x>` is answered `said-ask-<x>` at once; a word
 /// `hold-<x>` is answered `said-hold-<x>` once the file `release-<x>` exists, unless the turn
-/// is interrupted first. What it was asked is noted in files beside it.
+/// is interrupted first. A word `hold-cmd<x>` also starts a long command in a session of its
+/// own, as Codex runs a terminal command: an interrupt leaves it running, as Codex leaves a
+/// background terminal, and `thread/backgroundTerminals/clean` ends it. While the file `deaf`
+/// exists, Codex answers an interrupt but neither ends the turn nor cleans anything. What it
+/// was asked is noted in files beside it.
 const LANE_CODEX: &str = r#"#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
 import re
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -240,6 +246,7 @@ state = threading.Lock()
 thread = None
 count = 0
 running = {}
+terminals = []
 
 def emit(value):
     with out:
@@ -298,6 +305,10 @@ for line in sys.stdin:
             running[turn_id] = stopped
         def after():
             notify("turn/started", turn={"id": turn_id})
+            if word.startswith("hold-cmd"):
+                command = subprocess.Popen(["sleep", "30"], start_new_session=True)
+                terminals.append(command)
+                (root / ("command-" + word.removeprefix("hold-"))).write_text(str(command.pid))
             if word.startswith("hold-"):
                 (root / ("holding-" + word.removeprefix("hold-"))).write_text("")
                 threading.Thread(target=held, args=(turn_id, word, stopped), daemon=True).start()
@@ -308,6 +319,9 @@ for line in sys.stdin:
     elif method == "turn/interrupt":
         turn_id = params["turnId"]
         note("interrupts", turn_id)
+        if (root / "deaf").exists():
+            emit({"id": request_id, "result": {}})
+            continue
         with state:
             stopped = running.pop(turn_id, None)
         if stopped is not None:
@@ -321,6 +335,11 @@ for line in sys.stdin:
         result = {"data": []}
     elif method == "thread/backgroundTerminals/clean":
         note("cleaned", params["threadId"])
+        if not (root / "deaf").exists():
+            for command in terminals:
+                os.killpg(command.pid, signal.SIGKILL)
+                command.wait()
+            terminals.clear()
     else:
         raise SystemExit("unexpected " + method)
     emit({"id": request_id, "result": result})
@@ -459,8 +478,8 @@ fn a_stop_interrupts_the_lane_turn_at_once_and_the_next_message_runs_on_the_same
         "the held turn was interrupted"
     );
     assert_eq!(answers(&host, "stopper", "said-hold-stop"), 0);
-    wait_for("the stopped turn's commands to be ended", || {
-        noted(&place, "cleaned").lines().count() == 1
+    wait_for("each turn's end to clean its commands", || {
+        noted(&place, "cleaned").lines().count() == 2
     });
     assert!(
         lane_lives(&socket),
@@ -710,4 +729,87 @@ fn a_changed_model_restarts_the_idle_lane_and_the_next_turn_runs_with_it() {
         models()
     );
     assert_eq!(noted(&place, "turns"), "ask-one\nask-two\nask-three\n");
+}
+
+/// Whether a process runs: it is there and has not ended (an ended child its parent has not
+/// reaped yet is still listed).
+fn runs(pid: &str) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+        stat.rsplit_once(')')
+            .is_some_and(|(_, after)| !after.trim_start().starts_with('Z'))
+    })
+}
+
+#[test]
+fn a_stop_ends_the_long_command_of_a_lane_turn_within_its_grace_and_the_lane_answers_next() {
+    let (place, world) = lane_place("codex-lane-stop-command", "codex_lane_idle_minutes = 5\n");
+    let _lanes = Lanes(place.root.clone());
+    let host = start_lane_host(&place, &world);
+    let socket = lane_agent(&host, &place, "sleeper");
+    asked(&host, "sleeper", "ask-first");
+    let instance = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
+
+    host.send("sleeper", "hold-cmdstop", "cmd");
+    wait_for("the turn's command", || place.root.join("holding-cmdstop").exists());
+    let command = noted(&place, "command-cmdstop");
+    assert!(runs(&command), "the command runs while the turn runs");
+    let began = Instant::now();
+    host.post("/stop", json!({"session": "sleeper"}));
+    wait_within("the command to be ended", Duration::from_secs(5), || !runs(&command));
+    assert!(began.elapsed() < Duration::from_secs(5), "within the Stop's grace");
+    wait_for("the turn to end interrupted", || {
+        host.state("sleeper") == "interrupted"
+    });
+    assert_eq!(answers(&host, "sleeper", "said-hold-cmdstop"), 0);
+
+    // The lane that ended it answers the next turn.
+    asked(&host, "sleeper", "ask-after");
+    assert_eq!(noted(&place, "launches"), "app-server\n");
+    assert_eq!(
+        lane_said(&socket, "inspect").unwrap()["state"]["instance"],
+        instance
+    );
+}
+
+#[test]
+fn a_stop_codex_does_not_answer_ends_codex_and_its_long_command_and_a_new_lane_answers_next() {
+    let (place, world) = lane_place("codex-lane-stop-deaf", "codex_lane_idle_minutes = 5\n");
+    let _lanes = Lanes(place.root.clone());
+    let host = start_lane_host(&place, &world);
+    let socket = lane_agent(&host, &place, "deafened");
+    asked(&host, "deafened", "ask-first");
+    let first = lane_said(&socket, "inspect").unwrap()["state"]["instance"].clone();
+
+    // This Codex takes the interrupt and goes on: the lane ends it, and what runs below it,
+    // when the Stop's grace (5 s) is over.
+    std::fs::write(place.root.join("deaf"), "").unwrap();
+    host.send("deafened", "hold-cmddeaf", "cmd");
+    wait_for("the turn's command", || place.root.join("holding-cmddeaf").exists());
+    let command = noted(&place, "command-cmddeaf");
+    assert!(runs(&command), "the command runs while the turn runs");
+    let began = Instant::now();
+    host.post("/stop", json!({"session": "deafened"}));
+    wait_within("the command to be ended", Duration::from_secs(10), || !runs(&command));
+    let took = began.elapsed();
+    assert!(
+        took >= Duration::from_secs(4) && took < Duration::from_secs(10),
+        "Codex had the Stop's grace, and then it and its command were ended: {took:?}"
+    );
+    wait_for("the turn to end interrupted", || {
+        host.state("deafened") == "interrupted"
+    });
+    assert_eq!(answers(&host, "deafened", "said-hold-cmddeaf"), 0);
+
+    // The next turn gets a new lane on the same thread.
+    std::fs::remove_file(place.root.join("deaf")).unwrap();
+    asked(&host, "deafened", "ask-after");
+    assert_eq!(noted(&place, "launches"), "app-server\napp-server\n");
+    assert_ne!(
+        lane_said(&socket, "inspect").unwrap()["state"]["instance"],
+        first
+    );
+    assert_eq!(
+        noted(&place, "turns"),
+        "ask-first\nhold-cmddeaf\nask-after\n"
+    );
 }
