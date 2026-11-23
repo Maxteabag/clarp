@@ -1236,8 +1236,9 @@ struct Painted {
 /// the partial repaint missed keeps an older frame's rows on screen, the
 /// flash of another scroll state. Agent turns stream into a 200-row chat
 /// (tools come and go, rows are filed, a live reply grows and is replaced,
-/// rows land in bursts), the reader switches to another chat and back, and
-/// a long reply grows fast.
+/// rows land in bursts, the working footer comes and goes), the composer
+/// unfolds and folds under it, and the reader switches to another chat and
+/// back.
 pub(super) fn scroll_paint_check(out: String) {
     const SESSION: &str = "paint";
     const ROWS: usize = 200;
@@ -1256,6 +1257,10 @@ pub(super) fn scroll_paint_check(out: String) {
         steps.push((format!("turn {turn}: the fast reply is filed"), Box::new(move || {
             upsert(SESSION, json!([{"id": format!("paint-fast-done-{turn}"), "role": "assistant", "text": streamed(6)}]));
         })));
+        // The composer unfolds under the chat and folds again: the view
+        // shrinks and grows while it follows.
+        steps.push((format!("turn {turn}: the composer takes the keyboard"), Box::new(|| app_now().focus_composer())));
+        steps.push((format!("turn {turn}: the chat takes it back"), Box::new(|| app_now().focus_transcript())));
         steps.push((format!("turn {turn}: another chat"), Box::new(|| {
             app_now().engine.borrow_mut().select("rachel");
             crate::pump();
@@ -1316,9 +1321,12 @@ pub(super) fn scroll_paint_check(out: String) {
                     return;
                 }
                 st.following += 1;
-                if !now.at_end {
+                // Both what the transcript says and where its last row is
+                // drawn: its bottom edge inside the view.
+                let (visible, numbers) = last_row_visible();
+                if !now.at_end || !visible {
                     let at = st.begun.map_or(0, |b| b.elapsed().as_millis());
-                    st.off_end.push(format!("frame {} at {at}ms: offset {:.0}, top row #{}", headless::frames_drawn(), now.offset, now.top));
+                    st.off_end.push(format!("frame {} at {at}ms: at-end {}, offset {:.0}, top row #{}: {numbers}", headless::frames_drawn(), now.at_end, now.offset, now.top));
                 }
             })));
             s1.borrow_mut().begun = Some(Instant::now());
