@@ -39,6 +39,9 @@ pub(crate) struct Peer {
     pub(crate) engine: Box<Engine>,
     /// The primary's open panes and selection on this Host were handed to it.
     handed_over: bool,
+    /// Its first connect ended (live, or failed): until then the
+    /// "<Host> unreachable" note stays quiet for it.
+    settled: bool,
 }
 
 #[derive(Default)]
@@ -399,7 +402,7 @@ impl Engine {
         }
         engine.start();
         eprintln!("Engine: reading {} as a peer Host ({})", saved.label(), base);
-        self.peers.list.push(Peer { url: base, label: saved.label(), server_id: saved.server_id.clone(), engine: Box::new(engine), handed_over: false });
+        self.peers.list.push(Peer { url: base, label: saved.label(), server_id: saved.server_id.clone(), engine: Box::new(engine), handed_over: false, settled: false });
         let index = self.peers.list.len() - 1;
         if !saved.server_id.is_empty() {
             self.hand_over(index);
@@ -502,6 +505,9 @@ impl Engine {
         let badges = self.peers.badges;
         for (index, peer) in self.peers.list.iter_mut().enumerate() {
             let changes = peer.engine.pump();
+            if peer.engine.connection_state() != "connecting" {
+                peer.settled = true;
+            }
             // What the peer's Host said of a chat's view (#702): the
             // primary keeps every chat's own choice and its error line.
             chat_views.extend(peer.engine.qualified_chat_view_outcomes(&peer.server_id));
@@ -694,7 +700,7 @@ impl Engine {
             .peers
             .list
             .iter()
-            .filter(|p| matches!(p.engine.connection_state(), "offline" | "unauthorized"))
+            .filter(|p| p.settled && !Self::reachable(&p.engine))
             .map(|p| p.label.as_str())
             .collect();
         all_hosts::unreachable_note(&labels)
