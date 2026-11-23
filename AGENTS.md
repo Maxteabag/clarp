@@ -47,9 +47,12 @@ same closeout:
    mounts plus the Compose `working_dir`/`config_files` labels, and inspect
    systemd unit `WorkingDirectory`/`ExecStart` paths. A stopped container with a
    restart policy still counts as an active dependency.
-3. Remove it with `git worktree remove <exact-path>` and then run
+3. Run `server-rs/tools/build drop` from it first: a copy and target it built on
+   the build machine are 5 to 14 GB, and that disk is shared. Where it built
+   nothing, drop removes nothing.
+4. Remove it with `git worktree remove <exact-path>` and then run
    `git worktree prune`.
-4. Report the path that was removed.
+5. Report the path that was removed.
 
 Never force-remove a dirty, unmerged, active, or ownership-uncertain worktree.
 Never remove a worktree referenced by a container, service, timer, or other

@@ -21,7 +21,10 @@
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
 #   server-rs/tools/build status           who holds the queue, the machine's load and free build space
-# A build that needs more free space sets CLARP_BUILD_MIN_FREE_BYTES to its required byte count.
+#   server-rs/tools/build drop             remove this checkout's copy and its target from the build machine,
+#                                          once its branch has landed (a copy is 5 to 14 GB there)
+# A build that needs another free-space floor sets CLARP_BUILD_MIN_FREE_BYTES to its own byte count,
+# higher or lower.
 #
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
@@ -31,7 +34,9 @@ set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
 JOBS="${CLARP_BUILD_JOBS:-6}"
-floor="${CLARP_BUILD_MIN_FREE_BYTES:-10737418240}" # 10 GiB
+# The queue frees room (other checkouts' targets, oldest built first) below this much free space. The
+# build machine's disk is shared with other builds (Android, since 23 Nov 2026), and at 10 GiB it filled.
+floor="${CLARP_BUILD_MIN_FREE_BYTES:-25769803776}" # 24 GiB
 # Extra environment for the remote cargo, as NAME=value words. The tests that run a real tool
 # only run when asked this way, for example:
 #   CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- --ignored
@@ -60,6 +65,16 @@ cmd="${1:-check}"; shift || true
 
 if [ "$cmd" = status ]; then
     exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; python3 - status && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf "build disk: %s free\n"' < "$here/tools/build-queue.py"
+fi
+if [ "$cmd" = drop ]; then
+    # A landed branch's copy is only disk there. This checkout's locks are held (above), and the
+    # queue's eviction lock keeps another checkout's build from freeing room in it at that moment.
+    # The name reaches a remote shell: only a plain checkout name is removed, never a queue file.
+    if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == . || "$name" == .. || "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* ]]; then
+        echo "refusing to drop a copy under this checkout name: $name" >&2
+        exit 2
+    fi
+    exec ssh "${ssh_opts[@]}" "$HOST" "flock /var/tmp/clarp-build/eviction-lock rm -rf -- $remote && echo 'dropped $remote' && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf 'build disk: %s free\\n'"
 fi
 
 if ! [[ "$floor" =~ ^(0|[1-9][0-9]*)$ ]] || ! [ "$floor" -ge 0 ] 2>/dev/null; then
@@ -91,7 +106,7 @@ case "$cmd" in
         printf -v cargo_cmd '%q ' systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 timeout -k 3 "$slice_seconds" unshare --user --map-root-user --net --pid --fork --kill-child --mount-proc sh -ec 'ip link set lo up; exec python3 tools/fleet-load "$@"' fleet-load "$1" "$2"
         ;;
     release) cargo_cmd="cargo build --release -j $JOBS -p clarp-host -p clarp-shim" ;;
-    *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status" >&2; exit 2 ;;
+    *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status|drop" >&2; exit 2 ;;
 esac
 
 # Keep source lines for backtraces without embedding full type and variable
