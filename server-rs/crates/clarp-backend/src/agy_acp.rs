@@ -1027,4 +1027,27 @@ mod tests {
             ]
         );
     }
+
+    /// A janitor's isolated question goes to Antigravity as one sandboxed print in a home
+    /// of its own, exactly as for the plain card: never through ACP, and never into the
+    /// conversation store the agents share.
+    #[test]
+    fn an_isolated_question_is_the_plain_cards_one_shot_in_its_own_home() {
+        let reading = Reading {
+            instructions: "Keep the books.".to_string(),
+            asked: "GOAL AS RECORDED: ...".to_string(),
+            schema: r#"{"type":"object"}"#.to_string(),
+            model: Some("gemini-4-hydrogen-low".to_string()),
+            effort: None,
+        };
+        let acp = AgyAcp::with_program("/opt/agy");
+        let plain = crate::agy::Agy::with_program("/opt/agy");
+        let reads = acp.reads(&reading).unwrap();
+        assert_eq!(Some(reads.clone()), plain.reads(&reading));
+        assert_eq!(reads.launch.program, "/opt/agy");
+        assert!(reads.launch.args.iter().any(|arg| arg == "--sandbox"));
+        assert!(!reads.launch.args.iter().any(|arg| arg == "acp"));
+        assert_eq!(acp.own_home(), plain.own_home());
+        assert!(acp.own_home().is_some());
+    }
 }

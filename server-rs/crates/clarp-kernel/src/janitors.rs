@@ -737,4 +737,38 @@ mod tests {
              Nothing was turned on."
         );
     }
+
+    /// Antigravity over ACP shares the plain card's conversation store, so its janitors are
+    /// shut off from it the same way: an isolated run is taken for either card, and a
+    /// janitor seeded isolated keeps it.
+    #[test]
+    fn a_janitor_on_either_antigravity_card_can_run_isolated() {
+        for backend in ["agy", "agy-acp"] {
+            let run = execution(
+                "scheduled-prompt",
+                Some(&json!({"isolated": true})),
+                backend,
+            )
+            .unwrap_or_else(|refused| panic!("{backend}: {refused:?}"));
+            assert_eq!(
+                Value::Object(run),
+                json!({"executor": "ephemeral", "provider": backend, "isolated": true}),
+                "{backend}"
+            );
+            assert_eq!(
+                Value::Object(execution("scheduled-prompt", None, backend).unwrap()),
+                json!({"executor": "ephemeral", "provider": backend}),
+                "{backend}"
+            );
+            assert!(isolates(backend), "{backend}");
+        }
+        // The other cards are refused as before, and in the same words.
+        let refused = execution(
+            "scheduled-prompt",
+            Some(&json!({"isolated": true})),
+            "claude",
+        );
+        assert!(format!("{refused:?}").contains("Isolated execution is an Antigravity option"));
+        assert!(!isolates("claude"));
+    }
 }

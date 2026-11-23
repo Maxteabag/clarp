@@ -635,13 +635,15 @@
    "claude",
    "codex",
    "agy",
+   "agy-acp",
    "grok",
    "opencode",
    "deepseek",
    "muse"
   ],
   "isolating": [
-   "agy"
+   "agy",
+   "agy-acp"
   ],
   "backend_of": {
    "openai": "codex",

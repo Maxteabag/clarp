@@ -183,7 +183,7 @@ impl Book {
             Some(&json!(effort)),
             provider,
         )?;
-        if backend == "agy" && !effort.is_empty() {
+        if matches!(backend, "agy" | "agy-acp") && !effort.is_empty() {
             return Err(invalid(
                 "AGY model-specific effort compatibility is unknown",
             ));
