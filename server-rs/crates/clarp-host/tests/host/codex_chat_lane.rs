@@ -588,7 +588,9 @@ fn an_idle_lane_leaves_after_its_time_and_the_next_turn_starts_another_on_the_sa
     assert!(seen["state"]["claim"].is_null(), "{seen}");
     // The lane went idle when its turn ended, before the Host showed the turn done: it says
     // for how long.
-    let idle_ms = seen["state"]["idle_ms"].as_u64().expect("the lane says how long it is idle");
+    let idle_ms = seen["state"]["idle_ms"]
+        .as_u64()
+        .expect("the lane says how long it is idle");
     let idle_from = Instant::now() - Duration::from_millis(idle_ms);
 
     wait_within("the idle lane to leave", Duration::from_secs(120), || {
