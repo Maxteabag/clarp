@@ -45,6 +45,8 @@ mod cartesia_language;
 mod chat_view;
 #[path = "host/codex_chat_lane.rs"]
 mod codex_chat_lane;
+#[path = "host/codex_own_provider.rs"]
+mod codex_own_provider;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
 #[path = "host/contacts.rs"]
