@@ -1082,7 +1082,7 @@ Rules:
 - `synthesize_audio: true` asks for the answer to be spoken: the agent's tool is
   told how to speak, and what it marks with `<speak>` becomes clips. Send it when
   the app's voice output is on. Without it, or with `false`, the answer is text
-  only, whoever sent the message (Rust Host contract 171, feature
+  only, whoever sent the message (Rust Host contract 175, feature
   `spoken_when_asked`; an older Host speaks a user's send that leaves the
   field out, so send it either way). A person's words in a call that is still
   on (with `call_id`, or the greeting with `call_opening`) are spoken unless the
@@ -1165,7 +1165,7 @@ deletes an item of either kind until its turn starts; after that both answer
 sends `queue-updated` with its `client_msg_id`, `origin` and `sender` too.
 
 **The app's audio setting where a message is changed or an answer is given** (Rust Host
-contract 171, feature `spoken_when_asked`). `PUT /turn-queue/<id>` takes an optional
+contract 175, feature `spoken_when_asked`). `PUT /turn-queue/<id>` takes an optional
 `synthesize_audio` (bool) beside `text`, and `POST /turn-queue/<id>/send` takes an optional
 body `{"synthesize_audio": bool}` (an empty body is still accepted; a body that is not JSON
 answers 400 `invalid JSON body`). The value sent replaces the item's own flag, so send the
