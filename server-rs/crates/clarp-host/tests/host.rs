@@ -4379,10 +4379,16 @@ fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finish
         let seconds = if n % 2 == 0 { 4 } else { 1 };
         host.send(session, &format!("sleep {seconds}"), &format!("m-{n}"));
     }
-    wait_for("all ten turns to run", || {
-        agents
-            .iter()
-            .all(|session| host.state(session) == "thinking")
+    // On a slow machine a turn of one second can end before the tenth has started, so each
+    // is counted once it has been seen working or done, not all ten working at one moment.
+    let mut started = std::collections::HashSet::new();
+    wait_for("all ten turns to start", || {
+        for session in &agents {
+            if matches!(host.state(session).as_str(), "thinking" | "done") {
+                started.insert(session.clone());
+            }
+        }
+        started.len() == agents.len()
     });
 
     host.kill();
