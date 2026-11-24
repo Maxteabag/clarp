@@ -3008,12 +3008,32 @@ impl Fleet {
                 .and_then(|value| Visibility::read(value))
                 .unwrap_or_default(),
         });
-        let mut event = serde_json::json!({"type": "agent-roster", "kind": rules::ROSTER_KIND,
-                               "coordination_visibility": effective});
-        if let Some((_, session)) = chat {
-            event["session"] = serde_json::json!(session);
+        let told = |session: Option<&str>, visibility: Visibility| {
+            let mut event = serde_json::json!({"type": "agent-roster", "kind": rules::ROSTER_KIND,
+                                   "coordination_visibility": visibility});
+            if let Some(session) = session {
+                event["session"] = serde_json::json!(session);
+            }
+            event
+        };
+        let now = self.now_ms();
+        self.works
+            .hub
+            .publish(told(chat.as_ref().map(|(_, s)| s.as_str()), effective), now);
+        // An app sets every chat without a choice of its own to the Host's new value. A chat
+        // that does not follow it (a helper's own) is told its value right after, so no app
+        // shows it under the Host's.
+        if chat.is_none() {
+            for member in &self.members {
+                let (default, own) =
+                    crate::hidden_coordination::chat_choices(&self.settings, &member.record);
+                if own.is_none() && default != effective {
+                    self.works
+                        .hub
+                        .publish(told(Some(&member.record.session), default), now);
+                }
+            }
         }
-        self.works.hub.publish(event, self.now_ms());
         Ok(effective)
     }
 

@@ -65,10 +65,20 @@ impl Mode {
     }
 
     pub fn policy(self, global: Visibility, chat: Option<Visibility>) -> Policy {
+        self.policy_over((global, "global"), chat)
+    }
+
+    /// The same, where what holds without a choice of the chat's own is `default`, named by
+    /// its source: the Host's choice (`global`), or a helper's own chat (`helper`).
+    pub fn policy_over(
+        self,
+        default: (Visibility, &'static str),
+        chat: Option<Visibility>,
+    ) -> Policy {
         let (visibility, source) = match (self, chat) {
             (Self::Request(visibility), _) => (visibility, "request"),
             (_, Some(visibility)) => (visibility, "chat"),
-            _ => (global, "global"),
+            _ => default,
         };
         Policy {
             hidden: visibility == Visibility::Hide,

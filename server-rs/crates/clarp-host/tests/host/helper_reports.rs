@@ -47,7 +47,13 @@ fn a_helper_that_reports_mid_turn_reads_running_until_the_turn_is_over() {
     use super::coordination::{stand_in, start_host_as};
     let place = Place::new("helper-reports-mid-turn");
     let (tokens, release, holds) = stand_in(&place);
-    let host = start_host_as(&place, &[], "fixture-admin");
+    // The fleet's own look at its helpers is kept out of the way: every event here is a turn's
+    // or a message's.
+    let host = start_host_as(
+        &place,
+        &["--helpers-checked-every-ms", "3600000"],
+        "fixture-admin",
+    );
     host.post(
         "/agents",
         json!({"name":"Boss","session":"boss","backend":"claude"}),
@@ -91,13 +97,33 @@ fn a_helper_that_reports_mid_turn_reads_running_until_the_turn_is_over() {
             })
             .count()
     };
+    // Everything told before this is heard: a mute's change is told after it.
+    let settled = || {
+        let mutes = || {
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| event["kind"] == "mute-changed")
+                .count()
+        };
+        let before = mutes();
+        for muted in [true, false] {
+            host.post("/agent-mute", json!({"session":"boss","muted":muted}));
+        }
+        wait_for("the mute's change to be heard", || mutes() >= before + 2);
+    };
     let prompt = tokens.join("hal.prompt");
-    // A turn of the helper that runs until the test lets it go.
-    let held_turn = |text: &str, id: &str| {
+    // A turn of the helper that a message begins and that runs until the test lets it go.
+    let held = |message: Value| {
         std::fs::write(holds.join("hal"), b"").unwrap();
         let _ = std::fs::remove_file(&prompt);
-        host.send("hal", text, id);
+        let sent = host.post("/send", message);
+        assert_eq!(sent["ok"], true, "{sent}");
         wait_for("the helper's turn to begin", || prompt.exists());
+    };
+    let held_turn = |text: &str, id: &str| {
+        held(json!({"session":"hal","text":text,"client_msg_id":id}));
     };
     let let_go = || {
         std::fs::write(release.join("hal"), b"").unwrap();
@@ -121,6 +147,24 @@ fn a_helper_that_reports_mid_turn_reads_running_until_the_turn_is_over() {
     assert_eq!(state(), "reported");
     assert_eq!(row("hal")["helper_state"], "reported");
     assert_eq!(row("boss")["running_children"], 0);
+
+    // A turn the user begins on a helper that reported is told as it begins and as it ends.
+    held_turn("one question", "question");
+    wait_for("the turn's start to tell the list", || told() == 3);
+    assert_eq!(state(), "running");
+    let_go();
+    wait_for("the turn's end to tell the list", || told() == 4);
+    assert_eq!(state(), "reported");
+
+    // A turn its parent begins is told once, by its move back to work, and not again as the
+    // turn begins. The turn's end leaves it working: nothing more is told.
+    held(json!({"session":"hal","text":"more work","origin":"agent","sender":"boss",
+                "client_msg_id":"more-work"}));
+    assert_eq!(state(), "running");
+    let_go();
+    settled();
+    assert_eq!(told(), 5);
+    assert_eq!(state(), "running");
 
     // A helper its parent accepted stays done while it works on.
     let done = host.post(

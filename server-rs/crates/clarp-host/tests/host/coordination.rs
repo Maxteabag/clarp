@@ -1732,8 +1732,44 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
         "/agents",
         json!({"name":"Oak","session":"oak","backend":"claude"}),
     );
+    let heard = host.listen_at(&format!("/events?token={admin}"));
+    // A change of an agent's mute is told to every app: once it is heard, so is the rest.
+    wait_for("the event stream to subscribe", || {
+        for muted in [true, false] {
+            host.post("/agent-mute", json!({"session":"oak","muted":muted}));
+        }
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["kind"] == "mute-changed")
+    });
     let hide = json!({"coordination_visibility":"hide"});
     assert_eq!(host.post("/coordination-settings", hide.clone()), hide);
+    // The apps hear the Host's new value, and right after it that the helper's chat, which
+    // has no choice of its own, stays shown. A chat that follows the Host is not named.
+    let changed = || -> Vec<(Value, Value)> {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["kind"] == "coordination-changed")
+            .map(|event| {
+                (
+                    event.get("session").cloned().unwrap_or(Value::Null),
+                    event["coordination_visibility"].clone(),
+                )
+            })
+            .collect()
+    };
+    wait_for("the helper's own value to be told", || changed().len() >= 2);
+    assert_eq!(
+        changed(),
+        [
+            (Value::Null, json!("hide")),
+            (json!("hal"), json!("show"))
+        ]
+    );
     let reminder = "Coordination: this turn answers a message from another agent";
     // Boss writes to an agent, and the turn it starts is over: what its tool was given.
     let from_boss = |session: &str, text: &str, id: &str| {
@@ -1779,7 +1815,7 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
     let page = host.get("/log?session=hal&coordination=auto");
     assert_eq!(
         page["coordination"],
-        json!({"visibility":"show","hidden":false,"source":"global"})
+        json!({"visibility":"show","hidden":false,"source":"helper"})
     );
     assert!(for_agents(&page) > 0, "{page}");
     assert!(page.get("hidden_after").is_none(), "{page}");

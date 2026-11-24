@@ -24,6 +24,8 @@ pub(crate) struct Roster {
 #[derive(Clone, Copy)]
 struct Chat {
     default: Visibility,
+    /// Where the default comes from: `global`, or `helper` for a helper's own chat.
+    source: &'static str,
     own: Option<Visibility>,
     hides: bool,
 }
@@ -67,14 +69,14 @@ impl Roster {
                         Some(&agent.backend),
                         true,
                     );
-                (
-                    agent.agent_id.clone(),
-                    Chat {
-                        default,
-                        own,
-                        hides,
-                    },
-                )
+                let source = if agent.is_helper() { "helper" } else { "global" };
+                let chat = Chat {
+                    default,
+                    source,
+                    own,
+                    hides,
+                };
+                (agent.agent_id.clone(), chat)
             })
             .collect();
         Self { global, chats }
@@ -92,6 +94,19 @@ pub(crate) fn visibility(
         .chats
         .get(agent_id)
         .map_or((roster.global, None), |chat| (chat.default, chat.own))
+}
+
+/// How a read of this chat's log under `mode` treats coordination: which value holds and
+/// where it comes from (the request, the chat's own choice, a helper's own chat, the Host).
+pub(crate) fn policy(directory: &Directory, agent_id: &str, mode: rules::Mode) -> rules::Policy {
+    let roster = &directory.coordination;
+    let (default, own) = roster
+        .chats
+        .get(agent_id)
+        .map_or(((roster.global, "global"), None), |chat| {
+            ((chat.default, chat.source), chat.own)
+        });
+    mode.policy_over(default, own)
 }
 
 pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
