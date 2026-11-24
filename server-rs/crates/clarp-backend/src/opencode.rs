@@ -115,6 +115,8 @@ struct Stream {
     model: Option<String>,
     lines: BTreeMap<String, i64>,
     step: u64,
+    /// The replies a step has written so far: its words before each of its calls are one.
+    part: u64,
     assistant: BTreeSet<String>,
     types: BTreeMap<String, String>,
     texts: BTreeMap<String, String>,
@@ -222,7 +224,10 @@ fn clip(s: &str, n: usize) -> String {
 
 impl Stream {
     fn row(&self) -> String {
-        format!("r-{}-{}", self.name, self.step)
+        match self.part {
+            0 => format!("r-{}-{}", self.name, self.step),
+            part => format!("r-{}-{}-{part}", self.name, self.step),
+        }
     }
     fn said(&self) -> String {
         self.order
@@ -234,18 +239,30 @@ impl Stream {
             .join("\n\n")
     }
     fn flush(&mut self, out: &mut Vec<Signal>) {
+        self.flush_with(Vec::new(), out);
+    }
+    /// Writes what the step said so far as a reply, with the calls (`tools`) that follow its
+    /// words: a step's words before its call announce the call, as one message of the model
+    /// that says something and calls a tool does. A call with no words before it is a reply
+    /// too, the row its tool is shown on.
+    fn flush_with(&mut self, tools: Vec<String>, out: &mut Vec<Signal>) {
         let text = self.said();
-        if !text.is_empty() {
-            let id = self.row();
-            out.push(Signal::Glimpse(Glimpse::Done { id: id.clone() }));
-            out.push(Signal::Reply(Reply {
-                id,
-                turn: self.turn,
-                text,
-                ..Reply::default()
-            }));
-        }
         self.order.clear();
+        if text.is_empty() && tools.is_empty() {
+            return;
+        }
+        let id = self.row();
+        if !text.is_empty() {
+            out.push(Signal::Glimpse(Glimpse::Done { id: id.clone() }));
+        }
+        out.push(Signal::Reply(Reply {
+            id,
+            turn: self.turn,
+            text,
+            tools,
+            ..Reply::default()
+        }));
+        self.part += 1;
     }
     fn text(&mut self, id: &str, text: &str, delta: bool, out: &mut Vec<Signal>) {
         let s = self.texts.entry(id.into()).or_default();
@@ -283,8 +300,12 @@ impl Stream {
         let sid = format!("oc:{raw}");
         let name = tool_name(p["tool"].as_str().unwrap_or(word(p, "name"))).to_string();
         let id = format!("t-{}-{raw}", self.name);
-        let args = input(&state["input"]);
-        let call = self.tools.entry(raw.into()).or_insert_with(|| {
+        if !self.tools.contains_key(raw) {
+            // The step's words so far go with this call, written before it: what announced a
+            // call is never written after it, where it would read as words after work.
+            let reply = self.row();
+            self.flush_with(vec![id.clone()], out);
+            let args = input(&state["input"]);
             let call = ToolCall {
                 id: id.clone(),
                 turn: self.turn,
@@ -292,6 +313,7 @@ impl Stream {
                 input: args.clone(),
                 status: ToolStatus::Running,
                 started_at_ms: t,
+                reply: Some(reply),
                 ..ToolCall::default()
             };
             out.push(Signal::Glimpse(Glimpse::Tool {
@@ -303,8 +325,11 @@ impl Stream {
             }));
             out.push(Signal::Tool(call.clone()));
             out.push(Signal::Moved(Activity::Tool { name }));
-            call
-        });
+            self.tools.insert(raw.into(), call);
+        }
+        let Some(call) = self.tools.get_mut(raw) else {
+            return;
+        };
         let output = if matches!(status, "completed" | "error") {
             &state["output"]
         } else {
@@ -368,6 +393,7 @@ impl Stream {
     fn step(&mut self, out: &mut Vec<Signal>) {
         self.flush(out);
         self.step += 1;
+        self.part = 0;
         out.push(Signal::Moved(Activity::Thinking));
     }
     fn serve(&mut self, p: &Value, t: i64, out: &mut Vec<Signal>) {

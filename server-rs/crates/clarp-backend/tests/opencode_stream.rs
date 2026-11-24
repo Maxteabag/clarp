@@ -51,7 +51,8 @@ fn stream_records_agree_with_the_reference_drain() {
                         ToolStatus::Interrupted => "interrupted",
                     }
                 ])),
-                Signal::Reply(r) => last = r.text,
+                // A step's call is a reply too, with no words when none came before it.
+                Signal::Reply(r) if !r.text.is_empty() => last = r.text,
                 Signal::Usage {
                     tokens_in,
                     tokens_out,
@@ -183,5 +184,81 @@ fn an_answer_names_the_model_that_gave_it() {
     assert_eq!(
         models,
         ["opencode/big-pickle", "huggingface/zai-org/GLM-5.3"]
+    );
+}
+
+/// OpenCode's server tells a step's parts as they come: the step's start, its words, the call
+/// they announce, the call again as it runs and ends, the step's end. The words of a step that
+/// calls a tool go with that call, written before it, so what announced a call is never read as
+/// words after work. The last step's words, with no call, are a reply of their own.
+#[test]
+fn a_steps_words_go_with_its_call_and_are_written_before_it() {
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "steps");
+    let mut signals = Vec::new();
+    let part = |part: Value| {
+        json!({"type": "message.part.updated", "properties": {"part": part}}).to_string()
+    };
+    let start = |n: u32| part(json!({"type": "step-start", "id": format!("s{n}"), "messageID": "msg_1"}));
+    let text = |n: u32, words: &str| {
+        part(json!({"type": "text", "id": format!("x{n}"), "messageID": "msg_1", "text": words}))
+    };
+    let tool = |n: u32, status: &str| {
+        part(json!({"type": "tool", "id": format!("p{n}"), "messageID": "msg_1",
+            "callID": format!("call_{n}"), "tool": "bash",
+            "state": {"status": status, "input": {"command": "make test"}, "output": "ok"}}))
+    };
+    let finish = |n: u32| part(json!({"type": "step-finish", "id": format!("f{n}"), "messageID": "msg_1"}));
+    for line in [
+        start(1),
+        text(1, "Let me look."),
+        tool(1, "running"),
+        tool(1, "completed"),
+        finish(1),
+        start(2),
+        text(2, "Running the tests."),
+        tool(2, "running"),
+        tool(3, "running"),
+        tool(2, "completed"),
+        tool(3, "completed"),
+        finish(2),
+        start(3),
+        text(3, "Done, all green."),
+        finish(3),
+    ] {
+        interpreter.on_record(&Record { t: 1, entry: Entry::Out(line) }, &mut signals);
+    }
+    interpreter.on_record(
+        &Record {
+            t: 1,
+            entry: Entry::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        },
+        &mut signals,
+    );
+    // The rows as the conversation keeps them, in order: a reply with its words and calls,
+    // a call when it begins (with the reply it belongs to).
+    let rows: Vec<Value> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Reply(r) => Some(json!({"reply": r.id, "text": r.text, "tools": r.tools})),
+            Signal::Tool(c) if c.status == ToolStatus::Running => {
+                Some(json!({"call": c.id, "of": c.reply}))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            json!({"reply": "r-steps-1", "text": "Let me look.", "tools": ["t-steps-call_1"]}),
+            json!({"call": "t-steps-call_1", "of": "r-steps-1"}),
+            json!({"reply": "r-steps-2", "text": "Running the tests.", "tools": ["t-steps-call_2"]}),
+            json!({"call": "t-steps-call_2", "of": "r-steps-2"}),
+            json!({"reply": "r-steps-2-1", "text": "", "tools": ["t-steps-call_3"]}),
+            json!({"call": "t-steps-call_3", "of": "r-steps-2-1"}),
+            json!({"reply": "r-steps-3", "text": "Done, all green.", "tools": []}),
+        ]
     );
 }
