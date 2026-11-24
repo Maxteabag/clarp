@@ -285,30 +285,45 @@ Rules:
   "2026-11-23T18:00:00Z", "observed_at": "2026-11-23T15:12:40Z", "failover":
   "none"}`.
   From contract 176 (feature `quota_pool`) a Rust Host judges `exhausted` by
-  the same rule: the account in use being used up is the switch's business
-  while another seat of the tool's pool has any room left for the model the
-  agent runs (the switcher moves to any such seat), so the row is `null` then.
+  the switcher's own choice: the row is `null` while the Host's switcher would
+  move a turn of the model the agent runs (its own or the tool's default) to
+  another seat now, asked on the switcher's own reading of the seats (what the
+  tool said of each seat, including a seat it calls unavailable, models it
+  closes, a degraded seat and a seat that may run over its week), with the seat
+  in use taken as used up. The seat in use is the one the last switch moved to.
   Otherwise `exhausted` gains `failover` (`none` | `unknown`, as on `near`), and
-  where the Host switches seats and its fresh seats reading shows none with
-  room, `resets_at` is the soonest moment a seat that could serve the agent's
-  model regains room (the one in use among them), where that is sooner than the
-  reset the tool named; `window` and `used_percentage` stay those of the account
-  in use. A seats reading that is old or failed never hides a used-up account:
-  the row stands with `failover: "unknown"` and the account's own reset. Where
-  the Host switches no seats, the row is as before, with `failover: "none"`.
+  where the switcher would move the turn nowhere, `resets_at` is the soonest
+  moment a seat that could serve the agent's model regains room (the one in use
+  among them), where that is sooner than the reset the tool named; `window` and
+  `used_percentage` stay those of the account in use. When that moment comes the
+  Host reads the seats again, and the row clears if the seat has room (until that
+  reading, `resets_at` stays the moment that passed, never a later one). A seats
+  reading that is old or failed never hides a used-up account: the row stands
+  with `failover: "unknown"` and the account's own reset.
+  By kind of Host: one that switches no accounts (`--accounts none`), or one
+  with neither the owner's selector nor an automatic switcher lane for the tool,
+  says `exhausted` as before with `failover: "none"`. One beside another Host
+  (`--accounts follow`) cannot know the other's seats: `failover: "unknown"`, the
+  row stands. One with the owner's selector and no automatic lane reads the seats
+  only when an app asks for a reading, or when a seat a row waits on regains room;
+  ten minutes after a reading it is old, and the row says `exhausted` with
+  `failover: "unknown"` until the next.
   `GET /backend-usage` then gives each tool whose seats were read a `pool`
   beside its `windows` (`providers.<tool>.pool`): `{"seats" (in all),
-  "with_room" (seats with room in the five hours and the week), "used_up",
-  "active_alias" (the seat in use, or null), "next_reset_at" (the soonest
-  moment a used-up seat regains room, or null), "regains_room_at" (only where
-  every seat is used up: when the first regains room; else null), "stale",
-  "observed_at"}`, moments in UTC to the second. `next_alias` is the seat the Host's switcher
-  would move to were the one in use used up (most of its five hours left, then of
-  its week; the owner's selector may choose otherwise), null where no other seat
-  has room or the reading is stale. A seat that cannot be judged is
+  "with_room" (seats with room for a turn of no model in particular, as the
+  switcher reads them), "used_up", "active_alias" (the seat in use, or null),
+  "next_alias", "next_reset_at" (the soonest moment a used-up seat regains room,
+  or null), "regains_room_at" (only where every seat is used up: when the first
+  regains room; else null), "stale", "observed_at"}`, moments in UTC to the
+  second. `next_alias` is the seat the Host's switcher would move to were the one
+  in use used up (the owner's selector may choose otherwise), null where no
+  other seat has room or the reading is stale. A seat that cannot be read is
   counted in neither number; on a `stale` reading (old, failed, or the switcher
-  off) `with_room` and `used_up` are null and `regains_room_at` is null, since
-  an old reading says nothing of now. A tool with no seats read has no `pool`.
+  off) `with_room`, `used_up` and `next_alias` are null and `regains_room_at` is
+  null, since an old reading says nothing of now. A tool with no seats read has
+  no `pool`. The Quota keeper's push that a window of the account in use runs low
+  is not sent while another seat would take the turn (its receipt is cancelled,
+  "Another seat of the pool has room; the Host moves to it").
 - `parent_agent_id` is the agent that created this one (a helper's parent,
   or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
   `helper_state` is `null` unless `role` is `helper`; then it is `running`,

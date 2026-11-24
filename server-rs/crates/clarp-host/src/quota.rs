@@ -148,6 +148,12 @@ pub struct Desk {
     /// When the first window that an agent's row names begins anew: it is looked at again
     /// then, so that what it said clears as it does. The watch is woken where it moves sooner.
     wake: std::sync::Mutex<Option<i64>>,
+    /// When the first seat of a pool that a used-up row waits on regains room ([`look_again`]):
+    /// looked at again then too, apart from the windows the tools named, which do not move it.
+    pool_wake: std::sync::Mutex<Option<i64>>,
+    /// The moment a seat regained room that the seats were last read again for: once for each,
+    /// since a reading that still does not show it would otherwise ask for another at once.
+    read_for: std::sync::Mutex<Option<i64>>,
     woken: tokio::sync::Notify,
     /// Whether another seat would take the turns of a tool that is near a limit or used up, by
     /// the tool and the model an agent runs on it, as the apps were last told it
@@ -800,6 +806,16 @@ impl Desk {
         clarp_kernel::quota_near::limit_event(event, failover, regains)
     }
 
+    /// Whether another seat of the tool's pool would take a turn on its default model from the
+    /// account in use, by the judgement that holds now ([`look_again`]): what a notice of the
+    /// account in use alone is not told for.
+    pub(crate) fn pool_takes_turn(&self, tool: &str, now_ms: i64) -> bool {
+        let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
+        pooled.get(tool).is_some_and(|pooled| {
+            now_ms < pooled.until_ms && pooled.failover == clarp_kernel::quota_near::Failover::Spare
+        })
+    }
+
     /// When a turn of a tool that waits for an account shows that usage is there again, given
     /// the reset its tool said (`clarp_actor::Pooled::shown_reset`): none while another seat
     /// of the tool's pool would take the turn, since the Host is moving to it and no limit
@@ -820,28 +836,44 @@ impl Desk {
         }
     }
 
-    /// Has the accounts looked at again by `at`, where nothing is looked at sooner: when a seat
-    /// of a pool regains room, which the tool's own word does not name.
-    fn wake_by(&self, at: i64, now_ms: i64) {
-        if at <= now_ms {
-            return;
-        }
-        let mut kept = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
-        let sooner = kept.is_none_or(|kept| at < kept);
-        if sooner {
-            *kept = Some(at);
-        }
+    /// Has the accounts looked at again when the first seat of a pool that a used-up row waits
+    /// on regains room (`None`: no row waits on one), which the tool's own word does not name.
+    /// Kept apart from the tools' windows, so that a look at those does not lose it.
+    fn wake_by(&self, at: Option<i64>, now_ms: i64) {
+        let at = at.filter(|at| *at > now_ms);
+        let mut kept = self
+            .pool_wake
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let sooner = at.is_some_and(|at| kept.is_none_or(|kept| kept <= now_ms || at < kept));
+        *kept = at;
         drop(kept);
         if sooner {
             self.woken.notify_one();
         }
     }
 
+    /// Whether the seats are to be read again for the moment a seat regained room: once for
+    /// each such moment.
+    fn read_once_for(&self, at: i64) -> bool {
+        let mut read_for = self.read_for.lock().unwrap_or_else(PoisonError::into_inner);
+        let first = *read_for != Some(at);
+        *read_for = Some(at);
+        first
+    }
+
     /// How long until the accounts are looked at again: every five minutes, and a second
-    /// after the first window that an agent's row names begins anew, where that is sooner.
+    /// after the first window that an agent's row names begins anew, or the first seat of a
+    /// pool regains room, where that is sooner.
     fn next_look(&self, now_ms: i64) -> Duration {
         let wake = *self.wake.lock().unwrap_or_else(PoisonError::into_inner);
-        let until = wake.filter(|at| *at > now_ms).map(|at| at - now_ms + 1_000);
+        let pool_wake = *self
+            .pool_wake
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let wakes = [wake, pool_wake].into_iter().flatten();
+        let until = wakes.filter(|at| *at > now_ms).min();
+        let until = until.map(|at| at - now_ms + 1_000);
         let until = until.and_then(|ms| u64::try_from(ms).ok());
         until.map_or(LOOKED_EVERY, |ms| {
             Duration::from_millis(ms).min(LOOKED_EVERY)
@@ -934,7 +966,7 @@ pub async fn rows(app: &crate::edge::App) -> Rows {
     let desk = if looked.near.is_empty() && looked.used_up.is_empty() {
         Value::Null
     } else {
-        crate::seats::status(app).await
+        crate::seats::judged(app).await
     };
     let mut defaults = BTreeMap::new();
     for tool in looked.near.keys().chain(looked.used_up.keys()) {
@@ -963,14 +995,20 @@ pub async fn look_again(app: &crate::edge::App) {
     let directory = app.fleet.directory();
     let agents = directory.members.iter().chain(&directory.janitors);
     let mut now: Told = BTreeMap::new();
-    let mut regains_first: Option<i64> = None;
+    let at = app.clock.now_ms();
+    let (mut regained, mut regains_first): (Option<i64>, Option<i64>) = (None, None);
     for member in agents.filter(|member| member.record.archived_at_ms.is_none()) {
         let tool = &member.record.backend;
         let model = rows.model(tool, &member.record.model).to_string();
         let judged = if rows.looked.used_up.contains_key(tool) {
             let (failover, regains) = rows.used_up_failover(tool, &model);
-            if let Some(at) = regains {
-                regains_first = Some(regains_first.map_or(at, |first| first.min(at)));
+            // A moment that passed: a seat regained room the reading does not show yet.
+            let soonest =
+                |first: Option<i64>, at: i64| Some(first.map_or(at, |first| first.min(at)));
+            match regains {
+                Some(moment) if moment <= at => regained = soonest(regained, moment),
+                Some(moment) => regains_first = soonest(regains_first, moment),
+                None => {}
             }
             // To the minute, as the rows' resets are compared ([`Desk::looked`]).
             (
@@ -984,9 +1022,13 @@ pub async fn look_again(app: &crate::edge::App) {
         };
         now.insert((tool.clone(), model), judged);
     }
-    // A seat of the pool that regains room clears a used-up row: looked at again then.
-    if let Some(at) = regains_first {
-        app.limits.wake_by(at, app.clock.now_ms());
+    // A seat of the pool that regains room clears a used-up row: looked at again then, and
+    // once it has, the seats are read again, as the reading before does not show it.
+    app.limits.wake_by(regains_first, at);
+    if let Some(moment) = regained
+        && app.limits.read_once_for(moment)
+    {
+        crate::seats::read_again(app);
     }
     judge_pools(app, &rows).await;
     let mut told = app
@@ -1010,7 +1052,7 @@ pub async fn look_again(app: &crate::edge::App) {
 async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
     let now = app.clock.now_ms();
     let desk = if rows.desk.is_null() {
-        crate::seats::status(app).await
+        crate::seats::judged(app).await
     } else {
         rows.desk.clone()
     };

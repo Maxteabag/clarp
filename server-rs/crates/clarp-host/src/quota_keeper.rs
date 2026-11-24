@@ -77,6 +77,10 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[
     crate::kept::Kind::book(WINDOWS, crate::kept::Key::Plain, crate::kept::json),
 ];
 
+/// Why a receipt of a window of the account in use was not delivered, where another seat of the
+/// tool's pool would take the turn.
+const POOL_TAKES_IT: &str = "Another seat of the pool has room; the Host moves to it";
+
 /// The kinds of thing the keeper leaves with the fleet.
 const WINDOWS: &str = "quota-keeper-window";
 const RECEIPTS: &str = "quota-keeper-receipt";
@@ -447,10 +451,20 @@ async fn pass(app: &App) {
                 recoveries.push(format!("{provider}: {status}"));
                 payload["recovery"] = recovery;
             }
-            let suppressed = switched && quota::SWITCHED.contains(&notice.provider.as_str());
-            // Where the switcher tells, the receipt is cancelled as it is kept; any other
-            // waits to be delivered (or marked, beside another Host), below.
-            let delivery = suppressed.then(|| json!({ "cancelled": quota::SWITCHER_TELLS }));
+            let switcher_tells = switched && quota::SWITCHED.contains(&notice.provider.as_str());
+            // A window of the account in use runs low while another seat of the tool's pool
+            // would take the turn: the Host moves to it, and the owner is not told (the rule of
+            // the agents' rows, `quota::Desk::pool_takes_turn`).
+            let pool_takes = !switcher_tells && app.limits.pool_takes_turn(provider, now);
+            let suppressed = switcher_tells || pool_takes;
+            // Where the switcher tells, or the pool takes the turn, the receipt is cancelled as
+            // it is kept; any other waits to be delivered (or marked, beside another Host),
+            // below.
+            let delivery = if switcher_tells {
+                Some(json!({ "cancelled": quota::SWITCHER_TELLS }))
+            } else {
+                pool_takes.then(|| json!({ "cancelled": POOL_TAKES_IT }))
+            };
             order += 1;
             let receipt = Receipt {
                 order,

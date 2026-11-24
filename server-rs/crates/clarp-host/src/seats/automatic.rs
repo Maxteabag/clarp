@@ -324,6 +324,7 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
                 && let Some(target) = last["to"].as_str()
             {
                 kept.desk.mark_active(tool, target);
+                kept.seats.mark_active(tool, target);
             }
             kept.seats.acted(
                 tool,

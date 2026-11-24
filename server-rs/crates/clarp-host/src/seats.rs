@@ -273,6 +273,7 @@ impl Desk {
                     && let Some(alias) = record["to"].as_str()
                 {
                     kept.desk.mark_active(provider, alias);
+                    kept.seats.mark_active(provider, alias);
                 }
             }
             if let Ok(written) = serde_json::to_vec(kept) {
@@ -568,6 +569,38 @@ pub async fn status(app: &App) -> Value {
         Some(kept) => kept.seats.served(enabled, now),
         None => Seats::default().served(enabled, now),
     }
+}
+
+/// The seats as `GET /hotseat/status` serves them, with the switcher's own reading of each
+/// tool's seats beside (`switcher_seats`, by the tool): what whether a seat would take an
+/// agent's turn is judged by (`clarp_kernel::quota_near`). Never served to an app.
+pub async fn judged(app: &App) -> serde_json::Value {
+    let enabled = automatic::enabled(app).await;
+    let now = app.clock.now_ms();
+    let mut state = app.seats.state.lock().await;
+    match state.kept(app).await {
+        Some(kept) => with_switcher(&kept.seats, enabled, now),
+        None => with_switcher(&Seats::default(), enabled, now),
+    }
+}
+
+fn with_switcher(seats: &Seats, enabled: bool, now: i64) -> serde_json::Value {
+    let mut desk = seats.served(enabled, now);
+    for provider in clarp_kernel::seats::READ_PROVIDERS {
+        if let Some(read) = seats.switcher(provider) {
+            desk["switcher_seats"][provider] = json!(read);
+        }
+    }
+    desk
+}
+
+/// Reads the seats again now, whenever the last reading was, beside whoever asked: a seat
+/// whose reset has passed is seen with room only in a reading made after it.
+pub fn read_again(app: &App) {
+    let reader = app.clone();
+    tokio::spawn(async move {
+        reader.seats.read(&reader, true).await;
+    });
 }
 
 /// `GET /hotseat/desk`: the desk as it is kept; with `refresh`, after a live read where one

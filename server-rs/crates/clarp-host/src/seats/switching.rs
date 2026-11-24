@@ -157,6 +157,7 @@ pub(super) async fn perform(
                 json!({"from":record["from"],"to":target,"at":at}),
             );
             kept.desk.mark_active(tool, target);
+            kept.seats.mark_active(tool, target);
         }
         if expected.is_none() {
             kept.switches.insert(tool.into(), record);

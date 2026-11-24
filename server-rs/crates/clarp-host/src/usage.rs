@@ -247,7 +247,7 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
         })
         .collect();
     // The seats as they were last read, for the summary of each tool's pool.
-    let desk = crate::seats::status(app).await;
+    let desk = crate::seats::judged(app).await;
     let providers: Map<String, Value> = TOOLS
         .iter()
         .map(|tool| {
