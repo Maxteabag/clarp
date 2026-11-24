@@ -122,7 +122,8 @@ impl World {
                     Action::ForkFollow { turn, attempt, .. } => {
                         self.followed.push((turn.0, attempt));
                     }
-                    Action::Follow { turn, attempt, .. } | Action::FollowExit { turn, attempt, .. } => {
+                    Action::Follow { turn, attempt, .. }
+                    | Action::FollowExit { turn, attempt, .. } => {
                         self.followed.push((turn.0, attempt))
                     }
                     Action::Stop { turn, socket, .. } => {

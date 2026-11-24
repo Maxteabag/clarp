@@ -110,12 +110,18 @@ fn a_claude_turn_is_over_at_its_result_and_the_next_waits_for_its_exit() {
     // A message now begins its turn, and its tool waits for the process before it.
     host.send("quick", "two", "m2");
     settle();
-    assert_eq!(launches(), ["one"], "two processes never work in one conversation");
+    assert_eq!(
+        launches(),
+        ["one"],
+        "two processes never work in one conversation"
+    );
     mark("exit-one");
     await_file("answered-two");
     assert_eq!(launches(), ["one", "two"]);
     mark("exit-two");
-    wait_for("the second turn to be over", || host.state("quick") == "done");
+    wait_for("the second turn to be over", || {
+        host.state("quick") == "done"
+    });
 
     // A Stop: the interrupted tool says at once that its turn is over, and the turn is
     // stopped there, while its process still runs.

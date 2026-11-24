@@ -139,7 +139,9 @@ impl Actor {
         let Some(lingering) = self.lingering.as_mut() else {
             return Ok(());
         };
-        let spool = self.profile.spool_path_of(lingering.turn, lingering.attempt);
+        let spool = self
+            .profile
+            .spool_path_of(lingering.turn, lingering.attempt);
         let mut gone = false;
         let mut said_more = 0usize;
         while !gone {

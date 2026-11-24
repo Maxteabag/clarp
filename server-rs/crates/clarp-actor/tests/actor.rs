@@ -7035,7 +7035,12 @@ fn turn_ends(actor: &Actor) -> Vec<(String, String)> {
         .unwrap()
         .entries
         .iter()
-        .filter_map(|row| Some((row.entry.id().to_string(), row.turn.as_ref()?.status.clone())))
+        .filter_map(|row| {
+            Some((
+                row.entry.id().to_string(),
+                row.turn.as_ref()?.status.clone(),
+            ))
+        })
         .collect()
 }
 
@@ -7082,7 +7087,11 @@ fn a_message_that_waits_is_launched_only_once_the_process_before_it_is_gone() {
 
     // Turn 1 is over and turn 2 has begun: its tool waits for turn 1's process.
     assert_eq!(actor.status().live.unwrap().turn, TurnId(2));
-    assert_eq!(world.took, [1], "nothing is launched beside a process that runs");
+    assert_eq!(
+        world.took,
+        [1],
+        "nothing is launched beside a process that runs"
+    );
     world.hint(&mut actor);
     assert_eq!(world.took, [1]);
 
@@ -7126,7 +7135,11 @@ fn a_failure_or_a_call_that_runs_keeps_the_turn_to_its_exit() {
     world.says(1, r#"{"tool": "Bash", "id": "t1"}"#);
     world.says(1, ANSWERED);
     world.hint(&mut actor);
-    assert_eq!(actor.status().live.unwrap().turn, TurnId(1), "a call still runs");
+    assert_eq!(
+        actor.status().live.unwrap().turn,
+        TurnId(1),
+        "a call still runs"
+    );
     world.exits(1, Some(0), None);
     world.hint(&mut actor);
     assert!(actor.status().live.is_none());
@@ -7150,9 +7163,13 @@ fn a_stop_after_the_answer_ends_the_process_and_not_the_turn() {
     let (told, out) = actor.stop("peter", world.tick()).unwrap();
     assert_eq!(told, 0, "no turn is told to end");
     assert!(
-        out.actions
-            .iter()
-            .any(|action| matches!(action, Action::Stop { turn: TurnId(1), .. })),
+        out.actions.iter().any(|action| matches!(
+            action,
+            Action::Stop {
+                turn: TurnId(1),
+                ..
+            }
+        )),
         "its process is: {:?}",
         out.actions
     );

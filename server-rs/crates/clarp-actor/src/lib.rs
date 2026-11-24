@@ -45,9 +45,9 @@ use clarp_kernel::launch_refused;
 pub mod delegation;
 pub mod fork;
 mod goal_ledger;
+mod lingering;
 pub mod native_goal;
 mod native_goal_reservation;
-mod lingering;
 mod orphan;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -1737,8 +1737,8 @@ impl Actor {
                 tool_count: 0,
                 in_call,
                 out_until_ms: None,
-            answered: false,
-            ended_at: None,
+                answered: false,
+                ended_at: None,
             });
         }
         // A compaction whose turn ended and whose outcome an actor before this one did not
@@ -6683,8 +6683,7 @@ impl Actor {
                 let answered = std::mem::take(&mut live.answered);
                 let ends_at = if stop_end {
                     Some(EndsAt::Stop)
-                } else if answered
-                    && lingering::ends_at_answer(live, batch.agent(), EndsAt::Answer)
+                } else if answered && lingering::ends_at_answer(live, batch.agent(), EndsAt::Answer)
                 {
                     Some(EndsAt::Answer)
                 } else {
@@ -6716,7 +6715,8 @@ impl Actor {
                             batch.item(written(&end, t)?);
                         }
                         live.ended_at = Some(at);
-                        ended_until = Some(read.ends.get(place).copied().unwrap_or(read.next_offset));
+                        ended_until =
+                            Some(read.ends.get(place).copied().unwrap_or(read.next_offset));
                         break;
                     }
                 }

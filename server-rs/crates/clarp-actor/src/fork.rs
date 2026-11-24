@@ -1014,7 +1014,11 @@ impl Actor {
     /// Nothing holds the launch any more (the fork's turn and the turn before's process are
     /// over): the agent's own turn that waited starts, opening with the fork's note where
     /// there is one, if it still holds the agent.
-    pub(super) fn resume_deferred(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+    pub(super) fn resume_deferred(
+        &mut self,
+        out: &mut Outputs,
+        now_ms: i64,
+    ) -> Result<(), ActorError> {
         if self.fork_runs() || self.lingers() {
             return Ok(());
         }

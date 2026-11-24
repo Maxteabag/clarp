@@ -1164,7 +1164,10 @@ impl ClaudeInterpreter {
                 continue;
             };
             // A call that started work in the background returns at once, with the task's id.
-            if let Some(task) = meta["backgroundTaskId"].as_str().filter(|id| !id.is_empty()) {
+            if let Some(task) = meta["backgroundTaskId"]
+                .as_str()
+                .filter(|id| !id.is_empty())
+            {
                 self.background.insert(call.id.clone(), task.to_string());
             }
             if let Some(state) = self.helpers.get_mut(&call.id) {
