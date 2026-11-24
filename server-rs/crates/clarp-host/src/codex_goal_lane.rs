@@ -299,12 +299,15 @@ impl Lane {
         }
         // A folder that went after `start` looked is said as the Host says it, so that the turn
         // ends at once and is not tried again as a launch that failed.
-        let mut child = command.spawn().map_err(|error| {
-            match clarp_spool::folder_gone(&profile.cwd) {
-                Some(gone) => io::Error::new(io::ErrorKind::NotFound, gone),
-                None => error,
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                return Err(match clarp_spool::folder_gone(&profile.cwd) {
+                    Some(gone) => io::Error::new(io::ErrorKind::NotFound, gone),
+                    None => error,
+                });
             }
-        })?;
+        };
         let mut ready = String::new();
         if let Some(stdout) = child.stdout.take() {
             BufReader::new(stdout).read_line(&mut ready)?;
