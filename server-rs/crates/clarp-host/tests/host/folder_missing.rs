@@ -36,8 +36,8 @@ fn a_send_to_an_agent_whose_folder_is_gone_fails_at_once_and_runs_once_it_is_bac
     );
     let dir = folder.display();
     let sentence = format!(
-        "This agent's folder {dir} no longer exists. Recreate it, or give the agent another \
-         folder"
+        "This agent's folder {dir} no longer exists. Recreate it, or make a new agent in \
+         another folder"
     );
     assert_eq!(
         marker().unwrap()["text"],

@@ -545,8 +545,8 @@ the daily schedule.
   with the system's words for the program it could not start. The Rust Host looks first: a
   turn, a goal turn, a turn on the Codex chat lane or a fork of an agent whose folder is not
   there, or is no folder, fails at once as `folder_missing` (`failures::OWN_KINDS`), never tried
-  again, with a sentence that names the folder and says to recreate it or give the agent
-  another one. Only a folder that is not there, or a path that is no folder, counts: a look that
+  again, with a sentence that names the folder and says to recreate it or make a new agent in
+  another folder (nothing changes an agent's folder). Only a folder that is not there, or a path that is no folder, counts: a look that
   fails otherwise (a mount away for a moment, a parent that may not be searched) leaves the
   launch to be tried as before. The shim says the same when the folder goes between that look
   and the launch (`clarp_spool::folder_gone`, one source for both). A Codex goal that would go
