@@ -15,9 +15,12 @@ One headless process per turn, like Grok:
 muse exec --json --yolo --disable-reminders --session-id <uuid> [--model M] [--reasoning-effort E] -- <prompt>
 ```
 
-* `--disable-reminders`: Muse's reminder agents (a memory reminder after
-  every answer, itself a model call) run after the answer and before the
-  process exits, and the session stays locked until then. They held every
+* `--disable-reminders`: Muse's reminder agents (skill-, goal- and
+  verify-reminder) are model calls in child sessions, mid-turn and after the
+  answer. An accepted one puts a short developer `<system-reminder>` into the
+  agent's next step (28 of 1,453 proposals on one machine); none writes
+  memory. The one after the answer runs before the process exits, and the
+  session stays locked until then. They held every
   turn's end, and the start of a message waiting behind it: 3 to 7.5 s from
   the last text to exit with them, 0.6 to 2.7 s without, in direct runs, and
   8 to 19 s through a Host (measured 24 Nov 2026 on 1.4.25).
