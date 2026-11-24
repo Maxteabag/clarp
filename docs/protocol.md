@@ -284,6 +284,28 @@ Rules:
   "window": "five_hour", "used_percentage": 84.0, "resets_at":
   "2026-11-23T18:00:00Z", "observed_at": "2026-11-23T15:12:40Z", "failover":
   "none"}`.
+  From contract 176 (feature `quota_pool`) a Rust Host judges `exhausted` by
+  the same rule: the account in use being used up is the switch's business
+  while another seat of the tool's pool has any room left for the model the
+  agent runs (the switcher moves to any such seat), so the row is `null` then.
+  Otherwise `exhausted` gains `failover` (`none` | `unknown`, as on `near`), and
+  where the Host switches seats and its fresh seats reading shows none with
+  room, `resets_at` is the soonest moment a seat that could serve the agent's
+  model regains room (the one in use among them), where that is sooner than the
+  reset the tool named; `window` and `used_percentage` stay those of the account
+  in use. A seats reading that is old or failed never hides a used-up account:
+  the row stands with `failover: "unknown"` and the account's own reset. Where
+  the Host switches no seats, the row is as before, with `failover: "none"`.
+  `GET /backend-usage` then gives each tool whose seats were read a `pool`
+  beside its `windows` (`providers.<tool>.pool`): `{"seats" (in all),
+  "with_room" (seats with room in the five hours and the week), "used_up",
+  "active_alias" (the seat in use, or null), "next_reset_at" (the soonest
+  moment a used-up seat regains room, or null), "regains_room_at" (only where
+  every seat is used up: when the first regains room; else null), "stale",
+  "observed_at"}`, moments in UTC to the second. A seat that cannot be judged is
+  counted in neither number; on a `stale` reading (old, failed, or the switcher
+  off) `with_room` and `used_up` are null and `regains_room_at` is null, since
+  an old reading says nothing of now. A tool with no seats read has no `pool`.
 - `parent_agent_id` is the agent that created this one (a helper's parent,
   or a fork's source), else `null`. `role` is `agent`, `helper` or `janitor`.
   `helper_state` is `null` unless `role` is `helper`; then it is `running`,
