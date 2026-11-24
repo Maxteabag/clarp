@@ -1090,7 +1090,7 @@ Rules:
   user's that steers a running turn, follow the newest of them: each carries the
   app's setting when it was sent, so turning voice off takes effect with the
   next message. Another sender's message read into a turn can only ask for
-  speech. A message that asks for speech, read into a turn whose tool was not
+  speech, and so can any message read into a call's turn, which stays spoken. A message that asks for speech, read into a turn whose tool was not
   told how to speak, tells it then, so its answer is written for the ear.
   Answers to forms (`POST /artifacts/<id>/submit`) take the same field with the
   same rule. The one exception: in hands-free dictation the router of spoken

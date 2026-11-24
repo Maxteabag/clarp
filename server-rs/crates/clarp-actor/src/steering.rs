@@ -40,6 +40,8 @@ pub(super) struct State {
     pub(super) joined_speech: Option<bool>,
     /// Another sender's message read into the turn asked for speech.
     pub(super) joined_asked: bool,
+    /// A message read into the turn asked for speech: its tool was told how to speak then.
+    pub(super) joined_told: bool,
     pub(super) mixed: bool,
     /// The turn is Codex's: what it can take is told by its lane's lines, not a process's.
     codex: bool,
@@ -207,6 +209,7 @@ impl State {
                 match follow {
                     Some((_, follow)) if self.parent.is_none() => {
                         let message = message_at(log, follow.message_seq)?;
+                        self.joined_told |= message.speak;
                         if message.origin.is_user_send() {
                             self.joined_speech = Some(message.speak);
                         } else {

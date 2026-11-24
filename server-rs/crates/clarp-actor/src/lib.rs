@@ -5562,11 +5562,25 @@ impl Actor {
             draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
             self.shown_revision = draft.revision;
         }
-        // As when the turn ran: the newest of the user's messages read into it decides, and
-        // another sender's can only ask for speech.
-        let speak = steering.joined_speech.unwrap_or(message.speak) || steering.joined_asked;
-        let input_skipped = steering.input_skipped;
+        // As when the turn ran. It began as the newest of the user's messages read together
+        // into its prompt said (they have no echo of their own to replay); then the newest of
+        // the user's messages read into it decides, and another sender's can only ask for
+        // speech. A call's turn is never turned off by a message read into it.
         let in_call = opening_message(&message) || message.call.is_some();
+        let gathered = self.recorder.agent().gathered(turn).last();
+        let launched = match gathered.map(|one| one.message_seq) {
+            Some(seq) => self.message_at(seq)?.speak,
+            None => message.speak,
+        };
+        let speak = if in_call {
+            launched || steering.joined_told
+        } else {
+            steering.joined_speech.unwrap_or(launched) || steering.joined_asked
+        };
+        // The tool was told how to speak at its launch, or with a message read into it that
+        // asked.
+        let told_speech = launched || steering.joined_told;
+        let input_skipped = steering.input_skipped;
         let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
         self.live = Some(LiveTurn {
             steering,
@@ -5588,7 +5602,7 @@ impl Actor {
             said_worked,
             plan: None,
             speak,
-            told_speech: speak,
+            told_speech,
             model,
             tokens,
             total,
@@ -6764,7 +6778,9 @@ impl Actor {
                         // The user's own message carries the app's audio setting now: it
                         // turns the turn's speech on or off. Another sender's can only
                         // ask for it.
-                        if sharing.user {
+                        // A call's turn is speech by nature: a message read into it may only
+                        // ask for speech, never turn it off.
+                        if sharing.user && !live.in_call {
                             live.speak = sharing.speak;
                         } else {
                             live.speak |= sharing.speak;
