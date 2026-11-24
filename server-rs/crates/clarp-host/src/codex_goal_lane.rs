@@ -112,6 +112,9 @@ pub(crate) enum Submission {
 pub(crate) struct Login {
     pub lock: Option<PathBuf>,
     pub file: Option<PathBuf>,
+    /// The Codex home and provider of an agent bound to one of its own: its lane's Codex runs
+    /// in that home and on that provider, and leaves when it names another.
+    pub own: Option<clarp_backend::own_provider::OwnProvider>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +144,10 @@ impl Lane {
         thread: Option<&str>,
         turn: Option<(&Option<String>, &Option<String>)>,
     ) -> io::Result<Option<Child>> {
+        // A lane bound to a provider starts on that provider's configuration or not at all.
+        if let Some(own) = &login.own {
+            own.admits().map_err(io::Error::other)?;
+        }
         let settings = Settings::read();
         let options = self.options(profile, login, thread, settings.idle_ms)?;
         let digest = options["_clarpOptionsDigest"]
@@ -174,7 +181,8 @@ impl Lane {
         let config = profile
             .dir
             .join(format!("native-goal-{}.json", crate::ids::hex(8)));
-        let result = self.spawn(launcher, profile, &options, &config);
+        let home = login.own.as_ref().map(|own| own.home.as_path());
+        let result = self.spawn(launcher, profile, &options, &config, home);
         let _ = std::fs::remove_file(config);
         result
     }
@@ -211,7 +219,18 @@ impl Lane {
         if let Some(model) = &profile.model {
             resume["model"] = json!(model);
         }
-        let digest = format!("{:x}", Sha256::digest(resume.to_string().as_bytes()));
+        // An agent bound to a provider of its own names it on its thread, where neither a
+        // profile nor a project can move it. Its home is part of what makes the lane its own.
+        let mut own_home = String::new();
+        if let Some(own) = &login.own {
+            resume["modelProvider"] = json!(own.provider);
+            resume["config"]["model_provider"] = json!(own.provider);
+            own_home = own.home.display().to_string();
+        }
+        let digest = format!(
+            "{:x}",
+            Sha256::digest(format!("{resume}{own_home}").as_bytes())
+        );
         let locks = profile.run_dir.join("codex-threads");
         std::fs::create_dir_all(&locks)?;
         if let Some(thread) = thread {
@@ -223,6 +242,9 @@ impl Lane {
         resume["_clarpIdleMs"] = json!(idle_ms);
         resume["_clarpTurnFile"] = json!(self.turn_file(profile));
         resume["_clarpOptionsDigest"] = json!(digest);
+        if let Some(own) = &login.own {
+            resume["_clarpModelProvider"] = json!(own.provider);
+        }
         Ok(resume)
     }
 
@@ -242,6 +264,7 @@ impl Lane {
         profile: &clarp_actor::Profile,
         resume: &Value,
         config: &Path,
+        home: Option<&Path>,
     ) -> io::Result<Option<Child>> {
         let file = OpenOptions::new()
             .write(true)
@@ -251,8 +274,8 @@ impl Lane {
         serde_json::to_writer(file, resume).map_err(io::Error::other)?;
         let program = clarp_backend::program("codex")
             .ok_or_else(|| io::Error::other("Codex is not configured"))?;
-        let mut child = launcher
-            .goal_lane_command(self.socket(), &program, config, &profile.cwd)
+        let mut command = launcher.goal_lane_command(self.socket(), &program, config, &profile.cwd);
+        command
             .envs(
                 profile
                     .tool_env
@@ -260,8 +283,12 @@ impl Lane {
                     .map(|(key, value)| (key.as_str(), value.as_str())),
             )
             .env_remove("CLARP_PROVIDER_TURN")
-            .env(TURN_FILE_ENV, self.turn_file(profile))
-            .spawn()?;
+            .env(TURN_FILE_ENV, self.turn_file(profile));
+        // The lane's Codex runs in the agent's own home, for an agent bound to one.
+        if let Some(home) = home {
+            command.env(clarp_backend::codex::CODEX_HOME, home);
+        }
+        let mut child = command.spawn()?;
         let mut ready = String::new();
         if let Some(stdout) = child.stdout.take() {
             BufReader::new(stdout).read_line(&mut ready)?;

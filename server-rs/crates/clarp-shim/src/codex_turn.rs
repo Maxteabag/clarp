@@ -144,6 +144,13 @@ impl TurnSpool {
         Ok(false)
     }
 
+    /// The turn ended for the reason given, as a failure of its own, with one terminal record:
+    /// the lane ended Codex for running on another provider than its agent's.
+    pub fn refused(&mut self, why: &str, now_ms: i64) -> io::Result<()> {
+        self.output(json!({"type": "turn.failed", "error": why}), now_ms)?;
+        self.exit(Some(1), None, now_ms)
+    }
+
     /// A lost app-server is a failed ordinary turn, with one terminal record.
     pub fn lost(&mut self, now_ms: i64) -> io::Result<()> {
         self.output(

@@ -812,7 +812,7 @@ pub fn router(app: App) -> Router {
 }
 
 /// The controls of a chat, by their paths: what is asked of an agent a person speaks to.
-const CHAT_CONTROLS: [&str; 22] = [
+const CHAT_CONTROLS: [&str; 23] = [
     "/send",
     "/stop",
     "/select",
@@ -822,6 +822,7 @@ const CHAT_CONTROLS: [&str; 22] = [
     "/agent-voice",
     "/agent-llm",
     "/agent-mcp",
+    "/agent-provider",
     "/agent-heartbeat",
     "/agent-archive",
     "/agent-dreaming",
@@ -1998,6 +1999,13 @@ pub(crate) async fn make_agent(
         avatar_base64: presentation("avatar_base64"),
         avatar_path: asked.get("avatar_path").cloned(),
         mcp_servers: None,
+        codex_home: plain("codex_home"),
+        codex_provider: plain("codex_provider"),
+        cloud_speech: match asked.get("cloud_speech") {
+            None | Some(Value::Null) => None,
+            Some(Value::Bool(on)) => Some(*on),
+            Some(_) => return Err(bad("cloud_speech must be a boolean")),
+        },
     };
     let mcp_selection = || clarp_kernel::mcp::selection(asked.get("mcp_servers")).map_err(bad);
     let unavailable =
@@ -2034,7 +2042,18 @@ pub(crate) async fn make_agent(
         .as_deref()
         .map(clarp_kernel::python::strip)
         .unwrap_or("");
-    if !model.is_empty()
+    // An agent bound to a provider of its own runs on that provider's deployments, which no
+    // list of the machine's models has: any name is taken, and with none Codex takes the one
+    // its own configuration names.
+    let bound = request
+        .codex_provider
+        .as_deref()
+        .map_or_else(
+            || replacing.as_ref().is_some_and(|record| !record.codex_provider.is_empty()),
+            |provider| !provider.trim().is_empty(),
+        );
+    if !bound
+        && !model.is_empty()
         && let Some(detail) = app.models.policy_model_error(backend, model)
     {
         let code = "invalid model for backend";
@@ -2043,7 +2062,9 @@ pub(crate) async fn make_agent(
             .unwrap_or(code);
         return Err(refused(StatusCode::BAD_REQUEST, code, message));
     }
-    let default_model = if model.is_empty() && (replaces.is_none() || request.model.is_some()) {
+    let default_model = if bound {
+        None
+    } else if model.is_empty() && (replaces.is_none() || request.model.is_some()) {
         crate::models::default_for(app, backend).await
     } else {
         None

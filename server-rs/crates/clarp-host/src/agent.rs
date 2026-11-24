@@ -19,6 +19,7 @@ use clarp_actor::{
     QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
+use clarp_backend::own_provider::OwnProvider;
 use clarp_kernel::artifacts::decisions as requests;
 use clarp_kernel::artifacts::reports;
 use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
@@ -627,7 +628,12 @@ pub struct Setup {
 }
 
 impl Setup {
+    /// The pool of the accounts its tool runs on. An agent bound to a provider of its own runs
+    /// on none of the machine's accounts, and never waits for one.
     fn pool(&self) -> Option<&Arc<crate::pool::Service>> {
+        if !self.record.codex_provider.is_empty() {
+            return None;
+        }
         self.pools
             .iter()
             .find(|pool| pool.tool() == self.record.backend)
@@ -2152,8 +2158,21 @@ impl Worker {
         let was = &self.setup.record;
         let another = record.backend != was.backend;
         let moved = record.cwd != was.cwd || record.conversation_id != was.conversation_id;
+        // Another Codex home or provider is another Codex: the agent is opened again on it.
+        // One whose binding cannot be used is held to the one it had, and not run on the
+        // machine's own Codex.
+        let rebound = (record.codex_home != was.codex_home
+            || record.codex_provider != was.codex_provider)
+            && !another;
         if let Some(backend) = clarp_backend::by_id(&record.backend).filter(|_| another) {
-            self.setup.backend = backend;
+            self.setup.backend = crate::fleet::backend_of(&record).unwrap_or(backend);
+            self.actor = None;
+        }
+        if rebound {
+            match crate::fleet::backend_of(&record) {
+                Ok(backend) => self.setup.backend = backend,
+                Err(why) => eprintln!("clarp-host: {why}; its turns keep the binding they had"),
+            }
             self.actor = None;
         }
         if moved {
@@ -4165,9 +4184,17 @@ impl Worker {
                 let lane = self.lane();
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
+                let own = self.setup.record.own_provider();
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        // An agent bound to a provider of its own starts no Codex whose home
+                        // would run it on another: refused before anything starts, and the
+                        // turn ends as a provider mismatch.
+                        if let Some(Err(why)) = own.as_ref().map(OwnProvider::admits) {
+                            tell(&tx, turn, attempt, Told::Failed(why));
+                            return;
+                        }
                         let _ = lane.retire();
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
@@ -4358,9 +4385,15 @@ impl Worker {
         let (strict, servers) = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
         let (turn, attempt) = (order.turn, order.attempt);
         let starting = self.launches.begin(turn, &order.socket);
+        let own = self.setup.record.own_provider();
         std::thread::Builder::new()
             .name(format!("fork-{}", turn.0))
             .spawn(move || {
+                // The agent's fork runs on the agent's provider, or not at all.
+                if let Some(Err(why)) = own.as_ref().map(OwnProvider::admits) {
+                    tell(&tx, turn, attempt, Told::Failed(why));
+                    return;
+                }
                 if let Some(pool) = pool {
                     pool.guard_turn(&mut order);
                 }

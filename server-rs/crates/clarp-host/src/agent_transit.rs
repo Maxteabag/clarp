@@ -575,12 +575,27 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     let backend = optional(asked, "backend")?
         .unwrap_or_default()
         .to_ascii_lowercase();
+    // An agent bound to a provider of its own stays on it: moving it to another tool would
+    // carry its conversation, and the summary of it, to other services. Its models are its
+    // provider's deployments, which no catalogue lists.
+    let bound = before.own_provider().is_some();
+    if bound && backend != before.backend {
+        return Err(told(
+            StatusCode::CONFLICT,
+            json!({
+                "error": "own_provider",
+                "message": "This agent is bound to a model provider of its own and stays on Codex. \
+                    Clear its codex_home and codex_provider first.",
+            }),
+        ));
+    }
     let mut catalogue = app.models.told(app.clock.now_ms()).await;
     annotate(app, &mut catalogue).await;
     let Some(row) = catalogue["providers"].get(&backend).cloned() else {
         return Err(refused(StatusCode::BAD_REQUEST, "unknown_backend"));
     };
-    if row["available"] != true {
+    // The machine's own Codex account says nothing of whether a provider of its own answers.
+    if !bound && row["available"] != true {
         let mut body = json!({"error": "backend_unavailable", "reason": row["unavailable_reason"]});
         for key in ["until_ms", "unavailable_detail"] {
             if !row[key].is_null() {
@@ -596,7 +611,7 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .flatten()
         .filter_map(|model| model["id"].as_str())
         .collect();
-    if !model.is_empty() && !offered.is_empty() && !offered.contains(&model.as_str()) {
+    if !bound && !model.is_empty() && !offered.is_empty() && !offered.contains(&model.as_str()) {
         return Err(refused(StatusCode::BAD_REQUEST, "unknown_model"));
     }
     let valid = clarp_backend::efforts(&backend);

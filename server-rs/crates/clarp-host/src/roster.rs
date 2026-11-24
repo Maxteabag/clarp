@@ -313,6 +313,62 @@ pub(crate) async fn tune(app: &App, asked: &Fields) -> Result<Value, Refusal> {
     }))
 }
 
+/// `POST /agent-provider` with `{session, codex_home?, codex_provider?, cloud_speech?}`: binds
+/// a Codex agent to a model provider of its own, or lets it go (both empty or null), and says
+/// whether what it says may be spoken by a speech provider in the cloud (`null`: as its kind
+/// has it). What the request leaves out stays. Its next turn runs with what it now has; one
+/// that runs keeps what it was started with.
+async fn provider(State(app): State<App>, body: Bytes) -> Answered {
+    let asked = object(&body)?;
+    let session = edge::body_text(&asked, "session")?;
+    if session.is_empty() {
+        return Err(bad("session required"));
+    }
+    let Some(member) = app.fleet.directory().named(session).cloned() else {
+        return Err(no_such_agent());
+    };
+    let before = &member.record;
+    let home = optional(&asked, "codex_home", "codex_home must be string or null")?
+        .unwrap_or_else(|| before.codex_home.clone());
+    let provider = optional(&asked, "codex_provider", "codex_provider must be string or null")?
+        .unwrap_or_else(|| before.codex_provider.clone());
+    let cloud_speech = match asked.get("cloud_speech") {
+        None => before.cloud_speech,
+        Some(Value::Null) => None,
+        Some(Value::Bool(on)) => Some(*on),
+        Some(_) => return Err(bad("cloud_speech must be a boolean or null")),
+    };
+    if !home.is_empty() || !provider.is_empty() {
+        let backend = before.backend.clone();
+        let (said_home, said_provider) = (home.clone(), provider.clone());
+        let checked = tokio::task::spawn_blocking(move || {
+            crate::fleet::check_binding(&backend, &said_home, &said_provider)
+        })
+        .await
+        .map_err(|why| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.to_string()))?;
+        if let Err(why) = checked {
+            return Err(Refusal::Told(
+                StatusCode::BAD_REQUEST,
+                json!({"error": "invalid_codex_provider", "message": why}),
+            ));
+        }
+    }
+    let change = Amend::Provider {
+        home,
+        provider,
+        cloud_speech,
+    };
+    let record = amend(&app, &before.agent_id, change).await?;
+    Ok(Json(json!({
+        "ok": true,
+        "session": record.session,
+        "backend": record.backend,
+        "codex_home": record.codex_home,
+        "codex_provider": record.codex_provider,
+        "cloud_speech": record.speaks_to_cloud(),
+    })))
+}
+
 /// `GET /agents/archived?limit=&cursor=`: one page of the agents that are put away, the
 /// last put away first, each as its row in the snapshot.
 async fn archived(
@@ -444,6 +500,7 @@ pub fn routes() -> Router<App> {
         .route("/agent-archive", post(archive))
         .route("/agent-llm", post(llm))
         .route("/agent-mcp", post(mcp))
+        .route("/agent-provider", post(provider))
         .route("/agent-voice-verbosity", post(narration))
         .route("/agents/archived", get(archived))
 }

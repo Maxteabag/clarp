@@ -161,6 +161,23 @@ impl Slot {
         Ok(())
     }
 
+    /// Codex ran on another provider than the lane's: the claimed turn, bound or not yet,
+    /// fails with these words, once.
+    pub(crate) fn refused(&mut self, why: &str, now_ms: i64) -> io::Result<()> {
+        match std::mem::take(self) {
+            Self::Free => Ok(()),
+            Self::Running { mut spool, .. } => spool.refused(why, now_ms),
+            Self::Reserved { mut writer, .. } => {
+                let failed = serde_json::json!({"type": "turn.failed", "error": why});
+                writer.append(&Record {
+                    t: now_ms,
+                    entry: Entry::Out(failed.to_string()),
+                })?;
+                end_unbound(&mut writer, Some(1), None, now_ms)
+            }
+        }
+    }
+
     pub(crate) fn lost(&mut self, now_ms: i64) -> io::Result<()> {
         match std::mem::take(self) {
             Self::Free => Ok(()),
