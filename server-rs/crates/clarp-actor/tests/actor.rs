@@ -6891,7 +6891,8 @@ fn a_turn_whose_network_stays_gone_ends_after_a_quarter_of_an_hour_and_says_why(
     );
     let rows = actor.tail(5).unwrap().entries;
     assert!(
-        rows.iter().any(|row| matches!(&row.entry, Entry::Notice(notice)
+        rows.iter()
+            .any(|row| matches!(&row.entry, Entry::Notice(notice)
             if notice.text.starts_with("This computer had no network for 15 minutes"))),
         "{rows:?}"
     );
@@ -6921,7 +6922,8 @@ fn a_connection_that_fails_while_the_network_is_there_is_tried_for_a_minute() {
     assert_eq!(kind, "connection");
     let rows = actor.tail(5).unwrap().entries;
     assert!(
-        rows.iter().any(|row| matches!(&row.entry, Entry::Notice(notice)
+        rows.iter()
+            .any(|row| matches!(&row.entry, Entry::Notice(notice)
             if notice.text.starts_with("Connection lost — retries exhausted"))),
         "{rows:?}"
     );
