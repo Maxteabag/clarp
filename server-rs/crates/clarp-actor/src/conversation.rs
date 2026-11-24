@@ -25,7 +25,8 @@ use crate::ActorError;
 
 mod anchors;
 mod imported_anchors;
-use anchors::{Anchor, TurnAnchors, find_anchors};
+pub(crate) use anchors::AnchorCache;
+use anchors::{Anchor, TurnAnchors, find_anchors, read_into_turn};
 pub(crate) use imported_anchors::ImportedAnchors;
 pub(crate) mod resend;
 
@@ -541,6 +542,8 @@ impl TurnAudience {
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     imported_anchors: Option<&'a ImportedAnchors>,
+    /// The actor's walks of its newest turns, so a read of a running turn reads what is new.
+    anchor_cache: Option<&'a AnchorCache>,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     anchors: HashMap<u64, TurnAnchors>,
@@ -553,14 +556,16 @@ impl<'a> Reader<'a> {
         Self {
             log,
             imported_anchors: None,
+            anchor_cache: None,
             ends: HashMap::new(),
             anchors: HashMap::new(),
             marks: HashMap::new(),
         }
     }
 
-    fn with_imported_anchors(mut self, anchors: Option<&'a ImportedAnchors>) -> Self {
-        self.imported_anchors = anchors;
+    fn with_span(mut self, span: Span<'a>) -> Self {
+        self.imported_anchors = span.imported_anchors;
+        self.anchor_cache = span.anchor_cache;
         self
     }
 
@@ -618,11 +623,13 @@ impl<'a> Reader<'a> {
         if !self.anchors.contains_key(&turn) {
             let anchors = match self.end(turn)? {
                 Some((end, _)) if end.status == "replaced" => TurnAnchors::default(),
-                Some((_, seq)) => {
-                    let seq = *seq;
-                    find_anchors(self.log, turn, Some(seq))?
+                end => {
+                    let end = end.map(|(_, seq)| *seq);
+                    match self.anchor_cache {
+                        Some(cache) => cache.anchors(self.log, turn, end)?,
+                        None => find_anchors(self.log, turn, end)?,
+                    }
                 }
-                None => find_anchors(self.log, turn, None)?,
             };
             self.anchors.insert(turn, anchors);
         }
@@ -632,6 +639,20 @@ impl<'a> Reader<'a> {
     /// The anchor with this id, when the row is one of its turn's.
     fn anchor_of(&mut self, turn: u64, id: &str) -> Result<Option<&Anchor>, ActorError> {
         Ok(self.anchors(turn)?.of(id))
+    }
+
+    /// The reply this row decided was an answer, which entered the conversation view with it:
+    /// a reply with words after it, or a message of the user's read into its turn.
+    fn decided_by(&mut self, item: &Item, entry: &Entry) -> Result<Option<String>, ActorError> {
+        let turn = match entry {
+            Entry::Reply(reply) => Some(item.turn.unwrap_or(reply.turn)),
+            Entry::Message(_) => read_into_turn(self.log, item)?,
+            _ => None,
+        };
+        Ok(match turn {
+            Some(turn) => self.anchors(turn)?.decides.get(entry.id()).cloned(),
+            None => None,
+        })
     }
 
     /// The anchor the turn's end settled, once it has ended.
@@ -646,30 +667,19 @@ impl<'a> Reader<'a> {
             row.session_rows = self.imported_count(imported)?;
         }
         let ended = match row.turn_number {
-            Some(turn) if matches!(which, Which::Chat { .. }) => {
-                Some(self.end(turn)?.map(|(_, seq)| *seq))
-            }
+            Some(turn) if matches!(which, Which::Chat { .. }) => Some(self.end(turn)?.is_some()),
             _ => None,
         };
         // Before its turn ends, only a reply can be an answer. A message read into a turn is of
         // a turn that never ends by itself, and is conversation without an anchor.
         if let (Some(turn), Some(ended)) = (row.turn_number, ended)
-            && (ended.is_some() || matches!(row.entry, Entry::Reply(_)))
+            && (ended || matches!(row.entry, Entry::Reply(_)))
         {
-            let anchors = self.anchors(turn)?;
-            let id = row.entry.id();
-            if let Some(anchor) = anchors.of(id) {
+            // An anchor changed where it entered the conversation view: the row or the end
+            // that decided it.
+            if let Some(anchor) = self.anchors(turn)?.of(row.entry.id()) {
                 row.session_rows = Some(anchor.session_rows);
-            }
-            // The settled anchor is given again at the end, with the turn's last count.
-            if let Some(seq) = ended
-                && anchors.settled().is_some_and(|anchor| anchor.id == id)
-            {
-                row.revision = row.revision.max(seq * REVISION_STEP);
-            }
-            // A reply that a later one replaced as the answer changed when that one came.
-            if let Some(seq) = anchors.superseded.get(id) {
-                row.revision = row.revision.max(seq * REVISION_STEP);
+                row.revision = row.revision.max(anchor.entered * REVISION_STEP);
             }
         }
         // A goal's check-in that was sent again for the apps (`resend`) is, in a chat, as new
@@ -760,6 +770,15 @@ impl<'a> Reader<'a> {
             if self.stored(&id, which)?.is_some() {
                 return Ok(true);
             }
+        }
+        // A row that brought an earlier reply into the conversation view brings it to a reader
+        // of that view, even when the row itself is not in it.
+        if which.conversation_only().is_some()
+            && let Some(entry) = &entry
+            && let Some(id) = self.decided_by(item, entry)?
+            && self.stored(&id, which)?.is_some()
+        {
+            return Ok(true);
         }
         if entry
             .as_ref()
@@ -910,9 +929,9 @@ fn rows(
     items: &[Item],
     place: Place,
     which: Which,
-    imported_anchors: Option<&ImportedAnchors>,
+    span: Span<'_>,
 ) -> Result<Vec<Versioned>, ActorError> {
-    let mut reader = Reader::new(log).with_imported_anchors(imported_anchors);
+    let mut reader = Reader::new(log).with_span(span);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         // A row named again: it is given again, as it is now. A hidden row the user joined is
@@ -955,22 +974,17 @@ fn rows(
             }
             continue;
         }
-        if !reader.allows(item, &entry, which)? {
-            continue;
-        }
-        // A reply that takes the place of an earlier answer to the same message: that one has
-        // left the conversation view, and changed with it.
+        // A row that decided an earlier reply was an answer: that reply entered the
+        // conversation view with it, and changed.
         if place == Place::Newest
             && matches!(which, Which::Chat { .. })
-            && let Entry::Reply(reply) = &entry
-            && let Some(earlier) = reader
-                .anchors(item.turn.unwrap_or(reply.turn))?
-                .supersedes
-                .get(&reply.id)
-                .cloned()
+            && let Some(earlier) = reader.decided_by(item, &entry)?
         {
             found.retain(|known| known.entry.id() != earlier);
             found.extend(reader.stored(&earlier, which)?);
+        }
+        if !reader.allows(item, &entry, which)? {
+            continue;
         }
         let mut row = reader.row(item, entry)?;
         reader.chat_row(&mut row, which)?;
@@ -1062,6 +1076,8 @@ pub(crate) struct Span<'a> {
     pub floor: Seq,
     pub head_revision: u64,
     pub imported_anchors: Option<&'a ImportedAnchors>,
+    /// The actor's walks of its newest turns ([`AnchorCache`]).
+    pub anchor_cache: Option<&'a AnchorCache>,
 }
 
 const COUNT_CAP: usize = 100;
@@ -1221,7 +1237,7 @@ fn gaps(
     if !which.hides() {
         return Ok((HashMap::new(), None));
     }
-    let mut reader = Reader::new(log).with_imported_anchors(span.imported_anchors);
+    let mut reader = Reader::new(log).with_span(span);
     let mut before = HashMap::new();
     let mut saw_draft = false;
     let mut last_stored = None;
@@ -1288,7 +1304,7 @@ fn items_before(
     (before, floor): (Seq, Seq),
     limit: usize,
     which: Which,
-    imported_anchors: Option<&ImportedAnchors>,
+    span: Span<'_>,
 ) -> Result<(Vec<Item>, bool), ActorError> {
     if which == Which::All {
         let mut items = log.read_before(before, kind::ROWS, limit.saturating_add(1))?;
@@ -1302,7 +1318,7 @@ fn items_before(
     // Some are left out: read back until the page is full, or there is nothing older.
     let mut kept: Vec<Item> = Vec::new(); // the newest first
     let mut cursor = before;
-    let mut judge = Reader::new(log).with_imported_anchors(imported_anchors);
+    let mut judge = Reader::new(log).with_span(span);
     loop {
         let chunk = log.read_before(cursor, kind::ROWS, CHUNK)?;
         let Some(oldest) = chunk.first() else {
@@ -1358,9 +1374,9 @@ pub(crate) fn older(
         (before, span.floor),
         stored_limit,
         which,
-        span.imported_anchors,
+        span,
     )?;
-    let mut entries = rows(log, &items, Place::First, which, span.imported_anchors)?;
+    let mut entries = rows(log, &items, Place::First, which, span)?;
     live.retain(|shown| {
         !entries
             .iter()
@@ -1414,11 +1430,11 @@ fn items_after(
     mut from: Seq,
     limit: usize,
     which: Which,
-    imported_anchors: Option<&ImportedAnchors>,
+    span: Span<'_>,
 ) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
     let mut items: Vec<Item> = Vec::new();
     let mut cursor = None;
-    let mut judge = Reader::new(log).with_imported_anchors(imported_anchors);
+    let mut judge = Reader::new(log).with_span(span);
     let at_a_time = if which == Which::All {
         limit.saturating_add(1)
     } else {
@@ -1457,8 +1473,8 @@ pub(crate) fn after(
     let mut from = (revision / REVISION_STEP).max(span.floor);
     let (mut entries, latest_revision, has_more) = loop {
         let (items, has_more, cursor) =
-            items_after(log, from, limit, which, span.imported_anchors)?;
-        let mut entries = rows(log, &items, Place::Newest, which, span.imported_anchors)?;
+            items_after(log, from, limit, which, span)?;
+        let mut entries = rows(log, &items, Place::Newest, which, span)?;
         if !has_more {
             for draft in drafts {
                 let mut shown = draft.versioned();
@@ -1525,7 +1541,7 @@ pub(crate) fn delegation_baseline(
             return Ok(0);
         };
         before = first.seq;
-        for row in rows(log, &part, Place::Newest, Which::All, None)? {
+        for row in rows(log, &part, Place::Newest, Which::All, Span::default())? {
             let rev = revisions.entry(row.entry.id().to_owned()).or_insert(0);
             *rev = (*rev).max(row.revision);
         }
@@ -1821,6 +1837,7 @@ mod tests {
             floor: 0,
             head_revision,
             imported_anchors: Some(&anchors),
+            anchor_cache: None,
         };
         let chat = Which::chat(true).conversation_view(true);
         let newest = tail(log.as_ref(), &[], span, 1, chat).unwrap();
