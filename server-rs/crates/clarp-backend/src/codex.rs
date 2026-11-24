@@ -1768,7 +1768,10 @@ mod tests {
             };
             lane.on_record(&record, &mut out);
         }
-        assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))), "{out:?}");
+        assert!(
+            out.iter().any(|signal| matches!(signal, Signal::Reply(_))),
+            "{out:?}"
+        );
         std::fs::remove_dir_all(home).unwrap();
     }
 

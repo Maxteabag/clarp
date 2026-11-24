@@ -471,3 +471,29 @@ impl Book {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    /// A janitor reads every agent its scope names, or every agent where it names none, but
+    /// never one bound to a model provider of its own, even one it names.
+    #[test]
+    fn no_janitor_scope_holds_an_agent_bound_to_a_provider_of_its_own() {
+        let scope = |value: Value| value.as_object().unwrap().clone();
+        let every = scope(json!({"agent_ids": [], "exclude_agent_ids": []}));
+        let named = scope(json!({"agent_ids": ["a1"], "exclude_agent_ids": []}));
+        let agent = Agent {
+            agent_id: "a1".to_string(),
+            ..Agent::default()
+        };
+        assert!(in_scope(&every, &agent) && in_scope(&named, &agent));
+        let bound = Agent {
+            bound: true,
+            ..agent
+        };
+        assert!(!in_scope(&every, &bound));
+        assert!(!in_scope(&named, &bound));
+    }
+}
