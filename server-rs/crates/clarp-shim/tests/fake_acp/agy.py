@@ -7,7 +7,7 @@
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
 # first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-closing`, `case-background`, `case-refused`,
-# `case-stop`, `case-after`, and the paragraph cases in `WRITTEN`); a prompt that names `add-...` and no case is a message run as a turn of its
+# `case-stop`, `case-after`, `case-hold`, and the paragraph cases in `WRITTEN`); a prompt that names `add-...` and no case is a message run as a turn of its
 # own, answered `separate-add-...`. It waits for files beside it (`taken-<mode>`: say a word
 # under the new prompt; `release-<mode>`: answer) and leaves files for the test
 # (`working-<mode>`, `received-<message>`).
@@ -145,6 +145,21 @@ def steering(mid, sid, words):
         # Answered before anything else comes: what comes later is a prompt of its own.
         text(sid, "agent_message_chunk", "first-after")
         return result(mid, {"stopReason": "end_turn"})
+    if mode == "hold":
+        # It works until it is stopped, and takes none of the prompts it is sent meanwhile:
+        # each is answered as cancelled once the Stop came, and then the one it worked on.
+        tool(sid, "in_progress")
+        sent = []
+        while True:
+            message = read()
+            if message.get("method") == "session/prompt":
+                sent.append(message["id"])
+            elif message.get("method") == "session/cancel":
+                break
+        tool(sid, "failed")
+        for other in sent:
+            result(other, {"stopReason": "cancelled"})
+        return result(mid, {"stopReason": "cancelled"})
     if mode == "writing":
         text(sid, "agent_message_chunk", "before-steer")
     elif mode in ("sentence", "closing"):
