@@ -22,6 +22,12 @@
 //! it warns and says that it could not know (`failover: unknown`): a warning that a switch
 //! then makes needless costs a glance, and a limit reached without one stops the agent's
 //! work, which is what the warning is for.
+//!
+//! An account that is used up is judged by the same rule ([`used_up_failover`]), with a seat
+//! taking the turn where it has any room left rather than where it is below its share: the
+//! switch is the Host's business, so the row says nothing while another seat would take the
+//! turn, and where none would it names the soonest moment a seat that could serve the agent's
+//! model regains room. The usage screen gets a summary of each tool's pool ([`pool`]).
 
 use serde_json::{Value, json};
 

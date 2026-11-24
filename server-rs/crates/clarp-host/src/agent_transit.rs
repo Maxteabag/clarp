@@ -483,7 +483,9 @@ fn judge(backend: &str, row: &mut Value, used_up: &crate::quota::UsedUp, default
 
 /// Adds to `GET /agent-model-options` what tells which tool an agent can be moved to.
 pub(crate) async fn annotate(app: &App, told: &mut Value) {
-    let used_up = crate::quota::used_up(app).await;
+    // Used up only where no seat of the tool's pool would take the turn, as the agents' rows
+    // say it, on the tool's default model.
+    let used_up = crate::quota::rows(app).await.used_up();
     let tools: Vec<String> = told["providers"]
         .as_object()
         .map(|providers| providers.keys().cloned().collect())

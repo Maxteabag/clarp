@@ -11,8 +11,8 @@
 //! An agent's row says of its tool that its account is used up (`backend_quota`) while a
 //! window that was said to be all used is fresh and no turn of the tool completed since:
 //! advice for whoever is about to write to the agent, and no refusal. Before that, it says
-//! that the account is near a limit (`state: near`, `clarp_kernel::quota_near`), unless
-//! another seat of the tool would take the agent's turn ([`Rows`]).
+//! that the account is near a limit (`state: near`, `clarp_kernel::quota_near`). Either is
+//! said only where no other seat of the tool's pool would take the agent's turn ([`Rows`]).
 //!
 //! A turn that fails for a usage limit is a limit too, of which nothing more is known: it is
 //! told as a hard limit and stands until a turn of the tool completes.
@@ -149,9 +149,10 @@ pub struct Desk {
     /// then, so that what it said clears as it does. The watch is woken where it moves sooner.
     wake: std::sync::Mutex<Option<i64>>,
     woken: tokio::sync::Notify,
-    /// Whether another seat would take the turns of a tool that is near a limit, by the tool
-    /// and the model an agent runs on it, as the apps were last told it ([`look_again`]).
-    failover: std::sync::Mutex<BTreeMap<(String, String), &'static str>>,
+    /// Whether another seat would take the turns of a tool that is near a limit or used up, by
+    /// the tool and the model an agent runs on it, as the apps were last told it
+    /// ([`look_again`]): the word, and for a used-up account when the pool regains room.
+    failover: std::sync::Mutex<BTreeMap<(String, String), (&'static str, Option<i64>)>>,
 }
 
 /// Which accounts are used up, and which are near a limit and not used up, by the tool's
@@ -756,6 +757,23 @@ impl Desk {
         all
     }
 
+    /// Has the accounts looked at again by `at`, where nothing is looked at sooner: when a seat
+    /// of a pool regains room, which the tool's own word does not name.
+    fn wake_by(&self, at: i64, now_ms: i64) {
+        if at <= now_ms {
+            return;
+        }
+        let mut kept = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        let sooner = kept.is_none_or(|kept| at < kept);
+        if sooner {
+            *kept = Some(at);
+        }
+        drop(kept);
+        if sooner {
+            self.woken.notify_one();
+        }
+    }
+
     /// How long until the accounts are looked at again: every five minutes, and a second
     /// after the first window that an agent's row names begins anew, where that is sooner.
     fn next_look(&self, now_ms: i64) -> Duration {
@@ -768,23 +786,17 @@ impl Desk {
     }
 }
 
-/// Which accounts are used up now, for an app's request.
-pub async fn used_up(app: &crate::edge::App) -> Arc<UsedUp> {
-    let home = crate::config::home();
-    app.limits.used_up(With::of(app, &home)).await.used_up
-}
-
 /// What the agents' rows say of their tools' accounts (`backend_quota`): used up, and else
-/// near a limit where no other seat of the tool would take the agent's turn.
+/// near a limit, where no other seat of the tool would take the agent's turn.
 pub struct Rows {
     looked: Looked,
     accounts: clarp_kernel::recovery::Accounts,
     /// The tools whose pool has the owner's selector, which moves the tool to another seat
     /// when its account is used up.
     selectors: std::collections::BTreeSet<&'static str>,
-    /// The seats as `GET /hotseat/status` serves them, where a tool is near a limit.
+    /// The seats as `GET /hotseat/status` serves them, where a tool is near a limit or used up.
     desk: Value,
-    /// The model each tool that is near a limit runs for an agent that names none.
+    /// The model each tool that is near a limit or used up runs for an agent that names none.
     defaults: BTreeMap<String, String>,
 }
 
@@ -816,15 +828,44 @@ impl Rows {
         clarp_kernel::quota_near::failover(self.accounts, tool, model, selector, &self.desk)
     }
 
+    /// Whether another seat would take a turn of an agent on `model` from its tool whose
+    /// account is used up, and when the pool regains room where none would. A seats reading
+    /// that is old or failed says nothing of now: the account in use then stands as used up,
+    /// with its own reset (`failover: unknown`), rather than room being taken from it.
+    fn used_up_failover(
+        &self,
+        tool: &str,
+        model: &str,
+    ) -> (clarp_kernel::quota_near::Failover, Option<i64>) {
+        let selector = self.selectors.contains(tool);
+        let model = self.model(tool, model);
+        clarp_kernel::quota_near::used_up_failover(
+            self.accounts,
+            tool,
+            model,
+            selector,
+            &self.desk,
+        )
+    }
+
     /// What the row of an agent on this tool and model says of its account.
     pub fn of(&self, tool: &str, model: &str) -> Value {
         if let Some(used_up) = self.looked.used_up.get(tool) {
-            return used_up.clone();
+            let (failover, regains) = self.used_up_failover(tool, model);
+            return clarp_kernel::quota_near::used_up_row(used_up, failover, regains);
         }
         let Some(near) = self.looked.near.get(tool) else {
             return Value::Null;
         };
         clarp_kernel::quota_near::row(near, self.failover(tool, model))
+    }
+
+    /// Which tools' accounts are used up for an agent on the tool's default model: the tools
+    /// whose row says so.
+    pub fn used_up(&self) -> UsedUp {
+        let tools = self.looked.used_up.keys();
+        let rows = tools.map(|tool| (tool.clone(), self.of(tool, "")));
+        rows.filter(|(_, row)| !row.is_null()).collect()
     }
 }
 
@@ -833,13 +874,13 @@ impl Rows {
 pub async fn rows(app: &crate::edge::App) -> Rows {
     let home = crate::config::home();
     let looked = app.limits.used_up(With::of(app, &home)).await;
-    let desk = if looked.near.is_empty() {
+    let desk = if looked.near.is_empty() && looked.used_up.is_empty() {
         Value::Null
     } else {
         crate::seats::status(app).await
     };
     let mut defaults = BTreeMap::new();
-    for tool in looked.near.keys() {
+    for tool in looked.near.keys().chain(looked.used_up.keys()) {
         let model = crate::models::default_for(app, tool).await;
         defaults.insert(tool.clone(), model.unwrap_or_default());
     }
@@ -854,8 +895,8 @@ pub async fn rows(app: &crate::edge::App) -> Rows {
 }
 
 /// The accounts are looked at again, and whether another seat would take the turns of a tool
-/// that is near a limit is judged again: for each model that an agent of the tool runs, its own
-/// or the tool's default. Where that is not as the apps were last told it, they are told to
+/// that is near a limit or used up is judged again: for each model that an agent of the tool
+/// runs, its own or the tool's default; and for a used-up one, when the pool regains room. Where that is not as the apps were last told it, they are told to
 /// read their agents' rows again. What changes it: a reading of the seats, a seat that is
 /// switched to, a reading that grows old, a window of a seat that begins anew. So this is done
 /// after each reading and each switch from the desk or the switcher, and by the watch.
@@ -863,15 +904,28 @@ pub async fn look_again(app: &crate::edge::App) {
     let rows = rows(app).await;
     let directory = app.fleet.directory();
     let agents = directory.members.iter().chain(&directory.janitors);
-    let mut now: BTreeMap<(String, String), &'static str> = BTreeMap::new();
+    let mut now: BTreeMap<(String, String), (&'static str, Option<i64>)> = BTreeMap::new();
+    let mut regains_first: Option<i64> = None;
     for member in agents.filter(|member| member.record.archived_at_ms.is_none()) {
         let tool = &member.record.backend;
-        if !rows.looked.near.contains_key(tool) {
-            continue;
-        }
         let model = rows.model(tool, &member.record.model).to_string();
-        let word = rows.failover(tool, &model).word();
-        now.insert((tool.clone(), model), word);
+        let judged = if rows.looked.used_up.contains_key(tool) {
+            let (failover, regains) = rows.used_up_failover(tool, &model);
+            if let Some(at) = regains {
+                regains_first = Some(regains_first.map_or(at, |first| first.min(at)));
+            }
+            // To the minute, as the rows' resets are compared ([`Desk::looked`]).
+            (failover.word(), regains.map(|ms| (ms + 30_000).div_euclid(60_000)))
+        } else if rows.looked.near.contains_key(tool) {
+            (rows.failover(tool, &model).word(), None)
+        } else {
+            continue;
+        };
+        now.insert((tool.clone(), model), judged);
+    }
+    // A seat of the pool that regains room clears a used-up row: looked at again then.
+    if let Some(at) = regains_first {
+        app.limits.wake_by(at, app.clock.now_ms());
     }
     let mut told = app
         .limits

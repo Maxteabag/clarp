@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 174;
+pub const HOST_CONTRACT: u64 = 176;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -410,6 +410,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // before (owner, 24 Nov 2026). A reword and a Send now take the app's setting now in
     // place of the waiting message's, and an answer to a request is spoken when it asks.
     ("spoken_when_asked", 171),
+    // The usage warnings know the pool of seats: an agent's row says that its tool's account
+    // is used up only where no seat of the tool's pool would take its turn (`failover`), with
+    // the soonest moment a seat regains room; `GET /backend-usage` gives each tool with a pool
+    // a summary of it (`pool`: seats, with room, the one in use, the next reset).
+    ("quota_pool", 176),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by

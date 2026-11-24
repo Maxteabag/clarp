@@ -246,10 +246,12 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
             }
         })
         .collect();
+    // The seats as they were last read, for the summary of each tool's pool.
+    let desk = crate::seats::status(app).await;
     let providers: Map<String, Value> = TOOLS
         .iter()
         .map(|tool| {
-            let provider = if *tool == quota::CODEX {
+            let mut provider = if *tool == quota::CODEX {
                 left.provider.clone()
             } else if *tool == quota::CLAUDE {
                 of_claude.clone()
@@ -263,6 +265,11 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
                     "windows": [],
                 })
             };
+            // A tool with a pool of seats: how many have room, which is in use, and when a
+            // used-up one regains room (`clarp_kernel::quota_near::pool`).
+            if let Some(pool) = clarp_kernel::quota_near::pool(tool, &desk) {
+                provider["pool"] = pool;
+            }
             ((*tool).to_string(), provider)
         })
         .collect();
