@@ -88,8 +88,9 @@ What the Host then does:
   its tools are explained without a model, and the goal keeper (also of a bound helper),
   the label checker, the spoken-message router and the other agents of a call leave its
   conversation out. Other agents can still read it (see the limits below).
-- A turn whose provider Codex's own record (in the agent's home) does not name within ten
-  seconds, or by the time its process is gone, fails closed (`provider_mismatch`, "could not be verified"),
+- A turn whose rollout in the agent's home names no provider within 3 seconds is stopped,
+  and one whose rollout is still not found (or names none) when its process is gone fails
+  closed (`provider_mismatch`, "could not be verified"),
   and its answer is not shown. This check after start only detects: by then the request has
   reached whatever provider Codex used. What prevents it is the home and the
   `model_provider` set on every launch, the chat lane, a fork and the agent's terminal.

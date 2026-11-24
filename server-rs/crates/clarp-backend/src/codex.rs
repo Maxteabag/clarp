@@ -467,11 +467,11 @@ struct Bound {
     began: Option<i64>,
 }
 
-/// How long a bound exec turn may go on before its rollout names its provider. Codex writes
-/// the rollout as the turn goes, and may flush it late; one that has named no provider after
-/// this long is taken to run elsewhere (a rollout in another `CODEX_HOME` is never found in
-/// the agent's), and is stopped. A shorter turn is judged when its process is gone.
-const VERIFY_WITHIN_MS: i64 = 10_000;
+/// How long a bound exec turn may go on with a rollout in the agent's home that names no
+/// provider: Codex names it as the thread begins, so a rollout that says nothing of it this
+/// long is not to be trusted, and the turn is stopped. A rollout that is not found yet (Codex
+/// may flush it after the turn's end) is judged when the process is gone.
+const VERIFY_WITHIN_MS: i64 = 3_000;
 
 /// What the ids of Codex's live items begin with.
 const SHOWN: &str = "cx";
@@ -632,7 +632,7 @@ impl CodexInterpreter {
                 // what it said is not taken. Before that, what it says waits; its end too, as
                 // Codex may say it before its rollout is flushed: the verdict is then given
                 // when its process is gone.
-                let late = t.saturating_sub(began) >= VERIFY_WITHIN_MS;
+                let late = bound.rollout.is_some() && t.saturating_sub(began) >= VERIFY_WITHIN_MS;
                 if late && kind.starts_with("item.") {
                     self.unverified(out, true);
                     return;
@@ -1847,8 +1847,8 @@ mod tests {
     }
 
     #[test]
-    fn a_bound_exec_turn_whose_rollout_is_not_in_its_home_is_stopped_within_the_window() {
-        // Codex ran with another home: the agent's has no rollout of the thread.
+    fn a_bound_exec_turn_whose_rollout_is_not_in_its_home_fails_at_its_exit() {
+        // Codex ran with another home: the agent's has no rollout of the thread, then or later.
         let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f1", "stand-in");
         let thread =
             r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000f2"}"#;
@@ -1859,25 +1859,59 @@ mod tests {
                 (0, thread),
                 (10, r#"{"type":"turn.started"}"#),
                 (500, item),
+                (20_000, item),
+                (30_000, r#"{"type":"turn.completed"}"#),
+            ],
+            ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            },
+        );
+        assert!(!out.contains(&Signal::Halt), "{out:?}");
+        assert!(
+            !out.iter().any(|signal| matches!(signal, Signal::Tool(_))),
+            "nothing it did is the agent's: {out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert!(reason.contains("could not be verified"), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_bound_exec_turn_whose_rollout_names_no_provider_is_stopped_within_the_window() {
+        let thread = "019a0000-0000-7000-8000-0000000000f6";
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f7", "stand-in");
+        let meta = json!({"type": "session_meta", "payload": {"id": thread}});
+        std::fs::write(
+            home.join(format!(
+                "sessions/2026/11/24/rollout-2026-11-24T09-30-00-{thread}.jsonl"
+            )),
+            format!("{meta}\n"),
+        )
+        .unwrap();
+        let started = format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#);
+        let item = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#;
+        let out = bound_run(
+            &own,
+            &[
+                (0, &started),
+                (10, r#"{"type":"turn.started"}"#),
+                (500, item),
                 (10 + VERIFY_WITHIN_MS, item),
-                (20_000, r#"{"type":"turn.completed"}"#),
             ],
             ShimEvent::Exited {
                 code: None,
                 signal: Some(15),
             },
         );
-        let halts: Vec<usize> = out
-            .iter()
-            .enumerate()
-            .filter(|(_, signal)| **signal == Signal::Halt)
-            .map(|(at, _)| at)
-            .collect();
-        assert_eq!(halts.len(), 1, "stopped once, within the window: {out:?}");
-        assert!(
-            !out.iter().any(|signal| matches!(signal, Signal::Tool(_))),
-            "nothing it did is the agent's: {out:?}"
+        assert_eq!(
+            out.iter().filter(|signal| **signal == Signal::Halt).count(),
+            1,
+            "stopped once, within the window: {out:?}"
         );
+        assert!(!out.iter().any(|signal| matches!(signal, Signal::Tool(_))));
         let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
             panic!("{out:?}");
         };
