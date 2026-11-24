@@ -707,6 +707,8 @@ while True:
         });
         let all = records(&dir.join("spool/turn.jsonl"));
         assert_eq!(all.iter().any(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping{signal}) if signal=="SIGKILL")), !exits);
+        // The direct child's own signal is recorded as the group's are.
+        assert!(all.iter().any(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping{signal}) if signal=="SIGUSR1")), "{all:?}");
 
         assert!(
             matches!(

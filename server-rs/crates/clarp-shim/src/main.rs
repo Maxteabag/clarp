@@ -720,6 +720,12 @@ impl Control {
         if let Some(early) = &self.before_stop
             && !self.leader_exited.load(Ordering::SeqCst)
         {
+            // Recorded like the signals after it: when the tool was asked to stop is read from
+            // the spool, and an interrupt the tool is slow to act on shows as such.
+            let stopping = ShimEvent::Stopping {
+                signal: early.signal.as_str().to_string(),
+            };
+            let _ = self.to_spool.send(ToSpool::Entry(Entry::Shim(stopping)));
             let pid = Pid::from_raw(self.pid as i32);
             let _ = kill(pid, early.signal);
             (stage, _) = self
