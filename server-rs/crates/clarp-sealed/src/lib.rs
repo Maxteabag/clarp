@@ -210,6 +210,9 @@ pub const ABSENT: &[(&str, &str)] = &[
     // only where whoever started the Host did not (the driver reads whether they did).
     ("CLARP_AGY_ACP_PROFILE", "switch"),
     ("SSH_CONNECTION", "caller"),
+    // The cut of an agy-acp reply at a line end when a message comes (issue 753): on unless a
+    // test turns it off in its own place (`CLARP_AGY_ACP_CUT=off`).
+    ("CLARP_AGY_ACP_CUT", "switch"),
 ];
 
 /// Names shaped like a variable in a file that reads the environment that are not read from it:
