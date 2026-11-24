@@ -126,10 +126,11 @@ impl World {
                     Action::Fork(_) | Action::ForkFollow { .. } => {
                         panic!("these agents have no fork")
                     }
-                    Action::CheckNetwork { turn } => {
+                    Action::CheckNetwork { turn, attempts } => {
                         self.network_checks += 1;
                         let now = self.tick();
-                        asked.push(actor.network_checked(turn, self.network_up, now).unwrap());
+                        let up = self.network_up;
+                        asked.push(actor.network_checked(turn, attempts, up, now).unwrap());
                     }
                 }
             }
@@ -181,11 +182,13 @@ impl World {
             let at = actor.retry_at()?;
             self.now_ms = self.now_ms.max(at);
             let mut out = actor.retry_due(self.now_ms).unwrap();
-            while let [Action::CheckNetwork { turn }] = out.actions.as_slice() {
-                let turn = *turn;
+            while let [Action::CheckNetwork { turn, attempts }] = out.actions.as_slice() {
+                let (turn, attempts) = (*turn, *attempts);
                 self.network_checks += 1;
                 let now = self.tick();
-                out = actor.network_checked(turn, self.network_up, now).unwrap();
+                out = actor
+                    .network_checked(turn, attempts, self.network_up, now)
+                    .unwrap();
             }
             if !out.actions.is_empty() {
                 return Some(out);
@@ -6798,7 +6801,7 @@ fn a_turn_whose_network_is_gone_waits_for_it_says_so_and_goes_on_where_it_stood(
     assert!(due <= world.now_ms);
     let out = actor.retry_due(world.now_ms).unwrap();
     assert!(
-        matches!(&out.actions[..], [Action::CheckNetwork { turn }] if *turn == TurnId(1)),
+        matches!(&out.actions[..], [Action::CheckNetwork { turn, attempts: 1 }] if *turn == TurnId(1)),
         "{:?}",
         out.actions
     );
@@ -6821,7 +6824,7 @@ fn a_turn_whose_network_is_gone_waits_for_it_says_so_and_goes_on_where_it_stood(
     );
     assert_eq!(actor.shown_whole(now)["activity"]["state"], "limited");
     // A check whose answer comes again, late, changes nothing.
-    let late = actor.network_checked(TurnId(1), true, now).unwrap();
+    let late = actor.network_checked(TurnId(1), 1, true, now).unwrap();
     assert!(late.actions.is_empty());
     assert!(actor.status().live.unwrap().waits_for_the_network);
 
@@ -6829,6 +6832,12 @@ fn a_turn_whose_network_is_gone_waits_for_it_says_so_and_goes_on_where_it_stood(
     // log, and the network is checked anew at once.
     world.now_ms = checked_at + 5_000;
     let out = actor.retry_due(world.now_ms).unwrap();
+    // An answer of another wait of the turn, which lands while this check is asked for,
+    // changes nothing either.
+    let now = world.tick();
+    let other = actor.network_checked(TurnId(1), 2, true, now).unwrap();
+    assert!(other.actions.is_empty());
+    assert!(actor.status().live.unwrap().waits_for_the_network);
     world.carry_out(&mut actor, out);
     assert_eq!(world.network_checks, 2);
     drop(actor);

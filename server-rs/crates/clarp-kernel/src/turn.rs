@@ -408,7 +408,7 @@ pub enum TurnEvent {
 
 /// What a turn waits for between two attempts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "for", rename_all = "kebab-case")]
+#[serde(from = "WrittenWait", into = "WrittenWait")]
 pub enum Wait {
     /// A moment, and then the same again: the attempt failed in a way that passes (a
     /// connection that dropped, a tool that stalled, a provider that turned it away for a
@@ -434,11 +434,76 @@ pub enum Wait {
     /// checks whether it reaches the provider at all, and every few seconds while it does
     /// not; once it does, the turn is tried again. `until_ms`: when the turn ends if the
     /// network has not come back by then. `resume` as for [`Wait::Retry`].
-    Network {
+    Network { until_ms: i64, resume: bool },
+}
+
+/// A wait as the log keeps it. A wait for the network is written as a retry at its end with
+/// `network` beside it: a build of the Host from before the network wait reads such a line as
+/// a retry, waits until then and tries the turn once more, so its log stays readable to it
+/// after a rollback.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "for", rename_all = "kebab-case")]
+enum WrittenWait {
+    Retry {
         until_ms: i64,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         resume: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        network: bool,
     },
+    Account {
+        until_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resets_at_ms: Option<i64>,
+    },
+}
+
+impl From<WrittenWait> for Wait {
+    fn from(written: WrittenWait) -> Self {
+        match written {
+            WrittenWait::Retry {
+                until_ms,
+                resume,
+                network: false,
+            } => Self::Retry { until_ms, resume },
+            WrittenWait::Retry {
+                until_ms,
+                resume,
+                network: true,
+            } => Self::Network { until_ms, resume },
+            WrittenWait::Account {
+                until_ms,
+                resets_at_ms,
+            } => Self::Account {
+                until_ms,
+                resets_at_ms,
+            },
+        }
+    }
+}
+
+impl From<Wait> for WrittenWait {
+    fn from(wait: Wait) -> Self {
+        match wait {
+            Wait::Retry { until_ms, resume } => Self::Retry {
+                until_ms,
+                resume,
+                network: false,
+            },
+            Wait::Network { until_ms, resume } => Self::Retry {
+                until_ms,
+                resume,
+                network: true,
+            },
+            Wait::Account {
+                until_ms,
+                resets_at_ms,
+            } => Self::Account {
+                until_ms,
+                resets_at_ms,
+            },
+        }
+    }
 }
 
 impl Wait {
@@ -1186,9 +1251,53 @@ mod tests {
         let written = serde_json::to_string(&wait).unwrap();
         assert_eq!(
             written,
-            r#"{"for":"network","until_ms":901300,"resume":true}"#
+            r#"{"for":"retry","until_ms":901300,"resume":true,"network":true}"#
         );
         assert_eq!(serde_json::from_str::<Wait>(&written).unwrap(), wait);
+        // A build from before the network wait reads it as a retry at the wait's end: it
+        // waits until then and tries the turn once more. Its own enum, as it was.
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "for", rename_all = "kebab-case")]
+        enum OlderWait {
+            Retry {
+                until_ms: i64,
+                #[serde(default)]
+                resume: bool,
+            },
+            Account {
+                until_ms: i64,
+                #[serde(default)]
+                resets_at_ms: Option<i64>,
+            },
+        }
+        assert_eq!(
+            serde_json::from_str::<OlderWait>(&written).unwrap(),
+            OlderWait::Retry {
+                until_ms: 901_300,
+                resume: true
+            }
+        );
+        // And the waits it wrote itself are read as they were.
+        for (older, now) in [
+            (
+                r#"{"for":"retry","until_ms":5}"#,
+                Wait::Retry {
+                    until_ms: 5,
+                    resume: false,
+                },
+            ),
+            (r#"{"for":"account","until_ms":7}"#, Wait::account(7)),
+        ] {
+            assert_eq!(serde_json::from_str::<Wait>(older).unwrap(), now);
+            assert_eq!(serde_json::to_string(&now).unwrap(), older);
+        }
+        assert_eq!(
+            serde_json::from_str::<OlderWait>(r#"{"for":"account","until_ms":7}"#).unwrap(),
+            OlderWait::Account {
+                until_ms: 7,
+                resets_at_ms: None
+            }
+        );
         assert!(wait.is_for_the_network() && !wait.is_for_an_account());
         assert_eq!((wait.until_ms(), wait.resets_at_ms()), (901_300, None));
         // A retry is written as before where the network was not gone.
@@ -1217,6 +1326,16 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&back).unwrap(),
             r#"{"event":"retried","at_ms":60000,"network_back":true}"#
+        );
+        // A build from before reads that retry as any other: what it does not know is left.
+        #[derive(Debug, PartialEq, Deserialize)]
+        #[serde(tag = "event", rename_all = "kebab-case")]
+        enum OlderEvent {
+            Retried { at_ms: i64 },
+        }
+        assert_eq!(
+            serde_json::from_str::<OlderEvent>(&serde_json::to_string(&back).unwrap()).unwrap(),
+            OlderEvent::Retried { at_ms: 60_000 }
         );
         // The count survives a restart: the log says it.
         let replayed = Turn::replay([&accepted, &started, &moved, &parked_event, &back]).unwrap();

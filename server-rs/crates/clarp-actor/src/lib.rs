@@ -263,9 +263,9 @@ pub enum Action {
         socket: PathBuf,
     },
     /// Check whether this machine reaches the provider of the agent's tool, for this turn
-    /// that waits for the network, and say what was found: [`Actor::network_checked`]. The
-    /// check is the Host's, never the turn's tool's.
-    CheckNetwork { turn: TurnId },
+    /// that waits for the network after this many attempts, and say what was found, with
+    /// both: [`Actor::network_checked`]. The check is the Host's, never the turn's tool's.
+    CheckNetwork { turn: TurnId, attempts: u32 },
 }
 
 /// What is different after a call, for whoever tells the clients.
@@ -5629,7 +5629,10 @@ impl Actor {
                     ..watch
                 });
                 Ok(Outputs {
-                    actions: vec![Action::CheckNetwork { turn: watch.turn }],
+                    actions: vec![Action::CheckNetwork {
+                        turn: watch.turn,
+                        attempts: watch.attempts,
+                    }],
                     ..Outputs::default()
                 })
             }
@@ -5663,14 +5666,15 @@ impl Actor {
     }
 
     /// What the Host found when it checked the network for this turn, which waits for it
-    /// ([`Action::CheckNetwork`]): `up`, the machine reaches the provider of the agent's
-    /// tool. Where it does, the turn is tried again (`recovery::after_network_check`); where
-    /// it does not, it waits on and says that it waits for the network, until the wait is
-    /// over and the turn ends. An answer that comes late, or that nobody asked for, changes
-    /// nothing.
+    /// after this many attempts ([`Action::CheckNetwork`]): `up`, the machine reaches the
+    /// provider of the agent's tool. Where it does, the turn is tried again
+    /// (`recovery::after_network_check`); where it does not, it waits on and says that it
+    /// waits for the network, until the wait is over and the turn ends. An answer that comes
+    /// late, that is of another wait of the turn, or that nobody asked for, changes nothing.
     pub fn network_checked(
         &mut self,
         turn: TurnId,
+        attempts: u32,
         up: bool,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
@@ -5684,7 +5688,11 @@ impl Actor {
         let failed_at = parked.since_ms;
         let Some(watch) = self
             .network_of(parked)
-            .filter(|watch| watch.turn == turn && matches!(watch.next, NetworkStep::Asked(_)))
+            .filter(|watch| {
+                watch.turn == turn
+                    && watch.attempts == attempts
+                    && matches!(watch.next, NetworkStep::Asked(_))
+            })
         else {
             return Ok(out);
         };

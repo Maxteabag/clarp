@@ -58,9 +58,10 @@ test binary to move to the post-release job. An install is built from the commit
 `server-rs/tools/install-host` installs whatever `server-rs/dist` holds and compiles nothing, so build the release
 of that commit first and check `dist/COMMIT`.
 
-Going back to an older build is not always free. A build before the network wait (issue 752) cannot read a
-turn that waits for the network (`Wait::Network` in the agent's log): install an older build only while no
-turn waits for it, which is while no agent says "Waiting for the network".
+Going back to an older build is not always free. A turn that waits for the network (issue 752) is written
+in the agent's log as a retry with `network: true` beside it: a build from before reads it as a retry at the
+end of the quarter hour, and tries the turn once more then. Go back preferably while no agent says "Waiting for
+the network".
 
 Done means three kinds of evidence, in this order:
 

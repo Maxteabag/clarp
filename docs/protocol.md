@@ -908,6 +908,14 @@ last output, or of its start if it has never printed. A stall is still detected
 only after the silence threshold while a user or Oracle message waits.
 The fields are null when the tool is unstalled.
 
+A turn that waits for this machine's network (a Rust Host, issue 752: its tool lost its
+connection to the provider and the Host finds no network) is shown as a turn that waits for an
+account, in other words: `agent-activity` `state` `limited` with `summary` "Waiting for the
+network", `agent-state` `detail.account_recovery` `"waiting"` with `detail.message` "Waiting for
+the network", and `live_activity` `limited` with that `headline`. Show the words as sent; do not
+read `limited` alone as a usage limit. No contract number goes with it (see
+[compatibility](compatibility.md)).
+
 One `text/event-stream` per client. Every event is a JSON object with a
 `type` field and, when the server recorded it durably, an SSE `id:` line.
 

@@ -278,6 +278,9 @@ class RustHost(replay.Host):
              # Where a scenario's owner has a selector of accounts, this Host runs it, as the
              # reference Host does; without one the mode changes nothing.
              '--accounts', 'select',
+             # No scenario probes the real network: the Host's check of it reads a file that is
+             # never made, so the network is always there.
+             '--network-down-file', str(self.root / 'network-down'),
              # The pictures agents are shown with: the repository's own, as the reference Host has them.
              '--static', str(REPO / 'static')],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
