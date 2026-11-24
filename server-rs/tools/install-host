@@ -819,11 +819,31 @@ if isinstance(agents, dict):
         table("agents", kept)
 PYTHON
 )"
+# And the owner's switches of Codex lanes (issue 742): top-level keys, which the Host reads only
+# before any table, so they are written above [server].
+carried_top="$(python3 - "$own_config" <<'PYTHON'
+import sys
+import tomllib
+
+try:
+    with open(sys.argv[1], "rb") as source:
+        config = tomllib.load(source)
+except (OSError, UnicodeError, ValueError):
+    config = {}
+for name in ("codex_chat_lane", "codex_lane_idle_minutes", "codex_lane_most"):
+    item = config.get(name)
+    if isinstance(item, bool):
+        print(f"{name} = {'true' if item else 'false'}")
+    elif isinstance(item, int):
+        print(f"{name} = {item}")
+PYTHON
+)"
 # What the agents' Clarp tools read to find their Host: this one.
 (umask 077; cat > "$config/config.toml" <<EOF
 # Written by install-host. An agent on the Rust Host finds its Host here: a turn is told
 # where its Host is, and a worker an agent left running reads it from this file.
-[server]
+${carried_top:+$carried_top
+}[server]
 kind = "clarp-host"
 bind_addr = "$address"
 port = $port

@@ -1,0 +1,47 @@
+"""The owner's switches of Codex lanes survive an install, as top-level keys above [server]."""
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tomllib
+
+TOOLS = Path(__file__).resolve().parents[1]
+SCRIPT = (TOOLS / "install-host").read_text()
+
+
+def carried_top(config_text, tmp_path):
+    """What install-host keeps of an existing config's top-level keys: its own heredoc, run on it."""
+    body = re.search(r"carried_top=\"\$\(python3 - \"\$own_config\" <<'PYTHON'\n(.*?)\nPYTHON\n", SCRIPT, re.S)[1]
+    config = tmp_path / "config.toml"
+    config.write_text(config_text)
+    return subprocess.run([sys.executable, "-c", body, str(config)], capture_output=True, text=True, check=True).stdout
+
+
+def written(carried):
+    """The config file install-host writes, with these carried top-level lines."""
+    body = re.search(r"\(umask 077; cat > \"\$config/config.toml\" <<EOF\n(.*?)\nEOF\n", SCRIPT, re.S)[1]
+    shell = "cat <<EOF\n" + body + "\nEOF\n"
+    env = {"carried_top": carried, "address": "127.0.0.1", "port": "7690", "token": "t", "PATH": "/usr/bin:/bin"}
+    return subprocess.run(["bash", "-c", shell], capture_output=True, text=True, check=True, env=env).stdout
+
+
+def test_an_install_keeps_the_lane_switches(tmp_path):
+    config = ("# a comment\ncodex_chat_lane = true\ncodex_lane_idle_minutes = 20\ncodex_lane_most = 4\n"
+              "[server]\nkind = \"clarp-host\"\n[agents]\nreset_tell = [\"x\"]\n")
+    assert tomllib.loads(carried_top(config, tmp_path)) == {
+        "codex_chat_lane": True, "codex_lane_idle_minutes": 20, "codex_lane_most": 4}
+
+
+def test_only_top_level_switches_of_their_kind_are_kept(tmp_path):
+    config = "codex_chat_lane = \"yes\"\ncodex_lane_most = 4\n[other]\ncodex_lane_idle_minutes = 20\n"
+    assert tomllib.loads(carried_top(config, tmp_path)) == {"codex_lane_most": 4}
+    assert carried_top("[server]\nkind = \"clarp-host\"\n", tmp_path) == ""
+    assert carried_top("not toml [", tmp_path) == ""
+
+
+def test_the_written_file_has_them_above_the_server_table(tmp_path):
+    kept = carried_top("codex_chat_lane = true\n[server]\n", tmp_path).strip()
+    config = tomllib.loads(written(kept))
+    assert config["codex_chat_lane"] is True
+    assert set(config["server"]) == {"kind", "bind_addr", "port", "auth_token"}
+    assert "codex_chat_lane" not in tomllib.loads(written(""))
