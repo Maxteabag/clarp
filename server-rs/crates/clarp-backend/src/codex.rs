@@ -724,6 +724,16 @@ impl CodexInterpreter {
                         tokens_out,
                     });
                 }
+                // The answer is whole when nothing went wrong on the way, the turn was not
+                // halted for its provider, and none of its calls still runs.
+                let halted = self.bound.as_ref().is_some_and(|bound| bound.halted);
+                let running = self
+                    .tools
+                    .values()
+                    .any(|call| call.status == ToolStatus::Running);
+                if self.failure.is_none() && !halted && !running && !self.ended {
+                    out.push(Signal::Answered);
+                }
             }
             "turn.failed" | "thread.error" | "error" => {
                 let said = match &event["error"] {

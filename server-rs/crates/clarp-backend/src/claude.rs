@@ -513,6 +513,10 @@ pub struct ClaudeInterpreter {
     /// Every tool call of this turn, as it stands.
     tools: BTreeMap<String, ToolCall>,
     helpers: BTreeMap<String, Value>,
+    /// The work this turn left running in the background and has not heard the end of: the
+    /// call that began it, and the task id Claude Code gave it. Claude Code waits for such
+    /// work after its result and answers again when it is done, in the same process.
+    background: BTreeMap<String, String>,
     /// The tool calls whose start was reported as an activity.
     announced: HashSet<String>,
     usage_limit: bool,
@@ -597,6 +601,7 @@ impl ClaudeInterpreter {
             told: HashMap::new(),
             tools: BTreeMap::new(),
             helpers: BTreeMap::new(),
+            background: BTreeMap::new(),
             announced: HashSet::new(),
             usage_limit: false,
             resets_at_ms: None,
@@ -825,6 +830,19 @@ impl ClaudeInterpreter {
                     terminal_reason: text_of(&event["terminal_reason"]).to_string(),
                 });
                 out.push(Signal::Concluded);
+                // The answer is whole when it is no error, no account ran out on the way,
+                // and nothing of the turn still runs: Claude Code would answer again for it.
+                let whole = self.result.as_ref().is_some_and(|result| {
+                    !result.is_error && result.terminal_reason != "prompt_too_long"
+                }) && !self.usage_limit
+                    && self.background.is_empty()
+                    && self
+                        .tools
+                        .values()
+                        .all(|call| call.status != ToolStatus::Running);
+                if whole {
+                    out.push(Signal::Answered);
+                }
             }
             "rate_limit_event" => {
                 let info = &event["rate_limit_info"];
@@ -1130,6 +1148,10 @@ impl ClaudeInterpreter {
             let Some(call) = self.tools.get_mut(text_of(&block["tool_use_id"])) else {
                 continue;
             };
+            // A call that started work in the background returns at once, with the task's id.
+            if let Some(task) = meta["backgroundTaskId"].as_str().filter(|id| !id.is_empty()) {
+                self.background.insert(call.id.clone(), task.to_string());
+            }
             if let Some(state) = self.helpers.get_mut(&call.id) {
                 clarp_kernel::helper_cells::returned(state, block, meta);
                 update_helper(call, state, t, out);
@@ -1159,6 +1181,9 @@ impl ClaudeInterpreter {
             return;
         }
         clarp_kernel::helper_cells::notifications(text, |id, status, agent, result| {
+            // Background work whose end is told is over, named by its call or its task.
+            self.background
+                .retain(|call, task| call != id && (agent.is_empty() || task != agent));
             if let Some(state) = self.helpers.get_mut(id)
                 && let Some(call) = self.tools.get_mut(id)
             {
@@ -1332,6 +1357,7 @@ mod tests {
                         | Signal::Context { .. }
                         | Signal::Compacted(_)
                         | Signal::Concluded
+                        | Signal::Answered
                         | Signal::Cost { .. }
                 )
             })

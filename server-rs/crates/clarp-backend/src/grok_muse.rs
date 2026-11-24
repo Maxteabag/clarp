@@ -242,6 +242,15 @@ impl Stream {
                         tokens_out,
                     });
                 }
+                // Grok's own end of the turn: what it said is whole, and so is the turn when
+                // nothing went wrong and no call of it still runs. Its process ends a moment
+                // later.
+                if event_kind(e) == "end" {
+                    self.flush(Vec::new(), out);
+                    if self.outcome.is_none() && self.calls.is_empty() {
+                        out.push(Signal::Answered);
+                    }
+                }
             }
             "tool_call" | "tool_started" | "tool_start" | "tool_use" | "item.started" => {
                 let name = ["toolName", "title", "name", "tool"]
@@ -479,6 +488,10 @@ mod tests {
                     },
                     &mut signals,
                 );
+                // The Python Host showed the answer as it was written until the process was
+                // gone; this Host ends it at Grok's end line (`docs/differences.md`): what was
+                // said is then saved, and nothing is shown as being written.
+                let answered = signals.contains(&Signal::Answered);
                 for signal in signals {
                     match signal {
                         Signal::Moved(activity) => {
@@ -503,7 +516,9 @@ mod tests {
                     }
                 }
                 assert_eq!(step["phase"], phase, "{step}");
-                assert_eq!(step["text"], live, "{step}");
+                if !answered {
+                    assert_eq!(step["text"], live, "{step}");
+                }
                 assert_eq!(step["all_text"], format!("{saved}{live}"));
                 assert_eq!(step["usage"], json!([usage.0, usage.1]));
                 assert_eq!(step["model"], model);

@@ -224,6 +224,13 @@ pub enum Signal {
     /// it. A Codex agent bound to a provider of its own whose Codex named another
     /// ([`own_provider`]).
     Halt,
+    /// The tool said in its own end-of-turn line that the turn completed, and nothing of the
+    /// turn runs on: no tool call, no work it left running in the background. Everything
+    /// the turn said has been told before this. Its process is still there and ends by
+    /// itself a moment later (Claude Code uploads what it counted first, for up to a few
+    /// seconds); [`Signal::Ended`] still follows when it is gone. The actor may end the turn
+    /// for the user here, when nothing else of the turn is owed.
+    Answered,
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }

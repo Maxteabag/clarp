@@ -14,6 +14,7 @@
 //! | `{"activity": "thinking"}` | thinking, responding, waiting or compacting |
 //! | `{"fail": "why"}` | the turn fails, whatever the exit code |
 //! | `{"fail": "why", "out_until_ms": 1800000000000}` | and the account is out until then |
+//! | `{"answered": true}` | the tool's end of the turn, before its process ends: whole unless failed or a call runs |
 
 use std::collections::BTreeMap;
 
@@ -228,6 +229,16 @@ impl ScriptedInterpreter {
         if let Some(why) = text("fail") {
             self.failure = Some(why.to_string());
             self.out_until_ms = instruction.get("out_until_ms").and_then(Value::as_i64);
+        }
+        if instruction.get("answered").and_then(Value::as_bool) == Some(true) {
+            self.settle(out);
+            let running = self
+                .tools
+                .values()
+                .any(|call| call.status == ToolStatus::Running);
+            if self.failure.is_none() && !running {
+                out.push(Signal::Answered);
+            }
         }
     }
 }
