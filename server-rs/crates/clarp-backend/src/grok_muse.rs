@@ -19,6 +19,17 @@ pub(crate) struct Adapter {
     pub program: String,
 }
 
+impl Adapter {
+    /// Grok uploads its telemetry after the turn's last line, before the process exits: 1 to
+    /// 1.6 s that the turn's end, and the start of a message waiting behind it, waited for.
+    fn env(&self, mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+        if self.tool == Tool::Grok {
+            env.push(("DISABLE_TELEMETRY".into(), "1".into()));
+        }
+        env
+    }
+}
+
 impl Backend for Adapter {
     fn id(&self) -> &'static str {
         self.tool.id()
@@ -66,7 +77,7 @@ impl Backend for Adapter {
             program: self.program.clone(),
             args,
             stdin,
-            env: vec![(SESSION_ENV.into(), spec.session.clone())],
+            env: self.env(vec![(SESSION_ENV.into(), spec.session.clone())]),
         }
     }
 
@@ -427,7 +438,11 @@ mod tests {
                 };
                 let launch = adapter.launch(&spec);
                 assert_eq!(launch.program, "synthetic");
-                assert_eq!(launch.env, [(SESSION_ENV.into(), "my-session".into())]);
+                let mut env = vec![(SESSION_ENV.into(), "my-session".into())];
+                if tool == Tool::Grok {
+                    env.push(("DISABLE_TELEMETRY".into(), "1".into()));
+                }
+                assert_eq!(launch.env, env);
                 assert_eq!(launch.prompt_as_file, row["inline"] != true);
                 if row["inline"] == true {
                     assert!(launch.args.ends_with(&[tool.prompt_flag().into(), prompt]));

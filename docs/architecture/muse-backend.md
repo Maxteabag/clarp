@@ -98,3 +98,8 @@ with a `read_file` tool call, one echo-provider turn, and the matching
   MSP over stdio (`session/start`/`session/resume`, `turn/start`,
   `turn/steer` with `expectedTurnId`, `turn/interrupt`, `item/delta`
   notifications) and would also keep the start off every turn.
+
+Grok, the other one-process-per-turn tool here, uploads telemetry after its
+last line and when it is stopped: 1 to 1.6 s from `end` to exit and 1.5 to
+3 s from a Stop to its output closing. Its turns run with
+`DISABLE_TELEMETRY=1`: 0.02 to 0.33 s and 0.1 s.

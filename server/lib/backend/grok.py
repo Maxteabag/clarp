@@ -216,7 +216,10 @@ class GrokBackend(StreamJsonBackend):
                 # Past one argv string (BACKENDS-08); removed when the turn ends.
                 prompt_file = PromptFile(prompt)
                 cmd += ["--prompt-file", prompt_file.path]
-            proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+            # Grok uploads its telemetry after the turn's last line, before the
+            # process exits: 1 to 1.6 s the turn's end waited for.
+            env_extra = {**(identity or {}), "DISABLE_TELEMETRY": "1"}
+            proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=env_extra)
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                           provider=self.id, pid=proc.pid, trace_id=trace_id)
             self.register_handle(runtime_agent_id, handle)
