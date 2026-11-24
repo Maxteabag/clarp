@@ -349,7 +349,10 @@ mod tests {
         assert!(!hides(&shown, "hal"));
         let auto = rules::Mode::Auto;
         assert_eq!(
-            (policy(&shown, "hal", auto).source, policy(&shown, "hal", auto).hidden),
+            (
+                policy(&shown, "hal", auto).source,
+                policy(&shown, "hal", auto).hidden
+            ),
             ("helper", false)
         );
         // An agent that never was a helper keeps the global choice.
