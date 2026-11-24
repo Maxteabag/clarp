@@ -463,7 +463,8 @@ struct Bound {
     /// What the turn said of its items before its provider was verified: taken once it is,
     /// and never if it cannot be.
     held: Vec<(Value, i64)>,
-    /// When the turn began, by its record: how long its rollout has had to name a provider.
+    /// When the turn said its first item, by its record: how long its rollout has had to
+    /// name a provider. A first turn's rollout may be written late; its items come after.
     began: Option<i64>,
 }
 
@@ -626,13 +627,18 @@ impl CodexInterpreter {
             if kind == "steer.open" {
                 bound.verified = true;
             }
-            let began = *bound.began.get_or_insert(t);
+            if kind.starts_with("item.") {
+                bound.began.get_or_insert(t);
+            }
             if !bound.verified {
                 // Not verified within the time its rollout had to name a provider: stopped, and
                 // what it said is not taken. Before that, what it says waits; its end too, as
                 // Codex may say it before its rollout is flushed: the verdict is then given
                 // when its process is gone.
-                let late = bound.rollout.is_some() && t.saturating_sub(began) >= VERIFY_WITHIN_MS;
+                let late = bound.rollout.is_some()
+                    && bound
+                        .began
+                        .is_some_and(|began| t.saturating_sub(began) >= VERIFY_WITHIN_MS);
                 if late && kind.starts_with("item.") {
                     self.unverified(out, true);
                     return;
@@ -1899,7 +1905,8 @@ mod tests {
                 (0, &started),
                 (10, r#"{"type":"turn.started"}"#),
                 (500, item),
-                (10 + VERIFY_WITHIN_MS, item),
+                (500 + VERIFY_WITHIN_MS - 1, item),
+                (500 + VERIFY_WITHIN_MS, item),
             ],
             ShimEvent::Exited {
                 code: None,
@@ -1968,6 +1975,67 @@ mod tests {
         );
         assert!(!out.contains(&Signal::Halt), "{out:?}");
         assert_eq!(out.last(), Some(&Signal::Ended(RunOutcome::Completed)));
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn the_window_counts_from_the_first_item_and_an_exit_without_an_end_is_still_judged() {
+        let thread = "019a0000-0000-7000-8000-0000000000f8";
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f9", "stand-in");
+        let rollout = home.join(format!(
+            "sessions/2026/11/24/rollout-2026-11-24T10-00-00-{thread}.jsonl"
+        ));
+        // The rollout is begun, and names its provider only later.
+        let bare = json!({"type": "session_meta", "payload": {"id": thread}});
+        std::fs::write(&rollout, format!("{bare}\n")).unwrap();
+        let mut interpreter =
+            CodexInterpreter::reading(1, "w3", Some(own.sessions())).bound_to(own.clone());
+        let mut out = Vec::new();
+        let mut feed = |t: i64, line: String, out: &mut Vec<Signal>| {
+            let record = Record {
+                t,
+                entry: Entry::Out(line),
+            };
+            interpreter.on_record(&record, out);
+        };
+        feed(
+            0,
+            format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#),
+            &mut out,
+        );
+        feed(10, r#"{"type":"turn.started"}"#.to_string(), &mut out);
+        // Its first item comes long after its start: the window opens there, not at the start.
+        let said = r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"said late"}}"#;
+        feed(20_000, said.to_string(), &mut out);
+        assert!(!out.contains(&Signal::Halt), "{out:?}");
+        // Its process ends without a turn.completed; by then its rollout names its provider.
+        let meta = json!({"type": "session_meta", "payload": {"id": thread, "model_provider": "stand-in"}});
+        std::fs::write(&rollout, format!("{meta}\n")).unwrap();
+        let exited = ShimEvent::Exited {
+            code: Some(0),
+            signal: None,
+        };
+        interpreter.on_record(
+            &Record {
+                t: 20_500,
+                entry: Entry::Shim(exited),
+            },
+            &mut out,
+        );
+        assert!(!out.contains(&Signal::Halt), "{out:?}");
+        assert!(
+            out.iter()
+                .any(|signal| matches!(signal, Signal::Reply(reply) if reply.text == "said late")),
+            "what it held is shown once verified at its exit: {out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_ne!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH,
+            "it ended without completing, and that is all: {reason}"
+        );
         std::fs::remove_dir_all(home).unwrap();
     }
 
