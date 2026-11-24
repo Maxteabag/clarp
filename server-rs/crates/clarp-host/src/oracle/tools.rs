@@ -58,7 +58,13 @@ struct Said {
 
 /// The newest messages of an agent's own talk, the oldest first: without what a watcher or
 /// the Host's routine began.
+///
+/// The Oracle's voice is a provider's in the cloud: an agent whose words stay off the cloud
+/// (`cloud_speech` off) is told of with none of them.
 async fn said(member: &Member, most: usize) -> Option<Vec<Said>> {
+    if !member.record.speaks_to_cloud() {
+        return Some(Vec::new());
+    }
     let page = member
         .agent
         .tail(most, Which::WithoutAutomated)

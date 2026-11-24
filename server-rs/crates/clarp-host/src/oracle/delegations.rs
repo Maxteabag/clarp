@@ -88,10 +88,22 @@ async fn fate_of(app: &App, row: &Delegation) -> Result<(TurnFate, String), Unav
         return Ok((TurnFate::Gone, String::new()));
     };
     let (message_id, _) = Message::filed(&row.client_msg_id);
-    let fate = member.agent.fate(message_id).await?;
+    let mut fate = member.agent.fate(message_id).await?;
+    // The Oracle speaks what it is handed through a voice in the cloud: of an agent whose words
+    // stay off the cloud (`cloud_speech` off) it is told that it answered, not what.
+    if !member.record.speaks_to_cloud()
+        && let TurnFate::Ended { text, .. } = &mut fate
+        && !python::strip(text).is_empty()
+    {
+        *text = KEPT_OFF_THE_CLOUD.to_string();
+    }
     let tool_session = member.agent.view().status.backend_session.clone();
     Ok((fate, tool_session.unwrap_or_default()))
 }
+
+/// What the Oracle is told an agent answered whose words stay off the cloud.
+const KEPT_OFF_THE_CLOUD: &str =
+    "The agent answered. Its words are kept off cloud speech: read them in the app.";
 
 /// The delegations that are not over are held against what became of their turns: one
 /// whose turn began is under way; one whose turn ended is ended at the moment the turn

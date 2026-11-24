@@ -84,6 +84,9 @@ const KEPT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// What is written of a line on a Host whose owner turned speech off.
 const SPEECH_OFF: &str = "speech out is turned off on this Host";
+/// What is written of a line of an agent whose words are kept from speech providers in the
+/// cloud (`cloud_speech` off): every engine this Host has is one, so it is not spoken.
+pub(crate) const CLOUD_SPEECH_OFF: &str = "cloud speech is turned off for this agent";
 
 /// The engines that speak which are built into this Host.
 pub(crate) const BUILT: [&str; 5] = [
@@ -394,6 +397,15 @@ impl Mouth {
         let provider = owner::voices(&owners).provider;
         if provider == "none" {
             return Err("server audio is disabled: no voice provider".into());
+        }
+        // A text played for an agent whose words stay off the cloud is not sent to be spoken.
+        let kept_off = self
+            .fleet
+            .directory()
+            .named(session)
+            .is_some_and(|member| !member.record.speaks_to_cloud());
+        if kept_off {
+            return Err(CLOUD_SPEECH_OFF.into());
         }
         let preview = self
             .preview(&provider, voice, text, Audition::Text(session))
@@ -1262,6 +1274,13 @@ impl Mouth {
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
+        // An agent whose words stay off speech providers in the cloud is not spoken: this Host
+        // has no engine that speaks on this machine.
+        if !record.speaks_to_cloud() {
+            return self
+                .unsaid(member, &line, None, CLOUD_SPEECH_OFF, None)
+                .await;
+        }
         // An agent whose call's binding was not recovered speaks only once it is: tried now.
         if !self.held.may_speak(&record.agent_id).await {
             return self
@@ -1629,6 +1648,10 @@ impl Mouth {
         text: String,
         purpose: OutsideClip,
     ) -> Option<(String, PathBuf)> {
+        // Nothing is said in the voice of an agent whose words stay off the cloud.
+        if !record.speaks_to_cloud() {
+            return None;
+        }
         let owners = self.owners();
         let view = self.speech_view(&owners);
         let mut agent = speaker(record);
@@ -1677,7 +1700,7 @@ impl Mouth {
         primary: bool,
         cartesia: Option<Language>,
     ) -> Result<Option<(String, Option<Vec<u8>>)>, Mute> {
-        if !said::has_voice(Some(&record.voice_id)) {
+        if !said::has_voice(Some(&record.voice_id)) || !record.speaks_to_cloud() {
             return Ok(None);
         }
         let engine = self

@@ -411,6 +411,9 @@ impl Desk {
 // ---- what an app asks ------------------------------------------------------------------
 
 /// A refusal in the kernel's own form, for what a route itself refuses.
+/// What a live call or ring is refused with for an agent whose words stay off the cloud.
+pub(crate) const CLOUD_SPEECH_OFF: &str = "cloud_speech_off";
+
 fn refusal(status: u16, error: &str) -> Refused {
     Refused {
         status,
@@ -474,6 +477,14 @@ async fn user_call(
         Err(refused) => return refused.into_response(),
     };
     let names = Names::new();
+    // A live call is spoken by a voice in the cloud: an agent whose words stay off the cloud
+    // (`cloud_speech` off) takes none.
+    let kept_off = said["agent"].as_str().is_some_and(|agent| {
+        app.fleet
+            .directory()
+            .named(agent)
+            .is_some_and(|member| !member.record.speaks_to_cloud())
+    });
     let desk = app.calls.clone();
     let called = desk.rings(&app, |rings, _, with, (out, _)| {
         // What is no paired phone is told so before anything of what it sent is looked at.
@@ -484,6 +495,9 @@ async fn user_call(
         // each of them is there, and well made, the rules of the call hold.
         if said.as_object().is_none_or(|fields| fields.len() != 3) {
             return Err(refusal(400, "live_request_invalid"));
+        }
+        if kept_off {
+            return Err(refusal(409, CLOUD_SPEECH_OFF));
         }
         rings.user_call(
             // The call's model is chosen for the client that asks for it.
