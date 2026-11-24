@@ -1474,7 +1474,8 @@ impl Agent {
             }
             Command::WaitOver { turn } | Command::NetworkGone { turn } => {
                 let parked = work.parked(turn)?;
-                if matches!(command, Command::NetworkGone { .. }) && !parked.wait.is_for_the_network()
+                if matches!(command, Command::NetworkGone { .. })
+                    && !parked.wait.is_for_the_network()
                 {
                     return Err(Refusal::NotOffline(turn));
                 }

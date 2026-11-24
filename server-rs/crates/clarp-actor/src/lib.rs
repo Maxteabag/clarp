@@ -5686,14 +5686,11 @@ impl Actor {
             return Ok(out);
         };
         let failed_at = parked.since_ms;
-        let Some(watch) = self
-            .network_of(parked)
-            .filter(|watch| {
-                watch.turn == turn
-                    && watch.attempts == attempts
-                    && matches!(watch.next, NetworkStep::Asked(_))
-            })
-        else {
+        let Some(watch) = self.network_of(parked).filter(|watch| {
+            watch.turn == turn
+                && watch.attempts == attempts
+                && matches!(watch.next, NetworkStep::Asked(_))
+        }) else {
             return Ok(out);
         };
         let next = recovery::after_network_check(recovery::Checked {

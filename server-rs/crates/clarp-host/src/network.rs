@@ -233,9 +233,18 @@ mod tests {
             address("http://user:secret@proxy.corp:3128/"),
             Some(("proxy.corp".into(), 3128))
         );
-        assert_eq!(address("proxy.corp:8080"), Some(("proxy.corp".into(), 8080)));
-        assert_eq!(address("https://proxy.corp"), Some(("proxy.corp".into(), 443)));
-        assert_eq!(address("socks5://127.0.0.1"), Some(("127.0.0.1".into(), 1080)));
+        assert_eq!(
+            address("proxy.corp:8080"),
+            Some(("proxy.corp".into(), 8080))
+        );
+        assert_eq!(
+            address("https://proxy.corp"),
+            Some(("proxy.corp".into(), 443))
+        );
+        assert_eq!(
+            address("socks5://127.0.0.1"),
+            Some(("127.0.0.1".into(), 1080))
+        );
         assert_eq!(address("http://[::1]:3128"), Some(("::1".into(), 3128)));
         assert_eq!(address("http://proxy.corp:port"), None);
         assert_eq!(address(""), None);
