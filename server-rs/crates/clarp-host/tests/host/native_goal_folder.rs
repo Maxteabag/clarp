@@ -108,7 +108,10 @@ fn a_goal_whose_folder_is_gone_waits_without_a_turn_and_goes_on_once_it_is_back(
     let turns_of_the_goal =
         || std::fs::read_to_string(place.root.join("native-turns")).unwrap_or_default();
 
-    let started = host.post("/agent-goal", json!({"session": "ada", "objective": "Go on"}));
+    let started = host.post(
+        "/agent-goal",
+        json!({"session": "ada", "objective": "Go on"}),
+    );
     assert_eq!(started["goal"]["status"], "active", "{started}");
     wait_for("the goal's first turn", || {
         turns_of_the_goal() == "1" && host.state("ada") == "thinking"
@@ -129,12 +132,15 @@ fn a_goal_whose_folder_is_gone_waits_without_a_turn_and_goes_on_once_it_is_back(
     let rows = host.turns("ada");
     assert_eq!(rows.len(), rows_before, "nothing was tried: {rows:#?}");
     assert!(
-        !rows
-            .iter()
-            .any(|row| row["text"].as_str().is_some_and(|text| text.contains("never run"))),
+        !rows.iter().any(|row| row["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("never run"))),
         "{rows:#?}"
     );
-    assert_eq!(host.get("/agent-goal?session=ada")["goal"]["status"], "active");
+    assert_eq!(
+        host.get("/agent-goal?session=ada")["goal"]["status"],
+        "active"
+    );
 
     // The folder is back: the goal goes on by itself.
     std::fs::create_dir_all(&folder).unwrap();
