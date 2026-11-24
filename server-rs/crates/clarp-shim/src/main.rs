@@ -20,10 +20,11 @@
 //! does not belongs to a turn whose program was never given anything to do.
 
 mod agy_acp;
-mod codex_lane_login;
 mod codex_lane_runtime;
-mod codex_lane_socket;
 mod codex_lane_turns;
+mod lane_login;
+mod lane_own;
+mod lane_socket;
 mod opencode;
 
 use std::io::{ErrorKind, Read, Write};

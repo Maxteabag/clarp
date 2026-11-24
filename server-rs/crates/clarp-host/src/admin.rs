@@ -1254,7 +1254,7 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     // A turn of a Codex lane is told who it is in a file its lane rewrites at each turn: its
     // app-server's environment cannot change between turns (issue 742).
     if !env.contains_key(crate::turn_identity::TURN_ENV)
-        && let Some(token) = std::env::var(crate::codex_goal_lane::TURN_FILE_ENV)
+        && let Some(token) = std::env::var(crate::lane::TURN_FILE_ENV)
             .ok()
             .and_then(|path| turn_from_file(std::path::Path::new(&path)))
     {

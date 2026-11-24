@@ -4135,7 +4135,7 @@ impl Worker {
                         .actor
                         .as_ref()
                         .and_then(|actor| actor.status().backend_session)
-                    && let Err(error) = crate::codex_goal_lane::guard_exec(
+                    && let Err(error) = crate::lane::codex::guard_exec(
                         &mut order,
                         &self.setup.profile.run_dir,
                         &thread,

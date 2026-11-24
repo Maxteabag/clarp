@@ -1,33 +1,14 @@
-//! Control messages for one persistent Codex lane.
+//! Control messages for one persistent Codex lane: the Codex app-server driver of the lane
+//! layer ([`crate::lane`]).
 //!
 //! Control and watch connections are separate from Codex's stdio. A Host can
 //! reconnect after a crash and learn the lane's current claim before deciding
 //! whether to start, follow, stop or release a turn.
 
-use std::path::{Path, PathBuf};
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
-/// The refusal a lane gives when the tool's login changed since it started. The lane leaves,
-/// and nothing of the attempt reached Codex: the Host starts a new lane and offers the same
-/// attempt again.
-pub const LOGIN_CHANGED: &str = "lane-login-changed";
-
-/// The lock that says who may write a native thread, under `dir`. An exec turn takes it
-/// shared; a lane takes it exclusive and holds it until its app-server has been reaped.
-pub fn thread_lock(dir: &Path, thread: &str) -> PathBuf {
-    dir.join(format!("{:x}.lock", Sha256::digest(thread.as_bytes())))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Claim {
-    pub turn: u64,
-    pub attempt: u32,
-    pub spool: PathBuf,
-    pub socket: PathBuf,
-}
+pub use crate::lane::{Claim, LOGIN_CHANGED, thread_lock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
