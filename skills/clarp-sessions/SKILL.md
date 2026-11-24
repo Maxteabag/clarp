@@ -81,7 +81,14 @@ What the Host then does:
   cloud speech provider (its replies stay text, no ring opening or announcement in
   its voice, live calls and live rings for it answer 409 `cloud_speech_off`, and the
   Oracle is told none of its words). This Host has no speech engine on the machine
-  itself, so off means not spoken. Any agent can have it set off the same way.
+  itself, so off means not spoken. What is said to it is heard only by the Host's own
+  speech engine (refused in plain words where there is none). Any agent can have it set
+  off the same way.
+- Its words reach no model of the Host's: no janitor reads it (whatever its scope says),
+  its tools are explained without a model, and the goal keeper, the label checker, the
+  spoken-message router and the other agents of a call leave its conversation out.
+- A turn whose provider Codex's own record does not name by the end fails closed
+  (`provider_mismatch`, "could not be verified"), and its answer is not shown.
 
 ## Move an agent to another backend
 
