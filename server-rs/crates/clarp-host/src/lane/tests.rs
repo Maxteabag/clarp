@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex};
 use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
-use super::{Endpoint, Place, Room, Settings, Tool, make_room, once_more, replied};
+use super::{
+    Endpoint, Place, Room, Settings, Tool, make_room, make_way_within, once_more, replied,
+};
 
 fn of(text: &str) -> Settings {
     Settings::of(Some(&text.parse::<toml::Table>().unwrap()))
@@ -145,6 +147,10 @@ impl FakeLane {
                     "retire" if busy => {
                         json!({"ok": false, "error": "the Codex lane still owns live work"})
                     }
+                    // A lane whose tool hangs on its way out: it says it goes, and never lets go.
+                    "retire" if status["hangs"] == json!(true) => {
+                        json!({"ok": true, "state": status})
+                    }
                     "retire" => {
                         // Gone before it says so, as a lane's process is.
                         owner.take();
@@ -156,7 +162,7 @@ impl FakeLane {
                 let mut frame = reply.to_string();
                 frame.push('\n');
                 stream.write_all(frame.as_bytes()).unwrap();
-                if op == "retire" && !busy {
+                if op == "retire" && !busy && status["hangs"] != json!(true) {
                     return;
                 }
             }
@@ -441,5 +447,27 @@ fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
         .map(|(n, _)| n)
         .collect();
     assert_eq!(left, [0, 1, 2]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
+    let run = run_dir("hangs");
+    let mut said = status("t", "d", 50, false);
+    said["hangs"] = json!(true);
+    let hanging = FakeLane::start(&run, "agent", said);
+    let started = std::time::Instant::now();
+    make_way_within(&run, "agent", std::time::Duration::from_millis(300));
+    let waited = started.elapsed();
+    // Asked to leave, waited for at most the bound, and the terminal goes on.
+    assert_eq!(hanging.asked(), ["retire"]);
+    assert!(waited >= std::time::Duration::from_millis(300), "{waited:?}");
+    assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
+    assert!(!hanging.endpoint.released().unwrap());
+    // An idle lane that lets go is waited for until it has, and no longer.
+    let leaving = FakeLane::start(&run, "other", status("t", "d", 50, false));
+    make_way_within(&run, "other", std::time::Duration::from_secs(5));
+    assert_eq!(leaving.asked(), ["retire"]);
+    assert!(leaving.endpoint.released().unwrap());
     std::fs::remove_dir_all(&run).unwrap();
 }

@@ -185,10 +185,29 @@ impl Settings {
 /// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
 /// exited: one writer per conversation. A lane that still runs a turn refuses, and the terminal
 /// opens as it did before lanes (the lead's decision of 25 Nov 2026: that two-writer case is
-/// older than lanes, and is issue #770). Blocking: it waits for the lane's tool to exit.
+/// older than lanes, and is issue #770). Blocking: it waits for the lane's tool to exit, for
+/// at most [`TERMINAL_WAIT`]. A lane that acknowledged but has not let go by then (its tool hangs
+/// on its way out) is said once in the Host's log, and the terminal opens as it did before lanes
+/// rather than holding the request and the agent's lease (review of 25 Nov 2026).
 pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
+    make_way_within(run, agent_id, TERMINAL_WAIT);
+}
+
+/// How long the terminal waits for an idle lane's tool to exit before it opens anyway.
+const TERMINAL_WAIT: Duration = Duration::from_secs(15);
+/// How often a bounded wait looks at the owner lock again.
+const RELEASE_LOOK: Duration = Duration::from_millis(100);
+
+fn make_way_within(run: &Path, agent_id: &str, bound: Duration) {
     for tool in Tool::ALL {
-        let _ = Endpoint::of(tool, run, agent_id).retire();
+        if let Ok(false) = Endpoint::of(tool, run, agent_id).retire_within(bound) {
+            eprintln!(
+                "clarp-host: the {} lane of agent {agent_id} did not let go within {} s; the \
+                 terminal opens beside it",
+                tool.name(),
+                bound.as_secs()
+            );
+        }
     }
 }
 
@@ -324,6 +343,28 @@ impl Endpoint {
         }
         self.ask::<Status>(&Lifecycle::Retire)?;
         self.wait_released()
+    }
+
+    /// Asks an idle lane to leave and waits at most `bound` for it to have gone: `true` once its
+    /// owner lock is free, `false` when the bound passed first. A lane that still runs work
+    /// refuses, which is an error. The wait is a short look at the lock, again and again,
+    /// because a lock cannot be waited for with a deadline; it ends at the bound in any case.
+    pub(crate) fn retire_within(&self, bound: Duration) -> io::Result<bool> {
+        if self.released()? {
+            return Ok(true);
+        }
+        self.ask::<Status>(&Lifecycle::Retire)?;
+        let until = std::time::Instant::now() + bound;
+        loop {
+            if self.released()? {
+                return Ok(true);
+            }
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Ok(false);
+            }
+            std::thread::sleep(left.min(RELEASE_LOOK));
+        }
     }
 
     /// Waits for the lane's owner lock, which its process holds until it is gone.
