@@ -204,7 +204,13 @@ type Held = (Vec<Value>, String);
 /// its rollout ([`history::codex`]), the newest file under Codex's sessions that is named
 /// after it.
 fn read_of_codex(named: &str) -> Option<Held> {
-    let sessions = codex_home(&crate::config::home()).join("sessions");
+    read_of_codex_in(&codex_home(&crate::config::home()), named)
+}
+
+/// The same, of the rollouts in one Codex home: an agent bound to a provider of its own takes
+/// up a session of its own home, and never one of the machine's.
+fn read_of_codex_in(home: &Path, named: &str) -> Option<Held> {
+    let sessions = home.join("sessions");
     let rollout = std::fs::read_to_string(past::codex_rollout(&sessions, named)?).ok()?;
     Some((history::codex(&rollout), history::model(&rollout)))
 }
@@ -243,7 +249,7 @@ async fn begins_where_it_ran(
     resume: Option<String>,
     forks: bool,
     label: &str,
-    read: fn(&str) -> Option<Held>,
+    read: impl Fn(&str) -> Option<Held> + Send + 'static,
 ) -> Result<Begins, Refused> {
     let owner = resume.as_deref().and_then(|session| owner_of(app, session));
     if let Some((_, owner)) = &owner
@@ -301,6 +307,12 @@ pub(crate) async fn begins(
     let tool = said("backend").unwrap_or_else(|| CLAUDE.to_string());
     if tool.eq_ignore_ascii_case(CODEX) {
         let forks = fork.is_some();
+        // An agent made with a Codex home of its own takes its session up from that home.
+        if let Some(home) = said("codex_home") {
+            let home = PathBuf::from(home);
+            let read = move |named: &str| read_of_codex_in(&home, named);
+            return begins_where_it_ran(app, asked, resume, forks, "Codex", read).await;
+        }
         return begins_where_it_ran(app, asked, resume, forks, "Codex", read_of_codex).await;
     }
     if tool.eq_ignore_ascii_case("grok") {

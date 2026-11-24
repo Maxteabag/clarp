@@ -2058,7 +2058,7 @@ pub fn summary(
     // The start of the turn that runs: what an app counts the running turn from. At rest
     // there is no such turn, however the last one ended.
     let turn_started_at = live.map_or(0, |live| live.started_at_ms);
-    json!({
+    let mut row = json!({
         "agent_id": record.agent_id,
         "session": record.session,
         "persona": record.persona,
@@ -2136,7 +2136,22 @@ pub fn summary(
         "queue_paused": status.paused,
         "backend_quota": null,
         "background_jobs": { "count": 0, "sub_agents": 0 },
-    })
+    });
+    own_provider_fields(&mut row, record);
+    row
+}
+
+/// What an agent's row says of a provider of its own and of cloud speech: only where it has
+/// either, so that the row of every other agent is the Python Host's, field for field.
+pub(crate) fn own_provider_fields(row: &mut Value, record: &AgentRecord) {
+    let bound = !record.codex_provider.is_empty() || !record.codex_home.is_empty();
+    if bound {
+        row["codex_home"] = json!(record.codex_home);
+        row["codex_provider"] = json!(record.codex_provider);
+    }
+    if bound || record.cloud_speech.is_some() {
+        row["cloud_speech"] = json!(record.speaks_to_cloud());
+    }
 }
 
 #[cfg(test)]

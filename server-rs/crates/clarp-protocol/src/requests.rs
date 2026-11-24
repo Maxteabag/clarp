@@ -126,6 +126,17 @@ pub struct CreateAgentRequest {
     /// Ordered server names. Omission keeps the agent's selection; an empty list clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<Vec<String>>,
+    /// A Codex agent's own Codex home: an absolute directory whose `config.toml` defines
+    /// `codex_provider`. Given with `codex_provider`, or neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_home: Option<String>,
+    /// The model provider such an agent runs on, by the name its `config.toml` defines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_provider: Option<String>,
+    /// Whether what the agent says may be spoken by a speech provider in the cloud.
+    /// Omitted: true, and false for an agent with `codex_provider`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_speech: Option<bool>,
 }
 
 pub(crate) fn present_value<'de, D: serde::Deserializer<'de>>(

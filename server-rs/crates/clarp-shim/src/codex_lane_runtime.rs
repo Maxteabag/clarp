@@ -57,7 +57,13 @@ struct Own {
     turn_file: Option<PathBuf>,
     /// The Host's digest of the options, told back in every snapshot.
     digest: String,
+    /// The only provider the lane's Codex may run on, for an agent bound to one of its own.
+    provider: Option<String>,
 }
+
+/// What the words begin with of a turn the lane ended for running on another provider: the
+/// Host reads them as that kind of failure (`clarp_kernel::failures::provider_mismatch`).
+const PROVIDER_MISMATCH: &str = "provider_mismatch:";
 
 impl Own {
     fn take(options: &mut Value) -> Self {
@@ -68,6 +74,7 @@ impl Own {
                 idle: None,
                 turn_file: None,
                 digest: String::new(),
+                provider: None,
             };
         };
         let path = |value: Option<Value>| value?.as_str().map(PathBuf::from);
@@ -84,6 +91,10 @@ impl Own {
                 .remove("_clarpOptionsDigest")
                 .and_then(|digest| digest.as_str().map(str::to_owned))
                 .unwrap_or_default(),
+            provider: fields
+                .remove("_clarpModelProvider")
+                .and_then(|provider| provider.as_str().map(str::to_owned))
+                .filter(|provider| !provider.is_empty()),
         }
     }
 }
@@ -183,6 +194,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         fence_pause: None,
         uncertain_goal: false,
         stale_login: false,
+        mismatch: false,
         login,
         slot: Slot::default(),
         turn_socket: None,
@@ -252,6 +264,8 @@ struct Lane {
     fence_pause: Option<u64>,
     uncertain_goal: bool,
     stale_login: bool,
+    /// Codex named another provider than the lane's: it was ended, and the lane leaves.
+    mismatch: bool,
     login: Login,
     slot: Slot,
     turn_socket: Option<Socket>,
@@ -470,7 +484,31 @@ impl Lane {
             self.login.release();
         }
         self.show();
-        Ok(self.stale_login)
+        Ok(self.stale_login || self.mismatch)
+    }
+
+    /// Holds the lane's Codex to its provider, where it is bound to one: `named` is the
+    /// provider Codex says it runs the thread on. Any other ends Codex where it stands, ends
+    /// the claimed turn with the words of a provider mismatch, and the lane leaves. `required`:
+    /// Codex has to say it here (a thread's start or resume), and saying none is no answer.
+    fn held_to_provider(&mut self, named: Option<&str>, required: bool) -> io::Result<()> {
+        let Some(wanted) = self.own.provider.clone() else {
+            return Ok(());
+        };
+        let named = named.filter(|named| !named.is_empty());
+        let other = match named {
+            Some(named) if named == wanted => return Ok(()),
+            Some(named) => named.to_owned(),
+            None if required => "none".to_owned(),
+            None => return Ok(()),
+        };
+        let why = format!(
+            "{PROVIDER_MISMATCH} Codex reported model provider \"{other}\" for this thread, not \"{wanted}\"; the turn was stopped"
+        );
+        self.mismatch = true;
+        self.server.kill_group();
+        self.slot.refused(&why, super::now_ms())?;
+        Err(io::Error::other(why))
     }
 
     fn use_login(&mut self) -> io::Result<()> {
@@ -674,6 +712,7 @@ impl Lane {
         if result["thread"]["id"].as_str() != Some(&self.thread) {
             return Err(io::Error::other("Codex resumed a different thread"));
         }
+        self.held_to_provider(result["modelProvider"].as_str(), true)?;
         self.loaded = true;
         Ok(())
     }
@@ -693,6 +732,7 @@ impl Lane {
             .filter(|thread| !thread.is_empty())
             .ok_or_else(|| io::Error::other("Codex started no thread"))?
             .to_owned();
+        self.held_to_provider(result["modelProvider"].as_str(), true)?;
         if let Some(dir) = &self.own.thread_locks {
             self._thread_lock = Some(lock_exclusive(&thread_lock(dir, &thread))?);
         }
@@ -948,6 +988,20 @@ impl Lane {
     }
 
     fn notice(&mut self, method: &str, params: &Value, starting: Option<u64>) -> io::Result<()> {
+        // What Codex says of the thread's settings names the provider it runs on: held to the
+        // lane's own, where it has one, before anything else of it is taken.
+        let named = match method {
+            "thread/settings/updated" if params["threadId"].as_str() == Some(&self.thread) => {
+                Some(params["threadSettings"]["modelProvider"].as_str())
+            }
+            "thread/started" if params["thread"]["id"].as_str() == Some(&self.thread) => {
+                Some(params["thread"]["modelProvider"].as_str())
+            }
+            _ => None,
+        };
+        if let Some(named) = named {
+            self.held_to_provider(named, false)?;
+        }
         let thread = params["threadId"]
             .as_str()
             .or(params["turn"]["threadId"].as_str());

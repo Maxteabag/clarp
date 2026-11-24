@@ -229,6 +229,19 @@ pub struct AgentRecord {
     /// the ones chosen beside it from what it published (`clarp_kernel::kept_portraits`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub portraits: Vec<Portrait>,
+    /// The Codex home of a Codex agent bound to a model provider of its own: an absolute
+    /// directory whose `config.toml` defines `codex_provider`. Its turns run with this
+    /// `CODEX_HOME` and on that provider, and on no other ([`clarp_backend::own_provider`]).
+    /// Set with `codex_provider`, or neither. Empty: the machine's own Codex.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codex_home: String,
+    /// The provider such an agent runs on, by the name its `config.toml` defines.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub codex_provider: String,
+    /// Whether what it says may be spoken by a speech provider in the cloud. `None`: as its
+    /// kind has it ([`AgentRecord::speaks_to_cloud`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud_speech: Option<bool>,
 }
 
 impl AgentRecord {
@@ -243,6 +256,23 @@ impl AgentRecord {
 
     pub fn is_helper(&self) -> bool {
         self.role == "helper"
+    }
+
+    /// The Codex home and provider it is bound to, when it is a Codex agent bound to one.
+    pub fn own_provider(&self) -> Option<clarp_backend::own_provider::OwnProvider> {
+        if self.backend != "codex" {
+            return None;
+        }
+        clarp_backend::own_provider::OwnProvider::new(&self.codex_home, &self.codex_provider)
+            .ok()
+    }
+
+    /// Whether what it says may be spoken by a speech provider in the cloud: as it was set,
+    /// else never for an agent bound to a provider of its own (whose words are kept off every
+    /// service but that one), and always for any other.
+    pub fn speaks_to_cloud(&self) -> bool {
+        self.cloud_speech
+            .unwrap_or(self.codex_provider.is_empty() && self.codex_home.is_empty())
     }
 
     /// Whether the agent is quiet: it never claims its owner's attention by itself (the
@@ -283,6 +313,14 @@ pub enum Amend {
     },
     /// The MCP server names this agent's next turn may use.
     McpServers(Vec<String>),
+    /// The Codex home and the provider it is bound to (both empty: none), and whether what it
+    /// says may be spoken by a speech provider in the cloud (`None`: as its kind has it).
+    /// Whoever asks has checked them; its next turn runs with them.
+    Provider {
+        home: String,
+        provider: String,
+        cloud_speech: Option<bool>,
+    },
     /// The tool it runs on: for a member that has no conversation with the tool it had.
     /// Whoever asks has seen to that.
     Tool(String),
@@ -1752,14 +1790,73 @@ pub(crate) fn non_empty(text: &str) -> Option<String> {
     Some(text.trim().to_string()).filter(|text| !text.is_empty())
 }
 
+/// The backend an agent runs on. One bound to a provider of its own runs on a Codex of its
+/// own, and never on the machine's: where its binding cannot be used (it names half of one,
+/// or is not a Codex agent) it is not run at all.
+pub(crate) fn backend_of(record: &AgentRecord) -> Result<Arc<dyn clarp_backend::Backend>, String> {
+    if !record.codex_home.is_empty() || !record.codex_provider.is_empty() {
+        if record.backend != "codex" {
+            return Err(format!(
+                "agent {} is bound to a model provider of its own, which only a Codex agent can be",
+                record.session
+            ));
+        }
+        let own = clarp_backend::own_provider::OwnProvider::new(
+            &record.codex_home,
+            &record.codex_provider,
+        )
+        .map_err(|why| format!("agent {}: {why}", record.session))?;
+        return Ok(clarp_backend::codex_bound(own));
+    }
+    clarp_backend::by_id(&record.backend)
+        .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))
+}
+
+/// Whether an agent of this tool may be bound to this Codex home and provider: a Codex agent,
+/// both halves well formed, and a home that is a directory. `Err`: why not, in words for
+/// whoever asked. Its `config.toml` is read when a turn starts, not here: it may be put right
+/// after the agent is made.
+pub(crate) fn check_binding(backend: &str, home: &str, provider: &str) -> Result<(), String> {
+    if backend != "codex" {
+        return Err("codex_home and codex_provider are for Codex agents only".into());
+    }
+    let own = clarp_backend::own_provider::OwnProvider::new(home, provider)?;
+    if !own.home.is_dir() {
+        return Err("codex_home is not a directory".into());
+    }
+    Ok(())
+}
+
+/// The binding to a provider of its own, and the choice of cloud speech, an agent is made or
+/// started again with: what the request says, else what it had.
+fn bound_as(
+    request: &CreateAgentRequest,
+    backend: &str,
+    before: Option<&AgentRecord>,
+) -> Result<(String, String, Option<bool>), NotMade> {
+    let kept = |said: &Option<String>, had: Option<&String>| match said {
+        Some(said) => said.trim().to_string(),
+        None => had.cloned().unwrap_or_default(),
+    };
+    let home = kept(&request.codex_home, before.map(|had| &had.codex_home));
+    let provider = kept(&request.codex_provider, before.map(|had| &had.codex_provider));
+    let cloud_speech = request
+        .cloud_speech
+        .or_else(|| before.and_then(|had| had.cloud_speech));
+    if !home.is_empty() || !provider.is_empty() {
+        check_binding(backend, &home, &provider)
+            .map_err(|why| Told::new(400, "invalid_codex_provider", why))?;
+    }
+    Ok((home, provider, cloud_speech))
+}
+
 fn setup(
     works: &Works,
     desk: &delegations::Desk,
     versions: &Arc<crate::cli_version::Cache>,
     record: &AgentRecord,
 ) -> Result<Setup, String> {
-    let backend = clarp_backend::by_id(&record.backend)
-        .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))?;
+    let backend = backend_of(record)?;
     let profile = Profile {
         agent_id: record.agent_id.clone(),
         session: record.session.clone(),
@@ -3336,12 +3433,17 @@ impl Fleet {
             Some(&before),
         )?;
         Self::check_creation_effort(&backend, &model, &effort, &file)?;
+        let (codex_home, codex_provider, cloud_speech) =
+            bound_as(&request, &backend, Some(&before))?;
         let record = AgentRecord {
             persona,
             backend,
             cwd,
             model,
             effort,
+            codex_home,
+            codex_provider,
+            cloud_speech,
             mcp_servers: request.mcp_servers.or(before.mcp_servers.clone()),
             voice_id,
             parent_agent_id,
@@ -3663,6 +3765,7 @@ impl Fleet {
             &effort,
             &file,
         )?;
+        let (codex_home, codex_provider, cloud_speech) = bound_as(&request, &backend, None)?;
         let voice_id = self.assigned_voice(
             &file,
             &owner,
@@ -3689,6 +3792,9 @@ impl Fleet {
             model: request.model.unwrap_or_default().trim().to_string(),
             effort,
             mcp_servers: request.mcp_servers,
+            codex_home,
+            codex_provider,
+            cloud_speech,
             is_test: request.test.unwrap_or_default(),
             conversation_id: forked.unwrap_or_else(ids::uuid),
             created_at_ms: self.now_ms(),
@@ -3863,6 +3969,15 @@ impl Fleet {
                 record.effort = effort;
             }
             Amend::McpServers(names) => record.mcp_servers = Some(names),
+            Amend::Provider {
+                home,
+                provider,
+                cloud_speech,
+            } => {
+                record.codex_home = home;
+                record.codex_provider = provider;
+                record.cloud_speech = cloud_speech;
+            }
             Amend::Voice { provider, voice } => {
                 let occupied = self
                     .members

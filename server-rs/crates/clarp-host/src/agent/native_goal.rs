@@ -70,6 +70,7 @@ impl Worker {
                 .and_then(|pool| pool.login_lock())
                 .map(std::path::Path::to_owned),
             file: self.setup.backend.login_file(&crate::config::home()),
+            own: self.setup.record.own_provider(),
         }
     }
 

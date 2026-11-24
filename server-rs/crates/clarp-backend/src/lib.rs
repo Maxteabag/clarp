@@ -434,6 +434,13 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
     }
 }
 
+/// Codex for one agent bound to a provider of its own ([`own_provider`]): it runs in that
+/// agent's Codex home, on that provider, and reads that home's rollouts.
+pub fn codex_bound(own: own_provider::OwnProvider) -> Arc<dyn Backend> {
+    let program = program("codex").unwrap_or_else(|| "codex".to_string());
+    Arc::new(codex::Codex::bound(program, own))
+}
+
 /// The program whose store a backend keeps its conversations in: the one it runs through, else
 /// its own. `None` for no backend of this Host.
 pub fn store_of(id: &str) -> Option<&'static str> {
