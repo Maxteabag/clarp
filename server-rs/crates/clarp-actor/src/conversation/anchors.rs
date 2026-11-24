@@ -70,8 +70,6 @@ struct Walk {
     /// The rows since the last anchor.
     rows: usize,
     pending: Option<Pending>,
-    /// Where the last anchor stands: what is older is not since it.
-    last_anchor: Seq,
     /// The newest reply with words since the last anchor.
     words: Option<(Seq, String)>,
     /// The newest row since the last anchor that is conversation by itself: the turn's message
@@ -192,7 +190,6 @@ impl Walk {
         });
         self.decided.decides.insert(by.to_owned(), pending.id);
         self.rows -= pending.rows;
-        self.last_anchor = pending.seq;
         self.words = None;
         if self.fallback.as_ref().is_some_and(|(seq, _)| *seq < pending.seq) {
             self.fallback = None;
@@ -289,16 +286,16 @@ impl AnchorCache {
         end: Option<Seq>,
     ) -> Result<TurnAnchors, ActorError> {
         let mut walks = self.walks.borrow_mut();
-        let walk = match walks.get_mut(&turn) {
-            Some(walk) => walk,
-            None => {
-                let (walk, walked) = Walk::start(log, turn, end.unwrap_or(Seq::MAX))?;
-                self.walked.set(self.walked.get() + walked);
-                while walks.len() >= KEPT {
-                    walks.pop_first();
-                }
-                walks.entry(turn).or_insert(walk)
+        if !walks.contains_key(&turn) {
+            let (walk, walked) = Walk::start(log, turn, end.unwrap_or(Seq::MAX))?;
+            self.walked.set(self.walked.get() + walked);
+            while walks.len() >= KEPT {
+                walks.pop_first();
             }
+            walks.insert(turn, walk);
+        }
+        let Some(walk) = walks.get_mut(&turn) else {
+            return Ok(TurnAnchors::default());
         };
         let walked = walk.advance(log, turn, end)?;
         self.walked.set(self.walked.get() + walked);
