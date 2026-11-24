@@ -37,7 +37,7 @@ def test_debug_generation(tmp_path):
     assert binary.read_bytes() == b'release'
 
 
-def lane(root, name, stamp, target=True):
+def lane(root, name, stamp, target=True, built=True):
     """A checkout's copy as tools/build leaves it on the build machine."""
     copy = root / name
     (copy / 'contract/schemas').mkdir(parents=True)
@@ -54,6 +54,8 @@ def lane(root, name, stamp, target=True):
         deps.mkdir(parents=True)
         (deps / 'libserde-1111111111111111.rlib').write_text(name)
         os.link(deps / 'libserde-1111111111111111.rlib', copy / 'server-rs/target/debug/libserde.rlib')
+        if built:
+            (deps / 'libclarp_host-2222222222222222.rlib').write_text(name)
     return copy / 'server-rs'
 
 
@@ -68,6 +70,8 @@ def test_a_checkout_without_a_target_starts_from_the_last_built_one(tmp_path, mo
     lane(tmp_path, 'old', 10**18)
     newer = lane(tmp_path, 'newer', 2 * 10**18)
     lane(tmp_path, 'not-a-checkout', 3 * 10**18).parent.joinpath('scripts/clarp-media-publish.py').unlink()
+    # Built last, but only checked: its target holds the dependencies' metadata, not their libraries.
+    lane(tmp_path, 'checked', 4 * 10**18, built=False)
     here = lane(tmp_path, 'here', 10**17, target=False)
     with queue['directory'](tmp_path) as root, queue['directory'](here) as workspace:
         source = queue['seed_target'](root, 'here', workspace)

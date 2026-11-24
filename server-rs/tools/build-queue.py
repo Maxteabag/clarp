@@ -407,8 +407,18 @@ def make_room(root, current, floor):
 SEED = '.target-seed'
 
 
+def host_library_built(target):
+    try:
+        with directory('debug', target) as debug, directory('deps', debug) as deps:
+            return any(name.startswith('libclarp_host-') and name.endswith('.rlib') for name in os.listdir(deps))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
 def seed_target(root, current, workspace):
-    """Give a checkout without a target a clone of the target of the checkout built last.
+    """Give a checkout without a target a clone of the target of the checkout built last that
+    holds the Host's library built (so every dependency of it, not only their metadata, as after
+    a check or clippy), or else of the checkout built last.
 
     The clone shares its data with the original (a reflink), so it costs the disk little, and the
     new checkout starts with every crates.io dependency already built: cargo builds only the
@@ -432,16 +442,16 @@ def seed_target(root, current, workspace):
                 continue
             try:
                 with directory(name, root) as copy, directory('server-rs', copy) as other:
-                    with directory('target', other):
-                        pass
+                    with directory('target', other) as target:
+                        built = host_library_built(target)
                     age = last_build(name, copy, other)
                     if age is not None:
-                        sources.append((age, name))
+                        sources.append((built, age, name))
             except (FileNotFoundError, NotADirectoryError, PermissionError):
                 continue
         if not sources:
             return None
-        name = max(sources)[1]
+        name = max(sources)[2]
         try:
             shutil.rmtree(SEED, dir_fd=workspace)
         except FileNotFoundError:
