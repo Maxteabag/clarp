@@ -381,8 +381,7 @@ struct Reply<T> {
 /// A refusal for a changed login has the kind `PermissionDenied`: the lane has left, and
 /// nothing of the attempt reached the tool.
 fn replied<T: DeserializeOwned>(input: &mut impl BufRead, tool: Tool) -> io::Result<T> {
-    let reply: Reply<T> =
-        serde_json::from_slice(&line(input, tool)?).map_err(io::Error::other)?;
+    let reply: Reply<T> = serde_json::from_slice(&line(input, tool)?).map_err(io::Error::other)?;
     let kind = if reply.code.as_deref() == Some(LOGIN_CHANGED) {
         io::ErrorKind::PermissionDenied
     } else {
