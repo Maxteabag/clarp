@@ -3262,7 +3262,10 @@ impl Worker {
                                 .as_str()
                                 .unwrap_or("")
                                 .to_string(),
-                            preview: told["preview"].as_str().unwrap_or("").to_string(),
+                            preview: crate::pusher::preview_of(
+                                &self.setup.record,
+                                told["preview"].as_str().unwrap_or(""),
+                            ),
                             needs_response: actor.artifacts().has_pending_decision(now),
                         });
                     }
@@ -5165,7 +5168,10 @@ impl Worker {
                         session: record.session.clone(),
                         persona: record.persona.clone(),
                         notification_id: id.clone(),
-                        preview: told["preview"].as_str().unwrap_or("").to_string(),
+                        preview: crate::pusher::preview_of(
+                            &record,
+                            told["preview"].as_str().unwrap_or(""),
+                        ),
                         needs_response: actor.artifacts().has_pending_decision(now),
                     });
                 }
