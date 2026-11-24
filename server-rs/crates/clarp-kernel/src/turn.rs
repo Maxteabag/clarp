@@ -393,8 +393,12 @@ pub enum TurnEvent {
         at_ms: i64,
     },
     /// The wait is over: the tool process of the next attempt is being started.
+    /// `network_back`: the turn waited for the network, which was gone, and it is back
+    /// (absent in what an older Host wrote, and where it is not so).
     Retried {
         at_ms: i64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        network_back: bool,
     },
     Settled {
         outcome: Outcome,
@@ -426,6 +430,15 @@ pub enum Wait {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resets_at_ms: Option<i64>,
     },
+    /// The machine's network: the attempt failed on its connection to the provider. The Host
+    /// checks whether it reaches the provider at all, and every few seconds while it does
+    /// not; once it does, the turn is tried again. `until_ms`: when the turn ends if the
+    /// network has not come back by then. `resume` as for [`Wait::Retry`].
+    Network {
+        until_ms: i64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resume: bool,
+    },
 }
 
 impl Wait {
@@ -440,7 +453,9 @@ impl Wait {
     /// When the wait is over at the latest.
     pub fn until_ms(&self) -> i64 {
         match self {
-            Self::Retry { until_ms, .. } | Self::Account { until_ms, .. } => *until_ms,
+            Self::Retry { until_ms, .. }
+            | Self::Account { until_ms, .. }
+            | Self::Network { until_ms, .. } => *until_ms,
         }
     }
 
@@ -448,11 +463,23 @@ impl Wait {
         matches!(self, Self::Account { .. })
     }
 
+    pub fn is_for_the_network(&self) -> bool {
+        matches!(self, Self::Network { .. })
+    }
+
+    /// The turn had begun its work: the next attempt goes on from where it stands.
+    pub fn resumes(&self) -> bool {
+        matches!(
+            self,
+            Self::Retry { resume: true, .. } | Self::Network { resume: true, .. }
+        )
+    }
+
     /// When the account the turn waits on has usage again, where the tool said so.
     pub fn resets_at_ms(&self) -> Option<i64> {
         match self {
             Self::Account { resets_at_ms, .. } => *resets_at_ms,
-            Self::Retry { .. } => None,
+            Self::Retry { .. } | Self::Network { .. } => None,
         }
     }
 }
@@ -496,6 +523,8 @@ pub struct Starting {
     pub backend_session: Option<String>,
     pub tool_count: u32,
     pub account: AccountWaits,
+    /// How many of the turn's attempts followed a wait in which the network was gone.
+    pub offline: u32,
     /// The turn waited for an account before this attempt: the tool is told that it is
     /// taken up again, not given the message as if for the first time.
     pub recovering: bool,
@@ -523,6 +552,7 @@ pub struct Running {
     pub moved_at_ms: i64,
     pub tool_count: u32,
     pub account: AccountWaits,
+    pub offline: u32,
     pub ran_before: bool,
 }
 
@@ -548,6 +578,8 @@ pub struct Parked {
     pub ran: bool,
     /// The waits for an account, this one included when it is one.
     pub account: AccountWaits,
+    /// How many of the turn's attempts followed a wait in which the network was gone.
+    pub offline: u32,
 }
 
 /// A turn that is over. Nothing moves it again.
@@ -647,6 +679,7 @@ impl Queued {
             backend_session: None,
             tool_count: 0,
             account: AccountWaits::default(),
+            offline: 0,
             recovering: false,
             resuming: false,
             ran_before: false,
@@ -695,6 +728,7 @@ impl Starting {
             moved_at_ms: at_ms,
             tool_count: self.tool_count,
             account: self.account,
+            offline: self.offline,
             ran_before: self.ran_before,
         };
         (
@@ -845,6 +879,7 @@ impl Running {
             reason,
             since_ms: at_ms,
             account,
+            offline: self.offline,
         };
         (next, event)
     }
@@ -853,6 +888,12 @@ impl Running {
 impl Parked {
     /// The wait is over: the next attempt starts.
     pub fn retry(self, at_ms: i64) -> (Starting, TurnEvent) {
+        self.retry_as(at_ms, false)
+    }
+
+    /// The wait is over: the next attempt starts. `network_back`: the turn waited for the
+    /// network, which was gone and is back: that attempt is no try against a bad line.
+    pub fn retry_as(self, at_ms: i64, network_back: bool) -> (Starting, TurnEvent) {
         let next = Starting {
             id: self.id,
             message_seq: self.message_seq,
@@ -863,12 +904,19 @@ impl Parked {
             backend_session: self.backend_session,
             tool_count: self.tool_count,
             account: self.account,
+            offline: self.offline + u32::from(network_back),
             recovering: self.wait.is_for_an_account(),
-            resuming: matches!(self.wait, Wait::Retry { resume: true, .. }),
+            resuming: self.wait.resumes(),
             ran_before: self.ran,
             moved_at_ms: at_ms,
         };
-        (next, TurnEvent::Retried { at_ms })
+        (
+            next,
+            TurnEvent::Retried {
+                at_ms,
+                network_back,
+            },
+        )
     }
 
     /// The wait did not end well: the turn ends on the failure it waited on.
@@ -964,6 +1012,16 @@ impl Turn {
         }
     }
 
+    /// How many of the turn's attempts followed a wait in which the network was gone.
+    pub fn offline(&self) -> u32 {
+        match self {
+            Self::Starting(t) => t.offline,
+            Self::Running(t) => t.offline,
+            Self::Parked(t) => t.offline,
+            Self::Queued(_) | Self::Settled(_) => 0,
+        }
+    }
+
     /// Whether a tool process works for the turn, or is being started for it. A turn between
     /// two attempts has none.
     pub fn has_process(&self) -> bool {
@@ -1055,9 +1113,13 @@ impl Turn {
             ) => Ok(Self::Parked(
                 t.park(wait.clone(), kind.clone(), reason.clone(), *at_ms).0,
             )),
-            (Self::Parked(t), TurnEvent::Retried { at_ms }) => {
-                Ok(Self::Starting(t.retry(*at_ms).0))
-            }
+            (
+                Self::Parked(t),
+                TurnEvent::Retried {
+                    at_ms,
+                    network_back,
+                },
+            ) => Ok(Self::Starting(t.retry_as(*at_ms, *network_back).0)),
             // A turn that waits has no tool that could complete it.
             (Self::Parked(t), TurnEvent::Settled { outcome, at_ms }) => match outcome {
                 Outcome::Failed { .. } | Outcome::Stopped { .. } | Outcome::Interrupted { .. } => {

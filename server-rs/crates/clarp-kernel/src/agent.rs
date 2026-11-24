@@ -151,8 +151,14 @@ pub enum Command {
     },
     /// The wait is over: start the turn's next attempt.
     TurnRetried { turn: TurnId },
+    /// The turn waited for the network, which was gone, and it is back: start its next
+    /// attempt. That attempt is no try against a bad line.
+    NetworkBack { turn: TurnId },
     /// The wait did not end well: the turn ends on the failure it waited on.
     WaitOver { turn: TurnId },
+    /// The turn waited for the network, and it did not come back in time: the turn ends on
+    /// the failure it waited on, and says that the network was gone.
+    NetworkGone { turn: TurnId },
     /// The agent comes from another Host, with the tool's session it had there.
     Adopt {
         from: String,
@@ -1441,13 +1447,17 @@ impl Agent {
                 };
                 work.record(AgentEvent::Turn { turn, change });
             }
-            Command::TurnRetried { turn } => {
+            Command::TurnRetried { turn } | Command::NetworkBack { turn } => {
                 work.agent.require_here()?;
+                let network_back = matches!(command, Command::NetworkBack { .. });
                 let parked = work.parked(turn)?;
                 let (message_seq, attempt) = (parked.message_seq, parked.attempts + 1);
                 work.record(AgentEvent::Turn {
                     turn,
-                    change: TurnEvent::Retried { at_ms: now_ms },
+                    change: TurnEvent::Retried {
+                        at_ms: now_ms,
+                        network_back,
+                    },
                 });
                 work.decision.effects.push(Effect::RetryTurn {
                     turn,
@@ -1455,10 +1465,14 @@ impl Agent {
                     attempt,
                 });
             }
-            Command::WaitOver { turn } => {
+            Command::WaitOver { turn } | Command::NetworkGone { turn } => {
                 let parked = work.parked(turn)?;
+                let reason = match command {
+                    Command::NetworkGone { .. } => crate::failures::network_gone(&parked.reason),
+                    _ => parked.reason.clone(),
+                };
                 let outcome = Outcome::Failed {
-                    reason: parked.reason.clone(),
+                    reason,
                     kind: parked.kind.clone(),
                 };
                 work.record(AgentEvent::Turn {
@@ -1794,7 +1808,7 @@ impl Agent {
             TurnEvent::Started { at_ms, .. }
             | TurnEvent::Moved { at_ms, .. }
             | TurnEvent::Parked { at_ms, .. }
-            | TurnEvent::Retried { at_ms } => self.note_turn_activity(*at_ms),
+            | TurnEvent::Retried { at_ms, .. } => self.note_turn_activity(*at_ms),
             TurnEvent::Settled { at_ms, .. } if was_live => self.note_turn_activity(*at_ms),
             _ => {}
         }
@@ -2051,7 +2065,7 @@ fn change_at(change: &TurnEvent) -> Option<i64> {
         | TurnEvent::Started { at_ms, .. }
         | TurnEvent::Moved { at_ms, .. }
         | TurnEvent::Parked { at_ms, .. }
-        | TurnEvent::Retried { at_ms }
+        | TurnEvent::Retried { at_ms, .. }
         | TurnEvent::Settled { at_ms, .. } => Some(*at_ms),
         TurnEvent::Bound { .. } => None,
     }

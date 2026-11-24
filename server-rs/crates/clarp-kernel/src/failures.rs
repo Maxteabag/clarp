@@ -92,6 +92,24 @@ pub fn prompt_too_long(said: &str) -> String {
 /// How the Host says it, where the tool's words do not.
 const PROMPT_TOO_LONG_SAID: &str = "Prompt is too long";
 
+/// What a turn shows while it waits for the machine's network to come back.
+pub const NETWORK_WAIT: &str = "Waiting for the network";
+
+/// How the Host says, before the tool's own words, that a turn ended because the machine had
+/// no network for as long as a turn waits for it (`recovery::NETWORK_WAIT_MOST_MS`).
+const NETWORK_GONE_SAID: &str = "No network for 15 minutes";
+
+/// The words a turn ends with that waited for the network in vain: the Host's, then the
+/// tool's, so that both the sentence and what the tool said are kept.
+pub fn network_gone(said: &str) -> String {
+    let said = said.trim();
+    if said.is_empty() || said.starts_with(NETWORK_GONE_SAID) {
+        NETWORK_GONE_SAID.to_string()
+    } else {
+        format!("{NETWORK_GONE_SAID}: {said}")
+    }
+}
+
 /// What a Codex turn says when its failure reads like a usage limit and the provider did
 /// not confirm that the quota is spent.
 pub const QUOTA_UNCONFIRMED_MESSAGE: &str = "Codex could not complete this request. Try again";
@@ -278,6 +296,9 @@ pub fn usage_limit_resets(message: &str) -> bool {
 pub fn explain(message: &str) -> &'static str {
     if OPENCODE_FREE_RE.is_match(message) {
         "This free OpenCode model only runs in OpenCode's own apps. Choose another model for this agent"
+    } else if message.trim_start().starts_with(NETWORK_GONE_SAID) {
+        "This computer had no network for 15 minutes, so the turn stopped. Send it again once \
+         it is online"
     } else if PROVIDER_DOWN_RE.is_match(message) {
         "This model's provider is unavailable right now. Try again later or choose another model"
     } else {
