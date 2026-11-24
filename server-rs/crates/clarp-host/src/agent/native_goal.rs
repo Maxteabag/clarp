@@ -516,7 +516,10 @@ impl Worker {
             }
             Err(error) => {
                 self.reconcile_native();
-                Err(error)
+                // Whoever asked for the goal is told of a missing folder in a sentence.
+                let sentence = clarp_kernel::failures::missing_folder(&error)
+                    .map(clarp_kernel::failures::folder_missing_sentence);
+                Err(sentence.unwrap_or(error))
             }
         };
         if let Some(answer) = answer {

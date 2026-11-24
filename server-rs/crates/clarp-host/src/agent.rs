@@ -4252,6 +4252,13 @@ impl Worker {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
+                        // An agent whose folder is gone starts nothing, and is told so:
+                        // started in it, the tool would fail with words that name only its
+                        // program (issue 758).
+                        if let Some(why) = launcher::folder_gone(&order.cwd) {
+                            tell(&tx, turn, attempt, Told::Failed(why));
+                            return;
+                        }
                         let _ = lane.retire();
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
@@ -4496,6 +4503,11 @@ impl Worker {
             .spawn(move || {
                 // The agent's fork runs on the agent's provider, or not at all.
                 if let Err(why) = crate::fleet::admitted(&binding) {
+                    tell(&tx, turn, attempt, Told::Failed(why));
+                    return;
+                }
+                // Nor in a folder that is gone.
+                if let Some(why) = launcher::folder_gone(&order.cwd) {
                     tell(&tx, turn, attempt, Told::Failed(why));
                     return;
                 }

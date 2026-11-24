@@ -87,6 +87,15 @@ pub fn notice(failures: u32, error: &str) -> String {
     )
 }
 
+/// What the sender is told when the turn could not start because its agent's folder is not
+/// there: at once, with no try again, since no try brings the folder back.
+pub fn folder_missing_notice(dir: &str) -> String {
+    format!(
+        "{NEVER_RUN}\n\n{}, then send the message again.",
+        crate::failures::folder_missing_sentence(dir)
+    )
+}
+
 /// The count of a turn's refusals (`recovery_backoff.Backoff`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Refusals {

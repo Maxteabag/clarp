@@ -334,11 +334,13 @@ impl Outcome {
         }
     }
 
-    /// A turn whose tool could not be started. One the Host refused for its provider keeps
-    /// that kind: it is not tried again as a launch that failed would be.
+    /// A turn whose tool could not be started. One the Host refused for its provider, or
+    /// whose agent's folder is gone, keeps that kind: it is not tried again as a launch that
+    /// failed would be.
     pub fn not_started(reason: String) -> Self {
         let kind = match crate::failures::classify_error(&reason) {
             crate::failures::PROVIDER_MISMATCH => crate::failures::PROVIDER_MISMATCH,
+            crate::failures::FOLDER_MISSING => crate::failures::FOLDER_MISSING,
             _ => crate::failures::NOT_STARTED,
         };
         Self::Failed {
@@ -1023,7 +1025,7 @@ impl Parked {
 }
 
 fn launch_failure(outcome: &Outcome) -> bool {
-    matches!(outcome, Outcome::Failed { kind, .. } if kind == crate::failures::NOT_STARTED)
+    matches!(outcome, Outcome::Failed { kind, .. } if crate::failures::never_started(kind))
 }
 
 impl TurnEvent {

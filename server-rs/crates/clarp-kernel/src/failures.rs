@@ -46,6 +46,41 @@ pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
 /// [`provider_mismatch`] begins with; a tool's own words never read as it.
 pub const PROVIDER_MISMATCH: &str = "provider_mismatch";
 
+/// The agent's working folder is not there (a worktree removed after its branch landed):
+/// nothing can be started in it. Never tried again: no try brings the folder back. The Host
+/// names it itself, by the words [`folder_missing`] makes; a tool's own words never read as
+/// it.
+pub const FOLDER_MISSING: &str = "folder_missing";
+
+/// What the words of a missing folder begin with, before the folder. The shim writes the same
+/// words into a turn's spool when the folder went between the Host's look and the launch.
+const FOLDER_MISSING_MARK: &str = "folder_missing:";
+
+/// The words a turn ends with whose agent's folder is not there: the mark of the kind, then
+/// the folder.
+pub fn folder_missing(dir: &str) -> String {
+    format!("{FOLDER_MISSING_MARK} {dir}")
+}
+
+/// The folder in words that [`folder_missing`] made. `None` for any other words.
+pub fn missing_folder(said: &str) -> Option<&str> {
+    said.trim().strip_prefix(FOLDER_MISSING_MARK).map(str::trim)
+}
+
+/// What the user is told of a turn that could not start because its agent's folder is not
+/// there: which folder, and what to do.
+pub fn folder_missing_sentence(dir: &str) -> String {
+    format!(
+        "This agent's folder {dir} no longer exists. Recreate it, or give the agent another \
+         folder"
+    )
+}
+
+/// Whether a turn that failed of this kind never had its tool started.
+pub fn never_started(kind: &str) -> bool {
+    kind == NOT_STARTED || kind == FOLDER_MISSING
+}
+
 /// What the words of a provider mismatch begin with, so that wherever they are read they are
 /// read as that kind.
 const PROVIDER_MISMATCH_MARK: &str = "provider_mismatch:";
@@ -57,7 +92,7 @@ pub fn provider_mismatch(why: &str) -> String {
 }
 
 /// The kinds the user is told of, once the Host has stopped trying.
-pub const NOTIFY: [&str; 12] = [
+pub const NOTIFY: [&str; 13] = [
     CONNECTION,
     TRANSIENT,
     INTERRUPTED,
@@ -70,10 +105,11 @@ pub const NOTIFY: [&str; 12] = [
     NOT_STARTED,
     MUSE_SESSION_LOCKED,
     PROVIDER_MISMATCH,
+    FOLDER_MISSING,
 ];
 
 /// The kinds this Host reads that the Python Host does not (`docs/differences.md`).
-pub const OWN_KINDS: [&str; 2] = [PROMPT_TOO_LONG, PROVIDER_MISMATCH];
+pub const OWN_KINDS: [&str; 3] = [PROMPT_TOO_LONG, PROVIDER_MISMATCH, FOLDER_MISSING];
 
 /// The words a turn ends with whose tool said the conversation is too long for its model:
 /// the tool's own, after the Host's where they do not say it themselves, so that they are
@@ -255,6 +291,9 @@ pub fn classify_error(message: &str) -> &'static str {
     }
     if text.starts_with(PROVIDER_MISMATCH_MARK) {
         return PROVIDER_MISMATCH;
+    }
+    if text.starts_with(FOLDER_MISSING_MARK) {
+        return FOLDER_MISSING;
     }
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
@@ -472,6 +511,9 @@ fn sentence(kind: &str, model: &str) -> String {
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
         NOT_STARTED => "The turn could not be started".to_string(),
+        FOLDER_MISSING => "The turn could not start: the agent's folder no longer exists. \
+             Recreate it, or give the agent another folder"
+            .to_string(),
         PROVIDER_MISMATCH => "This agent's turn was stopped: it ran, or would have run, on \
              another model provider than the one it is bound to. Check its Codex home and provider"
             .to_string(),
@@ -495,6 +537,18 @@ fn sentence(kind: &str, model: &str) -> String {
 /// these words of the tool's. The Python Host's wording (`turn_retry._mark_interrupted` and
 /// `_record_failure_row`), held to it by `tests/failure_vectors.rs`.
 pub fn told(kind: &str, said: &str, model: &str, known: Known) -> Told {
+    // A missing folder is said in the Host's own sentence, which names the folder: there are
+    // no words of a tool's to add.
+    if let Some(dir) = missing_folder(said) {
+        let message = folder_missing_sentence(dir);
+        return Told {
+            summary: format!("{message}. Your message is saved."),
+            error: said.chars().take(200).collect(),
+            provider_message: String::new(),
+            row: format!("{message}."),
+            message,
+        };
+    }
     let explained = explain(said);
     let mut message = if explained.is_empty() {
         sentence(kind, model)

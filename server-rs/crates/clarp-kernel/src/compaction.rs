@@ -193,7 +193,7 @@ pub fn decide(
             } else {
                 kind.as_str()
             };
-            if !concluded && kind != failures::NOT_STARTED {
+            if !concluded && !failures::never_started(kind) {
                 return outcome(UNKNOWN, gauge, None, false, ENDED_UNSAID);
             }
             let told = failures::told(kind, reason, model, failures::Known::default());
