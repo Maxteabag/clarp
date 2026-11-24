@@ -2173,6 +2173,12 @@ impl Work {
             return;
         };
         let continues = self.agent.continues_user_queue(next);
+        // A message the user's Stop let through runs as part of that Stop: the hold stays for
+        // what comes after it, until the user's next fresh message or a resume. Were the hold
+        // to end when the last of them starts, the queue a Stop leaves would depend on how
+        // soon the stopped turn's process exits, and agree with what the Stop answered only
+        // when it was read before that.
+        let released = self.agent.stop_released.contains(&next.id);
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
@@ -2186,7 +2192,7 @@ impl Work {
             .push(Effect::StartTurn { turn, message_seq });
         if continues {
             self.resume_user_queue(now_ms);
-        } else if self.agent.live_from_queue() {
+        } else if self.agent.live_from_queue() && !released {
             self.let_go_of_nothing(DRAINED, now_ms);
         }
     }
@@ -2929,6 +2935,46 @@ mod tests {
         }
         assert_eq!(a.started, [1, 2, 3, 4].map(TurnId));
         assert!(a.waiting().is_empty());
+    }
+
+    /// Issue 747: the user's Stop lets their waiting messages run and holds the rest. When the
+    /// last of those messages starts, the hold is still there: it ends with the user's next
+    /// fresh message, so the queue a Stop leaves is the same whenever it is read.
+    #[test]
+    fn issue_747_the_messages_a_stop_lets_through_do_not_end_its_hold() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.user(12);
+        a.send(Command::StopAndStartWaiting {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        assert!(a.agent.is_paused());
+        a.finish(1);
+        assert_eq!((a.live(), a.waiting()), (Some(2), vec![3]));
+        assert!(a.agent.is_paused());
+        a.finish(2);
+        assert_eq!((a.live(), a.waiting()), (Some(3), vec![]));
+        assert!(a.agent.is_paused(), "the last one let through started");
+        a.finish(3);
+        assert!(a.agent.is_paused() && a.live().is_none());
+        assert!(
+            !a.history
+                .iter()
+                .any(|event| matches!(event, AgentEvent::Resumed { .. }))
+        );
+        // What comes now that is not the user's word waits for them.
+        assert!(a.background(13).is_empty());
+        assert_eq!(a.waiting(), vec![4]);
+        // The user's next message ends the hold, runs first, and the held work follows it.
+        a.user(14);
+        assert!(!a.agent.is_paused());
+        assert_eq!(a.live(), Some(5));
+        a.finish(5);
+        assert_eq!(a.live(), Some(4));
+        assert_eq!(a.started, [1, 2, 3, 5, 4].map(TurnId));
+        assert_eq!(Agent::replay(&a.history).unwrap(), a.agent);
     }
 
     #[test]

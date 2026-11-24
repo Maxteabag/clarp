@@ -103,9 +103,9 @@ pub struct Stopped {
     pub told: u32,
     /// How many goals that were being worked are paused now.
     pub goals_paused: usize,
-    /// The turn told to end was the conversation fork's: the agent's own and its queue are
-    /// as they were.
-    pub fork: bool,
+    /// Whether the agent's queue is held as the Stop left it, read in the same step. A Stop
+    /// of the conversation fork's turn leaves the agent's own turn and its queue as they were.
+    pub paused: bool,
 }
 
 /// Caller identity established by the Host before the goal command reaches its owner.
@@ -3297,7 +3297,7 @@ impl Worker {
                 let stopped = Stopped {
                     told: 1,
                     goals_paused: 0,
-                    fork: true,
+                    paused: actor.queue_state().paused,
                 };
                 answered(Ok((stopped, out)), answer)?
             }
@@ -3336,11 +3336,12 @@ impl Worker {
                     }
                     Ok(((told, paused.len()), out))
                 });
+                let paused = actor.queue_state().paused;
                 let stopped = stopped.map(|((told, goals_paused), out)| {
                     let stopped = Stopped {
                         told,
                         goals_paused,
-                        fork: false,
+                        paused,
                     };
                     (stopped, out)
                 });
@@ -5146,24 +5147,20 @@ impl Worker {
         }
         // What the agent is doing changed: its state, and the line that describes it.
         if last_told != Some(told_state(&status)) || stall_changed {
-            if turn_ended {
-                // The agent as it stood when the turn had ended and the next had not begun.
+            // How a turn ended is told once, a Stop's `interrupted` too: here when the next
+            // turn began in the same breath, else by the state told below.
+            if turn_ended && status.live.is_some() {
+                // The agent as it stood when the turn had ended and the next had not begun,
+                // told first: a client that waits for an agent to be done hears that it was.
                 let rested = Status {
                     live: None,
                     ..status.clone()
                 };
-                if let Some(at_once) = wire::stopped(&record, &rested, self.ended.as_ref()) {
-                    hub.publish(at_once, now);
-                }
-                if status.live.is_some() {
-                    // The next turn began in the same breath. How the last one ended is told
-                    // first: a client that waits for an agent to be done hears that it was.
-                    hub.publish(
-                        wire::state(&record, &rested, backend, self.ended.as_ref()),
-                        now,
-                    );
-                    hub.publish(wire::activity(&record, &rested), now);
-                }
+                hub.publish(
+                    wire::state(&record, &rested, backend, self.ended.as_ref()),
+                    now,
+                );
+                hub.publish(wire::activity(&record, &rested), now);
             }
             tell_work(
                 &hub,

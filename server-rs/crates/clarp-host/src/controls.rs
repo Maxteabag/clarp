@@ -65,9 +65,10 @@ pub(crate) async fn stop(
     let stopped = member.agent.stop_as(by, !main).await?;
     Ok(StopResponse {
         terminated: u64::from(stopped.told),
-        // The Stop's own pause, before dispatch can drain the queue and end it. A fork's
-        // Stop holds nothing.
-        queue_paused: Some(!stopped.fork),
+        // The queue as the Stop left it, read in the same step: what `GET /turn-queue` says
+        // after it until the user sends again or resumes it. A fork's Stop holds nothing and
+        // leaves the queue as it was.
+        queue_paused: Some(stopped.paused),
         goals_paused: Some(stopped.goals_paused as u64),
         ..answer
     })
