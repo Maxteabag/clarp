@@ -15,32 +15,63 @@ fn of(text: &str) -> Settings {
     Settings::of(Some(&text.parse::<toml::Table>().unwrap()))
 }
 
+const MIB: u64 = 1024 * 1024;
+/// What a Codex lane counts at before it has weighed itself.
+const CODEX_LANE: u64 = 270 * MIB;
+/// Room for everything the tests' lanes hold.
+const ROOMY: u64 = u64::MAX;
+
 #[test]
-fn the_lane_settings_are_off_and_fifteen_minutes_and_eight_unless_the_owner_says() {
+fn the_lane_settings_are_off_and_fifteen_minutes_and_2200_mb_unless_the_owner_says() {
     let default = Settings {
         chat: [false],
         idle_ms: 15 * 60_000,
-        most: 8,
+        budget: 2_200 * MIB,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
     assert!(!default.chat(Tool::Codex));
-    let set = of("codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\n");
+    let set = of("codex_chat_lane = true\ncodex_lane_idle_minutes = 2\nlane_memory_mb = 3000\n");
     assert_eq!(
         set,
         Settings {
             chat: [true],
             idle_ms: 120_000,
-            most: 3
+            budget: 3_000 * MIB,
         }
     );
     assert!(set.chat(Tool::Codex));
     // What is no setting keeps the default: a word, zero or less, or a key inside a table.
     assert_eq!(
-        of("codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\ncodex_lane_most = -1\n"),
+        of("codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\nlane_memory_mb = -1\n"),
         default
     );
-    assert_eq!(of("[other]\ncodex_chat_lane = true\n"), default);
+    assert_eq!(
+        of("[other]\ncodex_chat_lane = true\nlane_memory_mb = 9\n"),
+        default
+    );
+    // The default holds what the count of eight held: eight Codex lanes, the new one among them.
+    assert_eq!(default.budget / CODEX_LANE, 8);
+}
+
+#[test]
+fn the_count_of_lanes_is_no_longer_read_and_a_config_that_has_it_is_told() {
+    let old = of("codex_chat_lane = true\ncodex_lane_most = 2\n");
+    assert_eq!(old.budget, 2_200 * MIB);
+    let said = Settings::replaced(Some(&"codex_lane_most = 2\n".parse().unwrap())).unwrap();
+    assert!(
+        said.starts_with("codex_lane_most = 2 in config.toml is no longer read"),
+        "{said}"
+    );
+    assert!(
+        said.contains("lane_memory_mb (2200 MB unless set)"),
+        "{said}"
+    );
+    assert_eq!(
+        Settings::replaced(Some(&"lane_memory_mb = 9\n".parse().unwrap())),
+        None
+    );
+    assert_eq!(Settings::replaced(None), None);
 }
 
 #[test]
@@ -156,8 +187,9 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
     let busy = FakeLane::start(&run, "c", status("tc", "d", 0, true));
     std::fs::write(run.join("d-turn.token"), "not a lane").unwrap();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    // Three live, the new one makes four: one leaves for a cap of three.
-    make_room(&run, own.socket(), 3);
+    // Three live lanes that have not weighed themselves, each at a Codex lane's typical size,
+    // and the new one: a budget of three Codex lanes, so the longest idle leaves.
+    make_room(&run, &own, 3 * CODEX_LANE);
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -170,26 +202,32 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
 fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     let run = run_dir("place");
     let same = FakeLane::start(&run, "a", status("t", "d", 5, false));
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, 8);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, ROOMY);
     assert_eq!(place.unwrap(), Place::Kept);
     assert_eq!(same.asked(), ["inspect"]);
 
     // What the driver says the tool kept from an earlier turn starts it again.
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, 8);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, ROOMY);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
 
     let other = FakeLane::start(&run, "b", status("t", "old", 5, false));
-    let place = other.endpoint.place(&run, Some("t"), "new", |_| false, 8);
+    let place = other
+        .endpoint
+        .place(&run, Some("t"), "new", |_| false, ROOMY);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(other.asked(), ["inspect", "retire"]);
     assert!(other.endpoint.released().unwrap());
 
     // A lane that still runs work is used as it is for its own thread, and refuses another.
     let busy = FakeLane::start(&run, "c", status("t", "old", 0, true));
-    let place = busy.endpoint.place(&run, Some("t"), "new", |_| false, 8);
+    let place = busy
+        .endpoint
+        .place(&run, Some("t"), "new", |_| false, ROOMY);
     assert_eq!(place.unwrap(), Place::Kept);
-    let refused = busy.endpoint.place(&run, Some("u"), "new", |_| false, 8);
+    let refused = busy
+        .endpoint
+        .place(&run, Some("u"), "new", |_| false, ROOMY);
     assert_eq!(
         refused.unwrap_err().to_string(),
         "the Codex lane owns another thread"
@@ -242,4 +280,82 @@ fn a_changed_login_is_told_by_its_kind_and_a_reply_without_state_by_its_words() 
     assert_eq!(empty.to_string(), "Codex lane supplied no state");
     let cut = replied::<Status>(&mut &b"{\"ok\":true"[..], Tool::Codex).unwrap_err();
     assert_eq!(cut.to_string(), "Codex lane connection closed");
+}
+
+#[test]
+fn the_budget_counts_what_each_lane_weighed_and_the_new_one_at_its_typical_size() {
+    let run = run_dir("bytes");
+    let weighed = |idle_ms: u64, busy: bool| {
+        let mut said = status("t", "d", idle_ms, busy);
+        said["memory_bytes"] = json!(100 * MIB);
+        said
+    };
+    let shorter = FakeLane::start(&run, "a", weighed(10, false));
+    let longer = FakeLane::start(&run, "b", weighed(30, false));
+    let busy = FakeLane::start(&run, "c", weighed(0, true));
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    // 3 x 100 weighed and 270 for the new lane: over 500, so the longest idle leaves and 470
+    // fits; the busy one counts and stays.
+    make_room(&run, &own, 500 * MIB);
+    assert_eq!(longer.asked(), ["inspect", "retire"]);
+    assert_eq!(shorter.asked(), ["inspect"]);
+    assert_eq!(busy.asked(), ["inspect"]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn lanes_that_could_not_weigh_themselves_count_at_their_estimate_and_stay_bounded() {
+    let run = run_dir("unweighed");
+    // Ten idle lanes whose `/proc` could not be read: half say no weight, half say 0.
+    let lanes: Vec<FakeLane> = (0..10u64)
+        .map(|n| {
+            let mut said = status("t", "d", 100 - n, false);
+            if n % 2 == 0 {
+                said["memory_bytes"] = json!(0);
+            }
+            FakeLane::start(&run, &format!("a{n}"), said)
+        })
+        .collect();
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    // The default budget: each counts at 270 MiB, the new one too, so eight fit, and the three
+    // idle the longest (a0, a1, a2) leave.
+    make_room(&run, &own, Settings::of(None).budget);
+    let left: Vec<usize> = lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, lane)| lane.asked().contains(&"retire".to_owned()))
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(left, [0, 1, 2]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn the_default_budget_keeps_eight_codex_lanes_and_a_ninth_sends_the_longest_idle_away() {
+    let run = run_dir("eight");
+    let budget = Settings::of(None).budget;
+    let weighed = |idle_ms: u64| {
+        let mut said = status("t", "d", idle_ms, false);
+        said["memory_bytes"] = json!(CODEX_LANE);
+        said
+    };
+    // Seven lanes of about 270 MB and the one about to start: eight fit, nobody leaves.
+    let seven: Vec<FakeLane> = (0..7u64)
+        .map(|n| FakeLane::start(&run, &format!("a{n}"), weighed(100 - n)))
+        .collect();
+    let eighth = Endpoint::of(Tool::Codex, &run, "eighth");
+    make_room(&run, &eighth, budget);
+    assert!(seven.iter().all(|lane| lane.asked() == ["inspect"]));
+    // With eight running, a ninth sends the one idle the longest away, and only it.
+    let running = FakeLane::start(&run, "eighth", weighed(1));
+    let ninth = Endpoint::of(Tool::Codex, &run, "ninth");
+    make_room(&run, &ninth, budget);
+    assert_eq!(seven[0].asked(), ["inspect", "inspect", "retire"]);
+    assert!(
+        seven[1..]
+            .iter()
+            .all(|lane| lane.asked() == ["inspect", "inspect"])
+    );
+    assert_eq!(running.asked(), ["inspect"]);
+    std::fs::remove_dir_all(&run).unwrap();
 }

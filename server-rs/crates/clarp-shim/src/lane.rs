@@ -100,6 +100,10 @@ pub struct Status {
     /// How long the lane has held no claim, in milliseconds.
     #[serde(default)]
     pub idle_ms: u64,
+    /// What the lane holds in memory, in bytes, as it weighed itself (proportional set size of
+    /// its process and its tool's). None from a lane that has not said it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
 }
 
 #[cfg(test)]
@@ -137,6 +141,7 @@ mod tests {
             model: Some("m".into()),
             effort: None,
             idle_ms: 42,
+            memory_bytes: Some(7),
         };
         let status: Status =
             serde_json::from_value(serde_json::to_value(&snapshot).unwrap()).unwrap();
@@ -150,6 +155,7 @@ mod tests {
                 model: Some("m".into()),
                 effort: None,
                 idle_ms: 42,
+                memory_bytes: Some(7),
             }
         );
     }

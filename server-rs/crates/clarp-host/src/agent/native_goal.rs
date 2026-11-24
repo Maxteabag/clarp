@@ -651,6 +651,7 @@ impl Worker {
                         model: None,
                         effort: None,
                         idle_ms: 0,
+                        memory_bytes: None,
                     })
                 } else {
                     Err(error)
