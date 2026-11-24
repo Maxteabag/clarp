@@ -1790,9 +1790,14 @@ pub fn log_response(
             }
             if let Some(fields) = row.as_object_mut() {
                 use clarp_kernel::chat_view::View;
-                let view = if fields.get("audience").and_then(Value::as_str) != Some(coordination::AGENTS)
-                    && clarp_actor::conversation::is_conversation(&version.entry, version.session_rows)
-                {
+                // A helper's chat holds the turns other agents give it as its conversation.
+                let for_agents = fields.get("audience").and_then(Value::as_str) == Some(coordination::AGENTS);
+                let view = if clarp_actor::conversation::in_conversation_view(
+                    &version.entry,
+                    version.session_rows,
+                    for_agents,
+                    record.is_helper(),
+                ) {
                     View::Conversation
                 } else {
                     View::Session

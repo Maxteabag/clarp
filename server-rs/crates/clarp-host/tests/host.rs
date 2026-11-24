@@ -79,6 +79,8 @@ mod harness;
 mod harness_providers;
 #[path = "host/helper_reports.rs"]
 mod helper_reports;
+#[path = "host/helper_conversation.rs"]
+mod helper_conversation;
 #[path = "host/hotseat_demand.rs"]
 mod hotseat_demand;
 #[path = "host/import_devices.rs"]

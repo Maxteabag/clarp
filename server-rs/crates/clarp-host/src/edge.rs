@@ -2681,7 +2681,8 @@ async fn log(
         .include_automated
         .as_deref()
         .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
-    let which = Which::chat(include_automated);
+    // A helper's chat holds the turns other agents give it as its conversation (issue 745).
+    let which = Which::chat(include_automated).of_helper(member.record.is_helper());
     // Only an agent that can leave a note for its user has rows for the agents.
     let hides = coordination::can_leave_note(
         &member.record.agent_id,

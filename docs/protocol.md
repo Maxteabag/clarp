@@ -746,6 +746,15 @@ Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carrie
   Host or another agent sent (schedules, wakes, delivered answers, another agent's message), and
   every row of a turn with `audience` `agents`.
 
+A helper's chat (an agent whose `role` is `helper`) is the exception: a turn another agent
+started (its parent or any other) is that chat's conversation. Its prompt (a user row of origin
+`agent`) is `conversation`, and its answers anchor by the rules below exactly as a user's turn's
+do, with `session_rows`; its tool rows and commentary stay `session`. The turn's `audience` stays
+`agents`, and in a helper's chat `view=conversation` does not leave such turns out as
+coordination. Whether a chat is a helper's is decided from the agent's role, so a row's view is
+the same at every read. Every other chat keeps agent turns out of the Conversation view as above,
+and `view=session` is unchanged.
+
 The conversation view only grows (feature `conversation_view_grows`, contract 174): a row that
 has entered `view=conversation` never leaves it, so a client that reads only that view never has
 to remove a row. A turn's **answers** enter it as the turn runs. An assistant text row (words,

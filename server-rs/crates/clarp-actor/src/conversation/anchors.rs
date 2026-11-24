@@ -15,7 +15,7 @@ use clarp_kernel::journal::kind;
 use clarp_kernel::turn::TurnEvent;
 use clarp_ports::log::{AgentLog, Item, Kinds, Seq};
 
-use super::{CHUNK, corrupt, is_conversation, joined_read};
+use super::{CHUNK, conversation_in, corrupt, joined_read};
 use crate::ActorError;
 
 /// A row the conversation view shows in place of the work of a turn: an answer to a message of
@@ -79,12 +79,20 @@ struct Walk {
     fallback: Option<(Seq, String)>,
     /// The turn's newest row was a call by itself: its id.
     call: Option<String>,
+    /// The turn is in a helper's chat: a message another agent began it with is conversation
+    /// by itself, as the user's is ([`super::in_conversation_view`]).
+    helper: bool,
 }
 
 impl Walk {
     /// A walk from the turn's own message, read back from `from` (the turn's end, or the log's
     /// head), and over everything after it up to there.
-    fn start(log: &dyn AgentLog, turn: u64, from: Seq) -> Result<(Self, usize), ActorError> {
+    fn start(
+        log: &dyn AgentLog,
+        turn: u64,
+        from: Seq,
+        helper: bool,
+    ) -> Result<(Self, usize), ActorError> {
         let mut found = Vec::new();
         let mut before = from;
         let mut newest = None;
@@ -101,7 +109,10 @@ impl Walk {
                 }
             }
         }
-        let mut walk = Self::default();
+        let mut walk = Self {
+            helper,
+            ..Self::default()
+        };
         let walked = found.len();
         for item in found.iter().rev() {
             walk.step(log, turn, item)?;
@@ -153,7 +164,7 @@ impl Walk {
         if clarp_kernel::artifacts::forms::is_answer_row(id) || !self.seen.insert(id.to_owned()) {
             return Ok(());
         }
-        if is_conversation(&entry, None) {
+        if conversation_in(&entry, None, self.helper) {
             self.call = None;
             if matches!(entry, Entry::Message(_) | Entry::Note(_)) {
                 self.fallback = Some((item.seq, id.to_owned()));
@@ -330,8 +341,9 @@ pub(super) fn find_anchors(
     log: &dyn AgentLog,
     turn: u64,
     end: Option<Seq>,
+    helper: bool,
 ) -> Result<TurnAnchors, ActorError> {
-    let (walk, _) = Walk::start(log, turn, end.unwrap_or(Seq::MAX))?;
+    let (walk, _) = Walk::start(log, turn, end.unwrap_or(Seq::MAX), helper)?;
     Ok(walk.anchors(end))
 }
 
@@ -342,8 +354,9 @@ const KEPT: usize = 32;
 /// walks only what was written since the last one.
 #[derive(Default)]
 pub(crate) struct AnchorCache {
-    /// Each kept walk, with when it was last read.
-    walks: RefCell<HashMap<u64, (u64, Walk)>>,
+    /// Each kept walk, by its turn and whether it was read as a helper's chat, with when it
+    /// was last read.
+    walks: RefCell<HashMap<(u64, bool), (u64, Walk)>>,
     reads: Cell<u64>,
     /// How many log items its walks have read, for a test to see that a read costs what is new.
     walked: Cell<usize>,
@@ -355,27 +368,29 @@ impl AnchorCache {
         log: &dyn AgentLog,
         turn: u64,
         end: Option<Seq>,
+        helper: bool,
     ) -> Result<TurnAnchors, ActorError> {
+        let key = (turn, helper);
         let read = self.reads.get() + 1;
         self.reads.set(read);
         let mut walks = self.walks.borrow_mut();
-        if !walks.contains_key(&turn) {
-            let (walk, walked) = Walk::start(log, turn, end.unwrap_or(Seq::MAX))?;
+        if !walks.contains_key(&key) {
+            let (walk, walked) = Walk::start(log, turn, end.unwrap_or(Seq::MAX), helper)?;
             self.walked.set(self.walked.get() + walked);
             // The walk read longest ago goes: the running turn is read with every page.
             while walks.len() >= KEPT {
                 let Some(oldest) = walks
                     .iter()
                     .min_by_key(|(_, (last, _))| *last)
-                    .map(|(turn, _)| *turn)
+                    .map(|(key, _)| *key)
                 else {
                     break;
                 };
                 walks.remove(&oldest);
             }
-            walks.insert(turn, (read, walk));
+            walks.insert(key, (read, walk));
         }
-        let Some((last, walk)) = walks.get_mut(&turn) else {
+        let Some((last, walk)) = walks.get_mut(&key) else {
             return Ok(TurnAnchors::default());
         };
         *last = read;
@@ -881,4 +896,74 @@ mod tests {
         assert!(!super::announced(Some("t-oc-call_1"), "r-other-2"));
         assert!(super::announced(Some("t-oc-call_1"), "r-oc-2"));
     }
+
+    #[test]
+    fn a_helpers_chat_holds_the_turns_other_agents_give_it() {
+        // A turn another agent asked for, marked as one that answers that agent.
+        let mut recorder = open();
+        let message = Message {
+            id: "u-asked".into(),
+            text: "u-asked".into(),
+            origin: Origin::Agent {
+                agent_id: "parent".into(),
+            },
+            ..Message::default()
+        };
+        let turn = recorder
+            .accept_message(
+                Incoming {
+                    key: Some(message.id.clone()),
+                    body: serde_json::to_vec(&message).unwrap(),
+                    origin: message.origin.clone(),
+                    admission: Admission::Queue,
+                    coordination: Some("parent".into()),
+                    user_word: false,
+                },
+                100,
+            )
+            .unwrap()
+            .turn
+            .unwrap();
+        recorder.handle(Command::TurnStarted { turn }, 110).unwrap();
+        say(&mut recorder, turn, "r-look", &["t-1"], &[]);
+        say(&mut recorder, turn, "r-answer", &[], &[]);
+        end(&mut recorder, turn, "r-answer");
+        let read = |which: Which| -> Vec<(String, Option<usize>)> {
+            tail(recorder.log(), &[], span(&recorder), 100, which)
+                .unwrap()
+                .entries
+                .iter()
+                .map(|row| (row.entry.id().to_owned(), row.session_rows))
+                .collect()
+        };
+        // The helper's: the agent's message and the answer, which counts the work alone.
+        let helper = Which::chat(true).of_helper(true);
+        assert_eq!(
+            read(helper.conversation_view(true)),
+            [
+                ("u-asked".to_owned(), None),
+                ("r-answer".to_owned(), Some(1)),
+            ]
+        );
+        assert!(super::super::in_conversation_view(
+            &recorder_entry(&recorder, "u-asked"),
+            None,
+            true,
+            true
+        ));
+        // Any other agent's: none of it is the user's conversation.
+        assert!(read(Which::chat(true).conversation_view(true)).is_empty());
+        assert!(!super::super::in_conversation_view(
+            &recorder_entry(&recorder, "u-asked"),
+            None,
+            true,
+            false
+        ));
+    }
+
+    fn recorder_entry(recorder: &Recorder, id: &str) -> Entry {
+        let item = recorder.log().find(id).unwrap().unwrap();
+        Entry::from_item(&item).unwrap().unwrap()
+    }
+
 }

@@ -52,6 +52,9 @@ pub enum Which {
         /// When set, keep conversation rows only. The value says whether the agent
         /// can have a coordination audience.
         conversation_only: Option<bool>,
+        /// The chat is a helper's: the turns other agents give it are its conversation
+        /// ([`in_conversation_view`]).
+        helper: bool,
     },
 }
 
@@ -61,22 +64,50 @@ impl Which {
             include_automated,
             hide_coordination: false,
             conversation_only: None,
+            helper: false,
         }
     }
 
+    /// The chat of a helper (`helper`), whose conversation is the turns other agents give it.
+    /// Decided from the agent's role, so a row's view is the same at every read.
+    pub fn of_helper(self, helper: bool) -> Self {
+        match self {
+            Self::Chat {
+                include_automated,
+                hide_coordination,
+                conversation_only,
+                ..
+            } => Self::Chat {
+                include_automated,
+                hide_coordination,
+                conversation_only,
+                helper,
+            },
+            _ => self,
+        }
+    }
+
+    /// Conversation rows only. A helper's conversation is the agents' turns, so they are not
+    /// hidden from it as coordination.
     pub fn conversation_view(self, can_have_coordination: bool) -> Self {
         match self {
             Self::Chat {
                 include_automated,
                 hide_coordination,
+                helper,
                 ..
             } => Self::Chat {
                 include_automated,
-                hide_coordination,
+                hide_coordination: hide_coordination && !helper,
                 conversation_only: Some(can_have_coordination),
+                helper,
             },
             _ => self,
         }
+    }
+
+    fn helper(self) -> bool {
+        matches!(self, Self::Chat { helper: true, .. })
     }
 
     fn conversation_only(self) -> Option<bool> {
@@ -95,11 +126,13 @@ impl Which {
             Self::Chat {
                 include_automated,
                 conversation_only,
+                helper,
                 ..
             } => Self::Chat {
                 include_automated,
                 hide_coordination: true,
                 conversation_only,
+                helper,
             },
             _ => self,
         }
@@ -147,9 +180,30 @@ const CHUNK: usize = 256;
 
 /// Rows that are conversation without needing to be a turn's anchor.
 pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
+    conversation_in(entry, session_rows, false)
+}
+
+/// Whether a row is in a chat's conversation view. `for_agents`: the row's turn answers
+/// another agent (its audience is the agents'). Such a turn is left out of the user's
+/// conversation, except in a helper's chat (`helper`): the turns other agents give a helper are
+/// what it is for, so they are its conversation, the message that began one as the user's own
+/// is, and its answers anchor as a user's turn's do. Their audience stays the agents'.
+pub fn in_conversation_view(
+    entry: &Entry,
+    session_rows: Option<usize>,
+    for_agents: bool,
+    helper: bool,
+) -> bool {
+    (helper || !for_agents) && conversation_in(entry, session_rows, helper)
+}
+
+/// Rows that are conversation without needing to be a turn's anchor, in a helper's chat
+/// (`helper`) or another.
+pub(crate) fn conversation_in(entry: &Entry, session_rows: Option<usize>, helper: bool) -> bool {
     match entry {
         Entry::Message(message) => {
-            message.origin.is_user_send()
+            (message.origin.is_user_send()
+                || (helper && matches!(message.origin, Origin::Agent { .. })))
                 && !clarp_kernel::artifacts::forms::is_answer_row(&message.id)
         }
         Entry::Note(_) => true,
@@ -544,6 +598,8 @@ struct Reader<'a> {
     imported_anchors: Option<&'a ImportedAnchors>,
     /// The actor's walks of its newest turns, so a read of a running turn reads what is new.
     anchor_cache: Option<&'a AnchorCache>,
+    /// It reads a helper's chat ([`in_conversation_view`]).
+    helper: bool,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
     anchors: HashMap<u64, TurnAnchors>,
@@ -557,10 +613,18 @@ impl<'a> Reader<'a> {
             log,
             imported_anchors: None,
             anchor_cache: None,
+            helper: false,
             ends: HashMap::new(),
             anchors: HashMap::new(),
             marks: HashMap::new(),
         }
+    }
+
+    /// For this reader of the conversation: a helper's chat counts the turns other agents give
+    /// it as its conversation.
+    fn reading(mut self, which: Which) -> Self {
+        self.helper = which.helper();
+        self
     }
 
     fn with_span(mut self, span: Span<'a>) -> Self {
@@ -626,8 +690,8 @@ impl<'a> Reader<'a> {
                 end => {
                     let end = end.map(|(_, seq)| *seq);
                     match self.anchor_cache {
-                        Some(cache) => cache.anchors(self.log, turn, end)?,
-                        None => find_anchors(self.log, turn, end)?,
+                        Some(cache) => cache.anchors(self.log, turn, end, self.helper)?,
+                        None => find_anchors(self.log, turn, end, self.helper)?,
                     }
                 }
             };
@@ -739,13 +803,15 @@ impl<'a> Reader<'a> {
         let Some(respect_audience) = which.conversation_only() else {
             return Ok(true);
         };
+        let helper = which.helper();
         if respect_audience
+            && !helper
             && (self.hidden(item, entry)?.is_some()
                 || matches!(entry, Entry::Imported(import) if import.row["audience"] == "agents"))
         {
             return Ok(false);
         }
-        if is_conversation(entry, None) {
+        if conversation_in(entry, None, helper) {
             return Ok(true);
         }
         if let Entry::Imported(imported) = entry {
@@ -931,7 +997,7 @@ fn rows(
     which: Which,
     span: Span<'_>,
 ) -> Result<Vec<Versioned>, ActorError> {
-    let mut reader = Reader::new(log).with_span(span);
+    let mut reader = Reader::new(log).with_span(span).reading(which);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
         // A row named again: it is given again, as it is now. A hidden row the user joined is
@@ -1237,7 +1303,7 @@ fn gaps(
     if !which.hides() {
         return Ok((HashMap::new(), None));
     }
-    let mut reader = Reader::new(log).with_span(span);
+    let mut reader = Reader::new(log).with_span(span).reading(which);
     let mut before = HashMap::new();
     let mut saw_draft = false;
     let mut last_stored = None;
@@ -1318,7 +1384,7 @@ fn items_before(
     // Some are left out: read back until the page is full, or there is nothing older.
     let mut kept: Vec<Item> = Vec::new(); // the newest first
     let mut cursor = before;
-    let mut judge = Reader::new(log).with_span(span);
+    let mut judge = Reader::new(log).with_span(span).reading(which);
     loop {
         let chunk = log.read_before(cursor, kind::ROWS, CHUNK)?;
         let Some(oldest) = chunk.first() else {
@@ -1428,7 +1494,7 @@ fn items_after(
 ) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
     let mut items: Vec<Item> = Vec::new();
     let mut cursor = None;
-    let mut judge = Reader::new(log).with_span(span);
+    let mut judge = Reader::new(log).with_span(span).reading(which);
     let at_a_time = if which == Which::All {
         limit.saturating_add(1)
     } else {
