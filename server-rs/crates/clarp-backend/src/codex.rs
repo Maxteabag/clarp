@@ -1907,7 +1907,8 @@ mod tests {
             interpreter.on_record(&record, &mut out);
         }
         assert!(
-            !out.iter().any(|signal| matches!(signal, Signal::Reply(_) | Signal::Halt)),
+            !out.iter()
+                .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Halt)),
             "the answer waits for the verdict: {out:?}"
         );
         // Codex flushes its rollout as it exits.
@@ -1927,7 +1928,10 @@ mod tests {
             entry: Entry::Shim(exited),
         };
         interpreter.on_record(&record, &mut out);
-        assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))), "{out:?}");
+        assert!(
+            out.iter().any(|signal| matches!(signal, Signal::Reply(_))),
+            "{out:?}"
+        );
         assert!(!out.contains(&Signal::Halt), "{out:?}");
         assert_eq!(out.last(), Some(&Signal::Ended(RunOutcome::Completed)));
         std::fs::remove_dir_all(home).unwrap();
