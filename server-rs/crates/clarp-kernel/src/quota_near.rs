@@ -1055,6 +1055,19 @@ mod tests {
         assert_eq!(regains, Some(NOW + 3 * HOUR));
         let summary = pool("claude", &desk).unwrap();
         assert_eq!(summary["next_reset_at"], json!(moment(NOW + 3 * HOUR)));
+        // Beside it, a seat that really regained room since the reading: its moment is the
+        // row's, so the Host reads the seats again for it, and the failing seat's old one does
+        // not stand in its way.
+        let desk = judged_by(
+            served(json!([in_use, failing, soon])),
+            json!([
+                sw("work", true, Some(0), Some(50)),
+                sw("failing", false, None, None),
+                sw("soon", false, Some(0), Some(50)),
+            ]),
+        );
+        let (_, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
+        assert_eq!(regains, Some(NOW - 1_000));
     }
 
     #[test]
