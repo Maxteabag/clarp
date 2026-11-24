@@ -52,8 +52,8 @@ PLANTS = [
     (K, 'vectors', 'a stopped compaction is said in the words of one that ended', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "stopped"),', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "settled"),'),
     (K, 'vectors', 'one taken back is said in other words', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped before it began";', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped";'),
     (K, 'vectors', 'a failure is told in the tool\'s raw words', '            outcome(NOT_COMPACTED, gauge, None, false, &told.row)', '            outcome(NOT_COMPACTED, gauge, None, false, reason)'),
-    (K, 'vectors', 'a failure without the tool\'s word did not compact', '            if !concluded && kind != failures::NOT_STARTED {', '            if concluded && kind != failures::NOT_STARTED {'),
-    (K, 'vectors', 'a tool the Host never started may have compacted', '            if !concluded && kind != failures::NOT_STARTED {', '            if !concluded {'),
+    (K, 'vectors', 'a failure without the tool\'s word did not compact', '            if !concluded && !failures::never_started(kind) {', '            if concluded && !failures::never_started(kind) {'),
+    (K, 'vectors', 'a tool the Host never started may have compacted', '            if !concluded && !failures::never_started(kind) {', '            if !concluded {'),
     (K, 'vectors', 'a tool that ended without a word did not compact', '            outcome(UNKNOWN, gauge, None, false, ENDED_UNSAID)\n        }\n    }', '            outcome(NOT_COMPACTED, gauge, None, false, ENDED_UNSAID)\n        }\n    }'),
     # The agent's state: one outcome owed for the user's compaction, the last kept.
     (A, 'agent', 'every turn owes an outcome', '        if matches!(&ended.origin, Origin::Trigger { name } if name == COMPACTION) {', '        if !ended.origin.name().is_empty() {'),
