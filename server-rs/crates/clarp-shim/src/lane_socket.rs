@@ -1,4 +1,5 @@
-//! Private, reconnectable Unix sockets for the lane and its admitted turn.
+//! Private, reconnectable Unix sockets for a lane and its admitted turn, whatever tool the lane
+//! keeps: each request read is handed to the lane's one loop as the lane's own input.
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -15,8 +16,7 @@ use serde::de::DeserializeOwned;
 
 use clarp_shim::{Reply, Request as TurnRequest};
 
-use crate::codex_lane_runtime::Input;
-use clarp_shim::codex_lane::{Claim, Request};
+use clarp_shim::lane::Claim;
 
 const FRAME_MOST: u64 = 8 * 1024 * 1024;
 const TIME: Duration = Duration::from_secs(3);
@@ -28,32 +28,51 @@ pub(super) struct Socket {
     closing: Arc<AtomicBool>,
 }
 
+/// What came on an admitted attempt's socket.
+pub(super) enum TurnAsk {
+    Follow,
+    /// A Stop, with how long the tool has to end the turn itself.
+    Stop(u64),
+    /// Steered words, under the id their reading is told by.
+    Steer(String, String),
+}
+
 impl Socket {
-    pub(super) fn control(path: &Path, input: SyncSender<Input>) -> io::Result<Self> {
+    /// The lane's control socket: each request, as the lane's driver reads it, goes to its loop.
+    pub(super) fn control<R, I>(
+        path: &Path,
+        input: SyncSender<I>,
+        wrap: fn(R, UnixStream) -> I,
+    ) -> io::Result<Self>
+    where
+        R: DeserializeOwned,
+        I: Send + 'static,
+    {
         Self::listen(path, move |stream| {
-            if let Ok(request) = read::<Request>(&stream) {
-                let _ = input.send(Input::Control(request, stream));
+            if let Ok(request) = read::<R>(&stream) {
+                let _ = input.send(wrap(request, stream));
             }
         })
     }
 
-    pub(super) fn turn(claim: &Claim, input: SyncSender<Input>) -> io::Result<Self> {
+    /// The socket of the attempt `claim` names, for as long as the lane runs it.
+    pub(super) fn turn<I: Send + 'static>(
+        claim: &Claim,
+        input: SyncSender<I>,
+        wrap: fn((u64, u32), TurnAsk, UnixStream) -> I,
+    ) -> io::Result<Self> {
         let attempt = (claim.turn, claim.attempt);
         Self::listen(&claim.socket, move |mut stream| {
-            match read::<TurnRequest>(&stream) {
-                Ok(TurnRequest::Follow) => {
-                    let _ = input.send(Input::Follow(attempt, stream));
-                }
-                Ok(TurnRequest::Stop { grace_ms }) => {
-                    let _ = input.send(Input::Stop(attempt, grace_ms, stream));
-                }
-                Ok(TurnRequest::Steer { id, text }) => {
-                    let _ = input.send(Input::Steer(attempt, id, text, stream));
-                }
+            let ask = match read::<TurnRequest>(&stream) {
+                Ok(TurnRequest::Follow) => TurnAsk::Follow,
+                Ok(TurnRequest::Stop { grace_ms }) => TurnAsk::Stop(grace_ms),
+                Ok(TurnRequest::Steer { id, text }) => TurnAsk::Steer(id, text),
                 _ => {
                     let _ = write(&mut stream, &Reply::failed("Unsupported lane turn request"));
+                    return;
                 }
-            }
+            };
+            let _ = input.send(wrap(attempt, ask, stream));
         })
     }
 
@@ -73,7 +92,7 @@ impl Socket {
         let closing = socket.closing.clone();
         let receive = Arc::new(receive);
         std::thread::Builder::new()
-            .name("codex-lane-listener".into())
+            .name("lane-listener".into())
             .spawn(move || {
                 for stream in listener.incoming() {
                     if closing.load(Ordering::Acquire) {
@@ -82,7 +101,7 @@ impl Socket {
                     let Ok(stream) = stream else { break };
                     let receive = receive.clone();
                     let _ = std::thread::Builder::new()
-                        .name("codex-lane-request".into())
+                        .name("lane-request".into())
                         .spawn(move || {
                             let _ = stream.set_read_timeout(Some(TIME));
                             let _ = stream.set_write_timeout(Some(TIME));
