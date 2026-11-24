@@ -16,10 +16,11 @@ muse exec --json --yolo --disable-reminders --session-id <uuid> [--model M] [--r
 ```
 
 * `--disable-reminders`: Muse's reminder agents (a memory reminder after
-  every answer) run after the answer and before the process exits, and the
-  session stays locked until then. They held every turn's end, and the start
-  of a message waiting behind it, about 2.5 s (measured 24 Nov 2026 on
-  1.4.25).
+  every answer, itself a model call) run after the answer and before the
+  process exits, and the session stays locked until then. They held every
+  turn's end, and the start of a message waiting behind it: 3 to 7.5 s from
+  the last text to exit with them, 0.6 to 2.7 s without, in direct runs, and
+  8 to 19 s through a Host (measured 24 Nov 2026 on 1.4.25).
 * `--session-id` both creates and continues a session: a second `exec` with
   the same id appends to it (its sequence numbers continue). Clarp therefore
   pre-mints the UUID for a new agent and binds it before the process starts,
@@ -86,7 +87,7 @@ with a `read_file` tool call, one echo-provider turn, and the matching
   --backends muse`).
 * Each `exec` pays Muse's own start against Meta's API, 1.3 to 4 s (0.4 s
   with the echo provider), and until `--disable-reminders` the reminder
-  agents' 2.5 s at the end.
+  agents' model call at the end.
 * A spoken turn is the slow one. The voice rules at the head of the prompt
   make Muse write the whole answer in its reasoning before the first word,
   and weigh them against a short request ("reply only BANANA"): first text
