@@ -25,6 +25,7 @@ mod grok_muse;
 pub mod history;
 pub mod limits;
 pub mod opencode;
+pub mod own_provider;
 pub mod past;
 pub mod scripted;
 pub mod transit;
@@ -218,6 +219,11 @@ pub enum Signal {
     OutUntil {
         at_ms: i64,
     },
+    /// The tool must not go on: it is stopped at once. How the turn ended is still told by
+    /// [`Signal::Ended`] when the process is gone, in the interpreter's words, whatever ended
+    /// it. A Codex agent bound to a provider of its own whose Codex named another
+    /// ([`own_provider`]).
+    Halt,
     /// The tool process is gone, and this is how the turn went.
     Ended(RunOutcome),
 }

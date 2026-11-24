@@ -612,6 +612,8 @@ impl Actor {
             }
             out.damaged_lines += read.damaged.len();
             let session = record.session.clone();
+            // Where the fork's tool is told to stop when its interpreter says it must not go on.
+            let (halt_at, grace_ms) = (self.fork_socket(turn), self.profile.stop_grace_ms);
             let Some(running) = self.fork.running.as_mut() else {
                 return Ok(());
             };
@@ -635,6 +637,14 @@ impl Actor {
                 for signal in signals.drain(..) {
                     let message = &running.message;
                     let piece = match signal {
+                        Signal::Halt => {
+                            out.actions.push(Action::Stop {
+                                turn,
+                                socket: halt_at.clone(),
+                                grace_ms,
+                            });
+                            continue;
+                        }
                         Signal::Ended(outcome) => {
                             running.outcome = Some(outcome);
                             continue;

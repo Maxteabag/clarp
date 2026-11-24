@@ -4426,8 +4426,12 @@ impl Actor {
             return Ok(Outputs::default());
         }
         // Nothing was given to the tool: the turn is tried again, or ends with its sender told
-        // (R121). An opening has a rule of its own, and a turn that is stopped ends.
-        let refusable = self
+        // (R121). An opening has a rule of its own, and a turn that is stopped ends. A turn
+        // the Host refused for its provider ends at once: trying again would only be refused
+        // again until the agent's configuration is put right.
+        let mismatch = failures::classify_error(reason) == failures::PROVIDER_MISMATCH;
+        let refusable = !mismatch
+            && self
             .live
             .as_ref()
             .is_some_and(|live| live.turn == turn && !live.opening)
@@ -5951,6 +5955,16 @@ impl Actor {
                         }
                         Signal::Moved(activity) => {
                             let _ = batch.command(Command::TurnMoved { turn, activity }, t);
+                            continue;
+                        }
+                        // The tool must not go on: its shim is told to end it. The turn ends
+                        // when the process is gone, as the interpreter then says.
+                        Signal::Halt => {
+                            out.actions.push(Action::Stop {
+                                turn,
+                                socket: self.profile.socket_path_of(turn, live.attempt),
+                                grace_ms: self.profile.stop_grace_ms,
+                            });
                             continue;
                         }
                         Signal::Ended(outcome) => {

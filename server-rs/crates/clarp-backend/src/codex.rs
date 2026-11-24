@@ -31,6 +31,7 @@ use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
+use crate::own_provider::OwnProvider;
 use crate::{
     Apart, Backend, ErrorTail, Interpreter, Launch, LiveReply, Question, Reading, SESSION_ENV,
     Signal, TurnSpec, shorten,
@@ -38,6 +39,8 @@ use crate::{
 
 /// How much of what a tool gave back is kept with the call.
 const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
+/// The variable that names Codex's own directory.
+pub const CODEX_HOME: &str = "CODEX_HOME";
 /// What Codex is started without when it is only to read ([`Backend::reads`]).
 const NOTHING_TO_ACT_WITH: [&str; 18] = [
     "shell_tool",
@@ -88,6 +91,9 @@ const KEPT_APART: [&str; 22] = [
 
 pub struct Codex {
     program: String,
+    /// The Codex home and the provider of an agent bound to a provider of its own: every turn
+    /// runs with that home and that provider, and on no other ([`crate::own_provider`]).
+    own: Option<OwnProvider>,
 }
 
 impl Codex {
@@ -99,7 +105,21 @@ impl Codex {
     pub fn with_program(program: impl Into<String>) -> Self {
         Self {
             program: program.into(),
+            own: None,
         }
+    }
+
+    /// Codex for one agent bound to a provider of its own.
+    pub fn bound(program: impl Into<String>, own: OwnProvider) -> Self {
+        Self {
+            program: program.into(),
+            own: Some(own),
+        }
+    }
+
+    /// The home and provider this Codex is bound to, when it is.
+    pub fn own(&self) -> Option<&OwnProvider> {
+        self.own.as_ref()
     }
 }
 
@@ -138,6 +158,14 @@ impl Backend for Codex {
         .iter()
         .map(|arg| (*arg).to_string())
         .collect();
+        let mut env = vec![(SESSION_ENV.to_string(), spec.session.clone())];
+        // An agent bound to a provider of its own runs in its own Codex home, and on its
+        // provider: set on the command line too, where no profile or project can move it.
+        if let Some(own) = &self.own {
+            env.push((CODEX_HOME.to_string(), own.home.display().to_string()));
+            args.push("-c".to_string());
+            args.push(setting("model_provider", &own.provider));
+        }
         let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
         if let Some(model) = given(&spec.model) {
             args.push("--model".to_string());
@@ -175,22 +203,40 @@ impl Backend for Codex {
             before_stop: None,
             program: self.program.clone(),
             args,
-            env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
+            env,
             stdin: prompt.into_bytes(),
         }
     }
 
-    /// Codex's own directory (`CODEX_HOME`, else `.codex` at home) holds the login it runs
-    /// with.
+    /// Codex's own directory (`CODEX_HOME`, else `.codex` at home; the agent's own home for
+    /// one bound to a provider of its own) holds the login it runs with.
     fn login_file(&self, home: &Path) -> Option<PathBuf> {
-        let dir = std::env::var_os("CODEX_HOME")
+        if let Some(own) = &self.own {
+            return Some(own.home.join("auth.json"));
+        }
+        let dir = std::env::var_os(CODEX_HOME)
             .filter(|dir| !dir.is_empty())
             .map_or_else(|| home.join(".codex"), PathBuf::from);
         Some(dir.join("auth.json"))
     }
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
-        Box::new(CodexInterpreter::new(turn, name))
+        match &self.own {
+            Some(own) => Box::new(
+                CodexInterpreter::reading(turn, name, Some(own.sessions())).bound_to(own.clone()),
+            ),
+            None => Box::new(CodexInterpreter::new(turn, name)),
+        }
+    }
+
+    /// A thread of an agent bound to a provider of its own is kept in its own home: one
+    /// that is not there (the home was changed) is begun anew, with the Host's record of the
+    /// conversation, and never looked for in another home.
+    fn keeps(&self, session: &str) -> bool {
+        match &self.own {
+            Some(own) => crate::past::codex_rollout(&own.sessions(), session).is_some(),
+            None => true,
+        }
     }
 
     /// One `codex exec` that is not kept (`--ephemeral`), may write only where it runs, and
@@ -398,6 +444,19 @@ pub struct CodexInterpreter {
     /// Where Codex keeps its rollouts: where the model that answered is read when the turn
     /// is complete (Codex's events do not name it). `None`: not read.
     sessions: Option<std::path::PathBuf>,
+    /// The provider the turn must run on, for an agent bound to one.
+    bound: Option<Bound>,
+}
+
+/// What an interpreter of a turn bound to a provider knows of it. `codex exec --json` does not
+/// say which provider it runs on; its rollout does (`session_meta`, and the settings each turn
+/// is given), so the rollout is read as the turn goes.
+struct Bound {
+    own: OwnProvider,
+    /// The thread's rollout, once it was found.
+    rollout: Option<PathBuf>,
+    /// The turn was stopped for running on another provider: nothing it says after is taken.
+    halted: bool,
 }
 
 /// What the ids of Codex's live items begin with.
@@ -424,7 +483,49 @@ impl CodexInterpreter {
             shown: BTreeSet::new(),
             thread: None,
             sessions,
+            bound: None,
         }
+    }
+
+    /// One that holds the turn to the provider of an agent bound to one of its own: a turn
+    /// whose rollout names another provider is stopped ([`Signal::Halt`]) and fails as a
+    /// provider mismatch, and nothing it says from then on is taken.
+    #[must_use]
+    pub fn bound_to(mut self, own: OwnProvider) -> Self {
+        self.bound = Some(Bound {
+            own,
+            rollout: None,
+            halted: false,
+        });
+        self
+    }
+
+    /// Reads what the turn's rollout says of its provider, where it can be read yet: a
+    /// provider that is not the agent's halts the turn. Answers whether it is halted.
+    fn held_to_provider(&mut self, out: &mut Vec<Signal>) -> bool {
+        let Some(bound) = self.bound.as_mut() else {
+            return false;
+        };
+        if bound.halted {
+            return true;
+        }
+        let Some(thread) = self.thread.as_deref() else {
+            return false;
+        };
+        if bound.rollout.is_none() {
+            bound.rollout = crate::past::codex_rollout(&bound.own.sessions(), thread);
+        }
+        let Some(rollout) = bound.rollout.as_deref() else {
+            return false;
+        };
+        let named = crate::own_provider::named_providers(rollout);
+        let Some(other) = named.iter().find(|named| **named != bound.own.provider) else {
+            return false;
+        };
+        bound.halted = true;
+        self.failure = Some(bound.own.ran_on(other));
+        out.push(Signal::Halt);
+        true
     }
 
     fn moved(&mut self, activity: Activity, out: &mut Vec<Signal>) {
@@ -438,7 +539,26 @@ impl CodexInterpreter {
         let Ok(event) = serde_json::from_str::<Value>(line) else {
             return; // not one of its events: a line some tool of its printed
         };
-        match text_of(&event["type"]) {
+        if self.bound.as_ref().is_some_and(|bound| bound.halted) {
+            return; // stopped for its provider: nothing it says is the agent's
+        }
+        let kind = text_of(&event["type"]);
+        if kind == "thread.started" {
+            let thread = text_of(&event["thread_id"]).trim();
+            if !thread.is_empty() {
+                self.thread = Some(thread.to_string());
+            }
+        }
+        // A turn bound to a provider is held to it before anything it says is taken: when it
+        // begins, before every item, and before it is complete.
+        let checks = matches!(
+            kind,
+            "turn.started" | "item.started" | "item.completed" | "turn.completed"
+        );
+        if checks && self.held_to_provider(out) {
+            return;
+        }
+        match kind {
             "thread.started" => {
                 let thread = text_of(&event["thread_id"]).trim();
                 if !thread.is_empty() {
@@ -687,7 +807,12 @@ impl CodexInterpreter {
         self.ended = true;
         // A tool that still runs when the process goes is left as it is: what becomes of
         // it follows from how the turn ended, which is the Host's to say.
-        let outcome = if let Some(signal) = signal {
+        let halted = self.bound.as_ref().is_some_and(|bound| bound.halted);
+        let outcome = if let Some(reason) = self.failure.take().filter(|_| halted) {
+            // Stopped for running on another provider: that is how it ended, whatever signal
+            // ended it.
+            RunOutcome::Failed { reason }
+        } else if let Some(signal) = signal {
             RunOutcome::Interrupted {
                 reason: format!("codex was ended by signal {signal}"),
             }
@@ -717,6 +842,10 @@ impl CodexInterpreter {
 impl Interpreter for CodexInterpreter {
     fn on_record(&mut self, record: &Record, out: &mut Vec<Signal>) {
         match &record.entry {
+            // A lane names a thread it resumes here, and prints no `thread.started` for it.
+            Entry::Shim(ShimEvent::Session { id }) if self.thread.is_none() && !id.is_empty() => {
+                self.thread = Some(id.clone());
+            }
             Entry::Out(line) => self.on_line(line, record.t, out),
             Entry::Err(line) => self.stderr.push(line),
             Entry::Shim(ShimEvent::Exited { code, signal }) => {
@@ -1367,5 +1496,161 @@ mod tests {
             codex.answered("nothing of the kind"),
             Err("codex orchestrator returned no agent message".to_string())
         );
+    }
+
+    /// A Codex home of its own in a directory nobody else uses, with a made-up provider, and a
+    /// rollout of `thread` that names `provider` for it.
+    fn bound_home(thread: &str, provider: &str) -> (PathBuf, OwnProvider) {
+        let home = std::env::temp_dir().join(format!(
+            "clarp-codex-bound-{}-{}",
+            std::process::id(),
+            crate::transit::uuid4().unwrap()
+        ));
+        let day = home.join("sessions/2026/11/24");
+        std::fs::create_dir_all(&day).unwrap();
+        let rollout = [
+            json!({"type": "session_meta", "payload": {"id": thread, "model_provider": provider}}),
+            json!({"type": "event_msg", "payload": {"type": "thread_settings_applied",
+                "thread_settings": {"model_provider_id": provider}}}),
+        ]
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+        std::fs::write(
+            day.join(format!("rollout-2026-11-24T08-00-00-{thread}.jsonl")),
+            rollout + "\n",
+        )
+        .unwrap();
+        let own = OwnProvider::new(home.to_str().unwrap(), "stand-in").unwrap();
+        (home, own)
+    }
+
+    #[test]
+    fn an_agent_bound_to_a_provider_runs_in_its_own_home_and_on_its_provider() {
+        let own = OwnProvider::new("/var/agent-home", "stand-in").unwrap();
+        let codex = Codex::bound("codex", own);
+        let launch = codex.launch(&TurnSpec {
+            model: Some("a-deployment-name".to_string()),
+            backend_session: Some("thread-9".to_string()),
+            ..spec()
+        });
+        assert_eq!(
+            launch.args,
+            vec![
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                r#"model_provider="stand-in""#,
+                "--model",
+                "a-deployment-name",
+                "resume",
+                "thread-9",
+                "-"
+            ],
+            "the provider is set on the command line, where nothing can move it"
+        );
+        assert_eq!(
+            launch.env,
+            vec![
+                (SESSION_ENV.to_string(), "rachel".to_string()),
+                (CODEX_HOME.to_string(), "/var/agent-home".to_string()),
+            ]
+        );
+        assert_eq!(
+            codex.login_file(Path::new("/home/someone")),
+            Some(PathBuf::from("/var/agent-home/auth.json"))
+        );
+        // The machine's own Codex is started as ever.
+        let plain = Codex::new().launch(&spec());
+        assert!(plain.env.iter().all(|(name, _)| name != CODEX_HOME));
+        assert!(!plain.args.iter().any(|arg| arg.starts_with("model_provider")));
+    }
+
+    #[test]
+    fn a_bound_turn_whose_rollout_names_another_provider_is_halted_and_fails() {
+        let thread = "019a0000-0000-7000-8000-00000000000a";
+        let lines = |reply: &str| {
+            vec![
+                format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#),
+                r#"{"type":"turn.started"}"#.to_string(),
+                format!(
+                    r#"{{"type":"item.completed","item":{{"id":"item_0","type":"agent_message","text":"{reply}"}}}}"#
+                ),
+                r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}"#
+                    .to_string(),
+            ]
+        };
+        let run = |own: &OwnProvider, exit: ShimEvent| {
+            let mut interpreter =
+                CodexInterpreter::reading(1, "b1", Some(own.sessions())).bound_to(own.clone());
+            let mut out = Vec::new();
+            for (t, line) in lines("an answer").iter().enumerate() {
+                let t = i64::try_from(t).unwrap();
+                interpreter.on_record(
+                    &Record {
+                        t,
+                        entry: Entry::Out(line.clone()),
+                    },
+                    &mut out,
+                );
+            }
+            interpreter.on_record(
+                &Record {
+                    t: 9,
+                    entry: Entry::Shim(exit),
+                },
+                &mut out,
+            );
+            out
+        };
+
+        // On its own provider: as any turn.
+        let (home, own) = bound_home(thread, "stand-in");
+        let out = run(&own, ShimEvent::Exited {
+            code: Some(0),
+            signal: None,
+        });
+        assert!(!out.contains(&Signal::Halt));
+        assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))));
+        assert_eq!(out.last(), Some(&Signal::Ended(RunOutcome::Completed)));
+        std::fs::remove_dir_all(home).unwrap();
+
+        // On another: halted before it said anything, and failed as a provider mismatch
+        // however its process then ended.
+        let (home, own) = bound_home(thread, "openai");
+        let out = run(&own, ShimEvent::Exited {
+            code: None,
+            signal: Some(15),
+        });
+        assert_eq!(
+            out.iter().filter(|signal| **signal == Signal::Halt).count(),
+            1
+        );
+        assert!(
+            !out.iter().any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
+            "nothing a turn on another provider said is the agent's: {out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH
+        );
+        assert!(reason.contains("\"openai\""), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_bound_agent_keeps_only_the_threads_its_own_home_holds() {
+        let thread = "019a0000-0000-7000-8000-00000000000b";
+        let (home, own) = bound_home(thread, "stand-in");
+        let codex = Codex::bound("codex", own);
+        assert!(codex.keeps(thread));
+        assert!(!codex.keeps("019a0000-0000-7000-8000-00000000000c"));
+        assert!(Codex::new().keeps("019a0000-0000-7000-8000-00000000000c"));
+        std::fs::remove_dir_all(home).unwrap();
     }
 }

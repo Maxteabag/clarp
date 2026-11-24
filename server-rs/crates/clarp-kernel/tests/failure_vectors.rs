@@ -159,7 +159,10 @@ fn a_wait_for_an_account_is_worded_as_the_python_host_words_it() {
 fn the_kinds_and_who_is_told_are_the_python_hosts() {
     let vectors = vectors();
     // Besides the kinds of this Host's own (`docs/differences.md`), which it tells the user of.
-    assert_eq!(failures::OWN_KINDS, [failures::PROMPT_TOO_LONG]);
+    assert_eq!(
+        failures::OWN_KINDS,
+        [failures::PROMPT_TOO_LONG, failures::PROVIDER_MISMATCH]
+    );
     let pythons = |kind: &&str| !failures::OWN_KINDS.contains(kind);
     assert!(failures::OWN_KINDS.iter().all(|kind| NOTIFY.contains(kind)));
     let mut kinds = vec![
