@@ -21,6 +21,7 @@
 //! and what holds with or without one, is `server-rs/docs/lanes.md`.
 
 pub(crate) mod codex;
+pub(crate) mod digest;
 mod memory;
 
 use std::fs::OpenOptions;
@@ -30,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::Duration;
 
-use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_lock};
+use clarp_shim::lane::{LOGIN_CHANGED, Control, Status, owner_lock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -76,6 +77,29 @@ impl Tool {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
+        }
+    }
+
+    /// The shim's word that runs this tool's lane process, and the start of its scope's name.
+    pub(crate) fn shim_word(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Codex => ("codex-goal-lane", "clarp-codex-goal"),
+        }
+    }
+
+    /// The folder under the run folder that holds the locks of this tool's conversations.
+    fn locks(self) -> &'static str {
+        match self {
+            Self::Codex => "codex-threads",
+        }
+    }
+
+    /// What a lane of this tool holds in memory when it says nothing and cannot be read (just
+    /// started, or gone between the look and the read), in bytes: what was measured of it.
+    fn typical_bytes(self) -> u64 {
+        match self {
+            // An idle app-server with its shim, measured by `tools/turn-timings` (issue 761).
+            Self::Codex => 270 * 1024 * 1024,
         }
     }
 }
@@ -157,6 +181,54 @@ impl Settings {
             .position(|each| *each == tool)
             .is_some_and(|at| self.chat[at])
     }
+}
+
+/// The folder of the locks of `tool`'s conversations, made where it is missing.
+pub(crate) fn thread_locks(run: &Path, tool: Tool) -> io::Result<PathBuf> {
+    let locks = run.join(tool.locks());
+    std::fs::create_dir_all(&locks)?;
+    Ok(locks)
+}
+
+/// One writer per conversation: a turn of its own process keeps a read lease on its
+/// conversation's lock, without waiting, for its whole life. A lane takes the exclusive lease and
+/// holds it until its tool has exited, even when another agent has taken up the same
+/// conversation, so a per-turn process fails rather than writes beside a lane.
+pub(crate) fn guard_exec(
+    order: &mut clarp_actor::ShimOrder,
+    run: &Path,
+    tool: Tool,
+    thread: &str,
+) -> io::Result<()> {
+    let lock = clarp_shim::lane::thread_lock(&thread_locks(run, tool)?, thread);
+    let program = std::mem::replace(&mut order.program, "flock".into());
+    let args = std::mem::take(&mut order.args);
+    order.args = vec![
+        "--shared".into(),
+        "--nonblock".into(),
+        "--no-fork".into(),
+        lock.to_string_lossy().into_owned(),
+        program,
+    ];
+    order.args.extend(args);
+    Ok(())
+}
+
+/// Before a process of its own touches an agent's conversation, every lane of that agent leaves,
+/// whatever its tool: one left from when its chat turns ran on it, or from before the agent moved
+/// to another tool. Each idle one is retired and waited for until its tool has exited, since a
+/// tool may refuse a second process on a conversation at once rather than wait for it (Muse's
+/// session lock). A lane that still runs work refuses; [`guard_exec`] then fails the turn rather
+/// than let two processes write. The first refusal is returned, after every lane was asked.
+pub(crate) fn clear_before_exec(run: &Path, agent_id: &str) -> io::Result<()> {
+    let mut first = Ok(());
+    for tool in Tool::ALL {
+        let result = Endpoint::of(tool, run, agent_id).retire();
+        if first.is_ok() {
+            first = result;
+        }
+    }
+    first
 }
 
 /// Where an agent's lane keeps the identity of its running turn.
@@ -303,19 +375,22 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        make_room(run, &self.socket, room);
+        make_room(run, self, room);
         Ok(Place::Free)
     }
 
     pub(crate) fn inspect(&self) -> io::Result<Status> {
-        self.ask(&Lifecycle::Inspect)
+        self.ask(&Control::Inspect)
     }
 
-    /// What the lane that said `state` holds in memory: its process and every one below it.
+    /// What the lane that said `state` holds in memory, in bytes: what its driver read itself
+    /// where it says it, else its process and every one below it, read from `/proc`.
     pub(crate) fn memory(state: &Status) -> Option<u64> {
-        (state.instance != 0)
-            .then(|| memory::of(state.instance))
-            .flatten()
+        state.memory_bytes.or_else(|| {
+            (state.instance != 0)
+                .then(|| memory::of(state.instance))
+                .flatten()
+        })
     }
 
     /// One request, and the state the lane answers with, read as `T`.
@@ -352,7 +427,7 @@ impl Endpoint {
         if self.released()? {
             return Ok(());
         }
-        self.ask::<Status>(&Lifecycle::Retire)?;
+        self.ask::<Status>(&Control::Retire)?;
         self.wait_released()
     }
 
@@ -422,20 +497,22 @@ pub(crate) fn once_more<T>(
 }
 
 /// Keeps this Host's lanes, of every tool, within one [`Room`]: at most `room.most` alive, the
-/// one about to start included, and, where the owner set a budget, at most `room.memory` held by
-/// the running ones together. The idle lanes that held no turn the longest are asked to leave
+/// one about to start (`own`) included, and, where the owner set a budget, at most `room.memory`
+/// bytes held by all of them together, the new one counted at its tool's typical size. A lane's
+/// memory is what its driver says, or what is read of its process tree, or its tool's typical
+/// size where neither is there. The idle lanes that held no turn the longest are asked to leave
 /// first. A lane that runs a turn, or whose work may continue, refuses and counts. Read only when
 /// a lane is about to start; memory is read only where there is a budget.
-fn make_room(run: &Path, own: &Path, room: Room) {
+fn make_room(run: &Path, own: &Endpoint, room: Room) {
     let Ok(entries) = std::fs::read_dir(run) else {
         return;
     };
     let mut idle = Vec::new();
     let mut live = 0usize;
-    let mut held = 0u64;
+    let mut held = room.memory.map_or(0, |_| own.tool.typical_bytes());
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == own {
+        if path == own.socket {
             continue;
         }
         let Some(lane) = Endpoint::found(path) else {
@@ -447,10 +524,9 @@ fn make_room(run: &Path, own: &Path, room: Room) {
             continue;
         };
         live += 1;
-        let memory = room
-            .memory
-            .and_then(|_| Endpoint::memory(&state))
-            .unwrap_or(0);
+        let memory = room.memory.map_or(0, |_| {
+            Endpoint::memory(&state).unwrap_or_else(|| lane.tool.typical_bytes())
+        });
         held = held.saturating_add(memory);
         if state.claim.is_none() && state.available {
             idle.push((state.idle_ms, memory, lane));
@@ -462,7 +538,7 @@ fn make_room(run: &Path, own: &Path, room: Room) {
         if live < room.most && !over_budget {
             break;
         }
-        if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
+        if lane.ask::<Status>(&Control::Retire).is_ok() {
             live -= 1;
             held = held.saturating_sub(memory);
         }

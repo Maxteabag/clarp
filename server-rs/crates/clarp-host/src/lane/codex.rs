@@ -12,37 +12,9 @@ use std::process::Child;
 use clarp_shim::codex_lane::{Claim, GoalAction, Request, Snapshot};
 use clarp_shim::lane::key;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
+use super::digest::OptionsDigest;
 use super::{Driver, Endpoint, Login, Place, Settings, TURN_FILE_ENV, Tool};
-
-fn thread_lock(run: &Path, thread: &str) -> io::Result<PathBuf> {
-    let locks = run.join("codex-threads");
-    std::fs::create_dir_all(&locks)?;
-    Ok(clarp_shim::codex_lane::thread_lock(&locks, thread))
-}
-
-/// Regular exec keeps a read lease. A lane requires the exclusive lease and
-/// holds it until its app-server has exited, even when another agent has
-/// taken up the same native thread.
-pub(crate) fn guard_exec(
-    order: &mut clarp_actor::ShimOrder,
-    run: &Path,
-    thread: &str,
-) -> io::Result<()> {
-    let lock = thread_lock(run, thread)?;
-    let program = std::mem::replace(&mut order.program, "flock".into());
-    let args = std::mem::take(&mut order.args);
-    order.args = vec![
-        "--shared".into(),
-        "--nonblock".into(),
-        "--no-fork".into(),
-        lock.to_string_lossy().into_owned(),
-        program,
-    ];
-    order.args.extend(args);
-    Ok(())
-}
 
 #[derive(Clone)]
 pub(crate) enum Submission {
@@ -207,12 +179,11 @@ impl Lane {
             resume["config"]["model_provider"] = json!(own.provider);
             own_home = own.home.display().to_string();
         }
-        let digest = format!(
-            "{:x}",
-            Sha256::digest(format!("{resume}{own_home}").as_bytes())
-        );
-        let locks = profile.run_dir.join("codex-threads");
-        std::fs::create_dir_all(&locks)?;
+        let digest = OptionsDigest::new()
+            .text(&resume.to_string())
+            .text(&own_home)
+            .finish();
+        let locks = super::thread_locks(&profile.run_dir, Self::TOOL)?;
         if let Some(thread) = thread {
             resume["threadId"] = json!(thread);
         }
@@ -249,7 +220,7 @@ impl Lane {
         let program = clarp_backend::program("codex")
             .ok_or_else(|| io::Error::other("Codex is not configured"))?;
         let mut command =
-            launcher.goal_lane_command(self.endpoint.socket(), &program, config, &profile.cwd);
+            launcher.lane_command(Self::TOOL, self.endpoint.socket(), &program, config, &profile.cwd);
         command
             .envs(
                 profile

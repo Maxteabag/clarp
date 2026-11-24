@@ -190,7 +190,7 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
     // Three live, the new one makes four: one leaves for a cap of three.
     make_room(
         &run,
-        own.socket(),
+        &own,
         Room {
             most: 3,
             memory: None,
@@ -306,7 +306,7 @@ fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
     // longest idle first, and the busy one counts and stays.
     make_room(
         &run,
-        own.socket(),
+        &own,
         Room {
             most: 8,
             memory: Some(1),
@@ -327,7 +327,7 @@ fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
     let kept = FakeLane::start(&run, "d", status_of(me, "td", "d", 50, false));
     make_room(
         &run,
-        own.socket(),
+        &own,
         Room {
             most: 8,
             memory: Some(u64::MAX),
@@ -336,5 +336,39 @@ fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
     assert_eq!(kept.asked(), ["inspect"]);
     sleeper.kill().unwrap();
     sleeper.wait().unwrap();
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn the_budget_counts_each_lanes_own_reading_and_the_new_lane_at_its_typical_size() {
+    let run = run_dir("bytes");
+    const MIB: u64 = 1024 * 1024;
+    let said = |idle_ms: u64, bytes: u64| {
+        let mut status = status("t", "d", idle_ms, false);
+        status["memory_bytes"] = json!(bytes);
+        status
+    };
+    let all = Arc::new(Mutex::new(Vec::new()));
+    let _shorter = FakeLane::start_into(&run, "a", said(10, 100 * MIB), all.clone());
+    let _longer = FakeLane::start_into(&run, "b", said(30, 100 * MIB), all.clone());
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    // 100 + 100 said by the lanes, and the new Codex lane at 270: over 400, so the longest idle
+    // leaves, and 370 fits.
+    make_room(
+        &run,
+        &own,
+        Room {
+            most: 8,
+            memory: Some(400 * MIB),
+        },
+    );
+    let retired: Vec<String> = all
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|op| op.ends_with(":retire"))
+        .cloned()
+        .collect();
+    assert_eq!(retired, ["b:retire"]);
     std::fs::remove_dir_all(&run).unwrap();
 }

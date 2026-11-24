@@ -1,12 +1,14 @@
-//! Admission within a Codex lane. Only an actor's reserved slot can own a spool.
+//! Admission within a Codex lane. Only an actor's reserved slot can own a spool; the spool is
+//! admitted as every lane admits one (`lane_spool`).
 
 use std::io;
 
-use clarp_spool::{Entry, Record, ShimEvent, SpoolWriter};
 use serde_json::Value;
 
 use clarp_shim::codex_lane::{Claim, Reservation};
 use clarp_shim::codex_turn::TurnSpool;
+
+use crate::lane_spool::ClaimSpool;
 
 /// The lifecycle of the single live turn on a native thread.
 #[derive(Default)]
@@ -15,7 +17,7 @@ pub(crate) enum Slot {
     Free,
     Reserved {
         binding: Reservation,
-        writer: SpoolWriter,
+        writer: ClaimSpool,
     },
     Running {
         binding: Reservation,
@@ -30,8 +32,7 @@ impl Slot {
         if !matches!(self, Self::Free) {
             return Err(io::Error::other("the Codex lane is already reserved"));
         }
-        let mut writer = SpoolWriter::create(&binding.claim().spool)?;
-        writer.sync()?;
+        let writer = ClaimSpool::admit(binding.claim())?;
         *self = Self::Reserved { binding, writer };
         Ok(())
     }
@@ -85,7 +86,7 @@ impl Slot {
         match bound {
             Ok(binding) => {
                 let spool = TurnSpool::bind(
-                    writer,
+                    writer.into_writer(),
                     thread.to_owned(),
                     native_turn.to_owned(),
                     pid,
@@ -147,16 +148,14 @@ impl Slot {
         match std::mem::take(self) {
             Self::Free => Ok(()),
             Self::Running { mut spool, .. } => spool.killed(now_ms),
-            Self::Reserved { mut writer, .. } => {
-                end_unbound(&mut writer, None, Some(nix::libc::SIGKILL), now_ms)
-            }
+            Self::Reserved { writer, .. } => writer.end(None, Some(nix::libc::SIGKILL), now_ms),
         }
     }
 
     /// A reservation that never bound a provider turn still settles once.
     pub(crate) fn cancel(&mut self, now_ms: i64) -> io::Result<()> {
-        if let Self::Reserved { mut writer, .. } = std::mem::take(self) {
-            end_unbound(&mut writer, None, Some(nix::libc::SIGINT), now_ms)?;
+        if let Self::Reserved { writer, .. } = std::mem::take(self) {
+            writer.end(None, Some(nix::libc::SIGINT), now_ms)?;
         }
         Ok(())
     }
@@ -169,11 +168,8 @@ impl Slot {
             Self::Running { mut spool, .. } => spool.refused(why, now_ms),
             Self::Reserved { mut writer, .. } => {
                 let failed = serde_json::json!({"type": "turn.failed", "error": why});
-                writer.append(&Record {
-                    t: now_ms,
-                    entry: Entry::Out(failed.to_string()),
-                })?;
-                end_unbound(&mut writer, Some(1), None, now_ms)
+                writer.out(failed.to_string(), now_ms)?;
+                writer.end(Some(1), None, now_ms)
             }
         }
     }
@@ -182,20 +178,7 @@ impl Slot {
         match std::mem::take(self) {
             Self::Free => Ok(()),
             Self::Running { mut spool, .. } => spool.lost(now_ms),
-            Self::Reserved { mut writer, .. } => end_unbound(&mut writer, Some(1), None, now_ms),
+            Self::Reserved { writer, .. } => writer.end(Some(1), None, now_ms),
         }
     }
-}
-
-fn end_unbound(
-    writer: &mut SpoolWriter,
-    code: Option<i32>,
-    signal: Option<i32>,
-    now_ms: i64,
-) -> io::Result<()> {
-    writer.append(&Record {
-        t: now_ms,
-        entry: Entry::Shim(ShimEvent::Exited { code, signal }),
-    })?;
-    writer.sync()
 }

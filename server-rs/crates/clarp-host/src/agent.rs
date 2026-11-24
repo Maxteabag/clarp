@@ -4130,14 +4130,16 @@ impl Worker {
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(mut order) => {
-                if self.setup.record.backend == "codex"
+                // A tool that has lanes keeps a read lease on its conversation for the turn.
+                if let Some(tool) = crate::lane::Tool::of(&self.setup.record.backend)
                     && let Some(thread) = self
                         .actor
                         .as_ref()
                         .and_then(|actor| actor.status().backend_session)
-                    && let Err(error) = crate::lane::codex::guard_exec(
+                    && let Err(error) = crate::lane::guard_exec(
                         &mut order,
                         &self.setup.profile.run_dir,
+                        tool,
                         &thread,
                     )
                 {
@@ -4210,9 +4212,10 @@ impl Worker {
                 let runtime = self.setup.runtime.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 let starting = self.launches.begin(turn, &order.socket);
-                // A lane left from when chat turns ran on it, or from before the agent moved to
-                // another tool, holds the thread: it leaves first, once idle.
-                let lane = self.lane();
+                // A lane of the agent's, of any tool, leaves before this turn's process touches
+                // the conversation (`lane::clear_before_exec`).
+                let run_dir = self.setup.profile.run_dir.clone();
+                let lane_agent = self.setup.record.agent_id.clone();
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
                 let binding = self.setup.record.binding();
@@ -4226,7 +4229,7 @@ impl Worker {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
-                        let _ = lane.retire();
+                        let _ = crate::lane::clear_before_exec(&run_dir, &lane_agent);
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);

@@ -54,6 +54,7 @@ impl Worker {
         Tool::of(&self.setup.record.backend).is_some_and(|tool| Settings::read().chat(tool))
     }
 
+    /// The agent's Codex lane: a native goal's, and its chat turns' while Codex's switch is on.
     pub(super) fn lane(&self) -> Lane {
         Lane::of(&self.setup.profile.run_dir, &self.setup.record.agent_id)
     }
@@ -210,7 +211,15 @@ impl Worker {
         Ok(())
     }
 
+    /// Runs an admitted attempt on the agent's lane, through its tool's driver. A native goal is
+    /// Codex's whatever the agent's tool is now, so a lane of no other tool takes it.
     pub(super) fn launch_on_native_lane(&mut self, order: Box<ShimOrder>) {
+        match Tool::of(&self.setup.record.backend) {
+            Some(Tool::Codex) | None => self.launch_on_codex_lane(order),
+        }
+    }
+
+    fn launch_on_codex_lane(&mut self, order: Box<ShimOrder>) {
         self.native.idle_lane = false;
         if self.native.retiring {
             self.native.after_retire = Some(order);

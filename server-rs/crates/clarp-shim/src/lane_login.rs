@@ -10,7 +10,10 @@ use clarp_shim::lane::key;
 use serde_json::Value;
 
 /// Names the account of a tool's login file, when it names one: what a lane compares, so a token
-/// refreshed within the same account does not retire it.
+/// refreshed within the same account does not retire it. Each driver names its own file and
+/// reader: Codex `auth.json`'s `tokens.account_id`. A file that names no account (OpenCode's
+/// `auth.json`), or a reader that finds none, is compared whole: any change of it is a change of
+/// login.
 pub(super) type Account = fn(&Value) -> Option<&str>;
 
 pub(super) struct Login {
@@ -127,6 +130,21 @@ mod tests {
         assert!(login.acquire().unwrap());
         login.release();
         write("b", "two");
+        assert!(!login.acquire().unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_login_file_that_names_no_account_is_compared_whole() {
+        let dir = std::env::temp_dir().join(format!("lane-login-whole-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("auth.json");
+        std::fs::write(&file, json!({"deepseek": {"key": "one"}}).to_string()).unwrap();
+        let mut options = json!({"_clarpLoginFile": file});
+        let mut login = Login::read(&mut options, |_| None).unwrap();
+        assert!(login.acquire().unwrap());
+        login.release();
+        std::fs::write(&file, json!({"deepseek": {"key": "two"}}).to_string()).unwrap();
         assert!(!login.acquire().unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
     }

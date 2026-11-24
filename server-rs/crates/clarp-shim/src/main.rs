@@ -26,6 +26,7 @@ mod lane_driver;
 mod lane_login;
 mod lane_own;
 mod lane_socket;
+mod lane_spool;
 mod opencode;
 
 use std::io::{ErrorKind, Read, Write};

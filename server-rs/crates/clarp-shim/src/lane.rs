@@ -9,8 +9,8 @@
 //!   taken out before the tool sees them;
 //! - its process holds its owner lock ([`owner_lock`]) until its tool has been reaped, so a lane
 //!   that has left is known by the lock being free, not by a reply;
-//! - it answers [`Lifecycle::Inspect`] with a [`Status`] at any time, and leaves on
-//!   [`Lifecycle::Retire`] only while it holds no claim;
+//! - it answers [`Control::Inspect`] with a [`Status`] at any time, and leaves on
+//!   [`Control::Retire`] only while it holds no claim;
 //! - it refuses a claim with [`LOGIN_CHANGED`] once the tool's login changed, and leaves;
 //! - it writes the running turn's identity to its turn file, for the tools the turn calls;
 //! - it leaves by itself after its idle time.
@@ -68,13 +68,30 @@ pub struct Claim {
     pub socket: PathBuf,
 }
 
-/// The requests every lane answers, whatever its tool. They are the same lines on the wire as
-/// the driver's requests of the same name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The control requests every lane answers, whatever its tool. They are the same lines on the
+/// wire as the driver's requests of the same name (Codex's `codex_lane::Request` is a superset:
+/// its goal requests are its own). Steered words and a turn's own Stop and Follow come on the
+/// claim's socket instead, as [`crate::Request`], as for a turn of its own process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
-pub enum Lifecycle {
+pub enum Control {
     /// The lane's status, at once.
     Inspect,
+    /// The lane's status at once, then every change of it on the same connection.
+    Watch,
+    /// Hand an admitted turn to the tool: the lane makes the claim's spool before anything can
+    /// reach the tool, and a lane that has no conversation yet starts one for it.
+    Prompt {
+        claim: Claim,
+        text: String,
+        model: Option<String>,
+        effort: Option<String>,
+        /// The turn's identity for the Clarp tools it calls, written to the lane's turn file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
+    },
+    /// Stop the claimed attempt, if it is still the lane's.
+    Stop { turn: u64, attempt: u32 },
     /// Leave once no claim is held; refused while one is.
     Retire,
 }
@@ -103,19 +120,61 @@ pub struct Status {
     /// How long the lane has held no claim, in milliseconds.
     #[serde(default)]
     pub idle_ms: u64,
+    /// What the lane holds in memory, in bytes, where its driver reads it itself (proportional
+    /// set size of its tool's processes). A lane that says none is read by the Host from its
+    /// process tree ([`Status::instance`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{Lifecycle, Status};
+    use super::{Claim, Control, Status};
     use crate::codex_lane::{Request, Snapshot};
 
     #[test]
-    fn the_lifecycle_requests_are_the_codex_lanes_own_lines() {
+    fn the_control_requests_are_the_codex_lanes_own_lines() {
+        let claim = Claim {
+            turn: 3,
+            attempt: 1,
+            spool: "/s".into(),
+            socket: "/t".into(),
+        };
+        let prompt = |token: Option<&str>| {
+            (
+                Control::Prompt {
+                    claim: claim.clone(),
+                    text: "hi".into(),
+                    model: Some("m".into()),
+                    effort: None,
+                    token: token.map(str::to_owned),
+                },
+                Request::Prompt {
+                    claim: claim.clone(),
+                    text: "hi".into(),
+                    model: Some("m".into()),
+                    effort: None,
+                    token: token.map(str::to_owned),
+                },
+            )
+        };
         for (neutral, codex) in [
-            (Lifecycle::Inspect, Request::Inspect),
-            (Lifecycle::Retire, Request::Retire),
+            (Control::Inspect, Request::Inspect),
+            (Control::Watch, Request::Watch),
+            (Control::Retire, Request::Retire),
+            (
+                Control::Stop {
+                    turn: 3,
+                    attempt: 1,
+                },
+                Request::Stop {
+                    turn: 3,
+                    attempt: 1,
+                },
+            ),
+            prompt(None),
+            prompt(Some("tok")),
         ] {
             assert_eq!(
                 serde_json::to_string(&neutral).unwrap(),
@@ -154,6 +213,7 @@ mod tests {
                 model: Some("m".into()),
                 effort: None,
                 idle_ms: 42,
+                memory_bytes: None,
             }
         );
     }

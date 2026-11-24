@@ -125,18 +125,22 @@ impl Launcher {
         }
     }
 
-    /// The same launcher and lifetime scope used by an ordinary turn. No
-    /// per-turn identity is carried in the environment of this persistent process.
-    pub(crate) fn goal_lane_command(
+    /// The command that starts a lane process of `tool` (`crate::lane`): the same launcher and
+    /// lifetime scope used by an ordinary turn. No per-turn identity is carried in the
+    /// environment of this persistent process. It prints `ready` on its standard output once its
+    /// tool is up.
+    pub(crate) fn lane_command(
         &self,
+        tool: crate::lane::Tool,
         socket: &Path,
         program: &str,
         options: &Path,
         cwd: &Path,
     ) -> Command {
-        let mut command = self.shim_command(&format!("clarp-codex-goal-{}", ids::hex(4)));
+        let (word, scope) = tool.shim_word();
+        let mut command = self.shim_command(&format!("{scope}-{}", ids::hex(4)));
         command
-            .args(["codex-goal-lane"])
+            .args([word])
             .arg(socket)
             .arg(program)
             .arg(options)
