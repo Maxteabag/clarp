@@ -20,8 +20,8 @@ PLANTS = [
      '.filter(|end| end.turn == last.id.0)\n        .and_then(|end| end.trace_id.clone())', '.and_then(|end| end.trace_id.clone())'),
     (W, "stop", "a Stop that names no trace",
      'if !trace.is_empty() {\n                detail.insert("trace_id".to_string(), json!(trace));', 'if trace.is_empty() {\n                detail.insert("trace_id".to_string(), json!(trace));'),
-    (A, "stop", "the Stop told at once without its end",
-     'wire::stopped(&record, &rested, self.ended.as_ref())', 'wire::stopped(&record, &rested, None)'),
+    # "the Stop told at once without its end" left with wire::stopped (issue 747): a Stop's end is
+    # told once, through the ended state, which the next rule plants.
     (W, "stop", "an ended state told without its end",
      '(None, Some(last)) => ending_detail(last, backend, &record.model, ended),', '(None, Some(last)) => ending_detail(last, backend, &record.model, None),'),
     (T, "job", "a job between turns given a trace",
