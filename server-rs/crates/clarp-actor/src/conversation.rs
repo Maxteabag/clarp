@@ -1369,13 +1369,7 @@ pub(crate) fn older(
     } else {
         limit
     };
-    let (items, mut has_more) = items_before(
-        log,
-        (before, span.floor),
-        stored_limit,
-        which,
-        span,
-    )?;
+    let (items, mut has_more) = items_before(log, (before, span.floor), stored_limit, which, span)?;
     let mut entries = rows(log, &items, Place::First, which, span)?;
     live.retain(|shown| {
         !entries
@@ -1472,8 +1466,7 @@ pub(crate) fn after(
     let mut reader = Reader::new(log);
     let mut from = (revision / REVISION_STEP).max(span.floor);
     let (mut entries, latest_revision, has_more) = loop {
-        let (items, has_more, cursor) =
-            items_after(log, from, limit, which, span)?;
+        let (items, has_more, cursor) = items_after(log, from, limit, which, span)?;
         let mut entries = rows(log, &items, Place::Newest, which, span)?;
         if !has_more {
             for draft in drafts {
