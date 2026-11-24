@@ -164,15 +164,15 @@ mod tests {
         assert_eq!(provider_hosts("a tool nobody has heard of"), ANYWHERE);
     }
 
+    /// What a probe of a test tried: names and ports, in order.
+    type Tried = Arc<std::sync::Mutex<Vec<(String, u16)>>>;
+
     /// A probe whose connections open only to the names given, and that keeps what it tried.
     fn probe(
         proxy: Option<(&str, u16)>,
         open: &'static [(&'static str, u16)],
-    ) -> (
-        Probe<impl Fn(&str, u16) -> bool + Send + Sync>,
-        Arc<std::sync::Mutex<Vec<(String, u16)>>>,
-    ) {
-        let tried = Arc::new(std::sync::Mutex::new(Vec::new()));
+    ) -> (Probe<impl Fn(&str, u16) -> bool + Send + Sync>, Tried) {
+        let tried = Tried::default();
         let kept = tried.clone();
         let probe = Probe {
             proxy: proxy.map(|(host, port)| (host.to_string(), port)),
