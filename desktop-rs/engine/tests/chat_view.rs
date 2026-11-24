@@ -73,3 +73,25 @@ fn a_host_whose_conversation_view_grows_has_its_cached_chats_read_afresh_once() 
         "the chat cached before is not kept as it was");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `helper_conversation` (contract 175) reads the chats held from before
+/// afresh once too, recorded apart from `conversation_view_grows`.
+#[test]
+fn a_host_that_shows_helpers_conversations_has_its_cached_chats_read_afresh_once() {
+    use clarp_core::transcript_cache::TranscriptCache;
+    let host = Host::start("helper-conversation");
+    host.control("/__control/chat-view", json!({"on": true, "helper": true}));
+    let dir = std::env::temp_dir().join(format!("clarp-helper-conv-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cache = TranscriptCache::new(&dir);
+    let base = clarp_core::settings::normalized_base_url(&host.base);
+    let snapshot = json!({"turns": [{"id": "old", "role": "assistant", "text": "cached"}], "conversation_id": "c"});
+    cache.save(&base, "rachel", snapshot.as_object().unwrap()).unwrap();
+    let mut d = Driver::with_transcript_cache(&host.base, &dir);
+    d.connect();
+    d.until("the Host's features are read", |e| e.settings().boolean(&format!("chatView/helperConversationRead/{base}"), false));
+    assert!(!d.engine.settings().boolean(&format!("chatView/growsRead/{base}"), false), "each feature is recorded on its own");
+    assert!(cache.load(&base, "rachel").get("turns").and_then(|t| t.as_array()).is_none_or(|t| t.iter().all(|r| r["id"] != "old")),
+        "the chat cached before is not kept as it was");
+    let _ = std::fs::remove_dir_all(&dir);
+}

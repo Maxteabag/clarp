@@ -41,10 +41,12 @@ impl Outcome {
     }
 }
 
-/// The Host's conversation view only grows (contract 174).
-pub(crate) const GROWS_FEATURE: &str = "conversation_view_grows";
-/// Settings key prefix: this Host's chats were read afresh once it grew.
-const GROWS_READ: &str = "chatView/growsRead/";
+/// Features after which the chats held from before are read afresh, once
+/// per Host: the conversation view only grows (contract 174), and a
+/// helper's chat shows the turns other agents began (`helper_conversation`,
+/// contract 175), so rows held from before lack their new view tags.
+pub(crate) const READ_AFRESH_FEATURES: [(&str, &str); 2] =
+    [("conversation_view_grows", "chatView/growsRead/"), ("helper_conversation", "chatView/helperConversationRead/")];
 
 fn has(info: &Object, name: &str) -> bool {
     info.get("capabilities")
@@ -191,11 +193,16 @@ impl Engine {
     /// its cached transcripts are dropped and the open chats read afresh;
     /// after that no read ever needs a removal.
     fn conversation_view_grows(&mut self, info: &Object) {
-        if self.peer || !has(info, GROWS_FEATURE) || self.cache_key.is_empty() {
+        if self.peer || self.cache_key.is_empty() {
             return;
         }
-        let key = format!("{GROWS_READ}{}", self.cache_key);
-        if self.settings.boolean(&key, false) {
+        let new: Vec<String> = READ_AFRESH_FEATURES
+            .iter()
+            .filter(|(feature, _)| has(info, feature))
+            .map(|(_, prefix)| format!("{prefix}{}", self.cache_key))
+            .filter(|key| !self.settings.boolean(key, false))
+            .collect();
+        if new.is_empty() {
             return;
         }
         if let Some(cache) = self.transcript_cache.as_ref() {
@@ -213,7 +220,9 @@ impl Engine {
             self.request_tail(&session, true);
             self.changes.push(Change::Conversation(session));
         }
-        self.settings.set(&key, true);
+        for key in new {
+            self.settings.set(&key, true);
+        }
     }
 
     /// `agent-roster` kind `chat_view`: another device's different choice

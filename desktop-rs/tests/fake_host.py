@@ -1374,6 +1374,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("stalled_turn")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
+            if chat_view.get("helper"):
+                features.append("helper_conversation")
             if chat_view["on"]:
                 features.append("chat_view")
             if chat_view["fork"]:
@@ -1971,7 +1973,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/chat-view":
             # Test control: the chat_view and conversation_fork features (read
             # from /server-info on connecting), and whether writes are refused.
-            for key in ("on", "fork", "refuse", "grows"):
+            for key in ("on", "fork", "refuse", "grows", "helper"):
                 if key in body:
                     chat_view[key] = bool(body[key])
             return self.reply(200, {"ok": True})
