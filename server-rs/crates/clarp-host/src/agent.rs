@@ -1859,6 +1859,16 @@ impl Worker {
                 let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                 Instant::now() + Duration::from_millis(wait)
             });
+            // And an agent whose last turn's process runs on after the turn wakes to stop it,
+            // or to go on without it.
+            let linger_due = self
+                .actor
+                .as_ref()
+                .and_then(Actor::linger_due_at)
+                .map(|due| {
+                    let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
+                    Instant::now() + Duration::from_millis(wait)
+                });
             // And an agent whose turn holds something back from those who watch it (a text
             // that grows, lines a tool prints) wakes to send it.
             let shown_due = self
@@ -1881,6 +1891,7 @@ impl Worker {
                 goals_due,
                 requests_due,
                 retry_due,
+                linger_due,
                 shown_due,
                 stall_due,
             ]
@@ -1916,6 +1927,9 @@ impl Worker {
                     }
                     if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
                         looked = self.retry_turn();
+                    }
+                    if looked.is_ok() && linger_due.is_some_and(|due| due <= now) {
+                        looked = self.end_lingering();
                     }
                     if looked.is_ok() && stall_due.is_some_and(|due| due <= now) {
                         looked = self.check_stall();
@@ -3920,6 +3934,17 @@ impl Worker {
             return Ok(());
         };
         let out = actor.retry_due(now)?;
+        self.after(out);
+        Ok(())
+    }
+
+    /// Stops the process of a turn that is over and runs on too long, or goes on without it.
+    fn end_lingering(&mut self) -> Result<(), ActorError> {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let out = actor.linger_due(now)?;
         self.after(out);
         Ok(())
     }

@@ -26,6 +26,8 @@ pub(super) struct State {
     stream: steering::Stream,
     primary_uuid: Option<String>,
     primary_started: bool,
+    /// A result of the process named the turn's own message as one it answers.
+    primary_answered: bool,
     pub(super) input_skipped: bool,
     parent: Option<(RunOutcome, Facts, String)>,
     /// The process is answering another user message past its first result.
@@ -75,6 +77,32 @@ impl State {
 
     pub(super) fn prompt_uuid(&self) -> Option<&str> {
         self.primary_uuid.as_deref()
+    }
+
+    /// Whether the process has answered the turn's own message. A resumed Claude session can
+    /// first answer what its last process left behind (a `<task-notification>`), with a
+    /// result of its own that names no message or another one; only a result that names the
+    /// turn's message answers it. A tool whose input is not named this way has answered when
+    /// it says so.
+    pub(super) fn answered_its_prompt(&self) -> bool {
+        self.primary_uuid.is_none() || self.primary_answered
+    }
+
+    fn observe_answer(&mut self, event: &Value) {
+        let Some(uuid) = self.primary_uuid.as_deref() else {
+            return;
+        };
+        let nested = event["parent_tool_use_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty());
+        if event["type"] == "result"
+            && !nested
+            && event["user_message_uuids"]
+                .as_array()
+                .is_some_and(|named| contains_uuid(named, uuid))
+        {
+            self.primary_answered = true;
+        }
     }
 
     fn observe_start(&mut self, event: &Value) {
@@ -145,6 +173,7 @@ impl State {
             Line::Out(line) if self.primary_uuid.is_some() || self.owner.is_some() => {
                 let event = serde_json::from_str(line).ok()?;
                 self.observe_start(&event);
+                self.observe_answer(&event);
                 if self.owner.is_some() {
                     return Some(event);
                 }

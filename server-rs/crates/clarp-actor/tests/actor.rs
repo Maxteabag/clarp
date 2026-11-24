@@ -7216,6 +7216,11 @@ fn claude_init(world: &mut World, turn: u64) {
     );
 }
 
+/// The id the Host gave turn `turn`'s message to Claude Code, which its result names.
+fn claude_prompt(turn: u64) -> String {
+    clarp_kernel::takeover::attempt_prompt_uuid("a1", turn, None, 1)
+}
+
 fn claude_result(prompts: &[&str]) -> String {
     json!({"type": "result", "subtype": "success", "is_error": false, "result": "",
            "user_message_uuids": prompts})
@@ -7228,6 +7233,7 @@ fn work_claude_left_in_the_background_keeps_the_turn_until_it_answers_again() {
     world.backend = Arc::new(Claude::new());
     let mut actor = world.open();
     world.send(&mut actor, "u-1", "go", Admission::Queue);
+    let primary = claude_prompt(1);
     claude_init(&mut world, 1);
     claude_message(&mut world, 1, "a", "Starting it.", &["t1"]);
     let receipt = json!({"type": "user",
@@ -7236,7 +7242,7 @@ fn work_claude_left_in_the_background_keeps_the_turn_until_it_answers_again() {
         "toolUseResult": {"backgroundTaskId": "b1"}});
     world.says(1, &receipt.to_string());
     claude_message(&mut world, 1, "b", "It runs.", &[]);
-    world.says(1, &claude_result(&[]));
+    world.says(1, &claude_result(&[&primary]));
     world.hint(&mut actor);
     assert_eq!(
         actor.status().live.unwrap().turn,
@@ -7248,7 +7254,7 @@ fn work_claude_left_in_the_background_keeps_the_turn_until_it_answers_again() {
         "<task-notification><task-id>b1</task-id><tool-use-id>t1</tool-use-id><status>completed</status><summary>done</summary></task-notification>"}});
     world.says(1, &notified.to_string());
     claude_message(&mut world, 1, "c", "It finished.", &[]);
-    world.says(1, &claude_result(&[]));
+    world.says(1, &claude_result(&[&primary]));
     world.hint(&mut actor);
     assert!(actor.status().live.is_none(), "over at its last answer");
     assert_eq!(
@@ -7301,7 +7307,7 @@ fn a_message_read_into_the_turn_and_not_answered_keeps_it_open() {
         &json!({"type": "user", "isReplay": true, "uuid": uuid}).to_string(),
     );
     // Its first result answers only the turn's own message.
-    let primary = clarp_kernel::takeover::attempt_prompt_uuid("a1", 1, None, 1);
+    let primary = claude_prompt(1);
     world.says(1, &claude_result(&[&primary]));
     world.hint(&mut actor);
     assert_eq!(
@@ -7363,4 +7369,118 @@ fn a_stopped_claude_turn_ends_at_its_result_and_the_next_waits_for_the_exit() {
     world.exits(1, Some(0), None);
     world.hint(&mut actor);
     assert_eq!(world.took, [1, 2]);
+}
+
+#[test]
+fn a_result_for_what_the_last_process_left_behind_does_not_end_the_turn() {
+    let mut world = World::new("leftover-notification");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_init(&mut world, 1);
+    // A resumed session answers the notification its last process left behind first, with a
+    // result of its own that names no message of the turn.
+    let leftover = json!({"type": "user", "message": {"role": "user", "content":
+        "<task-notification><task-id>b9</task-id><tool-use-id>t9</tool-use-id><status>completed</status><summary>done</summary></task-notification>"}});
+    world.says(1, &leftover.to_string());
+    claude_message(&mut world, 1, "a", "The build is done.", &[]);
+    world.says(1, &claude_result(&[]));
+    world.hint(&mut actor);
+    assert_eq!(
+        actor.status().live.unwrap().turn,
+        TurnId(1),
+        "the user's message is not answered yet"
+    );
+
+    claude_message(&mut world, 1, "b", "Here is your answer.", &[]);
+    world.says(1, &claude_result(&[&claude_prompt(1)]));
+    world.hint(&mut actor);
+    assert!(actor.status().live.is_none(), "over at the answer to its message");
+    assert_eq!(
+        shown(&actor),
+        [
+            pair("u-1", "user: go"),
+            pair("r-a", "agent: The build is done."),
+            pair("r-b", "agent: Here is your answer."),
+        ]
+    );
+    assert_eq!(
+        turn_ends(&actor),
+        [("r-b".to_string(), "completed".to_string())]
+    );
+}
+
+#[test]
+fn what_the_process_says_after_its_end_line_is_kept_as_the_turns() {
+    let mut world = World::new("said-after-end");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.says(1, r#"{"reply": "Done."}"#);
+    world.says(1, ANSWERED);
+    world.hint(&mut actor);
+    assert!(actor.status().live.is_none());
+    world.says(1, r#"{"reply": "One more thing."}"#);
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        shown(&actor),
+        [
+            pair("u-1", "user: go"),
+            pair("r-1-1", "agent: Done."),
+            pair("r-1-2", "agent: One more thing."),
+        ]
+    );
+}
+
+#[test]
+fn a_shim_gone_before_its_end_line_was_read_lets_the_next_turn_go_on() {
+    let mut world = World::new("gone-before-read");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "next", Admission::Queue);
+    world.says(1, r#"{"reply": "Done."}"#);
+    world.says(1, ANSWERED);
+    // The shim goes without its exit in the spool, before the end line was read.
+    world.shims.remove(&1);
+    let now = world.tick();
+    let out = actor.shim_gone(TurnId(1), 1, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(
+        turn_ends(&actor),
+        [("r-1-1".to_string(), "completed".to_string())]
+    );
+    assert_eq!(world.took, [1, 2], "nothing waits for a process that is gone");
+}
+
+#[test]
+fn a_process_that_lingers_too_long_is_stopped_and_then_left_behind() {
+    let mut world = World::new("lingers-too-long");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "next", Admission::Queue);
+    world.says(1, r#"{"reply": "Done."}"#);
+    world.says(1, ANSWERED);
+    world.hint(&mut actor);
+    let due = actor.linger_due_at().unwrap();
+    assert!(due - world.now_ms >= 29_000, "it may run some 30 s");
+    assert!(actor.linger_due(due - 1).unwrap().actions.is_empty());
+
+    world.now_ms = due;
+    let out = actor.linger_due(due).unwrap();
+    assert!(
+        matches!(out.actions[..], [Action::Stop { turn: TurnId(1), .. }]),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.took, [1], "the next waits for the Stop");
+
+    // Its exit does not come: once the Stop has had its time, the next turn goes on.
+    let due = actor.linger_due_at().unwrap();
+    world.now_ms = due;
+    let out = actor.linger_due(due).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.took, [1, 2]);
+    assert_eq!(actor.linger_due_at(), None);
+    assert_eq!(actor.status().last.unwrap().id, TurnId(1));
 }

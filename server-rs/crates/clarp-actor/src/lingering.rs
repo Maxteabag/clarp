@@ -10,15 +10,30 @@
 //!
 //! The exit no longer changes the turn. One that fails after the tool said its answer was
 //! whole leaves the answer as it is, told: the user has it whole, and trying the turn again
-//! would answer it twice. The Host's own log says that it failed.
+//! would answer it twice. The Host's own log says that it failed. What the process still says
+//! after its end line is kept in the conversation, as the turn's, where the exit would have
+//! kept it: a turn misjudged as over shows a late row, and loses nothing.
+//!
+//! A process lingers at most [`LINGER_MOST_MS`]: then it is stopped as a Stop stops it, and
+//! once the Stop has had its time the next launch goes on, whether its exit came or not (a
+//! process it started outside its group can hold its output open).
 
 use clarp_backend::{Interpreter, Signal};
 use clarp_kernel::agent::Agent;
+use clarp_kernel::conversation::Entry;
 use clarp_kernel::steering::Stage;
-use clarp_kernel::turn::{RunOutcome, Turn, TurnId};
+use clarp_kernel::turn::{Origin, RunOutcome, Turn, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
-use super::{Action, Actor, ActorError, LiveTurn, Outputs, WINDOW, io_error};
+use super::{Action, Actor, ActorError, LiveTurn, Outputs, WINDOW, io_error, written};
+
+/// How long the process of a turn that is over may run before it is stopped. Claude Code
+/// sends what it counted within a few seconds.
+pub const LINGER_MOST_MS: i64 = 30_000;
+
+/// How long a stopped lingering process has to be gone, beyond the Stop's own grace: an
+/// interrupted Claude Code is given three seconds before SIGTERM.
+const STOPPED_MOST_MS: i64 = 8_000;
 
 /// How a turn that ends before its process does ended for the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +54,12 @@ pub(super) struct Lingering {
     interpreter: Option<Box<dyn Interpreter>>,
     /// The turn was stopped, or the process was told to end after it: how it exits says nothing.
     stopped: bool,
+    /// Whose turn it was, for what the process says after its end line.
+    origin: Origin,
+    trace_id: Option<String>,
+    /// When it began to linger, and when it was told to stop.
+    since_ms: i64,
+    stop_sent_ms: Option<i64>,
 }
 
 /// Whether the turn is over for the user at this line of its tool, while its process still
@@ -68,7 +89,9 @@ pub(super) fn ends_at_answer(live: &LiveTurn, agent: &Agent, at: EndsAt) -> bool
         && !joins_owed
         && agent.selected_takeover().is_none()
         && match at {
-            EndsAt::Answer => !stopped && live.tools.is_empty(),
+            EndsAt::Answer => {
+                !stopped && live.tools.is_empty() && live.steering.answered_its_prompt()
+            }
             EndsAt::Stop => stopped,
         }
         && matches!(agent.live(), Some(Turn::Running(running)) if running.id == live.turn)
@@ -81,7 +104,7 @@ impl Actor {
     }
 
     /// The live turn ended before its process: the actor follows that process to its exit.
-    pub(super) fn linger(&mut self) {
+    pub(super) fn linger(&mut self, now_ms: i64) {
         let Some(live) = self.live.take() else {
             return;
         };
@@ -95,6 +118,10 @@ impl Actor {
             offset: live.offset,
             interpreter: Some(live.interpreter),
             stopped: live.ended_at == Some(EndsAt::Stop),
+            origin: live.origin,
+            trace_id: live.trace_id,
+            since_ms: now_ms,
+            stop_sent_ms: None,
         });
     }
 
@@ -102,11 +129,11 @@ impl Actor {
     /// still run. Its shim's socket says so: the shim takes it away when the tool is gone.
     /// Followed to its exit, as before the restart. Called before the live turn is taken up,
     /// whose launch waits for that exit.
-    pub(super) fn take_up_lingering(&mut self, out: &mut Outputs) {
+    pub(super) fn take_up_lingering(&mut self, out: &mut Outputs, now_ms: i64) {
         let Some(last) = self.recorder.agent().last() else {
             return;
         };
-        let (turn, attempt) = (last.id, last.attempts);
+        let (turn, attempt, origin) = (last.id, last.attempts, last.origin.clone());
         if attempt == 0 {
             return;
         }
@@ -122,6 +149,10 @@ impl Actor {
             offset: 0,
             interpreter: None,
             stopped: false,
+            origin,
+            trace_id: None,
+            since_ms: now_ms,
+            stop_sent_ms: None,
         });
         out.actions.push(Action::FollowExit {
             turn,
@@ -143,7 +174,7 @@ impl Actor {
             .profile
             .spool_path_of(lingering.turn, lingering.attempt);
         let mut gone = false;
-        let mut said_more = 0usize;
+        let mut late = Vec::new();
         while !gone {
             let read = SpoolReader::new(&spool)
                 .read_window(lingering.offset, u64::MAX, WINDOW)
@@ -155,32 +186,54 @@ impl Actor {
             let mut signals = Vec::new();
             for record in &read.records {
                 gone |= matches!(record.entry, Line::Shim(ShimEvent::Exited { .. }));
-                if let Some(interpreter) = lingering.interpreter.as_mut() {
-                    interpreter.on_record(record, &mut signals);
-                }
-            }
-            for signal in signals {
-                match signal {
-                    Signal::Ended(outcome)
-                        if outcome != RunOutcome::Completed && !lingering.stopped =>
-                    {
-                        eprintln!(
-                            "clarp-host: agent {}: turn {} was over when its tool exited badly; \
-                             it stays as it ended: {outcome:?}",
-                            self.profile.session, lingering.turn.0
-                        );
-                    }
-                    Signal::Reply(_) | Signal::Tool(_) | Signal::Notice(_) => said_more += 1,
-                    _ => {}
+                let Some(interpreter) = lingering.interpreter.as_mut() else {
+                    continue;
+                };
+                interpreter.on_record(record, &mut signals);
+                for signal in signals.drain(..) {
+                    let entry = match signal {
+                        Signal::Ended(outcome)
+                            if outcome != RunOutcome::Completed && !lingering.stopped =>
+                        {
+                            eprintln!(
+                                "clarp-host: agent {}: turn {} was over when its tool exited \
+                                 badly; it stays as it ended: {outcome:?}",
+                                self.profile.session, lingering.turn.0
+                            );
+                            continue;
+                        }
+                        Signal::Reply(mut reply) => {
+                            reply.origin = lingering.origin.clone();
+                            reply.trace_id.clone_from(&lingering.trace_id);
+                            Entry::Reply(reply)
+                        }
+                        Signal::Tool(mut call) => {
+                            call.origin = lingering.origin.clone();
+                            call.trace_id.clone_from(&lingering.trace_id);
+                            Entry::Tool(call)
+                        }
+                        Signal::Notice(notice) => Entry::Notice(notice),
+                        _ => continue,
+                    };
+                    late.push((entry, record.t));
                 }
             }
         }
-        if said_more > 0 {
+        if !late.is_empty() {
             eprintln!(
-                "clarp-host: agent {}: turn {}'s tool said {said_more} thing(s) after its turn \
-                 was over; they are not in the conversation",
-                self.profile.session, lingering.turn.0
+                "clarp-host: agent {}: turn {}'s tool said {} thing(s) after its turn was over; \
+                 they are kept as the turn's",
+                self.profile.session,
+                lingering.turn.0,
+                late.len()
             );
+            let mut batch = self.recorder.batch();
+            for (entry, at) in &late {
+                batch.item(written(entry, *at)?);
+            }
+            batch.commit()?;
+            self.unstored_changes = 0;
+            out.changed.conversation = true;
         }
         if gone {
             self.let_go(out, now_ms)?;
@@ -208,11 +261,12 @@ impl Actor {
     }
 
     /// A Stop while the process lingers ends it. The turn it was is over and stays as it ended.
-    pub(super) fn stop_lingering(&mut self, out: &mut Outputs) {
+    pub(super) fn stop_lingering(&mut self, out: &mut Outputs, now_ms: i64) {
         let Some(lingering) = self.lingering.as_mut() else {
             return;
         };
         lingering.stopped = true;
+        lingering.stop_sent_ms.get_or_insert(now_ms);
         out.actions.push(Action::Stop {
             turn: lingering.turn,
             socket: self
@@ -220,6 +274,44 @@ impl Actor {
                 .socket_path_of(lingering.turn, lingering.attempt),
             grace_ms: self.profile.stop_grace_ms,
         });
+    }
+
+    /// When the lingering process is to be stopped, or let go of though it did not end.
+    pub fn linger_due_at(&self) -> Option<i64> {
+        let lingering = self.lingering.as_ref()?;
+        Some(match lingering.stop_sent_ms {
+            None => lingering.since_ms + LINGER_MOST_MS,
+            Some(sent) => {
+                sent + i64::try_from(self.profile.stop_grace_ms).unwrap_or(i64::MAX / 4)
+                    + STOPPED_MOST_MS
+            }
+        })
+    }
+
+    /// The lingering process ran too long: it is stopped as a Stop stops it. Once that Stop has
+    /// had its time, it is let go of, and the launch that waited for it is made.
+    pub fn linger_due(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        if self.linger_due_at().is_none_or(|due| due > now_ms) {
+            return Ok(out);
+        }
+        self.pump_lingering(&mut out, now_ms)?;
+        let Some(lingering) = self.lingering.as_ref() else {
+            return Ok(out);
+        };
+        let (session, turn) = (&self.profile.session, lingering.turn.0);
+        if lingering.stop_sent_ms.is_none() {
+            eprintln!("clarp-host: agent {session}: turn {turn}'s tool ran on after it; stopped");
+            self.stop_lingering(&mut out, now_ms);
+        } else {
+            eprintln!(
+                "clarp-host: agent {session}: turn {turn}'s tool was not gone after its Stop; \
+                 the next turn goes on"
+            );
+            self.let_go(&mut out, now_ms)?;
+        }
+        out.changed.status = true;
+        Ok(out)
     }
 
     /// The lingering process is gone: what it left is cleared away, and the launch that waited

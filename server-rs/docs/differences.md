@@ -545,7 +545,9 @@ the daily schedule.
   line, 0.7 to 2.7 seconds before it exits (Claude Code sends what it counted first), and the
   agent was shown at work for that long after its answer. The Rust Host ends the turn at that
   line (Codex exec at `turn.completed`), when its answer is whole and nothing else of the turn
-  is owed: no message read into it and not answered, none given to it and not yet read, no
+  is owed: Claude's result names the turn's own message (a resumed session can first answer,
+  in a result of its own, a task notification its last process left behind), no message read
+  into it and not answered, none given to it and not yet read, no
   separate turn its process went on to, no tool call that runs, no work Claude Code left in the
   background (it answers again when that is done, and the turn ends at that answer). The agent's
   state, its live items and the row's `turn` (`ended_at_ms` and `worked_ms` with it) say the
@@ -553,7 +555,10 @@ the daily schedule.
   begun at once but launched only then: two processes never work in one conversation. A Stop
   meanwhile ends the process and leaves the turn as it ended. A process that exits badly after
   an answer it said was whole leaves the turn completed and is not tried again (that would answer
-  twice); the Host's log says so. Claude Code is asked to stop with SIGINT first, then SIGTERM
+  twice); the Host's log says so. Anything the process still says after its end line is kept in
+  the conversation as the turn's, after its closing row. A process that runs on 30 seconds after
+  its turn is stopped as a Stop stops it, and once that Stop has had its time the next turn is
+  launched whether the process is gone or not. Claude Code is asked to stop with SIGINT first, then SIGTERM
   after three seconds: interrupted, it prints a `result` of `error_during_execution` some 40 ms
   later, and the stopped turn ends there (with SIGTERM it printed nothing and went a second
   later). A turn with a message given to it and not yet read still ends at the exit, as before.

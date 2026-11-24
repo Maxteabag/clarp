@@ -1670,7 +1670,7 @@ impl Actor {
         }
         // The process of the turn that ended last may still run: no turn is launched before
         // it is gone, the fork's held turn and the live turn included.
-        actor.take_up_lingering(&mut out);
+        actor.take_up_lingering(&mut out, now_ms);
         // The fork is taken up before the agent's own turn is rejoined: a turn of the user's
         // that was held for the fork's turn (never launched) is held again, not started
         // beside it.
@@ -4120,7 +4120,7 @@ impl Actor {
         self.carry_out(effects, &mut out, now_ms)?;
         // A process whose turn is over for the user and still runs is ended too: the turn it
         // was stays as it ended.
-        self.stop_lingering(&mut out);
+        self.stop_lingering(&mut out, now_ms);
         // Only the user's own Stop means "be quiet": the rest of what the agent had to say is
         // not spoken. An agent that stops another orchestrates; what was about to be said is
         // still the user's to hear.
@@ -4585,7 +4585,11 @@ impl Actor {
                 reason: "the turn's process is gone and did not say how it went".to_string(),
             },
         };
-        self.ended_outside_the_spool(turn, command, now_ms)
+        let mut out = self.ended_outside_the_spool(turn, command, now_ms)?;
+        // Reading what the spool still held may have ended the turn at its end line: its
+        // process is the one that is gone, and nothing waits for it any more.
+        self.lingering_gone(turn, attempt, &mut out, now_ms)?;
+        Ok(out)
     }
 
     /// Ends a turn on someone's word instead of the spool's. The spool is read first: if it does
@@ -6825,7 +6829,7 @@ impl Actor {
             // The turn is over when its attempt is and it does not wait for another. One that
             // ended before its process is followed to its exit.
             if lingers {
-                self.linger();
+                self.linger(now_ms);
             } else if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
