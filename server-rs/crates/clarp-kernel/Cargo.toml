@@ -11,6 +11,7 @@ clarp-tool-args.workspace = true
 clarp-provider-hook.workspace = true
 clarp-ports.workspace = true
 clarp-speech.workspace = true
+clarp-spool.workspace = true
 http.workspace = true
 url.workspace = true
 hmac.workspace = true

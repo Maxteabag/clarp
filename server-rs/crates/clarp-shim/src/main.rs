@@ -65,8 +65,6 @@ const HOLD_RETRY_WINDOW: Duration = Duration::from_millis(10);
 /// first.
 const SERVED: [&str; 2] = ["opencode-turn", clarp_acp::agy::DRIVER];
 const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";
-/// What the Host's words of a missing folder begin with (`clarp_kernel::failures`).
-const FOLDER_MISSING: &str = "folder_missing:";
 
 struct Args {
     before_stop: Option<(Signal, Duration)>,
@@ -1265,10 +1263,9 @@ fn run(args: Args) -> Result<u8, String> {
         Ok(child) => child,
         Err(error) => {
             // The folder the tool was to run in went after the Host looked: said as the Host
-            // says it (`clarp_kernel::failures::folder_missing`), not as the program's error,
-            // so that the turn ends at once.
-            if let Some(cwd) = args.cwd.as_ref().filter(|cwd| !cwd.is_dir()) {
-                return not_started(format!("{FOLDER_MISSING} {}", cwd.display()));
+            // says it, not as the program's error, so that the turn ends at once.
+            if let Some(gone) = args.cwd.as_deref().and_then(clarp_spool::folder_gone) {
+                return not_started(gone);
             }
             return not_started(format!("{}: {error}", args.program));
         }

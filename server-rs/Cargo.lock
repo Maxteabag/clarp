@@ -280,6 +280,7 @@ dependencies = [
  "clarp-ports",
  "clarp-provider-hook",
  "clarp-speech",
+ "clarp-spool",
  "clarp-store-mem",
  "clarp-tool-args",
  "hmac",

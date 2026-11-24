@@ -1,5 +1,7 @@
 //! Connects the agent's normal launch orders to its persistent Codex lane.
 
+use std::time::{Duration, Instant};
+
 use clarp_actor::native_goal::{NativeGoal, Ownership};
 use clarp_kernel::agent_goal::{Goal, Status as GoalStatus};
 use clarp_shim::codex_lane::{GoalAction, Request, Snapshot};
@@ -11,6 +13,9 @@ use super::{
 };
 
 pub(super) type GoalAnswer = Answer<Result<Option<Goal>, String>>;
+
+/// How often a goal that waits for its agent's folder to be back looks at it again.
+const FOLDER_LOOK: Duration = Duration::from_secs(5);
 
 pub(super) struct Activation {
     action: GoalAction,
@@ -32,6 +37,8 @@ pub(super) struct Native {
     idle_lane: bool,
     observed_lane: Option<(u32, u64)>,
     after_retire: Option<Box<ShimOrder>>,
+    /// When a goal that would go on, and whose agent's folder is gone, looks at it again.
+    pub(super) folder_look: Option<Instant>,
 }
 
 impl Native {
@@ -183,6 +190,18 @@ impl Worker {
                     .as_ref()
                     .is_some_and(|goal| goal.status == GoalStatus::Active)
         });
+        // A goal whose agent's folder is gone does not go on by itself: each of its turns
+        // would fail at once, and one held for an account would be started again at once,
+        // without end. It looks at the folder again every few seconds, and goes on once the
+        // folder is back (issue 758). The user's own word to it still runs, and is told.
+        self.native.folder_look = None;
+        let continue_goal = continue_goal && {
+            let gone = clarp_spool::folder_gone(&self.setup.profile.cwd).is_some();
+            if gone {
+                self.native.folder_look = Some(Instant::now() + FOLDER_LOOK);
+            }
+            !gone
+        };
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };

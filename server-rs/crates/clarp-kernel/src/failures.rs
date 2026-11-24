@@ -46,34 +46,34 @@ pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
 /// [`provider_mismatch`] begins with; a tool's own words never read as it.
 pub const PROVIDER_MISMATCH: &str = "provider_mismatch";
 
-/// The agent's working folder is not there (a worktree removed after its branch landed):
-/// nothing can be started in it. Never tried again: no try brings the folder back. The Host
-/// names it itself, by the words [`folder_missing`] makes; a tool's own words never read as
-/// it.
+/// The agent's working folder is not there, or is no folder (a worktree removed after its
+/// branch landed): nothing can be started in it. Never tried again: no try brings the folder
+/// back. The Host names it itself, by the words [`clarp_spool::folder_gone`] makes; a tool's
+/// own words never read as it.
 pub const FOLDER_MISSING: &str = "folder_missing";
 
-/// What the words of a missing folder begin with, before the folder. The shim writes the same
-/// words into a turn's spool when the folder went between the Host's look and the launch.
-const FOLDER_MISSING_MARK: &str = "folder_missing:";
-
-/// The words a turn ends with whose agent's folder is not there: the mark of the kind, then
-/// the folder.
-pub fn folder_missing(dir: &str) -> String {
-    format!("{FOLDER_MISSING_MARK} {dir}")
-}
-
-/// The folder in words that [`folder_missing`] made. `None` for any other words.
+/// What follows the mark in words of a missing folder: the folder, said as no folder where it
+/// is one. `None` for any other words.
 pub fn missing_folder(said: &str) -> Option<&str> {
-    said.trim().strip_prefix(FOLDER_MISSING_MARK).map(str::trim)
+    said.trim()
+        .strip_prefix(clarp_spool::FOLDER_MISSING_MARK)
+        .map(str::trim)
 }
 
-/// What the user is told of a turn that could not start because its agent's folder is not
-/// there: which folder, and what to do.
-pub fn folder_missing_sentence(dir: &str) -> String {
-    format!(
-        "This agent's folder {dir} no longer exists. Recreate it, or give the agent another \
-         folder"
-    )
+/// What the user is told of a turn that could not start because its agent's folder is gone:
+/// which folder, and what to do. `missing`: what [`missing_folder`] found.
+pub fn folder_missing_sentence(missing: &str) -> String {
+    match missing.strip_prefix(clarp_spool::NOT_A_FOLDER) {
+        Some(dir) => format!(
+            "This agent's folder {} is not a folder. Recreate it as one, or give the agent \
+             another folder",
+            dir.trim()
+        ),
+        None => format!(
+            "This agent's folder {missing} no longer exists. Recreate it, or give the agent \
+             another folder"
+        ),
+    }
 }
 
 /// Whether a turn that failed of this kind never had its tool started.
@@ -292,7 +292,7 @@ pub fn classify_error(message: &str) -> &'static str {
     if text.starts_with(PROVIDER_MISMATCH_MARK) {
         return PROVIDER_MISMATCH;
     }
-    if text.starts_with(FOLDER_MISSING_MARK) {
+    if text.starts_with(clarp_spool::FOLDER_MISSING_MARK) {
         return FOLDER_MISSING;
     }
     let text = affirmed(text);
@@ -914,7 +914,7 @@ mod tests {
 
     #[test]
     fn a_missing_folder_is_read_by_its_mark_and_told_in_a_sentence_that_names_it() {
-        let said = folder_missing("/work/helper");
+        let said = clarp_spool::folder_missing("/work/helper", false);
         assert_eq!(classify_error(&said), FOLDER_MISSING);
         assert_eq!(missing_folder(&said), Some("/work/helper"));
         assert!(never_started(FOLDER_MISSING) && never_started(NOT_STARTED));
@@ -931,6 +931,18 @@ mod tests {
         assert_eq!(told.row, format!("{sentence}."));
         assert_eq!(told.summary, format!("{sentence}. Your message is saved."));
         assert_eq!(told.provider_message, "");
+        // A file where the folder should be is said to be no folder.
+        let file = clarp_spool::folder_missing("/work/helper", true);
+        assert_eq!(classify_error(&file), FOLDER_MISSING);
+        assert_eq!(
+            told_of(&file),
+            "This agent's folder /work/helper is not a folder. Recreate it as one, or give the \
+             agent another folder"
+        );
+    }
+
+    fn told_of(said: &str) -> String {
+        told(FOLDER_MISSING, said, "m", Known::default()).message
     }
 
     #[test]
