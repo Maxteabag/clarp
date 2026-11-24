@@ -15,6 +15,12 @@
 //! - end of turn: Codex `turn/completed`, Claude its `result` line, Muse and OpenCode their
 //!   own end; the claim is let go and the lane is idle again;
 //! - health: the lane's snapshot, which every Host reads as a `clarp_shim::lane::Status`.
+//!
+//! What a driver may leave out: goal requests (`Reserve`, `Goal`, `Recover`, `Probe`) are Codex's
+//! own (`codex_lane::Request`), since only its tool keeps goals; another driver's control loop
+//! reads `clarp_shim::lane::Control`, and a request it does not know is not answered. Which
+//! attempts a lane takes at all, and which changes start it again, the Host's driver says
+//! (`lane::Driver::takes`, `restart_for`): an attempt a lane does not take never reaches it.
 
 use std::io;
 use std::time::Duration;

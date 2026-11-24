@@ -165,6 +165,21 @@ What every driver gets from the layer, built once:
 - **Process locks**: the owner lock, the thread lock and the exec guard.
 - **Room and registry**: idle retirement, the turn-identity file and `once_more`.
 
+What a driver says of itself, rather than the layer assuming it:
+
+- **which attempts it takes** (`lane::Driver::takes`). An attempt it does not take runs as a
+  process of its own, after the agent's lanes have left. Every driver leaves an opening turn to
+  its gated launch. A resume-only driver (Muse's serve can take up a session but not start one
+  under the Host's id) also leaves the first turn of a conversation, a fork and a takeover.
+- **what starts it again** (`lane::Driver::restart_for`, with the digest). What the tool takes
+  with a turn or by a call to its running process (a model on Codex's `turn/start`, Muse's
+  `session/setModel`) is applied in place. What it reads only at start is in the digest.
+- **goals** (`lane::Goals`). Codex's native goals, with its `Reserve`, `Goal`, `Recover` and
+  `Probe` requests, are an optional capability that only Codex has.
+- **steering**: a tool that takes steered words on its lane says so with `Steers::Words`. The
+  actor then reads its lane's lines (`steer.open`, `steer.read`, the turn's end) whatever the
+  tool, and the Host offers steering only while that tool's switch is on.
+
 What a driver answers, and where:
 
 - **start**: `lane::Driver::start` in the Host. Attach where `Endpoint::place` says the

@@ -4118,9 +4118,13 @@ impl Worker {
             other => other,
         };
         let action = match action {
-            // An opening turn keeps its own gated launch.
+            // An attempt the agent's lane takes runs there: an opening turn keeps its own gated
+            // launch, and a driver may leave others to a process of their own (`Driver::takes`).
             Action::Launch(order)
-                if self.native.owns() || (self.chat_lane() && order.opening.is_none()) =>
+                if self.native.owns()
+                    || (self.chat_lane()
+                        && crate::lane::Tool::of(&self.setup.record.backend)
+                            .is_some_and(|tool| tool.takes(&order))) =>
             {
                 self.launch_on_native_lane(order);
                 return;

@@ -14,7 +14,7 @@ use clarp_shim::lane::key;
 use serde_json::{Value, json};
 
 use super::digest::OptionsDigest;
-use super::{Driver, Endpoint, Login, Place, Settings, TURN_FILE_ENV, Tool};
+use super::{Driver, Endpoint, Goals, Login, Place, Settings, Status, TURN_FILE_ENV, Tool};
 
 #[derive(Clone)]
 pub(crate) enum Submission {
@@ -49,6 +49,12 @@ impl Driver for Lane {
         &self.endpoint
     }
 
+    /// Codex takes a model and effort with each turn, and keeps them for the turns after: a
+    /// turn that asks for the defaults again, after one that named its own, needs a new lane.
+    fn restart_for(state: &Status, model: &Option<String>, effort: &Option<String>) -> bool {
+        (model.is_none() && state.model.is_some()) || (effort.is_none() && state.effort.is_some())
+    }
+
     /// Attach to the current owner or return a new child to its reaper. `thread` is `None`
     /// for a new conversation: the lane starts the thread with its first prompt. `turn` is the
     /// model and effort a prompt asks for. A lane that was started otherwise (another thread,
@@ -70,13 +76,8 @@ impl Driver for Lane {
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        // Codex keeps a model or effort from an earlier turn: a turn that asks for the
-        // defaults again needs a new lane.
         let kept = |state: &clarp_shim::lane::Status| {
-            turn.is_some_and(|(model, effort)| {
-                (model.is_none() && state.model.is_some())
-                    || (effort.is_none() && state.effort.is_some())
-            })
+            turn.is_some_and(|(model, effort)| Self::restart_for(state, model, effort))
         };
         let place = self
             .endpoint
@@ -251,8 +252,10 @@ impl Lane {
             Err(io::Error::other("the Codex lane did not start"))
         }
     }
+}
 
-    pub(crate) fn recover_stop(&self) -> io::Result<Snapshot> {
+impl Goals for Lane {
+    fn recover_stop(&self) -> io::Result<Snapshot> {
         let observed = self.ask(Request::Probe)?;
         if observed
             .goal
@@ -267,7 +270,9 @@ impl Lane {
             Ok(observed)
         }
     }
+}
 
+impl Lane {
     pub(crate) fn ask(&self, request: Request) -> io::Result<Snapshot> {
         self.endpoint.ask(&request)
     }

@@ -372,3 +372,52 @@ fn the_budget_counts_each_lanes_own_reading_and_the_new_lane_at_its_typical_size
     assert_eq!(retired, ["b:retire"]);
     std::fs::remove_dir_all(&run).unwrap();
 }
+
+#[test]
+fn a_driver_says_which_attempts_it_takes_and_what_starts_it_again() {
+    use super::Driver;
+    use super::codex::Lane;
+    use clarp_actor::{OpeningOrder, ShimOrder};
+    use clarp_kernel::turn::TurnId;
+
+    let mut order = ShimOrder {
+        opening: None,
+        named_session: None,
+        model: None,
+        effort: None,
+        prompt_as_file: false,
+        streams_input: false,
+        before_stop: None,
+        turn: TurnId(7),
+        attempt: 1,
+        spool: PathBuf::from("/s"),
+        socket: PathBuf::from("/t"),
+        stdin_file: PathBuf::from("/i"),
+        cwd: PathBuf::from("/w"),
+        program: "codex".into(),
+        args: Vec::new(),
+        env: Vec::new(),
+    };
+    // Codex takes every attempt but an opening turn, which keeps its own gated launch.
+    assert!(Tool::Codex.takes(&order));
+    order.opening = Some(Box::new(OpeningOrder {
+        id: "o".into(),
+        trace: "t".into(),
+        previous_unsent: false,
+    }));
+    assert!(!Tool::Codex.takes(&order));
+
+    // Codex takes a model and effort with a turn, in place; only asking for its defaults after
+    // it was given its own starts it again.
+    let state = |model: Option<&str>, effort: Option<&str>| -> Status {
+        let mut value = status("t", "d", 0, false);
+        value["model"] = json!(model);
+        value["effort"] = json!(effort);
+        serde_json::from_value(value).unwrap()
+    };
+    let m = Some("m".to_owned());
+    assert!(!Lane::restart_for(&state(None, None), &m, &None));
+    assert!(!Lane::restart_for(&state(Some("x"), None), &m, &None));
+    assert!(Lane::restart_for(&state(Some("x"), None), &None, &None));
+    assert!(Lane::restart_for(&state(None, Some("high")), &m, &None));
+}

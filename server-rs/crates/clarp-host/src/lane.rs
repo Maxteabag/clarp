@@ -259,6 +259,10 @@ pub(crate) struct Login {
 ///   Host as any turn's;
 /// - health is the lane's [`Status`] ([`Endpoint::inspect`]), its memory
 ///   [`Endpoint::memory`]: every lane is a process tree under the shim.
+///
+/// What a driver may or may not do is said here, not assumed: which attempts it takes
+/// ([`Driver::takes`]), which changes it applies to its running tool and which start it again
+/// ([`Driver::restart_for`] and its digest), and whether it keeps goals ([`Goals`]).
 pub(crate) trait Driver {
     /// The tool it drives.
     const TOOL: Tool;
@@ -268,6 +272,26 @@ pub(crate) trait Driver {
     type Snapshot: DeserializeOwned;
 
     fn endpoint(&self) -> &Endpoint;
+
+    /// Whether `order` may run on the lane. One it does not take runs as a process of its own,
+    /// the per-turn fallback, once the agent's lanes have left ([`clear_before_exec`]). Every
+    /// driver leaves an opening turn to its own gated launch. A driver whose tool can only take
+    /// up a conversation that exists, not start one under the Host's id (Muse's serve), says
+    /// no as well to the first turn of a conversation, a fork and a takeover.
+    fn takes(order: &clarp_actor::ShimOrder) -> bool
+    where
+        Self: Sized,
+    {
+        order.opening.is_none()
+    }
+
+    /// Whether the running lane, as `state` says, must start again for a turn that asks for
+    /// `model` and `effort`. What the tool takes with a turn, or by a call to its running
+    /// process (Muse's `session/setModel`), is applied in place and answers false; what it can
+    /// only be started with belongs in the options digest instead.
+    fn restart_for(state: &Status, model: &Option<String>, effort: &Option<String>) -> bool
+    where
+        Self: Sized;
 
     /// Attaches to the agent's running lane where it is the one wanted ([`Endpoint::place`]),
     /// or starts a new one and returns its child for the reaper. `thread` is `None` for a new
@@ -290,6 +314,24 @@ pub(crate) trait Driver {
         submission: Self::Submission,
         token: Option<String>,
     ) -> io::Result<Self::Snapshot>;
+}
+
+/// A driver whose tool keeps goals of its own on its conversation and may start turns for them by
+/// itself (Codex's native goals). Its goal requests (`Reserve`, `Goal`, `Recover`, `Probe`) and
+/// its goal submissions are its own: no other driver has them, and the layer needs none of them.
+pub(crate) trait Goals: Driver {
+    /// After a Stop of a goal's turn: the goal is paused where it is still active, so its tool
+    /// starts no turn of its own after the Stop.
+    fn recover_stop(&self) -> io::Result<Self::Snapshot>;
+}
+
+impl Tool {
+    /// Whether this tool's driver takes `order` on its lane ([`Driver::takes`]).
+    pub(crate) fn takes(self, order: &clarp_actor::ShimOrder) -> bool {
+        match self {
+            Self::Codex => <codex::Lane as Driver>::takes(order),
+        }
+    }
 }
 
 /// Whether a lane that runs is used as it is or must make way for a new one.

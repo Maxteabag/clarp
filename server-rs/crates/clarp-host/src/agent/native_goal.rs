@@ -5,7 +5,7 @@ use clarp_kernel::agent_goal::{Goal, Status as GoalStatus};
 use clarp_shim::codex_lane::{GoalAction, Request, Snapshot};
 
 use crate::lane::codex::{Lane, Submission};
-use crate::lane::{Driver, Login, Settings, Tool};
+use crate::lane::{Driver, Goals, Login, Settings, Tool};
 
 use super::{
     ActorError, Answer, Ask, ShimOrder, Told, Unavailable, Worker, launch_permitted, tell,

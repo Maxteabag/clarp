@@ -1,6 +1,6 @@
 //! The actor's view of the extra user inputs of one running turn: those written to its tool's
 //! input (Claude Code, and the agy-acp driver, which say alike when they read a message and
-//! which result answers it), or the steered words of a Codex lane's turn.
+//! which result answers it), or the steered words of a lane's turn (Codex today).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -34,12 +34,13 @@ pub(super) struct State {
     crossed: bool,
     pub(super) joined_speech: bool,
     pub(super) mixed: bool,
-    /// The turn is Codex's: what it can take is told by its lane's lines, not a process's.
-    codex: bool,
-    /// A Codex lane runs the turn and takes steered words until the turn ends.
+    /// The turn's tool takes steered words on a lane (`Steers::Words`): what it can take is told
+    /// by its lane's lines, not a process's.
+    lane: bool,
+    /// A lane runs the turn and takes steered words until the turn ends.
     lane_open: bool,
-    /// How the Codex turn ended, which is how the words read into it ended.
-    codex_end: Option<&'static str>,
+    /// How the lane's turn ended, which is how the words read into it ended.
+    lane_end: Option<&'static str>,
 }
 
 pub(super) struct Sharing {
@@ -68,7 +69,7 @@ impl State {
     pub(super) fn for_prompt(steers: Steers, primary_uuid: Option<String>) -> Self {
         Self {
             primary_uuid,
-            codex: steers == Steers::Words,
+            lane: steers == Steers::Words,
             ..Self::default()
         }
     }
@@ -123,16 +124,16 @@ impl State {
                     projects: projects.clone(),
                 });
             }
-            // A lane says it takes steered words, which of them Codex read, and when the turn
+            // A lane says it takes steered words, which of them its tool read, and when the turn
             // ended. An exec turn prints none of the first two.
-            Line::Out(line) if self.codex => {
+            Line::Out(line) if self.lane => {
                 let event: Value = serde_json::from_str(line).ok()?;
                 match event["type"].as_str() {
                     Some("steer.open") => self.lane_open = true,
                     Some("steer.read") => return Some(event),
                     Some(end @ ("turn.completed" | "turn.failed")) => {
                         self.lane_open = false;
-                        self.codex_end = Some(if end == "turn.completed" {
+                        self.lane_end = Some(if end == "turn.completed" {
                             "completed"
                         } else {
                             "failed"
@@ -312,9 +313,9 @@ impl State {
             .iter()
             .filter_map(|(&turn, follow)| follow.stage.read_at().map(|at| (turn, at)))
             .collect();
-        // A Codex turn says how it ended; a process that ended without a result did not
+        // A lane's turn says how it ended; a process that ended without a result did not
         // answer what it read.
-        let status = self.codex_end.unwrap_or("interrupted");
+        let status = self.lane_end.unwrap_or("interrupted");
         for (turn, read_at) in read {
             self.finish(batch, turn, read_at, status, now_ms)?;
         }
@@ -488,9 +489,9 @@ impl Actor {
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
-        // A Codex lane takes steered words; a tool that steers on its input takes the message
+        // A lane takes steered words; a tool that steers on its input takes the message
         // there.
-        let codex = self.backend.steers() == Steers::Words;
+        let words = self.backend.steers() == Steers::Words;
         if !self.backend.steers_message(text)
             || !live.steering.stream.can_join()
             || live.steering.input_skipped
@@ -502,9 +503,9 @@ impl Actor {
             return Ok(None);
         }
         // A tool that keeps its own record of what it read (Claude): the process that reads
-        // it, and where it says it did, for a restart. Any other (agy-acp, a Codex lane's turn
+        // it, and where it says it did, for a restart. Any other (agy-acp, a lane's turn
         // that said it takes steered words): its reading is in the spool alone.
-        let recovery = if codex {
+        let recovery = if words {
             if !live.steering.lane_open {
                 return Ok(None);
             }
@@ -538,7 +539,7 @@ impl Actor {
         let prompt = brief
             .as_ref()
             .map_or_else(|| text.to_owned(), |brief| brief.prompt(text));
-        let input = if codex {
+        let input = if words {
             Steering::Words {
                 id: uuid.clone(),
                 text: prompt,
