@@ -98,6 +98,13 @@ struct FakeLane {
 
 impl FakeLane {
     fn start(run: &Path, agent: &str, status: Value) -> Self {
+        Self::start_into(run, agent, status, Arc::new(Mutex::new(Vec::new())))
+    }
+
+    /// As [`FakeLane::start`], and every op it is asked is also kept in `all`, as `agent:op`,
+    /// in the order the lanes were asked.
+    fn start_into(run: &Path, agent: &str, status: Value, all: Arc<Mutex<Vec<String>>>) -> Self {
+        let name = agent.to_owned();
         let endpoint = Endpoint::of(Tool::Codex, run, agent);
         let listener = UnixListener::bind(endpoint.socket()).unwrap();
         let owner = File::create(owner_lock(endpoint.socket())).unwrap();
@@ -114,6 +121,7 @@ impl FakeLane {
                 let request: Value = serde_json::from_str(&line).unwrap();
                 let op = request["op"].as_str().unwrap().to_owned();
                 seen.lock().unwrap().push(op.clone());
+                all.lock().unwrap().push(format!("{name}:{op}"));
                 let busy = !status["claim"].is_null();
                 let reply = match op.as_str() {
                     "retire" if busy => {
@@ -283,34 +291,49 @@ fn a_changed_login_is_told_by_its_kind_and_a_reply_without_state_by_its_words() 
 #[test]
 fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
     let run = run_dir("memory");
-    // Each says it is the same idle process: what it holds is real, steady, and more than a byte.
+    // Each says it is the same live process: what it holds is real, and more than a byte.
     let mut sleeper = std::process::Command::new("sleep")
         .arg("60")
         .spawn()
         .unwrap();
     let me = sleeper.id();
-    let shorter = FakeLane::start(&run, "a", status_of(me, "ta", "d", 10, false));
-    let longer = FakeLane::start(&run, "b", status_of(me, "tb", "d", 30, false));
-    let busy = FakeLane::start(&run, "c", status_of(me, "tc", "d", 0, true));
+    let all = Arc::new(Mutex::new(Vec::new()));
+    let shorter = FakeLane::start_into(&run, "a", status_of(me, "ta", "d", 10, false), all.clone());
+    let longer = FakeLane::start_into(&run, "b", status_of(me, "tb", "d", 30, false), all.clone());
+    let busy = FakeLane::start_into(&run, "c", status_of(me, "tc", "d", 0, true), all.clone());
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    let held = Endpoint::memory(&serde_json::from_value(status_of(me, "", "", 0, false)).unwrap())
-        .unwrap();
-    // Room for all three by their number, and for two of them by their memory: the longest
-    // idle leaves, the busy one counts and stays.
+    // A budget nothing fits and room for all by their number: every idle lane leaves, the
+    // longest idle first, and the busy one counts and stays.
     make_room(
         &run,
         own.socket(),
         Room {
             most: 8,
-            memory: Some(held * 2 + held / 2),
+            memory: Some(1),
         },
     );
-    assert_eq!(longer.asked(), ["inspect", "retire"]);
-    assert_eq!(shorter.asked(), ["inspect"]);
+    let retired: Vec<String> = all
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|op| op.ends_with(":retire"))
+        .cloned()
+        .collect();
+    assert_eq!(retired, ["b:retire", "a:retire"]);
     assert_eq!(busy.asked(), ["inspect"]);
-    // No budget: memory is not read, and the number alone decides.
-    make_room(&run, own.socket(), EIGHT);
-    assert_eq!(shorter.asked(), ["inspect", "inspect"]);
+    assert!(shorter.endpoint.released().unwrap() && longer.endpoint.released().unwrap());
+
+    // A budget all fit in: nobody leaves.
+    let kept = FakeLane::start(&run, "d", status_of(me, "td", "d", 50, false));
+    make_room(
+        &run,
+        own.socket(),
+        Room {
+            most: 8,
+            memory: Some(u64::MAX),
+        },
+    );
+    assert_eq!(kept.asked(), ["inspect"]);
     sleeper.kill().unwrap();
     sleeper.wait().unwrap();
     std::fs::remove_dir_all(&run).unwrap();
