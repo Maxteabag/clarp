@@ -191,6 +191,9 @@ interrupts its exact turn ID. A Stop pauses the native goal before interrupting
 the turn. A Host restart reconnects to the running lane or restores it for an active
 goal. The cost is one long-lived app-server and its supervisor per goal-enabled
 thread, plus retaining the spool and tracking ownership while the lane is idle.
+Chat turns run on the same lane where the owner switched it on (`codex_chat_lane`, issue 742);
+since issue 761 the lane's lifecycle is a layer of its own, for every tool that gets a lane.
+`docs/lanes.md` says when a turn runs on a kept lane and when per turn, and what holds either way.
 Host task plans keep their existing records and execution.
 
 ## 5. Code rules (this is where "exactly as you want" is spent)
