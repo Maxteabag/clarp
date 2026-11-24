@@ -17,6 +17,7 @@ clarp-ports.workspace = true
 clarp-protocol.workspace = true
 clarp-shim.workspace = true
 clarp-speech.workspace = true
+clarp-spool.workspace = true
 clarp-store-files.workspace = true
 clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
@@ -49,7 +50,6 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 clarp-sealed.workspace = true
-clarp-spool.workspace = true
 proc-macro2 = "1"
 syn = { version = "2", features = ["full", "visit"] }
 
