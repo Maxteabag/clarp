@@ -711,5 +711,19 @@ fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
             assert!(!spoken(&words), "round {round}: the newest said text");
         }
         wait_for("the agent to be done", || host.state(&agent) == "done");
+        // The turn was taken up where it ran, not launched again: its tool was given the
+        // prompt read together once. A second launch would start from its messages anew and
+        // pass without the Host having taken up the running turn.
+        let kept = std::fs::read_to_string(place.root.join("prompts")).unwrap();
+        let held = format!("hold-{round}");
+        let launches = kept
+            .lines()
+            .map(|line| serde_json::from_str::<String>(line).unwrap())
+            .filter(|prompt| prompt.ends_with(&held))
+            .count();
+        assert_eq!(
+            launches, 1,
+            "round {round}: one launch of the turn read together"
+        );
     }
 }
