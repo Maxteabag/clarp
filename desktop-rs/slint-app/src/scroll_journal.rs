@@ -320,6 +320,15 @@ impl Dashcam {
         }
     }
 
+    /// The user's input reached every pane (the window's size, a divider,
+    /// the text size).
+    pub fn input_all(&mut self) {
+        let panes: Vec<String> = self.rings.keys().cloned().collect();
+        for pane in panes {
+            self.event(&pane, crate::unasked::INPUT);
+        }
+    }
+
     /// A frame was drawn at `at`: each pane whose picture changed (or that
     /// something happened to) keeps it. The flashes it ended, by pane, that
     /// are due to be recorded at `now`.
@@ -614,6 +623,26 @@ pub fn event(pane: &str, what: &str) {
     DASHCAM.with(|d| d.borrow_mut().event(pane, what));
 }
 
+/// The user's own input that may resize `pane`'s chat (a key or edit in
+/// its composer): a resize right after it is theirs (unasked.rs).
+pub fn input(pane: &str) {
+    event(pane, crate::unasked::INPUT);
+}
+
+/// The user's own input that may resize every chat: a pane divider dragged,
+/// the text size or the window's scale changed.
+pub fn input_all() {
+    if !on() {
+        return;
+    }
+    DASHCAM.with(|d| d.borrow_mut().input_all());
+}
+
+thread_local! {
+    /// The window's size at the last frame.
+    static WINDOW_SIZE: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) };
+}
+
 /// A frame is drawn (headless: was drawn; the real window: is about to be,
 /// with everything that will be drawn settled). Cheap: a flash found is
 /// written and posted a moment later, off the frame.
@@ -622,6 +651,14 @@ pub fn frame_drawn() {
         // Off: nothing kept from before either.
         DASHCAM.with(|d| *d.borrow_mut() = Dashcam::default());
         return;
+    }
+    // The window's size changed: the user dragged its edge (the compositor
+    // resizes it), so the chats resizing with it are theirs.
+    if let Some(window) = crate::window() {
+        let size = slint::ComponentHandle::window(&window).size();
+        if WINDOW_SIZE.with(|last| last.replace((size.width, size.height))) != (size.width, size.height) {
+            input_all();
+        }
     }
     let (found, unasked) = DASHCAM.with(|d| {
         let mut d = d.borrow_mut();

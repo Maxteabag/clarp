@@ -758,6 +758,8 @@ fn main() {
     // The pane learns the sent message's row (its send animation flies to
     // it); "" when nothing was sent or it went to another agent's chat.
     window.on_send(|pane, text, queue| {
+        // Enter: the composer shrinking as it sends is the user's resize.
+        scroll_journal::input(&pane);
         let Some(app) = app() else { return SharedString::new() };
         let session = app.session_of(&pane);
         // A draft naming another agent goes to that agent's chat, which
@@ -792,11 +794,14 @@ fn main() {
         bridge.on_dismiss(|pane| with_window(|app, _| mention_view::dismiss(app, &pane)));
     }
     window.on_draft_edited(|pane, text| {
+        // Typing: the composer growing with it resizes the chat as asked.
+        scroll_journal::input(&pane);
         if let Some(app) = app() {
             app.draft_edited(&pane, &text);
         }
     });
     window.on_remove_attachment(|pane, id| {
+        scroll_journal::input(&pane);
         if let Some(app) = app() {
             let session = app.session_of(&pane);
             app.engine.borrow_mut().remove_attachment(&session, &id);
@@ -838,6 +843,8 @@ fn main() {
         }
     }));
     window.on_paste_image(|pane| {
+        // Ctrl+V: an image chip growing the composer is the user's resize.
+        scroll_journal::input(&pane);
         let Some(app) = app() else { return false };
         let session = app.session_of(&pane);
         let pasted = platform::clipboard::paste_image(&mut app.engine.borrow_mut(), &session);
@@ -865,7 +872,8 @@ fn main() {
         }
     });
     book.on_relayout(|pane| {
-        // The chat's width or text size changed: its rows move as asked.
+        // The chat's width or text size changed: a resize, asked only
+        // right after the user's input (unasked.rs).
         scroll_journal::event(&pane, "resize");
         if let Some(app) = app() {
             app.relayout(&pane);
@@ -996,6 +1004,8 @@ fn main() {
         commands::run(app, window, "dismiss-layout-warning");
     }));
     window.on_resize_split(|id, ratio| {
+        // A divider dragged: the chats resizing with it are the user's.
+        scroll_journal::input_all();
         if let Some(app) = app() {
             app.engine.borrow_mut().with_panes(|p| p.set_split_ratio(&id, f64::from(ratio)));
             pump_now(&app);
