@@ -38,7 +38,7 @@ def test_debug_generation(tmp_path):
     assert binary.read_bytes() == b'release'
 
 
-def lane(root, name, stamp, target=True, built=True):
+def lane(root, name, stamp, target=True, built=True, good=True):
     """A checkout's copy as tools/build leaves it on the build machine."""
     copy = root / name
     (copy / 'contract/schemas').mkdir(parents=True)
@@ -50,9 +50,15 @@ def lane(root, name, stamp, target=True, built=True):
         (copy / 'server-rs/crates' / crate / 'Cargo.toml').write_text('')
     (copy / '.clarp-last-build').write_text('')
     os.utime(copy / '.clarp-last-build', ns=(stamp, stamp))
+    # A good build's stamp has a second name; a failed build's stamp is a file of its own.
+    if good:
+        os.link(copy / '.clarp-last-build', copy / '.clarp-last-good-build')
+    else:
+        (copy / '.clarp-last-good-build').write_text('')
     if target:
         deps = copy / 'server-rs/target/debug/deps'
         deps.mkdir(parents=True)
+        (copy / 'server-rs/target/CACHEDIR.TAG').write_text('Signature: 8a477f597d28d172789f06886806bc55\n')
         (deps / 'libserde-1111111111111111.rlib').write_text(name)
         os.link(deps / 'libserde-1111111111111111.rlib', copy / 'server-rs/target/debug/libserde.rlib')
         if built:
@@ -66,13 +72,15 @@ def reflinks(tmp_path):
     return cloned.returncode == 0
 
 
-def test_a_checkout_without_a_target_starts_from_the_last_built_one(tmp_path, monkeypatch):
+def test_a_checkout_without_a_target_starts_from_the_last_good_build_with_libraries(tmp_path, monkeypatch):
     monkeypatch.setitem(queue['seed_target'].__globals__, 'QUEUE', tmp_path)
     lane(tmp_path, 'old', 10**18)
     newer = lane(tmp_path, 'newer', 2 * 10**18)
     lane(tmp_path, 'not-a-checkout', 3 * 10**18).parent.joinpath('scripts/clarp-media-publish.py').unlink()
     # Built last, but only checked: its target holds the dependencies' metadata, not their libraries.
     lane(tmp_path, 'checked', 4 * 10**18, built=False)
+    # Built last with the Host's library, but that build failed.
+    lane(tmp_path, 'failed', 5 * 10**18, good=False)
     here = lane(tmp_path, 'here', 10**17, target=False)
     # Sources that arrived before the other checkout's build.
     now = time.time_ns()
@@ -105,3 +113,20 @@ def test_a_checkout_without_a_target_starts_from_the_last_built_one(tmp_path, mo
         assert queue['seed_target'](root, 'here', workspace) is None
         assert (here / 'target/own').read_text() == 'own'
     assert (newer / 'target/debug/deps/libserde-1111111111111111.rlib').read_text() == 'newer'
+
+
+def test_a_build_marks_its_checkout_good_only_when_it_succeeds(tmp_path, monkeypatch):
+    # build_space is wrapped by contextmanager: reach the module through a plain function.
+    names = queue['last_good_build'].__globals__
+    monkeypatch.setitem(names, 'QUEUE', tmp_path)
+    workspace = lane(tmp_path, 'here', 10**17)
+    monkeypatch.chdir(workspace)
+    monkeypatch.setitem(names, 'make_room', lambda root, current, floor: True)
+    for code, good in ((0, True), (101, False), (None, False), (0, True)):
+        outcome = {}
+        with queue['build_space'](0, False, outcome) as ready:
+            assert ready
+            if code is not None:
+                outcome['code'] = code
+        with queue['directory'](workspace.parent) as copy:
+            assert (queue['last_good_build'](copy) is not None) == good
