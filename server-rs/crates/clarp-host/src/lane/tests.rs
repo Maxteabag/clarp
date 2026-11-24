@@ -442,3 +442,44 @@ fn a_turn_waits_for_a_cold_codex_lane_and_a_warm_lane_is_one_that_answers_free()
     assert!(!Endpoint::of(Tool::Codex, &run, "none").warm());
     std::fs::remove_dir_all(&run).unwrap();
 }
+
+#[test]
+fn a_per_turn_process_holds_its_conversation_shared_and_never_waits() {
+    use clarp_actor::ShimOrder;
+    use clarp_kernel::turn::TurnId;
+    let run = run_dir("guard");
+    let mut order = ShimOrder {
+        opening: None,
+        named_session: None,
+        model: None,
+        effort: None,
+        prompt_as_file: false,
+        streams_input: false,
+        before_stop: None,
+        turn: TurnId(7),
+        attempt: 1,
+        spool: PathBuf::from("/s"),
+        socket: PathBuf::from("/t"),
+        stdin_file: PathBuf::from("/i"),
+        cwd: PathBuf::from("/w"),
+        program: "codex".into(),
+        args: vec!["exec".into()],
+        env: Vec::new(),
+    };
+    super::guard_exec(&mut order, &run, Tool::Codex, "thread-1").unwrap();
+    let lock = clarp_shim::lane::thread_lock(&run.join("codex-threads"), "thread-1");
+    // The words Codex's exec turns have been started with since before the layer.
+    assert_eq!(order.program, "flock");
+    assert_eq!(
+        order.args,
+        [
+            "--shared",
+            "--nonblock",
+            "--no-fork",
+            lock.to_str().unwrap(),
+            "codex",
+            "exec"
+        ]
+    );
+    std::fs::remove_dir_all(&run).unwrap();
+}

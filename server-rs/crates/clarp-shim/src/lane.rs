@@ -46,11 +46,36 @@ pub mod key {
     pub const MODEL_PROVIDER: &str = "_clarpModelProvider";
 }
 
-/// The lock that says who may write a native thread, under `dir`. A turn of its own process
-/// takes it shared; a lane takes it exclusive and holds it until its tool has been reaped: one
-/// writer per conversation.
+/// The lock that says who may write a native thread, under `dir`: one writer per conversation,
+/// held as [`Holder`] says. For a tool that does not refuse a second process on a conversation
+/// itself (OpenCode: two serves share its database, and each runs its own prompt loop for a
+/// session it is asked to), this lock is the only guard.
 pub fn thread_lock(dir: &Path, thread: &str) -> PathBuf {
     dir.join(format!("{:x}.lock", Sha256::digest(thread.as_bytes())))
+}
+
+/// Who holds a conversation's lock ([`thread_lock`]), and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Holder {
+    /// A per-turn process (exec, or a fallback turn while its lane warms): shared, without
+    /// waiting, for its whole life. It fails at once where a lane holds the lock, rather than
+    /// write beside it; per-turn processes do not shut each other out.
+    Turn,
+    /// A lane: exclusive, taken before it touches the conversation in any way (a read, a
+    /// resume, a prompt) and held until its tool has been reaped. A lane that warms beside a
+    /// per-turn process waits for it in its own process, never in a turn; Codex's lane takes it
+    /// without waiting and fails to start while a turn holds it.
+    Lane,
+}
+
+impl Holder {
+    /// How `flock(1)` takes the lock for this holder, for a process the shim starts under it.
+    pub fn flock_args(self) -> &'static [&'static str] {
+        match self {
+            Self::Turn => &["--shared", "--nonblock"],
+            Self::Lane => &["--exclusive"],
+        }
+    }
 }
 
 /// The lock a lane's process holds for as long as it, and its tool, live.

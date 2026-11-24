@@ -90,8 +90,24 @@ fn write_whole(path: &Path, token: &str) -> io::Result<()> {
     fs::rename(&partial, path)
 }
 
-/// A lock file taken exclusive, without waiting: a lock someone else holds is an error.
-pub(super) fn lock_exclusive(path: &Path) -> io::Result<File> {
+/// How a lane takes its conversation's lock as its [`clarp_shim::lane::Holder::Lane`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Take {
+    /// At once, or not at all: a lane that would run beside a per-turn process fails to start
+    /// (Codex's lane).
+    Now,
+    /// Once every per-turn process that holds it shared is gone, waited for in the lane's own
+    /// process: a lane that warms beside a turn and touches the conversation only after.
+    #[allow(
+        dead_code,
+        reason = "the hand-over of drivers that warm beside a turn (issue 761); held by its tests"
+    )]
+    Waiting,
+}
+
+/// Takes a conversation's lock exclusive, as a lane holds it: before anything touches the
+/// conversation, kept for as long as the returned file lives.
+pub(super) fn hold_thread(path: &Path, take: Take) -> io::Result<File> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -102,7 +118,10 @@ pub(super) fn lock_exclusive(path: &Path) -> io::Result<File> {
         .truncate(false)
         .mode(0o600)
         .open(path)?;
-    file.try_lock().map_err(io::Error::other)?;
+    match take {
+        Take::Now => file.try_lock().map_err(io::Error::other)?,
+        Take::Waiting => file.lock()?,
+    }
     Ok(file)
 }
 
@@ -213,6 +232,38 @@ mod tests {
         own.keep_token(Some("two"), "Test");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "two");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_lane_takes_the_conversation_only_once_no_turn_holds_it() {
+        use super::{Take, hold_thread};
+        let dir = std::env::temp_dir().join(format!("lane-thread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("thread.lock");
+        // A per-turn process holds it shared, as `flock --shared --nonblock` does.
+        std::fs::create_dir_all(&dir).unwrap();
+        let turn = std::fs::File::create(&path).unwrap();
+        turn.try_lock_shared().unwrap();
+        // Codex's lane fails at once; a warming lane waits until the turn is gone.
+        assert!(hold_thread(&path, Take::Now).is_err());
+        let (send, take) = std::sync::mpsc::channel();
+        let waiting = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let held = hold_thread(&path, Take::Waiting).unwrap();
+                send.send(()).unwrap();
+                held
+            })
+        };
+        assert!(take.recv_timeout(Duration::from_millis(200)).is_err());
+        drop(turn);
+        take.recv_timeout(Duration::from_secs(10)).unwrap();
+        let held = waiting.join().unwrap();
+        // Held by the lane: a turn's shared hold now fails at once.
+        let other = std::fs::File::open(&path).unwrap();
+        assert!(other.try_lock_shared().is_err());
+        drop(held);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

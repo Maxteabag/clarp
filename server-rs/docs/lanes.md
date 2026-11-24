@@ -97,13 +97,26 @@ of them is not done.
     costs the lane nothing. This Host's helper forks copy it as words. A tool that can fork
     inside its own process does it on the lane (Muse's `session/fork`, as a request on the
     lane's control socket). A status question then never ends a lane.
-  - **The lease:** the lock is the rule's other half. A lane takes its thread's lock
-    (`clarp_shim::lane::thread_lock`) exclusive and keeps it until its tool has been reaped. A
-    per-turn process of the same thread takes it shared and without waiting
-    (`lane::guard_exec`, for every tool that has lanes), so if a lane is still there it fails
-    rather than writes beside it.
+  - **The conversation's lock: the rule for tools that do not enforce one themselves.** The
+    lock (`clarp_shim::lane::thread_lock`) is held in one of two ways (`clarp_shim::lane::Holder`):
+    - **a per-turn process** (`Holder::Turn`) holds it shared, without waiting, for its whole
+      life (`lane::guard_exec`, for every tool that has lanes). Where a lane holds it, the
+      per-turn process fails at once rather than write beside it;
+    - **a lane** (`Holder::Lane`) holds it exclusive. It takes the lock before it touches the
+      conversation in any way (a read, a resume, a prompt), and keeps it until its tool has been
+      reaped.
+    A lane that warms beside a per-turn turn starts its process without the session. It waits
+    for the lock in its own process, never in a turn (`lane_own::hold_thread` with
+    `Take::Waiting`), and takes the session up only once the per-turn process is gone. Codex's
+    lane takes the lock without waiting (`Take::Now`), and fails to start while a turn holds it.
+
+    For OpenCode this lock is the only guard. It does not refuse a second open: two serves
+    share `opencode.db`, and a session's running state (busy, its prompt loop, its abort) lives
+    in each process. Two serves prompting one session would run two loops writing one
+    conversation. Muse refuses a second process itself (`.session.lock`), and the lock holds
+    for it as well.
   - **Where it holds today (Codex, as before the layer):**
-    - Every exec turn: lanes leave first (`make_way(Touch::Exec)`), and the lease guards the
+    - Every exec turn: lanes leave first (`make_way(Touch::Exec)`), and the lock guards the
       turn.
     - Transit: it writes the new tool's session from the Host's record and never opens the old
       one, so it needs nothing.

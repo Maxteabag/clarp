@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::Duration;
 
-use clarp_shim::lane::{Control, LOGIN_CHANGED, Status, owner_lock};
+use clarp_shim::lane::{Control, Holder, LOGIN_CHANGED, Status, owner_lock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -200,10 +200,12 @@ pub(crate) fn thread_locks(run: &Path, tool: Tool) -> io::Result<PathBuf> {
     Ok(locks)
 }
 
-/// One writer per conversation: a turn of its own process keeps a read lease on its
-/// conversation's lock, without waiting, for its whole life. A lane takes the exclusive lease and
-/// holds it until its tool has exited, even when another agent has taken up the same
-/// conversation, so a per-turn process fails rather than writes beside a lane.
+/// One writer per conversation: a turn of its own process holds its conversation's lock as a
+/// [`Holder::Turn`], shared and without waiting, for its whole life. A lane holds it as a
+/// [`Holder::Lane`], exclusive, from before it touches the conversation until its tool has exited,
+/// even when another agent has taken up the same conversation. So a per-turn process fails
+/// rather than writes beside a lane, and a lane that warms beside a per-turn process takes the
+/// conversation only once that process is gone.
 pub(crate) fn guard_exec(
     order: &mut clarp_actor::ShimOrder,
     run: &Path,
@@ -213,13 +215,16 @@ pub(crate) fn guard_exec(
     let lock = clarp_shim::lane::thread_lock(&thread_locks(run, tool)?, thread);
     let program = std::mem::replace(&mut order.program, "flock".into());
     let args = std::mem::take(&mut order.args);
-    order.args = vec![
-        "--shared".into(),
-        "--nonblock".into(),
-        "--no-fork".into(),
-        lock.to_string_lossy().into_owned(),
-        program,
-    ];
+    order.args = Holder::Turn
+        .flock_args()
+        .iter()
+        .map(|arg| (*arg).to_owned())
+        .chain([
+            "--no-fork".into(),
+            lock.to_string_lossy().into_owned(),
+            program,
+        ])
+        .collect();
     order.args.extend(args);
     Ok(())
 }

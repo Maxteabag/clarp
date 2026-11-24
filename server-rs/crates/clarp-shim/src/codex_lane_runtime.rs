@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use crate::codex_lane_turns::Slot;
 use crate::lane_driver::{Driver, Turn};
 use crate::lane_login::Login;
-use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive};
+use crate::lane_own::{Idle, Own, Take, hold_owner, hold_thread};
 use crate::lane_socket::{Socket, TurnAsk, write};
 
 const RPC_LIMIT: Duration = Duration::from_secs(12);
@@ -94,7 +94,10 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         (None, Some(dir)) if !thread.is_empty() => Some(thread_lock(dir, &thread)),
         _ => None,
     };
-    let held_thread = named_lock.as_deref().map(lock_exclusive).transpose()?;
+    let held_thread = named_lock
+        .as_deref()
+        .map(|path| hold_thread(path, Take::Now))
+        .transpose()?;
     match fs::remove_file(path) {
         Ok(()) => {}
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -644,7 +647,7 @@ impl Lane {
             .to_owned();
         self.held_to_provider(result["modelProvider"].as_str(), true)?;
         if let Some(dir) = &self.own.thread_locks {
-            self._thread_lock = Some(lock_exclusive(&thread_lock(dir, &thread))?);
+            self._thread_lock = Some(hold_thread(&thread_lock(dir, &thread), Take::Now)?);
         }
         self.thread = thread;
         self.loaded = true;
