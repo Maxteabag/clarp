@@ -874,7 +874,8 @@ fn main() {
         if reading {
             scroll_journal::event(&pane, "reader");
         }
-        let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows, top_y, top_h, bottom: bottom.into(), bottom_y, bottom_h };
+        let bottom_trailing = app().is_some_and(|app| app.row_trailing(&pane, &bottom));
+        let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows, top_y, top_h, bottom: bottom.into(), bottom_y, bottom_h, bottom_trailing };
         scroll_journal::shot(&pane, shot);
     });
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {

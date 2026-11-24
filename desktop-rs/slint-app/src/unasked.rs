@@ -82,6 +82,9 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let viewport = b.viewport;
     let mut moved: Vec<(f32, f32)> = Vec::new();
     let mut anchors = 0;
+    // The end stayed put under a message row: rows moving above it are not
+    // the follow slide (a message growing above another message counts).
+    let mut held_by_message = false;
     if !a.top.is_empty() && a.top == b.top {
         anchors += 1;
         let dy = b.top_y - a.top_y;
@@ -94,6 +97,8 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
         let dy = b.bottom_y - a.bottom_y;
         if dy.abs() >= 0.5 {
             moved.push((dy, cover(viewport, (a.bottom_y, a.bottom_h), (b.bottom_y, b.bottom_h))));
+        } else if !b.bottom_trailing {
+            held_by_message = true;
         }
     }
     // No row on screen in both frames: the offset's change is the movement,
@@ -115,7 +120,11 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let arrived = b.rows > a.rows
         || b.content > a.content + 0.5
         || after.events.iter().any(|e| e == "height" || e == "live" || (e.starts_with("rows ") && !e.contains(" +0 ~0")));
-    let slide = b.follow && moved.iter().all(|m| m.0 < 0.0) && at_end(b) && (!at_end(a) || arrived || (anchors == 0 && a.follow));
+    let slide = b.follow
+        && !held_by_message
+        && moved.iter().all(|m| m.0 < 0.0)
+        && at_end(b)
+        && (!at_end(a) || arrived || (anchors == 0 && a.follow));
     Some(Step { dy, fraction, counted: !slide })
 }
 
@@ -284,11 +293,33 @@ mod tests {
             bottom: "row-19".into(),
             bottom_y: VIEW - last_h,
             bottom_h: last_h,
+            bottom_trailing: false,
         }
     }
 
     fn frame(ms: u64, shot: Shot, events: &[&str]) -> Frame {
         Frame { at: Duration::from_millis(ms), shot, events: events.iter().map(|e| (*e).to_owned()).collect() }
+    }
+
+    /// A reply streaming above the Running box (a trailing live row that
+    /// stays at the end) is the follow slide; a message growing above
+    /// another message row that stays at the end is counted.
+    #[test]
+    fn a_reply_above_the_running_box_slides_and_one_above_a_message_counts() {
+        let mut before = pinned(2000.0, 40.0, 60.0);
+        let mut after = pinned(2100.0, -60.0, 60.0);
+        before.bottom = "live:fold:t1".into();
+        after.bottom = "live:fold:t1".into();
+        before.bottom_trailing = true;
+        after.bottom_trailing = true;
+        let step = movement(&frame(0, before.clone(), &[]), &frame(16, after.clone(), &["live"])).expect("rows moved");
+        assert!(!step.counted, "above the Running box: the slide {step:?}");
+        before.bottom = "r-2".into();
+        after.bottom = "r-2".into();
+        before.bottom_trailing = false;
+        after.bottom_trailing = false;
+        let step = movement(&frame(0, before, &[]), &frame(16, after, &["height"])).expect("rows moved");
+        assert!(step.counted, "a message growing above another message counts {step:?}");
     }
 
     /// No row on screen in both frames and nobody following: a big jump is
