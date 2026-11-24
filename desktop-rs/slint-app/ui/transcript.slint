@@ -1092,8 +1092,7 @@ export component Transcript inherits FocusScope {
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     // What the chat would draw, for the dashcam (ScrollBook.frame).
-    property <{offset: length, content: length, viewport: length, top: string, top-index: int, follow: bool, reading: bool, rows: int,
-               top-y: length, top-h: length, bottom: string, bottom-y: length, bottom-h: length}> shot: {
+    property <{offset: length, content: length, viewport: length, top: string, top-index: int, follow: bool, reading: bool, rows: int}> shot: {
         offset: list.content-y,
         content: list.content-height,
         viewport: list.visible-height,
@@ -1102,16 +1101,22 @@ export component Transcript inherits FocusScope {
         follow: root.follow,
         reading: root.settling || root.dragging,
         rows: root.rows.length,
+    };
+    // And where its top and bottom rows are drawn (a struct of its own:
+    // one of more than twelve fields does not build).
+    property <{top-y: length, top-h: length, bottom: string, bottom-y: length, bottom-h: length}> edges: {
         top-y: root.top-y,
         top-h: root.top-h,
         bottom: root.bottom-index < root.rows.length ? root.rows[root.bottom-index].id : "",
         bottom-y: root.bottom-y,
         bottom-h: root.bottom-h,
     };
-    changed shot => {
+    function report-frame() {
         ScrollBook.frame(root.pane-id, root.shot.top, root.shot.top-index, root.shot.offset, root.shot.content, root.shot.viewport, root.shot.follow, root.shot.reading, root.shot.rows,
-                         root.shot.top-y, root.shot.top-h, root.shot.bottom, root.shot.bottom-y, root.shot.bottom-h);
+                         root.edges.top-y, root.edges.top-h, root.edges.bottom, root.edges.bottom-y, root.edges.bottom-h);
     }
+    changed shot => { root.report-frame(); }
+    changed edges => { root.report-frame(); }
     list := ListView {
         scrolled => { root.reader-scrolled(); }
         width: parent.width;
