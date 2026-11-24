@@ -219,24 +219,26 @@ What every driver gets from the layer, built once:
   no lane. It never uses a time of change (the lead's rule, issue 763): a file written again
   with the same content keeps the lane, and a change made within the same second still restarts
   it.
-- **The lease, its abort, and the kept child's death** (the lead's rule, issue 763: layer
-  mechanisms, not one tool's own).
-  - **The lease** is the claim: the lane is lent to one admitted attempt, from its admission
-    (its spool made) to its end (its `Exited` written). The attempt's text, model, effort and
-    identity travel with it. Its Stop, Steer and Follow come on the claim's socket, so the turn
-    needs no process of its own and nothing of the tool's (an address, a password) leaves the
-    lane process.
-  - **The abort of a lease that drops while the tool is busy** (`lane_driver::Driver::abort`).
-    Today's one cause is a Stop whose grace passed with the turn still running. Codex then ends
-    its group (D26), the turn is told as killed, and the lane leaves. A tool with a bounded
-    abort of its own (OpenCode's `POST /session/:id/abort`, then its idle) may keep its
-    process. A Host that is gone drops no lease: a shim never waits for the Host (D26), and a
-    lane's turn runs to its end and is followed again after a restart.
-  - **The kept child's death with its lane** (`lane_spawn::kept`). The tool runs in a process
-    group of its own, with `SIGTERM` set to reach it when the lane's starting thread ends
-    (`setpriv --pdeathsig`; this code allows no `unsafe`). A tool that does not end when its
-    input closes (OpenCode's serve listens on a port) cannot outlive a killed lane. Codex's
-    app-server ends with its standard input and is started as before.
+- **No lease: claims run in the lane process, for every driver** (the lead's decision, issue
+  763). A claim holds the lane for one admitted attempt, from its admission (its spool made) to
+  its end (its `Exited` written), and is carried out by the lane process itself, as Codex's are.
+  The attempt's text, model, effort and identity travel with it, and its Stop, Steer and Follow
+  come on the claim's socket. The turn needs no process of its own, and nothing of the tool's
+  (an address, a password) leaves the lane process. There is no mechanism that lends a kept
+  process to a separate per-turn driver.
+- **A claim's turn aborted while the tool is busy** (`lane_driver::Driver::abort`). Today's one
+  cause is a Stop whose grace passed with the turn still running. Codex then ends its group
+  (D26), the turn is told as killed, and the lane leaves. A tool with a bounded abort of its
+  own (OpenCode's `POST /session/:id/abort`, then its idle) may keep its process. A Host that is
+  gone aborts nothing: a shim never waits for the Host (D26), and a lane's turn runs to its end
+  and is followed again after a restart.
+- **The kept child's death with its lane** (the lead's decision, issue 763: a layer spawn
+  helper for every driver whose child does not end on its input's end).
+  `lane_spawn::kept` runs the tool in a process group of its own, with `SIGTERM` set to reach
+  it when the lane's starting thread ends (`setpriv --pdeathsig`; this code allows no
+  `unsafe`). A tool that does not end when its input closes (OpenCode's serve listens on a port)
+  cannot outlive a killed lane. Codex's app-server ends with its standard input and is started
+  as before.
 - **Process locks**: the owner lock, the thread lock and the exec guard.
 - **Room and registry**: idle retirement, the turn-identity file and `once_more`.
 

@@ -76,9 +76,9 @@ pub(super) trait Driver {
     /// running turn and never writes it.
     fn end_turn(&mut self) -> io::Result<()>;
 
-    /// The claim's lease dropped while its tool was still busy with it: a Stop whose grace
-    /// passed with the turn still running (today's one cause), or an attempt that is no longer
-    /// the actor's. The turn ends now and is told as killed, once. A tool whose own abort is
+    /// The claim's turn must end while its tool is still busy with it: a Stop whose grace passed
+    /// with the turn still running (today's one cause), or an attempt that is no longer the
+    /// actor's. The turn ends now and is told as killed, once. A tool whose own abort is
     /// bounded and sure (OpenCode's `POST /session/:id/abort`, then its idle) may keep its
     /// process; any other ends its process group, and the lane leaves.
     fn abort(&mut self) -> io::Result<()>;
