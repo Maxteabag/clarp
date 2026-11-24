@@ -4325,6 +4325,23 @@ impl Worker {
                         })
                     })
             }
+            // The process of a turn that is over for the user, which ran on while the Host was
+            // away: followed until it is gone, so that the next launch waits for it. It is no
+            // turn of the pool's any more.
+            Action::FollowExit {
+                turn,
+                attempt,
+                socket,
+            } => {
+                let starting = self.shim_may_be_starting(turn, Some(attempt));
+                std::thread::Builder::new()
+                    .name(format!("exit-{}", turn.0))
+                    .spawn(move || {
+                        launcher::follow_rejoined(&socket, starting, &|told| {
+                            tell(&tx, turn, attempt, told)
+                        })
+                    })
+            }
             // A turn whose shim is still starting is stopped by its launch: nothing is started,
             // or the shim is told as soon as it is ready. Any other is told at its socket, once
             // it listens where its shim may still be starting (issue 728).

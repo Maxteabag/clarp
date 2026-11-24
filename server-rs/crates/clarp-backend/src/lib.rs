@@ -291,6 +291,13 @@ pub trait Backend: Send + Sync {
         None
     }
 
+    /// Whether this line the tool printed is its own end of the turn, however the turn went:
+    /// a turn that was stopped ends for the user here, before its process is gone. Only a
+    /// tool that prints such a line when asked to stop says so (Claude Code's `result`).
+    fn ends_turn(&self, _line: &str) -> bool {
+        false
+    }
+
     /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
     /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
     /// when the tool gives it none. (A turn's number is not such a name: an agent that moves

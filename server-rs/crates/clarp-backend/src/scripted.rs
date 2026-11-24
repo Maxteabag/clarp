@@ -80,6 +80,10 @@ impl Backend for Scripted {
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(ScriptedInterpreter::new(turn, name))
     }
+
+    fn ends_turn(&self, line: &str) -> bool {
+        serde_json::from_str::<Value>(line).is_ok_and(|line| line.get("answered").is_some())
+    }
 }
 
 pub struct ScriptedInterpreter {

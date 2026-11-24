@@ -28,6 +28,10 @@ pub const USAGE_LIMIT: &str = "Claude usage limit reached";
 /// The most of a tool's output that is kept with the conversation.
 const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
 
+/// How long a Claude Code that was interrupted has to exit by itself before it is ended with
+/// SIGTERM. It exits within a second after its result.
+const STOP_GRACE_MS: u64 = 3_000;
+
 pub struct Claude {
     program: String,
 }
@@ -196,7 +200,11 @@ impl Backend for Claude {
         stdin.push(b'\n');
         Launch {
             prompt_as_file: false,
-            before_stop: None,
+            // Asked to stop with an interrupt, Claude Code says at once that its turn is over
+            // (a `result` of `error_during_execution`, some 40 ms after) and then exits by
+            // itself; ended with SIGTERM it says nothing and goes only once it has sent what it
+            // counted, a second later. SIGTERM and the kill follow where no exit comes.
+            before_stop: Some(("SIGINT", STOP_GRACE_MS)),
             program: self.program.clone(),
             args,
             env: vec![
@@ -218,6 +226,13 @@ impl Backend for Claude {
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(ClaudeInterpreter::new(turn, name))
+    }
+
+    /// The result that answers the turn's own message: a sub-agent's result is its own.
+    fn ends_turn(&self, line: &str) -> bool {
+        serde_json::from_str::<Value>(line).is_ok_and(|event| {
+            event["type"] == "result" && text_of(&event["parent_tool_use_id"]).is_empty()
+        })
     }
 
     /// One `claude -p` whose conversation is not kept, as the Python Host asks Claude Code

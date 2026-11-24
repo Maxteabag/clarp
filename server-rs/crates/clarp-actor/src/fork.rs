@@ -188,8 +188,10 @@ pub(super) struct Lane {
     shown: Option<Shown>,
     /// Events that go out whatever is shown: those of the moment what is shown changed.
     ready: Vec<serde_json::Value>,
-    /// The agent's own turn of the user's that waits for the fork's turn to end: its number,
-    /// its message and its attempt. Its tool is started then, with the note.
+    /// The agent's own turn whose launch waits: a turn of the user's for the fork's turn to
+    /// end, and any turn for the process of the turn before it to be gone
+    /// ([`super::lingering`]). Its number, its message and its attempt. Its tool is started
+    /// then, with the fork's note where there is one.
     deferred: Option<(TurnId, u64, u32)>,
 }
 
@@ -892,7 +894,7 @@ impl Actor {
             self.pump_fork(&mut out, now_ms)?;
         }
         self.fork_reconcile(&mut out, now_ms)?;
-        self.fork_resume(&mut out, now_ms)?;
+        self.resume_deferred(&mut out, now_ms)?;
         Ok(out)
     }
 
@@ -995,24 +997,25 @@ impl Actor {
         Ok(told)
     }
 
-    pub(super) fn fork_defer(&mut self, turn: TurnId, message_seq: u64, attempt: u32) {
+    pub(super) fn defer_launch(&mut self, turn: TurnId, message_seq: u64, attempt: u32) {
         self.fork.deferred = Some((turn, message_seq, attempt));
     }
 
-    pub(super) fn fork_deferred_is(&self, turn: TurnId) -> bool {
+    pub(super) fn launch_deferred(&self, turn: TurnId) -> bool {
         self.fork
             .deferred
             .is_some_and(|(deferred, _, _)| deferred == turn)
     }
 
-    pub(super) fn fork_undefer(&mut self) {
+    pub(super) fn undefer_launch(&mut self) {
         self.fork.deferred = None;
     }
 
-    /// The fork's turn is over: the agent's own turn of the user's that waited for it starts,
-    /// opening with the note, if it still holds the agent.
-    pub(super) fn fork_resume(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
-        if self.fork_runs() {
+    /// Nothing holds the launch any more (the fork's turn and the turn before's process are
+    /// over): the agent's own turn that waited starts, opening with the fork's note where
+    /// there is one, if it still holds the agent.
+    pub(super) fn resume_deferred(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+        if self.fork_runs() || self.lingers() {
             return Ok(());
         }
         let Some((turn, message_seq, attempt)) = self.fork.deferred.take() else {
@@ -1235,7 +1238,7 @@ impl Actor {
         let live = self
             .live
             .as_ref()
-            .filter(|live| live.turn == turn && turn != forked && !self.fork_deferred_is(turn))?;
+            .filter(|live| live.turn == turn && turn != forked && !self.launch_deferred(turn))?;
         let name = super::shown_name(live.trace_id.as_deref(), &live.message_id);
         let audience = self
             .audience_of(turn)
@@ -1351,6 +1354,6 @@ impl Actor {
     ) -> Result<(), ActorError> {
         self.fork_reconcile(out, now_ms)?;
         self.fork_next(out, now_ms)?;
-        self.fork_resume(out, now_ms)
+        self.resume_deferred(out, now_ms)
     }
 }

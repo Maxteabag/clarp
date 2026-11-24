@@ -47,6 +47,7 @@ pub mod fork;
 mod goal_ledger;
 pub mod native_goal;
 mod native_goal_reservation;
+mod lingering;
 mod orphan;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -77,6 +78,7 @@ pub mod teams;
 mod together;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
+use lingering::EndsAt;
 
 /// How many lines of a spool are read, understood and written to the log at a time.
 const WINDOW: usize = 2_000;
@@ -241,6 +243,14 @@ pub enum Action {
     /// Follow the shim that has this turn: say [`Actor::spool_changed`] whenever it hints that
     /// its spool has grown, and [`Actor::shim_gone`] when nothing answers at its socket any more.
     Follow {
+        turn: TurnId,
+        attempt: u32,
+        socket: PathBuf,
+    },
+    /// Follow the shim of a turn that is over for the user and whose process ran on while the
+    /// Host was away, as [`Action::Follow`] says, until it is gone. Nothing of the turn runs
+    /// for an account any more.
+    FollowExit {
         turn: TurnId,
         attempt: u32,
         socket: PathBuf,
@@ -738,6 +748,10 @@ struct LiveTurn {
     in_call: bool,
     /// The attempt's tool said its account is out until then.
     out_until_ms: Option<i64>,
+    /// The record being read is the tool's word that its answer is whole.
+    answered: bool,
+    /// The turn ended for the user before its process did, and how: its process lingers.
+    ended_at: Option<lingering::EndsAt>,
 }
 
 impl LiveTurn {
@@ -898,6 +912,9 @@ pub struct Actor {
     turn_notes: (u64, u32),
     /// The agent's conversation fork, where it has one ([`fork`]).
     fork: fork::Lane,
+    /// The process of the turn that ended before it, while it runs: no turn is launched until
+    /// it is gone.
+    lingering: Option<lingering::Lingering>,
 }
 
 /// Which message a trace is of: its id, sender and origin.
@@ -1603,6 +1620,7 @@ impl Actor {
             remembered: Remembered::default(),
             turn_notes: (0, 0),
             fork: fork::Lane::default(),
+            lingering: None,
         };
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
@@ -1650,6 +1668,9 @@ impl Actor {
         if let Some((turn, message_seq)) = noting {
             actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
         }
+        // The process of the turn that ended last may still run: no turn is launched before
+        // it is gone, the fork's held turn and the live turn included.
+        actor.take_up_lingering(&mut out);
         // The fork is taken up before the agent's own turn is rejoined: a turn of the user's
         // that was held for the fork's turn (never launched) is held again, not started
         // beside it.
@@ -1716,6 +1737,8 @@ impl Actor {
                 tool_count: 0,
                 in_call,
                 out_until_ms: None,
+            answered: false,
+            ended_at: None,
             });
         }
         // A compaction whose turn ended and whose outcome an actor before this one did not
@@ -4095,6 +4118,9 @@ impl Actor {
             ..Outputs::default()
         };
         self.carry_out(effects, &mut out, now_ms)?;
+        // A process whose turn is over for the user and still runs is ended too: the turn it
+        // was stays as it ended.
+        self.stop_lingering(&mut out);
         // Only the user's own Stop means "be quiet": the rest of what the agent had to say is
         // not spoken. An agent that stops another orchestrates; what was about to be said is
         // still the user's to hear.
@@ -4546,6 +4572,10 @@ impl Actor {
             let reason = "the fork's process is gone and did not say how it went";
             return self.fork_gone(turn, attempt, reason, now_ms);
         }
+        let mut out = Outputs::default();
+        if self.lingering_gone(turn, attempt, &mut out, now_ms)? {
+            return Ok(out);
+        }
         if !self.follows(turn, attempt) {
             return Ok(Outputs::default());
         }
@@ -4796,9 +4826,9 @@ impl Actor {
                     self.start(turn, message_seq, attempt, out, now_ms)?;
                 }
                 // A turn that waits for the agent's fork has no shim: it is gone at once.
-                Effect::StopTurn { turn } if self.fork_deferred_is(turn) => {
+                Effect::StopTurn { turn } if self.launch_deferred(turn) => {
                     let attempt = self.attempt_of_live(turn);
-                    self.fork_undefer();
+                    self.undefer_launch();
                     let gone = self.shim_gone(turn, attempt, now_ms)?;
                     out.actions.extend(gone.actions);
                     out.changed.status |= gone.changed.status;
@@ -4941,6 +4971,7 @@ impl Actor {
             && takeover.is_none()
             && message.call.is_none()
             && !self.fork_runs()
+            && !self.lingers()
             && self.mark(turn.0)?.is_none();
         let together = if bare || opening.is_some() {
             Vec::new()
@@ -5203,12 +5234,16 @@ impl Actor {
             tool_count: 0,
             in_call,
             out_until_ms: None,
+            answered: false,
+            ended_at: None,
         });
         // Never two sessions answer the user at once: a turn of the user's waits while the
         // agent's fork answers, and begins once the fork's turn is over, told what it said.
-        let defer = attempt <= 1 && origin_is_user && self.fork_runs();
+        // Never two processes work in one conversation: any turn waits while the process of
+        // the turn before it, over for the user, is not gone yet.
+        let defer = (attempt <= 1 && origin_is_user && self.fork_runs()) || self.lingers();
         if defer {
-            self.fork_defer(turn, message_seq, attempt);
+            self.defer_launch(turn, message_seq, attempt);
             return Ok(());
         }
         out.actions.push(Action::Launch(Box::new(ShimOrder {
@@ -5504,6 +5539,8 @@ impl Actor {
             tool_count: 0,
             in_call,
             out_until_ms: None,
+            answered: false,
+            ended_at: None,
         });
         out.changed.conversation = true;
         out.actions.push(Action::Follow {
@@ -5554,12 +5591,7 @@ impl Actor {
             if let Ok(Some(end)) = self.turn_end(live.turn.0) {
                 self.remembered.take(&end);
             }
-            for attempt in 1..=live.attempt {
-                let _ = std::fs::remove_file(self.profile.stdin_path_of(live.turn, attempt));
-                if !self.profile.keep_spools {
-                    let _ = std::fs::remove_file(self.profile.spool_path_of(live.turn, attempt));
-                }
-            }
+            self.forget_attempts(live.turn, live.attempt);
         }
     }
 
@@ -6032,10 +6064,13 @@ impl Actor {
     /// fork that has begun to answer has read its message before the agent's own turn,
     /// ending, could give the message back.
     fn pump(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+        self.pump_lingering(out, now_ms)?;
         self.pump_fork(out, now_ms)?;
         self.pump_main(out, now_ms)?;
+        // A turn that ended before its process may have its exit in what was read already.
+        self.pump_lingering(out, now_ms)?;
         self.fork_reconcile(out, now_ms)?;
-        self.fork_resume(out, now_ms)
+        self.resume_deferred(out, now_ms)
     }
 
     /// Reads what is new in the live turn's spool and writes what it means to the log.
@@ -6082,14 +6117,29 @@ impl Actor {
             // which the turn moved on to something else.
             let mut stopped_at: Option<u64> = None;
             let mut revealed_at = None;
+            // Where this reading stops because the turn ended before its process
+            // ([`lingering`]): the rest is that process's.
+            let mut ended_until: Option<u64> = None;
             for (place, record) in read.records.iter().enumerate() {
                 let t = record.t;
-                if after_stop(record, batch.agent().stopping_since_ms()) {
+                let late = after_stop(record, batch.agent().stopping_since_ms());
+                // What a stopped tool prints is not taken, but for its own end of the turn: it
+                // settles what was being written when the Stop came, as the exit would, and the
+                // turn ends for the user there. What it says of the messages it read does not
+                // count: they end with the stopped turn.
+                let stop_end = late
+                    && matches!(&record.entry, Line::Out(line) if self.backend.ends_turn(line))
+                    && lingering::ends_at_answer(live, batch.agent(), EndsAt::Stop);
+                if late && !stop_end {
                     continue;
                 }
                 note_output(&mut live.last_output_ms, record);
                 let input_skipped = live.steering.input_skipped;
-                let evidence = live.steering.record(&record.entry);
+                let evidence = if stop_end {
+                    None
+                } else {
+                    live.steering.record(&record.entry)
+                };
                 if !input_skipped && live.steering.input_skipped {
                     out.actions.push(Action::Stop {
                         turn,
@@ -6477,6 +6527,10 @@ impl Actor {
                             live.concluded = true;
                             continue;
                         }
+                        Signal::Answered => {
+                            live.answered = true;
+                            continue;
+                        }
                         Signal::Limits(said) => {
                             live.limits = Some((t, said));
                             continue;
@@ -6623,6 +6677,49 @@ impl Actor {
                         self.shown.close_answers();
                     }
                 }
+                // The turn ends for the user at its tool's own end line, while the process goes
+                // on a moment longer: where the tool said its answer is whole and nothing else
+                // of the turn is owed, or where it was stopped.
+                let answered = std::mem::take(&mut live.answered);
+                let ends_at = if stop_end {
+                    Some(EndsAt::Stop)
+                } else if answered
+                    && lingering::ends_at_answer(live, batch.agent(), EndsAt::Answer)
+                {
+                    Some(EndsAt::Answer)
+                } else {
+                    None
+                };
+                if let Some(at) = ends_at {
+                    live.steering.finish_read(&mut batch, t)?;
+                    // A stopped turn is told stopped, whatever the tool said.
+                    let outcome = match at {
+                        EndsAt::Answer => RunOutcome::Completed,
+                        EndsAt::Stop => RunOutcome::Interrupted {
+                            reason: "the turn was stopped".to_string(),
+                        },
+                    };
+                    if batch
+                        .command(Command::TurnEnded { turn, outcome }, t)
+                        .is_ok()
+                    {
+                        if let Some(end) = closing(
+                            &mut batch,
+                            turn,
+                            &live.last_row,
+                            Facts {
+                                notes: notes_of(self.turn_notes, turn),
+                                ..live.facts()
+                            },
+                        ) {
+                            cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
+                            batch.item(written(&end, t)?);
+                        }
+                        live.ended_at = Some(at);
+                        ended_until = Some(read.ends.get(place).copied().unwrap_or(read.next_offset));
+                        break;
+                    }
+                }
                 // The turn moved on to something else: what was read up to here is written
                 // down by itself, and how the agent stood is noted, before what came after.
                 if !live.over && told_activity(batch.agent()) != doing {
@@ -6630,7 +6727,7 @@ impl Actor {
                     break;
                 }
             }
-            let read_until = stopped_at.unwrap_or(read.next_offset);
+            let read_until = stopped_at.or(ended_until).unwrap_or(read.next_offset);
             if live.over
                 && batch
                     .agent()
@@ -6723,9 +6820,13 @@ impl Actor {
                 }
             }
             let over = live.over;
+            let lingers = live.ended_at.is_some();
             self.say_owed_compaction()?;
-            // The turn is over when its attempt is and it does not wait for another.
-            if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
+            // The turn is over when its attempt is and it does not wait for another. One that
+            // ended before its process is followed to its exit.
+            if lingers {
+                self.linger();
+            } else if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
             self.carry_out(committed.effects, out, now_ms)?;
