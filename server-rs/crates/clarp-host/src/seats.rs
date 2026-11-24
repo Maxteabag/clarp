@@ -585,13 +585,7 @@ pub async fn judged(app: &App) -> serde_json::Value {
 }
 
 fn with_switcher(seats: &Seats, enabled: bool, now: i64) -> serde_json::Value {
-    let mut desk = seats.served(enabled, now);
-    for provider in clarp_kernel::seats::READ_PROVIDERS {
-        if let Some(read) = seats.switcher(provider) {
-            desk["switcher_seats"][provider] = json!(read);
-        }
-    }
-    desk
+    seats.judged(enabled, now)
 }
 
 /// Reads the seats again now, whenever the last reading was, beside whoever asked: a seat

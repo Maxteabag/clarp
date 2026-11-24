@@ -222,3 +222,37 @@ fn the_switchers_reading_is_kept_and_a_switch_marks_the_seat_switched_to() {
         .collect();
     assert_eq!(active, [false, false, true]);
 }
+
+#[test]
+fn the_seat_in_use_is_judged_by_its_tag_through_what_is_kept() {
+    // As a Host has it: read, kept, switched, then put beside the desk it judges by.
+    let mut seats = Seats::with_salt("a-salt");
+    let usage = |used: f64| {
+        serde_json::json!({ "status": "allowed", "limited": used >= 1.0, "used_5h": used,
+            "reset_5h": 1_900_000_000, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+    };
+    let list = serde_json::json!({ "accounts": [
+        { "alias": "a", "is_active": true, "usage": usage(1.0) },
+        { "alias": "b", "is_active": false, "usage": usage(0.1) },
+    ]});
+    let at = 1_899_999_000_000;
+    seats.read("claude", &list, at);
+    let desk = seats.judged(true, at);
+    let on_a = clarp_kernel::quota_near::seat_in_use("claude", &desk);
+    assert!(on_a.is_some(), "{desk}");
+    seats.mark_active("claude", "b");
+    let desk = seats.judged(true, at);
+    let on_b = clarp_kernel::quota_near::seat_in_use("claude", &desk);
+    assert!(on_b.is_some() && on_b != on_a, "{desk}");
+    // The tags are kept, never served: the body an app is given has none of them.
+    let served = seats.served(true, at).to_string();
+    assert!(!served.contains(on_b.as_deref().unwrap()), "{served}");
+    // And the switcher still reads its seats from what is kept beside the desk.
+    let reading = &desk["switcher_seats"]["claude"];
+    let parsed: Vec<clarp_kernel::seat_switch::Seat> =
+        serde_json::from_value(reading.clone()).unwrap();
+    assert_eq!(
+        parsed.iter().map(|seat| seat.active).collect::<Vec<_>>(),
+        [false, true]
+    );
+}

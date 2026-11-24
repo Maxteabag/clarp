@@ -546,6 +546,24 @@ impl Seats {
         serde_json::from_value(kept.get("switcher")?.clone()).ok()
     }
 
+    /// What whether a seat would take an agent's turn is judged by (`quota_near`): the body an
+    /// app is given ([`Seats::served`]), and beside it, by the tool, the switcher's reading of
+    /// its seats as it is kept (`switcher_seats`), each with the keyed tag of its alias, which
+    /// names the seat in use (`quota_near::seat_in_use`). Never served to an app.
+    pub fn judged(&self, enabled: bool, served_at: i64) -> Value {
+        let mut desk = self.served(enabled, served_at);
+        for provider in READ_PROVIDERS {
+            let kept = self
+                .snapshots
+                .get(provider)
+                .and_then(|kept| kept.get("switcher"));
+            if let Some(seats) = kept.filter(|seats| seats.is_array()) {
+                desk["switcher_seats"][provider] = seats.clone();
+            }
+        }
+        desk
+    }
+
     /// A switch made the seat `alias` the one in use: the reading that is kept says so from
     /// now on, as the desk's does, so that the seat switched from is judged as any other and
     /// the seat switched to as the one whose account the tool is on. Nothing changes where the
