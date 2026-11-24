@@ -198,16 +198,20 @@ fn a_steps_words_go_with_its_call_and_are_written_before_it() {
     let part = |part: Value| {
         json!({"type": "message.part.updated", "properties": {"part": part}}).to_string()
     };
-    let start = |n: u32| part(json!({"type": "step-start", "id": format!("s{n}"), "messageID": "msg_1"}));
+    let start =
+        |n: u32| part(json!({"type": "step-start", "id": format!("s{n}"), "messageID": "msg_1"}));
     let text = |n: u32, words: &str| {
         part(json!({"type": "text", "id": format!("x{n}"), "messageID": "msg_1", "text": words}))
     };
     let tool = |n: u32, status: &str| {
-        part(json!({"type": "tool", "id": format!("p{n}"), "messageID": "msg_1",
+        part(
+            json!({"type": "tool", "id": format!("p{n}"), "messageID": "msg_1",
             "callID": format!("call_{n}"), "tool": "bash",
-            "state": {"status": status, "input": {"command": "make test"}, "output": "ok"}}))
+            "state": {"status": status, "input": {"command": "make test"}, "output": "ok"}}),
+        )
     };
-    let finish = |n: u32| part(json!({"type": "step-finish", "id": format!("f{n}"), "messageID": "msg_1"}));
+    let finish =
+        |n: u32| part(json!({"type": "step-finish", "id": format!("f{n}"), "messageID": "msg_1"}));
     for line in [
         start(1),
         text(1, "Let me look."),
@@ -225,7 +229,13 @@ fn a_steps_words_go_with_its_call_and_are_written_before_it() {
         text(3, "Done, all green."),
         finish(3),
     ] {
-        interpreter.on_record(&Record { t: 1, entry: Entry::Out(line) }, &mut signals);
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            &mut signals,
+        );
     }
     interpreter.on_record(
         &Record {

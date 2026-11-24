@@ -260,14 +260,18 @@ impl Walk {
 /// step's words (`r-<name>-<step>`) only when the next step began. Those words went with the
 /// call, and are no answer. It now writes them first, with the call, as every other tool does.
 fn announced(call: Option<&str>, reply: &str) -> bool {
-    let (Some(call), Some(reply)) = (call.and_then(|call| call.strip_prefix("t-")), reply.strip_prefix("r-"))
-    else {
+    let (Some(call), Some(reply)) = (
+        call.and_then(|call| call.strip_prefix("t-")),
+        reply.strip_prefix("r-"),
+    ) else {
         return false;
     };
     reply.rsplit_once('-').is_some_and(|(name, step)| {
         !step.is_empty()
             && step.bytes().all(|byte| byte.is_ascii_digit())
-            && call.strip_prefix(name).is_some_and(|rest| rest.starts_with('-'))
+            && call
+                .strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with('-'))
     })
 }
 
@@ -300,7 +304,11 @@ pub(super) fn read_into_turn(log: &dyn AgentLog, item: &Item) -> Result<Option<u
             return Ok(None);
         };
         before = oldest.seq;
-        for event in events.iter().rev().filter(|event| event.turn == Some(joined)) {
+        for event in events
+            .iter()
+            .rev()
+            .filter(|event| event.turn == Some(joined))
+        {
             match serde_json::from_slice::<AgentEvent>(&event.body)
                 .map_err(|why| corrupt(event, why))?
             {
@@ -573,7 +581,7 @@ mod tests {
         say(&mut recorder, turn, "r-look", &[], &[]);
         // Not yet: what the turn does next decides what these words were.
         assert_eq!(conversation(&recorder), ["u-ask"]);
-        call(&mut recorder, turn, "t-1", &["r-look"]);
+        call(&mut recorder, turn, "call-1", &["r-look"]);
         assert_eq!(conversation(&recorder), ["u-ask"]);
         say(&mut recorder, turn, "r-done", &[], &[]);
         assert_eq!(conversation(&recorder), ["u-ask"]);
@@ -584,7 +592,7 @@ mod tests {
             [
                 ("u-ask".to_owned(), None),
                 ("r-look".to_owned(), None),
-                ("t-1".to_owned(), None),
+                ("call-1".to_owned(), None),
                 ("r-done".to_owned(), Some(2)),
             ]
         );
@@ -734,12 +742,12 @@ mod tests {
         let mut steps: Vec<Step> = vec![
             Box::new(move |r| say(r, turn, "r-a", &[], &[])),
             Box::new(move |r| say(r, turn, "r-b", &[], &[])),
-            Box::new(move |r| call(r, turn, "t-1", &["r-b"])),
+            Box::new(move |r| call(r, turn, "call-1", &["r-b"])),
             Box::new(move |r| say(r, turn, "r-c", &["t-2"], &[])),
             Box::new(move |r| say(r, turn, "r-d", &[], &[])),
             Box::new(move |r| read_in(r, turn, "u-more")),
             Box::new(move |r| say(r, turn, "r-e", &[], &[])),
-            Box::new(move |r| call(r, turn, "t-3", &["r-e"])),
+            Box::new(move |r| call(r, turn, "call-3", &["r-e"])),
             Box::new(move |r| say(r, turn, "r-f", &[], &[])),
             Box::new(move |r| end(r, turn, "r-f")),
         ];
@@ -800,18 +808,21 @@ mod tests {
         let turn = start(&mut recorder);
         say(&mut recorder, turn, "r-first", &[], &[]);
         read_in(&mut recorder, turn, "u-more");
-        call(&mut recorder, turn, "t-1", &[]);
+        call(&mut recorder, turn, "call-1", &[]);
         let running = now(&recorder);
         assert_eq!(running[1], ("r-first".to_owned(), Some(0)));
-        end(&mut recorder, turn, "t-1");
+        end(&mut recorder, turn, "call-1");
         let settled = now(&recorder);
         assert_eq!(settled[1], ("r-first".to_owned(), Some(1)));
         assert_eq!(conversation(&recorder), ["u-ask", "r-first", "u-more"]);
         // The end gives it again with its new count.
-        let seq = recorder.log().find("t-1").unwrap().unwrap().seq;
+        let seq = recorder.log().find("call-1").unwrap().unwrap().seq;
         let (given, _) = delta(&recorder, seq * REVISION_STEP);
-        assert!(given.iter().any(|row| row.entry.id() == "r-first"
-            && row.session_rows == Some(1)));
+        assert!(
+            given
+                .iter()
+                .any(|row| row.entry.id() == "r-first" && row.session_rows == Some(1))
+        );
     }
 
     #[test]
@@ -824,7 +835,13 @@ mod tests {
         let held = revision_of(&recorder, "r-first");
         // The conversation fork reads a message of the user's and answers it, as its own turn.
         read_in(&mut recorder, turn, "u-fork");
-        let fork = recorder.log().find("u-fork").unwrap().unwrap().turn.unwrap();
+        let fork = recorder
+            .log()
+            .find("u-fork")
+            .unwrap()
+            .unwrap()
+            .turn
+            .unwrap();
         let mut batch = recorder.batch();
         batch.item(
             NewItem::new(kind::FORK, 330, b"fork-session".to_vec())
@@ -864,5 +881,4 @@ mod tests {
         assert!(!super::announced(Some("t-oc-call_1"), "r-other-2"));
         assert!(super::announced(Some("t-oc-call_1"), "r-oc-2"));
     }
-
 }
