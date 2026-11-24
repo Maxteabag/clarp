@@ -303,6 +303,12 @@ mod tests {
         assert_eq!(visibility(&shown, "oak"), (Visibility::Hide, None));
         assert!(hides(&shown, "oak"));
         assert_eq!(chat_choices(&settings, &helper), (Visibility::Show, None));
+        let auto = rules::Mode::Auto;
+        assert_eq!(
+            (policy(&shown, "hal", auto).source, policy(&shown, "hal", auto).hidden),
+            ("helper", false)
+        );
+        assert_eq!(policy(&shown, "oak", auto).source, "global");
 
         settings.insert(rules::chat_key("hal"), "hide".into());
         let hidden = directory(&settings);
@@ -311,5 +317,6 @@ mod tests {
             (Visibility::Show, Some(Visibility::Hide))
         );
         assert!(hides(&hidden, "hal"));
+        assert_eq!(policy(&hidden, "hal", auto).source, "chat");
     }
 }
