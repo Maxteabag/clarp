@@ -461,7 +461,10 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     let waited = started.elapsed();
     // Asked to leave, waited for at most the bound, and the terminal goes on.
     assert_eq!(hanging.asked(), ["retire"]);
-    assert!(waited >= std::time::Duration::from_millis(300), "{waited:?}");
+    assert!(
+        waited >= std::time::Duration::from_millis(300),
+        "{waited:?}"
+    );
     assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
     assert!(!hanging.endpoint.released().unwrap());
     // An idle lane that lets go is waited for until it has, and no longer.
