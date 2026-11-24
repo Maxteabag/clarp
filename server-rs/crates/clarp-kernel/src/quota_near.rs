@@ -354,8 +354,9 @@ fn regains_at(read: &Value, model: &str, desk: &Value) -> Option<i64> {
 /// `GET /backend-usage`), from the desk as `GET /hotseat/status` serves it; `None` where the
 /// desk read no account of the tool. Of no model in particular, so by the five hours and the
 /// week: how many seats there are, how many have room for a turn and how many are used up, the
-/// alias of the one in use, the soonest moment a used-up seat regains room, and where every
-/// seat is used up, when the first does. A seat that cannot be judged (its state not known, a
+/// alias of the one in use and of the one the switcher would move to next were it used up
+/// ([`ranked`]), the soonest moment a used-up seat regains room, and where every seat is used
+/// up, when the first does. A seat that cannot be judged (its state not known, a
 /// window old) is counted in neither.
 ///
 /// Where the reading is old or failed (`stale`), no seat is counted as having room or as used
@@ -375,9 +376,16 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
     let (mut with_room, mut used_up, mut unjudged) = (0_usize, 0_usize, false);
     let mut next: Option<i64> = None;
+    let mut next_seat: Option<(i64, i64, &str)> = None;
     for account in accounts {
         match room(account, &general, served_at, Bar::Room) {
-            Some(true) => with_room += 1,
+            Some(true) => {
+                with_room += 1;
+                let ranked = ranked(account, served_at);
+                if account["active_default"] != true && ranked > next_seat {
+                    next_seat = ranked;
+                }
+            }
             Some(false) => {
                 if account["state"] != "auth_error" {
                     used_up += 1;
@@ -400,11 +408,29 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
         "with_room": fresh.then_some(with_room),
         "used_up": fresh.then_some(used_up),
         "active_alias": active,
+        "next_alias": next_seat.filter(|_| fresh).map(|(_, _, alias)| alias),
         "next_reset_at": at(next),
         "regains_room_at": at(next.filter(|_| all_used_up)),
         "stale": !fresh,
         "observed_at": at(read["observed_at"].as_i64()),
     }))
+}
+
+/// How the switcher ranks a seat with room it would move to, of no model in particular: by
+/// the whole percent left of its five hours, then of its week, then by its alias
+/// (`seat_switch::decide`, where no model is asked for). `None` for a seat without an alias or
+/// without its numbers.
+fn ranked(account: &Value, served_at: i64) -> Option<(i64, i64, &str)> {
+    let left = |kind: &str| {
+        let window = account["windows"]
+            .as_array()?
+            .iter()
+            .find(|window| window["kind"] == kind)?;
+        let used = used_of(window, served_at)?;
+        // As the switcher rounds it: half a percent left is none.
+        Some((100.0 - used * 100.0).round_ties_even().clamp(0.0, 100.0) as i64)
+    };
+    Some((left("5h")?, left("7d").unwrap_or(0), account["alias"].as_str()?))
 }
 
 /// What an agent's row says of a tool near its limit, given whether another seat would take
@@ -896,7 +922,7 @@ mod tests {
             summary,
             json!({
                 "seats": 5, "with_room": 1, "used_up": 2, "active_alias": "work",
-                "next_reset_at": moment(NOW + 3 * HOUR), "regains_room_at": null,
+                "next_alias": "spare", "next_reset_at": moment(NOW + 3 * HOUR), "regains_room_at": null,
                 "stale": false, "observed_at": moment(NOW - 60_000),
             })
         );
