@@ -7,11 +7,13 @@
 //! entered, which is its revision from then on, so a reader that asks what is newer is given it.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
-use clarp_kernel::conversation::Entry;
+use clarp_kernel::agent::AgentEvent;
+use clarp_kernel::conversation::{Commentary, Entry};
 use clarp_kernel::journal::kind;
-use clarp_ports::log::{AgentLog, Item, Seq};
+use clarp_kernel::turn::TurnEvent;
+use clarp_ports::log::{AgentLog, Item, Kinds, Seq};
 
 use super::{CHUNK, corrupt, is_conversation, joined_read};
 use crate::ActorError;
@@ -137,7 +139,7 @@ impl Walk {
             if read_into(log, item)?
                 && let Some(entry) = Entry::from_item(item).map_err(|why| corrupt(item, why))?
             {
-                self.decide(item.seq, entry.id());
+                self.decide(log, item.seq, entry.id())?;
             }
             return Ok(());
         }
@@ -159,7 +161,7 @@ impl Walk {
             Entry::Reply(said) if !said.text.trim().is_empty() => {
                 if said.tools.is_empty() {
                     // Words after words: those before were an answer.
-                    self.decide(item.seq, id);
+                    self.decide(log, item.seq, id)?;
                     self.pending = Some(Pending {
                         id: id.to_owned(),
                         seq: item.seq,
@@ -178,11 +180,19 @@ impl Walk {
         Ok(())
     }
 
-    /// The row at `at` (`by`) decides that the words waiting for it are an answer.
-    fn decide(&mut self, at: Seq, by: &str) {
+    /// The row at `at` (`by`) decides that the words waiting for it are an answer, unless work
+    /// that writes no row of its own (a plan's update) came between: the actor marked them as
+    /// said along the way then, before `at`.
+    fn decide(&mut self, log: &dyn AgentLog, at: Seq, by: &str) -> Result<(), ActorError> {
         let Some(pending) = self.pending.take() else {
-            return;
+            return Ok(());
         };
+        if log
+            .find(&Commentary::id_of(&pending.id))?
+            .is_some_and(|mark| mark.kind == kind::COMMENTARY && mark.seq < at)
+        {
+            return Ok(());
+        }
         self.decided.anchors.push(Anchor {
             id: pending.id.clone(),
             session_rows: pending.rows - 1,
@@ -198,6 +208,7 @@ impl Walk {
         {
             self.fallback = None;
         }
+        Ok(())
     }
 
     /// The anchors as they stand. At the turn's end (`end`), what came after its last answer is
@@ -210,6 +221,16 @@ impl Walk {
         let settled = match (&self.words, &self.fallback) {
             (Some((_, id)), _) => Some((id.clone(), self.rows.saturating_sub(1))),
             (None, Some((_, id))) => Some((id.clone(), self.rows)),
+            // Work after the last answer, and nothing said after it: the last answer counts it,
+            // so no work of the turn is left out of every count.
+            (None, None) if self.rows > 0 => {
+                if let Some(at) = anchors.anchors.len().checked_sub(1) {
+                    anchors.anchors[at].session_rows += self.rows;
+                    anchors.anchors[at].entered = end;
+                    anchors.settled = Some(at);
+                }
+                None
+            }
             _ => None,
         };
         if let Some((id, session_rows)) = settled {
@@ -238,22 +259,32 @@ fn read_into(log: &dyn AgentLog, item: &Item) -> Result<bool, ActorError> {
         .is_none_or(|record| record.kind != kind::FORK))
 }
 
-/// The turn a message was read into, when it is one: the turn of the newest row before it that
-/// is neither of its own turn nor another message read in.
+/// The turn a message was read into, when it is one: the one its join named.
 pub(super) fn read_into_turn(log: &dyn AgentLog, item: &Item) -> Result<Option<u64>, ActorError> {
     if !read_into(log, item)? {
         return Ok(None);
     }
+    let Some(joined) = item.turn else {
+        return Ok(None);
+    };
     let mut before = item.seq;
     loop {
-        let items = log.read_before(before, kind::ROWS, 16)?;
-        let Some(oldest) = items.first() else {
+        let events = log.read_before(before, Kinds::only(kind::AGENT_EVENT), CHUNK)?;
+        let Some(oldest) = events.first() else {
             return Ok(None);
         };
         before = oldest.seq;
-        for row in items.iter().rev() {
-            if row.turn.is_some() && row.turn != item.turn && !read_into(log, row)? {
-                return Ok(row.turn);
+        for event in events.iter().rev().filter(|event| event.turn == Some(joined)) {
+            match serde_json::from_slice::<AgentEvent>(&event.body)
+                .map_err(|why| corrupt(event, why))?
+            {
+                AgentEvent::Joined { join, .. } => return Ok(Some(join.into.0)),
+                // Its acceptance comes before any join: there was none.
+                AgentEvent::Turn {
+                    change: TurnEvent::Accepted { .. },
+                    ..
+                } => return Ok(None),
+                _ => {}
             }
         }
     }
@@ -277,7 +308,9 @@ const KEPT: usize = 32;
 /// walks only what was written since the last one.
 #[derive(Default)]
 pub(crate) struct AnchorCache {
-    walks: RefCell<BTreeMap<u64, Walk>>,
+    /// Each kept walk, with when it was last read.
+    walks: RefCell<HashMap<u64, (u64, Walk)>>,
+    reads: Cell<u64>,
     /// How many log items its walks have read, for a test to see that a read costs what is new.
     walked: Cell<usize>,
 }
@@ -289,18 +322,29 @@ impl AnchorCache {
         turn: u64,
         end: Option<Seq>,
     ) -> Result<TurnAnchors, ActorError> {
+        let read = self.reads.get() + 1;
+        self.reads.set(read);
         let mut walks = self.walks.borrow_mut();
         if !walks.contains_key(&turn) {
             let (walk, walked) = Walk::start(log, turn, end.unwrap_or(Seq::MAX))?;
             self.walked.set(self.walked.get() + walked);
+            // The walk read longest ago goes: the running turn is read with every page.
             while walks.len() >= KEPT {
-                walks.pop_first();
+                let Some(oldest) = walks
+                    .iter()
+                    .min_by_key(|(_, (last, _))| *last)
+                    .map(|(turn, _)| *turn)
+                else {
+                    break;
+                };
+                walks.remove(&oldest);
             }
-            walks.insert(turn, walk);
+            walks.insert(turn, (read, walk));
         }
-        let Some(walk) = walks.get_mut(&turn) else {
+        let Some((last, walk)) = walks.get_mut(&turn) else {
             return Ok(TurnAnchors::default());
         };
+        *last = read;
         let walked = walk.advance(log, turn, end)?;
         self.walked.set(self.walked.get() + walked);
         if end.is_some() {
@@ -706,5 +750,73 @@ mod tests {
             held,
             ["u-ask", "r-a", "r-d", "u-more", "r-f"].map(str::to_owned)
         );
+    }
+
+    #[test]
+    fn a_plan_update_between_words_is_work() {
+        // Codex: a preamble, its plan updated (no row; the actor marks the preamble), more words.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-plan", &[], &[]);
+        let mut batch = recorder.batch();
+        let mark = Entry::Commentary(Commentary::of("r-plan", turn.0));
+        batch.item(mark.to_item(200).unwrap());
+        batch.commit().unwrap();
+        say(&mut recorder, turn, "r-run", &[], &[]);
+        assert_eq!(conversation(&recorder), ["u-ask"]);
+        end(&mut recorder, turn, "r-run");
+        assert_eq!(conversation(&recorder), ["u-ask", "r-run"]);
+    }
+
+    #[test]
+    fn work_after_the_last_answer_with_nothing_said_after_it_is_counted_on_that_answer() {
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-first", &[], &[]);
+        read_in(&mut recorder, turn, "u-more");
+        call(&mut recorder, turn, "t-1", &[]);
+        let running = now(&recorder);
+        assert_eq!(running[1], ("r-first".to_owned(), Some(0)));
+        end(&mut recorder, turn, "t-1");
+        let settled = now(&recorder);
+        assert_eq!(settled[1], ("r-first".to_owned(), Some(1)));
+        assert_eq!(conversation(&recorder), ["u-ask", "r-first", "u-more"]);
+        // The end gives it again with its new count.
+        let seq = recorder.log().find("t-1").unwrap().unwrap().seq;
+        let (given, _) = delta(&recorder, seq * REVISION_STEP);
+        assert!(given.iter().any(|row| row.entry.id() == "r-first"
+            && row.session_rows == Some(1)));
+    }
+
+    #[test]
+    fn the_answer_a_read_message_decided_is_given_again_past_a_forks_rows() {
+        use clarp_kernel::journal::kind;
+        use clarp_ports::log::NewItem;
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-first", &[], &[]);
+        let held = revision_of(&recorder, "r-first");
+        // The conversation fork reads a message of the user's and answers it, as its own turn.
+        read_in(&mut recorder, turn, "u-fork");
+        let fork = recorder.log().find("u-fork").unwrap().unwrap().turn.unwrap();
+        let mut batch = recorder.batch();
+        batch.item(
+            NewItem::new(kind::FORK, 330, b"fork-session".to_vec())
+                .keyed(crate::fork::turn_key(fork)),
+        );
+        let answer = Entry::Reply(Reply {
+            id: "r-fork".into(),
+            turn: fork,
+            text: "r-fork".into(),
+            ..Reply::default()
+        });
+        batch.item(answer.to_item(340).unwrap());
+        batch.commit().unwrap();
+        // Then a message is read into the running turn itself.
+        read_in(&mut recorder, turn, "u-more");
+        let (given, _) = delta(&recorder, held);
+        let ids: Vec<_> = given.iter().map(|row| row.entry.id()).collect();
+        assert!(ids.contains(&"r-first"), "{ids:?}");
+        assert!(conversation(&recorder).contains(&"r-first".to_owned()));
     }
 }

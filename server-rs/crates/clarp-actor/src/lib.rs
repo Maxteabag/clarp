@@ -1396,6 +1396,10 @@ fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), A
                 Some(Entry::Reply(reply)) if reply.turn == turn.0 => {
                     let worked = !reply.tools.is_empty();
                     if !reply.text.trim().is_empty() {
+                        // Work no row says (a plan's update) already followed these words.
+                        if log.find(&Commentary::id_of(&reply.id))?.is_some() {
+                            break 'reading;
+                        }
                         // What was said before the newest words was decided when they were
                         // written: an answer when they came without work, else along the way.
                         said.push(reply.id);
@@ -6511,6 +6515,12 @@ impl Actor {
                             continue;
                         }
                         Signal::Glimpse(glimpse) => {
+                            // A plan the tool updates (Codex's `update_plan`) is work, though
+                            // no row of the conversation says so: what was said before it
+                            // was said along the way.
+                            if matches!(glimpse, clarp_kernel::live::Glimpse::Plan { .. }) {
+                                follow(&mut batch, &mut live.said, turn, t)?;
+                            }
                             // Of the turn that is shown, and of no other: what a turn that
                             // is over still says is not given to the one after it.
                             if let Some((_, name)) =
@@ -6610,7 +6620,11 @@ impl Actor {
                             } else if !reply.text.trim().is_empty() {
                                 // Words after words: those before were an answer, and stay
                                 // one whatever work follows these. The conversation view
-                                // only grows.
+                                // only grows. Words whose own message called tools were
+                                // said along the way, and are no answer.
+                                if live.said_worked {
+                                    live.said.clear();
+                                }
                                 for answer in live.said.drain(..) {
                                     self.shown.close_answer(&answer);
                                 }
