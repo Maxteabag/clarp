@@ -306,7 +306,10 @@ mod tests {
         assert_eq!(chat_choices(&settings, &helper), (Visibility::Show, None));
         let auto = rules::Mode::Auto;
         assert_eq!(
-            (policy(&shown, "hal", auto).source, policy(&shown, "hal", auto).hidden),
+            (
+                policy(&shown, "hal", auto).source,
+                policy(&shown, "hal", auto).hidden
+            ),
             ("helper", false)
         );
         assert_eq!(policy(&shown, "oak", auto).source, "global");

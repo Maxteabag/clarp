@@ -2678,9 +2678,8 @@ async fn log(
         app.turns.has_key(),
     );
     let directory = app.fleet.directory();
-    let policy = mode.map(|mode| {
-        crate::hidden_coordination::policy(&directory, &member.record.agent_id, mode)
-    });
+    let policy = mode
+        .map(|mode| crate::hidden_coordination::policy(&directory, &member.record.agent_id, mode));
     let which = if hides && policy.is_some_and(|policy| policy.hidden) {
         which.hide_coordination()
     } else {

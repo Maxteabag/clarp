@@ -1754,7 +1754,12 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
             .unwrap()
             .iter()
             .filter(|event| event["kind"] == "coordination-changed")
-            .map(|event| (event["session"].clone(), event["coordination_visibility"].clone()))
+            .map(|event| {
+                (
+                    event["session"].clone(),
+                    event["coordination_visibility"].clone(),
+                )
+            })
             .collect()
     };
     wait_for("the helper's own value to be told", || changed().len() >= 2);
