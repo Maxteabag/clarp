@@ -23,7 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::ActorError;
 
+mod anchors;
 mod imported_anchors;
+use anchors::{Anchor, TurnAnchors, find_anchors};
 pub(crate) use imported_anchors::ImportedAnchors;
 pub(crate) mod resend;
 
@@ -164,41 +166,6 @@ pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
     }
 }
 
-/// A row the conversation view shows in place of the work of a turn: the answer to one message
-/// of the user's.
-struct Anchor {
-    id: String,
-    /// How many of the turn's rows for that message the conversation view leaves out.
-    session_rows: usize,
-}
-
-/// The anchors of one turn. Each message the turn answers has one: the turn's own, and each
-/// message read into it while it ran. The newest final reply to a message is its anchor from
-/// the moment it is written, so a client never sees it first as work and then as the answer.
-#[derive(Default)]
-struct TurnAnchors {
-    /// Oldest first.
-    anchors: Vec<Anchor>,
-    /// Which of them the turn's end settled: it carries the turn's last count, and is written
-    /// again with the end's revision.
-    settled: Option<usize>,
-    /// A reply that was the answer to its message until a later reply to the same message was
-    /// written, and where that later reply is: it left the conversation view there.
-    superseded: HashMap<String, Seq>,
-    /// The other way round: the reply a later one took the place of.
-    supersedes: HashMap<String, String>,
-}
-
-impl TurnAnchors {
-    fn of(&self, id: &str) -> Option<&Anchor> {
-        self.anchors.iter().find(|anchor| anchor.id == id)
-    }
-
-    fn settled(&self) -> Option<&Anchor> {
-        self.settled.and_then(|at| self.anchors.get(at))
-    }
-}
-
 /// A thing of a conversation as it is now.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Versioned {
@@ -211,7 +178,8 @@ pub struct Versioned {
     pub turn_number: Option<u64>,
     /// How that turn ended, when this is the row that closed it.
     pub turn: Option<TurnEnd>,
-    /// On a settled turn's conversation anchor, the number of rows omitted by that view.
+    /// On a turn's conversation anchor (the answer to one of its messages), the number of rows
+    /// omitted by that view for it.
     pub session_rows: Option<usize>,
     /// The uses of the tools a reply's message calls, as they are now, in its order.
     pub tools: Vec<ToolCall>,
@@ -679,8 +647,11 @@ impl<'a> Reader<'a> {
         }
         if matches!(which, Which::Chat { .. })
             && let Some(turn) = row.turn_number
+            && let ended = self.end(turn)?.map(|(_, seq)| *seq)
+            // Before its turn ends, only a reply can be an answer. A message read into a turn
+            // is of a turn that never ends by itself, and is conversation without an anchor.
+            && (ended.is_some() || matches!(row.entry, Entry::Reply(_)))
         {
-            let ended = self.end(turn)?.map(|(_, seq)| *seq);
             let anchors = self.anchors(turn)?;
             let id = row.entry.id();
             if let Some(anchor) = anchors.of(id) {
@@ -923,179 +894,6 @@ impl<'a> Reader<'a> {
         }
         Ok(None)
     }
-}
-
-/// A reply of a turn with words in it.
-struct Said {
-    id: String,
-    seq: Seq,
-    /// Its own message called tools: work follows it.
-    calls: bool,
-    /// It came right after the reply with words before it, with no work in between: it takes
-    /// that one's place as the answer.
-    follows: bool,
-}
-
-/// What a turn did for one message it answers: from that message to the next one read into
-/// the turn, or to the turn's end.
-#[derive(Default)]
-struct Segment {
-    /// Oldest first.
-    said: Vec<Said>,
-    /// The rows the conversation view leaves out.
-    rows: usize,
-    /// Its newest row that is conversation by itself: the turn's message or a note.
-    fallback: Option<String>,
-    /// Work came after the newest reply with words.
-    worked: bool,
-}
-
-/// Whether this row of another turn is a message read into a running turn of the agent's own
-/// session: a message the agent's conversation fork read is the fork's turn, not a part of it.
-fn read_into(log: &dyn AgentLog, item: &Item) -> Result<bool, ActorError> {
-    if item.kind != kind::MESSAGE || !joined_read(log, item)? {
-        return Ok(false);
-    }
-    let Some(joined) = item.turn else {
-        return Ok(false);
-    };
-    Ok(log
-        .find(&crate::fork::turn_key(joined))?
-        .is_none_or(|record| record.kind != kind::FORK))
-}
-
-/// A turn's anchors and counts come from its own rows, even if the page omits all its work.
-/// `end`: where the turn's end is written, once it has ended.
-///
-/// Each message the turn answers has its own anchor: the newest reply to it with words, when no
-/// work came after it (a final reply, from the moment it is written). A message read into the
-/// running turn closes what was said before it. The rows of a message with no such answer are
-/// counted on the next anchor. When the turn has ended, what came after its last anchor is
-/// settled as before there were anchors per message: its newest reply with words, else its
-/// newest note or its message, carries the count.
-fn find_anchors(
-    log: &dyn AgentLog,
-    turn: u64,
-    end: Option<Seq>,
-) -> Result<TurnAnchors, ActorError> {
-    // Back to the turn's own message: its rows, and where a message was read into it (`None`).
-    let mut found: Vec<(Seq, Option<Entry>)> = Vec::new();
-    let mut before = end.unwrap_or(Seq::MAX);
-    'reading: loop {
-        let items = log.read_before(before, kind::ROWS, CHUNK)?;
-        let Some(oldest) = items.first() else { break };
-        before = oldest.seq;
-        for item in items.into_iter().rev() {
-            if item.turn != Some(turn) {
-                if read_into(log, &item)? {
-                    found.push((item.seq, None));
-                }
-                continue;
-            }
-            let Some(entry) = Entry::from_item(&item).map_err(|why| corrupt(&item, why))? else {
-                continue;
-            };
-            let prompt = matches!(entry, Entry::Message(_));
-            found.push((item.seq, Some(entry)));
-            if prompt {
-                break 'reading;
-            }
-        }
-    }
-    found.reverse();
-
-    let mut segments = vec![Segment::default()];
-    let mut seen = HashSet::new();
-    for (seq, entry) in found {
-        let Some(entry) = entry else {
-            segments.push(Segment::default());
-            continue;
-        };
-        let id = entry.id();
-        if clarp_kernel::artifacts::forms::is_answer_row(id) || !seen.insert(id.to_owned()) {
-            continue;
-        }
-        let Some(segment) = segments.last_mut() else {
-            continue;
-        };
-        if is_conversation(&entry, None) {
-            if matches!(entry, Entry::Message(_) | Entry::Note(_)) {
-                segment.fallback = Some(id.to_owned());
-            }
-            continue;
-        }
-        segment.rows += 1;
-        match &entry {
-            Entry::Reply(said) if !said.text.trim().is_empty() => {
-                let follows =
-                    !segment.worked && segment.said.last().is_some_and(|before| !before.calls);
-                segment.said.push(Said {
-                    id: said.id.clone(),
-                    seq,
-                    calls: !said.tools.is_empty(),
-                    follows,
-                });
-                segment.worked = !said.tools.is_empty();
-            }
-            Entry::Reply(said) if !said.tools.is_empty() => segment.worked = true,
-            Entry::Tool(_) => segment.worked = true,
-            _ => {}
-        }
-    }
-
-    let mut anchors = TurnAnchors::default();
-    // The rows of the messages since the last anchor: the next anchor counts them.
-    let mut pending = 0;
-    let mut since = 0;
-    let last = segments.len() - 1;
-    for (at, segment) in segments.iter().enumerate() {
-        for pair in segment.said.windows(2) {
-            if pair[1].follows && !pair[1].calls {
-                anchors.superseded.insert(pair[0].id.clone(), pair[1].seq);
-                anchors
-                    .supersedes
-                    .insert(pair[1].id.clone(), pair[0].id.clone());
-            }
-        }
-        pending += segment.rows;
-        if end.is_some() && at == last {
-            break;
-        }
-        // Words with no work after them are the answer, also while the turn still runs.
-        if let Some(newest) = segment.said.last()
-            && !newest.calls
-            && log.find(&Commentary::id_of(&newest.id))?.is_none()
-        {
-            anchors.anchors.push(Anchor {
-                id: newest.id.clone(),
-                session_rows: pending - 1,
-            });
-            pending = 0;
-            since = at + 1;
-        }
-    }
-    if end.is_some() {
-        let open = &segments[since..];
-        let settled = match open.iter().rev().find_map(|segment| segment.said.last()) {
-            Some(newest) => Some(Anchor {
-                id: newest.id.clone(),
-                session_rows: pending.saturating_sub(1),
-            }),
-            None => open
-                .iter()
-                .rev()
-                .find_map(|segment| segment.fallback.clone())
-                .map(|id| Anchor {
-                    id,
-                    session_rows: pending,
-                }),
-        };
-        if let Some(anchor) = settled {
-            anchors.settled = Some(anchors.anchors.len());
-            anchors.anchors.push(anchor);
-        }
-    }
-    Ok(anchors)
 }
 
 /// The rows these items are about, each once and as it is now. The items are oldest first.
