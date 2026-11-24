@@ -151,7 +151,10 @@ impl Idle {
 
     /// True: a lane that may leave has been idle for its time.
     pub(super) fn over(&self, retirable: bool) -> bool {
-        retirable && self.limit.is_some_and(|limit| self.since.elapsed() >= limit)
+        retirable
+            && self
+                .limit
+                .is_some_and(|limit| self.since.elapsed() >= limit)
     }
 
     /// How long it has been idle, in milliseconds, as a status says it: none while it holds a
@@ -184,7 +187,10 @@ mod tests {
         });
         let own = Own::take(&mut options);
         assert_eq!(options, json!({"cwd": "/w"}));
-        assert_eq!(own.thread_locks.unwrap().to_str(), Some("/run/codex-threads"));
+        assert_eq!(
+            own.thread_locks.unwrap().to_str(),
+            Some("/run/codex-threads")
+        );
         assert_eq!(own.thread_lock, None);
         assert_eq!(own.idle, Some(Duration::from_secs(900)));
         assert_eq!(own.turn_file.unwrap().to_str(), Some("/run/a-turn.token"));
