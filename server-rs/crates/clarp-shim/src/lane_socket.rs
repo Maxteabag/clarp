@@ -45,7 +45,7 @@ impl Socket {
         wrap: fn(R, UnixStream) -> I,
     ) -> io::Result<Self>
     where
-        R: DeserializeOwned,
+        R: DeserializeOwned + 'static,
         I: Send + 'static,
     {
         Self::listen(path, move |stream| {
