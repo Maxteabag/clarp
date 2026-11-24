@@ -6,7 +6,8 @@ use clarp_actor::native_goal::{NativeGoal, Ownership};
 use clarp_kernel::agent_goal::{Goal, Status as GoalStatus};
 use clarp_shim::codex_lane::{GoalAction, Request, Snapshot};
 
-use crate::codex_goal_lane::{Lane, Login, Settings, Submission};
+use crate::lane::codex::{Lane, Login, Submission};
+use crate::lane::{Settings, Tool};
 
 use super::{
     ActorError, Answer, Ask, ShimOrder, Told, Unavailable, Worker, launch_permitted, tell,
@@ -54,19 +55,14 @@ impl Native {
 }
 
 impl Worker {
-    /// Whether this agent's chat turns run on its lane: a Codex agent, while the owner's
-    /// setting is on (issue 742).
+    /// Whether this agent's chat turns run on its lane: an agent of a tool that has one, while
+    /// the owner's switch for that tool is on (issues 742 and 761).
     pub(super) fn chat_lane(&self) -> bool {
-        self.setup.record.backend == "codex" && Settings::read().chat
+        Tool::of(&self.setup.record.backend).is_some_and(|tool| Settings::read().chat(tool))
     }
 
     pub(super) fn lane(&self) -> Lane {
-        Lane::new(
-            self.setup
-                .profile
-                .run_dir
-                .join(format!("{}-cxg.sock", self.setup.record.agent_id)),
-        )
+        Lane::of(&self.setup.profile.run_dir, &self.setup.record.agent_id)
     }
 
     fn native_login(&self) -> Login {
@@ -329,25 +325,16 @@ impl Worker {
                 if !launch_permitted(&tx, turn, attempt) {
                     return Err(std::io::Error::other("the actor stopped this attempt"));
                 }
-                match lane.submit((*order).clone(), submission.clone(), token.clone()) {
-                    // Nothing of the attempt reached Codex (no spool): the login changed and
-                    // the lane left, or an idle lane left between the look and the prompt
-                    // (its own idle time, another agent's room). The same attempt goes to a
-                    // new lane, once.
-                    Err(error) if !spool.try_exists().unwrap_or(true) => {
-                        // A lane that refused for its login is on its way out; any other may
-                        // still be there, and is looked at again rather than waited for.
-                        if error.kind() == std::io::ErrorKind::PermissionDenied {
-                            lane.wait_released()?;
-                        }
-                        start()?;
-                        if !launch_permitted(&tx, turn, attempt) {
-                            return Err(std::io::Error::other("the actor stopped this attempt"));
-                        }
-                        lane.submit(*order, submission, token)
+                let first = lane.submit((*order).clone(), submission.clone(), token.clone());
+                // Nothing of the attempt reached Codex (no spool): the same attempt goes to a
+                // new lane, once.
+                crate::lane::once_more(first, &spool, lane.endpoint(), || {
+                    start()?;
+                    if !launch_permitted(&tx, turn, attempt) {
+                        return Err(std::io::Error::other("the actor stopped this attempt"));
                     }
-                    other => other,
-                }
+                    lane.submit(*order, submission, token)
+                })
             })();
             // An absent reply cannot prove that Codex did not take the attempt.
             // The supervisor creates the spool before handing the request over.
