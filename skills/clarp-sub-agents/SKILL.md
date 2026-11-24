@@ -184,8 +184,12 @@ start, and the command exits 1.
 
    ```bash
    clarp-sub-agent start stream-a /path/to/worktree /var/tmp/prompts/stream-a.md \
-     --clarp-agent --backend codex --model gpt-5.5 --title "Refactor stream A"
+     --clarp-agent --backend codex --title "Refactor stream A"
    ```
+
+   Without `--model`, a helper gets the Host's default model for its tool, the
+   owner's `[agents] <tool>_model` (a plain worker without `--clarp-agent` reads
+   the same setting for Codex). Pass `--model` only to choose another.
 
    This runs `clarp-admin agent create stream-a --parent "$CLARP_SESSION"
    --role helper --cwd WORKTREE`, sends the prompt from your session with

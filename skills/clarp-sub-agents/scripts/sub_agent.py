@@ -41,6 +41,19 @@ import time
 
 DIR = pathlib.Path(os.environ.get("CLARP_SUB_AGENT_DIR", "/var/tmp/clarp-sub-agents"))
 DEFAULT_MODEL = "claude-opus-5-5"
+
+
+def owner_default(backend: str) -> str:
+    """The owner's default model for a tool ([agents] <tool>_model in ~/.config/clarp/config.toml), as
+    the Host gives an agent made without a model; empty where none is set. A plain worker runs its tool
+    itself, not through the Host, so it reads the same setting."""
+    try:
+        import tomllib
+        path = pathlib.Path.home() / ".config" / "clarp" / "config.toml"
+        model = tomllib.loads(path.read_text()).get("agents", {}).get(f"{backend}_model", "")
+    except (OSError, ValueError):
+        return ""
+    return model.strip() if isinstance(model, str) else ""
 HEARTBEAT_SEC = 90
 PROGRESS_SEC = 20
 PROGRESS_MAX = 200
@@ -404,7 +417,7 @@ def start(a: argparse.Namespace) -> int:
     if not shutil.which("systemd-run"):
         print("needs systemd (Linux); on macOS use launchctl submit", file=sys.stderr)
         return 3
-    model = a.model if a.model is not None else ("" if a.backend == "codex" else DEFAULT_MODEL)
+    model = a.model if a.model is not None else (owner_default("codex") if a.backend == "codex" else DEFAULT_MODEL)
     DIR.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(prompt, DIR / f"{a.name}.prompt.md")
     (DIR / f"{a.name}.title").write_text((a.title or f"Sub-agent {a.name}") + "\n")
