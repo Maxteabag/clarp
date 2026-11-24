@@ -122,7 +122,10 @@ fn stops_alike(host: &Host, session: &str, hold: &str, quick: impl Fn(usize, usi
         let paused = &stopped["queue_paused"];
         assert_eq!(paused, &json!(true), "round {round}: {stopped}");
         let now = queue();
-        assert_eq!(&now["paused"], paused, "round {round}, right after the Stop: {now}");
+        assert_eq!(
+            &now["paused"], paused,
+            "round {round}, right after the Stop: {now}"
+        );
 
         // The Stop let both messages run, the oldest first; the hold stays after them.
         wait_for("the messages the Stop let through to be answered", || {
@@ -135,7 +138,10 @@ fn stops_alike(host: &Host, session: &str, hold: &str, quick: impl Fn(usize, usi
         let at = |id: &str| read.iter().position(|row| *row == format!("u-{id}"));
         assert!(at(&waiting[0]) < at(&waiting[1]), "round {round}: {read:?}");
         let after = queue();
-        assert_eq!(&after["paused"], paused, "round {round}, after they ran: {after}");
+        assert_eq!(
+            &after["paused"], paused,
+            "round {round}, after they ran: {after}"
+        );
 
         // A moment longer for anything more of this Stop: one `interrupted`, for its turn.
         std::thread::sleep(Duration::from_millis(500));
@@ -146,7 +152,11 @@ fn stops_alike(host: &Host, session: &str, hold: &str, quick: impl Fn(usize, usi
             "round {round}: {:#?}",
             &told[before..]
         );
-        assert_eq!(told[before]["detail"]["source"], "user_stop", "{}", told[before]);
+        assert_eq!(
+            told[before]["detail"]["source"], "user_stop",
+            "{}",
+            told[before]
+        );
     }
 }
 
@@ -200,11 +210,7 @@ fn issue_747_each_stop_of_a_codex_turn_is_told_once_and_holds_the_queue_alike() 
     let place = Place::new("stop-events-codex");
     let codex = place.root.join("codex");
     program(&codex, CODEX);
-    let host = place.start_in(
-        "",
-        &[],
-        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
-    );
+    let host = place.start_in("", &[], &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())]);
     let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
     let session = made["session"].as_str().unwrap().to_string();
     stops_alike(&host, &session, "HOLD-747", |round, n| {
