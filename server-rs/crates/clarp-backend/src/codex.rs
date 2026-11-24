@@ -1816,7 +1816,8 @@ mod tests {
     fn a_bound_exec_turn_whose_rollout_is_not_in_its_home_is_stopped_within_the_window() {
         // Codex ran with another home: the agent's has no rollout of the thread.
         let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f1", "stand-in");
-        let thread = r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000f2"}"#;
+        let thread =
+            r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000f2"}"#;
         let item = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#;
         let out = bound_run(
             &own,
@@ -1863,7 +1864,10 @@ mod tests {
             &[
                 (0, r#"{"type":"turn.started"}"#),
                 (1, r#"{"type":"steer.open"}"#),
-                (2, r#"{"type":"error","message":"Reconnecting... stream disconnected"}"#),
+                (
+                    2,
+                    r#"{"type":"error","message":"Reconnecting... stream disconnected"}"#,
+                ),
                 (3, &mismatch),
             ],
             ShimEvent::Exited {
