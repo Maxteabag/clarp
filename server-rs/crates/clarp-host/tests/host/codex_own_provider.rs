@@ -192,7 +192,10 @@ fn a_bound_agent_runs_in_its_own_home_on_its_own_provider_and_never_on_another()
     let row = row_of(&host, &ada);
     assert_eq!(row["codex_home"], json!(home), "{row}");
     assert_eq!(row["codex_provider"], "stand-in", "{row}");
-    assert_eq!(row["cloud_speech"], false, "a bound agent's words stay off the cloud: {row}");
+    assert_eq!(
+        row["cloud_speech"], false,
+        "a bound agent's words stay off the cloud: {row}"
+    );
     assert_eq!(row["model"], "a-deployment-name", "{row}");
     host.send(&ada, "hello there", "u-ada-1");
     wait_for("the bound answer", || {
@@ -306,10 +309,12 @@ fn a_bound_agent_on_the_chat_lane_runs_in_its_own_home_and_leaves_another_provid
     let ada = bound_agent(&host, "Ada", &home);
     host.send(&ada, "say first", "u-lane-1");
     wait_for("the lane's answer", || {
-        host.conversation(&ada).contains(&said("assistant", "lane-first"))
+        host.conversation(&ada)
+            .contains(&said("assistant", "lane-first"))
     });
     assert_eq!(read("launches"), format!("app-server {}\n", home.display()));
-    let started: Value = serde_json::from_str(read("thread-params").lines().next().unwrap()).unwrap();
+    let started: Value =
+        serde_json::from_str(read("thread-params").lines().next().unwrap()).unwrap();
     assert_eq!(
         (&started["modelProvider"], &started["config_provider"]),
         (&json!("stand-in"), &json!("stand-in")),
@@ -327,7 +332,9 @@ fn a_bound_agent_on_the_chat_lane_runs_in_its_own_home_and_leaves_another_provid
     wait_for("the lane's Codex to be gone", || gone(&pid));
     assert!(!read("finished").contains("late"));
     assert!(
-        !host.conversation(&ada).contains(&said("assistant", "lane-second")),
+        !host
+            .conversation(&ada)
+            .contains(&said("assistant", "lane-second")),
         "{:?}",
         host.conversation(&ada)
     );
@@ -358,7 +365,12 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
     let home = place.root.to_str().unwrap();
     let host = place.start_in(
         "",
-        &["--accounts", "none", "--speech-keys", owners.to_str().unwrap()],
+        &[
+            "--accounts",
+            "none",
+            "--speech-keys",
+            owners.to_str().unwrap(),
+        ],
         &[
             ("HOME", home),
             ("XDG_CONFIG_HOME", home),
@@ -419,7 +431,10 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
     assert!(!asked("a preview kept off"));
 
     // Turned on, it is spoken as any agent.
-    host.post("/agent-provider", json!({"session": quiet, "cloud_speech": true}));
+    host.post(
+        "/agent-provider",
+        json!({"session": quiet, "cloud_speech": true}),
+    );
     host.send(&quiet, "<speak>now spoken too</speak>", "u-quiet-2");
     wait_for("the agent spoken once allowed", || asked("now spoken too"));
 }

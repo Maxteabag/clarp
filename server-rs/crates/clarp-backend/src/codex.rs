@@ -1565,7 +1565,12 @@ mod tests {
         // The machine's own Codex is started as ever.
         let plain = Codex::new().launch(&spec());
         assert!(plain.env.iter().all(|(name, _)| name != CODEX_HOME));
-        assert!(!plain.args.iter().any(|arg| arg.starts_with("model_provider")));
+        assert!(
+            !plain
+                .args
+                .iter()
+                .any(|arg| arg.starts_with("model_provider"))
+        );
     }
 
     #[test]
@@ -1608,10 +1613,13 @@ mod tests {
 
         // On its own provider: as any turn.
         let (home, own) = bound_home(thread, "stand-in");
-        let out = run(&own, ShimEvent::Exited {
-            code: Some(0),
-            signal: None,
-        });
+        let out = run(
+            &own,
+            ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            },
+        );
         assert!(!out.contains(&Signal::Halt));
         assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))));
         assert_eq!(out.last(), Some(&Signal::Ended(RunOutcome::Completed)));
@@ -1620,16 +1628,20 @@ mod tests {
         // On another: halted before it said anything, and failed as a provider mismatch
         // however its process then ended.
         let (home, own) = bound_home(thread, "openai");
-        let out = run(&own, ShimEvent::Exited {
-            code: None,
-            signal: Some(15),
-        });
+        let out = run(
+            &own,
+            ShimEvent::Exited {
+                code: None,
+                signal: Some(15),
+            },
+        );
         assert_eq!(
             out.iter().filter(|signal| **signal == Signal::Halt).count(),
             1
         );
         assert!(
-            !out.iter().any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
+            !out.iter()
+                .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
             "nothing a turn on another provider said is the agent's: {out:?}"
         );
         let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {

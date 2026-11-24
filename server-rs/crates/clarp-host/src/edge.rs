@@ -2050,13 +2050,14 @@ pub(crate) async fn make_agent(
     // An agent bound to a provider of its own runs on that provider's deployments, which no
     // list of the machine's models has: any name is taken, and with none Codex takes the one
     // its own configuration names.
-    let bound = request
-        .codex_provider
-        .as_deref()
-        .map_or_else(
-            || replacing.as_ref().is_some_and(|record| !record.codex_provider.is_empty()),
-            |provider| !provider.trim().is_empty(),
-        );
+    let bound = request.codex_provider.as_deref().map_or_else(
+        || {
+            replacing
+                .as_ref()
+                .is_some_and(|record| !record.codex_provider.is_empty())
+        },
+        |provider| !provider.trim().is_empty(),
+    );
     if !bound
         && !model.is_empty()
         && let Some(detail) = app.models.policy_model_error(backend, model)

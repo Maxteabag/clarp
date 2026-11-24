@@ -263,8 +263,7 @@ impl AgentRecord {
         if self.backend != "codex" {
             return None;
         }
-        clarp_backend::own_provider::OwnProvider::new(&self.codex_home, &self.codex_provider)
-            .ok()
+        clarp_backend::own_provider::OwnProvider::new(&self.codex_home, &self.codex_provider).ok()
     }
 
     /// Whether what it says may be spoken by a speech provider in the cloud: as it was set,
@@ -1839,7 +1838,10 @@ fn bound_as(
         None => had.cloned().unwrap_or_default(),
     };
     let home = kept(&request.codex_home, before.map(|had| &had.codex_home));
-    let provider = kept(&request.codex_provider, before.map(|had| &had.codex_provider));
+    let provider = kept(
+        &request.codex_provider,
+        before.map(|had| &had.codex_provider),
+    );
     let cloud_speech = request
         .cloud_speech
         .or_else(|| before.and_then(|had| had.cloud_speech));

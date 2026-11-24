@@ -336,8 +336,12 @@ pub(crate) async fn bind(app: &App, asked: &Fields) -> Result<Value, Refusal> {
     let before = &member.record;
     let home = optional(asked, "codex_home", "codex_home must be string or null")?
         .unwrap_or_else(|| before.codex_home.clone());
-    let provider = optional(asked, "codex_provider", "codex_provider must be string or null")?
-        .unwrap_or_else(|| before.codex_provider.clone());
+    let provider = optional(
+        asked,
+        "codex_provider",
+        "codex_provider must be string or null",
+    )?
+    .unwrap_or_else(|| before.codex_provider.clone());
     let cloud_speech = match asked.get("cloud_speech") {
         None => before.cloud_speech,
         Some(Value::Null) => None,
