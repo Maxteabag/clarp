@@ -131,6 +131,7 @@ impl World {
                         self.stopped.push(self.profile.spool_path_of(turn, attempt));
                     }
                     Action::Steer { .. } => panic!("no follow-up is steered here"),
+                    Action::CheckNetwork { .. } => panic!("no connection fails here"),
                 }
             }
         }
