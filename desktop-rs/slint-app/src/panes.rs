@@ -326,6 +326,19 @@ impl App {
         self.active_index().map(|i| self.pane_state.borrow()[i].report).unwrap_or_default()
     }
 
+    /// Whether row `id` of pane `pane` trails a chat's messages: the Running
+    /// box or another live-only row (author "live"), or a send still
+    /// pending, failed or withdrawn (the layout-shift rule's trailing rows).
+    pub fn row_trailing(&self, pane: &str, id: &str) -> bool {
+        if id.is_empty() {
+            return false;
+        }
+        let Ok(panes) = self.pane_state.try_borrow() else { return false };
+        panes.iter().find(|p| p.id == pane).is_some_and(|p| {
+            p.messages.iter().find(|row| row.id == id).is_some_and(|row| row.author == "live" || row.pending || row.failed || row.stopped)
+        })
+    }
+
     pub fn active_messages(&self) -> Option<Rc<VecModel<MessageRow>>> {
         self.active_index().map(|i| self.pane_state.borrow()[i].messages.clone())
     }

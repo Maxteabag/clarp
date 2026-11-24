@@ -174,6 +174,11 @@ pub struct Shot {
     pub bottom: String,
     pub bottom_y: f32,
     pub bottom_h: f32,
+    /// The bottom row is a trailing live row, not a message: the Running box
+    /// or another live-only row (author "live"), or a send still pending,
+    /// failed or withdrawn. Rows sliding up above only such rows while the
+    /// chat follows its end are the follow slide.
+    pub bottom_trailing: bool,
 }
 
 impl Shot {
