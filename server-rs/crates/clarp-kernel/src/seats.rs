@@ -842,7 +842,7 @@ fn merge(previous: Option<&Value>, accounts: Value, _observed_at: i64) -> Vec<Va
     merged
 }
 
-fn stale_after_ms(cadence_s: Option<i64>) -> i64 {
+pub(crate) fn stale_after_ms(cadence_s: Option<i64>) -> i64 {
     (2 * cadence_s.filter(|cadence| *cadence > 0).unwrap_or(0)).max(STALE_FLOOR_S) * 1000
 }
 

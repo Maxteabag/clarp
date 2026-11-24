@@ -433,6 +433,34 @@ fn ranked(account: &Value, served_at: i64) -> Option<(i64, i64, &str)> {
     Some((left("5h")?, left("7d").unwrap_or(0), account["alias"].as_str()?))
 }
 
+/// Until when a judgement of a tool's pool from this desk holds: until the desk's reading of
+/// the tool grows old by its own rule (twice its cadence, and ten minutes at least), the moment
+/// after which it says nothing of now. `None` where the tool's seats were not read.
+pub fn fresh_until(provider: &str, desk: &Value) -> Option<i64> {
+    let read = fresh_read(provider, desk)?;
+    let observed_at = read["observed_at"].as_i64()?;
+    Some(observed_at + crate::seats::stale_after_ms(read["cadence_s"].as_i64()))
+}
+
+/// A `provider-limit` event of a tool's account, given whether another seat of the tool would
+/// take the turn ([`used_up_failover`] for the tool's default model): an account that reached
+/// its limit while another seat has room is the switch's business, so its `hard_limit` is not
+/// told (`None`); else it is told with `failover`, and where no seat had room, when the first
+/// regains it (`pool_regains_at`, UTC to the second; null where that is not known). Every
+/// other event, a warning, a recovery or a limit no longer known, is told as it is.
+pub fn limit_event(event: Value, failover: Failover, regains_at: Option<i64>) -> Option<Value> {
+    if event["type"] != "provider-limit" || event["kind"] != "hard_limit" {
+        return Some(event);
+    }
+    if failover == Failover::Spare {
+        return None;
+    }
+    let mut event = event;
+    event["failover"] = json!(failover.word());
+    event["pool_regains_at"] = json!(regains_at.map(moment));
+    Some(event)
+}
+
 /// What an agent's row says of a tool near its limit, given whether another seat would take
 /// the turn: null where one would.
 pub fn row(near: &Value, failover: Failover) -> Value {
@@ -953,5 +981,28 @@ mod tests {
         // No pool read for the tool: no summary.
         assert!(pool("codex", &served(json!([in_use]))).is_none());
         assert!(pool("claude", &served(json!([]))).is_none());
+    }
+
+    #[test]
+    fn a_hard_limit_is_told_only_where_no_seat_of_the_pool_would_take_the_turn() {
+        let hard = json!({ "type": "provider-limit", "kind": "hard_limit", "provider_id": "codex",
+            "resets_at": moment(NOW + 3 * HOUR) });
+        assert!(limit_event(hard.clone(), Failover::Spare, None).is_none());
+        let told = limit_event(hard.clone(), Failover::None, Some(NOW + HOUR)).unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"], &told["pool_regains_at"], &told["resets_at"]),
+            (&json!("hard_limit"), &json!("none"), &json!(moment(NOW + HOUR)), &hard["resets_at"])
+        );
+        let told = limit_event(hard, Failover::Unknown, None).unwrap();
+        assert_eq!((&told["failover"], &told["pool_regains_at"]), (&json!("unknown"), &Value::Null));
+        // A warning, a recovery: as they are, also while a seat has room.
+        for kind in ["warning", "recovered", "unknown"] {
+            let event = json!({ "type": "provider-limit", "kind": kind });
+            assert_eq!(limit_event(event.clone(), Failover::Spare, None), Some(event));
+        }
+        // A reading holds until it grows old: ten minutes at least after it was read.
+        let desk = served(json!([timed("work", true, "ok", &[("5h", 0.1, NOW + HOUR)])]));
+        assert_eq!(fresh_until("claude", &desk), Some(NOW - 60_000 + 600_000));
+        assert_eq!(fresh_until("codex", &desk), None);
     }
 }
