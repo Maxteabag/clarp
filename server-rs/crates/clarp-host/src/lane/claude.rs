@@ -92,7 +92,11 @@ pub(crate) fn fits(order: &ShimOrder, mcp: &Mcp) -> Option<Fit> {
     let session = flag(&order.args, "--resume").or_else(|| flag(&order.args, "--session-id"))?;
     Some(Fit {
         session: session.to_owned(),
-        digest: digest(order, mcp, &crate::mcp::definitions(mcp.0, mcp.1.as_deref())),
+        digest: digest(
+            order,
+            mcp,
+            &crate::mcp::definitions(mcp.0, mcp.1.as_deref()),
+        ),
     })
 }
 
@@ -427,7 +431,10 @@ mod tests {
         assert_eq!(digest(&one, &mcp, &none), digest(&two, &mcp, &none));
         let other_model = order(&["-p", "--model", "opus", "--resume", "s-1"]);
         assert_ne!(digest(&one, &mcp, &none), digest(&other_model, &mcp, &none));
-        assert_ne!(digest(&one, &mcp, &none), digest(&one, &(true, None), &none));
+        assert_ne!(
+            digest(&one, &mcp, &none),
+            digest(&one, &(true, None), &none)
+        );
         // A server edited under the same name is another lane's.
         let server = |command: &str| serde_json::json!({"a": {"command": command}});
         assert_ne!(
