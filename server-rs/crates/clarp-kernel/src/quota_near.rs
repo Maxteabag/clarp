@@ -893,6 +893,7 @@ mod tests {
             (&json!(true), &Value::Null, &Value::Null)
         );
         assert_eq!(summary["seats"], 2);
+        assert_eq!(summary["next_alias"], Value::Null);
     }
 
     #[test]
@@ -926,7 +927,15 @@ mod tests {
                 "stale": false, "observed_at": moment(NOW - 60_000),
             })
         );
-        // Every seat used up: when the first regains room.
+        // Of two seats with room, the switcher would move to the one with more of its five
+        // hours left; of two as full, more of the week.
+        let roomier = timed("roomier", false, "ok", &[("5h", 0.05, NOW + HOUR), ("7d", 0.6, NOW + 90 * HOUR)]);
+        let weekly = timed("weekly", false, "ok", &[("5h", 0.05, NOW + HOUR), ("7d", 0.2, NOW + 90 * HOUR)]);
+        let summary = pool("claude", &served(json!([in_use, spare, roomier]))).unwrap();
+        assert_eq!(summary["next_alias"], "roomier");
+        let summary = pool("claude", &served(json!([in_use, spare, roomier, weekly]))).unwrap();
+        assert_eq!(summary["next_alias"], "weekly");
+        // Every seat used up: when the first regains room, and no seat to move to.
         let summary = pool("claude", &served(json!([in_use, week, out]))).unwrap();
         assert_eq!(
             (
@@ -936,6 +945,7 @@ mod tests {
             ),
             (&json!(0), &json!(2), &json!(moment(NOW + 3 * HOUR)))
         );
+        assert_eq!(summary["next_alias"], Value::Null);
         // A seat that cannot be judged: it is not known that every seat is used up.
         let summary = pool("claude", &served(json!([in_use, unread]))).unwrap();
         assert_eq!(summary["regains_room_at"], Value::Null);
