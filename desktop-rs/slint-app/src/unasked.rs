@@ -12,7 +12,10 @@
 //!
 //! A frame is asked for while the reader scrolls (wheel, touchpad, bar,
 //! keys, a fling settling) or a move they asked for runs (jump to the
-//! latest, a seek, a search hit or link revealed, an older page). One
+//! latest, a seek, a search hit or link revealed, an older page), and
+//! for 0.15 s after a resize that came within 0.4 s of the user's own input
+//! (the window or a divider dragged, the text size changed, typing in the
+//! composer); a resize the app made by itself is movement like any other. One
 //! movement is expected: while the chat follows its end, new content at
 //! the end slides the rows up, once, to the end. It does not count as a
 //! shift or toward the score, but its steps count toward a shake, so a
@@ -52,16 +55,31 @@ pub struct Step {
 /// settling, a seek, a search hit or link revealed, an older page, the
 /// jump to the latest.
 pub fn asked(event: &str) -> bool {
-    ["reader", "key:", "vim:", "bar:", "seek", "reveal", "load-older", "jump-latest", "resize"].iter().any(|p| event.starts_with(p))
+    ["reader", "key:", "vim:", "bar:", "seek", "reveal", "load-older", "jump-latest"].iter().any(|p| event.starts_with(p))
 }
 
-/// After the window (or the chat's pane) is resized, its rows settle for a
-/// moment: frames within this of a resize are asked for too.
+/// The user's own input that may resize a chat: the window's size
+/// changing under their drag, a pane divider dragged, the text size
+/// changed, a key or edit in the composer (which grows with it).
+pub const INPUT: &str = "input";
+
+/// A resize is the user's when their input came this long before it (or
+/// in the same frame); any other resize that moves the rows counts.
+pub const AFTER_INPUT: Duration = Duration::from_millis(400);
+
+/// After the user's resize, the rows settle for a moment: frames within
+/// this of it are asked for too.
 pub const AFTER_RESIZE: Duration = Duration::from_millis(150);
 
-/// The chat's size changed between two frames: the reader's resize.
+/// The chat's height changed between two frames.
 fn resized(a: &Shot, b: &Shot) -> bool {
     (a.viewport - b.viewport).abs() >= 0.5
+}
+
+/// The chat was resized in `after`: its height changed, or its width or
+/// text size did (the list lays its rows out again).
+pub fn resize(before: &Frame, after: &Frame) -> bool {
+    resized(&before.shot, &after.shot) || after.events.iter().any(|e| e == "resize")
 }
 
 fn at_end(s: &Shot) -> bool {
@@ -85,7 +103,7 @@ fn cover(viewport: f32, before: (f32, f32), after: (f32, f32)) -> f32 {
 /// changes as rows come and are drawn (the offset moves, the view does not).
 pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let (a, b) = (&before.shot, &after.shot);
-    if a.viewport < 1.0 || b.viewport < 1.0 || resized(a, b) || after.events.iter().any(|e| asked(e) || e.starts_with("reset:")) {
+    if a.viewport < 1.0 || b.viewport < 1.0 || after.events.iter().any(|e| asked(e) || e.starts_with("reset:")) {
         return None;
     }
     let viewport = b.viewport;
@@ -185,7 +203,9 @@ pub struct Motion {
     open_score: f32,
     open_sent: bool,
     minute: Option<(Duration, f32, bool)>,
-    /// A resize asks for movement until then.
+    /// When the user's input last came (a frame with an `input` event).
+    input: Option<Duration>,
+    /// The user's resize asks for movement until then.
     resized_until: Option<Duration>,
 }
 
@@ -195,9 +215,15 @@ impl Motion {
         let mut found = Vec::new();
         if after.events.iter().any(|e| e.starts_with("reset:")) {
             // Another chat (or every row again): a new open.
-            *self = Motion { minute: self.minute.take(), ..Motion::default() };
+            *self = Motion { minute: self.minute.take(), input: self.input, resized_until: self.resized_until, ..Motion::default() };
         }
-        if after.events.iter().any(|e| e.starts_with("resize")) || resized(&before.shot, &after.shot) {
+        if after.events.iter().any(|e| e == INPUT) {
+            self.input = Some(after.at);
+        }
+        // A resize right after the user's input is theirs; any other (a
+        // side pane, an overlay or a banner opening, the composer growing
+        // with a restored draft) is movement like any other.
+        if resize(before, after) && self.input.is_some_and(|input| after.at.saturating_sub(input) <= AFTER_INPUT) {
             self.resized_until = Some(after.at + AFTER_RESIZE);
         }
         if after.events.iter().any(|e| asked(e)) || self.resized_until.is_some_and(|until| after.at <= until) {
@@ -431,19 +457,52 @@ mod tests {
         assert!(Motion::default().frame(&a, &tiny).is_empty());
     }
 
-    /// A window resize is asked for: the resize frame and the rows settling
-    /// for 0.15 s after it post nothing; movement after that counts again.
+    /// The chat resized (its height and rows' places changed) at `ms`.
+    fn resized_at(ms: u64, events: &[&str]) -> Frame {
+        frame(ms, Shot { viewport: 420.0, top_y: -80.0, ..pinned(4000.0, -20.0, 100.0) }, events)
+    }
+
+    fn shifts(found: &[Found]) -> usize {
+        found.iter().filter(|f| f.rule == "shift").count()
+    }
+
+    /// A resize right after the user's input (dragging the window or a
+    /// divider, zooming, typing in the composer) is theirs: it and the rows
+    /// settling in the 0.15 s after it post nothing; a jump later counts.
     #[test]
-    fn a_resize_and_the_settling_after_it_are_asked_for() {
+    fn a_resize_right_after_input_and_its_settling_post_nothing() {
         let a = frame(0, pinned(4000.0, -20.0, 100.0), &[]);
-        let wider = frame(16, Shot { viewport: 420.0, top_y: -80.0, ..pinned(4000.0, -20.0, 100.0) }, &["resize"]);
-        assert_eq!(movement(&a, &wider), None, "the resize frame");
+        let typed = frame(100, pinned(4000.0, -20.0, 100.0), &[INPUT]);
+        let wider = resized_at(450, &["resize"]);
         let mut motion = Motion::default();
-        assert!(motion.frame(&a, &wider).is_empty());
-        let settle = frame(116, Shot { viewport: 420.0, top_y: -40.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert!(motion.frame(&a, &typed).is_empty());
+        assert!(motion.frame(&typed, &wider).is_empty(), "the resize 0.35 s after input");
+        let settle = frame(550, Shot { viewport: 420.0, top_y: -40.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
         assert!(motion.frame(&wider, &settle).is_empty(), "rows settling within 0.15 s after it");
-        let later = frame(400, Shot { viewport: 420.0, top_y: 60.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
-        assert!(motion.frame(&settle, &later).iter().any(|f| f.rule == "shift"), "a jump well after the resize counts");
+        let later = frame(900, Shot { viewport: 420.0, top_y: 60.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert_eq!(shifts(&motion.frame(&settle, &later)), 1, "a jump well after the resize counts");
+        // Input in the resize's own frame (the window's size changed).
+        let mut motion = Motion::default();
+        assert!(motion.frame(&a, &resized_at(16, &[INPUT, "resize"])).is_empty());
+    }
+
+    /// A resize the app made by itself (a side pane, overlay or banner
+    /// opening, a restored draft growing the composer) is a shift.
+    #[test]
+    fn a_resize_with_no_input_before_it_is_a_shift() {
+        let a = frame(0, pinned(4000.0, -20.0, 100.0), &[]);
+        assert_eq!(shifts(&Motion::default().frame(&a, &resized_at(16, &["resize"]))), 1, "a pane or banner opening");
+        assert_eq!(shifts(&Motion::default().frame(&a, &resized_at(16, &[]))), 1, "the height alone changed");
+    }
+
+    #[test]
+    fn a_resize_half_a_second_after_input_is_a_shift() {
+        let typed = frame(0, pinned(4000.0, -20.0, 100.0), &[INPUT]);
+        let mut motion = Motion::default();
+        assert!(motion.frame(&frame(0, pinned(4000.0, -20.0, 100.0), &[]), &typed).is_empty());
+        let still = frame(300, pinned(4000.0, -20.0, 100.0), &["live"]);
+        assert!(motion.frame(&typed, &still).is_empty());
+        assert_eq!(shifts(&motion.frame(&still, &resized_at(500, &["resize"]))), 1);
     }
 
     #[test]

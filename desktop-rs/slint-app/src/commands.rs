@@ -355,6 +355,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     if crate::look::confirm_first(app, window, action) {
         return true;
     }
+    // The text size or the window's scale changed by the user: the chats
+    // resizing with it are theirs (unasked.rs).
+    if action.starts_with("chat-zoom-") || action.starts_with("pref-set:") || matches!(action, "ui-larger" | "ui-smaller" | "ui-reset") {
+        crate::scroll_journal::input_all();
+    }
     // `:set`, the settings file, reset all, the chat zoom.
     if let Some(ran) = crate::look::run(app, window, action) {
         return ran;

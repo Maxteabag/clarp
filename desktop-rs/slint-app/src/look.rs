@@ -722,6 +722,8 @@ pub fn wire(app: &Rc<App>, window: &AppWindow) {
     editor.on_reset(|| with_window(reset_editor));
     editor.on_confirmed(|| with_window(confirmed));
     window.global::<Look>().on_zoom_by(|delta| {
+        // Ctrl+wheel: the chats resizing with the text are the user's.
+        crate::scroll_journal::input_all();
         with_window(|app, window| {
             step_setting(app, window, "chatzoom", delta);
         })
