@@ -87,12 +87,13 @@ pub fn notice(failures: u32, error: &str) -> String {
     )
 }
 
-/// What the sender is told when the turn could not start because its agent's folder is not
-/// there: at once, with no try again, since no try brings the folder back.
-pub fn folder_missing_notice(dir: &str) -> String {
+/// What the sender is told when the turn could not start because its agent's folder is gone:
+/// at once, with no try again, since no try brings the folder back. `missing`: what
+/// [`crate::failures::missing_folder`] found.
+pub fn folder_missing_notice(missing: &str) -> String {
     format!(
         "{NEVER_RUN}\n\n{}, then send the message again.",
-        crate::failures::folder_missing_sentence(dir)
+        crate::failures::folder_missing_sentence(missing)
     )
 }
 
