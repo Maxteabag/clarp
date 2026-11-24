@@ -991,10 +991,10 @@ impl Lane {
         // What Codex says of the thread's settings names the provider it runs on: held to the
         // lane's own, where it has one, before anything else of it is taken.
         let named = match method {
-            "thread/settings/updated" if params["threadId"].as_str() == Some(&self.thread) => {
+            "thread/settings/updated" if params["threadId"].as_str() == Some(self.thread.as_str()) => {
                 Some(params["threadSettings"]["modelProvider"].as_str())
             }
-            "thread/started" if params["thread"]["id"].as_str() == Some(&self.thread) => {
+            "thread/started" if params["thread"]["id"].as_str() == Some(self.thread.as_str()) => {
                 Some(params["thread"]["modelProvider"].as_str())
             }
             _ => None,
