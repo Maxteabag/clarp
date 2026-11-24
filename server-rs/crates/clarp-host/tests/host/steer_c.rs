@@ -841,7 +841,12 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
             .collect::<Vec<_>>();
         assert_eq!(
             rows,
-            [format!("case-{mode}"), answer.to_owned(), follow, last.to_owned()],
+            [
+                format!("case-{mode}"),
+                answer.to_owned(),
+                follow,
+                last.to_owned()
+            ],
             "{mode}: each message with its own answer, after the turn"
         );
     }
