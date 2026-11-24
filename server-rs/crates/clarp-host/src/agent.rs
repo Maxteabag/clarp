@@ -514,10 +514,11 @@ enum Ask {
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now.
     LoginChanged,
-    /// From a check of the network for a turn that waits for it: whether this machine
-    /// reaches the provider of the agent's tool.
+    /// From a check of the network for an attempt of a turn that waits for it: whether this
+    /// machine reaches the provider of the agent's tool.
     NetworkChecked {
         turn: TurnId,
+        attempts: u32,
         up: bool,
     },
     /// A terminal on the agent's own tool is to be opened: what the tool is started with
@@ -1504,6 +1505,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         helper_clock: Default::default(),
         provider_requested: false,
         provider_retry_at: None,
+        network_checks: Arc::default(),
         historical_reading: false,
         historical_sources: BTreeMap::new(),
         helper_generation: 0,
@@ -1533,6 +1535,14 @@ pub fn spawn(setup: Setup) -> AgentHandle {
 enum QueueEdit {
     Edited { item: Waiting, text: String },
     Deleted(Waiting),
+}
+
+/// The checks of the network an agent has asked for: whether one runs, and the one asked for
+/// meanwhile, which is made when it is over.
+#[derive(Default)]
+struct NetworkChecks {
+    running: bool,
+    next: Option<(TurnId, u32)>,
 }
 
 struct Worker {
@@ -1590,6 +1600,8 @@ struct Worker {
     helper_clock: crate::helper_source::RefreshClock,
     provider_requested: bool,
     provider_retry_at: Option<Instant>,
+    /// The agent's checks of the network: one at a time.
+    network_checks: Arc<Mutex<NetworkChecks>>,
     historical_reading: bool,
     historical_sources: BTreeMap<String, Box<crate::helper_source::HelperSource>>,
     helper_generation: u64,
@@ -3796,7 +3808,14 @@ impl Worker {
             }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
-            Ask::NetworkChecked { turn, up } => (actor.network_checked(turn, up, now)?, nobody()),
+            Ask::NetworkChecked {
+                turn,
+                attempts,
+                up,
+            } => (
+                actor.network_checked(turn, attempts, up, now)?,
+                nobody(),
+            ),
             Ask::TerminalFacts { answer } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
@@ -4342,16 +4361,53 @@ impl Worker {
             }
             Action::Fork(order) => self.launch_fork(*order, tx),
             // The check can take seconds: it runs on a thread of its own, and its answer
-            // comes back as any other.
-            Action::CheckNetwork { turn } => {
+            // comes back as any other. One runs at a time: a check asked for meanwhile is
+            // made when it is over, the newest of them only.
+            Action::CheckNetwork { turn, attempts } => {
+                let checks = self.network_checks.clone();
+                {
+                    let mut checks = checks.lock().unwrap_or_else(PoisonError::into_inner);
+                    if checks.running {
+                        checks.next = Some((turn, attempts));
+                        return;
+                    }
+                    checks.running = true;
+                }
                 let network = self.setup.network.clone();
                 let backend = self.setup.record.backend.clone();
-                std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name("network".to_string())
-                    .spawn(move || {
-                        let up = network.reachable(&backend);
-                        let _ = tx.send(Ask::NetworkChecked { turn, up });
-                    })
+                    .spawn({
+                        let checks = checks.clone();
+                        move || {
+                            let mut asked = (turn, attempts);
+                            loop {
+                                let up = network.reachable(&backend);
+                                let (turn, attempts) = asked;
+                                let _ = tx.send(Ask::NetworkChecked {
+                                    turn,
+                                    attempts,
+                                    up,
+                                });
+                                let mut checks =
+                                    checks.lock().unwrap_or_else(PoisonError::into_inner);
+                                match checks.next.take() {
+                                    Some(next) => asked = next,
+                                    None => {
+                                        checks.running = false;
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                if spawned.is_err() {
+                    checks
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .running = false;
+                }
+                spawned
             }
             Action::ForkFollow {
                 turn,

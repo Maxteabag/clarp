@@ -355,6 +355,8 @@ pub enum Refusal {
     NotLive(TurnId),
     /// The turn does not wait between two attempts.
     NotParked(TurnId),
+    /// The turn waits between two attempts, but not for the network.
+    NotOffline(TurnId),
     /// A resume for an agent that is not held.
     NotPaused,
     /// A turn of the agent runs: nothing that waits is sent by hand past it.
@@ -380,6 +382,7 @@ impl std::fmt::Display for Refusal {
             Self::NotWaiting(turn) => write!(f, "turn {} is not waiting", turn.0),
             Self::NotLive(turn) => write!(f, "turn {} is not the live turn", turn.0),
             Self::NotParked(turn) => write!(f, "turn {} does not wait for an attempt", turn.0),
+            Self::NotOffline(turn) => write!(f, "turn {} does not wait for the network", turn.0),
             Self::NotPaused => write!(f, "the agent is not paused"),
             Self::AtWork => write!(f, "a turn of the agent runs"),
             Self::AlreadyAtWork => write!(f, "the agent has already worked on this Host"),
@@ -1451,6 +1454,10 @@ impl Agent {
                 work.agent.require_here()?;
                 let network_back = matches!(command, Command::NetworkBack { .. });
                 let parked = work.parked(turn)?;
+                // Only a turn that waited for the network has it come back.
+                if network_back && !parked.wait.is_for_the_network() {
+                    return Err(Refusal::NotOffline(turn));
+                }
                 let (message_seq, attempt) = (parked.message_seq, parked.attempts + 1);
                 work.record(AgentEvent::Turn {
                     turn,
@@ -1467,6 +1474,10 @@ impl Agent {
             }
             Command::WaitOver { turn } | Command::NetworkGone { turn } => {
                 let parked = work.parked(turn)?;
+                if matches!(command, Command::NetworkGone { .. }) && !parked.wait.is_for_the_network()
+                {
+                    return Err(Refusal::NotOffline(turn));
+                }
                 let reason = match command {
                     Command::NetworkGone { .. } => crate::failures::network_gone(&parked.reason),
                     _ => parked.reason.clone(),
@@ -2530,6 +2541,47 @@ mod tests {
             }]
         );
         assert_eq!(a.agent.last().unwrap().outcome, Outcome::Completed);
+    }
+
+    #[test]
+    fn only_a_turn_that_waits_for_the_network_has_it_come_back_or_stay_gone() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        // A turn that waits a moment, not for the network: neither is taken.
+        a.send(dropped(1)).unwrap();
+        assert_eq!(
+            a.send(Command::NetworkBack { turn: TurnId(1) }),
+            Err(Refusal::NotOffline(TurnId(1)))
+        );
+        assert_eq!(
+            a.send(Command::NetworkGone { turn: TurnId(1) }),
+            Err(Refusal::NotOffline(TurnId(1)))
+        );
+        a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        // One that waits for the network: the network back starts the next attempt, which
+        // is counted as one that followed an outage.
+        a.send(Command::TurnParked {
+            turn: TurnId(1),
+            wait: Wait::Network {
+                until_ms: 905_000,
+                resume: true,
+            },
+            kind: "connection".to_string(),
+            reason: "EAI_AGAIN".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            a.send(Command::NetworkBack { turn: TurnId(1) }).unwrap(),
+            vec![Effect::RetryTurn {
+                turn: TurnId(1),
+                message_seq: 10,
+                attempt: 3
+            }]
+        );
+        assert!(matches!(a.agent.live(), Some(Turn::Starting(starting))
+            if starting.offline == 1 && starting.resuming));
     }
 
     #[test]

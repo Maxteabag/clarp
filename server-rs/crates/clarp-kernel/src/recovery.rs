@@ -199,7 +199,9 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
         .saturating_sub(failed.account_waits)
         .saturating_sub(failed.offline);
     match failed.kind {
-        // Someone listens to a call: it is not kept waiting for minutes.
+        // Someone listens to a call: it is not kept waiting for minutes. Its next attempt is
+        // given the message anew (`resume: false`), as before the network wait, also where
+        // the turn had begun its work: a call's turn rarely runs a tool.
         failures::CONNECTION | failures::TIMEOUT
             if failed.in_call && (1..MAX_ATTEMPTS).contains(&tries) =>
         {
