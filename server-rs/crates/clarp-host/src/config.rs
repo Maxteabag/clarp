@@ -79,6 +79,9 @@ pub struct Config {
     /// How often the logins of the agents' tools are looked at, where turns wait for an
     /// account.
     pub logins_checked_every_ms: u64,
+    /// A file whose presence says that this machine has no network (`--network-down-file`),
+    /// in place of a check of the network: what a test holds. Absent: the network is checked.
+    pub network_down_file: Option<PathBuf>,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
     pub stalled_turn_ms: i64,
@@ -210,7 +213,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
 [--accounts none|follow|select] [--seats-tool PROGRAM] \
-[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] [--network-down-file FILE] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -450,6 +453,7 @@ impl Config {
         let mut seats_tool = String::new();
         let (mut skills, mut skills_other_releases, mut skills_chosen_before) = (None, None, None);
         let mut logins_checked_every_ms = 5_000;
+        let mut network_down_file = None;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
         let mut heartbeats_checked_every_ms = 60_000;
@@ -513,6 +517,9 @@ impl Config {
                     if !safe {
                         return Err(format!("--push-relay {push_relay}: an https address"));
                     }
+                }
+                "--network-down-file" => {
+                    network_down_file = Some(PathBuf::from(value("a file")?));
                 }
                 "--logins-checked-every-ms" => {
                     logins_checked_every_ms = value("a number of milliseconds")?
@@ -723,6 +730,7 @@ impl Config {
             skills_other_releases,
             skills_chosen_before,
             logins_checked_every_ms,
+            network_down_file,
             jobs_checked_every_ms,
             stalled_turn_ms: crate::experience_watch::stalled_after_ms(
                 &host_config_dir().join("config.toml"),
