@@ -180,9 +180,58 @@ def admitted(landing, lease):
     return not markers
 
 
-def acquire_slot(lock, landing, lease):
+# An ordinary waiter's place in line: wait-<arrival, ns since the epoch>-<pid>-<process start>,
+# holding its description. Waiters take the slot in order of arrival; a landing (CLARP_BUILD_FIRST)
+# and a lease's builds keep going before all of them, and take no place in line.
+IN_LINE = re.compile(r'wait-([0-9]+)-([0-9]+)-([0-9]+)')
+
+
+def waiting_in_line():
+    """The ordinary waiters still alive, first come first: (arrival ns, marker name, description).
+    A waiter whose process has ended gives up its place: its marker is removed here."""
+    line = []
+    for name in os.listdir(QUEUE):
+        match = IN_LINE.fullmatch(name)
+        if not match:
+            continue
+        arrival, pid, start = match.groups()
+        try:
+            if not stat.S_ISREG(os.lstat(QUEUE / name).st_mode):
+                continue
+            if process_start(pid) != start:
+                (QUEUE / name).unlink(missing_ok=True)
+                continue
+            description = (QUEUE / name).read_text().strip()
+        except FileNotFoundError:
+            continue
+        line.append((int(arrival), name, description))
+    return sorted(line)
+
+
+@contextmanager
+def place_in_line(description):
+    pid = os.getpid()
+    marker = QUEUE / f'wait-{time.time_ns()}-{pid}-{process_start(pid)}'
+    try:
+        publish_marker(marker, description)
+        yield marker
+    finally:
+        marker.unlink(missing_ok=True)
+
+
+def my_turn(landing, lease, place):
+    """Whether this waiter may try for the slot now: admitted, and first in line if it has a place."""
+    if not admitted(landing, lease):
+        return False
+    if place is None:
+        return True
+    line = waiting_in_line()
+    return bool(line) and line[0][1] == place.name
+
+
+def acquire_slot(lock, landing, lease, place=None):
     while True:
-        if admitted(landing, lease) and try_lock(lock):
+        if my_turn(landing, lease, place) and try_lock(lock):
             if admitted(landing, lease):
                 return
             fcntl.flock(lock, fcntl.LOCK_UN)
@@ -194,8 +243,11 @@ def take_slot(lock, landing, description):
     if landing and not lease:
         with marker_for(description):
             acquire_slot(lock, landing, None)
-    else:
+    elif lease:
         acquire_slot(lock, landing, lease)
+    else:
+        with place_in_line(description) as place:
+            acquire_slot(lock, landing, lease, place)
 
 
 def reserve(description):
@@ -258,6 +310,15 @@ def status(lock):
             print('queue: held without a current holder record; file users:', *names)
     else:
         print('queue: reserved' if any(m.startswith('lease ') for m in markers.values()) else 'queue: free')
+    now = time.time_ns()
+    for place, (arrival, _, description) in enumerate(waiting_in_line(), 1):
+        print(f'waiting {place}: {description} (waited {waited(now - arrival)})')
+
+
+def waited(ns):
+    minutes, seconds = divmod(max(ns, 0) // 10**9, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f'{hours}h{minutes:02d}m' if hours else f'{minutes}m{seconds:02d}s'
 
 
 def cancelled(signum, frame):

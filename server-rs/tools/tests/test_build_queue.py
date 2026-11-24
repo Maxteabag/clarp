@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import runpy
 import subprocess
+import threading
 import time
 
 queue = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'build-queue.py'))
@@ -129,3 +130,85 @@ def test_a_build_marks_its_checkout_good_only_when_it_succeeds(tmp_path, monkeyp
                 outcome['code'] = code
         with queue['directory'](workspace.parent) as copy:
             assert (queue['last_good_build'](copy) is not None) == good
+
+
+def line_at(tmp_path, monkeypatch):
+    """The queue's functions, working in tmp_path instead of the build machine's queue."""
+    names = queue['waiting_in_line'].__globals__
+    for name, value in (('QUEUE', tmp_path), ('LOCK', tmp_path / 'lock'), ('HOLDER', tmp_path / 'holder')):
+        monkeypatch.setitem(names, name, value)
+    monkeypatch.delenv('CLARP_BUILD_LEASE', raising=False)
+    return names
+
+
+def live_waiter(tmp_path, ago_ns):
+    """Another waiter that arrived ago_ns before now: a process of this test's own, and its marker."""
+    child = subprocess.Popen(['sleep', '60'])
+    marker = tmp_path / f'wait-{time.time_ns() - ago_ns}-{child.pid}-{queue["process_start"](child.pid)}'
+    marker.write_text(f'waiter-{child.pid} since 10:00:00\n')
+    return child, marker
+
+
+def test_waiters_are_in_line_in_order_of_arrival_and_a_dead_one_gives_up_its_place(tmp_path, monkeypatch):
+    line_at(tmp_path, monkeypatch)
+    first, first_marker = live_waiter(tmp_path, 2 * 10**9)
+    second, second_marker = live_waiter(tmp_path, 10**9)
+    # A checkout's directory that happens to look like a place in line is none.
+    (tmp_path / 'wait-1-2-3').mkdir()
+    try:
+        with queue['place_in_line']('me since 10:01:00') as place:
+            assert [name for _, name, _ in queue['waiting_in_line']()] == [first_marker.name, second_marker.name, place.name]
+            assert not queue['my_turn'](False, None, place)
+            # A landing goes before the whole line and takes no place in it.
+            assert queue['my_turn'](True, None, None)
+            first.kill()
+            first.wait()
+            assert [name for _, name, _ in queue['waiting_in_line']()] == [second_marker.name, place.name]
+            assert not first_marker.exists()
+            assert not queue['my_turn'](False, None, place)
+            second.kill()
+            second.wait()
+            assert queue['my_turn'](False, None, place)
+        assert not place.exists()
+        assert (tmp_path / 'wait-1-2-3').is_dir()
+    finally:
+        for child in (first, second):
+            child.kill()
+            child.wait()
+
+
+def test_a_later_waiter_takes_the_slot_only_after_the_one_before_it(tmp_path, monkeypatch):
+    line_at(tmp_path, monkeypatch)
+    before, _ = live_waiter(tmp_path, 10**9)
+    taken = threading.Event()
+    try:
+        with (tmp_path / 'lock').open('a') as slot:
+            waiter = threading.Thread(target=lambda: (queue['take_slot'](slot.fileno(), False, 'me since 10:01:00'), taken.set()), daemon=True)
+            waiter.start()
+            # The slot is free, but a waiter that came first is still waiting.
+            assert not taken.wait(1.5)
+            before.kill()
+            before.wait()
+            assert taken.wait(5)
+            waiter.join(5)
+        assert not [name for name in os.listdir(tmp_path) if name.startswith('wait-')]
+    finally:
+        before.kill()
+        before.wait()
+
+
+def test_status_shows_the_line_in_order_with_each_wait(tmp_path, monkeypatch, capsys):
+    line_at(tmp_path, monkeypatch)
+    first, _ = live_waiter(tmp_path, 125 * 10**9)
+    second, _ = live_waiter(tmp_path, 3 * 10**9)
+    try:
+        with (tmp_path / 'lock').open('a') as slot:
+            queue['status'](slot.fileno())
+        out = capsys.readouterr().out.splitlines()
+        assert out[0] == 'queue: free'
+        assert out[1].startswith(f'waiting 1: waiter-{first.pid} since 10:00:00 (waited 2m0')
+        assert out[2].startswith(f'waiting 2: waiter-{second.pid} since 10:00:00 (waited 0m0')
+    finally:
+        for child in (first, second):
+            child.kill()
+            child.wait()

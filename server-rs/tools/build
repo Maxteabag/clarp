@@ -23,7 +23,8 @@
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
-#   server-rs/tools/build status           who holds the queue, the machine's load and free build space
+#   server-rs/tools/build status           who holds the queue, who waits in what order and how long so far,
+#                                          the machine's load and free build space
 #   server-rs/tools/build drop             remove this checkout's copy and its target from the build machine,
 #                                          once its branch has landed (a copy is 5 to 14 GB there)
 # A build that needs another free-space floor sets CLARP_BUILD_MIN_FREE_BYTES to its own byte count,
@@ -31,7 +32,8 @@
 #
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
-# to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
+# to the build machine, waits for the one build slot (flock; first come, first served, a landing
+# before all), and runs cargo there at lowest priority
 # with a target directory per checkout, so a second run is incremental. A checkout's first build
 # starts from a reflink clone of the target of the latest checkout whose last build succeeded with
 # the Host's library built (build-queue.py's seed_target): the clone shares that target's data on
@@ -77,7 +79,7 @@ if [ "$cmd" = drop ]; then
     # A landed branch's copy is only disk there. This checkout's locks are held (above), and the
     # queue's eviction lock keeps another checkout's build from freeing room in it at that moment.
     # The name reaches a remote shell: only a plain checkout name is removed, never a queue file.
-    if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == . || "$name" == .. || "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* ]]; then
+    if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == . || "$name" == .. || "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* || "$name" == wait-* ]]; then
         echo "refusing to drop a copy under this checkout name: $name" >&2
         exit 2
     fi
