@@ -550,16 +550,19 @@ impl Desk {
             provider: tool,
         };
         let mut events = Vec::new();
+        // When the turn's own word of the windows was written, where it wrote a new one.
+        let mut its_word_ms = None;
         if let (Some((snapshot, written_ms)), Some(on)) = (&read, &on)
             && let Some(at_ms) = taken(*written_ms, on.since_ms, kept.seen_at_ms(), with.now_ms)
         {
             events = kept.seen(of, on.login(), snapshot, SEEN_IN, at_ms, &mut drawn);
+            its_word_ms = Some(at_ms);
         }
         match how {
             // An account that served a turn to its end was not used up when it did, and a
             // limit of which nothing more was known is over.
             Ending::Completed(at_ms) => {
-                let at_ms = at_ms.min(with.now_ms);
+                let at_ms = completed_at(at_ms, its_word_ms, with.now_ms);
                 events.extend(kept.completed(of, login, at_ms, &mut drawn));
             }
             // A turn that failed for a usage limit is a limit, whatever else is known of it.
@@ -598,11 +601,8 @@ impl Desk {
             }
         }
         if let Ending::Completed(at_ms) = how {
-            // The turn completed after all it said, its word of the windows with it, also
-            // where both have one millisecond: a turn ends at its tool's own end line, which
-            // can come in the same millisecond as that word (issue 750).
-            let after_its_word = word.as_ref().map_or(at_ms, |(_, said)| at_ms.max(said + 1));
-            kept.completed(after_its_word.min(with.now_ms));
+            let its_word_ms = word.as_ref().map(|(_, said)| (*said).min(with.now_ms));
+            kept.completed(completed_at(at_ms, its_word_ms, with.now_ms));
         }
         if kept != before {
             known.keep_standing(with.fleet, kept.clone()).await;
@@ -1038,6 +1038,15 @@ async fn written_in(home: &Path, session: &str) -> Option<(Value, i64)> {
     Some((snapshot, written_ms))
 }
 
+/// When a turn that completed is taken to have completed: when it ended, no later than now,
+/// and after the word of its account's windows it gave in the turn, where it gave one (that
+/// word no later than now). A turn ends at its tool's own end line (issue 750), which can come
+/// in the same millisecond as that word: the word was still said before the turn was over.
+fn completed_at(ended_ms: i64, its_word_ms: Option<i64>, now_ms: i64) -> i64 {
+    let at_ms = ended_ms.min(now_ms);
+    its_word_ms.map_or(at_ms, |said| at_ms.max(said + 1))
+}
+
 /// Whether a record is taken, and as seen when. It is taken as seen when it was written,
 /// and no later than now, whatever the clocks say. Not taken: a record written before the
 /// login file was (it is of the login before, which nobody can name now), and one that is
@@ -1317,6 +1326,18 @@ mod tests {
         assert_eq!(taken(1_000, 900, Some(1_000), 5_000), None);
         assert_eq!(taken(1_000, 900, Some(2_000), 5_000), None);
         assert_eq!(taken(1_001, 900, Some(1_000), 5_000), Some(1_001));
+    }
+
+    #[test]
+    fn a_turn_completes_after_the_word_of_its_account_it_gave() {
+        // Its end line in the same millisecond as its word: after the word all the same.
+        assert_eq!(completed_at(1_000, Some(1_000), 5_000), 1_001);
+        // An end after its word, or a turn that gave none: when it ended.
+        assert_eq!(completed_at(1_200, Some(1_000), 5_000), 1_200);
+        assert_eq!(completed_at(1_000, None, 5_000), 1_000);
+        // A clock ahead: no later than now, but for the moment after its word.
+        assert_eq!(completed_at(9_000, None, 5_000), 5_000);
+        assert_eq!(completed_at(9_000, Some(5_000), 5_000), 5_001);
     }
 
     #[test]
