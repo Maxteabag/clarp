@@ -16865,8 +16865,7 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
 }
 
 #[test]
-fn a_connection_that_drops_is_tried_again_and_its_wait_ends_with_a_stop_and_outlasts_a_restart()
-{
+fn a_connection_that_drops_is_tried_again_and_its_wait_ends_with_a_stop_and_outlasts_a_restart() {
     let place = Place::new("retried");
     // A stand-in for Claude Code whose connection drops as often as the message says: it
     // counts, in a file named after the message, how often it was given it.

@@ -5617,10 +5617,12 @@ impl Actor {
             _ => None,
         };
         match watch {
-            Some(watch @ NetworkWatch {
-                next: NetworkStep::Retry(_),
-                ..
-            }) => self.retry_as(now_ms, watch.gone),
+            Some(
+                watch @ NetworkWatch {
+                    next: NetworkStep::Retry(_),
+                    ..
+                },
+            ) => self.retry_as(now_ms, watch.gone),
             Some(watch) => {
                 self.network = Some(NetworkWatch {
                     next: NetworkStep::Asked(now_ms + recovery::NETWORK_ANSWER_MS),
@@ -5680,9 +5682,10 @@ impl Actor {
             return Ok(out);
         };
         let failed_at = parked.since_ms;
-        let Some(watch) = self.network_of(parked).filter(|watch| {
-            watch.turn == turn && matches!(watch.next, NetworkStep::Asked(_))
-        }) else {
+        let Some(watch) = self
+            .network_of(parked)
+            .filter(|watch| watch.turn == turn && matches!(watch.next, NetworkStep::Asked(_)))
+        else {
             return Ok(out);
         };
         let next = recovery::after_network_check(recovery::Checked {
