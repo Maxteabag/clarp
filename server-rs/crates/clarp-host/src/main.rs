@@ -238,6 +238,9 @@ async fn serve(config: Config) -> Result<(), String> {
         pool.attach(fleet.clone());
     }
     let limits: Arc<clarp_host::quota::Desk> = Arc::default();
+    for pool in &pools {
+        pool.watch_limits(limits.clone());
+    }
     let counts = clarp_host::usage::Works {
         clock: clock.clone(),
         hub: hub.clone(),

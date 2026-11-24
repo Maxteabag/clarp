@@ -800,6 +800,26 @@ impl Desk {
         clarp_kernel::quota_near::limit_event(event, failover, regains)
     }
 
+    /// When a turn of a tool that waits for an account shows that usage is there again, given
+    /// the reset its tool said (`clarp_actor::Pooled::shown_reset`): none while another seat
+    /// of the tool's pool would take the turn, since the Host is moving to it and no limit
+    /// holds the turn; where none would, the soonest of the tool's reset and the moment the
+    /// first seat regains room. Judged for the tool's default model. A judgement that no longer
+    /// holds, or none yet, leaves the tool's word.
+    pub fn shown_reset(&self, tool: &str, resets_at_ms: Option<i64>, now_ms: i64) -> Option<i64> {
+        let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(pooled) = pooled.get(tool).filter(|pooled| now_ms < pooled.until_ms) else {
+            return resets_at_ms;
+        };
+        match (pooled.failover, pooled.regains) {
+            (clarp_kernel::quota_near::Failover::Spare, _) => None,
+            (clarp_kernel::quota_near::Failover::None, Some(regains)) => {
+                Some(resets_at_ms.map_or(regains, |reset| reset.min(regains)))
+            }
+            _ => resets_at_ms,
+        }
+    }
+
     /// Has the accounts looked at again by `at`, where nothing is looked at sooner: when a seat
     /// of a pool regains room, which the tool's own word does not name.
     fn wake_by(&self, at: i64, now_ms: i64) {
@@ -1333,6 +1353,44 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn a_waiting_turn_and_a_hard_limit_are_told_by_the_pool_while_its_judgement_holds() {
+        use clarp_kernel::quota_near::Failover;
+        let desk = Desk::default();
+        let judged = |failover, regains, until_ms| {
+            let pooled = Pooled {
+                failover,
+                regains,
+                until_ms,
+            };
+            let mut all = desk.pooled.lock().unwrap();
+            all.insert(CODEX.to_string(), pooled);
+        };
+        let hard =
+            json!({ "type": "provider-limit", "kind": "hard_limit", "provider_id": "codex" });
+        // Not judged yet: the tool's word, and the limit told as not known.
+        assert_eq!(desk.shown_reset(CODEX, Some(9_000), 0), Some(9_000));
+        let told = desk.pooled(CODEX, hard.clone(), 0).unwrap();
+        assert_eq!(told["failover"], "unknown");
+        // Another seat would take the turn: no reset shown, no hard limit told.
+        judged(Failover::Spare, None, 1_000);
+        assert_eq!(desk.shown_reset(CODEX, Some(9_000), 0), None);
+        assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
+        // Once the judgement no longer holds, it hides nothing.
+        assert_eq!(desk.shown_reset(CODEX, Some(9_000), 1_000), Some(9_000));
+        assert!(desk.pooled(CODEX, hard.clone(), 1_000).is_some());
+        // No seat has room: the first that regains it, where that is sooner.
+        judged(Failover::None, Some(5_000), 1_000);
+        assert_eq!(desk.shown_reset(CODEX, Some(9_000), 0), Some(5_000));
+        assert_eq!(desk.shown_reset(CODEX, Some(4_000), 0), Some(4_000));
+        assert_eq!(desk.shown_reset(CODEX, None, 0), Some(5_000));
+        let told = desk.pooled(CODEX, hard, 0).unwrap();
+        assert_eq!(told["failover"], "none");
+        assert_eq!(told["pool_regains_at"], quota::moment(5_000));
+        // Another tool's turns are not judged by it.
+        assert_eq!(desk.shown_reset(CLAUDE, Some(9_000), 0), Some(9_000));
     }
 
     #[test]

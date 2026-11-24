@@ -810,6 +810,12 @@ pub trait Pooled: Send + Sync {
     fn failed(&self, turn: TurnId, plan: bool, resets_at_ms: Option<i64>, now_ms: i64) -> bool;
     /// Nothing of the agent's turn runs any more, as the pool had asked.
     fn stopped(&self, now_ms: i64);
+    /// When the turn that waits shows that usage is there again, given when its tool said its
+    /// account has usage again: the pool may know better, from the other seats it holds. By
+    /// default the tool's word. What is shown only: how long the turn waits is the tool's.
+    fn shown_reset(&self, resets_at_ms: Option<i64>, _now_ms: i64) -> Option<i64> {
+        resets_at_ms
+    }
 }
 
 /// How much longer than the pool lets a turn wait the turn's own wait lasts: the pool takes
@@ -6491,9 +6497,15 @@ impl Actor {
                                         });
                                         let until_ms = recovery::pool_wait_until(resets_at_ms, t)
                                             + POOL_MARGIN_MS;
+                                        // The reset the wait shows is the pool's: none while
+                                        // another seat would take the turn, and the first
+                                        // seat's that regains room where none would.
+                                        let shown = pool.map_or(resets_at_ms, |pool| {
+                                            pool.shown_reset(resets_at_ms, t)
+                                        });
                                         waits.then_some(Wait::Account {
                                             until_ms,
-                                            resets_at_ms,
+                                            resets_at_ms: shown,
                                         })
                                     }
                                     recovery::Next::Fail

@@ -40,6 +40,9 @@ pub struct Service {
     fleet: OnceLock<FleetHandle>,
     /// How long the selector may take.
     selector_most: Duration,
+    /// What the Host knows of the tools' accounts and their pools of seats: which reset a
+    /// turn that waits shows ([`crate::quota::Desk::shown_reset`]).
+    limits: OnceLock<Arc<crate::quota::Desk>>,
 }
 
 impl Service {
@@ -65,6 +68,7 @@ impl Service {
             clock,
             fleet: OnceLock::new(),
             selector_most: SELECTOR_MOST,
+            limits: OnceLock::new(),
         })
     }
 
@@ -144,6 +148,11 @@ impl Service {
     pub fn attach(&self, fleet: FleetHandle) {
         // Attached once, at the start; a second attach (none is made) keeps the first.
         self.fleet.get_or_init(|| fleet);
+    }
+
+    /// Gives the pool what the Host knows of the tools' accounts, once at the start.
+    pub fn watch_limits(&self, limits: Arc<crate::quota::Desk>) {
+        self.limits.get_or_init(|| limits);
     }
 
     /// The pool as one agent's turn sees it.
@@ -441,6 +450,13 @@ impl Pooled for OfAgent {
 
     fn stopped(&self, _now_ms: i64) {
         self.service.stopped(&self.agent);
+    }
+
+    fn shown_reset(&self, resets_at_ms: Option<i64>, now_ms: i64) -> Option<i64> {
+        match self.service.limits.get() {
+            Some(limits) => limits.shown_reset(self.service.tool, resets_at_ms, now_ms),
+            None => resets_at_ms,
+        }
     }
 }
 
