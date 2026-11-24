@@ -1314,7 +1314,7 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   defaults to true, and to false for an agent with `codex_provider`; when false nothing the
   agent says reaches a speech provider in the cloud: its lines are not spoken, nothing is
   made in its voice, `POST /preview` for it answers 409, live calls and live rings for it
-  answer 409 `cloud_speech_off`, and the Oracle is told none of its words. The snapshot row
+  answer 409 `cloud_speech_off`, the Oracle is told none of its words, and what is said to it is heard only by the Host's own engine (`POST /transcribe` and a call's clips answer 409 with a sentence where there is none; `GET /stt/stream` answers 409). A bound agent's conversation reaches no model of the Host's: no janitor scope holds it, its tools are explained without a model, and the goal keeper, label checker, router and other agents of a call leave its words out. An exec turn whose provider could not be read by its end fails closed as `provider_mismatch`, its answer not shown. The snapshot row
   carries `codex_home` and `codex_provider` when the agent is bound, and `cloud_speech` (the
   value in effect) when it is bound or the choice was set.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
