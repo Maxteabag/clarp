@@ -265,7 +265,19 @@ impl Chip {
                 None | Some("idle" | "interrupted" | "limited")
             );
         let mut veiled;
-        let event = if hidden {
+        // The chip is pushed through the phone maker's service: what an agent bound to a model
+        // provider of its own is doing is told as that it works, never its tools or commands.
+        let bound = directory
+            .named(recipient)
+            .is_some_and(|member| member.record.bound())
+            && event["ops"][0]["activity"].is_object();
+        let event = if bound {
+            veiled = event.clone();
+            let activity = &mut veiled["ops"][0]["activity"];
+            clarp_kernel::hidden_coordination::veil_live(activity, "Working");
+            activity["veiled"] = json!(true);
+            &veiled
+        } else if hidden {
             let sender = event["sender_agent_id"]
                 .as_str()
                 .and_then(|id| directory.named(id));

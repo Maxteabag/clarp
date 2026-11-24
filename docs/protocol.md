@@ -1305,9 +1305,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   home's `config.toml` does not set `model_provider = "<codex_provider>"` and define
   `[model_providers.<codex_provider>]` is refused before Codex starts; a turn whose Codex
   reports another provider for its thread is stopped at once. Both end the turn as the
-  failure kind `provider_mismatch`, never tried again, with the reason "This agent's turn did
-  not run: it would have used another model provider than the one it is bound to. Check its
-  Codex home and provider" and the Host's words of what it found below it. A bound agent
+  failure kind `provider_mismatch`, never tried again, with the reason "This agent's turn was
+  stopped: it ran, or would have run, on another model provider than the one it is bound to.
+  Check its Codex home and provider" and the Host's words of what it found below it. A bound agent
   takes any model name (its provider's deployments), runs on its `config.toml`'s model when
   it names none, takes its sessions (`resume_session_id`) from its own home, and cannot be
   moved to another tool (`POST /agent-transit` answers 409 `own_provider`). `cloud_speech`

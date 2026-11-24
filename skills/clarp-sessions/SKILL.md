@@ -87,8 +87,29 @@ What the Host then does:
 - Its words reach no model of the Host's: no janitor reads it (whatever its scope says),
   its tools are explained without a model, and the goal keeper, the label checker, the
   spoken-message router and the other agents of a call leave its conversation out.
-- A turn whose provider Codex's own record does not name by the end fails closed
-  (`provider_mismatch`, "could not be verified"), and its answer is not shown.
+- A turn whose provider Codex's own record (in the agent's home) does not name within a
+  few seconds, or by its end, fails closed (`provider_mismatch`, "could not be verified"),
+  and its answer is not shown. This check after start only detects: by then the request has
+  reached whatever provider Codex used. What prevents it is the home and the
+  `model_provider` set on every launch, the chat lane, a fork and the agent's terminal.
+- Push notifications, questions and the lock-screen chip of a bound agent say that it
+  answered, asks or works, never its words, tools or commands. A binding that cannot be
+  used (half of one, a malformed one, one on another tool) starts nothing at all.
+
+Limits to know:
+
+- Other agents and anyone with access to this Host can still read a bound agent's
+  conversation (`GET /log`, the snapshot, a message it sends to another agent, a status
+  fork). Its words reach another agent's model only when someone or something hands them
+  over: keep bound agents out of teams and calls with agents on other providers.
+- Clearing the binding (`--clear`) moves the agent to the machine's own Codex: its next
+  turn begins a new thread there, carrying the Host's record of the conversation to the
+  default provider.
+- The Host installs its `clarp-*` skills into the machine's Codex home only. A bound agent's
+  own home has none unless you copy or link them there.
+- The Host's environment reaches a bound turn. Do not define the customer's provider with
+  `env_key = "OPENAI_API_KEY"` or another variable the machine already sets for its own
+  provider; use the provider's own auth command or a variable of its own.
 
 ## Move an agent to another backend
 

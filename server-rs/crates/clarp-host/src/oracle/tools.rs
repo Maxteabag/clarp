@@ -62,7 +62,7 @@ struct Said {
 /// The Oracle's voice is a provider's in the cloud: an agent whose words stay off the cloud
 /// (`cloud_speech` off) is told of with none of them.
 async fn said(member: &Member, most: usize) -> Option<Vec<Said>> {
-    if !member.record.speaks_to_cloud() {
+    if !member.record.speaks_to_cloud() || member.record.bound() {
         return Some(Vec::new());
     }
     let page = member
@@ -158,9 +158,16 @@ async fn answered(
                 ended,
                 focused,
             );
+            // What an agent bound to a provider of its own is doing (its tools, its commands)
+            // is not told to the Oracle's model either: only that it works.
+            let nothing = Value::Null;
             let latest = Doing {
                 kind: row["latest_state"].as_str().unwrap_or(""),
-                detail: &row["activity"],
+                detail: if member.record.bound() {
+                    &nothing
+                } else {
+                    &row["activity"]
+                },
                 at_ms: row["latest_state_ts"].as_i64().filter(|at| *at > 0),
             };
             let rows = messages(&rows);

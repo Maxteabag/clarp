@@ -449,8 +449,8 @@ fn sentence(kind: &str, model: &str) -> String {
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
         NOT_STARTED => "The turn could not be started".to_string(),
-        PROVIDER_MISMATCH => "This agent's turn did not run: it would have used another model \
-             provider than the one it is bound to. Check its Codex home and provider"
+        PROVIDER_MISMATCH => "This agent's turn was stopped: it ran, or would have run, on \
+             another model provider than the one it is bound to. Check its Codex home and provider"
             .to_string(),
         PROMPT_TOO_LONG => "This conversation is too long for the model. Compact it or start \
              a new one"

@@ -35,6 +35,20 @@ use crate::direct::Direct;
 use crate::fleet::{FleetHandle, Pushed};
 use crate::relay::{Outcome, Push, Relay};
 
+/// What a push says in place of the words of an agent bound to a model provider of its own:
+/// a push goes through the phone maker's service, and that agent's words go to none.
+pub const KEPT_OFF: &str = "Open Clarp to read it.";
+
+/// What a push shows of what an agent said: its words, or [`KEPT_OFF`] for an agent bound to
+/// a model provider of its own.
+pub fn preview_of(record: &crate::fleet::AgentRecord, said: &str) -> String {
+    if record.bound() {
+        KEPT_OFF.to_string()
+    } else {
+        said.to_string()
+    }
+}
+
 /// A finished turn the user is told of.
 #[derive(Debug, Clone, Default)]
 pub struct TurnDone {

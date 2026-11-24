@@ -1458,12 +1458,29 @@ fn push_request(app: &App, artifact: &Value) {
     if muted || quiet {
         return;
     }
+    // A push goes through the phone maker's service: of an agent bound to a model provider of
+    // its own it says that it asks, not what.
+    let bound = directory
+        .members
+        .iter()
+        .any(|member| member.record.agent_id == asker && member.record.bound());
     let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
+    let (title, question) = if bound {
+        (
+            "A question".to_string(),
+            crate::pusher::KEPT_OFF.to_string(),
+        )
+    } else {
+        (
+            text(&artifact["title"]),
+            or(text(&decision["question"]), text(&artifact["summary"])),
+        )
+    };
     app.pusher.requested(Requested {
         session: text(&artifact["session"]),
         persona: or(text(&artifact["agent_name"]), "Clarp".to_string()),
-        title: text(&artifact["title"]),
-        question: or(text(&decision["question"]), text(&artifact["summary"])),
+        title,
+        question,
         decision_id,
         artifact_id: text(&artifact["artifact_id"]),
         time_sensitive: push::needs_interruption(

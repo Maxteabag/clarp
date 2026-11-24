@@ -463,7 +463,15 @@ struct Bound {
     /// What the turn said of its items before its provider was verified: taken once it is,
     /// and never if it cannot be.
     held: Vec<(Value, i64)>,
+    /// When the turn began, by its record: how long its rollout has had to name a provider.
+    began: Option<i64>,
 }
+
+/// How long a bound exec turn may go on before its rollout names its provider. Codex writes
+/// the rollout as it begins the turn; one that has not named the agent's provider by then is
+/// taken to run elsewhere (a rollout in another `CODEX_HOME` is never found in the agent's),
+/// and is stopped.
+const VERIFY_WITHIN_MS: i64 = 3_000;
 
 /// What the ids of Codex's live items begin with.
 const SHOWN: &str = "cx";
@@ -504,6 +512,7 @@ impl CodexInterpreter {
             halted: false,
             verified: false,
             held: Vec::new(),
+            began: None,
         });
         self
     }
@@ -585,13 +594,17 @@ impl CodexInterpreter {
             if kind == "steer.open" {
                 bound.verified = true;
             }
+            let began = *bound.began.get_or_insert(t);
             if !bound.verified {
-                if kind.starts_with("item.") {
-                    bound.held.push((event, t));
+                // Not verified by the end of the turn, or within the time its rollout had to
+                // name a provider: stopped, and what it said is not taken.
+                let late = t.saturating_sub(began) >= VERIFY_WITHIN_MS;
+                if kind == "turn.completed" || (late && kind.starts_with("item.")) {
+                    self.unverified(out);
                     return;
                 }
-                if kind == "turn.completed" {
-                    self.unverified(out);
+                if kind.starts_with("item.") {
+                    bound.held.push((event, t));
                     return;
                 }
             }
@@ -654,7 +667,11 @@ impl CodexInterpreter {
                         message => message,
                     },
                 };
-                if self.failure.is_none() && !said.trim().is_empty() {
+                // The words of a provider mismatch win over whatever was said before them:
+                // such a turn is never tried again, and an earlier word could make it so.
+                let mismatch = clarp_kernel::failures::classify_error(said)
+                    == clarp_kernel::failures::PROVIDER_MISMATCH;
+                if (self.failure.is_none() || mismatch) && !said.trim().is_empty() {
                     self.failure = Some(shorten(said.trim(), 600));
                 }
             }
@@ -1771,6 +1788,96 @@ mod tests {
         assert!(
             out.iter().any(|signal| matches!(signal, Signal::Reply(_))),
             "{out:?}"
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// Feeds lines, each at its own time, then an exit, to a bound interpreter.
+    fn bound_run(own: &OwnProvider, lines: &[(i64, &str)], exit: ShimEvent) -> Vec<Signal> {
+        let mut interpreter =
+            CodexInterpreter::reading(1, "w1", Some(own.sessions())).bound_to(own.clone());
+        let mut out = Vec::new();
+        for (t, line) in lines {
+            let record = Record {
+                t: *t,
+                entry: Entry::Out((*line).to_string()),
+            };
+            interpreter.on_record(&record, &mut out);
+        }
+        let record = Record {
+            t: 99_999,
+            entry: Entry::Shim(exit),
+        };
+        interpreter.on_record(&record, &mut out);
+        out
+    }
+
+    #[test]
+    fn a_bound_exec_turn_whose_rollout_is_not_in_its_home_is_stopped_within_the_window() {
+        // Codex ran with another home: the agent's has no rollout of the thread.
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f1", "stand-in");
+        let thread = r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000f2"}"#;
+        let item = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#;
+        let out = bound_run(
+            &own,
+            &[
+                (0, thread),
+                (10, r#"{"type":"turn.started"}"#),
+                (500, item),
+                (10 + VERIFY_WITHIN_MS, item),
+                (20_000, r#"{"type":"turn.completed"}"#),
+            ],
+            ShimEvent::Exited {
+                code: None,
+                signal: Some(15),
+            },
+        );
+        let halts: Vec<usize> = out
+            .iter()
+            .enumerate()
+            .filter(|(_, signal)| **signal == Signal::Halt)
+            .map(|(at, _)| at)
+            .collect();
+        assert_eq!(halts.len(), 1, "stopped once, within the window: {out:?}");
+        assert!(
+            !out.iter().any(|signal| matches!(signal, Signal::Tool(_))),
+            "nothing it did is the agent's: {out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert!(reason.contains("could not be verified"), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_lanes_provider_mismatch_wins_over_an_earlier_error() {
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f3", "stand-in");
+        let mismatch = format!(
+            r#"{{"type":"turn.failed","error":"{}"}}"#,
+            clarp_kernel::failures::provider_mismatch("Codex reported model provider \"openai\"")
+                .replace('"', "\\\"")
+        );
+        let out = bound_run(
+            &own,
+            &[
+                (0, r#"{"type":"turn.started"}"#),
+                (1, r#"{"type":"steer.open"}"#),
+                (2, r#"{"type":"error","message":"Reconnecting... stream disconnected"}"#),
+                (3, &mismatch),
+            ],
+            ShimEvent::Exited {
+                code: Some(1),
+                signal: None,
+            },
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH,
+            "{reason}"
         );
         std::fs::remove_dir_all(home).unwrap();
     }
