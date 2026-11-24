@@ -289,6 +289,36 @@ mod tests {
         Frame { at: Duration::from_millis(ms), shot, events: events.iter().map(|e| (*e).to_owned()).collect() }
     }
 
+    /// A reply taller than the window lands at the end while the chat
+    /// follows it: no row is on screen in both frames, the content grew and
+    /// the view moved up to the new end. That is the follow slide, never a
+    /// shift (the offset is not a fallback once the content changed).
+    #[test]
+    fn a_reply_taller_than_the_window_landing_while_following_is_no_shift() {
+        let before = pinned(2000.0, 40.0, 200.0);
+        let mut after = pinned(2900.0, 0.0, 900.0);
+        after.rows = 21;
+        after.top = "row-20".into();
+        after.top_index = 20;
+        after.top_h = 900.0;
+        after.bottom = "row-20".into();
+        after.bottom_y = VIEW - 900.0;
+        after.bottom_h = 900.0;
+        let step = movement(&frame(0, before.clone(), &[]), &frame(16, after.clone(), &["rows -0 +1 ~0"]));
+        assert!(step.is_none_or(|s| !s.counted), "no shift for the expected slide: {step:?}");
+        // The same tall reply growing on screen in both frames slides up as
+        // it grows: the follow slide too.
+        let mut growing = after.clone();
+        growing.content = 3100.0;
+        growing.offset = VIEW - 3100.0;
+        growing.top_y = -200.0;
+        growing.top_h = 1100.0;
+        growing.bottom_y = VIEW - 1100.0;
+        growing.bottom_h = 1100.0;
+        let step = movement(&frame(16, after, &[]), &frame(32, growing, &["live"])).expect("the reply moved");
+        assert!(!step.counted, "a tall reply growing at the end while following is the slide: {step:?}");
+    }
+
     #[test]
     fn the_follow_slide_is_no_shift_and_scores_nothing() {
         // The last row grows by 40 px, the chat stays at its end: the rows
