@@ -1548,3 +1548,177 @@ pub(super) fn scroll_flash_check(out: String) {
     ];
     run_stages(stages);
 }
+
+/// The unasked-movement rules' detections so far: shift, shake, layout_shift.
+fn moved_now() -> [usize; 3] {
+    ["shift", "shake", "layout_shift"].map(crate::scroll_journal::moved_seen)
+}
+
+/// What `scroll-shake` counted before each part.
+#[derive(Default)]
+struct Shake {
+    pane: String,
+    moved: [usize; 3],
+    flashes: usize,
+    posted: usize,
+    done: usize,
+}
+
+/// `--check scroll-shake --out DIR`: unasked movement in a chat following
+/// its end (unasked.rs). The last row's height settles up and down, ten
+/// times in a second, while the chat is pinned to its end: the dashcam
+/// finds a shake and posts one `scroll_flash` event with rule `shake`, its
+/// reversals and largest step. Then a settled, following chat that only
+/// gets rows at its end and a reply that grows finds none of the new
+/// rules. Last, whole agent turns stream in (tools come and go, the live
+/// reply is replaced by the durable one): what they measure is printed.
+pub(super) fn scroll_shake_check(out: String) {
+    const SESSION: &str = "shake";
+    const ROWS: usize = 60;
+    const FLIPS: usize = 10;
+    let state = Rc::new(RefCell::new(Shake::default()));
+    let (s1, s2, s3, s4, s5, s6) = (state.clone(), state.clone(), state.clone(), state.clone(), state.clone(), state.clone());
+    let settle = |n: usize| -> serde_json::Value { json!([{"id": "shake-settling", "role": "assistant", "text": LOREM.repeat(if n % 2 == 0 { 1 } else { 6 })}]) };
+    let quiet: Rc<Vec<(String, Box<dyn Fn()>)>> = Rc::new(
+        (0..12)
+            .map(|n| -> (String, Box<dyn Fn()>) {
+                if n % 3 == 0 {
+                    (format!("a row lands at the end ({n})"), Box::new(move || {
+                        upsert(SESSION, json!([{"id": format!("shake-quiet-{n}"), "role": if n % 2 == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(1 + n % 3)}]));
+                    }))
+                } else {
+                    (format!("a reply grows ({n})"), Box::new(move || {
+                        upsert(SESSION, json!([{"id": format!("shake-growing-{}", n / 3), "role": "assistant", "text": streamed(n % 3 + 1)}]));
+                    }))
+                }
+            })
+            .collect(),
+    );
+    let turns: Rc<Vec<(String, Box<dyn Fn()>)>> = Rc::new((0..2).flat_map(|turn| agent_turn(SESSION, turn)).collect());
+    let (quiet_count, turn_count) = (quiet.len(), turns.len());
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            app.engine.borrow_mut().settings_mut().set(crate::scroll_journal::SETTING, true);
+            check(crate::scroll_journal::on(), "the scroll dashcam is on (Settings → Diagnostics)");
+            check(control("/__control/add-agent", &json!({"session": SESSION, "persona": "Shake"})).is_ok(), "the Host takes a new chat");
+            true
+        })),
+        ("select", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find(SESSION).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(SESSION);
+            crate::pump();
+            true
+        })),
+        ("fill", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().conversation(SESSION).is_none() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(control("/__control/rich", &json!({"session": SESSION, "count": ROWS})).is_ok(), &format!("the Host fills the chat with {ROWS} varied rows"));
+            true
+        })),
+        ("at the end", Box::new(move |app, window, elapsed| {
+            if rows(window).len() < ROWS || elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            if !(report().follows && report().at_end && last_row_visible().0) {
+                app.to_latest();
+                return false;
+            }
+            let mut st = s1.borrow_mut();
+            st.pane = app.active_id().to_string();
+            st.moved = moved_now();
+            st.posted = crate::scroll_journal::flashes().len();
+            true
+        })),
+        // The last row grows and shrinks every 100 ms, nobody scrolling.
+        ("heights settle up and down", Box::new(move |_, _, elapsed| {
+            let mut st = s2.borrow_mut();
+            let due = (elapsed.as_millis() / 100) as usize;
+            while st.done < FLIPS && st.done <= due {
+                upsert(SESSION, settle(st.done));
+                st.done += 1;
+            }
+            // Then a second: the shake is posted half a second after it is found.
+            st.done >= FLIPS && elapsed >= Duration::from_millis(100 * FLIPS as u64 + 1000)
+        })),
+        ("a shake is found and posted", Box::new(move |_, _, _| {
+            let mut st = s3.borrow_mut();
+            let now = moved_now();
+            let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
+            println!("note scroll-shake fixture: found shift {} shake {} layout_shift {}", found[0], found[1], found[2]);
+            check(found[1] >= 1, &format!("the dashcam finds a shake while the last row settles up and down ({} found)", found[1]));
+            check(found[0] >= 1, &format!("and shifts: rows moving down while the end is pinned ({} found)", found[0]));
+            let posted = crate::scroll_journal::flashes()[st.posted..].to_vec();
+            let shakes: Vec<&serde_json::Value> = posted.iter().filter(|d| d["rule"] == "shake").collect();
+            check(shakes.len() == 1, &format!("one scroll_flash event with rule shake is posted, not one per step ({} posted; rules {:?})", shakes.len(), posted.iter().map(|d| d["rule"].clone()).collect::<Vec<_>>()));
+            if let Some(shake) = shakes.first() {
+                println!("note scroll-shake fixture event: reversals {} max_step {} score {} frames {}", shake["reversals"], shake["max_step"], shake["score"], shake["frames"].as_array().map_or(0, Vec::len));
+                check(shake["reversals"].as_u64().is_some_and(|r| r >= 2), &format!("with its reversals ({})", shake["reversals"]));
+                check(shake["max_step"].as_f64().is_some_and(|s| s >= 2.0), &format!("and its largest step ({})", shake["max_step"]));
+                check(shake["chat"] == SESSION && shake["window"] == st.pane.as_str(), &format!("for this chat and window ({} {})", shake["chat"], shake["window"]));
+                check(shake["screen"].as_i64().is_some_and(|s| s > 0) && shake["build"].as_str().is_some_and(|b| !b.is_empty()), "with the screen's height and the build");
+                check(shake["frames"].as_array().is_some_and(|f| !f.is_empty()), "and the frames around it");
+            }
+            st.done = 0;
+            true
+        })),
+        // Rows at the end and replies that only grow: the follow slide, no more.
+        ("a settled chat streams at its end", Box::new(move |_, _, elapsed| {
+            let mut st = s4.borrow_mut();
+            if st.done == 0 && elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            if st.done == 0 {
+                st.moved = moved_now();
+                st.flashes = crate::scroll_journal::flashes_seen();
+            }
+            let due = ((elapsed.as_millis().saturating_sub(800)) / 150) as usize;
+            while st.done < quiet_count && st.done <= due {
+                (quiet[st.done].1)();
+                st.done += 1;
+            }
+            st.done >= quiet_count && elapsed >= Duration::from_millis(800 + 150 * quiet_count as u64 + 1500)
+        })),
+        ("none of the new rules", Box::new(move |_, _, _| {
+            let mut st = s5.borrow_mut();
+            let now = moved_now();
+            let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
+            println!("note scroll-shake settled streaming: found shift {} shake {} layout_shift {}", found[0], found[1], found[2]);
+            check(found == [0, 0, 0], &format!("a settled, following chat finds no shift, shake or layout shift ({found:?})"));
+            check(crate::scroll_journal::flashes_seen() == st.flashes, "nor a flash");
+            let (visible, numbers) = last_row_visible();
+            check(report().follows && visible, &format!("it still follows and shows its last row whole: {numbers}"));
+            shot(&out, "scroll-shake-01-settled");
+            st.moved = now;
+            st.posted = crate::scroll_journal::flashes().len();
+            st.done = 0;
+            true
+        })),
+        // Whole agent turns, measured (not judged): what the app does today.
+        ("agent turns stream", Box::new(move |_, _, elapsed| {
+            let mut st = s6.borrow_mut();
+            let due = (elapsed.as_millis() / 200) as usize;
+            while st.done < turn_count && st.done <= due {
+                (turns[st.done].1)();
+                st.done += 1;
+            }
+            if st.done < turn_count || elapsed < Duration::from_millis(200 * turn_count as u64 + 1500) {
+                return false;
+            }
+            let now = moved_now();
+            let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
+            let posted: Vec<String> = crate::scroll_journal::flashes()[st.posted..]
+                .iter()
+                .map(|d| format!("{} step {} reversals {} max_step {} score {}", d["rule"], d["step"], d["reversals"], d["max_step"], d["score"]))
+                .collect();
+            println!("note scroll-shake agent turns ({turn_count} updates): found shift {} shake {} layout_shift {}; posted {posted:?}", found[0], found[1], found[2]);
+            true
+        })),
+    ];
+    run_stages(stages);
+}

@@ -12,7 +12,11 @@
 //! A flash (the chat drawn a viewport or more away, or with another row
 //! across its top, and back within three frames, nobody scrolling) writes
 //! those frames here and posts them to the primary Host's /clog as one
-//! `scroll_flash` event, at most once per pane per ten seconds.
+//! `scroll_flash` event, at most once per pane per ten seconds. Smaller
+//! unasked movement (a shift, a shake, a layout score; unasked.rs) is found
+//! on the same frames and posted as the same event with its own `rule`, at
+//! most once per rule a minute across windows. All of it only while
+//! Settings → Diagnostics → "Scroll dashcam" is on.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
@@ -154,7 +158,8 @@ pub fn reset(pane: &str, why: &str, rows: usize) {
 
 /// What a transcript showed: its offset, content and viewport heights, the
 /// row across its top (id and index), whether it followed the latest and
-/// its row count.
+/// its row count; where the top row is drawn (y in the viewport) and its
+/// height, and the row across the bottom (id, y, height).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Shot {
     pub offset: f32,
@@ -164,6 +169,11 @@ pub struct Shot {
     pub top_index: i32,
     pub follow: bool,
     pub rows: i32,
+    pub top_y: f32,
+    pub top_h: f32,
+    pub bottom: String,
+    pub bottom_y: f32,
+    pub bottom_h: f32,
 }
 
 impl Shot {
@@ -266,6 +276,8 @@ pub fn detect(frames: &[Frame]) -> Option<Flash> {
 
 #[derive(Default)]
 struct Ring {
+    /// Its rows' unasked movement (unasked.rs).
+    motion: crate::unasked::Motion,
     /// What the transcript would draw now, and what happened since the
     /// last frame.
     latest: Option<Shot>,
@@ -282,6 +294,13 @@ pub struct Dashcam {
     rings: HashMap<String, Ring>,
     /// Flashes found so far, recorded or not.
     pub seen: usize,
+    /// Unasked movement found, by rule (shift, shake, layout_shift),
+    /// reported or not.
+    pub moved: HashMap<&'static str, usize>,
+    /// Those due to be reported, with how many of their rule were held
+    /// back before them.
+    pub unasked: Vec<(String, crate::unasked::Found, u32)>,
+    limit: crate::unasked::Limit,
 }
 
 impl Dashcam {
@@ -322,6 +341,14 @@ impl Dashcam {
                 ring.frames.pop_front();
             }
             let frames = ring.frames.make_contiguous();
+            if let [.., before, after] = &*frames {
+                for found in ring.motion.frame(before, after) {
+                    *self.moved.entry(found.rule).or_default() += 1;
+                    if let Some(held) = self.limit.allow(found.rule, now) {
+                        self.unasked.push((pane.clone(), found, held));
+                    }
+                }
+            }
             let Some(flash) = detect(&frames[frames.len().saturating_sub(BACK_WITHIN + 2)..]) else { continue };
             self.seen += 1;
             if ring.recorded.is_some_and(|at| now.duration_since(at) < FLASH_EVERY) {
@@ -337,6 +364,11 @@ impl Dashcam {
     /// A pane's frames now (the flash's, and those drawn since).
     pub fn frames(&self, pane: &str) -> Vec<Frame> {
         self.rings.get(pane).map(|r| r.frames.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// A pane's shake under way, if one is, and its chat's layout score.
+    fn motion(&self, pane: &str) -> (Option<crate::unasked::Tally>, f32) {
+        self.rings.get(pane).map_or((None, 0.0), |r| (r.motion.shake.clone(), r.motion.open_score()))
     }
 
 }
@@ -457,6 +489,84 @@ pub fn flash_detail(chat: &str, pane: &str, flash: &Flash, frames: &[Frame]) -> 
     }
 }
 
+/// The build that saw it: the version, and the commit when built by CI.
+fn build() -> String {
+    match option_env!("GITHUB_SHA") {
+        Some(sha) => format!("{}+{}", env!("CARGO_PKG_VERSION"), &sha[..sha.len().min(9)]),
+        None => env!("CARGO_PKG_VERSION").to_owned(),
+    }
+}
+
+/// The `scroll_flash` event's detail for unasked movement (the rule every
+/// app shares): `rule` shift, shake or layout_shift; `chat`, `window`,
+/// `screen` (the viewport's height), `build`; `score` (the chat's layout
+/// score since it opened, or the minute's for a layout_shift of scope
+/// `minute`), `step` (shift: px, up negative), `reversals` and `max_step`
+/// (shake: so far, as it is posted); `frames` around it [{t ms from it,
+/// y offset, h content height, top and ty, th the top row's id, y and
+/// height, bot and by the bottom row's id and y, f following, g asked}] and
+/// `events` [{t, kind, note}], ids and numbers only, under 3.9 KB: the
+/// frames farthest from it go first.
+pub fn unasked_detail(chat: &str, pane: &str, found: &crate::unasked::Found, tally: Option<&crate::unasked::Tally>, open_score: f32, frames: &[Frame], held: u32) -> Value {
+    const MOST: usize = 3900;
+    const MOST_FRAMES: usize = 40;
+    let ms = |at: Duration| ((at.as_secs_f64() - found.at.as_secs_f64()) * 1000.0).round() as i64;
+    let r = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
+    let r4 = |v: f32| (f64::from(v) * 10_000.0).round() / 10_000.0;
+    let mut kept: Vec<(i64, Value)> = Vec::new();
+    let mut events: Vec<(i64, Value)> = Vec::new();
+    for frame in frames {
+        let t = ms(frame.at);
+        let s = &frame.shot;
+        for (kind, note) in host_events(&frame.events) {
+            events.push((t, json!({"t": t, "kind": kind, "note": note})));
+        }
+        kept.push((t, json!({"t": t, "y": r(s.offset), "h": r(s.content), "top": s.top, "ty": r(s.top_y), "th": r(s.top_h),
+                             "bot": s.bottom, "by": r(s.bottom_y), "f": s.follow, "g": frame.events.iter().any(|e| crate::unasked::asked(e))})));
+    }
+    let screen = frames.iter().find(|f| f.at >= found.at).or(frames.last()).map_or(0.0, |f| f.shot.viewport);
+    let mut detail = json!({"chat": chat, "window": pane, "screen": screen.round() as i64, "build": build(), "rule": found.rule, "held": held});
+    match found.rule {
+        "shake" => {
+            let (reversals, max_step) = tally.map_or((found.reversals, found.max_step), |t| (t.reversals.max(found.reversals), t.max_step.max(found.max_step)));
+            detail["reversals"] = json!(reversals);
+            detail["max_step"] = json!(r(max_step));
+            detail["score"] = json!(r4(open_score));
+        }
+        "shift" => {
+            detail["step"] = json!(r(found.step));
+            detail["score"] = json!(r4(open_score));
+        }
+        _ => {
+            detail["score"] = json!(r4(found.score));
+            detail["scope"] = json!(found.scope);
+        }
+    }
+    // The frames nearest it first.
+    let by_nearness = |list: &mut Vec<(i64, Value)>, most: usize| {
+        list.sort_by_key(|(t, _)| t.abs());
+        list.truncate(most);
+        list.sort_by_key(|(t, _)| *t);
+    };
+    by_nearness(&mut kept, MOST_FRAMES);
+    by_nearness(&mut events, 30);
+    loop {
+        detail["frames"] = json!(kept.iter().map(|k| &k.1).collect::<Vec<_>>());
+        detail["events"] = json!(events.iter().map(|e| &e.1).collect::<Vec<_>>());
+        if detail.to_string().len() <= MOST || (kept.is_empty() && events.is_empty()) {
+            return detail;
+        }
+        let farthest = |list: &Vec<(i64, Value)>| list.iter().map(|(t, _)| t.abs()).max();
+        if farthest(&kept) >= farthest(&events) && !kept.is_empty() {
+            let i = kept.iter().enumerate().max_by_key(|(_, (t, _))| t.abs()).map(|(i, _)| i).unwrap_or(0);
+            kept.remove(i);
+        } else {
+            let i = events.iter().enumerate().max_by_key(|(_, (t, _))| t.abs()).map(|(i, _)| i).unwrap_or(0);
+            events.remove(i);
+        }
+    }
+}
+
 /// Settings → Diagnostics → "Scroll dashcam" (Peter, 23 Nov 2026, via Hazel:
 /// keep it, behind a diagnostics setting, off by default). While off the
 /// dashcam keeps no frames and posts nothing; the journal's log lines stay.
@@ -479,7 +589,7 @@ thread_local! {
     static DASHCAM_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static DASHCAM: std::cell::RefCell<Dashcam> = std::cell::RefCell::default();
     /// The flash events posted (or that would have been, with no Host), for
-    /// the checks.
+    /// the checks: the existing rules' and the unasked movement's alike.
     static FLASHES: std::cell::RefCell<Vec<Value>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
@@ -508,7 +618,44 @@ pub fn frame_drawn() {
         DASHCAM.with(|d| *d.borrow_mut() = Dashcam::default());
         return;
     }
-    let found = DASHCAM.with(|d| d.borrow_mut().drawn(crate::perf::now(), Instant::now()));
+    let (found, unasked) = DASHCAM.with(|d| {
+        let mut d = d.borrow_mut();
+        let found = d.drawn(crate::perf::now(), Instant::now());
+        (found, std::mem::take(&mut d.unasked))
+    });
+    for (pane, found, held) in unasked {
+        // Half a second later: the frames after it come along (the rest
+        // of a shake, the rows settling).
+        slint::Timer::single_shot(Duration::from_millis(500), move || {
+            let (frames, (tally, open_score)) = DASHCAM.with(|d| {
+                let d = d.borrow();
+                (d.frames(&pane), d.motion(&pane))
+            });
+            let near: Vec<Frame> = frames.into_iter().filter(|f| f.at + Duration::from_secs(1) >= found.at).collect();
+            let shake = if found.rule == "shake" { tally.as_ref() } else { None };
+            eprintln!(
+                "scroll-unasked {} pane={pane} rule={} step {:.1} reversals {} max-step {:.1} score {:.4} scope {} ({held} held back)",
+                chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
+                found.rule,
+                found.step,
+                shake.map_or(found.reversals, |t| t.reversals),
+                shake.map_or(found.max_step, |t| t.max_step),
+                if found.rule == "layout_shift" { found.score } else { open_score },
+                found.scope,
+            );
+            let session = crate::app().map(|app| app.session_of(&pane)).unwrap_or_default();
+            let mut posted = None;
+            if let Some(app) = crate::app() {
+                app.engine.borrow().report_chat_event(&session, "scroll_flash", "fault", |chat| {
+                    let detail = unasked_detail(chat, &pane, &found, shake, open_score, &near, held);
+                    posted = Some(detail.clone());
+                    detail
+                });
+            }
+            let detail = posted.unwrap_or_else(|| unasked_detail(&session, &pane, &found, shake, open_score, &near, held));
+            FLASHES.with(|f| f.borrow_mut().push(detail));
+        });
+    }
     for (pane, flash, skipped) in found {
         // A moment later: the frames after the flash come along.
         slint::Timer::single_shot(Duration::from_millis(300), move || {
@@ -541,6 +688,12 @@ pub fn frames(pane: &str) -> Vec<Frame> {
 /// Flashes found so far, recorded or not (for the checks).
 pub fn flashes_seen() -> usize {
     DASHCAM.with(|d| d.borrow().seen)
+}
+
+/// Unasked movement found so far by rule (shift, shake, layout_shift),
+/// reported or not (for the checks).
+pub fn moved_seen(rule: &str) -> usize {
+    DASHCAM.with(|d| d.borrow().moved.get(rule).copied().unwrap_or(0))
 }
 
 /// The flash events recorded so far (for the checks).
@@ -599,7 +752,7 @@ mod tests {
     }
 
     fn at_end(rows: i32, content: f32) -> Shot {
-        Shot { offset: 480.0 - content, content, viewport: 480.0, top: format!("row-{}", rows - 4), top_index: rows - 4, follow: true, rows }
+        Shot { offset: 480.0 - content, content, viewport: 480.0, top: format!("row-{}", rows - 4), top_index: rows - 4, follow: true, rows, ..Shot::default() }
     }
 
     fn frames(shots: &[(Shot, &[&str])]) -> Vec<Frame> {
@@ -744,5 +897,72 @@ mod tests {
         assert_eq!(last, [("reload", "chat"), ("remove", "3 rows"), ("insert", "1 rows"), ("live", "tick")]);
         let lines = flash_lines("pane-3", &flash, &frames, 0, "t");
         assert_eq!(lines.len(), frames.len() + 1);
+    }
+
+    /// A pinned chat whose last row is `h` px taller than at first.
+    fn settled(h: f32) -> Shot {
+        Shot { top_y: -20.0 - h, top_h: 120.0, bottom: "row-77".into(), bottom_y: 380.0 - h, bottom_h: 100.0 + h, ..at_end(78, 8421.0 + h) }
+    }
+
+    #[test]
+    fn a_shake_in_one_pane_is_reported_once_and_another_panes_waits_its_minute() {
+        let mut cam = Dashcam::default();
+        let start = Instant::now();
+        let mut t = 0;
+        let mut shake = |cam: &mut Dashcam, pane: &str, now: Instant| {
+            for h in [0.0, 30.0, 0.0, 30.0, 0.0, 30.0, 0.0] {
+                cam.shot(pane, settled(h));
+                cam.event(pane, "live");
+                t += 40;
+                cam.drawn(Duration::from_millis(t), now);
+            }
+            t += 1000;
+        };
+        shake(&mut cam, "pane-1", start);
+        let rules: Vec<&str> = cam.unasked.iter().map(|u| u.1.rule).collect();
+        assert_eq!(rules, ["shift", "layout_shift", "shake"], "each rule once");
+        assert_eq!(cam.moved["shake"], 1);
+        assert_eq!(cam.moved["shift"], 3);
+        cam.unasked.clear();
+        shake(&mut cam, "pane-2", start + Duration::from_secs(30));
+        assert!(cam.unasked.is_empty(), "one report per rule a minute across windows: {:?}", cam.unasked);
+        assert_eq!(cam.moved["shake"], 2, "found all the same");
+        shake(&mut cam, "pane-2", start + Duration::from_secs(61));
+        let shake = cam.unasked.iter().find(|u| u.1.rule == "shake").expect("a minute later, reported");
+        assert_eq!((shake.0.as_str(), shake.2), ("pane-2", 1));
+        // A settled, following chat: rows streaming in at the end only.
+        let mut quiet = Dashcam::default();
+        for (i, h) in [0.0, 10.0, 25.0, 25.0, 60.0, 90.0, 90.0].iter().enumerate() {
+            quiet.shot("pane-1", settled(*h));
+            quiet.event("pane-1", "live");
+            quiet.drawn(Duration::from_millis(16 * i as u64), start);
+        }
+        assert!(quiet.moved.is_empty() && quiet.unasked.is_empty(), "{:?}", quiet.moved);
+    }
+
+    #[test]
+    fn the_unasked_event_has_the_shared_shape_ids_and_numbers_and_fits_four_kb() {
+        let shots: Vec<(Shot, &[&str])> = (0..400)
+            .map(|i| (Shot { top: format!("a-long-message-id-{i:04}-0123456789"), bottom: format!("another-long-id-{i:04}-0123456789"), ..settled((i % 2) as f32 * 30.0) }, &["live", "rows -1 +2 ~1"][..]))
+            .collect();
+        let frames = frames(&shots);
+        let found = crate::unasked::Found { rule: "shake", at: frames[200].at, step: 0.0, reversals: 2, max_step: 30.0, score: 0.0, scope: "" };
+        let tally = crate::unasked::Tally { reversals: 7, max_step: 30.0 };
+        let detail = unasked_detail("rachel", "pane-3", &found, Some(&tally), 0.4321, &frames, 2);
+        assert!(detail.to_string().len() <= 3900, "{}", detail.to_string().len());
+        let mut keys: Vec<&String> = detail.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["build", "chat", "events", "frames", "held", "max_step", "reversals", "rule", "score", "screen", "window"]);
+        assert_eq!((detail["rule"].as_str(), detail["reversals"].as_u64(), detail["max_step"].as_f64(), detail["score"].as_f64()), (Some("shake"), Some(7), Some(30.0), Some(0.4321)));
+        let shown = detail["frames"].as_array().unwrap();
+        assert!(!shown.is_empty() && shown.len() <= 40);
+        assert!(shown.iter().any(|f| f["t"] == 0), "the frame it was found at is kept");
+        let mut fields: Vec<&String> = shown[0].as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["bot", "by", "f", "g", "h", "t", "th", "top", "ty", "y"]);
+        let layout = crate::unasked::Found { rule: "layout_shift", score: 0.031, scope: "minute", ..found };
+        let detail = unasked_detail("rachel", "pane-3", &layout, None, 0.5, &frames[195..205], 0);
+        assert_eq!((detail["score"].as_f64(), detail["scope"].as_str()), (Some(0.031), Some("minute")));
+        assert!(detail.get("reversals").is_none());
     }
 }

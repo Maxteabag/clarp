@@ -23,6 +23,7 @@ mod perf;
 mod motion;
 mod scroll_book;
 mod scroll_journal;
+mod unasked;
 mod preview_view;
 mod platform;
 mod settings_view;
@@ -869,11 +870,11 @@ fn main() {
         }
     });
     book.on_row_at(|pane, y| app().map_or(0, |app| app.row_at(&pane, y)));
-    book.on_frame(|pane, top, top_index, offset, content, viewport, follow, reading, rows| {
+    book.on_frame(|pane, top, top_index, offset, content, viewport, follow, reading, rows, top_y, top_h, bottom, bottom_y, bottom_h| {
         if reading {
             scroll_journal::event(&pane, "reader");
         }
-        let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows };
+        let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows, top_y, top_h, bottom: bottom.into(), bottom_y, bottom_h };
         scroll_journal::shot(&pane, shot);
     });
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {

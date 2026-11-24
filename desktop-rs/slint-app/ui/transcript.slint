@@ -168,7 +168,9 @@ export global ScrollBook {
     // the offset, content and viewport heights, whether it follows, whether
     // the reader is scrolling it and the row count. The app keeps what each
     // drawn frame showed.
-    callback frame(string, string, int, length, length, length, bool, bool, int);
+    // Then where the top row is drawn and its height, and the row across
+    // the bottom (id, y, height): the rows the reader sees moving.
+    callback frame(string, string, int, length, length, length, bool, bool, int, length, length, string, length, length);
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.
@@ -1090,7 +1092,8 @@ export component Transcript inherits FocusScope {
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     // What the chat would draw, for the dashcam (ScrollBook.frame).
-    property <{offset: length, content: length, viewport: length, top: string, top-index: int, follow: bool, reading: bool, rows: int}> shot: {
+    property <{offset: length, content: length, viewport: length, top: string, top-index: int, follow: bool, reading: bool, rows: int,
+               top-y: length, top-h: length, bottom: string, bottom-y: length, bottom-h: length}> shot: {
         offset: list.content-y,
         content: list.content-height,
         viewport: list.visible-height,
@@ -1099,9 +1102,15 @@ export component Transcript inherits FocusScope {
         follow: root.follow,
         reading: root.settling || root.dragging,
         rows: root.rows.length,
+        top-y: root.top-y,
+        top-h: root.top-h,
+        bottom: root.bottom-index < root.rows.length ? root.rows[root.bottom-index].id : "",
+        bottom-y: root.bottom-y,
+        bottom-h: root.bottom-h,
     };
     changed shot => {
-        ScrollBook.frame(root.pane-id, root.shot.top, root.shot.top-index, root.shot.offset, root.shot.content, root.shot.viewport, root.shot.follow, root.shot.reading, root.shot.rows);
+        ScrollBook.frame(root.pane-id, root.shot.top, root.shot.top-index, root.shot.offset, root.shot.content, root.shot.viewport, root.shot.follow, root.shot.reading, root.shot.rows,
+                         root.shot.top-y, root.shot.top-h, root.shot.bottom, root.shot.bottom-y, root.shot.bottom-h);
     }
     list := ListView {
         scrolled => { root.reader-scrolled(); }
@@ -1144,12 +1153,20 @@ export component Transcript inherits FocusScope {
             // Not as the row is created: the list has not placed it yet.
             property <length> on-screen: self.y + list.content-y;
             property <bool> on-top: self.on-screen <= 0 && self.on-screen + self.height > 0;
+            // The row across the viewport's bottom edge (or ending on it).
+            property <bool> on-bottom: self.on-screen < list.visible-height && self.on-screen + self.height >= list.visible-height;
             property <int> at: index;
             property <length> scrolled-to: list.content-y;
             function mark() {
                 if (self.on-top) {
                     root.top-index = index;
                     root.top-y = self.on-screen;
+                    root.top-h = self.height;
+                }
+                if (self.on-bottom) {
+                    root.bottom-index = index;
+                    root.bottom-y = self.on-screen;
+                    root.bottom-h = self.height;
                 }
             }
             changed on-screen => { self.mark(); self.report-marked(); }
@@ -1165,12 +1182,13 @@ export component Transcript inherits FocusScope {
                 }
             }
             changed on-top => { self.mark(); }
+            changed on-bottom => { self.mark(); }
             changed at => { self.mark(); }
             changed scrolled-to => { self.mark(); }
             // Drawn, the row's height is the truth (an artifact card that
             // grows in place changes it without a new row), and a row that
             // changes on screen needs no measuring off screen.
-            changed height => { ScrollBook.shown(root.pane-id, row.id, self.height, list.visible-width); }
+            changed height => { ScrollBook.shown(root.pane-id, row.id, self.height, list.visible-width); self.mark(); }
             changed message => { ScrollBook.shown(root.pane-id, row.id, self.height, list.visible-width); }
         }
     }
@@ -1206,6 +1224,11 @@ export component Transcript inherits FocusScope {
     // so the thumb keeps its size and moves only as the reader does.
     property <int> top-index;
     property <length> top-y;
+    property <length> top-h;
+    // The row across the bottom, for the dashcam.
+    property <int> bottom-index;
+    property <length> bottom-y;
+    property <length> bottom-h;
     property <bool> measured: root.before.length > 1;
     property <length> total: root.measured ? root.before[root.before.length - 1] * 1px : list.content-height;
     property <length> above: root.measured ? root.before[Math.min(root.top-index, root.before.length - 1)] * 1px - root.top-y : -list.content-y;
