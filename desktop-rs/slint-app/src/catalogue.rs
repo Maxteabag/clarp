@@ -353,6 +353,8 @@ impl Setting {
     /// Sets it from a stored value ("on"/"off", a choice's value), as a
     /// settings file or `reset` would; false for a value it does not take.
     pub fn apply(&self, app: &Rc<App>, window: &AppWindow, value: &str) -> bool {
+        // A setting the user changes may resize the chats (text size, density): their own input.
+        crate::scroll_journal::input_all();
         match &self.control {
             Control::Toggle { set, .. } => match value {
                 "on" | "true" => set(app, window, true),
@@ -376,6 +378,8 @@ impl Setting {
 
     /// Puts its default back; false when it has none.
     pub fn reset(&self, app: &Rc<App>, window: &AppWindow) -> bool {
+        // A setting the user changes may resize the chats (text size, density): their own input.
+        crate::scroll_journal::input_all();
         if let Some(reset) = &self.reset_to {
             reset(app, window);
             return true;
@@ -387,6 +391,8 @@ impl Setting {
     /// Enter or Space (`delta` 1) and Left/Right: a toggle switches, a
     /// choice steps, an action runs.
     pub fn change(&self, app: &Rc<App>, window: &AppWindow, delta: i32) {
+        // A setting the user changes may resize the chats (text size, density): their own input.
+        crate::scroll_journal::input_all();
         match &self.control {
             Control::Toggle { get, set } => {
                 let on = get(app);
