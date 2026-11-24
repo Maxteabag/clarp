@@ -171,6 +171,9 @@ impl Settings {
     /// start: `codex_lane_most`, which the memory budget replaced.
     fn replaced(file: Option<&toml::Table>) -> Option<String> {
         let most = file?.get(MOST)?;
+        let most = most
+            .as_integer()
+            .map_or_else(|| format!("{most:?}"), |count| count.to_string());
         Some(format!(
             "{MOST} = {most} in config.toml is no longer read: lanes are kept within \
              {MEMORY_MB} (2200 MB unless set), the memory all lanes may hold together"

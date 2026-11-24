@@ -81,6 +81,7 @@ pub(super) trait Driver {
     /// - `{"type":"steer.read","id":<the steer's id>,"separate":true}` when the follow-up starts;
     /// - the follow-up's own lines;
     /// - the follow-up's end.
+    ///
     /// It calls this only then. The actor takes the follow-up on its separate-turn path
     /// (`clarp_kernel::steering::Observation::Separate`): a turn of its own with its own reply,
     /// neither counted as the first turn nor dropped. Codex reads every steered word inside its
