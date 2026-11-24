@@ -579,13 +579,9 @@ pub async fn judged(app: &App) -> serde_json::Value {
     let now = app.clock.now_ms();
     let mut state = app.seats.state.lock().await;
     match state.kept(app).await {
-        Some(kept) => with_switcher(&kept.seats, enabled, now),
-        None => with_switcher(&Seats::default(), enabled, now),
+        Some(kept) => kept.seats.judged(enabled, now),
+        None => Seats::default().judged(enabled, now),
     }
-}
-
-fn with_switcher(seats: &Seats, enabled: bool, now: i64) -> serde_json::Value {
-    seats.judged(enabled, now)
 }
 
 /// Reads the seats again now, whenever the last reading was, beside whoever asked: a seat
