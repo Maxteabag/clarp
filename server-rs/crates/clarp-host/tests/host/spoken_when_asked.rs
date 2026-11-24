@@ -243,6 +243,47 @@ fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
     assert!(!spoken("Steered quietly.") && !spoken("Voice turned off."));
     assert!(!spoken("Plain words.") && !spoken("Refused words."));
 
+    // A call's turn is speech by nature: a message typed to the agent while it runs, which
+    // asks for no speech, is read into it and does not turn it off.
+    let (phone, _) = pair(&host, "Phone", "full");
+    let (status, call) = host.ask_as(
+        &phone,
+        "POST",
+        "/calls",
+        Some(&json!({ "agents": [reader] })),
+    );
+    assert!(status < 300, "{status} {call}");
+    let call_id = call["call"]["call_id"].as_str().unwrap().to_string();
+    let (status, said) = host.ask_as(
+        &phone,
+        "POST",
+        "/send",
+        Some(&json!({
+            "session": reader, "text": "hold", "client_msg_id": "c-first", "call_id": call_id,
+        })),
+    );
+    assert_eq!(status, 200, "{said}");
+    wait_for("the call's turn in its tool", || {
+        host.state(&reader) == "tool"
+    });
+    host.post(
+        "/send",
+        json!({
+            "session": reader, "text": "<speak>Typed during the call.</speak>",
+            "client_msg_id": "c-typed", "synthesize_audio": false,
+        }),
+    );
+    answered(&reader, "c-typed");
+    wait_for("the call's turn still spoken", || {
+        spoken("Typed during the call.")
+    });
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({ "call_id": call_id })),
+    );
+
     // Antigravity is told how to speak in the words before the prompt: only when it is asked.
     let gatherer = make("Fixture Gatherer", "agy");
     let prompts = || -> Vec<String> {
@@ -541,3 +582,125 @@ fn a_reword_a_send_now_and_an_answer_carry_the_apps_audio_setting() {
             > told_before
     });
 }
+
+/// Antigravity, as `AGY` above, but each answer marks itself for the ear, and a prompt that
+/// ends with `hold-<tag>` waits for the file `release-<tag>`: the same file however often the
+/// prompt is given, so a turn tried again after a restart waits the same way.
+const AGY_SPOKEN: &str = r#"#!/usr/bin/env python3
+import json, os, pathlib, re, sys, time
+root = pathlib.Path(__file__).resolve().parent
+args = sys.argv[1:]
+prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
+with (root / "prompts").open("a") as kept:
+    kept.write(json.dumps(prompt) + "\n")
+conversation = "11111111-2222-3333-4444-555555555555"
+def say(event, **body):
+    print(json.dumps({"event": event, **body}), flush=True)
+def step(index, state, kind, **more):
+    update = {"conversation_id": conversation, "step_index": index, "state": state,
+              "step_type": kind, **more}
+    say("step_update", step_update=update)
+say("init", conversation_id=conversation,
+    init={"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []})
+step(0, "DONE", "user_input", text_delta=prompt)
+held = re.search(r"hold-(\w+)$", prompt)
+tag = held.group(1) if held else "none"
+if held:
+    (root / ("holding-" + tag)).touch()
+    end = time.monotonic() + 90
+    while not (root / ("release-" + tag)).exists():
+        if time.monotonic() >= end:
+            raise SystemExit("stand-in release expired")
+        time.sleep(0.05)
+answer = "<speak>Answer %s.</speak>" % tag
+step(1, "DONE", "agent_response", text_delta=answer)
+say("result", result={"conversation_id": conversation, "status": "SUCCESS", "response": answer})
+"#;
+
+/// The user's messages read together into one turn are spoken as the newest of them asked,
+/// also when the Host starts again while that turn runs: it is taken up as it began, not as
+/// its first message said.
+#[test]
+fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
+    let place = Place::new("spoken-after-restart");
+    let agy = place.root.join("agy");
+    program(&agy, AGY_SPOKEN);
+    let voice = cartesia_stand_in(vec![31; 2000]);
+    let owners = place.root.join("synthetic-voice.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\n\
+         model='sonic-3'\n",
+    )
+    .unwrap();
+    let nowhere = place.root.join("absent");
+    let world = [
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", nowhere.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("GOOGLE_APPLICATION_CREDENTIALS", ""),
+        ("GEMINI_API_KEY", ""),
+        ("DEEPGRAM_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let mut host = place.start_in("", &args, &world);
+    let own = json!({ "cartesia": "fixture-voice-restart" }).to_string();
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Fixture Restarted", "backend": "agy", "voice_id": own }),
+    );
+    let agent = made["session"].as_str().unwrap().to_string();
+    let spoken = |words: &str| {
+        voice.asked().iter().any(|asked| {
+            asked["transcript"]
+                .as_str()
+                .is_some_and(|said| said.contains(words))
+        })
+    };
+    let mark = |name: &str| std::fs::write(place.root.join(name), "").unwrap();
+    let marked = |name: &str| place.root.join(name).exists();
+    let send = |host: &Host, id: &str, text: &str, aloud: bool| {
+        let body = json!({
+            "session": agent, "text": text, "client_msg_id": id, "synthesize_audio": aloud,
+        });
+        host.post("/send", body)
+    };
+
+    // Each round: a turn holds, two of the user's messages wait behind it and are read
+    // together into the next turn, which holds in turn; the Host starts again while it does,
+    // and then it answers.
+    for (round, first, second, aloud) in [
+        ("a", true, false, false),
+        ("b", false, true, true),
+    ] {
+        send(&host, &format!("busy-{round}"), &format!("hold-busy{round}"), false);
+        wait_for("the first turn to hold", || marked(&format!("holding-busy{round}")));
+        let sent = send(&host, &format!("{round}1"), "the first of two", first);
+        assert_eq!(sent["queued"], true, "{sent}");
+        let sent = send(&host, &format!("{round}2"), &format!("hold-{round}"), second);
+        assert_eq!(sent["queued"], true, "{sent}");
+        mark(&format!("release-busy{round}"));
+        wait_for("the turn read together to hold", || {
+            marked(&format!("holding-{round}"))
+        });
+        host.kill();
+        host = place.start_in("", &args, &world);
+        mark(&format!("release-{round}"));
+        let words = format!("Answer {round}.");
+        if aloud {
+            wait_for("the answer spoken", || spoken(&words));
+        } else {
+            wait_for("the answer written", || {
+                host.conversation(&agent)
+                    .iter()
+                    .any(|(role, text)| role == "assistant" && text.contains(&words))
+            });
+            std::thread::sleep(Duration::from_secs(2));
+            assert!(!spoken(&words), "round {round}: the newest said text");
+        }
+        wait_for("the agent to be done", || host.state(&agent) == "done");
+    }
+}
+
