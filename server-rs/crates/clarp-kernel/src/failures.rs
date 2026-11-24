@@ -913,6 +913,27 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_folder_is_read_by_its_mark_and_told_in_a_sentence_that_names_it() {
+        let said = folder_missing("/work/helper");
+        assert_eq!(classify_error(&said), FOLDER_MISSING);
+        assert_eq!(missing_folder(&said), Some("/work/helper"));
+        assert!(never_started(FOLDER_MISSING) && never_started(NOT_STARTED));
+        // A tool's own words of a missing file are no such thing.
+        assert_ne!(
+            classify_error("flock: No such file or directory (os error 2)"),
+            FOLDER_MISSING
+        );
+        assert_eq!(missing_folder("flock: No such file or directory"), None);
+        let told = told(FOLDER_MISSING, &said, "m", Known::default());
+        let sentence = "This agent's folder /work/helper no longer exists. Recreate it, or give \
+             the agent another folder";
+        assert_eq!(told.message, sentence);
+        assert_eq!(told.row, format!("{sentence}."));
+        assert_eq!(told.summary, format!("{sentence}. Your message is saved."));
+        assert_eq!(told.provider_message, "");
+    }
+
+    #[test]
     fn the_order_of_the_wordings_is_the_reading() {
         // A watchdog kills with a signal: a timeout, not a stop.
         assert_eq!(

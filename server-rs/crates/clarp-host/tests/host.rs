@@ -67,6 +67,8 @@ mod diagnostics;
 mod end_at_answer;
 #[path = "host/enter_at_start.rs"]
 mod enter_at_start;
+#[path = "host/folder_missing.rs"]
+mod folder_missing;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]
