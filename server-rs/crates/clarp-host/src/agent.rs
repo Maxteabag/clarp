@@ -4119,12 +4119,21 @@ impl Worker {
         };
         let action = match action {
             // An attempt the agent's lane takes runs there: an opening turn keeps its own gated
-            // launch, and a driver may leave others to a process of their own (`Driver::takes`).
+            // launch, and a driver may leave others to a process of their own (`Driver::takes`),
+            // or, for one that never makes a turn wait for a cold lane, run it per turn until
+            // its lane is warm (`Tool::runs_on_lane`).
             Action::Launch(order)
                 if self.native.owns()
                     || (self.chat_lane()
-                        && crate::lane::Tool::of(&self.setup.record.backend)
-                            .is_some_and(|tool| tool.takes(&order))) =>
+                        && crate::lane::Tool::of(&self.setup.record.backend).is_some_and(
+                            |tool| {
+                                tool.runs_on_lane(
+                                    &order,
+                                    &self.setup.profile.run_dir,
+                                    &self.setup.record.agent_id,
+                                )
+                            },
+                        )) =>
             {
                 self.launch_on_native_lane(order);
                 return;

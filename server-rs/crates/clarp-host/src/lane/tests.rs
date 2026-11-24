@@ -46,7 +46,10 @@ fn the_lane_settings_are_off_and_fifteen_minutes_and_2200_mb_unless_the_owner_sa
         of("codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\nlane_memory_mb = -1\n"),
         default
     );
-    assert_eq!(of("[other]\ncodex_chat_lane = true\nlane_memory_mb = 9\n"), default);
+    assert_eq!(
+        of("[other]\ncodex_chat_lane = true\nlane_memory_mb = 9\n"),
+        default
+    );
     // The default budget holds what the count of eight held: eight Codex lanes.
     assert_eq!(default.budget / CODEX_LANE, 8);
 }
@@ -57,9 +60,15 @@ fn the_count_of_lanes_is_no_longer_read_and_a_config_that_has_it_is_told() {
     let old = of("codex_chat_lane = true\ncodex_lane_most = 2\n");
     assert_eq!(old.budget, 2_200 * MIB);
     let said = Settings::replaced(Some(&"codex_lane_most = 2\n".parse().unwrap())).unwrap();
-    assert!(said.starts_with("codex_lane_most = 2 in config.toml is no longer read"), "{said}");
+    assert!(
+        said.starts_with("codex_lane_most = 2 in config.toml is no longer read"),
+        "{said}"
+    );
     assert!(said.contains("lane_memory_mb"), "{said}");
-    assert_eq!(Settings::replaced(Some(&"lane_memory_mb = 9\n".parse().unwrap())), None);
+    assert_eq!(
+        Settings::replaced(Some(&"lane_memory_mb = 9\n".parse().unwrap())),
+        None
+    );
     assert_eq!(Settings::replaced(None), None);
 }
 
@@ -301,11 +310,7 @@ fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // A budget nothing fits and room for all by their number: every idle lane leaves, the
     // longest idle first, and the busy one counts and stays.
-    make_room(
-        &run,
-        &own,
-        1,
-    );
+    make_room(&run, &own, 1);
     let retired: Vec<String> = all
         .lock()
         .unwrap()
@@ -319,11 +324,7 @@ fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
 
     // A budget all fit in: nobody leaves.
     let kept = FakeLane::start(&run, "d", status_of(me, "td", "d", 50, false));
-    make_room(
-        &run,
-        &own,
-        ROOMY,
-    );
+    make_room(&run, &own, ROOMY);
     assert_eq!(kept.asked(), ["inspect"]);
     sleeper.kill().unwrap();
     sleeper.wait().unwrap();
@@ -344,11 +345,7 @@ fn the_budget_counts_each_lanes_own_reading_and_the_new_lane_at_its_typical_size
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // 100 + 100 said by the lanes, and the new Codex lane at 270: over 400, so the longest idle
     // leaves, and 370 fits.
-    make_room(
-        &run,
-        &own,
-        400 * MIB,
-    );
+    make_room(&run, &own, 400 * MIB);
     let retired: Vec<String> = all
         .lock()
         .unwrap()
@@ -429,5 +426,19 @@ fn before_anything_else_opens_the_conversation_its_lanes_leave_or_it_does_not_go
         "{refused}"
     );
     assert!(!busy.endpoint.released().unwrap());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_turn_waits_for_a_cold_codex_lane_and_a_warm_lane_is_one_that_answers_free() {
+    use super::Cold;
+    // Codex as before the layer: its turn waits while a new lane starts.
+    assert_eq!(Tool::Codex.cold(), Cold::Waits);
+    let run = run_dir("warm");
+    let free = FakeLane::start(&run, "a", status("t", "d", 5, false));
+    let busy = FakeLane::start(&run, "b", status("t", "d", 0, true));
+    assert!(free.endpoint.warm());
+    assert!(!busy.endpoint.warm());
+    assert!(!Endpoint::of(Tool::Codex, &run, "none").warm());
     std::fs::remove_dir_all(&run).unwrap();
 }

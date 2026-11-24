@@ -330,6 +330,35 @@ pub(crate) trait Driver {
         order.opening.is_none()
     }
 
+    /// What a turn does when the agent has no warm lane ready ([`Cold`]).
+    const COLD: Cold;
+
+    /// Starts the agent's lane without its session, beside a per-turn process that holds the
+    /// session now ([`Cold::Beside`]). The lane takes the session only once that process is
+    /// gone: it waits, in its own process, for the conversation's lock
+    /// ([`clarp_shim::lane::thread_lock`]) that the per-turn process holds shared for its life,
+    /// then takes it up (Muse's `session/resume`, OpenCode's `GET /session/:id`). A lane that
+    /// fails to start costs nothing: the next turn runs per turn again.
+    #[allow(
+        dead_code,
+        reason = "the seam for drivers that warm beside a per-turn process (issue 761)"
+    )]
+    fn warm(
+        &self,
+        launcher: &crate::launcher::Launcher,
+        profile: &clarp_actor::Profile,
+        login: &Login,
+    ) -> io::Result<Option<Child>>
+    where
+        Self: Sized,
+    {
+        let _ = (launcher, profile, login);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("the {} lane does not start beside a turn", Self::TOOL.name()),
+        ))
+    }
+
     /// Whether the running lane, as `state` says, must start again for a turn that asks for
     /// `model` and `effort`. What the tool takes with a turn, or by a call to its running
     /// process (Muse's `session/setModel`), is applied in place and answers false; what it can
@@ -370,12 +399,53 @@ pub(crate) trait Goals: Driver {
     fn recover_stop(&self) -> io::Result<Self::Snapshot>;
 }
 
+/// What a turn does when the agent has no warm lane ready for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Cold {
+    /// The turn waits while its lane starts and takes up the session, then runs on it: Codex
+    /// today, whose first turn on a new lane pays the app-server's start and the thread's load.
+    Waits,
+    /// No turn ever waits for a cold lane (the lead's rule for every driver): the turn runs as a
+    /// process of its own, as it would with the switch off, and the lane starts beside it
+    /// without the session ([`Driver::warm`]). The next turn runs on the lane once it is warm.
+    /// The worst first turn is a per-turn one, never a cold start; the cold start shows only
+    /// as memory taken early.
+    #[allow(
+        dead_code,
+        reason = "the rule for the Muse, OpenCode and Claude drivers (issue 761)"
+    )]
+    Beside,
+}
+
 impl Tool {
     /// Whether this tool's driver takes `order` on its lane ([`Driver::takes`]).
     pub(crate) fn takes(self, order: &clarp_actor::ShimOrder) -> bool {
         match self {
             Self::Codex => <codex::Lane as Driver>::takes(order),
         }
+    }
+
+    /// What a turn of this tool does without a warm lane ([`Driver::COLD`]).
+    pub(crate) fn cold(self) -> Cold {
+        match self {
+            Self::Codex => <codex::Lane as Driver>::COLD,
+        }
+    }
+
+    /// Whether `order` runs on the agent's lane now: one the driver takes, and, for a driver
+    /// that never makes a turn wait for a cold lane, only once that lane answers and is free.
+    /// Otherwise the attempt runs as a process of its own.
+    pub(crate) fn runs_on_lane(
+        self,
+        order: &clarp_actor::ShimOrder,
+        run: &Path,
+        agent_id: &str,
+    ) -> bool {
+        self.takes(order)
+            && match self.cold() {
+                Cold::Waits => true,
+                Cold::Beside => Endpoint::of(self, run, agent_id).warm(),
+            }
     }
 }
 
@@ -468,6 +538,11 @@ impl Endpoint {
 
     pub(crate) fn inspect(&self) -> io::Result<Status> {
         self.ask(&Control::Inspect)
+    }
+
+    /// The lane runs, answers, and is free for a claim: a turn sent to it starts at once.
+    pub(crate) fn warm(&self) -> bool {
+        self.inspect().is_ok_and(|state| state.available)
     }
 
     /// What the lane that said `state` holds in memory, in bytes: what its driver read itself

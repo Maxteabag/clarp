@@ -14,7 +14,7 @@ use clarp_shim::lane::key;
 use serde_json::{Value, json};
 
 use super::digest::OptionsDigest;
-use super::{Driver, Endpoint, Goals, Login, Place, Settings, Status, TURN_FILE_ENV, Tool};
+use super::{Cold, Driver, Endpoint, Goals, Login, Place, Settings, Status, TURN_FILE_ENV, Tool};
 
 #[derive(Clone)]
 pub(crate) enum Submission {
@@ -42,6 +42,8 @@ fn bound(login: &Login) -> Option<&clarp_backend::own_provider::OwnProvider> {
 
 impl Driver for Lane {
     const TOOL: Tool = Tool::Codex;
+    /// As before the layer: a turn waits while a new lane starts and resumes the thread.
+    const COLD: Cold = Cold::Waits;
     type Submission = Submission;
     type Snapshot = Snapshot;
 
@@ -79,9 +81,9 @@ impl Driver for Lane {
         let kept = |state: &clarp_shim::lane::Status| {
             turn.is_some_and(|(model, effort)| Self::restart_for(state, model, effort))
         };
-        let place = self
-            .endpoint
-            .place(&profile.run_dir, thread, &digest, kept, settings.budget)?;
+        let place =
+            self.endpoint
+                .place(&profile.run_dir, thread, &digest, kept, settings.budget)?;
         if place == Place::Kept {
             return Ok(None);
         }

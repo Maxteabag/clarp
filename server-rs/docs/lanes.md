@@ -144,6 +144,31 @@ of them is not done.
 - **Stop.** The tool's own interrupt first, then its process group once the grace has passed
   (D26). A shim never waits for the Host.
 
+## No turn waits for a cold lane
+
+The lead's rule for the layer and every driver (24 Nov 2026). When no warm lane is ready, the
+turn runs per turn, the tool's exec path as with the switch off. The lane's process starts
+beside it, without the session.
+
+- **The hand-over.** The per-turn process holds the conversation's lock shared for its whole
+  life (`lane::guard_exec`). The lane waits for that lock in its own process, never in a turn,
+  then takes the session up: Muse's `session/resume`, OpenCode's `GET /session/:id`. Muse's own
+  session lock goes with the per-turn process, so the lane can take the session only once that
+  process is gone. The next turn runs on the lane.
+- **The worst first turn** is then today's per-turn turn, never a cold start (Muse measured
+  9-11 s for one). The cold start shows only as memory taken early.
+- **A lane that fails to start** costs nothing: the next turn runs per turn again.
+- **The seam.** A driver says which way it goes (`lane::Driver::COLD`, `Cold::Waits` or
+  `Cold::Beside`). A `Beside` driver starts its lane with `Driver::warm`. The agent sends an
+  attempt to the lane only when `Tool::runs_on_lane` says so: the driver takes it, and, for a
+  `Beside` driver, the lane answers and is free (`Endpoint::warm`).
+- **Codex today does not keep this rule: a cold Codex lane makes the turn wait.** The first turn
+  on a new Codex lane starts the app-server and waits for it to be ready (`ready` after
+  `initialize`). That turn's prompt then resumes the thread (`thread/resume`, up to 25 s for a
+  long rollout) before `turn/start`. Codex is `Cold::Waits` in step 1, unchanged, until the lead
+  says otherwise. Moving it to `Beside` needs a lane that waits for the thread's lock, where it
+  now fails at once when an exec turn holds it (`lock_exclusive`, without waiting).
+
 ## Fallback: a process per turn
 
 Every tool without a lane, and every tool whose switch is off, runs a process per turn exactly
