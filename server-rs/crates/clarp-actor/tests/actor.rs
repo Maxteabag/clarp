@@ -6928,3 +6928,39 @@ fn a_connection_that_fails_while_the_network_is_there_is_tried_for_a_minute() {
         "{rows:?}"
     );
 }
+
+#[test]
+fn a_timeout_keeps_its_three_attempts_while_the_network_is_there_and_waits_when_it_is_gone() {
+    const STALLED: &str = "Turn timed out: no output for 600 s";
+    let (mut world, mut actor) = a_turn_whose_connection_fails("network-timeout");
+    // The first attempt stalls while the network is gone: the turn waits for the network.
+    world.write(1, Line::Err(STALLED.into()));
+    world.exits(1, Some(1), None);
+    world.network_up = false;
+    world.hint(&mut actor);
+    let out = actor.retry_due(world.now_ms).unwrap();
+    world.carry_out(&mut actor, out);
+    assert!(actor.status().live.unwrap().waits_for_the_network);
+    // Back: tried at once, and that attempt is none of the three.
+    world.network_up = true;
+    let out = world.due(&mut actor).expect("the turn is tried again");
+    world.carry_out(&mut actor, out);
+    // With the network there it stalls again and again: a second, then two, then it ends.
+    let mut waits = Vec::new();
+    loop {
+        world.write(1, Line::Err(STALLED.into()));
+        world.exits(1, Some(1), None);
+        world.hint(&mut actor);
+        let failed_at = world.now_ms;
+        let Some(out) = world.due(&mut actor) else {
+            break;
+        };
+        waits.push((world.now_ms - failed_at + 500) / 1_000 * 1_000);
+        world.carry_out(&mut actor, out);
+    }
+    assert_eq!(waits, vec![1_000, 2_000]);
+    let Outcome::Failed { kind, .. } = actor.status().last.unwrap().outcome else {
+        panic!("the turn failed");
+    };
+    assert_eq!(kind, "timeout");
+}
