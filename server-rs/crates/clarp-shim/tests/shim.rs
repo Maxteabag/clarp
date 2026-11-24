@@ -375,6 +375,44 @@ fn a_program_that_cannot_start_is_recorded_and_the_shim_says_so() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The folder the tool was to run in is gone (it went after the Host looked): the spool says
+/// so in the Host's own words of a missing folder, the ones its reader knows by their mark,
+/// and not as an error of the program's.
+#[test]
+fn a_tool_whose_folder_is_gone_is_recorded_as_a_missing_folder() {
+    let dir = std::env::temp_dir().join(format!("clarp-shim-nofolder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
+    let gone = dir.join("removed-worktree");
+    let status = shim_in(&dir)
+        .args([
+            "--spool",
+            spool.to_str().unwrap(),
+            "--socket",
+            socket.to_str().unwrap(),
+            "--cwd",
+            gone.to_str().unwrap(),
+            "--",
+            "/bin/sh",
+            "-c",
+            "true",
+        ])
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(i32::from(EXIT_NOT_STARTED)));
+    let all = records(&spool);
+    let Entry::Shim(ShimEvent::SpawnFailed { error }) = &all.last().unwrap().entry else {
+        panic!("no spawn-failed record: {all:?}");
+    };
+    assert_eq!(
+        *error,
+        clarp_spool::folder_missing(gone.to_str().unwrap(), false)
+    );
+    assert!(error.starts_with(clarp_spool::FOLDER_MISSING_MARK));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn the_message_is_given_to_the_tool_after_its_start_is_on_record() {
     let mut running = start_with(

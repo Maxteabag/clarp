@@ -243,8 +243,17 @@ start, and the command exits 1.
    A helper whose worktree you already closed out cannot run: on the Rust Host
    with `folder_missing` (contract 173) its turn fails at once with the kind
    `folder_missing`, and its conversation says your message was never run and
-   names the folder. Recreate the worktree at that path (`git worktree add PATH BRANCH`)
-   and send the message again, or start a new helper.
+   names the folder. A Codex goal of such a helper waits, and goes on once the
+   folder is back. Recreate the worktree at that path and send the message
+   again:
+
+   ```bash
+   git worktree add PATH BRANCH                 # the branch is still there
+   git worktree add -b BRANCH PATH origin/main  # it was deleted at closeout
+   ```
+
+   No command moves an agent to another folder; when the old path will not do,
+   start a new helper in a new worktree instead.
 
    A queued prompt is not proof the work started; check the helper's own new
    activity. `clarp-sub-agent stop NAME` stops only the watcher in this

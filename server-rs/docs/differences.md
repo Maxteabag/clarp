@@ -544,11 +544,18 @@ the daily schedule.
   Host started the tool in the agent's folder and, when that folder had been removed, failed
   with the system's words for the program it could not start. The Rust Host looks first: a
   turn, a goal turn, a turn on the Codex chat lane or a fork of an agent whose folder is not
-  there fails at once as `folder_missing` (`failures::OWN_KINDS`), never tried again, with a
-  sentence that names the folder and says to recreate it or give the agent another one. The
-  shim says the same when the folder goes between that look and the launch. A one-off question
-  asked in a folder that is gone says so too. No try brings a folder back, so the ten tries of
-  a refused launch only put the failure off.
+  there, or is no folder, fails at once as `folder_missing` (`failures::OWN_KINDS`), never tried
+  again, with a sentence that names the folder and says to recreate it or give the agent
+  another one. Only a folder that is not there, or a path that is no folder, counts: a look that
+  fails otherwise (a mount away for a moment, a parent that may not be searched) leaves the
+  launch to be tried as before. The shim says the same when the folder goes between that look
+  and the launch (`clarp_spool::folder_gone`, one source for both). A Codex goal that would go
+  on by itself does not while its agent's folder is gone: it looks again every 5 seconds, and
+  goes on once the folder is back. The Host's own questions to a model in its default folder say
+  so too when that folder is gone. No try brings a folder back, so the ten tries of a refused
+  launch only put the failure off. Not covered: a call's opening to such an agent keeps its own
+  rule, and is tried again every second for as long as the call lasts, while the caller hears
+  nothing; that is an issue of its own.
 - **A turn is over at its tool's own end line (issue 750, Rust contract 172).** The Python Host
   ended a turn when its tool's process exited. Claude Code prints its `result`, and Grok its end
   line, 0.7 to 2.7 seconds before it exits (Claude Code sends what it counted first), and the
