@@ -89,7 +89,10 @@ end to end), a turn that runs `ls` (the call's round trip as the Host shows it),
 (until the turn is over and its process gone). `--codex-lane` adds a row of Codex with `codex_chat_lane` on in the disposable Host's own config.toml: it
 splits turns that started a lane from warm ones, adds a cold first turn of a new agent per round, times a
 steer to the lane's `steer.read`, and reads the memory of the idle lanes (shim, app-server and its process
-group, on the owner's own Codex configuration). A full run is about 75 turns and 15 minutes, 100 and 20 with the lane row. It writes
+group, on the owner's own Codex configuration). A full run is about 75 turns and 15 minutes, 100 and 20 with the lane row. `--cases queued` (with
+`--backends grok,muse,...`) times a message that waits behind a turn, from the first turn's last line through
+its process ending, the Host settling it and starting the next, the next process up, to the next turn's first
+reply and activity. It writes
 `timings.json` and `summary.md` (median and p90 per measure) under `/var/tmp/turn-timings/<run-id>/`, with the
 machine's load beside every case: compare only runs taken at similar loads. `--bin` takes a dist folder;
 without it the installed release runs. Nothing is built. `turn-timings report <run dir>` writes the summary again.

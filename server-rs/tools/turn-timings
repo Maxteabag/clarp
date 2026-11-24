@@ -27,6 +27,13 @@ times (default 5). The cases, and what each measures:
           turn is over, and Stop to the tool's process being gone (the spool's `exited`, and the
           process id no longer there).
 
+  queued  (only when named in `--cases`) a first turn that writes a 50-line list, and a second
+          message sent two seconds in with `queue_if_busy`, so that it waits on every backend.
+          From the first turn's last line to the second turn's first activity, step by step:
+          the tool's process gone (`exited`), the Host settling the turn, the Host starting the
+          next one, its spool made, `spawned`, the tool's first line, the model's first reply
+          line and the Host's first activity of it; and to the second turn's end.
+
 `--codex-lane` adds the `codex-lane` row (as does naming it in `--backends`). It is Codex with the
 Host's `codex_chat_lane` setting on (written to the
 disposable Host's own config.toml, read at each turn), so its chat turns run on the agent's
@@ -58,6 +65,12 @@ binaries are the installed release (~/.local/share/clarp-host/bin) unless `--bin
 folder; nothing is built. The tools run on the machine's own logins as they are: nothing logs in
 or out, and nothing is copied. The run stops its Host by the process id it started and deletes
 the Host's folders (unless `--keep-host`). Claude test agents run on Sonnet (hard rule 8).
+
+Claude Code and muse keep their login under a folder the run gives them (CLAUDE_CONFIG_DIR, and
+XDG_CONFIG_HOME for muse): the run's own folder holds only a link to each live login file, so
+what else they write stays with the run. After the run `login_links` says whether a link is
+still a link (a tool that renewed its login may have written a file in its place; nothing is
+ever copied).
 
 Before and after the run it looks at the tools' own settings files for an entry naming the run's
 folder (a trust entry, a project), removes one if a tool wrote it, and says so in the summary.
@@ -91,9 +104,10 @@ TOOL_OF = {"codex-lane": "codex"}
 SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}}
 CASES = ("plain", "tool", "steer", "stop")
 # Cheap and low by default. Claude is on Sonnet: hard rule 8 of REBUILD.md.
-MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low"}
+MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low",
+          "grok": "grok-4.7", "muse": "muse-spark-1.3"}
 # agy folds its effort into the model's name.
-EFFORTS = {"codex": "low", "codex-lane": "low", "claude": "low", "agy": ""}
+EFFORTS = {"codex": "low", "codex-lane": "low", "claude": "low", "agy": "", "grok": "low", "muse": "low"}
 TURN_TIMEOUT = 180.0
 ENDED = {"done", "idle", "stopped", "interrupted", "error", "failed"}
 
@@ -164,8 +178,46 @@ def own_environment(root: pathlib.Path, secret: str) -> dict:
         "CLAUDE_PWA_DB": str(root / "share" / "no-python-state.sqlite"),
         "CLARP_HOST_TOKEN": secret,
         "CLARP_HEARTBEATS_DISABLED": "1",
+        # Claude Code writes its settings and conversations where CLAUDE_CONFIG_DIR says: a
+        # folder of the run's own, which holds only a link to the live login (REBUILD.md rule 2).
+        "CLAUDE_CONFIG_DIR": str(root / "claude-config"),
     })
     return env
+
+
+# The live logins a disposable Host's tools reach through a link in a folder of the run's own,
+# because the tool keeps them under a folder the run gives it (CLAUDE_CONFIG_DIR, and
+# XDG_CONFIG_HOME for muse). Only the login file is linked: whatever else the tool writes (its
+# settings, its trust of a folder, its conversations) stays in the run's folder and goes with it.
+# A tool that renews its login may write the file anew in place of the link: `login_links` says
+# so after the run, and the run never copies a login.
+LOGIN_LINKS = [
+    (pathlib.Path("claude-config") / ".credentials.json", HOME / ".claude" / ".credentials.json"),
+    (pathlib.Path("config") / "muse" / "auth.json", HOME / ".config" / "muse" / "auth.json"),
+]
+
+
+def link_logins(root: pathlib.Path) -> list:
+    made = []
+    for inside, live in LOGIN_LINKS:
+        if live.exists():
+            (root / inside).parent.mkdir(parents=True, exist_ok=True)
+            (root / inside).symlink_to(live)
+            made.append(str(inside))
+    return made
+
+
+def login_links(root: pathlib.Path) -> list:
+    """How each login link stands after the run: still a link to the live file, or not."""
+    said = []
+    for inside, live in LOGIN_LINKS:
+        path = root / inside
+        if path.is_symlink():
+            said.append(f"{inside}: still a link to {live}")
+        elif path.exists():
+            said.append(f"{inside}: REPLACED by a file of its own (the tool renewed its login there; the live "
+                        f"{live} may now hold an older one; nothing was copied)")
+    return said
 
 
 class Host:
@@ -185,6 +237,7 @@ class Host:
     def start(self):
         for name in ("data", "run", "config/clarp-host", "share/logs", "ws"):
             (self.root / name).mkdir(parents=True, exist_ok=True)
+        self.links = link_logins(self.root)
         binary = self.bin_dir / "clarp-host"
         shim = self.bin_dir / "clarp-shim"
         command = [str(binary), "--data", str(self.root / "data"), "--run", str(self.root / "run"),
@@ -354,13 +407,14 @@ class Agent:
                 pass
         return found
 
-    def send(self, text: str) -> dict:
+    def send(self, text: str, queue_if_busy: bool = False) -> dict:
         self.sent += 1
         client_id = f"tt-{self.backend}-{int(now_ms())}-{self.sent}"
         at = now_ms()
-        status, answer = self.host.ask("POST", "/send", {"session": self.session, "text": text,
-                                                         "client_msg_id": client_id,
-                                                         "synthesize_audio": False})
+        body = {"session": self.session, "text": text, "client_msg_id": client_id, "synthesize_audio": False}
+        if queue_if_busy:
+            body["queue_if_busy"] = True
+        status, answer = self.host.ask("POST", "/send", body)
         return {"client_msg_id": client_id, "t_send": at, "t_accepted": now_ms(), "status": status,
                 "queued": bool(isinstance(answer, dict) and answer.get("queued")),
                 "dispatch": answer.get("dispatch") if isinstance(answer, dict) else None,
@@ -615,7 +669,10 @@ def read_spool(path: pathlib.Path) -> list:
             except ValueError:
                 inner = None
             if isinstance(inner, dict):
-                kept["type"] = str(inner.get("type") or inner.get("method") or inner.get("event") or "")
+                # The line's kind: `type` (Codex, Claude, grok), `method`, agy's `event`, muse's
+                # `payload_type`.
+                named = [inner.get(key) for key in ("type", "method", "event", "payload_type")]
+                kept["type"] = next((str(word) for word in named if isinstance(word, str) and word), "")
                 # agy: a step's kind and state. Claude: a streamed event's kind and its block's.
                 update = inner.get("step_update")
                 if isinstance(update, dict):
@@ -689,9 +746,10 @@ def spool_marks(path: pathlib.Path) -> dict:
             if (kind in ("item.completed", "item/completed") and item in ("agent_message", "agentMessage")) \
                     or (kind == "stream_event" and item == "content_block_start:text") \
                     or (kind == "assistant" and "text" in item) \
-                    or (kind == "step_update" and item.startswith("agent_response:")):
+                    or (kind == "step_update" and item.startswith("agent_response:")) \
+                    or kind in ("text", "run.output.delta"):
                 marks.setdefault("first_reply", t)
-            if kind in ("turn.completed", "turn/completed", "result"):
+            if kind in ("turn.completed", "turn/completed", "result", "end") or kind.startswith("run.terminal."):
                 marks.setdefault("turn_completed", t)
             # A lane's receipt that the running turn read a steered message, and Codex's first
             # item after it.
@@ -960,6 +1018,74 @@ def case_stop(agent: Agent, n: int) -> dict:
     return found
 
 
+def case_queued(agent: Agent, n: int) -> dict:
+    """A second message that waits behind a running turn (sent with `queue_if_busy`, so it waits
+    on every backend), and the steps from the first turn's last output to the second turn's
+    first activity: the tool's last line, its process gone (the spool's `exited`), the Host
+    settling the turn (its ending `agent-state`), the Host starting the next turn (the
+    `agent-state` that names the second message), the next spool made, `spawned`, the tool's
+    first line, and the first activity the Host shows of it."""
+    before = agent.spools()
+    # A first turn that writes a list for some seconds, as a person's long answer does, and a
+    # second message sent two seconds in.
+    sent = agent.send(f"Timing check {n}. Write the numbers from 1 to 50, one per line, each followed by "
+                      "the name of a different animal. Nothing else.")
+    time.sleep(2.0)
+    if agent.wait_ended(sent["t_send"], timeout=0.01) is not None:
+        agent.wait_idle()
+        return {"sent": sent, "measures": {"queued_mode": "first_turn_ended_early"}}
+    second = agent.send("Reply with exactly one word: next", queue_if_busy=True)
+    ends = agent.wait_ended(sent["t_send"], count=2)
+    agent.wait_idle()
+    events = agent.host.events_since(sent["t_send"], agent.session)
+    settled = next((at for at, e in events if e.get("type") == "agent-state" and e.get("kind") in ENDED), None)
+    started = next((at for at, e in events if e.get("type") == "agent-state"
+                    and e.get("client_msg_id") == second["client_msg_id"] and e.get("kind") not in ENDED), None)
+    # The Host tells the first turn's end just after it starts the second: the second turn's
+    # activity is what comes after its own `thinking` (the one that carries its start time).
+    activity = None
+    if started is not None:
+        opened = False
+        for at, e in events:
+            if at < started or e.get("type") != "agent-activity":
+                continue
+            state = e.get("state") or e.get("kind")
+            if not opened:
+                opened = state == "thinking" and bool(e.get("turn_started_ms"))
+                continue
+            if state != "thinking" or e.get("phase") == "tool_finished":
+                activity = at
+                break
+    second_end = ends
+    spools = new_spools(agent, before)
+    first = spool_marks(spools[0]) if spools else {}
+    nxt = spool_marks(spools[1]) if len(spools) > 1 else {}
+    last_line = None
+    if spools:
+        outs = [r["t"] for r in read_spool(spools[0]) if r.get("s") == "out"]
+        last_line = outs[-1] if outs else None
+    found = {"sent": sent, "second": second, "spools": [first, nxt], "t_settled": settled, "t_started": started,
+             "t_activity": activity}
+    found["measures"] = {
+        "queued_mode": "queued" if len(spools) > 1 else ("steered" if spools else "no_spool"),
+        "second_answer_queued": second["queued"],
+        "last_line_to_exited": seconds(last_line, first.get("exited")),
+        "exited_to_settled": seconds(first.get("exited"), settled),
+        "settled_to_next_start": seconds(settled, started),
+        "next_start_to_spool": seconds(started, nxt.get("made")),
+        "spool_to_spawned": seconds(nxt.get("made"), nxt.get("spawned")),
+        "spawned_to_first_output": seconds(nxt.get("spawned"), nxt.get("first_out")),
+        "first_output_to_activity": seconds(nxt.get("first_out"), activity),
+        "last_line_to_next_activity": seconds(last_line, activity),
+        "last_line_to_next_spawned": seconds(last_line, nxt.get("spawned")),
+        "next_model_reply": seconds(nxt.get("first_out"), nxt.get("first_reply")),
+        "last_line_to_next_reply_line": seconds(last_line, nxt.get("first_reply")),
+        "last_line_to_next_end": seconds(last_line, second_end),
+        "both_ended": ends is not None,
+    }
+    return found
+
+
 def case_cold(agent: Agent, n: int) -> dict:
     """A plain turn of a new agent: for a lane, its first turn starts the lane and its thread."""
     fresh = make_agent(agent.host, agent.backend, agent.model, agent.effort, agent.row, f"cold{n}")
@@ -968,10 +1094,15 @@ def case_cold(agent: Agent, n: int) -> dict:
     return found
 
 
-RUNNERS = {"plain": case_plain, "tool": case_tool, "steer": case_steer, "stop": case_stop, "cold": case_cold}
+RUNNERS = {"plain": case_plain, "tool": case_tool, "steer": case_steer, "stop": case_stop, "cold": case_cold,
+           "queued": case_queued}
 
 # The measures the summary shows, in order, per case.
 SHOWN = {
+    "queued": ["last_line_to_next_activity", "last_line_to_exited", "exited_to_settled", "settled_to_next_start",
+               "next_start_to_spool", "spool_to_spawned", "spawned_to_first_output", "first_output_to_activity",
+               "last_line_to_next_spawned", "next_model_reply", "last_line_to_next_reply_line",
+               "last_line_to_next_end"],
     "cold": ["first_activity", "end_to_end", "send_to_spawned", "send_to_ready", "tool_ready", "send_to_first_output",
              "model_reply_in_spool"],
     "plain": ["host_ack", "first_activity", "first_reply_in_log", "end_to_end", "send_to_spawned", "send_to_ready",
@@ -992,7 +1123,8 @@ SHOWN = {
 # ---------------------------------------------------------------------------------------------
 
 SETTINGS = [HOME / ".claude.json", HOME / ".codex" / "config.toml", HOME / ".gemini" / "projects.json",
-            HOME / ".gemini" / "settings.json", HOME / ".claude" / "settings.json"]
+            HOME / ".gemini" / "settings.json", HOME / ".claude" / "settings.json", HOME / ".grok" / "config.toml",
+            HOME / ".config" / "muse" / "trust.json", HOME / ".config" / "muse" / "settings.json"]
 
 
 def mentions(root: pathlib.Path) -> dict:
@@ -1226,6 +1358,7 @@ def run(args) -> int:
     finally:
         result["ended"] = load()
         result["left_after_host"] = host.stop()
+        result["login_links"] = login_links(root)
         result["unowned_in_folder"] = host.unowned
         result["settings"]["after"] = mentions(root)
         result["settings"]["undone"] = undo_mentions(root) + drop_claude_sessions(root)
