@@ -819,7 +819,7 @@ if isinstance(agents, dict):
         table("agents", kept)
 PYTHON
 )"
-# And the owner's switches of Codex lanes (issue 742): top-level keys, which the Host reads only
+# And the owner's switches of lanes (issues 742 and 761): top-level keys, which the Host reads only
 # before any table, so they are written above [server].
 carried_top="$(python3 - "$own_config" <<'PYTHON'
 import sys
@@ -831,7 +831,8 @@ try:
 except (OSError, UnicodeError, ValueError):
     config = {}
 # One kind per switch; a bool is not taken for a number (Python counts it as one).
-for name, kind in (("codex_chat_lane", bool), ("codex_lane_idle_minutes", int), ("codex_lane_most", int)):
+for name, kind in (("codex_chat_lane", bool), ("codex_lane_idle_minutes", int), ("codex_lane_most", int),
+                   ("lane_memory_mb", int)):
     if name not in config:
         continue
     item = config[name]

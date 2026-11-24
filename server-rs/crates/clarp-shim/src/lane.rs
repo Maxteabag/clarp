@@ -83,6 +83,9 @@ pub enum Lifecycle {
 /// driver's own): enough to choose whether to use it, start it again, or retire it for room.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Status {
+    /// The lane's own process id (a Codex snapshot's `instance`): where its memory is read.
+    #[serde(default)]
+    pub instance: u32,
     /// The conversation the lane holds; empty while a lane started for a new one has none yet.
     pub thread: String,
     /// Free for a new claim.
@@ -143,6 +146,7 @@ mod tests {
         assert_eq!(
             status,
             Status {
+                instance: 7,
                 thread: "t".into(),
                 available: true,
                 claim: None,

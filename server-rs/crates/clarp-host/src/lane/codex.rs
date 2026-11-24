@@ -14,7 +14,7 @@ use clarp_shim::lane::key;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{Endpoint, Place, Settings, TURN_FILE_ENV, Tool};
+use super::{Driver, Endpoint, Login, Place, Settings, TURN_FILE_ENV, Tool};
 
 fn thread_lock(run: &Path, thread: &str) -> io::Result<PathBuf> {
     let locks = run.join("codex-threads");
@@ -57,35 +57,23 @@ pub(crate) enum Submission {
     Recover,
 }
 
-pub(crate) struct Login {
-    pub lock: Option<PathBuf>,
-    pub file: Option<PathBuf>,
-    /// The Codex home and provider of an agent bound to one of its own: its lane's Codex runs
-    /// in that home and on that provider, and leaves when it names another.
-    /// `Err`: the agent is bound, and its binding cannot be used: no lane starts for it.
-    pub own: Result<Option<clarp_backend::own_provider::OwnProvider>, String>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Lane {
     endpoint: Endpoint,
 }
 
 /// The binding a lane runs with, where it has a usable one: a lane whose binding cannot be
-/// used never gets past [`Lane::start`].
+/// used never gets past [`Driver::start`].
 fn bound(login: &Login) -> Option<&clarp_backend::own_provider::OwnProvider> {
     login.own.as_ref().ok().and_then(Option::as_ref)
 }
 
-impl Lane {
-    /// The Codex lane of an agent, in its run folder.
-    pub(crate) fn of(run: &Path, agent_id: &str) -> Self {
-        Self {
-            endpoint: Endpoint::of(Tool::Codex, run, agent_id),
-        }
-    }
+impl Driver for Lane {
+    const TOOL: Tool = Tool::Codex;
+    type Submission = Submission;
+    type Snapshot = Snapshot;
 
-    pub(crate) fn endpoint(&self) -> &Endpoint {
+    fn endpoint(&self) -> &Endpoint {
         &self.endpoint
     }
 
@@ -94,7 +82,7 @@ impl Lane {
     /// model and effort a prompt asks for. A lane that was started otherwise (another thread,
     /// other options, a model or effort Codex would keep from an earlier turn) is retired while
     /// idle and started again; one that still runs work is used as it is, for its own thread.
-    pub(crate) fn start(
+    fn start(
         &self,
         launcher: &crate::launcher::Launcher,
         profile: &clarp_actor::Profile,
@@ -120,7 +108,7 @@ impl Lane {
         };
         let place = self
             .endpoint
-            .place(&profile.run_dir, thread, &digest, kept, settings.most)?;
+            .place(&profile.run_dir, thread, &digest, kept, settings.room)?;
         if place == Place::Kept {
             return Ok(None);
         }
@@ -131,6 +119,52 @@ impl Lane {
         let result = self.spawn(launcher, profile, &options, &config, home);
         let _ = std::fs::remove_file(config);
         result
+    }
+
+    /// The actor and login pool have both admitted this attempt. `token` is the turn's
+    /// identity for the Clarp tools it calls. A refusal for a changed login has the kind
+    /// `PermissionDenied`: the lane has left, and nothing of the attempt reached Codex.
+    fn submit(
+        &self,
+        order: clarp_actor::ShimOrder,
+        submission: Submission,
+        token: Option<String>,
+    ) -> io::Result<Snapshot> {
+        let claim = Claim {
+            turn: order.turn.0,
+            attempt: order.attempt,
+            spool: order.spool,
+            socket: order.socket,
+        };
+        match submission {
+            Submission::Prompt { model, effort } => {
+                let text = std::fs::read_to_string(order.stdin_file)?;
+                self.ask(Request::Prompt {
+                    claim,
+                    text,
+                    model,
+                    effort,
+                    token,
+                })
+            }
+            Submission::Activate { action, objective } => {
+                self.ask(Request::Reserve { claim, token })?;
+                self.ask(Request::Goal { action, objective })
+            }
+            Submission::Recover => {
+                self.ask(Request::Reserve { claim, token })?;
+                self.ask(Request::Recover)
+            }
+        }
+    }
+}
+
+impl Lane {
+    /// The Codex lane of an agent, in its run folder.
+    pub(crate) fn of(run: &Path, agent_id: &str) -> Self {
+        Self {
+            endpoint: Endpoint::of(Tool::Codex, run, agent_id),
+        }
     }
 
     /// What Codex is started with, and the lane's own settings. The digest covers what makes
@@ -239,43 +273,6 @@ impl Lane {
         } else {
             let _ = child.wait();
             Err(io::Error::other("the Codex lane did not start"))
-        }
-    }
-
-    /// The actor and login pool have both admitted this attempt. `token` is the turn's
-    /// identity for the Clarp tools it calls. A refusal for a changed login has the kind
-    /// `PermissionDenied`: the lane has left, and nothing of the attempt reached Codex.
-    pub(crate) fn submit(
-        &self,
-        order: clarp_actor::ShimOrder,
-        submission: Submission,
-        token: Option<String>,
-    ) -> io::Result<Snapshot> {
-        let claim = Claim {
-            turn: order.turn.0,
-            attempt: order.attempt,
-            spool: order.spool,
-            socket: order.socket,
-        };
-        match submission {
-            Submission::Prompt { model, effort } => {
-                let text = std::fs::read_to_string(order.stdin_file)?;
-                self.ask(Request::Prompt {
-                    claim,
-                    text,
-                    model,
-                    effort,
-                    token,
-                })
-            }
-            Submission::Activate { action, objective } => {
-                self.ask(Request::Reserve { claim, token })?;
-                self.ask(Request::Goal { action, objective })
-            }
-            Submission::Recover => {
-                self.ask(Request::Reserve { claim, token })?;
-                self.ask(Request::Recover)
-            }
         }
     }
 

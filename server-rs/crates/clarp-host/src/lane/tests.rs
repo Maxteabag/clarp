@@ -9,7 +9,12 @@ use std::sync::{Arc, Mutex};
 use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
-use super::{Endpoint, Place, Settings, Tool, make_room, once_more, replied};
+use super::{Endpoint, Place, Room, Settings, Tool, make_room, once_more, replied};
+
+const EIGHT: Room = Room {
+    most: 8,
+    memory: None,
+};
 
 fn of(text: &str) -> Settings {
     Settings::of(Some(&text.parse::<toml::Table>().unwrap()))
@@ -20,7 +25,7 @@ fn the_lane_settings_are_off_and_fifteen_minutes_and_eight_unless_the_owner_says
     let default = Settings {
         chat: [false],
         idle_ms: 15 * 60_000,
-        most: 8,
+        room: EIGHT,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
@@ -31,7 +36,10 @@ fn the_lane_settings_are_off_and_fifteen_minutes_and_eight_unless_the_owner_says
         Settings {
             chat: [true],
             idle_ms: 120_000,
-            most: 3
+            room: Room {
+                most: 3,
+                memory: None
+            }
         }
     );
     assert!(set.chat(Tool::Codex));
@@ -41,6 +49,15 @@ fn the_lane_settings_are_off_and_fifteen_minutes_and_eight_unless_the_owner_says
         default
     );
     assert_eq!(of("[other]\ncodex_chat_lane = true\n"), default);
+    // One memory budget for every lane of the Host, in MiB; none unless the owner sets it.
+    assert_eq!(
+        of("lane_memory_mb = 2048\n").room,
+        Room {
+            most: 8,
+            memory: Some(2048 * 1024 * 1024)
+        }
+    );
+    assert_eq!(of("lane_memory_mb = 0\n").room, EIGHT);
 }
 
 #[test]
@@ -127,6 +144,11 @@ impl FakeLane {
 }
 
 fn status(thread: &str, options: &str, idle_ms: u64, busy: bool) -> Value {
+    status_of(0, thread, options, idle_ms, busy)
+}
+
+/// A status whose lane process is `instance`: its memory is that process tree's.
+fn status_of(instance: u32, thread: &str, options: &str, idle_ms: u64, busy: bool) -> Value {
     let claim = busy.then(|| json!({"turn": 1, "attempt": 1, "spool": "/s", "socket": "/t"}));
     json!({
         "thread": thread,
@@ -136,6 +158,7 @@ fn status(thread: &str, options: &str, idle_ms: u64, busy: bool) -> Value {
         "model": null,
         "effort": null,
         "idle_ms": idle_ms,
+        "instance": instance,
         // A driver's own fields are not the layer's.
         "known_goal": false,
     })
@@ -157,7 +180,14 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
     std::fs::write(run.join("d-turn.token"), "not a lane").unwrap();
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // Three live, the new one makes four: one leaves for a cap of three.
-    make_room(&run, own.socket(), 3);
+    make_room(
+        &run,
+        own.socket(),
+        Room {
+            most: 3,
+            memory: None,
+        },
+    );
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -170,26 +200,26 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
 fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     let run = run_dir("place");
     let same = FakeLane::start(&run, "a", status("t", "d", 5, false));
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, 8);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, EIGHT);
     assert_eq!(place.unwrap(), Place::Kept);
     assert_eq!(same.asked(), ["inspect"]);
 
     // What the driver says the tool kept from an earlier turn starts it again.
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, 8);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, EIGHT);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
 
     let other = FakeLane::start(&run, "b", status("t", "old", 5, false));
-    let place = other.endpoint.place(&run, Some("t"), "new", |_| false, 8);
+    let place = other.endpoint.place(&run, Some("t"), "new", |_| false, EIGHT);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(other.asked(), ["inspect", "retire"]);
     assert!(other.endpoint.released().unwrap());
 
     // A lane that still runs work is used as it is for its own thread, and refuses another.
     let busy = FakeLane::start(&run, "c", status("t", "old", 0, true));
-    let place = busy.endpoint.place(&run, Some("t"), "new", |_| false, 8);
+    let place = busy.endpoint.place(&run, Some("t"), "new", |_| false, EIGHT);
     assert_eq!(place.unwrap(), Place::Kept);
-    let refused = busy.endpoint.place(&run, Some("u"), "new", |_| false, 8);
+    let refused = busy.endpoint.place(&run, Some("u"), "new", |_| false, EIGHT);
     assert_eq!(
         refused.unwrap_err().to_string(),
         "the Codex lane owns another thread"
@@ -242,4 +272,40 @@ fn a_changed_login_is_told_by_its_kind_and_a_reply_without_state_by_its_words() 
     assert_eq!(empty.to_string(), "Codex lane supplied no state");
     let cut = replied::<Status>(&mut &b"{\"ok\":true"[..], Tool::Codex).unwrap_err();
     assert_eq!(cut.to_string(), "Codex lane connection closed");
+}
+
+#[test]
+fn one_memory_budget_holds_every_lane_and_the_longest_idle_leaves_first() {
+    let run = run_dir("memory");
+    // Each says it is the same idle process: what it holds is real, steady, and more than a byte.
+    let mut sleeper = std::process::Command::new("sleep")
+        .arg("60")
+        .spawn()
+        .unwrap();
+    let me = sleeper.id();
+    let shorter = FakeLane::start(&run, "a", status_of(me, "ta", "d", 10, false));
+    let longer = FakeLane::start(&run, "b", status_of(me, "tb", "d", 30, false));
+    let busy = FakeLane::start(&run, "c", status_of(me, "tc", "d", 0, true));
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    let held = Endpoint::memory(&serde_json::from_value(status_of(me, "", "", 0, false)).unwrap())
+        .unwrap();
+    // Room for all three by their number, and for two of them by their memory: the longest
+    // idle leaves, the busy one counts and stays.
+    make_room(
+        &run,
+        own.socket(),
+        Room {
+            most: 8,
+            memory: Some(held * 2 + held / 2),
+        },
+    );
+    assert_eq!(longer.asked(), ["inspect", "retire"]);
+    assert_eq!(shorter.asked(), ["inspect"]);
+    assert_eq!(busy.asked(), ["inspect"]);
+    // No budget: memory is not read, and the number alone decides.
+    make_room(&run, own.socket(), EIGHT);
+    assert_eq!(shorter.asked(), ["inspect", "inspect"]);
+    sleeper.kill().unwrap();
+    sleeper.wait().unwrap();
+    std::fs::remove_dir_all(&run).unwrap();
 }

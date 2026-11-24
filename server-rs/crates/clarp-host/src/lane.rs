@@ -6,23 +6,28 @@
 //!   shared by all ([`Settings`]);
 //! - where a lane listens, and how it is asked, watched, retired and known to have left
 //!   ([`Endpoint`]);
-//! - the registry: room is made across every tool's lanes, the longest idle leaving first;
+//! - the registry: one cap on the number of lanes and one memory budget for this Host, across
+//!   every tool's lanes, the longest idle leaving first ([`Room`]);
 //! - whether a running lane is used as it is or retired and started again: another thread,
 //!   other options (model, prompt, provider, ...), or what its driver says it kept;
 //! - the turn-identity file its tools read the running turn from ([`TURN_FILE_ENV`]);
 //! - an attempt that reached nothing of the tool offered once more to a new lane, after a
 //!   changed login ([`clarp_shim::lane::LOGIN_CHANGED`]) or a lane that left by itself.
 //!
-//! A tool's driver adds what is its own: how its process is started, what its digest covers,
-//! and its requests. [`codex`] is the Codex app-server's, and the only one so far. The lane
-//! process's side of the same lifecycle is the shim's `lane_*` modules.
+//! A tool's driver ([`Driver`]) adds what is its own: how its process is started, what its
+//! digest covers, and how a turn is sent. [`codex`] is the Codex app-server's, and the only one
+//! built; Claude's stream-json, Muse's MSP and OpenCode's serve are planned (issue 761). The
+//! lane process's side of the same seam is the shim's `lane_driver`. Why there are lanes at all,
+//! and what holds with or without one, is `server-rs/docs/lanes.md`.
 
 pub(crate) mod codex;
+mod memory;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::time::Duration;
 
 use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_lock};
@@ -80,6 +85,8 @@ impl Tool {
 /// behaves as before.
 const IDLE_MINUTES: &str = "codex_lane_idle_minutes";
 const MOST: &str = "codex_lane_most";
+/// The memory all lanes of this Host may hold together, in MiB. None set: no budget, as before.
+const MEMORY_MB: &str = "lane_memory_mb";
 
 /// The owner's settings of lanes, in this Host's `config.toml`, read anew at each use so they
 /// change without a build or a restart. Top-level keys, before any table:
@@ -87,14 +94,26 @@ const MOST: &str = "codex_lane_most";
 /// ```toml
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
-/// codex_lane_most = 8           # live lanes this Host keeps; the longest idle one leaves first
+/// codex_lane_most = 8           # live lanes this Host keeps, of every tool; the longest idle
+///                               # one leaves first
+/// lane_memory_mb = 4096         # what they may hold together (unset: no budget)
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     /// Each tool's switch, in the order of [`Tool::ALL`].
     chat: [bool; Tool::ALL.len()],
     pub idle_ms: u64,
+    pub room: Room,
+}
+
+/// What all lanes of this Host may take together, whatever their tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Room {
+    /// Live lanes, the one about to start included.
     pub most: usize,
+    /// Bytes of memory the running lanes may hold together (proportional set size of each
+    /// lane's process tree), where the owner set a budget.
+    pub memory: Option<u64>,
 }
 
 impl Settings {
@@ -119,7 +138,15 @@ impl Settings {
             idle_ms: u64::try_from(number(IDLE_MINUTES, 15))
                 .unwrap_or(15)
                 .saturating_mul(60_000),
-            most: usize::try_from(number(MOST, 8)).unwrap_or(8),
+            room: Room {
+                most: usize::try_from(number(MOST, 8)).unwrap_or(8),
+                memory: file
+                    .and_then(|file| file.get(MEMORY_MB))
+                    .and_then(toml::Value::as_integer)
+                    .filter(|mb| *mb > 0)
+                    .and_then(|mb| u64::try_from(mb).ok())
+                    .map(|mb| mb.saturating_mul(1024 * 1024)),
+            },
         }
     }
 
@@ -135,6 +162,62 @@ impl Settings {
 /// Where an agent's lane keeps the identity of its running turn.
 pub(crate) fn turn_file(run: &Path, agent_id: &str) -> PathBuf {
     run.join(format!("{agent_id}-turn.token"))
+}
+
+/// The login a lane runs under: it holds the pool's lock shared while it owns a turn, and
+/// leaves when the login file names another account.
+pub(crate) struct Login {
+    pub lock: Option<PathBuf>,
+    pub file: Option<PathBuf>,
+    /// The tool's home and provider of an agent bound to one of its own (Codex today): its
+    /// lane's tool runs in that home and on that provider, and leaves when it names another.
+    /// `Err`: the agent is bound, and its binding cannot be used: no lane starts for it.
+    pub own: Result<Option<clarp_backend::own_provider::OwnProvider>, String>,
+}
+
+/// What a tool's lane driver does in the Host that is its own (issue 761). Four are planned:
+/// the Codex app-server over JSON-RPC ([`codex`], the only one built), Claude Code's
+/// stream-json on stdin, Muse's MSP over stdio, and OpenCode's serve.
+///
+/// The rest of the seam is the same for every driver, so it is not here:
+/// - steer and Stop go on the claim's own socket (`clarp_shim::Request::Steer`, `Stop`),
+///   as for a turn of its own process; the lane process answers them in its tool's way
+///   (the shim's `lane_driver::Driver`);
+/// - the end of a turn is the claim's spool ending and the claim let go, followed by the
+///   Host as any turn's;
+/// - health is the lane's [`Status`] ([`Endpoint::inspect`]), its memory
+///   [`Endpoint::memory`]: every lane is a process tree under the shim.
+pub(crate) trait Driver {
+    /// The tool it drives.
+    const TOOL: Tool;
+    /// What a turn asks of the lane: a prompt, or (Codex) a goal's activation or recovery.
+    type Submission;
+    /// The driver's snapshot of its lane, which reads as a [`Status`] as well.
+    type Snapshot: DeserializeOwned;
+
+    fn endpoint(&self) -> &Endpoint;
+
+    /// Attaches to the agent's running lane where it is the one wanted ([`Endpoint::place`]),
+    /// or starts a new one and returns its child for the reaper. `thread` is `None` for a new
+    /// conversation; `turn` is the model and effort a prompt asks for.
+    fn start(
+        &self,
+        launcher: &crate::launcher::Launcher,
+        profile: &clarp_actor::Profile,
+        login: &Login,
+        thread: Option<&str>,
+        turn: Option<(&Option<String>, &Option<String>)>,
+    ) -> io::Result<Option<Child>>;
+
+    /// Sends an admitted attempt to the lane. `token` is the turn's identity for the Clarp
+    /// tools it calls. A refusal for a changed login has the kind `PermissionDenied`: the lane
+    /// has left, and nothing of the attempt reached the tool ([`once_more`]).
+    fn submit(
+        &self,
+        order: clarp_actor::ShimOrder,
+        submission: Self::Submission,
+        token: Option<String>,
+    ) -> io::Result<Self::Snapshot>;
 }
 
 /// Whether a lane that runs is used as it is or must make way for a new one.
@@ -188,14 +271,14 @@ impl Endpoint {
     /// Decides whether the lane that runs is used for `thread` with options of `digest`: one
     /// started otherwise (another thread, other options, or what `kept` says the tool keeps from
     /// an earlier turn) is retired while idle; one that still runs work is used as it is, for
-    /// its own thread. Before a new lane starts, room is made for it under `most`.
+    /// its own thread. Before a new lane starts, room is made for it ([`Room`]).
     pub(crate) fn place(
         &self,
         run: &Path,
         thread: Option<&str>,
         digest: &str,
         kept: impl FnOnce(&Status) -> bool,
-        most: usize,
+        room: Room,
     ) -> io::Result<Place> {
         if let Ok(state) = self.inspect() {
             let same_thread = state.thread == thread.unwrap_or_default();
@@ -220,12 +303,19 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        make_room(run, &self.socket, most);
+        make_room(run, &self.socket, room);
         Ok(Place::Free)
     }
 
     pub(crate) fn inspect(&self) -> io::Result<Status> {
         self.ask(&Lifecycle::Inspect)
+    }
+
+    /// What the lane that said `state` holds in memory: its process and every one below it.
+    pub(crate) fn memory(state: &Status) -> Option<u64> {
+        (state.instance != 0)
+            .then(|| memory::of(state.instance))
+            .flatten()
     }
 
     /// One request, and the state the lane answers with, read as `T`.
@@ -331,16 +421,18 @@ pub(crate) fn once_more<T>(
     }
 }
 
-/// Keeps at most `most` lanes alive on this Host, of every tool, this one about to start
-/// included: the idle lanes that held no turn the longest are asked to leave first. A lane that
-/// runs a turn, or whose work may continue, refuses and counts. Read only when a lane is about
-/// to start.
-fn make_room(run: &Path, own: &Path, most: usize) {
+/// Keeps this Host's lanes, of every tool, within one [`Room`]: at most `room.most` alive, the
+/// one about to start included, and, where the owner set a budget, at most `room.memory` held by
+/// the running ones together. The idle lanes that held no turn the longest are asked to leave
+/// first. A lane that runs a turn, or whose work may continue, refuses and counts. Read only when
+/// a lane is about to start; memory is read only where there is a budget.
+fn make_room(run: &Path, own: &Path, room: Room) {
     let Ok(entries) = std::fs::read_dir(run) else {
         return;
     };
     let mut idle = Vec::new();
     let mut live = 0usize;
+    let mut held = 0u64;
     for entry in entries.flatten() {
         let path = entry.path();
         if path == own {
@@ -355,17 +447,24 @@ fn make_room(run: &Path, own: &Path, most: usize) {
             continue;
         };
         live += 1;
+        let memory = room
+            .memory
+            .and_then(|_| Endpoint::memory(&state))
+            .unwrap_or(0);
+        held = held.saturating_add(memory);
         if state.claim.is_none() && state.available {
-            idle.push((state.idle_ms, lane));
+            idle.push((state.idle_ms, memory, lane));
         }
     }
-    idle.sort_by_key(|(idle_ms, _)| std::cmp::Reverse(*idle_ms));
-    for (_, lane) in idle {
-        if live < most {
+    idle.sort_by_key(|(idle_ms, _, _)| std::cmp::Reverse(*idle_ms));
+    for (_, memory, lane) in idle {
+        let over_budget = room.memory.is_some_and(|budget| held > budget);
+        if live < room.most && !over_budget {
             break;
         }
         if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
             live -= 1;
+            held = held.saturating_sub(memory);
         }
     }
 }

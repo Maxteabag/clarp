@@ -20,6 +20,7 @@ use clarp_shim::codex_lane::{
 use serde_json::{Value, json};
 
 use crate::codex_lane_turns::Slot;
+use crate::lane_driver::{Driver, Turn};
 use crate::lane_login::Login;
 use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive};
 use crate::lane_socket::{Socket, TurnAsk, write};
@@ -167,7 +168,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     let retired = lane
         .retire_reply
         .take()
-        .map(|stream| (stream, lane.inspect()));
+        .map(|stream| (stream, lane.health()));
     // The locks witness the app-server's real lifetime, including shutdown: the lane's
     // fields drop in order, the app-server before the thread's lock.
     drop(lane);
@@ -224,7 +225,7 @@ struct Lane {
 }
 
 impl Lane {
-    fn inspect(&mut self) -> Snapshot {
+    fn snapshot(&mut self) -> Snapshot {
         self.revision = self.revision.saturating_add(1);
         Snapshot {
             thread: self.thread.clone(),
@@ -244,7 +245,7 @@ impl Lane {
     }
 
     fn show(&mut self) {
-        let snapshot = self.inspect();
+        let snapshot = self.health();
         self.watchers
             .retain_mut(|stream| write(stream, &snapshot).is_ok());
     }
@@ -377,7 +378,7 @@ impl Lane {
     fn control(&mut self, request: Request, mut stream: UnixStream) -> io::Result<bool> {
         let result = match request {
             Request::Inspect | Request::Watch => {
-                let _ = write(&mut stream, &json!({"ok": true, "state": self.inspect()}));
+                let _ = write(&mut stream, &json!({"ok": true, "state": self.health()}));
                 if matches!(request, Request::Watch) && self.watchers.len() < 4 {
                     let _ = stream.set_nonblocking(true);
                     self.watchers.push(stream);
@@ -392,7 +393,13 @@ impl Lane {
                 model,
                 effort,
                 token,
-            } => self.prompt(claim, text, model, effort, token.as_deref()),
+            } => self.send_turn(Turn {
+                claim,
+                text,
+                model,
+                effort,
+                token,
+            }),
             Request::Goal { action, objective } => self.goal(action, objective),
             Request::Recover => self.recover(),
             Request::Stop { turn, attempt } => self.stop((turn, attempt), STOP_GRACE),
@@ -407,7 +414,7 @@ impl Lane {
             Request::Retire => Err(io::Error::other("the Codex lane still owns live work")),
         };
         let reply = match result {
-            Ok(()) => json!({"ok": true, "state": self.inspect()}),
+            Ok(()) => json!({"ok": true, "state": self.health()}),
             // A changed login is said with a code: nothing reached Codex, and the Host may
             // give the same attempt to the lane that starts after this one.
             Err(error) if self.stale_login => {
@@ -466,7 +473,7 @@ impl Lane {
         }
         let socket = Socket::turn(&claim, self.send.clone(), Input::turn)?;
         self.use_login()?;
-        self.own.keep_token(token, "Codex");
+        self.own.keep_token(token, Self::TOOL);
         self.slot.reserve(Reservation::Goal(claim))?;
         self.turn_socket = Some(socket);
         self.idle.reset();
@@ -490,7 +497,7 @@ impl Lane {
         let socket = Socket::turn(&claim, self.send.clone(), Input::turn)?;
         self.use_login()?;
         self.load()?;
-        self.own.keep_token(token, "Codex");
+        self.own.keep_token(token, Self::TOOL);
         self.idle.reset();
         let mut params = json!({
             "threadId": self.thread,
@@ -689,7 +696,7 @@ impl Lane {
         }
     }
 
-    fn stop(&mut self, attempt: (u64, u32), grace: Duration) -> io::Result<()> {
+    fn interrupt(&mut self, attempt: (u64, u32), grace: Duration) -> io::Result<()> {
         if !self.holds(attempt) {
             return Ok(());
         }
@@ -741,7 +748,7 @@ impl Lane {
     /// More of the user's words for the running turn. Codex refuses them when that turn is
     /// no longer the active one (`expectedTurnId`), and then they wait for a turn of their
     /// own. Accepted, they are read once their receipt is in the spool.
-    fn steer(&mut self, attempt: (u64, u32), id: &str, text: &str) -> io::Result<()> {
+    fn steer_turn(&mut self, attempt: (u64, u32), id: &str, text: &str) -> io::Result<()> {
         if !self.holds(attempt) {
             return Err(io::Error::other(
                 "the Codex lane does not hold this attempt",
@@ -971,8 +978,7 @@ impl Lane {
             Vec::new()
         };
         if self.slot.notification(method, params, now)? {
-            self.clear_slot()?;
-            self.end_terminals();
+            self.end_turn()?;
         } else {
             self.hint();
         }
@@ -1036,6 +1042,42 @@ impl Lane {
         )?;
         self.show();
         Ok(())
+    }
+}
+
+/// The Codex app-server's answers to the lane seam: its own methods, under the seam's names.
+impl Driver for Lane {
+    const TOOL: &'static str = "Codex";
+    type Health = Snapshot;
+
+    fn send_turn(&mut self, turn: Turn) -> io::Result<()> {
+        let Turn {
+            claim,
+            text,
+            model,
+            effort,
+            token,
+        } = turn;
+        self.prompt(claim, text, model, effort, token.as_deref())
+    }
+
+    fn steer(&mut self, attempt: (u64, u32), id: &str, text: &str) -> io::Result<()> {
+        self.steer_turn(attempt, id, text)
+    }
+
+    fn stop(&mut self, attempt: (u64, u32), grace: Duration) -> io::Result<()> {
+        self.interrupt(attempt, grace)
+    }
+
+    /// `turn/completed` for the claimed turn: what Codex keeps for the turn ends with it.
+    fn end_turn(&mut self) -> io::Result<()> {
+        self.clear_slot()?;
+        self.end_terminals();
+        Ok(())
+    }
+
+    fn health(&mut self) -> Snapshot {
+        self.snapshot()
     }
 }
 

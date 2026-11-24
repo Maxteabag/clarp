@@ -58,3 +58,9 @@ def test_the_written_file_has_them_above_the_server_table(tmp_path):
     assert config["codex_chat_lane"] is True
     assert set(config["server"]) == {"kind", "bind_addr", "port", "auth_token"}
     assert "codex_chat_lane" not in tomllib.loads(written(""))
+
+
+def test_the_shared_memory_budget_is_kept_too(tmp_path):
+    config = "lane_memory_mb = 4096\n[server]\n"
+    assert tomllib.loads(carried_top(config, tmp_path)) == {"lane_memory_mb": 4096}
+    assert "install-host: lane_memory_mb in " in run_carry("lane_memory_mb = true\n", tmp_path).stderr
