@@ -430,7 +430,11 @@ fn ranked(account: &Value, served_at: i64) -> Option<(i64, i64, &str)> {
         // As the switcher rounds it: half a percent left is none.
         Some((100.0 - used * 100.0).round_ties_even().clamp(0.0, 100.0) as i64)
     };
-    Some((left("5h")?, left("7d").unwrap_or(0), account["alias"].as_str()?))
+    Some((
+        left("5h")?,
+        left("7d").unwrap_or(0),
+        account["alias"].as_str()?,
+    ))
 }
 
 /// Until when a judgement of a tool's pool from this desk holds: until the desk's reading of
@@ -957,8 +961,18 @@ mod tests {
         );
         // Of two seats with room, the switcher would move to the one with more of its five
         // hours left; of two as full, more of the week.
-        let roomier = timed("roomier", false, "ok", &[("5h", 0.05, NOW + HOUR), ("7d", 0.6, NOW + 90 * HOUR)]);
-        let weekly = timed("weekly", false, "ok", &[("5h", 0.05, NOW + HOUR), ("7d", 0.2, NOW + 90 * HOUR)]);
+        let roomier = timed(
+            "roomier",
+            false,
+            "ok",
+            &[("5h", 0.05, NOW + HOUR), ("7d", 0.6, NOW + 90 * HOUR)],
+        );
+        let weekly = timed(
+            "weekly",
+            false,
+            "ok",
+            &[("5h", 0.05, NOW + HOUR), ("7d", 0.2, NOW + 90 * HOUR)],
+        );
         let summary = pool("claude", &served(json!([in_use, spare, roomier]))).unwrap();
         assert_eq!(summary["next_alias"], "roomier");
         let summary = pool("claude", &served(json!([in_use, spare, roomier, weekly]))).unwrap();
@@ -990,18 +1004,39 @@ mod tests {
         assert!(limit_event(hard.clone(), Failover::Spare, None).is_none());
         let told = limit_event(hard.clone(), Failover::None, Some(NOW + HOUR)).unwrap();
         assert_eq!(
-            (&told["kind"], &told["failover"], &told["pool_regains_at"], &told["resets_at"]),
-            (&json!("hard_limit"), &json!("none"), &json!(moment(NOW + HOUR)), &hard["resets_at"])
+            (
+                &told["kind"],
+                &told["failover"],
+                &told["pool_regains_at"],
+                &told["resets_at"]
+            ),
+            (
+                &json!("hard_limit"),
+                &json!("none"),
+                &json!(moment(NOW + HOUR)),
+                &hard["resets_at"]
+            )
         );
         let told = limit_event(hard, Failover::Unknown, None).unwrap();
-        assert_eq!((&told["failover"], &told["pool_regains_at"]), (&json!("unknown"), &Value::Null));
+        assert_eq!(
+            (&told["failover"], &told["pool_regains_at"]),
+            (&json!("unknown"), &Value::Null)
+        );
         // A warning, a recovery: as they are, also while a seat has room.
         for kind in ["warning", "recovered", "unknown"] {
             let event = json!({ "type": "provider-limit", "kind": kind });
-            assert_eq!(limit_event(event.clone(), Failover::Spare, None), Some(event));
+            assert_eq!(
+                limit_event(event.clone(), Failover::Spare, None),
+                Some(event)
+            );
         }
         // A reading holds until it grows old: ten minutes at least after it was read.
-        let desk = served(json!([timed("work", true, "ok", &[("5h", 0.1, NOW + HOUR)])]));
+        let desk = served(json!([timed(
+            "work",
+            true,
+            "ok",
+            &[("5h", 0.1, NOW + HOUR)]
+        )]));
         assert_eq!(fresh_until("claude", &desk), Some(NOW - 60_000 + 600_000));
         assert_eq!(fresh_until("codex", &desk), None);
     }

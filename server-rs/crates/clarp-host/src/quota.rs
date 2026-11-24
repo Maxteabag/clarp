@@ -153,6 +153,21 @@ pub struct Desk {
     /// the tool and the model an agent runs on it, as the apps were last told it
     /// ([`look_again`]): the word, and for a used-up account when the pool regains room.
     failover: std::sync::Mutex<Told>,
+    /// Whether another seat of each tool's pool would take a turn on the tool's default model
+    /// from an account that is used up, as last judged ([`look_again`]): what a hard limit of
+    /// the tool is told with ([`Desk::pooled`]).
+    pooled: std::sync::Mutex<BTreeMap<String, Pooled>>,
+}
+
+/// Whether another seat of a tool's pool would take a turn from its used-up account, the
+/// soonest moment a seat regains room where none would, and until when that holds: until the
+/// reading of the seats it was judged by grows old, and five minutes at most, after which it
+/// is judged again ([`watch`]).
+#[derive(Debug, Clone, Copy)]
+struct Pooled {
+    failover: clarp_kernel::quota_near::Failover,
+    regains: Option<i64>,
+    until_ms: i64,
 }
 
 /// What the apps were told of whether another seat would take the turns of a tool, by the tool
@@ -467,14 +482,18 @@ impl Desk {
                     };
                     let on = login.as_ref().map(Named::login);
                     if let (Some(record), Some(on)) = (answer, on) {
-                        for event in kept.seen(
+                        let seen = kept.seen(
                             tool,
                             on,
                             &record.value,
                             record.source,
                             with.now_ms,
                             &mut drawn,
-                        ) {
+                        );
+                        let told = seen
+                            .into_iter()
+                            .filter_map(|event| self.pooled(name, event, with.now_ms));
+                        for event in told {
                             with.hub.publish(event.clone(), with.now_ms);
                             events.push(event);
                         }
@@ -578,7 +597,10 @@ impl Desk {
         if kept != before {
             known.keep(with.fleet, tool, kept.clone()).await;
         }
-        for event in events {
+        let told = events
+            .into_iter()
+            .filter_map(|event| self.pooled(tool, event, with.now_ms));
+        for event in told {
             with.hub.publish(event, with.now_ms);
         }
         self.looked(with, tool, codex_said(&kept, of, login, with.now_ms));
@@ -762,6 +784,22 @@ impl Desk {
         all
     }
 
+    /// A `provider-limit` event of a tool, as the apps are told it: a hard limit not at all
+    /// while another seat of the tool's pool would take the turn, else with `failover` and
+    /// when the pool regains room (`clarp_kernel::quota_near::limit_event`). A judgement that
+    /// no longer holds, or none yet, is not known: the limit is told, as `unknown`, since an
+    /// old reading of the seats never hides one.
+    fn pooled(&self, tool: &str, event: Value, now_ms: i64) -> Option<Value> {
+        let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
+        let holds = pooled.get(tool).filter(|pooled| now_ms < pooled.until_ms);
+        let (failover, regains) = holds.map_or(
+            (clarp_kernel::quota_near::Failover::Unknown, None),
+            |pooled| (pooled.failover, pooled.regains),
+        );
+        drop(pooled);
+        clarp_kernel::quota_near::limit_event(event, failover, regains)
+    }
+
     /// Has the accounts looked at again by `at`, where nothing is looked at sooner: when a seat
     /// of a pool regains room, which the tool's own word does not name.
     fn wake_by(&self, at: i64, now_ms: i64) {
@@ -930,6 +968,7 @@ pub async fn look_again(app: &crate::edge::App) {
     if let Some(at) = regains_first {
         app.limits.wake_by(at, app.clock.now_ms());
     }
+    judge_pools(app, &rows).await;
     let mut told = app
         .limits
         .failover
@@ -942,6 +981,46 @@ pub async fn look_again(app: &crate::edge::App) {
         let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
         app.hub.publish(again, app.clock.now_ms());
     }
+}
+
+/// Judges for each tool whose limits are told whether another seat of its pool would take a turn
+/// on its default model from an account that is used up, and keeps it for the tool's hard
+/// limits ([`Desk::pooled`]): until the reading of the seats grows old, and five minutes at
+/// most, as the watch judges it again by then.
+async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
+    let now = app.clock.now_ms();
+    let desk = if rows.desk.is_null() {
+        crate::seats::status(app).await
+    } else {
+        rows.desk.clone()
+    };
+    let mut judged = BTreeMap::new();
+    for tool in [CODEX, CLAUDE] {
+        let model = crate::models::default_for(app, tool)
+            .await
+            .unwrap_or_default();
+        let selector = rows.selectors.contains(tool);
+        let (failover, regains) = clarp_kernel::quota_near::used_up_failover(
+            rows.accounts,
+            tool,
+            &model,
+            selector,
+            &desk,
+        );
+        let most = now + i64::try_from(LOOKED_EVERY.as_millis()).unwrap_or(i64::MAX);
+        let fresh = clarp_kernel::quota_near::fresh_until(tool, &desk);
+        let until_ms = fresh.map_or(most, |fresh| fresh.min(most));
+        let pooled = Pooled {
+            failover,
+            regains,
+            until_ms,
+        };
+        judged.insert(tool.to_string(), pooled);
+    }
+    *app.limits
+        .pooled
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner) = judged;
 }
 
 /// That an account is used up or near a limit stops being so with time, and nothing happens
