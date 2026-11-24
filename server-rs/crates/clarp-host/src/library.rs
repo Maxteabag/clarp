@@ -82,6 +82,8 @@ pub enum Want {
         verified: String,
         /// An agent has the session that answers in the user's place.
         known: bool,
+        /// The app asks for the agent's reply to the answer to be spoken.
+        synthesize_audio: bool,
     },
     Dismiss {
         decision_id: String,
@@ -185,8 +187,15 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
         } else {
             Admission::Background
         };
+        // Spoken when the app that answered asked for it, and not otherwise.
+        let speak = artifact
+            .decision
+            .as_ref()
+            .and_then(|decision| decision.delivery.as_ref())
+            .is_some_and(|delivery| delivery.synthesize_audio);
         let message = Message {
             id: format!("u-decision-{decision_id}"),
+            speak,
             text: prompt,
             origin: Origin::Trigger {
                 name: "automation".to_string(),
@@ -322,11 +331,13 @@ pub fn carry_out(
                 designated,
                 verified,
                 known,
+                synthesize_audio,
             } => {
                 let given = Given {
                     expected_revision: *expected_revision,
                     choice: choice.as_ref(),
                     answer: answer.as_ref(),
+                    synthesize_audio: *synthesize_audio,
                 };
                 let by = OnBehalf {
                     session: on_behalf_session.as_deref(),
@@ -1552,6 +1563,15 @@ pub(crate) async fn decide(
                 Some(_) => return Err(refused(StatusCode::BAD_REQUEST, "invalid decision choice")),
             };
             let expected = whole(data, "expected_revision")?;
+            // The message the answer becomes is spoken only when the app asks for it.
+            let synthesize_audio = match data.get("synthesize_audio") {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(audio)) => *audio,
+                Some(_) => {
+                    let why = "synthesize_audio must be a boolean";
+                    return Err(refused(StatusCode::BAD_REQUEST, why));
+                }
+            };
             // Whose turn asks, where one says it is a turn: a token that names nobody is
             // refused, and an agent never answers as the user.
             let caller = crate::turn_identity::presented(app, turn).await?;
@@ -1588,6 +1608,7 @@ pub(crate) async fn decide(
                 designated,
                 verified,
                 known,
+                synthesize_audio,
             }
         }
         "dismiss" => {

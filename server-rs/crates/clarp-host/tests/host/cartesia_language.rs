@@ -61,7 +61,7 @@ fn every_agent_cartesia_request_uses_its_first_supported_language() {
         })
     };
     let speak = |host: &Host, text: &str, language: &str| {
-        host.send(
+        host.send_aloud(
             session,
             &format!("<speak>{text}</speak>"),
             &text.replace(' ', "-"),

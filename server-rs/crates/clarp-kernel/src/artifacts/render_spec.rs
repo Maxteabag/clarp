@@ -357,7 +357,7 @@ pub fn admit(
     let parts = ["intent", "state"];
     let given = checks.closed(answers, "/answers", &parts, &parts, "unknown_key")?;
     let audio = match fields.get("synthesize_audio") {
-        None => true,
+        None => false,
         Some(J::Bool(audio)) => *audio,
         Some(_) => return refuse("audio_preference", "/synthesize_audio"),
     };

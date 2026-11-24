@@ -242,7 +242,7 @@ impl ArtifactBook {
             submission_id: sent.submission_id.clone(),
             version: version.to_string(),
             payload_hash: sent.payload_hash.clone(),
-            synthesize_audio: sent.synthesize_audio.unwrap_or(true),
+            synthesize_audio: sent.synthesize_audio.unwrap_or(false),
             created_at: now,
             prompt: Some(prompt),
             delivered_at: None,

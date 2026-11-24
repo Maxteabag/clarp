@@ -263,6 +263,20 @@ pub trait Backend: Send + Sync {
         Steers::No
     }
 
+    /// The blocks of a message given to a running turn that was not told how to speak, when
+    /// the message asks for its answer to be spoken: the words with what the turn would have
+    /// been told at its launch. A tool told before its prompt is told so again, between the
+    /// marks that let its own record give back the user's words (`told::unheaded`).
+    fn steered_with_speech(
+        &self,
+        told: &clarp_kernel::told::Turn,
+        session: &str,
+        text: &str,
+    ) -> Vec<String> {
+        let head = clarp_kernel::told::at_head(&told.persona, session, told.spoken);
+        vec![clarp_kernel::told::headed(&head, None, text)]
+    }
+
     /// Whether this message can go to a running turn as it is. A message the tool would be
     /// given as more than its words waits for a turn of its own.
     fn steers_message(&self, text: &str) -> bool {

@@ -17755,7 +17755,8 @@
          "a",
          "b"
         ]
-       }
+       },
+       "synthesize_audio": true
       }
      },
      "at": 1803440041000,
@@ -17842,7 +17843,7 @@
       "delivery_status": "pending"
      },
      "ids": 0,
-     "note": "and said to be spoken, as they are when nothing is said"
+     "note": "and said to be spoken again"
     },
     {
      "call": "submit",
@@ -18155,7 +18156,8 @@
        "answers": {
         "when": "now",
         "budget": 0
-       }
+       },
+       "synthesize_audio": true
       }
      },
      "at": 1803440057000,

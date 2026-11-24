@@ -622,6 +622,19 @@ impl Desk {
         })
     }
 
+    /// Whether the call is up now. Nothing is changed by asking; a call that cannot be read
+    /// counts as over.
+    pub(crate) async fn is_up(&self, app: &App, call_id: &str) -> bool {
+        let mut held = self.books.lock().await;
+        let Ok(books) = Self::read(&mut held, app).await else {
+            return false;
+        };
+        books
+            .calls
+            .record(call_id)
+            .is_some_and(|(_, call)| call.is_live())
+    }
+
     /// A request on the rings that places none: asked, done, and the phones told on the side.
     pub async fn rings<T>(
         &self,

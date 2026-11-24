@@ -155,6 +155,8 @@ mod render_spec_export;
 mod router_phrases;
 #[path = "host/source_trace.rs"]
 mod source_trace;
+#[path = "host/spoken_when_asked.rs"]
+mod spoken_when_asked;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
@@ -587,6 +589,18 @@ impl Host {
         self.post(
             "/send",
             json!({ "session": session, "text": text, "client_msg_id": id }),
+        )
+    }
+
+    /// A send whose answer is to be said aloud: the app asks for it, as it does when its user
+    /// has voice on. Without asking, an answer is only read.
+    fn send_aloud(&self, session: &str, text: &str, id: &str) -> Value {
+        self.post(
+            "/send",
+            json!({
+                "session": session, "text": text, "client_msg_id": id,
+                "synthesize_audio": true,
+            }),
         )
     }
 
@@ -9258,8 +9272,10 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     later["submission_id"] = json!("recorded-answer-02");
     let (status, said) = ask("POST", "/artifacts/answered/submit", capable, Some(&later));
     assert_eq!((status, said), (409, refusal("already_answered", "")));
+    // The answers said nothing of speech, so they were kept as not to be spoken: asked to be
+    // spoken under the same id, they are another wish.
     let mut audio = sent.clone();
-    audio["synthesize_audio"] = json!(false);
+    audio["synthesize_audio"] = json!(true);
     let (status, said) = ask("POST", "/artifacts/answered/submit", capable, Some(&audio));
     assert_eq!(
         (status, said),
@@ -19511,9 +19527,18 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
     );
     done(1);
     assert!(voice.asked().is_empty());
+    // Answers that say nothing of it are answered in text, and kept so: said again without
+    // speech they are the same answers, asked to be spoken they are another wish.
+    let unsaid = "submission-default-01";
+    assert_eq!(submit(unsaid, "Read the default", None).0, 200);
+    done(2);
+    assert!(voice.asked().is_empty());
+    let again = submit(unsaid, "Read the default", Some(false));
+    assert_eq!(again.1["delivery_status"], "delivered", "{again:?}");
+    assert_eq!(submit(unsaid, "Read the default", Some(true)).0, 409);
     let mut clips = Vec::new();
     for (index, (id, words, audio)) in [
-        ("submission-default-01", "Read the default", None),
+        ("submission-spoken-00", "Read on request", Some(true)),
         ("submission-spoken-01", "Read by request", Some(true)),
     ]
     .into_iter()
@@ -19544,7 +19569,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
             });
         }
         assert_eq!(status, 200, "{receipt}");
-        done(if index == 0 { 2 } else { 4 });
+        done(if index == 0 { 3 } else { 5 });
         wait_for("the scripted voice receives the requested reply", || {
             voice.asked().len() == index + 1
         });
@@ -19593,7 +19618,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
             .iter()
             .filter(|r| r["role"] == "assistant")
             .count(),
-        4
+        5
     );
 }
 
@@ -21516,7 +21541,7 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
 
     // The user asks, and so looks at the agent: it does not say who speaks. Two parts for
     // the ear are two clips, said in the order the agent said them.
-    host.send(
+    host.send_aloud(
         &session,
         "<speak>One.</speak> and <speak>Two.</speak>",
         "m2",
@@ -21552,7 +21577,7 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     // Stranger has a voice from the pool, but its provider has no credentials.
     // Neither clip is announced and the apps are told why once for the turn.
     let stranger = host.new_agent("Stranger");
-    host.send(
+    host.send_aloud(
         &stranger,
         "<speak>Unheard.</speak> and <speak>Nor this.</speak>",
         "s1",
@@ -21595,7 +21620,7 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     // The engine is down: the clip that was announced is over, and the apps are told why
     // nothing is heard.
     voice.down.store(true, Ordering::SeqCst);
-    host.send(&session, "<speak>Into the void.</speak>", "m4");
+    host.send_aloud(&session, "<speak>Into the void.</speak>", "m4");
     wait_for("the failure to be told", || told("tts-error").len() == 2);
     let failed = told("tts-error")[1].clone();
     assert_eq!(
@@ -21665,7 +21690,7 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
     // And a new clip gets a number no clip had.
     voice.down.store(false, Ordering::SeqCst);
     let heard = host.listen();
-    host.send(&session, "<speak>Back again.</speak>", "m5");
+    host.send_aloud(&session, "<speak>Back again.</speak>", "m5");
     wait_for("the clip after the restart", || {
         let heard = heard.lock().unwrap();
         heard.iter().any(|event| event["type"] == "audio")
@@ -22287,7 +22312,7 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     );
 
     // The speaker hands the engine the voice the profile shows, and tells the reason it shows.
-    host.send(&maximus, "<speak>Hello.</speak>", "m1");
+    host.send_aloud(&maximus, "<speak>Hello.</speak>", "m1");
     let spoken = || {
         voice
             .asked()
@@ -22296,7 +22321,7 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     };
     wait_for("the clip", || spoken().is_some());
     assert_eq!(spoken().unwrap()["voice"]["id"], mine["speech"]["voice_id"]);
-    host.send(&stranger, "<speak>The helper can speak.</speak>", "s1");
+    host.send_aloud(&stranger, "<speak>The helper can speak.</speak>", "s1");
     let helper_clip = || {
         voice
             .asked()
@@ -38596,7 +38621,7 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     );
     assert_eq!(answer(&host, &r, true).0, 409);
     // A new turn speaks under a fresh trace. Only the original reply keeps the opening tag.
-    let ordinary = host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","text":"<speak>Ordinary speech.</speak>"}));
+    let ordinary = host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","text":"<speak>Ordinary speech.</speak>","synthesize_audio":true}));
     assert_ne!(ordinary["trace_id"], "test-greeting");
     wait_for(
         "an unbound reply and the retired greeting are available",

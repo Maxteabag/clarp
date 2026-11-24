@@ -214,14 +214,11 @@ pub fn origin(claimed: Option<&str>, principal: &Principal, peer: bool) -> Strin
     }
 }
 
-/// Whether a send's answer is spoken: as it asks (`synthesize_audio`), where the user sent it
-/// only unless it asks for silence, and otherwise only when it asks for speech.
-pub fn synthesize_audio(origin: &str, asked: Option<&Value>) -> bool {
-    match asked {
-        None => origin == "user",
-        Some(asked) if origin == "user" => *asked != Value::Bool(false),
-        Some(asked) => *asked == Value::Bool(true),
-    }
+/// Whether a send's answer is spoken: only when it asks for speech (`synthesize_audio: true`),
+/// whoever sent it. A send that says nothing is answered in text, a person's too: the app
+/// asks for a spoken reply when its user has voice on.
+pub fn synthesize_audio(_origin: &str, asked: Option<&Value>) -> bool {
+    asked == Some(&Value::Bool(true))
 }
 
 /// The command an agent leaves a note with, named in the words of a refusal.

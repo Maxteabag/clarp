@@ -58,6 +58,7 @@ impl Decision {
             answer: answer.clone(),
             created_at: resolved_at.unwrap_or(0),
             delivered_at: None,
+            synthesize_audio: false,
         });
         let options = shown.get("options").and_then(Value::as_array);
         let recommended = shown.get("recommended_option_id").and_then(Value::as_str);

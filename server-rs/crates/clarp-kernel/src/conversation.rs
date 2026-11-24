@@ -50,8 +50,8 @@ pub struct Message {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<String>,
     /// What the agent answers is said aloud: the parts of its replies it marks for the ear.
-    /// So it is for what a person sends, unless the app says otherwise; for anything else
-    /// only when it is asked for.
+    /// So it is only when the send asks for it (`synthesize_audio: true`), whoever sent it;
+    /// a call's clips and live rings, which are audio by nature, set it themselves.
     #[serde(default, skip_serializing_if = "is_false")]
     pub speak: bool,
     /// The app said its user began to speak before hearing what this agent last said
