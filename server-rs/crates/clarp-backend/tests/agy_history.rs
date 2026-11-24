@@ -81,26 +81,57 @@ fn a_transcript_that_is_no_transcript_holds_no_turns() {
 }
 
 #[test]
-fn a_message_that_cut_a_reply_is_read_as_the_user_sent_it() {
-    // As agy 1.5.16 kept it (24 Nov 2026): the reply the driver gave back stands before the
-    // user's words, within agy's mark.
-    let sent = clarp_acp::agy::steer::with_reply(
-        "1. **Pizza**: A baked flatbread.\n2. **Sushi**: Vinegared rice.\n",
-        "Change of plan: stop the list now and reply with only the word BANANA.",
-    );
-    let content = format!(
-        "<USER_REQUEST>\n{sent}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T15:06:53+01:00.\n</ADDITIONAL_METADATA>"
-    );
-    let step = json!({"step_index": 2, "source": "USER_EXPLICIT", "type": "USER_INPUT",
-                      "status": "DONE", "created_at": "2026-11-24T14:07:04Z", "content": content});
-    let read = history::agy(&format!("{step}\n"));
+fn a_message_that_cut_a_reply_is_read_as_the_cut_reply_then_the_user_message() {
+    // As agy 1.5.16 kept a cut (24 Nov 2026): no step of the cancelled reply; the reply the
+    // driver gave back stands before the user's words, within agy's mark.
+    let request = |said: &str| {
+        format!(
+            "<USER_REQUEST>\n{said}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T15:06:53+01:00.\n</ADDITIONAL_METADATA>"
+        )
+    };
+    let user = |step: u64, said: &str, at: &str| {
+        json!({"step_index": step, "source": "USER_EXPLICIT", "type": "USER_INPUT",
+               "status": "DONE", "created_at": at, "content": request(said)})
+    };
+    let model = |step: u64, said: &str, at: &str| {
+        json!({"step_index": step, "source": "MODEL", "type": "PLANNER_RESPONSE",
+               "status": "DONE", "created_at": at, "content": said})
+    };
+    let reply = "1. **Pizza**: A baked flatbread.\n2. **Sushi**: Vinegared rice.\n";
+    let words = "Change of plan: stop the list now and reply with only the word BANANA.";
+    let sent = clarp_acp::agy::steer::with_reply(reply, words);
+    let steps = [
+        user(0, "Write a list of 50 foods.", "2026-11-24T14:06:53Z"),
+        user(2, &sent, "2026-11-24T14:07:04Z"),
+        model(3, "BANANA", "2026-11-24T14:07:05Z"),
+    ];
+    let transcript: String = steps.iter().map(|step| format!("{step}\n")).collect();
+    let turn = |role: &str, text: &str, at: &str| json!({"role": role, "text": text, "tools": [], "timestamp": at});
+    let cut = turn("assistant", reply.trim_end(), "2026-11-24T14:07:04Z");
     assert_eq!(
-        read,
-        vec![json!({
-            "role": "user",
-            "text": "Change of plan: stop the list now and reply with only the word BANANA.",
-            "tools": [],
-            "timestamp": "2026-11-24T14:07:04Z"
-        })]
+        history::agy(&transcript),
+        vec![
+            turn("user", "Write a list of 50 foods.", "2026-11-24T14:06:53Z"),
+            cut.clone(),
+            turn("user", words, "2026-11-24T14:07:04Z"),
+            turn("assistant", "BANANA", "2026-11-24T14:07:05Z"),
+        ]
     );
+
+    // Where agy kept the start of the reply (what it wrote before a tool), that turn is the
+    // reply, not a second turn beside it.
+    let steps = [
+        user(0, "Write a list of 50 foods.", "2026-11-24T14:06:53Z"),
+        model(
+            1,
+            "1. **Pizza**: A baked flatbread.",
+            "2026-11-24T14:06:58Z",
+        ),
+        user(2, &sent, "2026-11-24T14:07:04Z"),
+    ];
+    let transcript: String = steps.iter().map(|step| format!("{step}\n")).collect();
+    let read = history::agy(&transcript);
+    assert_eq!(read.len(), 3, "{read:?}");
+    assert_eq!(read[1]["text"], reply.trim_end());
+    assert_eq!(read[2], turn("user", words, "2026-11-24T14:07:04Z"));
 }

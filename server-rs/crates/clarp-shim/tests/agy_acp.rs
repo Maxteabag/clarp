@@ -1319,3 +1319,149 @@ fn a_stop_while_a_message_is_held_ends_the_turn_and_the_message_is_not_taken() {
     // The message never went: the only prompt is the turn's own.
     assert_eq!(place.sent_of("session/prompt").len(), 1);
 }
+
+/// A message held while the stand-in writes in the turn of `case`; `more` is done once the
+/// driver holds it, before the stand-in goes on (`go-<case>`). What the driver printed, the
+/// prompts the stand-in kept, and the stand-in's place.
+fn held_for(
+    case: &str,
+    more: impl FnOnce(&mut std::process::ChildStdin, &mut Printed),
+) -> (Vec<Value>, Place) {
+    let place = Place::new(&format!("held-{case}"), "steer");
+    let (mut child, mut input) = place.open(&steering(&place, &format!("case-{case}")), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, &format!("working-{case}"));
+    steer(&mut input, "u-add", &format!("add-{case}"));
+    printed.until("the message held", |line| {
+        line["clarp"] == "cut" && line["stage"] == "held"
+    });
+    more(&mut input, &mut printed);
+    std::fs::write(place.dir.join(format!("go-{case}")), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success(), "{:?}", printed.seen);
+    // Never a Stop.
+    assert!(
+        driver(&printed.seen, "cancel").is_empty(),
+        "{:?}",
+        printed.seen
+    );
+    let prompted = driver(&printed.seen, "prompted");
+    assert_eq!(prompted.len(), 1, "{:?}", printed.seen);
+    assert_eq!(prompted[0]["result"]["stopReason"], "end_turn");
+    (printed.seen, place)
+}
+
+fn kept_prompt(place: &Place, name: &str) -> String {
+    std::fs::read_to_string(place.dir.join(format!("prompt-{name}"))).unwrap()
+}
+
+#[test]
+fn a_cancel_answered_after_the_bound_sends_the_message_and_keeps_the_rows_apart() {
+    let began = Instant::now();
+    let (seen, place) = held_for("slow", |_, _| {});
+    // The message went at the bound, with the reply given back; what agy wrote for the
+    // cancelled prompt until its late answer is left out, and the answer is a row of its own.
+    assert!(began.elapsed() >= Duration::from_secs(8));
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n", "BANANA"]);
+    assert_eq!(
+        kept_prompt(&place, "slow"),
+        clarp_acp::agy::steer::with_reply("1. Pho\n2. Ramen\n", "add-slow")
+    );
+    let read = printed_at(&seen, |line| read_of(line) == Some("u-add"));
+    let banana = printed_at(&seen, |line| {
+        line["params"]["update"]["content"]["text"] == "BANANA"
+    });
+    assert_eq!(read + 1, banana, "{seen:?}");
+    assert_eq!(
+        settled(&seen)[0]["user_message_uuids"],
+        json!(["u-own", "u-add"])
+    );
+}
+
+#[test]
+fn a_message_refused_after_a_late_cancel_leaves_the_turn_ended_not_stopped() {
+    let (seen, _place) = held_for("slowrefused", |_, _| {});
+    assert!(seen.iter().all(|line| read_of(line).is_none()), "{seen:?}");
+    assert!(
+        seen.iter()
+            .any(|line| line["type"] == "steer_refused" && line["uuid"] == "u-add"),
+        "{seen:?}"
+    );
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n"]);
+    assert_eq!(settled(&seen)[0]["user_message_uuids"], json!(["u-own"]));
+}
+
+#[test]
+fn a_thought_before_any_line_end_sends_the_message_without_a_cut() {
+    let (seen, place) = held_for("missed", |_, _| {});
+    assert!(place.sent_of("session/cancel").is_empty());
+    assert!(
+        driver(&seen, "cut")
+            .iter()
+            .all(|line| line["stage"] == "held"),
+        "{seen:?}"
+    );
+    // As a message sent while nothing is cut: as the Host wrote it.
+    assert_eq!(kept_prompt(&place, "missed"), "add-missed");
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "BANANA"]);
+    let read = printed_at(&seen, |line| read_of(line) == Some("u-add"));
+    let banana = printed_at(&seen, |line| {
+        line["params"]["update"]["content"]["text"] == "BANANA"
+    });
+    assert_eq!(read + 1, banana, "{seen:?}");
+    assert_eq!(
+        settled(&seen)[0]["user_message_uuids"],
+        json!(["u-own", "u-add"])
+    );
+}
+
+#[test]
+fn a_reply_that_ends_its_own_prompt_before_a_line_end_sends_the_message_as_it_was() {
+    let (seen, place) = held_for("ends", |_, _| {});
+    assert!(place.sent_of("session/cancel").is_empty());
+    assert_eq!(kept_prompt(&place, "ends"), "add-ends");
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men", "BANANA"]);
+    assert_eq!(
+        settled(&seen)[0]["user_message_uuids"],
+        json!(["u-own", "u-add"])
+    );
+}
+
+#[test]
+fn a_reply_that_already_ends_a_line_is_cut_at_once() {
+    let (seen, place) = held_for("linestart", |_, printed| {
+        // Before agy writes another word.
+        printed.until("the cut", |line| {
+            line["clarp"] == "cut" && line["stage"] == "cancel"
+        });
+    });
+    assert_eq!(
+        kept_prompt(&place, "linestart"),
+        clarp_acp::agy::steer::with_reply("1. Pho\n2. Ramen\n", "add-linestart")
+    );
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ramen\n", "BANANA"]);
+}
+
+#[test]
+fn a_message_that_comes_while_one_is_held_goes_after_it_in_order() {
+    let (seen, place) = held_for("twice", |input, printed| {
+        steer(input, "u-add2", "add-twice-2");
+        printed.until("the second held after the first", |line| {
+            line["clarp"] == "steer" && line["uuid"] == "u-add2" && line["why"] == "after a cut"
+        });
+    });
+    assert_eq!(
+        kept_prompt(&place, "twice"),
+        clarp_acp::agy::steer::with_reply("1. Pho\n2. Ramen\n", "add-twice")
+    );
+    assert_eq!(kept_prompt(&place, "twice-2"), "add-twice-2");
+    let reads: Vec<&str> = seen.iter().filter_map(read_of).collect();
+    assert_eq!(reads, ["u-add", "u-add2"], "{seen:?}");
+    assert_eq!(
+        settled(&seen)[0]["user_message_uuids"],
+        json!(["u-own", "u-add", "u-add2"])
+    );
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n", "BANANA"]);
+}

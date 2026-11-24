@@ -233,3 +233,105 @@ fn shown_live(host: &Host, session: &str, text: &str) {
             .contains(text)
     });
 }
+
+/// A message sent while Antigravity writes its reply cuts that reply at its next line end,
+/// end to end through the Host: the rows are the cut reply, the message, then its answer; the
+/// message is started on the write and read when agy takes it up; the turn ends done, never
+/// stopped. The stand-in's `case-list` writes "1. Pho\n2. Ra", and once told goes on with
+/// "men\n3. Udon": the cut comes after "men\n", and the rest is never shown.
+#[test]
+fn a_message_sent_while_antigravity_writes_cuts_its_reply_at_a_line_end() {
+    let place = Place::new("agy-acp-cut");
+    let agy = place.root.join("agy");
+    program(&agy, FAKE);
+    std::fs::write(place.root.join("scenario"), "steer").unwrap();
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let heard = host.listen();
+    wait_for("the event stream", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
+    });
+    let session = "acp-cut-list";
+    host.post(
+        "/agents",
+        json!({"name": session, "session": session, "backend": "agy-acp"}),
+    );
+    let first = host.send(session, "case-list", "first");
+    assert_eq!(first["queued"], false, "{first}");
+    wait_for("working-list", || place.root.join("working-list").exists());
+    shown_live(&host, session, "2. Ra");
+
+    let sent = host.send(session, "add-list", "add-list");
+    assert_eq!(sent["queued"], true, "{sent}");
+    let queue_status = || {
+        host.get(&format!("/turn-queue?session={session}"))["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == "add-list")
+            .and_then(|row| row["status"].as_str().map(str::to_owned))
+    };
+    wait_for("the message written to the turn", || {
+        queue_status().as_deref() == Some("started")
+    });
+    // The driver holds it the moment it reads it; then agy goes on past a line end.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::fs::write(place.root.join("go-list"), "").unwrap();
+    answered(&host, session, "BANANA");
+    wait_for("the agent to finish", || host.state(session) == "done");
+
+    let rows = host.turns(session);
+    let at = |what: &dyn Fn(&Value) -> bool| {
+        rows.iter()
+            .position(what)
+            .unwrap_or_else(|| panic!("{rows:?}"))
+    };
+    let cut = at(&|row| {
+        row["role"] == "assistant"
+            && row["text"]
+                .as_str()
+                .is_some_and(|text| text.trim_end() == "1. Pho\n2. Ramen")
+    });
+    let read = at(&|row| row["id"] == "u-add-list");
+    let banana = at(&|row| row["role"] == "assistant" && row["text"] == "BANANA");
+    assert!(cut < read && read < banana, "{rows:?}");
+    assert!(
+        rows.iter().all(|row| !row["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("Udon") || text.contains("late"))),
+        "what agy wrote after the line end is never shown: {rows:?}"
+    );
+    // Started once, read in the one process, and gone from the queue.
+    wait_for("the queue-start of the message", || {
+        started(&heard, session, "add-list").len() == 1
+    });
+    assert_eq!(
+        host.get(&format!("/turn-queue?session={session}"))["items"],
+        json!([])
+    );
+    // It went to agy once, with the reply so far before it.
+    let prompts: Vec<String> = std::fs::read_to_string(place.root.join("acp.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|message| message["method"] == "session/prompt")
+        .filter_map(|message| {
+            message["params"]["prompt"][0]["text"]
+                .as_str()
+                .map(str::to_owned)
+        })
+        .collect();
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    assert!(
+        prompts[1].ends_with("\n\nadd-list") && prompts[1].contains("1. Pho\n2. Ramen"),
+        "{prompts:?}"
+    );
+    assert_eq!(prompted(&place.root, "case-list"), 1);
+}

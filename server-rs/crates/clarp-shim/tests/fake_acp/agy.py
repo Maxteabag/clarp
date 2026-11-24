@@ -150,7 +150,48 @@ CUTS = {
     "blockopen": ("```\nx\n", "y\n"),
     # A Stop while the message is held.
     "holdstop": ("1. Pho\n2. Ra", None),
+    # The reply already ends a line when the message comes: the cut comes at once.
+    "linestart": ("1. Pho\n2. Ramen\n", None),
+    # A second message comes while the first is held: it goes after it.
+    "twice": ("1. Pho\n2. Ra", "men\n3. Udon"),
 }
+
+# What agy does otherwise while a message is held (`go-<mode>`): it answers the cancel only after
+# the driver's bound, with what it wrote before, and then takes the message (`slow`) or turns it
+# away (`slowrefused`); it stops writing for a thought before any line end (`missed`); or it ends
+# its reply by itself before any line end (`ends`).
+HELD = {"slow", "slowrefused", "missed", "ends"}
+
+
+def held(mid, sid, mode):
+    text(sid, "agent_message_chunk", "1. Pho\n2. Ra")
+    touch("working-" + mode)
+    wait_file("go-" + mode)
+    if mode == "missed":
+        text(sid, "agent_thought_chunk", "Thinking it over")
+    elif mode == "ends":
+        text(sid, "agent_message_chunk", "men")
+        result(mid, {"stopReason": "end_turn", "usage": {"inputTokens": 3, "outputTokens": 1}})
+    else:
+        text(sid, "agent_message_chunk", "men\n3. Udon")
+        while read().get("method") != "session/cancel":
+            pass
+        touch("cancelled-" + mode)
+    second = next_prompt()
+    with open(os.path.join(here, "prompt-" + mode), "w") as kept:
+        kept.write(said_in(second))
+    if mode == "slowrefused":
+        error(second["id"], -32603, "a prompt is already running")
+        text(sid, "agent_message_chunk", "tail")
+        return result(mid, {"stopReason": "cancelled", "usage": {"inputTokens": 3, "outputTokens": 1}})
+    if mode == "slow":
+        # Still the cancelled prompt's: written before its answer.
+        text(sid, "agent_message_chunk", "tail")
+    if mode != "ends":
+        stop = "cancelled" if mode == "slow" else "end_turn"
+        result(mid, {"stopReason": stop, "usage": {"inputTokens": 3, "outputTokens": 1}})
+    text(sid, "agent_message_chunk", "BANANA")
+    result(second["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}})
 
 
 def cut(mid, sid, mode):
@@ -170,6 +211,14 @@ def cut(mid, sid, mode):
     second = next_prompt()
     with open(os.path.join(here, "prompt-" + mode), "w") as kept:
         kept.write(said_in(second))
+    if mode == "twice":
+        # The message after it comes at once: agy takes it over, as any prompt sent while one runs.
+        third = next_prompt()
+        with open(os.path.join(here, "prompt-" + mode + "-2"), "w") as kept:
+            kept.write(said_in(third))
+        result(second["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}})
+        text(sid, "agent_message_chunk", "BANANA")
+        return result(third["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 1, "outputTokens": 1}})
     text(sid, "agent_message_chunk", "BANANA")
     result(second["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}})
 
@@ -179,6 +228,8 @@ def steering(mid, sid, words):
     mode = found.group(1) if found else ""
     if mode in CUTS:
         return cut(mid, sid, mode)
+    if mode in HELD:
+        return held(mid, sid, mode)
     if mode == "after":
         # Answered before anything else comes: what comes later is a prompt of its own.
         text(sid, "agent_message_chunk", "first-after")

@@ -13,6 +13,13 @@
 //! conversation, and the driver prints when it was read and which messages each answer covers
 //! ([`prompts`]; the lines are `clarp_acp::agy::steer`'s).
 //!
+//! A message that comes while Antigravity writes its reply (no tool running) cuts that reply:
+//! at the next line end outside a code block the prompt is cancelled, and the message goes as
+//! the next prompt with the reply so far given back before it, since agy forgets the text of a
+//! cancelled prompt. The cut is no Stop: the turn goes on. `CLARP_AGY_ACP_CUT=off` (or `0`,
+//! `false`, `no`) in the driver's environment, which it inherits from the Host, turns the cut
+//! off: the message then goes at once, as during a tool (`clarp_acp::agy::steer::CUT_ENV`).
+//!
 //! A Stop reaches the driver as SIGUSR1. It sends `session/cancel`, waits a bounded time for
 //! Antigravity to answer the prompt, prints what it said, ends agy (its input closed, then
 //! TERM, then KILL only if it stays), and ends itself with SIGTERM, so that the turn ends as
@@ -641,11 +648,13 @@ fn works(message: &Value, seen_tools: &BTreeSet<String>) -> bool {
 struct Written {
     /// How many line breaks the message ends with, at most two.
     breaks: usize,
-    /// Inside a code block: an odd number of fence lines (three backticks first on the line,
-    /// after spaces) so far. A blank line in it is no paragraph break.
-    fenced: bool,
-    /// Backticks first on the line being written, after spaces.
+    /// Inside a code block, by the fence that opened it: three backticks or three tildes first
+    /// on a line, after spaces, until a line of the same kind closes it. A blank line in it is
+    /// no paragraph break, and no line end in it is a place to cut.
+    fence: Option<char>,
+    /// The fence characters first on the line being written, after spaces, and their kind.
     ticks: u8,
+    line_char: Option<char>,
     /// The line being written is known to be a fence line or not.
     line_known: bool,
 }
@@ -657,12 +666,16 @@ impl Written {
     fn take(&mut self, words: &str) -> Option<usize> {
         let mut found = None;
         for (at, c) in words.char_indices() {
-            if found.is_none() && !matches!(c, '\n' | '\r') && self.breaks >= 2 && !self.fenced {
+            if found.is_none()
+                && !matches!(c, '\n' | '\r')
+                && self.breaks >= 2
+                && self.fence.is_none()
+            {
                 found = Some(at);
             }
             self.step(c);
         }
-        if found.is_none() && self.breaks >= 2 && !self.fenced {
+        if found.is_none() && self.breaks >= 2 && self.fence.is_none() {
             found = Some(words.len());
         }
         found
@@ -672,7 +685,7 @@ impl Written {
     /// that line end ends. None when the piece holds no such line end.
     fn line_end(&mut self, words: &str) -> Option<usize> {
         for (at, c) in words.char_indices() {
-            let ends = c == '\n' && !self.fenced;
+            let ends = c == '\n' && self.fence.is_none();
             self.step(c);
             if ends {
                 return Some(at + 1);
@@ -683,7 +696,7 @@ impl Written {
 
     /// The message stands at the start of a line outside a code block: a cut can come now.
     fn at_line_start(&self) -> bool {
-        self.breaks > 0 && !self.fenced
+        self.breaks > 0 && self.fence.is_none()
     }
 
     fn step(&mut self, c: char) {
@@ -691,6 +704,7 @@ impl Written {
             '\n' => {
                 self.breaks = (self.breaks + 1).min(2);
                 self.ticks = 0;
+                self.line_char = None;
                 self.line_known = false;
             }
             '\r' => {}
@@ -701,19 +715,24 @@ impl Written {
         }
     }
 
-    /// A character of the line being written: the third backtick first on it opens or closes
-    /// a code block.
+    /// A character of the line being written: the third backtick (or tilde) first on it opens
+    /// a code block, or closes one that a fence of its kind opened.
     fn first_on_line(&mut self, c: char) {
         if self.line_known || (c == ' ' && self.ticks == 0) {
             return;
         }
-        if c != '`' {
+        if !matches!(c, '`' | '~') || self.line_char.is_some_and(|kind| kind != c) {
             self.line_known = true;
             return;
         }
+        self.line_char = Some(c);
         self.ticks += 1;
         if self.ticks == 3 {
-            self.fenced = !self.fenced;
+            self.fence = match self.fence {
+                None => Some(c),
+                Some(open) if open == c => None,
+                other => other,
+            };
             self.line_known = true;
         }
     }
@@ -1110,6 +1129,27 @@ mod tests {
         // Backticks inside a line are no fence; a break before a block is one.
         assert_eq!(first_break(&["say ```x``` then\n\nmore"]), Some(18));
         assert_eq!(first_break(&["text\n\n```\ncode"]), Some(6));
+        // A tilde fence is a fence; a fence of the other kind inside it is code.
+        assert_eq!(first_break(&["~~~\nx\n\n```\n\ny\n~~~\n\nz"]), Some(19));
+    }
+
+    #[test]
+    fn a_cut_finds_a_line_end_outside_any_code_block() {
+        let mut written = Written::default();
+        assert_eq!(written.line_end("1. Pho\n2. Ra"), Some(7));
+        let mut written = Written::default();
+        assert_eq!(written.line_end("Run:"), None);
+        assert!(!written.at_line_start());
+        assert_eq!(written.line_end("\n"), Some(1));
+        assert!(written.at_line_start());
+        // Inside a block, by either fence, no line is a place to cut; the closing line is.
+        let mut written = Written::default();
+        assert_eq!(written.line_end("```sh\necho a\n~~~\necho b\n``"), None);
+        assert!(!written.at_line_start());
+        assert_eq!(written.line_end("`\nDone."), Some(2));
+        let mut written = Written::default();
+        assert_eq!(written.take("~~~\nx\n"), None);
+        assert!(!written.at_line_start());
     }
 
     #[test]

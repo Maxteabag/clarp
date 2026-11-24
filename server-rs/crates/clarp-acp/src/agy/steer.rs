@@ -77,47 +77,99 @@ pub fn settled_line(is_error: bool, text: &str, uuids: &[String]) -> Value {
     })
 }
 
-/// The driver's environment says `off` here to send a message that comes while Antigravity
-/// writes at once, as it sends one while a tool runs, rather than cut the reply for it: for an
-/// agy that answers a cancel otherwise than 1.5.16 does.
+/// The driver's environment turns the cut off here (`off`, `0`, `false` or `no`, in any case):
+/// a message that comes while Antigravity writes then goes at once, as one does while a tool
+/// runs. It is for an agy that answers a cancel otherwise than 1.5.16 does. The driver reads it
+/// from the environment the Host gives it, once per turn ([`cuts_replies`]).
 pub const CUT_ENV: &str = "CLARP_AGY_ACP_CUT";
+
+/// Whether the driver cuts a reply for a message, by what [`CUT_ENV`] says (`None`: not set).
+pub fn cuts_replies(said: Option<&str>) -> bool {
+    !said.is_some_and(|said| {
+        matches!(
+            said.trim().to_ascii_lowercase().as_str(),
+            "off" | "0" | "false" | "no"
+        )
+    })
+}
 
 /// The line before the reply given back with a message that cut it ([`with_reply`]).
 pub const REPLY_BEGINS: &str = "<<< Your reply so far, cut off when the message below arrived >>>";
 /// The line after it.
 pub const REPLY_ENDS: &str = "<<< End of your reply so far >>>";
-/// The most of a reply given back, in bytes: of a longer one, the end is kept.
+/// The most of a reply given back, in bytes: of a longer one, the end is kept, from the start
+/// of a line.
 pub const REPLY_MOST: usize = 24 * 1024;
 /// The line in place of the start of a reply too long to give back whole.
 pub const REPLY_LEFT_OUT: &str = "[The start of your reply is left out here.]";
 
 /// A message that cut Antigravity's reply short, with the reply it had written so far before
 /// it. Antigravity forgets the text of a prompt that is cancelled (seen with agy 1.5.16 on
-/// 24 Nov 2026: asked, it said it had written nothing), so the driver gives it back.
+/// 24 Nov 2026: asked, it said it had written nothing), so the driver gives it back. A code
+/// block the cut left open is closed before the end line.
 pub fn with_reply(reply: &str, message: &str) -> String {
     let mut start = reply.len().saturating_sub(REPLY_MOST);
     while !reply.is_char_boundary(start) {
         start += 1;
     }
     let left_out = if start > 0 {
+        // From the start of the next line, where one comes before the end.
+        if let Some(line) = reply[start..]
+            .find('\n')
+            .filter(|at| start + at + 1 < reply.len())
+        {
+            start += line + 1;
+        }
         format!("{REPLY_LEFT_OUT}\n")
     } else {
         String::new()
     };
     let kept = reply[start..].trim_end_matches('\n');
-    format!("{REPLY_BEGINS}\n{left_out}{kept}\n{REPLY_ENDS}\n\n{message}")
+    let closed = open_fence(reply).map_or(String::new(), |fence| format!("\n{fence}"));
+    format!("{REPLY_BEGINS}\n{left_out}{kept}{closed}\n{REPLY_ENDS}\n\n{message}")
 }
 
-/// A user's words as they were sent: without a reply the driver gave back before them
-/// ([`with_reply`]).
-pub fn without_reply(text: &str) -> &str {
-    let Some(rest) = text.strip_prefix(REPLY_BEGINS) else {
-        return text;
-    };
-    match rest.find(&format!("\n{REPLY_ENDS}")) {
-        Some(at) => rest[at + 1 + REPLY_ENDS.len()..].trim_start_matches(['\n', '\r']),
-        None => text,
+/// The fence of a code block a text leaves open: three backticks or tildes first on a line,
+/// after spaces, opened and not closed by a line of the same kind.
+fn open_fence(text: &str) -> Option<&'static str> {
+    let mut open = None;
+    for line in text.lines() {
+        let line = line.trim_start_matches(' ');
+        let kind = if line.starts_with("```") {
+            "```"
+        } else if line.starts_with("~~~") {
+            "~~~"
+        } else {
+            continue;
+        };
+        open = match open {
+            None => Some(kind),
+            Some(was) if was == kind => None,
+            other => other,
+        };
     }
+    open
+}
+
+/// A user's words as they were sent, and the reply the driver gave back before them, if it
+/// did ([`with_reply`]). The reply ends at the last end line: one it quoted itself stays in it.
+pub fn split_reply(text: &str) -> (Option<&str>, &str) {
+    let Some(rest) = text.strip_prefix(REPLY_BEGINS) else {
+        return (None, text);
+    };
+    let end = format!("\n{REPLY_ENDS}");
+    match rest.rfind(&end) {
+        Some(at) => (
+            Some(rest[..at].trim_start_matches('\n')),
+            rest[at + end.len()..].trim_start_matches(['\n', '\r']),
+        ),
+        None => (None, text),
+    }
+}
+
+/// A user's words as they were sent: without a reply the driver gave back before them.
+pub fn without_reply(text: &str) -> &str {
+    split_reply(text).1
 }
 
 /// Adds what one answer spent to what the answers before it in the same work spent: every
@@ -203,6 +255,37 @@ mod tests {
         assert!(sent.len() < REPLY_MOST + 300);
         assert!(sent.ends_with(&format!("é\n{REPLY_ENDS}\n\nB")));
         assert_eq!(without_reply(&sent), "B");
+        // What is kept begins at a line.
+        let lines = "line of the list\n".repeat(REPLY_MOST / 8);
+        let sent = with_reply(&lines, "B");
+        assert!(sent.contains(&format!("{REPLY_LEFT_OUT}\nline of the list\n")));
+    }
+
+    #[test]
+    fn the_reply_given_back_is_read_back_whole_and_a_block_it_left_open_is_closed() {
+        let sent = with_reply("1. Pho\n2. Ramen\n", "Stop.");
+        assert_eq!(split_reply(&sent), (Some("1. Pho\n2. Ramen"), "Stop."));
+        assert_eq!(split_reply("Stop."), (None, "Stop."));
+        // A reply that quotes the end line keeps it: the last one ends the reply.
+        let quoting = format!("It says {REPLY_ENDS} here:\n{REPLY_ENDS}\nand more");
+        let sent = with_reply(&quoting, "Stop.");
+        assert_eq!(split_reply(&sent), (Some(quoting.as_str()), "Stop."));
+        // A block the cut left open is closed, by its own kind of fence.
+        let sent = with_reply("Run:\n```sh\necho a\n", "Stop.");
+        assert_eq!(split_reply(&sent).0, Some("Run:\n```sh\necho a\n```"));
+        let sent = with_reply("~~~\nx\n~~~\n```\ny", "Stop.");
+        assert_eq!(split_reply(&sent).0, Some("~~~\nx\n~~~\n```\ny\n```"));
+        assert_eq!(open_fence("```\n~~~\n```"), None);
+    }
+
+    #[test]
+    fn the_cut_is_off_for_the_usual_words_for_off() {
+        assert!(cuts_replies(None));
+        assert!(cuts_replies(Some("on")));
+        assert!(cuts_replies(Some("")));
+        for off in ["off", "OFF", " 0 ", "false", "No"] {
+            assert!(!cuts_replies(Some(off)), "{off}");
+        }
     }
 
     #[test]

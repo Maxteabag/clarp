@@ -68,6 +68,8 @@ struct Sent {
     unread: Option<String>,
     /// What the answers of the chain it took over spent.
     spent: Value,
+    /// The prompt was cancelled for a cut: its answer, whenever it comes, is no Stop.
+    cut: bool,
 }
 
 /// An answer given while a newer prompt was on its way: the chain of work it ends, waiting for
@@ -123,11 +125,12 @@ pub(super) fn converse(
                 .collect(),
             unread: None,
             spent: Value::Null,
+            cut: false,
         }]),
         held: None,
         cut: None,
         after_cut: Vec::new(),
-        cuts_replies: std::env::var(steer::CUT_ENV).map_or(true, |said| said.trim() != "off"),
+        cuts_replies: steer::cuts_replies(std::env::var(steer::CUT_ENV).ok().as_deref()),
         outcome: None,
         given: BTreeSet::new(),
     };
@@ -289,7 +292,14 @@ impl Prompts<'_> {
             .notify(method::SESSION_CANCEL, json!({"sessionId": self.session}));
         held.cancelled = true;
         held.until = Instant::now() + CUT_ANSWER_WITHIN;
+        if let Some(front) = self.flight.front_mut() {
+            front.cut = true;
+        }
+        // What agy writes for the cancelled prompt is left out until its answer, and what it
+        // writes after that is a message of its own.
         turn.record.cut = Cut::Cutting;
+        turn.record.writing = false;
+        turn.record.written = super::Written::default();
         // Not `cancel`, which is a Stop's: the turn goes on.
         emit(&said(
             "cut",
@@ -314,7 +324,11 @@ impl Prompts<'_> {
         let Some(held) = self.cut.take() else {
             return Ok(());
         };
-        turn.record.cut = Cut::None;
+        // A cancelled prompt not answered yet (the bound passed) still has what it writes
+        // left out, until its answer.
+        if !self.flight.iter().any(|sent| sent.cut) {
+            turn.record.cut = Cut::None;
+        }
         let mut text = held.text;
         if cut {
             let reply = turn
@@ -376,6 +390,7 @@ impl Prompts<'_> {
             covers: Vec::new(),
             unread: Some(uuid),
             spent: Value::Null,
+            cut: false,
         });
         Ok(())
     }
@@ -402,18 +417,25 @@ impl Prompts<'_> {
     }
 
     fn answered(&mut self, turn: &mut Turn, id: u64, mut answer: Answer) -> Result<()> {
-        if self.cut.is_some() && self.flight.front().is_some_and(|sent| sent.id == id) {
-            // The prompt a message was held for answered: after a cut, as cancelled. The held
-            // message goes first, so that this answer hands the work over to it, as any
-            // answer given while a newer prompt is on its way. A cut is no Stop: should this
-            // answer stand alone (the message refused), it reads as ended.
-            let cut = self.cut.as_ref().is_some_and(|held| held.cancelled);
-            if cut
+        if self.flight.iter().any(|sent| sent.id == id && sent.cut) {
+            // The answer of a prompt cancelled for a cut, in time or after the bound: agy
+            // stopped where it was cut. A cut is no Stop: should this answer stand alone (the
+            // message refused), it reads as ended. What agy writes next is a message of its own.
+            if turn.stopping.is_none()
                 && let Answer::Result(result) = &mut answer
                 && result["stopReason"] == "cancelled"
             {
                 result["stopReason"] = json!("end_turn");
             }
+            turn.record.cut = Cut::None;
+            turn.record.writing = false;
+            turn.record.written = super::Written::default();
+        }
+        if self.cut.is_some() && self.flight.front().is_some_and(|sent| sent.id == id) {
+            // The prompt a message was held for answered. The held message goes first, so that
+            // this answer hands the work over to it, as any answer given while a newer prompt
+            // is on its way.
+            let cut = self.cut.as_ref().is_some_and(|held| held.cancelled);
             turn.record.writing = false;
             turn.record.written = super::Written::default();
             self.release(turn, cut)?;

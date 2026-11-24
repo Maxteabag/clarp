@@ -14,6 +14,12 @@
 //! `tests/fixtures/agy-history-vectors.json`: also where it surprises. Tools of steps that
 //! never said anything are shown with the next thing the agent says, and with nothing when
 //! the user speaks first. A step of agy 1.1 is a tool by its kind.
+//!
+//! One thing here the Python Host does not read: a message the Rust Host's agy-acp driver sent
+//! after it cut agy's reply carries that reply before the user's words, between marker lines
+//! (`clarp_acp::agy::steer::with_reply`), and is read as the agent's cut reply and then the
+//! user's message. The Python Host never sends one; reading such a conversation, it would show
+//! the marked block as part of the user's message.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -137,16 +143,20 @@ pub(super) fn title(text: &str) -> String {
 }
 
 /// What the user wrote: what stands within the tool's mark, where it has one, without what
-/// a Host wrote before it or the reply a cut gave back.
-fn asked(content: Option<&Value>) -> String {
+/// a Host wrote before it; and the reply a cut gave back before it, if one did.
+fn asked(content: Option<&Value>) -> (Option<String>, String) {
     let Some(Value::String(content)) = content else {
-        return String::new();
+        return (None, String::new());
     };
     let within = ASKED.captures(content).and_then(|found| found.get(1));
     let said = within.map_or(content.as_str(), |found| found.as_str());
-    // A message that cut agy's reply carries that reply before it: the user's words are what
-    // follows (`clarp_acp::agy::steer::with_reply`).
-    steer::without_reply(without_preamble(python::strip(said))).to_string()
+    // A message that cut agy's reply carries that reply before it
+    // (`clarp_acp::agy::steer::with_reply`): agy keeps no other copy of it.
+    let (reply, words) = steer::split_reply(python::strip(said));
+    (
+        reply.map(str::to_string),
+        without_preamble(words).to_string(),
+    )
 }
 
 /// A text agy wrote as JSON once more, as the text it is.
@@ -548,6 +558,28 @@ impl Reading {
         }
     }
 
+    /// The reply a message cut short, as agy kept it only in that message: the agent's turn
+    /// before it. Where the agent's last turn holds the start of it (text agy kept from before
+    /// a tool), that turn is the reply.
+    fn cut_reply(&mut self, reply: String, at: &str) {
+        if reply.trim().is_empty() {
+            return;
+        }
+        if let Some(last) = self.turns.last_mut().filter(|last| !last.by_user)
+            && reply.starts_with(last.text.trim_end())
+        {
+            last.text = reply;
+            return;
+        }
+        self.turns.push(Turn {
+            by_user: false,
+            text: reply,
+            at: at.to_string(),
+            tools: Vec::new(),
+            order: Vec::new(),
+        });
+    }
+
     /// The turns as a conversation has them (`_finish_tools`).
     fn turns(self) -> Vec<Value> {
         let used = &self.used;
@@ -605,7 +637,10 @@ pub fn agy(transcript: &str) -> Vec<Value> {
         match kind.as_str() {
             "USER_INPUT" => {
                 reading.flush(&at);
-                let said = asked(row.get("content"));
+                let (reply, said) = asked(row.get("content"));
+                if let Some(reply) = reply {
+                    reading.cut_reply(reply, &at);
+                }
                 if !said.is_empty() {
                     reading.turns.push(Turn {
                         by_user: true,
