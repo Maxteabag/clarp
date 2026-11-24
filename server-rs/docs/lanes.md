@@ -47,8 +47,7 @@ Top-level keys of the Host's `config.toml`, read anew at each turn. They are off
 ```toml
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
-lane_memory_mb = 2200         # the cap: what all lanes may hold together, in MiB (unset: none yet)
-codex_lane_most = 8           # and, as before, at most this many lanes
+lane_memory_mb = 2200         # what all lanes of the Host may hold together, in MiB (the default)
 ```
 
 - **One switch per tool.** `codex_chat_lane` today; `claude_chat_lane`, and Muse's and
@@ -56,7 +55,7 @@ codex_lane_most = 8           # and, as before, at most this many lanes
 - **The idle time is shared by every tool.** It keeps the name it had when Codex had the only
   lane, so an installed config means exactly what it meant.
 - **The cap is a memory budget, in bytes, one for every lane of the Host** (the lead's rule,
-  issue 763). It is not a count of lanes. The weight of a lane
+  issues 761 and 763). It is not a count of lanes: the bytes decide. The weight of a lane
   differs by tool: measured on 24 Nov 2026, an idle Codex lane about 270 MB, a Muse serve
   274-301 MB, an OpenCode serve 571-590 MB. A count alone would let eight OpenCode lanes take
   about 5 GB, so the budget counts bytes. Each lane's memory comes from, in this order:
@@ -65,17 +64,17 @@ codex_lane_most = 8           # and, as before, at most this many lanes
     and what the tool started);
   - else its tool's typical size.
   The lane about to start counts at its tool's typical size.
-- **Room is made before a lane starts.** The idle lanes leave, longest idle first, until the
-  count is under the cap and the memory is within the budget. A lane that runs a turn, or whose
+- **Room is made before a lane starts.** The idle lanes leave, longest idle first, until what
+  all lanes hold, the new one included, is within the budget. A lane that runs a turn, or whose
   work may continue (an active goal), refuses to leave and counts.
-- **`codex_lane_most` keeps its meaning as an extra count limit.** An installed config means
-  what it meant: at most that many lanes, 8 unless set. With Codex alone the count binds about
-  where a budget of 2,200 MB would: eight idle lanes at about 270 MB each.
-- **The budget's default is the lead's to set.** Until he does, it is unset, and only the count
-  holds, exactly as before the layer. The designs of the Muse and OpenCode drivers name 2,200 MB.
-  The other way to keep the count's meaning would be to map it onto the budget (`codex_lane_most`
-  times a Codex lane's typical size); it was not taken, because a measured lane can weigh more
-  than its typical size, and the same config would then keep fewer lanes than it does today.
+- **The default is 2,200 MB**, the figure the owner approved for the Codex lane: eight lanes at
+  about 270 MB. Switching on lanes of other tools never quietly raises what he agreed to. With
+  Codex as the only driver, the default keeps about eight Codex lanes, as the count of eight did.
+  Lanes that measure heavier than 270 MB leave sooner, because the bytes decide.
+- **`codex_lane_most` is no longer read.** The budget replaced the count (the lead's decision of
+  24 Nov 2026). A Host whose config still has it logs once, at its start, that it is not read
+  and that `lane_memory_mb` holds lanes now. `install-host` still carries the key through an
+  install, so nothing in the owner's file changes behind his back.
 - **Who sets them.** `install-host` carries these keys through an install. Switching a lane on
   for the owner's agents is his decision.
 

@@ -4,7 +4,7 @@
     server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--codex-lane] [--rounds N] [--cases LIST]
                                         [--bin DIR] [--out DIR] [--model ROW=MODEL ...]
                                         [--effort ROW=EFFORT ...] [--keep-host]
-                                        [--lane-idle-minutes N] [--lane-most N] [--lane-settle SECONDS]
+                                        [--lane-idle-minutes N] [--lane-memory-mb N] [--lane-settle SECONDS]
     server-rs/tools/turn-timings report RUN_DIR
 
 `run` starts a Host of its own (its own data, port, token and an empty configuration folder),
@@ -1269,8 +1269,8 @@ def lane_settings(args) -> dict:
     out = {}
     if args.lane_idle_minutes is not None:
         out["codex_lane_idle_minutes"] = str(args.lane_idle_minutes)
-    if args.lane_most is not None:
-        out["codex_lane_most"] = str(args.lane_most)
+    if args.lane_memory_mb is not None:
+        out["lane_memory_mb"] = str(args.lane_memory_mb)
     return out
 
 
@@ -1617,7 +1617,8 @@ def main() -> int:
     go.add_argument("--codex-lane", action="store_true",
                     help="add the codex-lane row: Codex with codex_chat_lane on in the disposable Host's config")
     go.add_argument("--lane-idle-minutes", type=int, default=None, help="codex_lane_idle_minutes for the lane row")
-    go.add_argument("--lane-most", type=int, default=None, help="codex_lane_most for the lane row")
+    go.add_argument("--lane-memory-mb", type=int, default=None,
+                    help="lane_memory_mb for the lane row: what all lanes may hold together (2200 unless set)")
     go.add_argument("--lane-settle", type=float, default=30.0,
                     help="seconds between the two looks at the idle lanes' memory")
     again = sub.add_parser("report")

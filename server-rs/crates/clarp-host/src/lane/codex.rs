@@ -81,7 +81,7 @@ impl Driver for Lane {
         };
         let place = self
             .endpoint
-            .place(&profile.run_dir, thread, &digest, kept, settings.room)?;
+            .place(&profile.run_dir, thread, &digest, kept, settings.budget)?;
         if place == Place::Kept {
             return Ok(None);
         }
