@@ -64,7 +64,11 @@ fn a_helpers_chat_holds_the_turns_other_agents_give_it_and_another_agents_does_n
     let place = Place::new("helper-conversation");
     let claude = place.root.join("claude");
     program(&claude, CLAUDE);
-    let host = place.start_in("", &[], &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())]);
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
     host.post(
         "/agents",
         json!({"name": "Boss", "session": "boss", "backend": "claude"}),

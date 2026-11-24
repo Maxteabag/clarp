@@ -965,5 +965,4 @@ mod tests {
         let item = recorder.log().find(id).unwrap().unwrap();
         Entry::from_item(&item).unwrap().unwrap()
     }
-
 }
