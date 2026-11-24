@@ -37,6 +37,8 @@ def stopped(*_):
     raise SystemExit(0)
 
 signal.signal(signal.SIGTERM, stopped)
+# Claude Code is asked to stop with an interrupt first.
+signal.signal(signal.SIGINT, stopped)
 
 def send(kind, **fields):
     print(json.dumps({"type": kind, "session_id": sid, **fields}), flush=True)
