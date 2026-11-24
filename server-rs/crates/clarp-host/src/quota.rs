@@ -598,7 +598,11 @@ impl Desk {
             }
         }
         if let Ending::Completed(at_ms) = how {
-            kept.completed(at_ms.min(with.now_ms));
+            // The turn completed after all it said, its word of the windows with it, also
+            // where both have one millisecond: a turn ends at its tool's own end line, which
+            // can come in the same millisecond as that word (issue 750).
+            let after_its_word = word.as_ref().map_or(at_ms, |(_, said)| at_ms.max(said + 1));
+            kept.completed(after_its_word.min(with.now_ms));
         }
         if kept != before {
             known.keep_standing(with.fleet, kept.clone()).await;

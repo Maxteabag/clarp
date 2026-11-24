@@ -237,6 +237,7 @@ pub const NOT_READ: &[&str] = &[
     "INGRID",
     "LS",
     "POST",
+    "SIGINT",
     "SIGKILL",
     "SIGTERM",
     "SIGUSR1",
