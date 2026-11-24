@@ -26681,7 +26681,8 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     assert!(!host.conversation(&echo).contains(&said("user", "second")));
 
     // One more is taken back, and the last is sent by hand: nothing waits any more, and the
-    // hold is over without a resume. That is told with the turn that began, not by itself.
+    // hold stays all the same: a Send Now runs one message past it and ends nothing. Nothing
+    // of the queue is told but the turn that began.
     let told_before = plain_news().len();
     let before = queue()["revision"].as_u64().unwrap();
     host.ask("DELETE", "/turn-queue/m2", None);
@@ -26695,8 +26696,8 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
             .contains(&said("assistant", "fifth"))
             && host.state(&echo) == "done"
     });
-    let free = queue();
-    assert_eq!((&free["paused"], waiting().len()), (&json!(false), 0));
+    let still = queue();
+    assert_eq!((&still["paused"], waiting().len()), (&json!(true), 0));
     assert_eq!(plain_news().len(), told_before, "{:?}", plain_news());
     let began: Vec<Value> = {
         let heard = heard.lock().unwrap();
@@ -26710,7 +26711,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     assert_eq!(began.len(), 1, "{began:?}");
     assert_eq!(
         (&began[0]["queue_paused"], &began[0]["queue_depth"]),
-        (&json!(false), &json!(0))
+        (&json!(true), &json!(0))
     );
     // What was taken back is nowhere: not in the conversation, and it is not answered.
     let all = host.conversation(&echo);
@@ -26719,7 +26720,7 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
     }
 
     // A hold that holds one thing ends when that thing is taken back, and what is left for
-    // the agent afterwards runs.
+    // the agent afterwards runs. What a person says to the free agent runs past the hold.
     host.send(&echo, "sleep 60", "m6");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     leave("seventh", "m7");
