@@ -2,7 +2,8 @@
 //!
 //! Two lines are a lane's own. `steer.open` says the turn takes more of the user's words while
 //! it runs; an exec turn never prints it. `steer.read` names the id of words Codex took into
-//! the turn: it is the only evidence that a steered message was read.
+//! the turn: it is the only evidence that a steered message was read. `turn.progress` says the
+//! model is still writing, at most every [`PROGRESS_EVERY_MS`].
 
 use std::collections::BTreeSet;
 use std::io;
@@ -10,6 +11,12 @@ use std::path::Path;
 
 use clarp_spool::{Entry, Record, ShimEvent, SpoolWriter};
 use serde_json::{Value, json};
+
+/// How long the model may write text or reasoning without a line in the spool. Text is not kept
+/// as it is written, so a long reply with nothing else in it would leave the spool silent, and
+/// the Host counts a turn's silence from its last line (the stall check; the lead's ruling of
+/// 24 Nov 2026).
+pub const PROGRESS_EVERY_MS: i64 = 30_000;
 
 pub struct TurnSpool {
     writer: SpoolWriter,
@@ -20,6 +27,8 @@ pub struct TurnSpool {
     steered: BTreeSet<String>,
     /// The ids whose reading is in the spool.
     read: BTreeSet<String>,
+    /// When the last line of Codex's output was written.
+    last_out: i64,
 }
 
 impl TurnSpool {
@@ -52,6 +61,7 @@ impl TurnSpool {
             total: None,
             steered: BTreeSet::new(),
             read: BTreeSet::new(),
+            last_out: now_ms,
         };
         spool.record(
             Entry::Shim(ShimEvent::Session {
@@ -127,7 +137,16 @@ impl TurnSpool {
             }
             // A reply is kept whole when it is complete. The apps do not show text as it is
             // written (the owner's decision of 23 Nov 2026), and a line per delta that carried
-            // the whole text so far made a spool grow with the square of the reply.
+            // the whole text so far made a spool grow with the square of the reply. Only that the
+            // model still writes is said, now and then.
+            "item/agentMessage/delta"
+            | "item/reasoning/textDelta"
+            | "item/reasoning/summaryTextDelta"
+            | "item/reasoning/summaryPartAdded" => {
+                if now_ms.saturating_sub(self.last_out) >= PROGRESS_EVERY_MS {
+                    self.output(json!({"type": "turn.progress"}), now_ms)?;
+                }
+            }
             "thread/tokenUsage/updated" => {
                 let total = &params["tokenUsage"]["total"];
                 self.total = total["inputTokens"]
@@ -174,6 +193,7 @@ impl TurnSpool {
     }
 
     fn output(&mut self, value: Value, now_ms: i64) -> io::Result<()> {
+        self.last_out = self.last_out.max(now_ms);
         self.record(Entry::Out(value.to_string()), now_ms)
     }
 
@@ -213,4 +233,49 @@ fn normalize_item(raw: &Value) -> Option<Value> {
         }
     }
     Some(Value::Object(item))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use clarp_spool::SpoolReader;
+
+    #[test]
+    fn a_long_reply_says_it_is_still_written_at_most_every_thirty_seconds() {
+        let dir = std::env::temp_dir().join(format!("clarp-turn-progress-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("turn.jsonl");
+        let mut spool = TurnSpool::begin(&path, "thread".into(), "turn".into(), 1, 0).unwrap();
+        let params = json!({"threadId": "thread", "turnId": "turn", "itemId": "m", "delta": "x"});
+        for (method, at) in [
+            ("item/agentMessage/delta", 1_000),
+            ("item/reasoning/textDelta", 10_000),
+            ("item/agentMessage/delta", 31_500),
+            ("item/reasoning/summaryTextDelta", 40_000),
+            ("item/agentMessage/delta", 62_000),
+        ] {
+            assert!(!spool.notification(method, &params, at).unwrap());
+        }
+        let item = json!({"threadId": "thread", "turnId": "turn",
+            "item": {"type": "agentMessage", "id": "m", "text": "done"}});
+        spool.notification("item/completed", &item, 70_000).unwrap();
+        // Another turn's deltas say nothing of this one.
+        let other = json!({"threadId": "thread", "turnId": "other", "itemId": "m", "delta": "x"});
+        spool.notification("item/agentMessage/delta", &other, 200_000).unwrap();
+        spool.notification("item/agentMessage/delta", &params, 90_000).unwrap();
+
+        let progress: Vec<i64> = SpoolReader::new(path)
+            .read_from(0)
+            .unwrap()
+            .records
+            .iter()
+            .filter(|record| matches!(&record.entry, Entry::Out(line) if line.contains("turn.progress")))
+            .map(|record| record.t)
+            .collect();
+        // At 31.5 s and 62 s; not at 90 s, 20 s after the whole reply was written.
+        assert_eq!(progress, [31_500, 62_000]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
