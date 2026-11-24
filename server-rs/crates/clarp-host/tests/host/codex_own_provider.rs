@@ -385,8 +385,10 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
         ],
     );
     let voice = json!({"cartesia": "fixture-voice"}).to_string();
+    // Each agent has a voice of its own: two agents never share one.
     let make = |name: &str, more: Value| {
-        let mut body = json!({"name": name, "backend": "scripted", "voice_id": voice});
+        let own = json!({"cartesia": format!("fixture-voice-{name}")}).to_string();
+        let mut body = json!({"name": name, "backend": "scripted", "voice_id": own});
         body.as_object_mut()
             .unwrap()
             .extend(more.as_object().unwrap().clone());
