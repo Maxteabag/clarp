@@ -217,7 +217,8 @@ No trait or hook is built for drivers that do not exist yet (REBUILD.md section 
 driver's pull request adds what it needs, next to what Codex has, and moves into the layer what
 two drivers then share. Named here so that nothing is forgotten:
 
-- **Claude** (stream-json on stdin, issue 761 step 2, after #750 and #747):
+- **Claude** (stream-json on stdin, issue 761 step 2, after #750 and #747; the full list is the
+  last section):
   - its switch;
   - the turn-identity file read by its background hook (`has_turn` reads the variable today);
   - a lane variant of the hook's words, which say "one Claude process per turn";
@@ -247,5 +248,53 @@ two drivers then share. Named here so that nothing is forgotten:
 Every driver runs its claims in the lane process, as Codex does. No kept process is lent to a
 separate per-turn driver.
 
-What in Clarp assumes a process per turn, and must be held by the Claude driver before
-`claude_chat_lane` exists, is listed in issue 761.
+## What step 2 (Claude) must handle: what assumes a fresh Claude process per turn
+
+Checked on 24 Nov 2026 against the Rust Host (the Python Host noted where it differs).
+
+**Hooks.**
+- **SessionStart.** Neither Host installs or passes a SessionStart hook, so nothing of Clarp's
+  depends on it firing every turn. A kept Claude process fires it once.
+- **The one hook the Rust Host passes** is `PreToolUse` on `Bash`, which runs `clarp-shim
+  claude-background-hook <agent>` (`launcher.rs` `claude_settings`, joined into `--settings` for
+  turns and forks; the handler is the shim's `background_hook` and `clarp-provider-hook`). It
+  fires per tool call, so it survives a kept process. Two things in it assume one process per
+  turn:
+  - Its `has_turn` reads `CLARP_PROVIDER_TURN`, which a lane removes. It must also read the turn
+    file (`CLARP_PROVIDER_TURN_FILE`), as `clarp-host tool` does.
+  - Its words (`TURN_CONTEXT`) tell the model "Clarp runs one Claude process per turn ... that
+    process exits and this task stops with it". In a kept process that is false, so it needs a
+    lane variant.
+- **The Python Host's plugin hooks** (UserPromptSubmit, PreToolUse, PostToolUse, Stop,
+  PreCompact, Notification, SubagentStop) fire per message or per tool call. They exit at once
+  under the Rust Host (`CLARP_RUST_MANAGED_TURN`).
+
+**What is per process today and would break or freeze in a kept process.**
+- **The turn token** (`CLARP_PROVIDER_TURN`, set per launch). A kept process would present
+  turn 1's token on every later turn. That breaks the trace of artifacts, leader decisions and
+  message provenance. The fix is the layer's turn file. A detached worker of an earlier turn
+  then reads a later turn's token, as with Codex.
+- **The provider boundary** (`helper_source::boundary`, `provider_boundary`). It is recorded
+  per launch, and the earlier attempt's background tasks are stopped as
+  `provider_turn_exited_without_result`. In a lane those tasks still run. The driver must record
+  the boundary for ownership only, and the exit only when the lane's process exits.
+- **A read-only turn's edit guard** (`--settings` with the fork's edit guard and `CLARP_FORK=1`,
+  as for the transit summary). A kept process cannot take a guard for one turn, so such a turn
+  runs per turn.
+- **`--model`, `--effort`, `--append-system-prompt`.** Fixed at spawn, so they go into the
+  lane's digest and a change restarts the lane.
+- **`--resume`, `--session-id`, `--resume-session-at`, `--resume-drops-turn`** (takeover and
+  rewind). These need their own process, and the lane makes way first.
+- **Per-turn reminders** (persona, spoken, call). They travel in the stdin user line and
+  survive. On a takeover they go into `--append-system-prompt`, which is covered above.
+- **`pool.guard_turn`** (`flock --shared` on the login lock for the process's life). An idle kept
+  process would hold the lock and block the seat switch. The driver passes the login lock and
+  file to the lane instead, which holds the lock only while it holds a claim, as Codex's lane
+  does.
+- **The per-launch MCP config file** (`mcp::configure`), removed when the launch thread ends.
+  The MCP set goes into the digest, and the file must live as long as the lane.
+- **`gate_steering`, `CLARP_SESSION`, the Host's address and token.** These are per Host or per
+  agent and survive. A Host that comes back on another address or token must retire the lane,
+  so the address goes into the digest.
+- **The shim's per-turn parts** (spool, socket, `--stdin-until result`, `launch_permitted`).
+  The lane's claim, turn socket and spool copy replace them, as for Codex.
