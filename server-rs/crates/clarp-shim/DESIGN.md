@@ -431,6 +431,15 @@ command in a group of its own, and a terminal command in a session of its own. T
 ruling on review finding F3: no cgroups. The Python Host leaves these commands
 running (`docs/differences.md`).
 
+## Silence while the model writes (24 Nov 2026)
+
+Text is not spooled as it is written. A long reply with no other item would leave the spool
+silent, and the Host counts a turn's silence from its last spool line (the stall check:
+`stalled_turn_minutes`, with a user's message waiting). So while message or reasoning deltas
+arrive, a lane turn writes `{"type":"turn.progress"}` when 30 s have passed since its last
+line. This applies to chat and goal turns. Nothing shows it: the interpreter and the steering
+reader pass over it, and only the silence clock counts it. The lead's ruling.
+
 ## Decisions (the lead, 23 Nov 2026)
 
 1. `codex_chat_lane` lands off. It is turned on for both Rust Hosts after the harness's before
