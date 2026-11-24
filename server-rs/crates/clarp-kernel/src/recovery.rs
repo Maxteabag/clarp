@@ -1,11 +1,17 @@
 //! What follows an attempt of a turn that failed.
 //!
 //! A turn is tried more than once when the failure is one that passes. A connection that
-//! dropped or a tool that stalled passes by itself: the turn waits a moment (the Python Host's
-//! rule, `turn_retry._handle_failure`: three attempts in all, a second after the first, two
-//! after the second). A provider that turned an attempt away for a moment (overloaded, or
-//! holding requests back) passes too, more slowly: the turn waits half a minute, then a
-//! minute, on the same account. One that has done nothing yet is asked the same again; one
+//! dropped or a tool that stalled passes by itself, but not always within seconds: a laptop
+//! that changes networks has none for half a minute or more. So the Host first checks whether
+//! the machine reaches the provider at all ([`after_network_check`]). Where it does not, the
+//! turn waits for the network, checked every few seconds, a quarter of an hour at most, and is
+//! tried again when it is back. Where it does, the turn is tried again after 2, 4, 8, 16 and 30
+//! seconds, a minute in all. A call's turn keeps the Python Host's shorter rule
+//! (`turn_retry._handle_failure`: three attempts in all, a second after the first, two after
+//! the second): someone listens. A provider that turned an attempt away for a moment
+//! (overloaded, or holding requests back) passes too, more slowly: the turn waits half a
+//! minute, then a minute, on the same account. Either way, one that has done nothing yet is
+//! asked the same again; one
 //! that had begun its work is told that it is taken up again and goes on from where it
 //! stands ([`continue_prompt`]). A call is not kept waiting so long: its turn ends at once.
 //! An account that is out passes when another account is put in its place, or when its limit
@@ -16,11 +22,35 @@
 
 use crate::failures;
 
-/// How many attempts a turn gets against failures that pass by themselves, the first included.
+/// How many attempts a call's turn gets against failures that pass by themselves, the first
+/// included.
 pub const MAX_ATTEMPTS: u32 = 3;
 
-/// How long the turn waits after its first attempt. Twice as long after each one more.
+/// How long a call's turn waits after its first attempt. Twice as long after each one more.
 pub const BACKOFF_BASE_MS: i64 = 1_000;
+
+/// How often the Host checks whether a turn that waits for the network has one again.
+pub const NETWORK_RECHECK_MS: i64 = 5_000;
+
+/// How long a turn waits for the network in all. A laptop that changes networks has none for
+/// half a minute or more; one that has none for a quarter of an hour is not about to, and the
+/// user is told (`failures::network_gone`).
+pub const NETWORK_WAIT_MOST_MS: i64 = 900_000;
+
+/// How long a turn waits after its first attempt that failed on its connection while the
+/// machine had a network. Twice as long after each one more, [`LINE_BACKOFF_MOST_MS`] at most.
+pub const LINE_BACKOFF_MS: i64 = 2_000;
+
+/// The longest a turn waits between two such attempts.
+pub const LINE_BACKOFF_MOST_MS: i64 = 30_000;
+
+/// How many times a turn is tried again on a connection that fails while the machine has a
+/// network: after 2, 4, 8, 16 and 30 seconds, a minute in all.
+pub const LINE_RETRIES: u32 = 5;
+
+/// How long the Host waits for its check of the network before it asks again: a check
+/// that was lost (its thread gone with the Host's) never holds a turn.
+pub const NETWORK_ANSWER_MS: i64 = 30_000;
 
 /// How long a turn waits after a first attempt its provider turned away for a moment. Twice
 /// as long after each one more. The tool has tried again by itself before it gave up, and a
@@ -118,6 +148,8 @@ pub struct Failed<'a> {
     pub attempt: u32,
     /// How many of the turn's waits so far were for an account.
     pub account_waits: u32,
+    /// How many of the turn's attempts followed a wait in which the network was gone.
+    pub offline: u32,
     /// Since when the turn has waited for an account, when it has before.
     pub account_wait_since_ms: Option<i64>,
     /// The turn has put nothing into the conversation and begun no tool, in any attempt:
@@ -141,6 +173,14 @@ pub enum Next {
     Retry { after_ms: i64, resume: bool },
     /// The turn waits for an account, and is tried at this time at the latest.
     Account { until_ms: i64 },
+    /// The turn waits for the machine's network, which the Host checks now: it ends at
+    /// `until_ms` if the network is gone and does not come back by then. `resume` as for
+    /// [`Next::Retry`].
+    Network { until_ms: i64, resume: bool },
+    /// The network is gone: the Host checks it again at this time.
+    Offline { check_at_ms: i64 },
+    /// The network did not come back in time: the turn ends and says so.
+    NetworkGone,
     /// The turn failed on its account, on a Host that runs the selector itself: the pool of
     /// the tool's accounts says whether it waits or ends. `plan`: the provider said that the
     /// account does not offer the turn's model, which is a fact about one turn and not about
@@ -152,13 +192,29 @@ pub enum Next {
 
 /// What follows the failure of an attempt of a turn, on a Host that treats accounts this way.
 pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
-    // Waits for an account are no tries against a bad line: they do not use those up.
-    let tries = failed.attempt.saturating_sub(failed.account_waits);
+    // Waits for an account are no tries against a bad line: they do not use those up. Nor
+    // are attempts that followed a wait in which the network was gone.
+    let tries = failed
+        .attempt
+        .saturating_sub(failed.account_waits)
+        .saturating_sub(failed.offline);
     match failed.kind {
-        failures::CONNECTION | failures::TIMEOUT if (1..MAX_ATTEMPTS).contains(&tries) => {
+        // Someone listens to a call: it is not kept waiting for minutes.
+        failures::CONNECTION | failures::TIMEOUT
+            if failed.in_call && (1..MAX_ATTEMPTS).contains(&tries) =>
+        {
             Next::Retry {
                 after_ms: BACKOFF_BASE_MS << (tries - 1),
                 resume: false,
+            }
+        }
+        // Whether the machine has a network says what follows: the Host checks it, and
+        // `after_network_check` says. A turn that had begun its work goes on from where it
+        // stands when it is tried again.
+        failures::CONNECTION | failures::TIMEOUT if !failed.in_call && failed.attempt >= 1 => {
+            Next::Network {
+                until_ms: failed.now_ms + NETWORK_WAIT_MOST_MS,
+                resume: !failed.nothing_done,
             }
         }
         // No other account helps with a provider that is busy. A turn that had begun its
@@ -206,6 +262,61 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
     }
 }
 
+/// What the Host found when it checked the network for a turn that waits for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Checked {
+    /// The machine reaches the provider.
+    pub up: bool,
+    /// An earlier check of this wait found the network gone.
+    pub was_gone: bool,
+    /// Which attempt of the turn failed, from 1.
+    pub attempt: u32,
+    /// How many of the turn's waits so far were for an account.
+    pub account_waits: u32,
+    /// How many of the turn's attempts followed a wait in which the network was gone.
+    pub offline: u32,
+    /// When the wait ends if the network does not come back.
+    pub until_ms: i64,
+    /// The turn had begun its work: it goes on from where it stands.
+    pub resume: bool,
+    pub now_ms: i64,
+}
+
+/// What follows a check of the network for a turn that waits for it.
+///
+/// The network came back after it was gone: the turn is tried again at once, and that try is
+/// none against a bad line. It is there and was never gone: the connection failed for another
+/// reason, and the turn is tried again after 2, 4, 8, 16 and 30 seconds, then it ends as it
+/// failed. It is gone: it is checked again in a few seconds, until the wait's end, and then
+/// the turn ends and says that the network was gone.
+pub fn after_network_check(checked: Checked) -> Next {
+    if checked.up && checked.was_gone {
+        return Next::Retry {
+            after_ms: 0,
+            resume: checked.resume,
+        };
+    }
+    if checked.up {
+        let tries = checked
+            .attempt
+            .saturating_sub(checked.account_waits)
+            .saturating_sub(checked.offline);
+        if !(1..=LINE_RETRIES).contains(&tries) {
+            return Next::Fail;
+        }
+        return Next::Retry {
+            after_ms: (LINE_BACKOFF_MS << (tries - 1)).min(LINE_BACKOFF_MOST_MS),
+            resume: checked.resume,
+        };
+    }
+    if checked.now_ms >= checked.until_ms {
+        return Next::NetworkGone;
+    }
+    Next::Offline {
+        check_at_ms: (checked.now_ms + NETWORK_RECHECK_MS).min(checked.until_ms),
+    }
+}
+
 /// What the tool is told when a turn is taken up again after it waited for an account: the
 /// Python Host's words (`turn_launcher._resume_after_account_switch`), in the envelope its
 /// transcript reader knows. `relapsed`: the turn has been told once already, and the account
@@ -229,12 +340,14 @@ pub fn resume_prompt(backend: &str, request: &str, relapsed: bool) -> String {
 }
 
 /// What the tool is told when a turn that had begun its work is taken up again after its
-/// provider turned an attempt away for a moment: it goes on from where the conversation
-/// stands, in an envelope its transcript reader knows, as [`resume_prompt`]'s.
+/// provider turned an attempt away for a moment, or its connection to the provider was lost:
+/// it goes on from where the conversation stands, in an envelope its transcript reader
+/// knows, as [`resume_prompt`]'s.
 pub fn continue_prompt(request: &str) -> String {
     format!(
-        "<clarp-turn-resumed>\nThe provider held requests back for a moment and this turn \
-         stopped part way; Clarp has taken it up again on the same account. Continue the \
+        "<clarp-turn-resumed>\nThe provider held requests back for a moment, or the connection \
+         to it was lost, and this turn stopped part way; Clarp has taken it up again on the \
+         same account. Continue the \
          unfinished request from the existing conversation. Check the results of interrupted \
          operations before retrying them; do not repeat work or external actions already \
          completed. If the request is already complete, report that and stop.\n\n\
@@ -251,6 +364,7 @@ mod tests {
             kind,
             attempt,
             account_waits: 0,
+            offline: 0,
             account_wait_since_ms: None,
             nothing_done: false,
             busy: false,
@@ -308,32 +422,208 @@ mod tests {
     fn a_turn_taken_up_after_a_busy_provider_goes_on_from_where_it_stands() {
         let told = continue_prompt("count the files");
         assert!(told.starts_with("<clarp-turn-resumed>\n"));
+        assert!(told.contains("or the connection to it was lost"));
         assert!(told.ends_with("\nOriginal request:\ncount the files\n</clarp-turn-resumed>"));
         assert!(told.contains("do not repeat work or external actions already completed"));
     }
 
     #[test]
-    fn a_failure_that_passes_is_tried_three_times_in_all() {
+    fn a_calls_failure_that_passes_is_tried_three_times_in_all() {
         for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
             for kind in [failures::CONNECTION, failures::TIMEOUT] {
+                let calling = |attempt| Failed {
+                    in_call: true,
+                    ..failed(kind, attempt)
+                };
                 assert_eq!(
-                    after_failed_attempt(failed(kind, 1), accounts),
+                    after_failed_attempt(calling(1), accounts),
                     Next::Retry {
                         after_ms: 1_000,
                         resume: false
                     }
                 );
                 assert_eq!(
-                    after_failed_attempt(failed(kind, 2), accounts),
+                    after_failed_attempt(calling(2), accounts),
                     Next::Retry {
                         after_ms: 2_000,
                         resume: false
                     }
                 );
-                assert_eq!(after_failed_attempt(failed(kind, 3), accounts), Next::Fail);
-                assert_eq!(after_failed_attempt(failed(kind, 4), accounts), Next::Fail);
+                assert_eq!(after_failed_attempt(calling(3), accounts), Next::Fail);
+                assert_eq!(after_failed_attempt(calling(4), accounts), Next::Fail);
                 // An attempt that has no number was none.
+                assert_eq!(after_failed_attempt(calling(0), accounts), Next::Fail);
+            }
+        }
+    }
+
+    #[test]
+    fn a_connection_that_fails_makes_the_turn_wait_for_the_network_on_any_host() {
+        for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
+            for kind in [failures::CONNECTION, failures::TIMEOUT] {
+                // However often it was tried: whether the network is there says what follows.
+                for attempt in [1, 2, 3, 9] {
+                    for nothing_done in [true, false] {
+                        let failure = Failed {
+                            nothing_done,
+                            ..failed(kind, attempt)
+                        };
+                        assert_eq!(
+                            after_failed_attempt(failure, accounts),
+                            Next::Network {
+                                until_ms: 10_000 + NETWORK_WAIT_MOST_MS,
+                                resume: !nothing_done
+                            },
+                            "{kind}, attempt {attempt}"
+                        );
+                    }
+                }
                 assert_eq!(after_failed_attempt(failed(kind, 0), accounts), Next::Fail);
+            }
+        }
+    }
+
+    fn checked(up: bool, attempt: u32) -> Checked {
+        Checked {
+            up,
+            was_gone: false,
+            attempt,
+            account_waits: 0,
+            offline: 0,
+            until_ms: 10_000 + NETWORK_WAIT_MOST_MS,
+            resume: true,
+            now_ms: 10_000,
+        }
+    }
+
+    #[test]
+    fn a_turn_whose_network_is_gone_waits_for_it_and_goes_on_when_it_is_back() {
+        // Gone: checked again in five seconds.
+        assert_eq!(
+            after_network_check(checked(false, 1)),
+            Next::Offline {
+                check_at_ms: 15_000
+            }
+        );
+        // Back after it was gone: tried again at once. A turn that had begun its work goes
+        // on from where it stands; one that had done nothing is asked again.
+        for resume in [true, false] {
+            let back = Checked {
+                was_gone: true,
+                resume,
+                now_ms: 400_000,
+                ..checked(true, 1)
+            };
+            assert_eq!(
+                after_network_check(back),
+                Next::Retry {
+                    after_ms: 0,
+                    resume
+                }
+            );
+        }
+        // However often the network was gone before: each time it is back the turn goes on.
+        let often = Checked {
+            was_gone: true,
+            offline: 7,
+            ..checked(true, 8)
+        };
+        assert_eq!(
+            after_network_check(often),
+            Next::Retry {
+                after_ms: 0,
+                resume: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_turn_waits_a_quarter_of_an_hour_for_the_network_and_then_says_it_was_gone() {
+        assert_eq!(NETWORK_WAIT_MOST_MS, 15 * 60_000);
+        let until_ms = 10_000 + NETWORK_WAIT_MOST_MS;
+        let (mut now, mut checks) = (10_000, 0);
+        loop {
+            let next = after_network_check(Checked {
+                was_gone: checks > 0,
+                now_ms: now,
+                ..checked(false, 1)
+            });
+            match next {
+                Next::Offline { check_at_ms } => {
+                    assert!(check_at_ms > now && check_at_ms <= until_ms);
+                    now = check_at_ms;
+                    checks += 1;
+                }
+                Next::NetworkGone => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(now, until_ms, "it ends at the wait's end, and not before");
+        assert_eq!(checks, 180, "every five seconds for a quarter of an hour");
+        // The network back at the last moment still lets it go on.
+        let back = Checked {
+            was_gone: true,
+            now_ms: until_ms,
+            ..checked(true, 1)
+        };
+        assert_eq!(
+            after_network_check(back),
+            Next::Retry {
+                after_ms: 0,
+                resume: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_connection_that_fails_while_the_network_is_there_is_tried_for_a_minute() {
+        let mut waits = Vec::new();
+        for attempt in 1.. {
+            match after_network_check(checked(true, attempt)) {
+                Next::Retry { after_ms, resume } => {
+                    assert!(resume);
+                    waits.push(after_ms);
+                }
+                Next::Fail => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(waits, vec![2_000, 4_000, 8_000, 16_000, 30_000]);
+        assert_eq!(waits.iter().sum::<i64>(), 60_000, "a minute in all");
+        // Waits for an account and attempts after the network came back are no tries
+        // against a bad line.
+        let later = Checked {
+            account_waits: 2,
+            offline: 3,
+            ..checked(true, 6)
+        };
+        assert_eq!(
+            after_network_check(later),
+            Next::Retry {
+                after_ms: 2_000,
+                resume: true
+            }
+        );
+        assert_eq!(after_network_check(checked(true, 0)), Next::Fail);
+    }
+
+    #[test]
+    fn a_connection_failure_never_waits_for_an_account() {
+        for accounts in [Accounts::None, Accounts::Follow, Accounts::Select] {
+            for kind in [failures::CONNECTION, failures::TIMEOUT] {
+                for in_call in [true, false] {
+                    let next = after_failed_attempt(
+                        Failed {
+                            in_call,
+                            ..failed(kind, 1)
+                        },
+                        accounts,
+                    );
+                    assert!(
+                        !matches!(next, Next::Account { .. } | Next::Pool { .. }),
+                        "{next:?}"
+                    );
+                }
             }
         }
     }
@@ -394,6 +684,7 @@ mod tests {
                     kind: failures::USAGE_LIMIT,
                     attempt: waits + 1,
                     account_waits: waits,
+                    offline: 0,
                     account_wait_since_ms: (waits > 0).then_some(since),
                     nothing_done: false,
                     busy: false,
@@ -532,10 +823,11 @@ mod tests {
             kind: failures::CONNECTION,
             attempt: 3,
             account_waits: 2,
+            offline: 0,
             account_wait_since_ms: Some(1_000),
             nothing_done: false,
             busy: false,
-            in_call: false,
+            in_call: true,
             resets_at_ms: None,
             now_ms: 500_000,
         };
