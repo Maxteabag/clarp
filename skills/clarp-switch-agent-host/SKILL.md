@@ -1,6 +1,6 @@
 ---
 name: clarp-switch-agent-host
-description: Move a running Clarp agent's work from one machine to another - rebuild its repo and uncommitted changes at an identical path, recreate the agent with matching persona/voice/avatar, hand it a written briefing, and retire the original. Use when an agent must continue on a different host, or when consolidating agents onto one machine.
+description: Move a Clarp agent from one machine to another. Between two Rust Hosts, `clarp-host import` moves the agent itself with its conversation, and its tool's own session is carried beside it; otherwise rebuild its repo at an identical path, recreate the agent with matching persona/voice/avatar, hand it a written briefing, and retire the original. Use when an agent must continue on a different host, or when consolidating agents onto one machine.
 allowed-tools:
   - Bash
   - Read
@@ -19,6 +19,66 @@ the environment right and the *work* wrong: the agent knows which repo it is in
 but not the plan it designed, the constraints the user stated in their own words,
 or the evidence behind its own half-finished decisions. Budget most of your effort
 for step 5.
+
+## Between two Rust Hosts: the Host's own import
+
+When both machines run the Rust Host, move the agent itself. Its chat, model and
+memory go with it, and nothing is briefed. Verified on 24 Nov 2026 by moving an
+OpenCode-based agent (backend `deepseek`) from laptopstudio to the EliteBook: its
+first turn there named the last book it had sent, from memory.
+
+`clarp-host import` carries what the Host keeps: the agent's row, every
+conversation row, plans and goals with their ledger, its library, files,
+portraits and how it is heard. Afterwards the source is marked `moved` (its
+turn-start doors refuse it) and the copy here is resumed. It does **not** carry the
+tool's own session, which is the model's memory. Put that on the target before the
+import, under the same id, so the first turn resumes it.
+
+1. **Survey.** The agent must be idle on the source. Read its row in the source's
+   snapshot: `backend`, `model`, `backend_session_id`, `cwd`. The `cwd` must exist
+   on the target.
+2. **Carry the tool's own session** (per backend):
+   - OpenCode and DeepSeek (OpenCode pinned to 1.18.33 by `~/.local/bin/opencode`,
+     which the Host's PATH puts before `/usr/bin`). On the source, export with the
+     pin from a consistent copy of its database:
+     ```bash
+     umask 077; mkdir -p /var/tmp/move/xdg/opencode
+     sqlite3 "file:$HOME/.local/share/opencode/opencode.db?mode=ro" ".backup /var/tmp/move/xdg/opencode/opencode.db"
+     XDG_DATA_HOME=/var/tmp/move/xdg mise x opencode@1.18.33 -- opencode export SES_ID > /var/tmp/move/session.json
+     ```
+     Copy only `session.json` across, then on the target run `opencode import
+     session.json` (the pinned wrapper). Check the row counts:
+     `sqlite3 "file:$HOME/.local/share/opencode/opencode.db?mode=ro" "select count(*) from message where session_id='SES_ID'"`.
+     Never use `/usr/bin/opencode` (2.x). It reads only its own `session_v2` table
+     and answers "Session not found" for every session Clarp made. Under a
+     different `XDG_DATA_HOME`, mise fetches the pin again; that is harmless.
+   - Claude Code: the session file `~/.claude/projects/<cwd as a slug>/<id>.jsonl`,
+     copied with the agent stopped (two writers corrupt it). Not yet verified
+     between Rust Hosts.
+   - Others: find the tool's store first; not yet verified between Rust Hosts.
+3. **Import on the target**, reading the source through a tunnel. The Hosts listen
+   on loopback. The tokens stay in the process environment, never printed or written:
+   ```bash
+   ssh -o ExitOnForwardFailure=yes -N -L 27690:127.0.0.1:7690 SOURCE & tunnel=$!
+   export CLARP_SOURCE_TOKEN="$(ssh SOURCE "sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env" | tr -d '"')"
+   export CLARP_HOST_TOKEN="$(sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env | tr -d '"')"
+   ~/.local/share/clarp-host/bin/clarp-host import --from 127.0.0.1:27690 --session SESSION --host 127.0.0.1:7690
+   unset CLARP_SOURCE_TOKEN; kill "$tunnel"
+   ```
+   It answers in sentences: what it brought, that the source is marked moved, and
+   that the agent is resumed. If files did not all arrive, run it again with
+   `--files`.
+4. **What the agent's work needs on this machine.** Run `python3
+   ~/dotfiles/lib/vault_files.py --check` for skills' key files. A file that is
+   missing and not in `packages/vault-files.txt` goes into the vault and gets its
+   line (the `secrets` skill). Tools the agent installed itself on the source live
+   in the Host's Node toolchain (`npm root -g` in the Host's PATH) and must be
+   installed again here (for example `npm install -g playwright@<the source's version>`).
+5. **Verify.** On the target the row shows the same `backend`, `model` and
+   `backend_session_id`, with `queue_paused: false`. Send one turn, with no tools,
+   asking for something only its history knows. On the source the row shows `moved`.
+6. **Clean up** every copy of the session (both machines' `/var/tmp`): it is the
+   user's private conversation.
 
 ## Decide first: briefing or true resume?
 
