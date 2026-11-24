@@ -1344,6 +1344,8 @@ mod tests {
                     tokens_in: 12,
                     tokens_out: 3
                 },
+                // The turn's end line says the answer is whole, before the process goes.
+                Signal::Answered,
                 Signal::Ended(RunOutcome::Completed),
             ]
         );
