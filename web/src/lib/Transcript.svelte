@@ -5,7 +5,7 @@
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
   import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
-  import { withLiveEntry } from '@core/live-timeline.js';
+  import { liveSegmentItems, withLiveSegments } from '@core/live-timeline.js';
   import Turn from './Turn.svelte';
   import WorkRow from './WorkRow.svelte';
   import { foldTurns } from '@core/history-fold.js';
@@ -61,7 +61,11 @@
     ? liveInsertIndex(merged.map(e => e.item), liveState.turn) : -1);
   // These deriveds are composeTimeline (@core/live-timeline.js) in steps,
   // split so a live event that changes nothing structural rebuilds nothing.
-  let liveTimeline = $derived(withLiveEntry(merged, liveAt));
+  // A message the turn read while it ran splits it there (withLiveSegments): the
+  // turn's start and end are numbers, so a streaming event does not rebuild this.
+  let liveStarted = $derived(Number(liveState && liveState.turn && liveState.turn.started_at_ms) || 0);
+  let liveEnded = $derived(Number(liveState && liveState.turn && liveState.turn.ended_at_ms) || 0);
+  let liveTimeline = $derived(withLiveSegments(merged, liveAt, liveStarted, liveEnded));
   // Native forms (render_spec, issue 428) sit where they were published; always drawn, whatever
   // the coordination setting (docs/protocol.md). A form older than the loaded page waits for it.
   let forms = $derived(renderSpecsFor(session));
@@ -231,7 +235,7 @@
       <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
     {:else if entry.type === 'live'}
-      <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
+      <LiveTurn {liveState} items={liveSegmentItems(liveItems, entry)} explanations={live.explanations.enabled} />
     {:else if entry.type === 'artifact'}
       <RenderSpecCard row={entry.item} />
     {:else}

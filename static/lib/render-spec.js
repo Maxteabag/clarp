@@ -599,6 +599,8 @@ export async function matchesIdentity(form, identity, digest) {
 // ---- placing cards in the transcript --------------------------------------------------------
 
 function entryTime(entry, liveStartMs) {
+  // A later part of a live turn split at a steer (withLiveSegments) starts at that steer.
+  if (entry.type === 'live' && Number.isFinite(entry.from)) return entry.from;
   if (entry.type === 'live') return Number.isFinite(liveStartMs) ? liveStartMs : Infinity;
   const item = entry.item || {};
   const raw = entry.type === 'turn' ? item.timestamp : item.ts;
