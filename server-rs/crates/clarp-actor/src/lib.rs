@@ -4512,16 +4512,21 @@ impl Actor {
         }
         // Nothing was given to the tool: the turn is tried again, or ends with its sender told
         // (R121). An opening has a rule of its own, and a turn that is stopped ends. A turn
-        // the Host refused for its provider ends at once: trying again would only be refused
-        // again until the agent's configuration is put right.
-        let mismatch = failures::classify_error(reason) == failures::PROVIDER_MISMATCH;
-        let refusable = !mismatch
+        // the Host refused for its provider, or whose agent's folder is gone, ends at once:
+        // trying again would only be refused again until the agent is put right.
+        let kind = failures::classify_error(reason);
+        let starting = self.recorder.agent().stopping().is_none()
+            && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
+        if starting && let Some(dir) = failures::missing_folder(reason) {
+            self.never_run = Some(launch_refused::folder_missing_notice(dir));
+        }
+        let refusable = kind != failures::PROVIDER_MISMATCH
+            && kind != failures::FOLDER_MISSING
             && self
                 .live
                 .as_ref()
                 .is_some_and(|live| live.turn == turn && !live.opening)
-            && self.recorder.agent().stopping().is_none()
-            && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
+            && starting;
         if refusable {
             let after = after_refusal(
                 &mut self.refused,
@@ -6172,7 +6177,13 @@ impl Actor {
                         // refused before anything was sent, or ended with its sender told
                         // (R121).
                         let mut said = None;
-                        if !stopping {
+                        // The agent's folder went between the Host's look and the launch:
+                        // the turn ends at once, as it would have before the launch.
+                        let folder = failures::missing_folder(&reason)
+                            .map(launch_refused::folder_missing_notice);
+                        if !stopping && folder.is_some() {
+                            said = folder;
+                        } else if !stopping {
                             let after = if live.opening {
                                 AfterRefusal::Wait {
                                     until_ms: t.saturating_add(1_000),

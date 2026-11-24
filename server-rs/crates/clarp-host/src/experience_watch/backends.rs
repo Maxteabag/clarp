@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_kernel::conversation::Entry;
-use clarp_kernel::failures::{AUTH, INTERRUPTED, USAGE_LIMIT};
+use clarp_kernel::failures::{AUTH, FOLDER_MISSING, INTERRUPTED, USAGE_LIMIT};
 use clarp_kernel::turn::{COMPACTION, Origin, Outcome};
 use jiff::tz::TimeZone;
 use serde::{Deserialize, Serialize};
@@ -72,7 +72,8 @@ pub(crate) fn said<'a>(rows: impl IntoIterator<Item = &'a Entry>, turn: u64) -> 
 }
 
 /// How a settled turn counts: `None` for one that says nothing of its backend (a Stop, a
-/// usage limit the Hotseat handles, a cut-off, a turn replaced or taken back). `answered`
+/// usage limit the Hotseat handles, an agent whose folder is gone, a cut-off, a turn replaced
+/// or taken back). `answered`
 /// says whether the row that closed it is a reply with words in it or it left a note.
 pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Option<How> {
     match outcome {
@@ -82,7 +83,11 @@ pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Opti
             Some(How::Answered)
         }
         Outcome::Completed => Some(How::Empty),
-        Outcome::Failed { kind, .. } if kind == USAGE_LIMIT || kind == INTERRUPTED => None,
+        Outcome::Failed { kind, .. }
+            if kind == USAGE_LIMIT || kind == INTERRUPTED || kind == FOLDER_MISSING =>
+        {
+            None
+        }
         Outcome::Failed { kind, .. } if kind == AUTH => Some(How::SignIn),
         Outcome::Failed { reason, kind } => Some(How::Failed {
             reason: short(reason, kind),

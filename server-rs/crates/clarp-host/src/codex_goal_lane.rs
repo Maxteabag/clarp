@@ -153,6 +153,10 @@ impl Lane {
     ) -> io::Result<Option<Child>> {
         // A lane bound to a provider starts on that provider's configuration or not at all.
         crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
+        // Nor in a folder that is gone: the turn it was started for ends at once, as one.
+        if let Some(why) = crate::launcher::folder_gone(&profile.cwd) {
+            return Err(io::Error::new(io::ErrorKind::NotFound, why));
+        }
         let settings = Settings::read();
         let options = self.options(profile, login, thread, settings.idle_ms)?;
         let digest = options["_clarpOptionsDigest"]
