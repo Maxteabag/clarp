@@ -355,7 +355,7 @@ mod tests {
         after.bottom_y = VIEW - 900.0;
         after.bottom_h = 900.0;
         let step = movement(&frame(0, before.clone(), &[]), &frame(16, after.clone(), &["rows -0 +1 ~0"]));
-        assert!(step.is_none_or(|s| !s.counted), "no shift for the expected slide: {step:?}");
+        assert!(step.as_ref().is_none_or(|s| !s.counted), "no shift for the expected slide: {step:?}");
         // The same tall reply growing on screen in both frames slides up as
         // it grows: the follow slide too.
         let mut growing = after.clone();
