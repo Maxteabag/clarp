@@ -167,7 +167,9 @@ fn a_real_turn_that_only_answers() {
     assert_eq!(stored[3], &Signal::Ended(RunOutcome::Completed));
     // Its result says the answer is whole, after the answer and before the process goes.
     let at = |wanted: &Signal| signals.iter().position(|signal| signal == wanted).unwrap();
-    let answer = signals.iter().position(|signal| matches!(signal, Signal::Reply(_)));
+    let answer = signals
+        .iter()
+        .position(|signal| matches!(signal, Signal::Reply(_)));
     assert!(answer.unwrap() < at(&Signal::Answered));
     assert!(at(&Signal::Answered) < at(&Signal::Ended(RunOutcome::Completed)));
     // While it was written it was shown under the same name, and it ended as it was stored.
