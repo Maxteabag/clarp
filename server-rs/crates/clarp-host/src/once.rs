@@ -353,6 +353,14 @@ async fn run_with(
     keeps: Option<&[&str]>,
     (backend, prompt): (&str, &str),
 ) -> Result<String, Unanswered> {
+    // Started in a folder that is gone, the tool would fail with words that name only its
+    // program.
+    if !cwd.is_dir() {
+        return Err(Unanswered::NotStarted(format!(
+            "the folder {} no longer exists",
+            cwd.display()
+        )));
+    }
     let mut command = crate::child::one_off(&launch.program, keeps);
     command
         .process_group(0)
