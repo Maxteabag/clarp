@@ -5679,6 +5679,7 @@ impl Actor {
         let Wait::Network { until_ms, resume } = parked.wait else {
             return Ok(out);
         };
+        let failed_at = parked.since_ms;
         let Some(watch) = self.network_of(parked).filter(|watch| {
             watch.turn == turn && matches!(watch.next, NetworkStep::Asked(_))
         }) else {
@@ -5698,9 +5699,10 @@ impl Actor {
             recovery::Next::Retry { after_ms, .. } if after_ms <= 0 => {
                 self.retry_as(now_ms, watch.gone)
             }
+            // Counted from the failure, as any wait between two attempts is.
             recovery::Next::Retry { after_ms, .. } => {
                 self.network = Some(NetworkWatch {
-                    next: NetworkStep::Retry(now_ms + after_ms),
+                    next: NetworkStep::Retry((failed_at + after_ms).max(now_ms)),
                     ..watch
                 });
                 out.changed.status = true;

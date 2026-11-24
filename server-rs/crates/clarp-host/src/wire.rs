@@ -296,16 +296,16 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
             of,
         )),
         Wait::Account { .. } => None,
-        // One whose network is gone waits for it, and says so.
+        // One whose network is gone waits for it, and says so; one whose network is not
+        // checked yet is as busy as before. One whose network is there reconnects.
         Wait::Network { .. } if live.waits_for_the_network => None,
-        // One whose network is there, or not known yet, reconnects: after how long, once
-        // that is known.
-        Wait::Network { .. } => Some((
-            tries + 1,
-            live.network_retry_at_ms
-                .map_or(0, |at_ms| at_ms - parked.since_ms),
-            recovery::LINE_RETRIES + 1,
-        )),
+        Wait::Network { .. } => live.network_retry_at_ms.map(|at_ms| {
+            (
+                tries + 1,
+                at_ms - parked.since_ms,
+                recovery::LINE_RETRIES + 1,
+            )
+        }),
     }
 }
 

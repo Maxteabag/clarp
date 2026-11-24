@@ -1178,6 +1178,52 @@ mod tests {
     }
 
     #[test]
+    fn a_wait_for_the_network_is_kept_and_an_attempt_after_it_came_back_is_counted() {
+        let wait = Wait::Network {
+            until_ms: 901_300,
+            resume: true,
+        };
+        let written = serde_json::to_string(&wait).unwrap();
+        assert_eq!(
+            written,
+            r#"{"for":"network","until_ms":901300,"resume":true}"#
+        );
+        assert_eq!(serde_json::from_str::<Wait>(&written).unwrap(), wait);
+        assert!(wait.is_for_the_network() && !wait.is_for_an_account());
+        assert_eq!((wait.until_ms(), wait.resets_at_ms()), (901_300, None));
+        // A retry is written as before where the network was not gone.
+        let retried = TurnEvent::Retried {
+            at_ms: 5,
+            network_back: false,
+        };
+        assert_eq!(
+            serde_json::to_string(&retried).unwrap(),
+            r#"{"event":"retried","at_ms":5}"#
+        );
+        let older: TurnEvent = serde_json::from_str(r#"{"event":"retried","at_ms":5}"#).unwrap();
+        assert_eq!(older, retried);
+
+        let (queued, accepted) = accepted();
+        let (starting, started) = queued.start(1_100);
+        let (running, moved) = starting.running(1_200);
+        let (parked, parked_event) = running.park(
+            wait,
+            crate::failures::CONNECTION.to_owned(),
+            "EAI_AGAIN".into(),
+            1_300,
+        );
+        let (next, back) = parked.retry_as(60_000, true);
+        assert_eq!((next.offline, next.resuming, next.attempt), (1, true, 2));
+        assert_eq!(
+            serde_json::to_string(&back).unwrap(),
+            r#"{"event":"retried","at_ms":60000,"network_back":true}"#
+        );
+        // The count survives a restart: the log says it.
+        let replayed = Turn::replay([&accepted, &started, &moved, &parked_event, &back]).unwrap();
+        assert_eq!(replayed.as_ref().map(Turn::offline), Some(1));
+    }
+
+    #[test]
     fn a_turn_whose_work_had_begun_is_taken_up_and_not_given_its_message_anew() {
         for resume in [true, false] {
             let (queued, _) = accepted();
