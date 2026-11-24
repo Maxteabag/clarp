@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 172;
+pub const HOST_CONTRACT: u64 = 173;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -396,6 +396,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `turn.ended_at_ms`, `worked_ms` and the agent's state say that line. The next
     // turn is launched once the process is gone (`clarp_actor::lingering`, issue 750).
     ("turn_over_at_answer", 172),
+    // A turn whose agent's folder is gone fails at once, never tried again, as the kind
+    // `folder_missing`, with a sentence that names the folder (issue 758).
+    ("folder_missing", 173),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by

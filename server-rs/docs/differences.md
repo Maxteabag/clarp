@@ -540,6 +540,15 @@ the daily schedule.
 
 ## Rust-first features
 
+- **A turn whose agent's folder is gone says so (issue 758, Rust contract 173).** The Python
+  Host started the tool in the agent's folder and, when that folder had been removed, failed
+  with the system's words for the program it could not start. The Rust Host looks first: a
+  turn, a goal turn, a turn on the Codex chat lane or a fork of an agent whose folder is not
+  there fails at once as `folder_missing` (`failures::OWN_KINDS`), never tried again, with a
+  sentence that names the folder and says to recreate it or give the agent another one. The
+  shim says the same when the folder goes between that look and the launch. A one-off question
+  asked in a folder that is gone says so too. No try brings a folder back, so the ten tries of
+  a refused launch only put the failure off.
 - **A turn is over at its tool's own end line (issue 750, Rust contract 172).** The Python Host
   ended a turn when its tool's process exited. Claude Code prints its `result`, and Grok its end
   line, 0.7 to 2.7 seconds before it exits (Claude Code sends what it counted first), and the
