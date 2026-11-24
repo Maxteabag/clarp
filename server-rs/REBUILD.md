@@ -108,7 +108,10 @@ without it the installed release runs. Nothing is built. `turn-timings report <r
    installed Host's `peers.json` and reaches the real peer Hosts and their agents (seen on 23 Nov 2026; issue 741
    makes the Host refuse that by itself); no `--relay-config`, `--relay-also`, `--push-keys` or `--push-relay`; and
    `--launcher direct`. Before its first case, `GET /peers` on it answers an empty list. It is not run at `nice 19`
-   when its turns are timed: under load a Codex turn then took 127 s to start.
+   when its turns are timed: under load a Codex turn then took 127 s to start. Its Claude agents run with
+   `CLAUDE_CONFIG_DIR` pointed at a folder of its own that holds only a link to the live `.credentials.json`, so
+   the CLI never writes the live `~/.claude.json` or the live `~/.claude` (seen on 24 Nov 2026 without it); the
+   folder goes with the Host when it is deleted. Other tools use their live logins in place and never copy them.
 3. **The client contract does not change** in stages 1 to 3: `contract/`, `HOST_CONTRACT`, routes, payloads and
    event types are frozen for this program. The Rust Host leaves out of `FEATURES` what it does not have yet.
 4. **Main moves by fast-forward.** No force-push, no rewriting main, no secrets in commits. The lead lands
