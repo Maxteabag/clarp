@@ -815,19 +815,34 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
             Some("final"),
             "{mode}: kept, while the tool runs"
         );
+        // And it is the answer to the first message in the conversation view from the moment
+        // it was written: the work for the follow-up neither hides it now nor at the end.
+        assert_eq!(
+            view_of(&host, session, answer),
+            Some(json!("conversation")),
+            "{mode}: in the conversation, while the tool runs"
+        );
         std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
         collect_answer(&host, session, last);
-        if mode == "answered-separate" {
-            // A turn of its own for the follow-up: the answer is its own turn's, in the
-            // conversation once that turn has ended with its process.
-            wait_for("the answer in the conversation", || {
-                view_of(&host, session, answer) == Some(json!("conversation"))
-            });
-        }
+        wait_for("the follow-up's answer in the conversation", || {
+            view_of(&host, session, last) == Some(json!("conversation"))
+        });
         assert_eq!(
             stored_phase_of(&host, session, answer).as_deref(),
             Some("final"),
             "{mode}: after the turn"
+        );
+        wait_for("the turn ended", || host.state(session) == "done");
+        let rows = host.get(&format!("/log?session={session}&view=conversation"))["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["text"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [format!("case-{mode}"), answer.to_owned(), follow, last.to_owned()],
+            "{mode}: each message with its own answer, after the turn"
         );
     }
 }

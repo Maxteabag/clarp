@@ -645,11 +645,15 @@ impl<'a> Reader<'a> {
         {
             row.session_rows = self.imported_count(imported)?;
         }
-        if matches!(which, Which::Chat { .. })
-            && let Some(turn) = row.turn_number
-            && let ended = self.end(turn)?.map(|(_, seq)| *seq)
-            // Before its turn ends, only a reply can be an answer. A message read into a turn
-            // is of a turn that never ends by itself, and is conversation without an anchor.
+        let ended = match row.turn_number {
+            Some(turn) if matches!(which, Which::Chat { .. }) => {
+                Some(self.end(turn)?.map(|(_, seq)| *seq))
+            }
+            _ => None,
+        };
+        // Before its turn ends, only a reply can be an answer. A message read into a turn is of
+        // a turn that never ends by itself, and is conversation without an anchor.
+        if let (Some(turn), Some(ended)) = (row.turn_number, ended)
             && (ended.is_some() || matches!(row.entry, Entry::Reply(_)))
         {
             let anchors = self.anchors(turn)?;
