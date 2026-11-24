@@ -152,8 +152,13 @@ pub struct Desk {
     /// Whether another seat would take the turns of a tool that is near a limit or used up, by
     /// the tool and the model an agent runs on it, as the apps were last told it
     /// ([`look_again`]): the word, and for a used-up account when the pool regains room.
-    failover: std::sync::Mutex<BTreeMap<(String, String), (&'static str, Option<i64>)>>,
+    failover: std::sync::Mutex<Told>,
 }
+
+/// What the apps were told of whether another seat would take the turns of a tool, by the tool
+/// and the model an agent runs on it: the word, and for a used-up account the minute the pool
+/// regains room.
+type Told = BTreeMap<(String, String), (&'static str, Option<i64>)>;
 
 /// Which accounts are used up, and which are near a limit and not used up, by the tool's
 /// name, with what an agent's row says of its tool then.
@@ -839,13 +844,7 @@ impl Rows {
     ) -> (clarp_kernel::quota_near::Failover, Option<i64>) {
         let selector = self.selectors.contains(tool);
         let model = self.model(tool, model);
-        clarp_kernel::quota_near::used_up_failover(
-            self.accounts,
-            tool,
-            model,
-            selector,
-            &self.desk,
-        )
+        clarp_kernel::quota_near::used_up_failover(self.accounts, tool, model, selector, &self.desk)
     }
 
     /// What the row of an agent on this tool and model says of its account.
@@ -896,15 +895,16 @@ pub async fn rows(app: &crate::edge::App) -> Rows {
 
 /// The accounts are looked at again, and whether another seat would take the turns of a tool
 /// that is near a limit or used up is judged again: for each model that an agent of the tool
-/// runs, its own or the tool's default; and for a used-up one, when the pool regains room. Where that is not as the apps were last told it, they are told to
-/// read their agents' rows again. What changes it: a reading of the seats, a seat that is
-/// switched to, a reading that grows old, a window of a seat that begins anew. So this is done
-/// after each reading and each switch from the desk or the switcher, and by the watch.
+/// runs, its own or the tool's default; and for a used-up one, when the pool regains room.
+/// Where that is not as the apps were last told it, they are told to read their agents' rows
+/// again. What changes it: a reading of the seats, a seat that is switched to, a reading that
+/// grows old, a window of a seat that begins anew. So this is done after each reading and each
+/// switch from the desk or the switcher, and by the watch.
 pub async fn look_again(app: &crate::edge::App) {
     let rows = rows(app).await;
     let directory = app.fleet.directory();
     let agents = directory.members.iter().chain(&directory.janitors);
-    let mut now: BTreeMap<(String, String), (&'static str, Option<i64>)> = BTreeMap::new();
+    let mut now: Told = BTreeMap::new();
     let mut regains_first: Option<i64> = None;
     for member in agents.filter(|member| member.record.archived_at_ms.is_none()) {
         let tool = &member.record.backend;
@@ -915,7 +915,10 @@ pub async fn look_again(app: &crate::edge::App) {
                 regains_first = Some(regains_first.map_or(at, |first| first.min(at)));
             }
             // To the minute, as the rows' resets are compared ([`Desk::looked`]).
-            (failover.word(), regains.map(|ms| (ms + 30_000).div_euclid(60_000)))
+            (
+                failover.word(),
+                regains.map(|ms| (ms + 30_000).div_euclid(60_000)),
+            )
         } else if rows.looked.near.contains_key(tool) {
             (rows.failover(tool, &model).word(), None)
         } else {

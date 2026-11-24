@@ -114,7 +114,8 @@ fn quota_of(host: &Host, session: &str) -> Value {
 
 fn told_again(heard: &Arc<Mutex<Vec<Value>>>) -> usize {
     let all = heard.lock().unwrap();
-    let again = |event: &&Value| event["type"] == "agent-roster" && event["kind"] == "backend-quota";
+    let again =
+        |event: &&Value| event["type"] == "agent-roster" && event["kind"] == "backend-quota";
     all.iter().filter(again).count()
 }
 

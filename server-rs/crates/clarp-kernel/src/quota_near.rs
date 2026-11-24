@@ -746,7 +746,12 @@ mod tests {
         let row = json!({ "state": "exhausted", "resets_at": moment(NOW + 2 * HOUR) });
         assert!(used_up_row(&row, Failover::Spare, None).is_null());
         // Less than half a percent left is none, as the switcher rounds it.
-        let full = timed("full", false, "ok", &[("5h", 0.996, NOW + HOUR), ("7d", 0.4, NOW + 90 * HOUR)]);
+        let full = timed(
+            "full",
+            false,
+            "ok",
+            &[("5h", 0.996, NOW + HOUR), ("7d", 0.4, NOW + 90 * HOUR)],
+        );
         let desk = served(json!([in_use, full]));
         let (of, _) = used_up_failover(Accounts::Select, "claude", "", false, &desk);
         assert_eq!(of, Failover::None);
@@ -761,7 +766,10 @@ mod tests {
             "no-opus",
             false,
             "exhausted",
-            &[("5h", 1.0, NOW + HOUR), ("model:opus", 1.0, NOW + 96 * HOUR)],
+            &[
+                ("5h", 1.0, NOW + HOUR),
+                ("model:opus", 1.0, NOW + 96 * HOUR),
+            ],
         );
         let soon = timed(
             "soon",
@@ -772,7 +780,10 @@ mod tests {
         let out = timed("out", false, "auth_error", &[]);
         let desk = served(json!([in_use, no_opus, soon, out]));
         let of = |model: &str| used_up_failover(Accounts::Select, "claude", model, true, &desk);
-        assert_eq!(of("claude-opus-5-5"), (Failover::None, Some(NOW + 2 * HOUR)));
+        assert_eq!(
+            of("claude-opus-5-5"),
+            (Failover::None, Some(NOW + 2 * HOUR))
+        );
         assert_eq!(of("claude-sonnet-5-5"), (Failover::None, Some(NOW + HOUR)));
         let said = json!({
             "state": "exhausted", "provider_id": "claude", "reason": "usage_limit",
@@ -780,7 +791,12 @@ mod tests {
         });
         let row = used_up_row(&said, Failover::None, Some(NOW + 2 * HOUR));
         assert_eq!(
-            (&row["state"], &row["failover"], &row["resets_at"], &row["window"]),
+            (
+                &row["state"],
+                &row["failover"],
+                &row["resets_at"],
+                &row["window"]
+            ),
             (
                 &json!("exhausted"),
                 &json!("none"),
@@ -796,7 +812,12 @@ mod tests {
     #[test]
     fn a_tool_without_a_pool_says_its_used_up_account_as_before() {
         let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 3 * HOUR)]);
-        let spare = timed("spare", false, "ok", &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)]);
+        let spare = timed(
+            "spare",
+            false,
+            "ok",
+            &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)],
+        );
         let desk = served(json!([in_use, spare]));
         // Nothing moves the tool, or nobody switches logins: the row stands, its reset its own.
         let no_switcher = {
@@ -819,7 +840,12 @@ mod tests {
     #[test]
     fn a_stale_reading_never_hides_a_used_up_account() {
         let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 3 * HOUR)]);
-        let spare = timed("spare", false, "ok", &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)]);
+        let spare = timed(
+            "spare",
+            false,
+            "ok",
+            &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)],
+        );
         let mut desk = served(json!([in_use, spare]));
         desk["providers"][0]["stale"] = json!(true);
         let (of, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
@@ -833,7 +859,11 @@ mod tests {
         // Nor does it claim room in the pool's summary.
         let summary = pool("claude", &desk).unwrap();
         assert_eq!(
-            (&summary["stale"], &summary["with_room"], &summary["regains_room_at"]),
+            (
+                &summary["stale"],
+                &summary["with_room"],
+                &summary["regains_room_at"]
+            ),
             (&json!(true), &Value::Null, &Value::Null)
         );
         assert_eq!(summary["seats"], 2);
@@ -841,9 +871,24 @@ mod tests {
 
     #[test]
     fn the_pool_summary_counts_seats_with_room_and_says_when_a_used_up_one_regains_it() {
-        let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 3 * HOUR), ("7d", 0.2, NOW + 90 * HOUR)]);
-        let spare = timed("spare", false, "ok", &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + 90 * HOUR)]);
-        let week = timed("week", false, "ok", &[("5h", 0.2, NOW + HOUR), ("7d", 1.0, NOW + 40 * HOUR)]);
+        let in_use = timed(
+            "work",
+            true,
+            "exhausted",
+            &[("5h", 1.0, NOW + 3 * HOUR), ("7d", 0.2, NOW + 90 * HOUR)],
+        );
+        let spare = timed(
+            "spare",
+            false,
+            "ok",
+            &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + 90 * HOUR)],
+        );
+        let week = timed(
+            "week",
+            false,
+            "ok",
+            &[("5h", 0.2, NOW + HOUR), ("7d", 1.0, NOW + 40 * HOUR)],
+        );
         let out = timed("out", false, "auth_error", &[]);
         let unread = timed("unread", false, "unknown", &[]);
         let summary = pool("claude", &served(json!([in_use, spare, week, out, unread]))).unwrap();
@@ -858,7 +903,11 @@ mod tests {
         // Every seat used up: when the first regains room.
         let summary = pool("claude", &served(json!([in_use, week, out]))).unwrap();
         assert_eq!(
-            (&summary["with_room"], &summary["used_up"], &summary["regains_room_at"]),
+            (
+                &summary["with_room"],
+                &summary["used_up"],
+                &summary["regains_room_at"]
+            ),
             (&json!(0), &json!(2), &json!(moment(NOW + 3 * HOUR)))
         );
         // A seat that cannot be judged: it is not known that every seat is used up.
