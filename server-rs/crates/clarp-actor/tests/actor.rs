@@ -7395,7 +7395,10 @@ fn a_result_for_what_the_last_process_left_behind_does_not_end_the_turn() {
     claude_message(&mut world, 1, "b", "Here is your answer.", &[]);
     world.says(1, &claude_result(&[&claude_prompt(1)]));
     world.hint(&mut actor);
-    assert!(actor.status().live.is_none(), "over at the answer to its message");
+    assert!(
+        actor.status().live.is_none(),
+        "over at the answer to its message"
+    );
     assert_eq!(
         shown(&actor),
         [
@@ -7449,7 +7452,11 @@ fn a_shim_gone_before_its_end_line_was_read_lets_the_next_turn_go_on() {
         turn_ends(&actor),
         [("r-1-1".to_string(), "completed".to_string())]
     );
-    assert_eq!(world.took, [1, 2], "nothing waits for a process that is gone");
+    assert_eq!(
+        world.took,
+        [1, 2],
+        "nothing waits for a process that is gone"
+    );
 }
 
 #[test]
@@ -7468,7 +7475,13 @@ fn a_process_that_lingers_too_long_is_stopped_and_then_left_behind() {
     world.now_ms = due;
     let out = actor.linger_due(due).unwrap();
     assert!(
-        matches!(out.actions[..], [Action::Stop { turn: TurnId(1), .. }]),
+        matches!(
+            out.actions[..],
+            [Action::Stop {
+                turn: TurnId(1),
+                ..
+            }]
+        ),
         "{:?}",
         out.actions
     );
