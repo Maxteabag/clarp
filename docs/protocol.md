@@ -753,8 +753,11 @@ no tool name, not a note) whose message called no tools is `session` while what 
 change, and enters once it can no longer: when the turn's next row is other words, when a
 message is read into the running turn (steering: any message read into it, the user's, another
 agent's or a relayed one, but not one the agent's conversation fork read), or when the turn
-ends. If work comes next (a tool call, or a plan the tool updates), the words were said along
-the way (`phase` `commentary`) and do not enter as an answer. Each message the turn answers keeps
+ends. If work comes next (a tool call, or a plan the tool changes; one it tells again with the
+same steps, as Codex closes its plan after its last words, is no work), the words were said along
+the way (`phase` `commentary`) and do not enter as an answer. A plan counts as work from contract
+174 on: a Codex turn written before it whose words came before a plan and then more words has
+the first words as an answer too. Each message the turn answers keeps
 its answer, also one given before a follow-up was read into the turn; two replies with no work
 between them are both answers. When the turn ends (settles; a turn a follow-up replaced has
 none), what came after its last answer is settled: its newest words enter as the turn's last

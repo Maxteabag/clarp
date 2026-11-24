@@ -127,6 +127,8 @@ mod pairing_identity;
 mod peer_snapshot;
 #[path = "host/pictures.rs"]
 mod pictures;
+#[path = "host/plan_closed.rs"]
+mod plan_closed;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
 #[path = "host/question_cards.rs"]
