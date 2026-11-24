@@ -413,7 +413,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The usage warnings know the pool of seats: an agent's row says that its tool's account
     // is used up only where no seat of the tool's pool would take its turn (`failover`), with
     // the soonest moment a seat regains room; `GET /backend-usage` gives each tool with a pool
-    // a summary of it (`pool`: seats, with room, the one in use, the next reset).
+    // a summary of it (`pool`: seats, with room, the one in use, the next one, the next reset);
+    // a hard limit (`provider-limit`) is not told while a seat would take the turn, and a turn
+    // that waits for an account shows the pool's reset.
     ("quota_pool", 176),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
