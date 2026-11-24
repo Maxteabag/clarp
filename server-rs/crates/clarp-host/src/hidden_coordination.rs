@@ -256,4 +256,38 @@ mod tests {
             (Visibility::Hide, Some(Visibility::Show))
         );
     }
+
+    #[test]
+    fn a_helpers_chat_shows_coordination_unless_its_own_choice_hides_it() {
+        let helper = AgentRecord {
+            agent_id: "hal".into(),
+            backend: "claude".into(),
+            role: "helper".into(),
+            ..AgentRecord::default()
+        };
+        let plain = AgentRecord {
+            agent_id: "oak".into(),
+            backend: "claude".into(),
+            ..AgentRecord::default()
+        };
+        let mut settings = BTreeMap::from([(rules::GLOBAL_KEY.into(), "hide".into())]);
+        let directory = |settings: &BTreeMap<String, String>| Directory {
+            coordination: Roster::of(settings, [&helper, &plain].into_iter()),
+            ..Directory::default()
+        };
+        let shown = directory(&settings);
+        assert_eq!(visibility(&shown, "hal"), (Visibility::Show, None));
+        assert!(!hides(&shown, "hal"));
+        assert_eq!(visibility(&shown, "oak"), (Visibility::Hide, None));
+        assert!(hides(&shown, "oak"));
+        assert_eq!(chat_choices(&settings, &helper), (Visibility::Show, None));
+
+        settings.insert(rules::chat_key("hal"), "hide".into());
+        let hidden = directory(&settings);
+        assert_eq!(
+            visibility(&hidden, "hal"),
+            (Visibility::Show, Some(Visibility::Hide))
+        );
+        assert!(hides(&hidden, "hal"));
+    }
 }
