@@ -3808,14 +3808,9 @@ impl Worker {
             }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
-            Ask::NetworkChecked {
-                turn,
-                attempts,
-                up,
-            } => (
-                actor.network_checked(turn, attempts, up, now)?,
-                nobody(),
-            ),
+            Ask::NetworkChecked { turn, attempts, up } => {
+                (actor.network_checked(turn, attempts, up, now)?, nobody())
+            }
             Ask::TerminalFacts { answer } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
@@ -4384,11 +4379,7 @@ impl Worker {
                             loop {
                                 let up = network.reachable(&backend);
                                 let (turn, attempts) = asked;
-                                let _ = tx.send(Ask::NetworkChecked {
-                                    turn,
-                                    attempts,
-                                    up,
-                                });
+                                let _ = tx.send(Ask::NetworkChecked { turn, attempts, up });
                                 let mut checks =
                                     checks.lock().unwrap_or_else(PoisonError::into_inner);
                                 match checks.next.take() {
