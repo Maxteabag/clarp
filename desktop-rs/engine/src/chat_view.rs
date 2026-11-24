@@ -41,6 +41,11 @@ impl Outcome {
     }
 }
 
+/// The Host's conversation view only grows (contract 174).
+pub(crate) const GROWS_FEATURE: &str = "conversation_view_grows";
+/// Settings key prefix: this Host's chats were read afresh once it grew.
+const GROWS_READ: &str = "chatView/growsRead/";
+
 fn has(info: &Object, name: &str) -> bool {
     info.get("capabilities")
         .and_then(|c| c.get("features"))
@@ -162,6 +167,7 @@ impl Engine {
 
     /// `/server-info` answered.
     pub(crate) fn chat_view_server_info(&mut self, info: &Object) {
+        self.conversation_view_grows(info);
         let (feature, fork) = (has(info, chat_view::FEATURE), has(info, chat_view::FORK_FEATURE));
         if feature != self.chat_view.feature || fork != self.chat_view.fork {
             let gained = feature && !self.chat_view.feature;
@@ -177,6 +183,37 @@ impl Engine {
                 }
             }
         }
+    }
+
+    /// A Host that newly lists `conversation_view_grows` (contract 174): a
+    /// row that entered the conversation view never leaves it, and old turns
+    /// may have gained answers below this desktop's cursor. Once per Host,
+    /// its cached transcripts are dropped and the open chats read afresh;
+    /// after that no read ever needs a removal.
+    fn conversation_view_grows(&mut self, info: &Object) {
+        if self.peer || !has(info, GROWS_FEATURE) || self.cache_key.is_empty() {
+            return;
+        }
+        let key = format!("{GROWS_READ}{}", self.cache_key);
+        if self.settings.boolean(&key, false) {
+            return;
+        }
+        if let Some(cache) = self.transcript_cache.as_ref() {
+            match cache.all(&self.cache_key) {
+                Ok(chats) => {
+                    for (session, _) in chats {
+                        cache.remove(&self.cache_key, &session);
+                    }
+                }
+                Err(error) => eprintln!("Engine: could not list the cached chats to read them afresh: {error}"),
+            }
+        }
+        let open: Vec<String> = self.conversations.keys().cloned().collect();
+        for session in open {
+            self.request_tail(&session, true);
+            self.changes.push(Change::Conversation(session));
+        }
+        self.settings.set(&key, true);
     }
 
     /// `agent-roster` kind `chat_view`: another device's different choice
