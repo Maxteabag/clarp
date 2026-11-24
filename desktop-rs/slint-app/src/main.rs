@@ -865,6 +865,8 @@ fn main() {
         }
     });
     book.on_relayout(|pane| {
+        // The chat's width or text size changed: its rows move as asked.
+        scroll_journal::event(&pane, "resize");
         if let Some(app) = app() {
             app.relayout(&pane);
         }
