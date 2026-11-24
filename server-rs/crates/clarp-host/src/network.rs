@@ -99,6 +99,7 @@ impl Check for Switch {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
