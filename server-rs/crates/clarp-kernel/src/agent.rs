@@ -2173,12 +2173,16 @@ impl Work {
             return;
         };
         let continues = self.agent.continues_user_queue(next);
-        // A message the user's Stop let through runs as part of that Stop: the hold stays for
-        // what comes after it, until the user's next fresh message or a resume. Were the hold
-        // to end when the last of them starts, the queue a Stop leaves would depend on how
-        // soon the stopped turn's process exits, and agree with what the Stop answered only
-        // when it was read before that.
-        let released = self.agent.stop_released.contains(&next.id);
+        // A message the user's Stop let through runs as part of that Stop, and one the user
+        // sent by hand (Send Now) runs past the hold: neither ends it, the last one included.
+        // The hold stays for what comes after them, until the user's next fresh message or a
+        // resume. Were it to end when the last of the Stop's own starts, the queue a Stop
+        // leaves would depend on how soon the stopped turn's process exits, and agree with what
+        // the Stop answered only when it was read before that.
+        let sent_by_hand = self.decision.events.iter().any(
+            |event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == next.id),
+        );
+        let released = self.agent.stop_released.contains(&next.id) || sent_by_hand;
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
             turn,
@@ -3178,7 +3182,7 @@ mod tests {
     }
 
     #[test]
-    fn a_waiting_message_is_sent_by_hand_past_a_hold_and_the_hold_ends_with_the_last() {
+    fn a_waiting_message_is_sent_by_hand_past_a_hold_and_the_hold_stays_after_the_last() {
         let mut a = Driven::new();
         a.user(10);
         a.user(11);
@@ -3214,7 +3218,8 @@ mod tests {
             "what was refused changed nothing"
         );
         assert_eq!(a.finish(3), vec![], "the hold holds what is left");
-        // The last one is sent by hand: nothing waits any more, and the hold is over.
+        // The last one is sent by hand: nothing waits any more, and the hold stays all the
+        // same. A Send Now runs one message past it and ends nothing.
         assert_eq!(
             a.send(by_hand(2)).unwrap(),
             vec![Effect::StartTurn {
@@ -3222,23 +3227,23 @@ mod tests {
                 message_seq: 11
             }]
         );
-        assert!(!a.agent.is_paused());
+        assert!(a.agent.is_paused() && a.waiting().is_empty());
         assert_eq!(
             a.agent.queue_revision(),
-            revision + 5,
-            "taken out of its place, it left, and the hold ended"
+            revision + 4,
+            "taken out of its place, and it left"
         );
-        assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == DRAINED));
+        assert!(
+            !a.history
+                .iter()
+                .any(|event| matches!(event, AgentEvent::Resumed { .. }))
+        );
         a.finish(2);
-        // Background work that comes now runs: no hold is left to hold it.
-        assert_eq!(
-            a.background(13),
-            vec![Effect::StartTurn {
-                turn: TurnId(4),
-                message_seq: 13
-            }]
-        );
-        assert_eq!(a.started, vec![TurnId(1), TurnId(3), TurnId(2), TurnId(4)]);
+        // Background work that comes now waits for the user: the hold still holds it.
+        assert_eq!(a.background(13), vec![]);
+        assert_eq!(a.waiting(), vec![4]);
+        assert_eq!(a.started, vec![TurnId(1), TurnId(3), TurnId(2)]);
+        assert_eq!(Agent::replay(&a.history).unwrap(), a.agent);
     }
 
     #[test]
