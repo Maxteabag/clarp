@@ -2587,7 +2587,7 @@ mod tests {
             ("--help", "usage: clarp-admin [-h]"),
             (
                 "agent --help",
-                "usage: clarp-admin agent [-h] {create,fork,helper-state,transit}",
+                "usage: clarp-admin agent [-h] {create,fork,helper-state,provider,transit}",
             ),
             ("agent create -h", "usage: clarp-admin agent create [-h]"),
             (
