@@ -216,7 +216,8 @@ may coexist with authorized independent work. A card asked without
 `--blocks-progress`, approval or question, leaves the goal running: its jobs and
 timers still wake you while the user decides, so go on with work that does not
 depend on the answer. Only a card asked with `--blocks-progress` holds automatic
-continuation until it is answered, withdrawn or expired.
+continuation until it is answered, withdrawn or expired: ask with it when nothing
+independent is left to do, so the goal does not wake you for nothing.
 
 A manually tracked goal (`enroll:false`) never claims an automatic wake. To opt
 it in later, verify its owner binding and use

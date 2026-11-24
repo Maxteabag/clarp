@@ -32,7 +32,8 @@ Optional creation flags:
 
 - `--blocks-progress`: this work cannot continue without the answer. It also holds
   your goal's automatic wakes (a job's result, a timer) until the card is answered,
-  withdrawn or expired; without it they go on while the user decides.
+  withdrawn or expired; without it they go on while the user decides. Use it when
+  nothing independent is left to do until the answer comes.
 - `--priority-reason TEXT`: what is blocked, why timing matters, and the effect
   of waiting. Required for blocking or time-sensitive requests.
 - `--urgency normal|time_sensitive`: time-sensitive breaks through the user's
