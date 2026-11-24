@@ -312,7 +312,7 @@ fn read_now(
 }
 
 /// The key under which the session of a turn the fork answered is kept.
-fn turn_key(turn: u64) -> String {
+pub(crate) fn turn_key(turn: u64) -> String {
     format!("fork-turn-{turn}")
 }
 
