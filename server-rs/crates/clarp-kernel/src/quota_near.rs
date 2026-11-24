@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 
 use crate::quota::{from_text, moment};
 use crate::recovery::Accounts;
+use crate::seat_switch::{Demand, Seat};
 
 /// From how much of a window, in percent, it stands near its limit: four fifths of the five
 /// hours, nine tenths of a week (and of any other window, which is at least as long).
@@ -122,18 +123,6 @@ impl Failover {
     }
 }
 
-/// What a seat must have left to take an agent's turn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bar {
-    /// Every window that bears on the agent below its share ([`near_at`]): a warning that the
-    /// account in use is near a limit is spared only where another seat is not near one too.
-    Near,
-    /// Room in every window that bears on the agent: the account in use is used up, and the
-    /// switcher moves the tool to any seat with room left (`seat_switch::decide`, whose last
-    /// rung takes a seat with one whole percent left).
-    Room,
-}
-
 /// From how much of a window, in percent, a seat has no room left: where less than half of
 /// one percent is left, which the switcher rounds to none.
 pub const ROOM_UNTIL: f64 = 99.5;
@@ -162,66 +151,10 @@ pub fn failover(
     selector: bool,
     desk: &Value,
 ) -> Failover {
-    judged(accounts, provider, model, selector, desk, Bar::Near).0
-}
-
-/// Whether another seat of `provider` would take the turn of an agent on `model` from an
-/// account that is used up, by the rule of [`failover`] with a seat taking the turn where it
-/// has any room left ([`Bar::Room`]); and, where no seat would and the pool's reading said so,
-/// the soonest moment a seat of the pool that could serve the model regains room
-/// ([`regains_at`]), the one in use among them.
-///
-/// Where the Host does not switch seats, or the reading is old or failed, no moment of the pool
-/// is given: a row then names the reset of the account in use, as the tool said it, and a
-/// stale reading of the seats never hides that the account in use is used up (it is
-/// `unknown`, and the row stands).
-pub fn used_up_failover(
-    accounts: Accounts,
-    provider: &str,
-    model: &str,
-    selector: bool,
-    desk: &Value,
-) -> (Failover, Option<i64>) {
-    let (failover, read) = judged(accounts, provider, model, selector, desk, Bar::Room);
-    let regains = match (failover, read) {
-        (Failover::None, Some(read)) => regains_at(read, model, desk),
-        _ => None,
+    let read = match gate(accounts, provider, selector, desk) {
+        Ok(read) => read,
+        Err(failover) => return failover,
     };
-    (failover, regains)
-}
-
-/// The rule of [`failover`] for a bar, with the tool's reading of the seats where the answer
-/// was judged by it: a reading that is fresh and read well.
-fn judged<'a>(
-    accounts: Accounts,
-    provider: &str,
-    model: &str,
-    selector: bool,
-    desk: &'a Value,
-    bar: Bar,
-) -> (Failover, Option<&'a Value>) {
-    match accounts {
-        Accounts::None => return (Failover::None, None),
-        Accounts::Follow => return (Failover::Unknown, None),
-        Accounts::Select => {}
-    }
-    let switcher = desk["switcher"]["enabled"] == true
-        && desk["switcher"]["lanes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|lane| lane["provider"] == provider && lane["mode"] == "automatic");
-    if !selector && !switcher {
-        return (Failover::None, None);
-    }
-    let Some(read) = fresh_read(provider, desk) else {
-        return (Failover::Unknown, None);
-    };
-    match read["inventory"].as_str() {
-        Some("ok") => {}
-        Some("empty") => return (Failover::None, Some(read)),
-        _ => return (Failover::Unknown, None),
-    }
     let family = crate::seats::family(&json!(model));
     let bears = of_model(family);
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
@@ -232,17 +165,141 @@ fn judged<'a>(
         .flatten()
         .filter(|account| account["active_default"] != true);
     for account in others {
-        match room(account, &bears, served_at, bar) {
-            Some(true) => return (Failover::Spare, Some(read)),
+        match below_share(account, &bears, served_at) {
+            Some(true) => return Failover::Spare,
             Some(false) => {}
             None => unjudged = true,
         }
     }
     if unjudged {
-        (Failover::Unknown, Some(read))
+        Failover::Unknown
     } else {
-        (Failover::None, Some(read))
+        Failover::None
     }
+}
+
+/// Whether another seat of `provider` would take the turn of an agent on `model` from an
+/// account that is used up: what the switcher itself would do (`seat_switch::decide`, the
+/// choice `seats/automatic.rs` makes), on its own reading of the seats as the desk keeps it
+/// (`switcher_seats`), with the seat in use taken as used up, since its tool said so. Spare
+/// where it would move this model's turn to a seat now; none where it would not, with the
+/// soonest moment a seat that could serve the model regains room ([`regains_at`], the seat in
+/// use among them); unknown where it cannot tell (no seat is read as in use).
+///
+/// The rule of [`failover`] says first whether the switcher is asked at all: where the Host
+/// switches no seats, none would and no moment of the pool is given; where the reading is old
+/// or failed (or this Host follows another), unknown, and a row then names the reset of the
+/// account in use as the tool said it. A stale reading never hides a used-up account.
+pub fn used_up_failover(
+    accounts: Accounts,
+    provider: &str,
+    model: &str,
+    selector: bool,
+    desk: &Value,
+) -> (Failover, Option<i64>) {
+    let read = match gate(accounts, provider, selector, desk) {
+        Ok(read) => read,
+        Err(failover) => return (failover, None),
+    };
+    let Some(seats) = switcher_seats(provider, desk) else {
+        return (Failover::Unknown, None);
+    };
+    match takes(&seats, model, floor(provider, desk)) {
+        Some(Some(_)) => (Failover::Spare, None),
+        Some(None) => (Failover::None, regains_at(read, model, desk)),
+        None => (Failover::Unknown, None),
+    }
+}
+
+/// Whether the switcher is asked about a tool's turns at all, and the reading it is asked on:
+/// the tool's reading of the seats where it is fresh, read well and holds accounts. Else what
+/// is known without it: none where nobody switches the tool's seats or no account was read;
+/// unknown where another Host switches them or the reading is old, failed or not there.
+fn gate<'a>(
+    accounts: Accounts,
+    provider: &str,
+    selector: bool,
+    desk: &'a Value,
+) -> Result<&'a Value, Failover> {
+    match accounts {
+        Accounts::None => return Err(Failover::None),
+        Accounts::Follow => return Err(Failover::Unknown),
+        Accounts::Select => {}
+    }
+    let switcher = desk["switcher"]["enabled"] == true
+        && desk["switcher"]["lanes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|lane| lane["provider"] == provider && lane["mode"] == "automatic");
+    if !selector && !switcher {
+        return Err(Failover::None);
+    }
+    let read = fresh_read(provider, desk).ok_or(Failover::Unknown)?;
+    match read["inventory"].as_str() {
+        Some("ok") => Ok(read),
+        Some("empty") => Err(Failover::None),
+        _ => Err(Failover::Unknown),
+    }
+}
+
+/// The seats of a tool as the switcher read them, in the reading the desk keeps, with the one
+/// in use as the last switch made it (`seats::Seats::switcher`). The Host puts them beside
+/// the desk it judges by (`switcher_seats`, never served to an app).
+fn switcher_seats(provider: &str, desk: &Value) -> Option<Vec<Seat>> {
+    serde_json::from_value(desk["switcher_seats"][provider].clone()).ok()
+}
+
+/// The share of a seat the switcher would rather keep, as the tool's lane says it, else the
+/// switcher's own default: what it prefers among seats with room (`seats/automatic.rs`).
+fn floor(provider: &str, desk: &Value) -> i64 {
+    let lane = desk["switcher"]["lanes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|lane| lane["provider"] == provider);
+    let default = if provider == "claude" { 25 } else { 10 };
+    lane.and_then(|lane| lane["floor_pct"].as_i64())
+        .unwrap_or(default)
+}
+
+/// What the switcher would do with a turn of `model` (none named: of no model in particular)
+/// were the seat in use used up: the alias of the seat it would move to (`Some(Some)`), none
+/// (`Some(None)`: no seat has room for it), or `None` where it cannot tell, as no seat is read
+/// as the one in use. Asked without the last switch, so its hold against moving back does not
+/// count: the question is whether a seat would take the turn, not whether it moves now.
+pub fn takes(seats: &[Seat], model: &str, floor: i64) -> Option<Option<String>> {
+    let mut seats = seats.to_vec();
+    let active = seats.iter_mut().find(|seat| seat.active)?;
+    active.remaining = Some(0);
+    let required: Vec<String> = Some(model)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string)
+        .into_iter()
+        .collect();
+    let asked = Demand {
+        floor,
+        required: &required,
+        running: &[],
+        last: &Value::Null,
+        now: 0,
+        cooldown: 0,
+    };
+    let decision = crate::seat_switch::decide(&seats, asked);
+    match decision["action"].as_str() {
+        Some("switch") => Some(decision["target"].as_str().map(str::to_string)),
+        Some("exhausted") => Some(None),
+        _ => None,
+    }
+}
+
+/// Whether a seat has room for a turn of no model in particular, as the switcher reads it: some
+/// of its five hours left, and of its week unless it may run over (`overage`). `None` where its
+/// five hours could not be read.
+fn has_room(seat: &Seat) -> Option<bool> {
+    let left = seat.remaining?;
+    let week_out = seat.secondary.is_some_and(|week| week <= 0) && !seat.overage;
+    Some(left > 0 && !week_out)
 }
 
 /// The desk's reading of a tool's seats where it is fresh and was read well; `None` where it
@@ -272,14 +329,19 @@ fn general(kind: &str) -> bool {
     matches!(kind, "5h" | "7d")
 }
 
+/// Whether a window of the desk began anew since it was read: it has no number, and its reset
+/// has passed.
+fn begun_anew(window: &Value, served_at: i64) -> bool {
+    window["used_ratio"].is_null()
+        && window["resets_at"]
+            .as_i64()
+            .is_some_and(|reset| reset <= served_at)
+}
+
 /// What is used of a window of the desk, as a share of one: nothing where it began anew since
 /// it was read; `None` where that cannot be told (old, or no number).
 fn used_of(window: &Value, served_at: i64) -> Option<f64> {
-    let begun_anew = window["used_ratio"].is_null()
-        && window["resets_at"]
-            .as_i64()
-            .is_some_and(|reset| reset <= served_at);
-    if begun_anew {
+    if begun_anew(window, served_at) {
         return Some(0.0);
     }
     window["used_ratio"]
@@ -287,58 +349,72 @@ fn used_of(window: &Value, served_at: i64) -> Option<f64> {
         .filter(|_| window["stale"] == false)
 }
 
-/// Whether an account of the desk has room for a turn, by the windows that bear on it and the
-/// bar it must clear: `None` where it cannot be told (its state is not known, or a window that
-/// bears on it is old or has no number).
-fn room(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64, bar: Bar) -> Option<bool> {
+/// Whether an account of the desk is below the near share in every window that bears on the
+/// turn: `None` where it cannot be told (its state is not known, or a window that bears on it is
+/// old or has no number, and none is known to be at its share). Whatever order the windows come
+/// in, one at its share says no.
+fn below_share(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) -> Option<bool> {
     match account["state"].as_str() {
         Some("ok") => {}
         Some("exhausted" | "auth_error") => return Some(false),
         _ => return None,
     }
-    let mut general_read = false;
+    let (mut general_read, mut unread) = (false, false);
     for window in account["windows"].as_array().into_iter().flatten() {
         let kind = window["kind"].as_str().unwrap_or("");
         if !bears(kind) {
             continue;
         }
-        let used = used_of(window, served_at)?;
-        let full_at = match bar {
-            Bar::Near if kind == "5h" => near_at("five_hour"),
-            Bar::Near => near_at("seven_day"),
-            Bar::Room => ROOM_UNTIL,
+        let Some(used) = used_of(window, served_at) else {
+            unread = true;
+            continue;
         };
-        if used * 100.0 >= full_at {
+        let share = if kind == "5h" {
+            near_at("five_hour")
+        } else {
+            near_at("seven_day")
+        };
+        if used * 100.0 >= share {
             return Some(false);
         }
         general_read |= general(kind);
     }
+    if unread {
+        return None;
+    }
     general_read.then_some(true)
 }
 
-/// When an account of the desk that has no room regains it: when the last of its windows
-/// that bear on the turn and are all used begins anew. `None` where that is not known (a full
-/// window that does not say when, an account used up with no window read as full) and for an
-/// account that is signed out, which no reset frees.
+/// When an account of the desk that has no room regains it: when the last of its windows that
+/// bear on the turn and are all used begins anew. A window read as all used counts by its reset
+/// however old the reading is, since its reset was set in advance; one of an account that was
+/// used up and began anew since counts at the reset that passed: the account regained room then,
+/// and the Host reads the seats again to see it. `None` where that is not known (a full window
+/// that does not say when, an account used up with no window read as full) and for an account
+/// that is signed out, which no reset frees.
 fn regains(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) -> Option<i64> {
     if account["state"] == "auth_error" {
         return None;
     }
+    let was_out = account["state"] != "ok";
     let mut last: Option<i64> = None;
     for window in account["windows"].as_array().into_iter().flatten() {
         let kind = window["kind"].as_str().unwrap_or("");
-        let full = used_of(window, served_at).is_some_and(|used| used * 100.0 >= ROOM_UNTIL);
-        if !bears(kind) || !full {
+        let full = window["used_ratio"]
+            .as_f64()
+            .is_some_and(|used| used * 100.0 >= ROOM_UNTIL);
+        if !bears(kind) || !(full || (was_out && begun_anew(window, served_at))) {
             continue;
         }
         let reset = window["resets_at"].as_i64()?;
         last = Some(last.map_or(reset, |last| last.max(reset)));
     }
-    last.filter(|at| *at > served_at)
+    last
 }
 
 /// The soonest moment a seat of a reading that could serve `model` regains room, the seat in
-/// use among them; `None` where no seat says when.
+/// use among them; `None` where no seat says when. A moment that passed is the moment a seat
+/// regained room that the reading does not show yet.
 fn regains_at(read: &Value, model: &str, desk: &Value) -> Option<i64> {
     let bears = of_model(crate::seats::family(&json!(model)));
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
@@ -351,17 +427,17 @@ fn regains_at(read: &Value, model: &str, desk: &Value) -> Option<i64> {
 }
 
 /// What the usage screen says of a tool's pool of seats (`pool` of a provider in
-/// `GET /backend-usage`), from the desk as `GET /hotseat/status` serves it; `None` where the
-/// desk read no account of the tool. Of no model in particular, so by the five hours and the
-/// week: how many seats there are, how many have room for a turn and how many are used up, the
-/// alias of the one in use and of the one the switcher would move to next were it used up
-/// ([`ranked`]), the soonest moment a used-up seat regains room, and where every seat is used
-/// up, when the first does. A seat that cannot be judged (its state not known, a
-/// window old) is counted in neither.
+/// `GET /backend-usage`), from the desk as `GET /hotseat/status` serves it and the switcher's own
+/// reading beside it; `None` where the desk read no account of the tool. Of no model in
+/// particular: how many seats there are, how many have room for a turn and how many are used
+/// up as the switcher reads them ([`has_room`]), the alias of the one in use and of the one the
+/// switcher would move to were it used up ([`takes`]), the soonest moment a used-up seat
+/// regains room, and where every seat is used up, when the first does. A seat that cannot be
+/// read is counted in neither.
 ///
 /// Where the reading is old or failed (`stale`), no seat is counted as having room or as used
-/// up, and nothing says that every seat is used up: an old reading says nothing of now. The
-/// moments it holds are still given where they are ahead, since a reset is set in advance.
+/// up, none is named next, and nothing says that every seat is used up: an old reading says
+/// nothing of now. The moments it holds are still given, since a reset is set in advance.
 pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
     let read = desk["providers"]
         .as_array()
@@ -372,69 +448,43 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
     if read["inventory"] != "ok" {
         return None;
     }
-    let fresh = fresh_read(provider, desk).is_some();
+    let seats = switcher_seats(provider, desk).filter(|_| fresh_read(provider, desk).is_some());
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
-    let (mut with_room, mut used_up, mut unjudged) = (0_usize, 0_usize, false);
-    let mut next: Option<i64> = None;
-    let mut next_seat: Option<(i64, i64, &str)> = None;
-    for account in accounts {
-        match room(account, &general, served_at, Bar::Room) {
-            Some(true) => {
-                with_room += 1;
-                let ranked = ranked(account, served_at);
-                if account["active_default"] != true && ranked > next_seat {
-                    next_seat = ranked;
-                }
-            }
-            Some(false) => {
-                if account["state"] != "auth_error" {
-                    used_up += 1;
-                }
-                if let Some(at) = regains(account, &general, served_at) {
-                    next = Some(next.map_or(at, |next| next.min(at)));
-                }
-            }
-            None => unjudged = true,
+    let next = accounts
+        .iter()
+        .filter_map(|account| regains(account, &general, served_at))
+        .min();
+    let (mut with_room, mut used_up, mut unread) = (0_usize, 0_usize, false);
+    for seat in seats.iter().flatten() {
+        match has_room(seat) {
+            Some(true) => with_room += 1,
+            Some(false) => used_up += 1,
+            None => unread = true,
         }
     }
+    let next_alias = seats
+        .as_ref()
+        .and_then(|seats| takes(seats, "", floor(provider, desk)))
+        .flatten()
+        .map(|alias| crate::seats::display_alias(&json!(alias)));
     let active = accounts
         .iter()
         .find(|account| account["active_default"] == true)
         .and_then(|account| account["alias"].as_str());
-    let all_used_up = fresh && with_room == 0 && !unjudged;
+    let fresh = seats.is_some();
+    let all_used_up = fresh && with_room == 0 && !unread;
     let at = |ms: Option<i64>| ms.map(moment);
     Some(json!({
         "seats": accounts.len(),
         "with_room": fresh.then_some(with_room),
         "used_up": fresh.then_some(used_up),
         "active_alias": active,
-        "next_alias": next_seat.filter(|_| fresh).map(|(_, _, alias)| alias),
+        "next_alias": next_alias,
         "next_reset_at": at(next),
         "regains_room_at": at(next.filter(|_| all_used_up)),
         "stale": !fresh,
         "observed_at": at(read["observed_at"].as_i64()),
     }))
-}
-
-/// How the switcher ranks a seat with room it would move to, of no model in particular: by
-/// the whole percent left of its five hours, then of its week, then by its alias
-/// (`seat_switch::decide`, where no model is asked for). `None` for a seat without an alias or
-/// without its numbers.
-fn ranked(account: &Value, served_at: i64) -> Option<(i64, i64, &str)> {
-    let left = |kind: &str| {
-        let window = account["windows"]
-            .as_array()?
-            .iter()
-            .find(|window| window["kind"] == kind)?;
-        let used = used_of(window, served_at)?;
-        // As the switcher rounds it: half a percent left is none.
-        Some((100.0 - used * 100.0).round_ties_even().clamp(0.0, 100.0) as i64)
-    };
-    Some((
-        left("5h")?,
-        left("7d").unwrap_or(0),
-        account["alias"].as_str()?,
-    ))
 }
 
 /// Until when a judgement of a tool's pool from this desk holds: until the desk's reading of
@@ -779,10 +829,21 @@ mod tests {
         desk
     }
 
+    /// A seat as the switcher reads it: what is left of its five hours and its week, in percent.
+    fn sw(alias: &str, active: bool, left: Option<i64>, week: Option<i64>) -> Value {
+        json!({ "alias": alias, "active": active, "remaining": left, "secondary": week })
+    }
+
+    /// The desk with the switcher's reading of Claude's seats beside it.
+    fn judged_by(mut desk: Value, seats: Value) -> Value {
+        desk["switcher_seats"]["claude"] = seats;
+        desk
+    }
+
     const HOUR: i64 = 3_600_000;
 
     #[test]
-    fn a_used_up_account_says_nothing_where_another_seat_has_any_room_left() {
+    fn a_used_up_account_says_nothing_where_the_switcher_would_move_the_turn() {
         let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 2 * HOUR)]);
         // At 92% of its five hours: too near to spare a warning, room enough to take a turn.
         let nearly = timed(
@@ -791,28 +852,73 @@ mod tests {
             "ok",
             &[("5h", 0.92, NOW + HOUR), ("7d", 0.4, NOW + 90 * HOUR)],
         );
-        let desk = served(json!([in_use, nearly]));
-        let judge = |bar_near: bool| {
-            if bar_near {
-                failover(Accounts::Select, "claude", "claude-opus-5-5", false, &desk)
-            } else {
-                used_up_failover(Accounts::Select, "claude", "claude-opus-5-5", false, &desk).0
-            }
-        };
-        assert_eq!(judge(true), Failover::None);
-        assert_eq!(judge(false), Failover::Spare);
+        let seats = json!([
+            sw("work", true, Some(0), Some(60)),
+            sw("nearly", false, Some(8), Some(60))
+        ]);
+        let desk = judged_by(served(json!([in_use, nearly])), seats);
+        let model = "claude-opus-5-5";
+        assert_eq!(
+            failover(Accounts::Select, "claude", model, false, &desk),
+            Failover::None
+        );
+        let (of, regains) = used_up_failover(Accounts::Select, "claude", model, false, &desk);
+        assert_eq!((of, regains), (Failover::Spare, None));
         let row = json!({ "state": "exhausted", "resets_at": moment(NOW + 2 * HOUR) });
         assert!(used_up_row(&row, Failover::Spare, None).is_null());
-        // Less than half a percent left is none, as the switcher rounds it.
-        let full = timed(
-            "full",
-            false,
-            "ok",
-            &[("5h", 0.996, NOW + HOUR), ("7d", 0.4, NOW + 90 * HOUR)],
+        // No switcher's reading beside the desk: it cannot be told.
+        let bare = served(json!([in_use, nearly]));
+        assert_eq!(
+            used_up_failover(Accounts::Select, "claude", model, false, &bare).0,
+            Failover::Unknown
         );
-        let desk = served(json!([in_use, full]));
-        let (of, _) = used_up_failover(Accounts::Select, "claude", "", false, &desk);
-        assert_eq!(of, Failover::None);
+    }
+
+    #[test]
+    fn the_switchers_own_reading_decides_what_the_desks_windows_do_not_show() {
+        let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 2 * HOUR)]);
+        let roomy = |alias: &str| {
+            timed(
+                alias,
+                false,
+                "ok",
+                &[("5h", 0.1, NOW + HOUR), ("7d", 0.2, NOW + 90 * HOUR)],
+            )
+        };
+        let desk = served(json!([in_use, roomy("spare")]));
+        let of = |seats: Value, model: &str| {
+            let desk = judged_by(desk.clone(), seats);
+            used_up_failover(Accounts::Select, "claude", model, true, &desk).0
+        };
+        let work = sw("work", true, Some(0), Some(60));
+        // Not available, as the tool said: the switcher reads it as without room.
+        let unavailable = json!([work, sw("spare", false, Some(0), Some(80))]);
+        assert_eq!(of(unavailable, ""), Failover::None);
+        // Closed to Opus: Opus's turn stays, Sonnet's moves.
+        let mut blocked = sw("spare", false, Some(90), Some(80));
+        blocked["blocked_models"] = json!(["opus"]);
+        let closed = json!([work, blocked]);
+        assert_eq!(of(closed.clone(), "claude-opus-5-5"), Failover::None);
+        assert_eq!(of(closed, "claude-sonnet-5-5"), Failover::Spare);
+        // Its week is used, but it may run over: the switcher takes it.
+        let mut over = sw("spare", false, Some(90), Some(0));
+        over["overage"] = json!(true);
+        assert_eq!(of(json!([work, over]), ""), Failover::Spare);
+        let over_not = json!([work, sw("spare", false, Some(90), Some(0))]);
+        assert_eq!(of(over_not, ""), Failover::None);
+        // Read as degraded: of no family can it be told that it has room.
+        let mut degraded = sw("spare", false, Some(90), Some(80));
+        degraded["degraded"] = json!(true);
+        assert_eq!(
+            of(json!([work, degraded]), "claude-opus-5-5"),
+            Failover::None
+        );
+        // No seat read as the one in use: it cannot be told.
+        let none_active = json!([
+            sw("work", false, Some(0), Some(60)),
+            sw("spare", false, Some(90), Some(80))
+        ]);
+        assert_eq!(of(none_active, ""), Failover::Unknown);
     }
 
     #[test]
@@ -836,7 +942,13 @@ mod tests {
             &[("5h", 1.0, NOW + 2 * HOUR), ("7d", 0.5, NOW + 90 * HOUR)],
         );
         let out = timed("out", false, "auth_error", &[]);
-        let desk = served(json!([in_use, no_opus, soon, out]));
+        let seats = json!([
+            sw("work", true, Some(0), Some(50)),
+            sw("no-opus", false, Some(0), Some(50)),
+            sw("soon", false, Some(0), Some(50)),
+            sw("out", false, None, None),
+        ]);
+        let desk = judged_by(served(json!([in_use, no_opus, soon, out])), seats);
         let of = |model: &str| used_up_failover(Accounts::Select, "claude", model, true, &desk);
         assert_eq!(
             of("claude-opus-5-5"),
@@ -868,6 +980,61 @@ mod tests {
     }
 
     #[test]
+    fn at_the_moment_a_seat_regains_room_the_row_keeps_that_moment_and_never_a_later_one() {
+        // The seat `soon` was used up until NOW - 1s; the reading was taken before, so the desk
+        // serves it as no longer known, its window without a number. A stale full week of
+        // another seat still counts by its reset.
+        let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 3 * HOUR)]);
+        let soon = json!({ "alias": "soon", "active_default": false, "state": "unknown", "windows": [
+            { "kind": "5h", "used_ratio": null, "stale": true, "resets_at": NOW - 1_000 },
+        ]});
+        let week = json!({ "alias": "week", "active_default": false, "state": "exhausted", "windows": [
+            { "kind": "5h", "used_ratio": 1.0, "stale": false, "resets_at": NOW + HOUR },
+            { "kind": "7d", "used_ratio": 1.0, "stale": true, "resets_at": NOW + 40 * HOUR },
+        ]});
+        let seats = json!([
+            sw("work", true, Some(0), Some(50)),
+            sw("soon", false, Some(0), Some(50)),
+            sw("week", false, Some(0), Some(0)),
+        ]);
+        let desk = judged_by(served(json!([in_use, soon, week])), seats);
+        let (of, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
+        assert_eq!((of, regains), (Failover::None, Some(NOW - 1_000)));
+        // Of `week` alone: its last full window, the stale week, not the five hours.
+        let desk = judged_by(
+            served(json!([timed("work", true, "exhausted", &[]), week])),
+            json!([
+                sw("work", true, Some(0), Some(50)),
+                sw("week", false, Some(0), Some(0))
+            ]),
+        );
+        let (_, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
+        assert_eq!(regains, Some(NOW + 40 * HOUR));
+    }
+
+    #[test]
+    fn a_near_seat_is_judged_alike_whatever_order_its_windows_come_in() {
+        let in_use = seat(true, "ok", &[("5h", Some(0.85), false)]);
+        let full_then_old = seat(
+            false,
+            "ok",
+            &[("5h", Some(0.9), false), ("7d", Some(0.1), true)],
+        );
+        let old_then_full = seat(
+            false,
+            "ok",
+            &[("7d", Some(0.1), true), ("5h", Some(0.9), false)],
+        );
+        for other in [full_then_old, old_then_full] {
+            let desk = desk(true, "automatic", read(json!([in_use, other])));
+            assert_eq!(
+                failover(Accounts::Select, "claude", "", false, &desk),
+                Failover::None
+            );
+        }
+    }
+
+    #[test]
     fn a_tool_without_a_pool_says_its_used_up_account_as_before() {
         let in_use = timed("work", true, "exhausted", &[("5h", 1.0, NOW + 3 * HOUR)]);
         let spare = timed(
@@ -876,7 +1043,11 @@ mod tests {
             "ok",
             &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)],
         );
-        let desk = served(json!([in_use, spare]));
+        let seats = json!([
+            sw("work", true, Some(0), Some(60)),
+            sw("spare", false, Some(90), Some(90))
+        ]);
+        let desk = judged_by(served(json!([in_use, spare])), seats);
         // Nothing moves the tool, or nobody switches logins: the row stands, its reset its own.
         let no_switcher = {
             let mut desk = desk.clone();
@@ -889,6 +1060,11 @@ mod tests {
                 (Failover::None, None)
             );
         }
+        // Beside another Host that switches: not this Host's to know.
+        assert_eq!(
+            used_up_failover(Accounts::Follow, "claude", "", true, &desk),
+            (Failover::Unknown, None)
+        );
         let said = json!({ "state": "exhausted", "resets_at": moment(NOW + 3 * HOUR) });
         let row = used_up_row(&said, Failover::None, None);
         assert_eq!(row["resets_at"], said["resets_at"]);
@@ -904,7 +1080,11 @@ mod tests {
             "ok",
             &[("5h", 0.1, NOW + HOUR), ("7d", 0.1, NOW + HOUR)],
         );
-        let mut desk = served(json!([in_use, spare]));
+        let seats = json!([
+            sw("work", true, Some(0), Some(60)),
+            sw("spare", false, Some(90), Some(90))
+        ]);
+        let mut desk = judged_by(served(json!([in_use, spare])), seats);
         desk["providers"][0]["stale"] = json!(true);
         let (of, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
         assert_eq!((of, regains), (Failover::Unknown, None));
@@ -914,22 +1094,22 @@ mod tests {
             (&row["state"], &row["failover"], &row["resets_at"]),
             (&json!("exhausted"), &json!("unknown"), &said["resets_at"])
         );
-        // Nor does it claim room in the pool's summary.
+        // Nor does it claim room in the pool's summary, or name a seat to move to.
         let summary = pool("claude", &desk).unwrap();
         assert_eq!(
             (
                 &summary["stale"],
                 &summary["with_room"],
-                &summary["regains_room_at"]
+                &summary["regains_room_at"],
+                &summary["next_alias"]
             ),
-            (&json!(true), &Value::Null, &Value::Null)
+            (&json!(true), &Value::Null, &Value::Null, &Value::Null)
         );
         assert_eq!(summary["seats"], 2);
-        assert_eq!(summary["next_alias"], Value::Null);
     }
 
     #[test]
-    fn the_pool_summary_counts_seats_with_room_and_says_when_a_used_up_one_regains_it() {
+    fn the_pool_summary_counts_seats_as_the_switcher_reads_them_and_says_when_one_regains_room() {
         let in_use = timed(
             "work",
             true,
@@ -949,51 +1129,64 @@ mod tests {
             &[("5h", 0.2, NOW + HOUR), ("7d", 1.0, NOW + 40 * HOUR)],
         );
         let out = timed("out", false, "auth_error", &[]);
-        let unread = timed("unread", false, "unknown", &[]);
-        let summary = pool("claude", &served(json!([in_use, spare, week, out, unread]))).unwrap();
+        let accounts = json!([in_use, spare, week, out]);
+        let seats = json!([
+            sw("work", true, Some(0), Some(80)),
+            sw("spare", false, Some(90), Some(90)),
+            sw("week", false, Some(80), Some(0)),
+            sw("out", false, None, None),
+        ]);
+        let summary = pool("claude", &judged_by(served(accounts.clone()), seats)).unwrap();
         assert_eq!(
             summary,
             json!({
-                "seats": 5, "with_room": 1, "used_up": 2, "active_alias": "work",
-                "next_alias": "spare", "next_reset_at": moment(NOW + 3 * HOUR), "regains_room_at": null,
-                "stale": false, "observed_at": moment(NOW - 60_000),
+                "seats": 4, "with_room": 1, "used_up": 2, "active_alias": "work",
+                "next_alias": "spare", "next_reset_at": moment(NOW + 3 * HOUR),
+                "regains_room_at": null, "stale": false, "observed_at": moment(NOW - 60_000),
             })
         );
-        // Of two seats with room, the switcher would move to the one with more of its five
-        // hours left; of two as full, more of the week.
-        let roomier = timed(
-            "roomier",
-            false,
-            "ok",
-            &[("5h", 0.05, NOW + HOUR), ("7d", 0.6, NOW + 90 * HOUR)],
-        );
-        let weekly = timed(
-            "weekly",
-            false,
-            "ok",
-            &[("5h", 0.05, NOW + HOUR), ("7d", 0.2, NOW + 90 * HOUR)],
-        );
-        let summary = pool("claude", &served(json!([in_use, spare, roomier]))).unwrap();
-        assert_eq!(summary["next_alias"], "roomier");
-        let summary = pool("claude", &served(json!([in_use, spare, roomier, weekly]))).unwrap();
-        assert_eq!(summary["next_alias"], "weekly");
-        // Every seat used up: when the first regains room, and no seat to move to.
-        let summary = pool("claude", &served(json!([in_use, week, out]))).unwrap();
+        // Of two seats with room, the switcher's choice: more of the five hours left.
+        let roomier = timed("roomier", false, "ok", &[("5h", 0.05, NOW + HOUR)]);
+        let seats = json!([
+            sw("work", true, Some(0), Some(80)),
+            sw("spare", false, Some(90), Some(90)),
+            sw("roomier", false, Some(95), Some(60)),
+        ]);
+        let desk = judged_by(served(json!([accounts[0], accounts[1], roomier])), seats);
+        assert_eq!(pool("claude", &desk).unwrap()["next_alias"], "roomier");
+        // Every seat used up and read: when the first regains room, and no seat to move to.
+        let seats = json!([
+            sw("work", true, Some(0), Some(80)),
+            sw("week", false, Some(80), Some(0))
+        ]);
+        let desk = judged_by(served(json!([accounts[0], accounts[2]])), seats);
+        let summary = pool("claude", &desk).unwrap();
         assert_eq!(
             (
                 &summary["with_room"],
                 &summary["used_up"],
-                &summary["regains_room_at"]
+                &summary["regains_room_at"],
+                &summary["next_alias"]
             ),
-            (&json!(0), &json!(2), &json!(moment(NOW + 3 * HOUR)))
+            (
+                &json!(0),
+                &json!(2),
+                &json!(moment(NOW + 3 * HOUR)),
+                &Value::Null
+            )
         );
-        assert_eq!(summary["next_alias"], Value::Null);
-        // A seat that cannot be judged: it is not known that every seat is used up.
-        let summary = pool("claude", &served(json!([in_use, unread]))).unwrap();
-        assert_eq!(summary["regains_room_at"], Value::Null);
-        assert_eq!(summary["next_reset_at"], json!(moment(NOW + 3 * HOUR)));
+        // A seat that cannot be read: it is not known that every seat is used up.
+        let seats = json!([
+            sw("work", true, Some(0), Some(80)),
+            sw("out", false, None, None)
+        ]);
+        let desk = judged_by(served(json!([accounts[0], accounts[3]])), seats);
+        assert_eq!(
+            pool("claude", &desk).unwrap()["regains_room_at"],
+            Value::Null
+        );
         // No pool read for the tool: no summary.
-        assert!(pool("codex", &served(json!([in_use]))).is_none());
+        assert!(pool("codex", &served(accounts.clone())).is_none());
         assert!(pool("claude", &served(json!([]))).is_none());
     }
 

@@ -160,3 +160,43 @@ fn an_alias_is_shown_only_where_it_is_plainly_safe() {
     }
     assert_eq!(seats::display_alias(&Value::Null), "account");
 }
+
+#[test]
+fn the_switchers_reading_is_kept_and_a_switch_marks_the_seat_switched_to() {
+    let mut seats = Seats::with_salt("a-salt");
+    let usage = |used: f64| {
+        serde_json::json!({ "status": "allowed", "limited": used >= 1.0, "used_5h": used,
+            "reset_5h": 1_900_000_000, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+    };
+    let list = serde_json::json!({ "accounts": [
+        { "alias": "work", "is_active": true, "usage": usage(1.0) },
+        { "alias": "someone@example.invalid", "is_active": false, "usage": usage(0.1) },
+    ]});
+    seats.read("claude", &list, 1_899_999_000_000);
+    let kept = seats.switcher("claude").unwrap();
+    let read: Vec<(&str, bool, Option<i64>)> = kept
+        .iter()
+        .map(|seat| (seat.alias.as_str(), seat.active, seat.remaining))
+        .collect();
+    // The switcher's own numbers, under the aliases that may be shown: no address is kept.
+    assert_eq!(read, [("work", true, Some(0)), ("s…@e…", false, Some(90))]);
+    let fields = Value::Object(seats::kept_fields(&seats)).to_string();
+    assert!(!fields.contains("example.invalid"), "{fields}");
+    // A switch to the second seat: both readings say it is the one in use.
+    seats.mark_active("claude", "someone@example.invalid");
+    let kept = seats.switcher("claude").unwrap();
+    assert_eq!(
+        kept.iter().map(|seat| seat.active).collect::<Vec<_>>(),
+        [false, true]
+    );
+    let served = seats.served(true, 1_899_999_000_000);
+    let accounts = served["providers"][0]["accounts"].as_array().unwrap();
+    let active: Vec<bool> = accounts
+        .iter()
+        .map(|account| account["active_default"] == true)
+        .collect();
+    assert_eq!(active, [false, true]);
+    // A seat the reading does not have changes nothing.
+    seats.mark_active("claude", "nobody");
+    assert!(seats.switcher("claude").unwrap()[1].active);
+}
