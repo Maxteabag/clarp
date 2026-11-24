@@ -2971,13 +2971,13 @@ impl Fleet {
         choice: Option<clarp_kernel::hidden_coordination::Visibility>,
     ) -> Result<clarp_kernel::hidden_coordination::Visibility, Unavailable> {
         use clarp_kernel::hidden_coordination::{self as rules, Visibility};
-        let key = if let Some((id, _)) = &chat {
-            if self.place_of(id).is_none() {
+        let (key, at) = if let Some((id, _)) = &chat {
+            let Some(at) = self.place_of(id) else {
                 return Err(Unavailable::new("no such agent".to_owned()));
-            }
-            rules::chat_key(id)
+            };
+            (rules::chat_key(id), Some(at))
         } else {
-            rules::GLOBAL_KEY.to_owned()
+            (rules::GLOBAL_KEY.to_owned(), None)
         };
         self.set(vec![(key, choice.map_or("", Visibility::word).to_owned())])?;
         for member in &self.members {
@@ -2988,11 +2988,17 @@ impl Fleet {
                 member.agent.refresh_telling();
             }
         }
-        let effective = choice.unwrap_or_else(|| {
-            self.settings
+        // What the chat shows now: the choice made, or what holds for it without one.
+        let effective = choice.unwrap_or_else(|| match at {
+            Some(at) => {
+                crate::hidden_coordination::chat_choices(&self.settings, &self.members[at].record)
+                    .0
+            }
+            None => self
+                .settings
                 .get(rules::GLOBAL_KEY)
                 .and_then(|value| Visibility::read(value))
-                .unwrap_or_default()
+                .unwrap_or_default(),
         });
         let mut event = serde_json::json!({"type": "agent-roster", "kind": rules::ROSTER_KIND,
                                "coordination_visibility": effective});

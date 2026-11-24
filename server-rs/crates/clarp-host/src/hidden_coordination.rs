@@ -16,7 +16,35 @@ use crate::fleet::{AgentRecord, Directory};
 #[derive(Default)]
 pub(crate) struct Roster {
     global: Visibility,
-    chats: HashMap<String, (Option<Visibility>, bool)>,
+    chats: HashMap<String, Chat>,
+}
+
+/// One chat's choices: what holds when it has none of its own, its own, and whether its
+/// turns that answer another agent are kept out of it.
+#[derive(Clone, Copy)]
+struct Chat {
+    default: Visibility,
+    own: Option<Visibility>,
+    hides: bool,
+}
+
+/// What a chat shows of the turns other agents start: the visibility that holds when it has
+/// no choice of its own, and its own choice. A helper's own chat shows them by default
+/// whatever the global choice is: every turn of a helper is started by its parent or another
+/// agent, so under a global `hide` its chat would always be empty. The global choice keeps
+/// agent chatter out of the chats the owner talks in, and a helper's chat is its work. A
+/// choice the owner made for the chat still wins.
+pub(crate) fn chat_choices(
+    settings: &BTreeMap<String, String>,
+    agent: &AgentRecord,
+) -> (Visibility, Option<Visibility>) {
+    let read = |key: &str| settings.get(key).and_then(|word| Visibility::read(word));
+    let default = if agent.is_helper() {
+        Visibility::Show
+    } else {
+        read(rules::GLOBAL_KEY).unwrap_or_default()
+    };
+    (default, read(&rules::chat_key(&agent.agent_id)))
 }
 
 impl Roster {
@@ -26,33 +54,37 @@ impl Roster {
         settings: &BTreeMap<String, String>,
         agents: impl Iterator<Item = &'a AgentRecord>,
     ) -> Self {
-        let read = |key: &str| settings.get(key).and_then(|word| Visibility::read(word));
-        let global = read(rules::GLOBAL_KEY).unwrap_or_default();
+        let global = settings
+            .get(rules::GLOBAL_KEY)
+            .and_then(|word| Visibility::read(word))
+            .unwrap_or_default();
         let chats = agents
             .map(|agent| {
-                let own = read(&rules::chat_key(&agent.agent_id));
-                let hides = own.unwrap_or(global) == Visibility::Hide
+                let (default, own) = chat_choices(settings, agent);
+                let hides = own.unwrap_or(default) == Visibility::Hide
                     && clarp_kernel::coordination::can_leave_note(
                         &agent.agent_id,
                         Some(&agent.backend),
                         true,
                     );
-                (agent.agent_id.clone(), (own, hides))
+                (agent.agent_id.clone(), Chat { default, own, hides })
             })
             .collect();
         Self { global, chats }
     }
 }
 
+/// What holds for this chat when it has no choice of its own, and its own choice. An agent
+/// the directory does not name has the global choice.
 pub(crate) fn visibility(
     directory: &Directory,
     agent_id: &str,
 ) -> (Visibility, Option<Visibility>) {
     let roster = &directory.coordination;
-    (
-        roster.global,
-        roster.chats.get(agent_id).and_then(|(own, _)| *own),
-    )
+    roster
+        .chats
+        .get(agent_id)
+        .map_or((roster.global, None), |chat| (chat.default, chat.own))
 }
 
 pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
@@ -60,7 +92,7 @@ pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
     roster
         .chats
         .get(agent_id)
-        .map_or(roster.global == Visibility::Hide, |(_, hides)| *hides)
+        .map_or(roster.global == Visibility::Hide, |chat| chat.hides)
 }
 
 fn owner(headers: &HeaderMap) -> Result<(), ApiError> {

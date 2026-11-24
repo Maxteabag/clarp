@@ -98,12 +98,8 @@ impl Telling {
             owner::voices(&file).route(who).provider == "gemini"
         });
         let coordination_hidden = {
-            use clarp_kernel::hidden_coordination::{self as rules, Visibility};
-            stored(&rules::chat_key(&record.agent_id))
-                .and_then(Visibility::read)
-                .or_else(|| stored(rules::GLOBAL_KEY).and_then(Visibility::read))
-                .unwrap_or_default()
-                == Visibility::Hide
+            let (default, own) = crate::hidden_coordination::chat_choices(&settings, record);
+            own.unwrap_or(default) == clarp_kernel::hidden_coordination::Visibility::Hide
         };
         Told {
             coordination_hidden,

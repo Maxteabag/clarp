@@ -3766,7 +3766,7 @@ retry the catalogue after 15 minutes, an hour, and four hours, then daily.
 
 **Hidden coordination** (the Python Host's PR 512). Fleet writes the global and per-chat
 visibility settings, publishes the directory, then emits the new effective choice with
-the roster hint. The default is hide (Python PR 580). A stored choice takes precedence. It never edits a conversation for this purpose. An explicit log mode reads
+the roster hint. The default is hide (Python PR 580). A helper's own chat defaults to show whatever the global choice is, since every turn of a helper is started by another agent; this is decided once (`hidden_coordination::chat_choices`) for the log, the snapshot, the prompt and the per-chat route (`docs/differences.md`). A stored choice takes precedence. It never edits a conversation for this purpose. An explicit log mode reads
 under one choice and echoes its source. A hidden reader applies its mark check before the
 page limit and still carries hidden changes in the revision cursor. Notes remain visible.
 The gap count names the hidden turns between visible rows and the current tail, nearest
