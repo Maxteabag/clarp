@@ -214,16 +214,48 @@ pub(crate) fn guard_exec(
     Ok(())
 }
 
-/// Before a process of its own touches an agent's conversation, every lane of that agent leaves,
-/// whatever its tool: one left from when its chat turns ran on it, or from before the agent moved
-/// to another tool. Each idle one is retired and waited for until its tool has exited, since a
-/// tool may refuse a second process on a conversation at once rather than wait for it (Muse's
-/// session lock). A lane that still runs work refuses; [`guard_exec`] then fails the turn rather
-/// than let two processes write. The first refusal is returned, after every lane was asked.
-pub(crate) fn clear_before_exec(run: &Path, agent_id: &str) -> io::Result<()> {
+/// What, other than its lane, may open an agent's conversation with its tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "the single-writer seam of every touch (issue 761); only Exec is wired yet"
+)]
+pub(crate) enum Touch {
+    /// A turn run as a process of its own: the switch off, an attempt the lane does not take
+    /// ([`Driver::takes`]), or a tool without a lane.
+    Exec,
+    /// A fork that runs the tool on the agent's conversation. A fork that copies it (as words,
+    /// as this Host's helper forks do, or by the tool inside the lane, as Muse's `session/fork`)
+    /// opens nothing and needs no way made: copying is preferred, so a fork costs the lane
+    /// nothing.
+    Fork,
+    /// A status fork that runs the tool on the conversation, read-only. As for [`Touch::Fork`],
+    /// one that copies needs no way made.
+    StatusFork,
+    /// The agent moves to another tool: its new session is written from the Host's record,
+    /// so only a transit that opens the old session needs the way made.
+    Transit,
+    /// The agent's tool spoken to by hand, on its conversation (`GET /terminal/<session>`).
+    Terminal,
+}
+
+/// Single writer, the layer's rule for every tool: before anything else opens an agent's
+/// conversation (`touch`), every lane of that agent leaves, whatever its tool, and is waited for
+/// until its tool has exited. A tool may refuse a second process on a conversation at once
+/// rather than wait for it (Muse's session lock), so waiting is the rule, not a lock to queue on.
+/// A lane that still runs work refuses, and the touch must not go ahead: an exec turn is then
+/// failed by [`guard_exec`]'s lease rather than write beside it. The first refusal is returned,
+/// after every lane was asked.
+///
+/// Where it is called today: before every exec turn of an agent (what Codex did before the
+/// layer). A terminal, a fork or a transit that opens the session does not call it yet; see
+/// `server-rs/docs/lanes.md`.
+pub(crate) fn make_way(run: &Path, agent_id: &str, touch: Touch) -> io::Result<()> {
     let mut first = Ok(());
     for tool in Tool::ALL {
-        let result = Endpoint::of(tool, run, agent_id).retire();
+        let result = Endpoint::of(tool, run, agent_id)
+            .retire()
+            .map_err(|why| io::Error::new(why.kind(), format!("{touch:?} waits for the {} lane: {why}", tool.name())));
         if first.is_ok() {
             first = result;
         }
@@ -274,7 +306,7 @@ pub(crate) trait Driver {
     fn endpoint(&self) -> &Endpoint;
 
     /// Whether `order` may run on the lane. One it does not take runs as a process of its own,
-    /// the per-turn fallback, once the agent's lanes have left ([`clear_before_exec`]). Every
+    /// the per-turn fallback, once the agent's lanes have left ([`make_way`]). Every
     /// driver leaves an opening turn to its own gated launch. A driver whose tool can only take
     /// up a conversation that exists, not start one under the Host's id (Muse's serve), says
     /// no as well to the first turn of a conversation, a fork and a takeover.

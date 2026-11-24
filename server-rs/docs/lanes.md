@@ -78,19 +78,37 @@ lane_memory_mb = 4096         # what they may hold together (unset: no budget)
 These hold for a turn whether its tool runs per turn or on a lane. A driver that cannot hold one
 of them is not done.
 
-- **One writer per session.** One process writes a tool's conversation at a time.
-  - A lane takes its thread's lock (`clarp_shim::lane::thread_lock`) exclusive, and keeps it
-    until its tool has been reaped.
-  - A per-turn process of the same thread takes it shared and without waiting
-    (`lane::guard_exec`, for every tool that has lanes), so it fails rather than writes beside
-    a lane.
-  - Before any per-turn process starts, every lane of the agent, of any tool, is retired and
-    waited for until its tool has exited (`lane::clear_before_exec`). Waiting matters because
-    a tool may refuse a second process at once instead of waiting: Muse fails `muse exec` on a
-    session a `muse serve` holds.
-  - A fork, the terminal takeover, a compaction, or a move of the agent ends the lane first. A
-    tool that can fork inside its own process (Muse's `session/fork`) may do so on the lane
-    instead.
+- **One writer per session: the layer's rule, for every driver** (the lead, on #762). Before
+  any other process touches a session a lane holds, the layer retires the lane and waits until
+  its tool has exited (`lane::make_way`, with what touches it: `Touch`).
+  - **Waiting, not locking:** a tool may refuse a second process at once rather than wait for it.
+    Muse fails `muse exec` on a session a `muse serve` holds, and a second serve gets
+    `sessionInUse`.
+  - **A lane that still runs a turn refuses.** The touch must not go ahead.
+  - **What touches a session:** an exec turn on it (the switch off, an attempt the lane does
+    not take, a tool without a lane), a fork or status fork that runs the tool on it, a transit
+    that opens the old session, and the terminal (`GET /terminal/<session>`).
+  - **Forks copy rather than exec.** A fork that copies the conversation opens nothing and
+    costs the lane nothing. This Host's helper forks copy it as words. A tool that can fork
+    inside its own process does it on the lane (Muse's `session/fork`, as a request on the
+    lane's control socket). A status question then never ends a lane.
+  - **The lease:** the lock is the rule's other half. A lane takes its thread's lock
+    (`clarp_shim::lane::thread_lock`) exclusive and keeps it until its tool has been reaped. A
+    per-turn process of the same thread takes it shared and without waiting
+    (`lane::guard_exec`, for every tool that has lanes), so if a lane is still there it fails
+    rather than writes beside it.
+  - **Where it holds today (Codex, as before the layer):**
+    - Every exec turn: lanes leave first (`make_way(Touch::Exec)`), and the lease guards the
+      turn.
+    - Transit: it writes the new tool's session from the Host's record and never opens the old
+      one, so it needs nothing.
+    - Forks: helper forks are words. Conversation forks are Claude's only, and no Claude lane
+      exists yet.
+    - Status forks: not a route of this Host; they are a Clarp skill.
+    - The terminal does not make way yet. A person who opens a Codex agent's terminal while
+      its lane is idle runs `codex resume` beside it, as before the layer. Wiring
+      `make_way(Touch::Terminal)` into `GET /terminal/<session>` closes that, refusing while a
+      turn runs. It changes Codex's behaviour, so it waits for the lead's word.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool, and only such an
   attempt is offered to a new lane, once (`lane::once_more`).
@@ -168,7 +186,7 @@ What every driver gets from the layer, built once:
 What a driver says of itself, rather than the layer assuming it:
 
 - **which attempts it takes** (`lane::Driver::takes`). An attempt it does not take runs as a
-  process of its own, after the agent's lanes have left. Every driver leaves an opening turn to
+  process of its own, after the agent's lanes have made way. Every driver leaves an opening turn to
   its gated launch. A resume-only driver (Muse's serve can take up a session but not start one
   under the Host's id) also leaves the first turn of a conversation, a fork and a takeover.
 - **what starts it again** (`lane::Driver::restart_for`, with the digest). What the tool takes

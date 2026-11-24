@@ -421,3 +421,26 @@ fn a_driver_says_which_attempts_it_takes_and_what_starts_it_again() {
     assert!(Lane::restart_for(&state(Some("x"), None), &None, &None));
     assert!(Lane::restart_for(&state(None, Some("high")), &m, &None));
 }
+
+#[test]
+fn before_anything_else_opens_the_conversation_its_lanes_leave_or_it_does_not_go_ahead() {
+    use super::{Touch, make_way};
+    let run = run_dir("way");
+    let idle = FakeLane::start(&run, "a", status("t", "d", 5, false));
+    make_way(&run, "a", Touch::Exec).unwrap();
+    assert_eq!(idle.asked(), ["retire"]);
+    assert!(idle.endpoint.released().unwrap());
+    // No lane at all: nothing to wait for.
+    make_way(&run, "nobody", Touch::Fork).unwrap();
+    // A lane that still runs a turn refuses, and says who waited for it.
+    let busy = FakeLane::start(&run, "b", status("t", "d", 0, true));
+    let refused = make_way(&run, "b", Touch::Terminal).unwrap_err();
+    assert!(
+        refused
+            .to_string()
+            .starts_with("Terminal waits for the Codex lane:"),
+        "{refused}"
+    );
+    assert!(!busy.endpoint.released().unwrap());
+    std::fs::remove_dir_all(&run).unwrap();
+}

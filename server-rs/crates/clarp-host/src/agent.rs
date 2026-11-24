@@ -4217,7 +4217,7 @@ impl Worker {
                 let (turn, attempt) = (order.turn, order.attempt);
                 let starting = self.launches.begin(turn, &order.socket);
                 // A lane of the agent's, of any tool, leaves before this turn's process touches
-                // the conversation (`lane::clear_before_exec`).
+                // the conversation (`lane::make_way`).
                 let run_dir = self.setup.profile.run_dir.clone();
                 let lane_agent = self.setup.record.agent_id.clone();
                 let claude_mcp = (self.setup.record.backend == "claude")
@@ -4233,7 +4233,7 @@ impl Worker {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
-                        let _ = crate::lane::clear_before_exec(&run_dir, &lane_agent);
+                        let _ = crate::lane::make_way(&run_dir, &lane_agent, crate::lane::Touch::Exec);
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);
