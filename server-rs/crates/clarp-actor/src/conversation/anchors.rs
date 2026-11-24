@@ -314,3 +314,389 @@ impl AnchorCache {
         self.walked.get()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    use clarp_kernel::agent::Command;
+    use clarp_kernel::conversation::{Commentary, Entry, Message, Reply, ToolCall, TurnEnd};
+    use clarp_kernel::journal::{Incoming, Recorder};
+    use clarp_kernel::steering::Join;
+    use clarp_kernel::turn::{Admission, Origin, RunOutcome, TurnId};
+    use clarp_ports::log::LogEngine;
+
+    use super::super::{REVISION_STEP, Span, Versioned, Which, after, tail};
+    use super::AnchorCache;
+
+    fn open() -> Recorder {
+        let log = clarp_store_mem::MemEngine::new()
+            .open(
+                Path::new("/agents/anchors"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        Recorder::open(log).unwrap()
+    }
+
+    fn accept(recorder: &mut Recorder, id: &str, now: i64) -> TurnId {
+        let message = Message {
+            id: id.into(),
+            text: id.into(),
+            origin: Origin::User,
+            ..Message::default()
+        };
+        recorder
+            .accept_message(
+                Incoming {
+                    key: Some(message.id.clone()),
+                    body: serde_json::to_vec(&message).unwrap(),
+                    origin: Origin::User,
+                    admission: Admission::Queue,
+                    coordination: None,
+                    user_word: false,
+                },
+                now,
+            )
+            .unwrap()
+            .turn
+            .unwrap()
+    }
+
+    /// A turn of the user's that runs: its message is `u-ask`.
+    fn start(recorder: &mut Recorder) -> TurnId {
+        let turn = accept(recorder, "u-ask", 100);
+        recorder
+            .handle(Command::TurnStarted { turn }, 110)
+            .unwrap();
+        turn
+    }
+
+    /// Writes what the actor writes when the agent says something whole: the reply, with the
+    /// calls its message makes, and that what was said before it is along the way (`along`).
+    fn say(recorder: &mut Recorder, turn: TurnId, id: &str, tools: &[&str], along: &[&str]) {
+        let mut batch = recorder.batch();
+        for earlier in along {
+            let part = Entry::Commentary(Commentary::of(earlier, turn.0));
+            batch.item(part.to_item(200).unwrap());
+        }
+        let reply = Entry::Reply(Reply {
+            id: id.into(),
+            turn: turn.0,
+            text: id.into(),
+            tools: tools.iter().map(|tool| (*tool).to_owned()).collect(),
+            ..Reply::default()
+        });
+        batch.item(reply.to_item(200).unwrap());
+        batch.commit().unwrap();
+    }
+
+    /// A call no message carries (a Codex command): a row of work by itself. What was said
+    /// before it is along the way (`along`).
+    fn call(recorder: &mut Recorder, turn: TurnId, id: &str, along: &[&str]) {
+        let mut batch = recorder.batch();
+        for earlier in along {
+            let part = Entry::Commentary(Commentary::of(earlier, turn.0));
+            batch.item(part.to_item(200).unwrap());
+        }
+        let call = Entry::Tool(ToolCall {
+            id: id.into(),
+            turn: turn.0,
+            name: "Bash".into(),
+            ..ToolCall::default()
+        });
+        batch.item(call.to_item(200).unwrap());
+        batch.commit().unwrap();
+    }
+
+    /// A message of the user's read into the running turn (steering).
+    fn read_in(recorder: &mut Recorder, into: TurnId, id: &str) {
+        let followup = accept(recorder, id, 300);
+        let mut batch = recorder.batch();
+        let join = Join {
+            into,
+            uuid: id.into(),
+            recovery: None,
+            together: false,
+        };
+        batch
+            .command(
+                Command::Join {
+                    turn: followup,
+                    join,
+                },
+                310,
+            )
+            .unwrap();
+        batch
+            .command(Command::JoinRead { turn: followup }, 320)
+            .unwrap();
+        batch.commit().unwrap();
+    }
+
+    fn end(recorder: &mut Recorder, turn: TurnId, closes: &str) {
+        let mut batch = recorder.batch();
+        batch
+            .command(
+                Command::TurnEnded {
+                    turn,
+                    outcome: RunOutcome::Completed,
+                },
+                400,
+            )
+            .unwrap();
+        let end = TurnEnd::of(batch.agent().last().unwrap(), closes).unwrap();
+        batch.item(Entry::TurnEnd(end).to_item(400).unwrap());
+        batch.commit().unwrap();
+    }
+
+    fn span(recorder: &Recorder) -> Span<'static> {
+        Span {
+            head_revision: recorder.conversation_seq() * REVISION_STEP,
+            ..Span::default()
+        }
+    }
+
+    /// What a chat holds now, in the order it shows it: each row and its count, when it is
+    /// in the conversation view.
+    fn now(recorder: &Recorder) -> Vec<(String, Option<usize>)> {
+        tail(recorder.log(), &[], span(recorder), 100, Which::chat(true))
+            .unwrap()
+            .entries
+            .iter()
+            .map(|row| (row.entry.id().to_owned(), row.session_rows))
+            .collect()
+    }
+
+    /// What a reader of the conversation view alone holds now.
+    fn conversation(recorder: &Recorder) -> Vec<String> {
+        let which = Which::chat(true).conversation_view(false);
+        tail(recorder.log(), &[], span(recorder), 100, which)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|row| row.entry.id().to_owned())
+            .collect()
+    }
+
+    /// What a reader of the conversation view that held everything up to `revision` is given,
+    /// and its next cursor.
+    fn delta(recorder: &Recorder, revision: u64) -> (Vec<Versioned>, u64) {
+        let which = Which::chat(true).conversation_view(false);
+        let page = after(recorder.log(), revision, &[], span(recorder), 100, which).unwrap();
+        (page.entries, page.latest_revision)
+    }
+
+    fn revision_of(recorder: &Recorder, id: &str) -> u64 {
+        recorder.log().find(id).unwrap().unwrap().seq * REVISION_STEP
+    }
+
+    #[test]
+    fn words_that_a_call_follows_never_enter_the_conversation_view() {
+        // Codex: a message whole by itself, then a command of its own.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-look", &[], &[]);
+        // Not yet: what the turn does next decides what these words were.
+        assert_eq!(conversation(&recorder), ["u-ask"]);
+        call(&mut recorder, turn, "t-1", &["r-look"]);
+        assert_eq!(conversation(&recorder), ["u-ask"]);
+        say(&mut recorder, turn, "r-done", &[], &[]);
+        assert_eq!(conversation(&recorder), ["u-ask"]);
+        end(&mut recorder, turn, "r-done");
+        assert_eq!(conversation(&recorder), ["u-ask", "r-done"]);
+        assert_eq!(
+            now(&recorder),
+            [
+                ("u-ask".to_owned(), None),
+                ("r-look".to_owned(), None),
+                ("t-1".to_owned(), None),
+                ("r-done".to_owned(), Some(2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn two_replies_with_no_work_between_both_stay_in_the_conversation_view() {
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-one", &[], &[]);
+        let held = revision_of(&recorder, "r-one");
+        say(&mut recorder, turn, "r-two", &[], &[]);
+        // The second words decide that the first were an answer: it enters with them.
+        assert_eq!(conversation(&recorder), ["u-ask", "r-one"]);
+        let (given, _) = delta(&recorder, held);
+        assert_eq!(given.len(), 1);
+        assert_eq!(given[0].entry.id(), "r-one");
+        assert_eq!(given[0].session_rows, Some(0));
+        assert_eq!(given[0].revision, revision_of(&recorder, "r-two"));
+        // Work after the second makes it words along the way; the first stays an answer.
+        say(&mut recorder, turn, "r-call", &["t-1"], &["r-two"]);
+        say(&mut recorder, turn, "r-three", &[], &[]);
+        end(&mut recorder, turn, "r-three");
+        assert_eq!(conversation(&recorder), ["u-ask", "r-one", "r-three"]);
+        assert_eq!(
+            now(&recorder),
+            [
+                ("u-ask".to_owned(), None),
+                ("r-one".to_owned(), Some(0)),
+                ("r-two".to_owned(), None),
+                ("r-call".to_owned(), None),
+                ("r-three".to_owned(), Some(2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_answer_given_before_a_message_read_into_the_turn_stays_an_answer() {
+        // Issue 745: the user's follow-up is read into the turn after a whole answer.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-first", &[], &[]);
+        let held = revision_of(&recorder, "r-first");
+        read_in(&mut recorder, turn, "u-more");
+        assert_eq!(conversation(&recorder), ["u-ask", "r-first", "u-more"]);
+        // A reader of the conversation view alone is given the answer with the message.
+        let (given, _) = delta(&recorder, held);
+        let ids: Vec<_> = given.iter().map(|row| row.entry.id()).collect();
+        assert_eq!(ids, ["r-first", "u-more"]);
+        say(&mut recorder, turn, "r-call", &["t-1"], &[]);
+        say(&mut recorder, turn, "r-second", &[], &[]);
+        let before = now(&recorder);
+        end(&mut recorder, turn, "r-second");
+        assert_eq!(
+            conversation(&recorder),
+            ["u-ask", "r-first", "u-more", "r-second"]
+        );
+        let settled = now(&recorder);
+        assert_eq!(settled[1], ("r-first".to_owned(), Some(0)));
+        assert_eq!(before[1], settled[1]);
+        assert_eq!(settled[4], ("r-second".to_owned(), Some(1)));
+    }
+
+    #[test]
+    fn a_turn_whose_last_words_were_work_settles_as_it_always_did() {
+        // Nothing that answered a message by itself: at the end its newest words carry the
+        // count of the whole turn, a message read into it or not.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-look", &["t-1"], &[]);
+        read_in(&mut recorder, turn, "u-more");
+        say(&mut recorder, turn, "r-call", &["t-2"], &[]);
+        end(&mut recorder, turn, "r-call");
+        assert_eq!(
+            now(&recorder),
+            [
+                ("u-ask".to_owned(), None),
+                ("r-look".to_owned(), None),
+                ("u-more".to_owned(), None),
+                ("r-call".to_owned(), Some(1)),
+            ]
+        );
+        // A turn that said nothing: its message carries the count.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        let quiet = Entry::Reply(Reply {
+            id: "r-quiet".into(),
+            turn: turn.0,
+            tools: vec!["t-1".into()],
+            ..Reply::default()
+        });
+        let mut batch = recorder.batch();
+        batch.item(quiet.to_item(250).unwrap());
+        batch.commit().unwrap();
+        end(&mut recorder, turn, "r-quiet");
+        assert_eq!(
+            now(&recorder),
+            [("u-ask".to_owned(), Some(1)), ("r-quiet".to_owned(), None)]
+        );
+    }
+
+    #[test]
+    fn a_read_during_a_long_running_turn_walks_only_what_is_new() {
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        for at in 0..300 {
+            say(&mut recorder, turn, &format!("r-{at}"), &[&format!("t-{at}")], &[]);
+        }
+        let cache = AnchorCache::default();
+        let read = |recorder: &Recorder| {
+            let span = Span {
+                anchor_cache: Some(&cache),
+                ..span(recorder)
+            };
+            tail(recorder.log(), &[], span, 20, Which::chat(true)).unwrap();
+        };
+        read(&recorder);
+        let first = cache.walked();
+        assert!(first >= 300, "{first}");
+        read(&recorder);
+        assert_eq!(cache.walked(), first);
+        say(&mut recorder, turn, "r-new", &[], &[]);
+        read(&recorder);
+        assert_eq!(cache.walked(), first + 1);
+        // What the kept walk says is what a walk from the start says.
+        let fresh = tail(recorder.log(), &[], span(&recorder), 20, Which::chat(true)).unwrap();
+        let span = Span {
+            anchor_cache: Some(&cache),
+            ..span(&recorder)
+        };
+        let kept = tail(recorder.log(), &[], span, 20, Which::chat(true)).unwrap();
+        assert_eq!(fresh.entries, kept.entries);
+    }
+
+    #[test]
+    fn a_row_that_entered_the_conversation_view_never_leaves_it() {
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        let mut entered: BTreeSet<String> = BTreeSet::new();
+        let (mut held, mut cursor) = (Vec::<String>::new(), 0);
+        let mut steps: Vec<Box<dyn Fn(&mut Recorder)>> = vec![
+            Box::new(move |r| say(r, turn, "r-a", &[], &[])),
+            Box::new(move |r| say(r, turn, "r-b", &[], &[])),
+            Box::new(move |r| call(r, turn, "t-1", &["r-b"])),
+            Box::new(move |r| say(r, turn, "r-c", &["t-2"], &[])),
+            Box::new(move |r| say(r, turn, "r-d", &[], &[])),
+            Box::new(move |r| read_in(r, turn, "u-more")),
+            Box::new(move |r| say(r, turn, "r-e", &[], &[])),
+            Box::new(move |r| call(r, turn, "t-3", &["r-e"])),
+            Box::new(move |r| say(r, turn, "r-f", &[], &[])),
+            Box::new(move |r| end(r, turn, "r-f")),
+        ];
+        for step in steps.drain(..) {
+            step(&mut recorder);
+            // Whoever reads every row: a row once in the conversation view stays there.
+            let shown: BTreeSet<String> = now(&recorder)
+                .into_iter()
+                .filter(|(_, count)| count.is_some())
+                .map(|(id, _)| id)
+                .collect();
+            assert!(entered.is_subset(&shown), "{entered:?} {shown:?}");
+            entered = shown;
+            // Whoever reads the conversation view alone: it only grows, in its order, and
+            // what is newer brings each row that entered.
+            let view = conversation(&recorder);
+            assert!(view.starts_with(&held), "{held:?} {view:?}");
+            let (given, next) = delta(&recorder, cursor);
+            for row in given {
+                let id = row.entry.id().to_owned();
+                if !held.contains(&id) {
+                    held.push(id);
+                }
+            }
+            cursor = next;
+            let mut sorted = held.clone();
+            sorted.sort();
+            let mut expected = view.clone();
+            expected.sort();
+            assert_eq!(sorted, expected);
+            held = view;
+        }
+        assert_eq!(
+            held,
+            ["u-ask", "r-a", "r-d", "u-more", "r-f"].map(str::to_owned)
+        );
+    }
+}

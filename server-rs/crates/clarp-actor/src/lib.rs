@@ -1373,8 +1373,8 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
     Some(Entry::TurnEnd(end))
 }
 
-/// The replies at the end of what a turn has put into the conversation that said something
-/// and that no tool work has followed, oldest first, as the log has them. An attempt before
+/// The newest reply of what a turn has put into the conversation that said something and that
+/// no tool work or other words have followed, as the log has it (at most one). An attempt before
 /// the one that runs may have said them, and an actor before this one.
 fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), ActorError> {
     const AT_A_TIME: usize = 32;
@@ -1396,8 +1396,11 @@ fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), A
                 Some(Entry::Reply(reply)) if reply.turn == turn.0 => {
                     let worked = !reply.tools.is_empty();
                     if !reply.text.trim().is_empty() {
+                        // What was said before the newest words was decided when they were
+                        // written: an answer when they came without work, else along the way.
                         said.push(reply.id);
                         newest_worked.get_or_insert(worked);
+                        break 'reading;
                     }
                     if worked {
                         // What came before this was told when this was written.
@@ -6604,6 +6607,13 @@ impl Actor {
                             // The tools it calls are work after what the turn said before.
                             if !reply.tools.is_empty() {
                                 follow(&mut batch, &mut live.said, turn, t)?;
+                            } else if !reply.text.trim().is_empty() {
+                                // Words after words: those before were an answer, and stay
+                                // one whatever work follows these. The conversation view
+                                // only grows.
+                                for answer in live.said.drain(..) {
+                                    self.shown.close_answer(&answer);
+                                }
                             }
                             if !reply.text.trim().is_empty() {
                                 live.said.push(reply.id.clone());
