@@ -331,7 +331,10 @@ async fn of_an_agent(
     }
     if let Ok(Some(own)) = &binding {
         let provider = serde_json::Value::String(own.provider.clone());
-        argv.splice(1..1, ["-c".to_string(), format!("model_provider={provider}")]);
+        argv.splice(
+            1..1,
+            ["-c".to_string(), format!("model_provider={provider}")],
+        );
         env.push((
             clarp_backend::codex::CODEX_HOME.to_string(),
             own.home.display().to_string(),

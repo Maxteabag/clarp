@@ -2051,11 +2051,7 @@ pub(crate) async fn make_agent(
     // list of the machine's models has: any name is taken, and with none Codex takes the one
     // its own configuration names.
     let bound = request.codex_provider.as_deref().map_or_else(
-        || {
-            replacing
-                .as_ref()
-                .is_some_and(AgentRecord::bound)
-        },
+        || replacing.as_ref().is_some_and(AgentRecord::bound),
         |provider| !provider.trim().is_empty(),
     );
     if !bound
