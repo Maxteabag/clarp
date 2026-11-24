@@ -529,6 +529,14 @@ impl AcpInterpreter {
                 self.notice("agy-question", text, out);
             }
             "cancel" => self.cancelled = true,
+            // A reply cut for a message ends at the cut: nothing more of it is shown, so it is
+            // a row from here, not when the message is read (seen 24 Nov 2026: the live reply
+            // turned into its row just before the answer to the message, seconds later). The
+            // cut is no Stop.
+            "cut" if line["stage"] == "cancel" => {
+                self.close_thought(out);
+                self.close_message(out);
+            }
             // An answer to a message agy never took (one it refused) leaves the turn as it was.
             "prompted" | "failed"
                 if (what == "prompted" || line["stage"] == "prompt")

@@ -629,6 +629,25 @@ fn a_reply_cut_for_a_message_is_no_stop_and_the_turn_answers_both() {
     assert_eq!(replies(&signals), ["1. Pho\n2. Ramen\n", "BANANA"]);
     assert_eq!(ended(&signals), &RunOutcome::Completed);
 
+    // The cut reply is a row from the cut on: at the cut's own line, before the message is
+    // read, never rewritten later.
+    let mut interpreter = by_id("agy-acp").unwrap().interpreter(4, "t4");
+    let mut out = Vec::new();
+    let mut t = 0;
+    for line in lines.iter().take(4) {
+        t += 1;
+        let entry = Entry::Out(line.to_string());
+        interpreter.on_record(&Record { t, entry }, &mut out);
+    }
+    assert_eq!(replies(&out), ["1. Pho\n2. Ramen\n"]);
+    let mut later = Vec::new();
+    for line in lines.iter().skip(4) {
+        t += 1;
+        let entry = Entry::Out(line.to_string());
+        interpreter.on_record(&Record { t, entry }, &mut later);
+    }
+    assert_eq!(replies(&later), ["BANANA"], "the cut row is not told again");
+
     // agy refused the message after the cut: the cut prompt's answer stands, as ended.
     let refused = [
         bound_as("primary"),
