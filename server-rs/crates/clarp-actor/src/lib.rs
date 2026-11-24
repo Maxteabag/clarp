@@ -690,6 +690,9 @@ struct LiveTurn {
     said: Vec<String>,
     /// The newest of `said` carried tool calls: it announced work, and is no answer.
     said_worked: bool,
+    /// The steps of the plan the tool last told in this turn. A plan told again unchanged (Codex
+    /// closes its list so when the task is complete, after its last words) is no work.
+    plan: Option<serde_json::Value>,
     /// What the turn's replies mark for the ear is said aloud.
     speak: bool,
     /// What the tool has said of itself so far: its model, what the turn cost, and how
@@ -1713,6 +1716,7 @@ impl Actor {
                 // The attempt that comes reads from the log what the turn has said.
                 said: Vec::new(),
                 said_worked: false,
+                plan: None,
                 speak: message.speak,
                 interpreter: actor
                     .backend
@@ -5219,6 +5223,7 @@ impl Actor {
             last_row,
             said,
             said_worked,
+            plan: None,
             speak,
             client_id,
             message_id: message.id,
@@ -5532,6 +5537,7 @@ impl Actor {
             last_row,
             said,
             said_worked,
+            plan: None,
             speak,
             model,
             tokens,
@@ -6515,10 +6521,14 @@ impl Actor {
                             continue;
                         }
                         Signal::Glimpse(glimpse) => {
-                            // A plan the tool updates (Codex's `update_plan`) is work, though
+                            // A plan the tool changes (Codex's `update_plan`) is work, though
                             // no row of the conversation says so: what was said before it
-                            // was said along the way.
-                            if matches!(glimpse, clarp_kernel::live::Glimpse::Plan { .. }) {
+                            // was said along the way. One told again with the same steps is
+                            // no new work: Codex closes its plan so after its last words.
+                            if let clarp_kernel::live::Glimpse::Plan { steps, .. } = &glimpse
+                                && live.plan.as_ref() != Some(steps)
+                            {
+                                live.plan = Some(steps.clone());
                                 follow(&mut batch, &mut live.said, turn, t)?;
                             }
                             // Of the turn that is shown, and of no other: what a turn that
