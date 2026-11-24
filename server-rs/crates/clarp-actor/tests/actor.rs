@@ -45,6 +45,10 @@ struct World {
     stopped: Vec<u64>,
     /// What each launch gave its tool, in order.
     prompts: Vec<String>,
+    /// Whether the machine reaches the provider, as a check of the network finds it.
+    network_up: bool,
+    /// How often the network was checked.
+    network_checks: u32,
 }
 
 impl World {
@@ -82,6 +86,8 @@ impl World {
             followed: Vec::new(),
             stopped: Vec::new(),
             prompts: Vec::new(),
+            network_up: true,
+            network_checks: 0,
         }
     }
 
@@ -119,6 +125,11 @@ impl World {
                     Action::Steer { .. } => panic!("the scripted tool cannot be steered"),
                     Action::Fork(_) | Action::ForkFollow { .. } => {
                         panic!("these agents have no fork")
+                    }
+                    Action::CheckNetwork { turn } => {
+                        self.network_checks += 1;
+                        let now = self.tick();
+                        asked.push(actor.network_checked(turn, self.network_up, now).unwrap());
                     }
                 }
             }
@@ -160,6 +171,26 @@ impl World {
     fn exits(&mut self, turn: u64, code: Option<i32>, signal: Option<i32>) {
         self.write(turn, Line::Shim(ShimEvent::Exited { code, signal }));
         self.shims.remove(&turn);
+    }
+
+    /// Lets time pass to when the turn that waits is due, checks the network where it waits
+    /// for it, and answers with what the actor asks when the turn is tried again: not yet
+    /// carried out. `None`: nothing is due any more.
+    fn due(&mut self, actor: &mut Actor) -> Option<Outputs> {
+        loop {
+            let at = actor.retry_at()?;
+            self.now_ms = self.now_ms.max(at);
+            let mut out = actor.retry_due(self.now_ms).unwrap();
+            while let [Action::CheckNetwork { turn }] = out.actions.as_slice() {
+                let turn = *turn;
+                self.network_checks += 1;
+                let now = self.tick();
+                out = actor.network_checked(turn, self.network_up, now).unwrap();
+            }
+            if !out.actions.is_empty() {
+                return Some(out);
+            }
+        }
     }
 
     /// Tells the actor its spool has grown, and does what it asks.
@@ -5361,15 +5392,14 @@ fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
     world.write(3, Line::Err("API Error: socket hang up".to_string()));
     world.exits(3, Some(1), None);
     world.hint(&mut actor);
-    let at = actor.retry_at().expect("the turn waits for a retry");
+    assert!(actor.retry_at().is_some(), "the turn waits for a retry");
     assert_eq!(actor.waits_for_an_account(), None, "not for an account");
     assert_eq!(
         actor.running_trace(3).unwrap(),
         Some("trace-c".to_string()),
         "a turn that waits for a retry after a dropped connection"
     );
-    world.now_ms = at;
-    let out = actor.retry_due(at).unwrap();
+    let out = world.due(&mut actor).expect("the turn is tried again");
     assert!(
         matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(3) && order.attempt == 2),
         "{:?}",
@@ -6530,13 +6560,13 @@ fn the_users_waiting_messages_are_one_turn_and_its_retry_is_given_all_of_them() 
     world.write(2, Line::Err("API Error: socket hang up".to_string()));
     world.exits(2, Some(1), None);
     world.hint(&mut actor);
-    let at = actor
-        .retry_at()
-        .expect("the turn waits for its next attempt");
+    assert!(
+        actor.retry_at().is_some(),
+        "the turn waits for its next attempt"
+    );
     drop(actor);
     let mut actor = world.open();
-    world.now_ms = world.now_ms.max(at);
-    let out = actor.retry_due(world.now_ms).unwrap();
+    let out = world.due(&mut actor).expect("the turn is tried again");
     assert!(
         matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(2) && order.attempt == 2),
         "{:?}",
@@ -6737,4 +6767,162 @@ fn the_run_stops_at_another_agents_words_and_they_keep_their_own_turn() {
     );
     assert!(world.prompts[3].contains("third words"));
     assert!(!world.prompts[3].contains("<clarp-queued-messages>"));
+}
+
+/// A turn of an agent whose tool failed to reach its provider (the words Claude Code says when
+/// the machine's DNS is down), after it had begun its work.
+fn a_turn_whose_connection_fails(name: &str) -> (World, Actor) {
+    let mut world = World::new(name);
+    world.profile.accounts = clarp_kernel::recovery::Accounts::Follow;
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "count the files", Admission::Queue);
+    world.says(1, r#"{"session": "s1"}"#);
+    world.says(1, "Counting.");
+    world.hint(&mut actor);
+    (world, actor)
+}
+
+const UNREACHABLE: &str =
+    "API Error: Can't reach the API server. Check your connection (EAI_AGAIN)";
+
+#[test]
+fn a_turn_whose_network_is_gone_waits_for_it_says_so_and_goes_on_where_it_stood() {
+    let (mut world, mut actor) = a_turn_whose_connection_fails("network-gone");
+    world.write(1, Line::Err(UNREACHABLE.into()));
+    world.exits(1, Some(1), None);
+    world.network_up = false;
+    world.hint(&mut actor);
+
+    // The turn waits, and the network is checked at once, by the Host.
+    let due = actor.retry_at().expect("the turn waits");
+    assert!(due <= world.now_ms);
+    let out = actor.retry_due(world.now_ms).unwrap();
+    assert!(
+        matches!(&out.actions[..], [Action::CheckNetwork { turn }] if *turn == TurnId(1)),
+        "{:?}",
+        out.actions
+    );
+    // Asked once: the check is not asked for again while it runs.
+    assert!(actor.retry_due(world.now_ms).unwrap().actions.is_empty());
+    world.carry_out(&mut actor, out);
+
+    // It is gone: the turn says that it waits for the network, as a turn says it waits for an
+    // account, and the network is checked again in five seconds. It never waits for an
+    // account, and nothing says it failed.
+    let checked_at = world.now_ms;
+    let live = actor.status().live.expect("the turn holds the agent");
+    assert!(live.waits_for_the_network);
+    assert_eq!(actor.retry_at(), Some(checked_at + 5_000));
+    assert_eq!(actor.waits_for_an_account(), None);
+    let now = world.tick();
+    assert_eq!(
+        actor.shown_whole(now)["activity"]["headline"],
+        "Waiting for the network"
+    );
+    assert_eq!(actor.shown_whole(now)["activity"]["state"], "limited");
+    // A check whose answer comes again, late, changes nothing.
+    let late = actor.network_checked(TurnId(1), true, now).unwrap();
+    assert!(late.actions.is_empty());
+    assert!(actor.status().live.unwrap().waits_for_the_network);
+
+    // Still gone at the next check, and the Host starts again meanwhile: the wait is in the
+    // log, and the network is checked anew at once.
+    world.now_ms = checked_at + 5_000;
+    let out = actor.retry_due(world.now_ms).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.network_checks, 2);
+    drop(actor);
+    let mut actor = world.open();
+    assert!(actor.retry_at().is_some_and(|at| at <= world.now_ms));
+    let out = actor.retry_due(world.now_ms).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.network_checks, 3);
+    assert!(actor.status().live.unwrap().waits_for_the_network);
+
+    // The network is back: the turn is tried again at once, on the same account, and told to
+    // go on from where it stood, not given its message anew.
+    world.network_up = true;
+    let out = world.due(&mut actor).expect("the turn is tried again");
+    assert!(
+        matches!(&out.actions[..], [Action::Launch(order)] if order.turn == TurnId(1) && order.attempt == 2),
+        "{:?}",
+        out.actions
+    );
+    world.carry_out(&mut actor, out);
+    let prompt = world.prompts.last().unwrap();
+    assert!(
+        prompt.contains("<clarp-turn-resumed>") && prompt.contains("count the files"),
+        "{prompt}"
+    );
+    world.says(1, "Done.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let status = actor.status();
+    assert!(status.live.is_none());
+    assert_eq!(status.last.unwrap().outcome, Outcome::Completed);
+}
+
+#[test]
+fn a_turn_whose_network_stays_gone_ends_after_a_quarter_of_an_hour_and_says_why() {
+    let (mut world, mut actor) = a_turn_whose_connection_fails("network-never");
+    world.write(1, Line::Err(UNREACHABLE.into()));
+    world.exits(1, Some(1), None);
+    world.network_up = false;
+    world.hint(&mut actor);
+    let failed_at = world.now_ms;
+    assert!(world.due(&mut actor).is_none(), "it is never tried again");
+    let waited = world.now_ms - failed_at;
+    assert!(
+        (clarp_kernel::recovery::NETWORK_WAIT_MOST_MS
+            ..clarp_kernel::recovery::NETWORK_WAIT_MOST_MS + 6_000)
+            .contains(&waited),
+        "{waited}"
+    );
+    assert!(world.network_checks > 170, "{}", world.network_checks);
+    let status = actor.status();
+    assert!(status.live.is_none());
+    let Outcome::Failed { reason, kind } = status.last.unwrap().outcome else {
+        panic!("the turn failed");
+    };
+    assert_eq!(kind, "connection");
+    assert!(
+        reason.starts_with("No network for 15 minutes") && reason.contains("EAI_AGAIN"),
+        "{reason}"
+    );
+    let rows = actor.tail(5).unwrap().entries;
+    assert!(
+        rows.iter().any(|row| matches!(&row.entry, Entry::Notice(notice)
+            if notice.text.starts_with("This computer had no network for 15 minutes"))),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn a_connection_that_fails_while_the_network_is_there_is_tried_for_a_minute() {
+    let (mut world, mut actor) = a_turn_whose_connection_fails("network-there");
+    let mut waits = Vec::new();
+    loop {
+        world.write(1, Line::Err(UNREACHABLE.into()));
+        world.exits(1, Some(1), None);
+        world.hint(&mut actor);
+        let failed_at = world.now_ms;
+        let Some(out) = world.due(&mut actor) else {
+            break;
+        };
+        // Rounded down to the second: the clock of the test moves on with each step.
+        waits.push((world.now_ms - failed_at) / 1_000 * 1_000);
+        world.carry_out(&mut actor, out);
+        assert_eq!(actor.waits_for_an_account(), None);
+    }
+    assert_eq!(waits, vec![2_000, 4_000, 8_000, 16_000, 30_000]);
+    let Outcome::Failed { kind, .. } = actor.status().last.unwrap().outcome else {
+        panic!("the turn failed");
+    };
+    assert_eq!(kind, "connection");
+    let rows = actor.tail(5).unwrap().entries;
+    assert!(
+        rows.iter().any(|row| matches!(&row.entry, Entry::Notice(notice)
+            if notice.text.starts_with("Connection lost — retries exhausted"))),
+        "{rows:?}"
+    );
 }
