@@ -48,50 +48,47 @@ unless switched on:
 ```toml
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
-lane_memory_mb = 2200         # what all lanes of the Host may hold together, in MiB (the default)
+codex_lane_most = 8           # live lanes this Host keeps, of every tool (the default)
+lane_memory_mb = 2200         # what they may hold together, in MiB of PSS (the default)
 ```
 
 - **One switch per tool.** `codex_chat_lane` is the only one today. The switches for Claude,
   Muse and OpenCode come with their drivers.
-- **The idle time is shared by every tool's lanes.** It keeps the name it had when Codex had the
-  only lane, so an installed config means exactly what it meant.
-- **The cap is a memory budget in bytes, one for every lane of the Host** (the lead's decision of
-  24 Nov 2026). It is not a count of lanes, because lanes weigh differently by tool. Measured on
-  24 Nov 2026: an idle Codex lane about 270 MB, a Muse serve 274-301 MB, an OpenCode serve
-  571-590 MB. Eight OpenCode lanes would take about 5 GB.
+- **The idle time and the count are shared by every tool's lanes.** They keep the names they
+  had when Codex had the only lane, so an installed config means exactly what it meant.
+- **Two limits, both always on** (the lead's decision of 25 Nov 2026). A lane starts only when
+  both allow it:
+  - **a count**, `codex_lane_most`, 8 unless set: live lanes of every tool, the one about to
+    start included, with its meaning unchanged;
+  - **a memory budget in bytes**, `lane_memory_mb`, 2,200 MB unless set: what all lanes hold
+    together, by proportional set size.
+- **Why both.** Lanes weigh differently by tool. Measured on 24 Nov 2026: an idle Codex lane
+  83-142 MiB of PSS, a Muse serve 274-301 MB, an OpenCode serve 571-590 MB.
+  - A count alone would let eight OpenCode lanes take about 5 GB.
+  - A budget alone would let Codex keep 15 to 20 idle lanes, more than the eight the owner agreed
+    to.
+  - 2,200 MB is the figure he approved for the Codex lane (eight lanes at about 270 MB), so
+    switching on lanes of other tools never quietly raises it.
 - **What each lane counts at.** A lane counts at what it weighed itself (`memory_bytes` in its
   status). That weight is the proportional set size of its own process, every process below it,
-  and its tool's process group, read from `/proc`. A lane weighs itself when it is ready and
-  again after each claim ends, never on a turn's path. A lane that has not said a weight, or
-  said 0 (its `/proc` could not be read), counts at its tool's typical size, as does the lane
-  about to start. So the budget bounds the lanes even without `/proc`, at about eight Codex
-  lanes by default, and no separate count is needed.
-- **Room is made before a lane starts.** The idle lanes leave, longest idle first, until what all
-  lanes hold, the new one included, is within the budget. A lane that runs a turn, or whose work
-  may continue (an active goal), refuses to leave and counts.
-- **The default is 2,200 MB.** This is the figure the owner approved for the Codex lane: eight
-  lanes at about 270 MB. Switching on lanes of other tools never quietly raises what he agreed
-  to. The budget bounds memory, not a count (the lead's decision of 25 Nov 2026):
-  - Lanes not yet weighed, and every lane where `/proc` cannot be read, count at 270 MiB, so
-    eight fit.
-  - Weighed lanes count at what they hold. An idle Codex app-server measured 130-142 MiB of PSS
-    on elitebook (25 Nov 2026, Codex 0.167.1, one process, no thread loaded), so about fifteen
-    such lanes fit.
-  - A lane that weighs more leaves sooner, because the bytes decide.
+  and its tool's process group, read from `/proc`.
+  - A lane weighs itself when it is ready and again after each claim ends, never on a turn's
+    path.
+  - The Host reads no `/proc` when it makes room: it adds up what the lanes said. One
+    `make_room` over any number of lanes reads `/proc` not at all.
+  - A lane that has not said a weight, or said 0 (its `/proc` could not be read), counts at its
+    tool's typical size (Codex 270 MiB), never at 0. So does the lane about to start.
+- **Room is made before a lane starts.** The idle lanes leave, longest idle first, until both
+  limits hold with the new one included. A lane that runs a turn, or whose work may continue
+  (an active goal), refuses to leave and counts.
+- **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
+  that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
+  at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on
+  elitebook (25 Nov 2026, Codex 0.167.1, one process, no thread loaded), so about fifteen of
+  those would fit the budget. The count is the tighter limit, and Codex keeps eight lanes as
+  today.
 - **Who sets them.** `install-host` carries these keys through an install. Switching a lane on
   for the owner's agents is his decision.
-
-### Compatibility: an installed `codex_lane_most`
-
-`codex_lane_most`, the count of lanes that was the cap, is no longer read. A Host whose
-`config.toml` still has it logs once, at its start:
-
-> `codex_lane_most = N in config.toml is no longer read: lanes are kept within lane_memory_mb
-> (2200 MB unless set), the memory all lanes may hold together`
-
-`install-host` still carries the key through an install, so nothing in the owner's file changes
-behind his back. The owner may delete it. To keep fewer or more lanes than the default allows,
-set `lane_memory_mb`.
 
 ## What holds either way
 

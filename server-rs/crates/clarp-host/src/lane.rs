@@ -2,12 +2,12 @@
 //! shim, while the owner's switch for that tool is on (issues 742 and 761). What every lane
 //! shares lives here, whatever tool it keeps:
 //!
-//! - the owner's settings in `config.toml`: one switch per tool, the idle time and the memory
-//!   budget shared by all ([`Settings`]);
+//! - the owner's settings in `config.toml`: one switch per tool, the idle time, the count of
+//!   lanes and the memory budget shared by all ([`Settings`]);
 //! - where a lane listens, and how it is asked, watched, retired and known to have left
 //!   ([`Endpoint`]);
-//! - the registry: room is made across every tool's lanes within one memory budget in bytes,
-//!   the longest idle leaving first;
+//! - the registry: room is made across every tool's lanes within two limits, a count and a
+//!   memory budget in bytes, the longest idle leaving first;
 //! - whether a running lane is used as it is or retired and started again: another thread,
 //!   other options (model, prompt, provider, ...), or what its driver says it kept;
 //! - the turn-identity file its tools read the running turn from ([`TURN_FILE_ENV`]);
@@ -97,9 +97,20 @@ const MEMORY_MB: &str = "lane_memory_mb";
 /// 2,200 MB unless the owner says: what he approved for the Codex lane (eight lanes at about
 /// 270 MB each), so switching on lanes of other tools never quietly raises what he agreed to.
 const MEMORY_MB_DEFAULT: u64 = 2_200;
-/// The count of lanes that was the cap before the memory budget replaced it. It is no longer
-/// read; a Host that finds it in its config says so once, at its start ([`replaced_settings`]).
+/// The count of lanes this Host keeps, of every tool, the one about to start included: a limit
+/// beside the budget, with the meaning it had when it was the only one (the lead's decision of
+/// 25 Nov 2026). Idle Codex lanes measure 83-142 MiB of PSS, so the budget alone would keep
+/// 15-20 of them; the count keeps the eight the owner agreed to.
 const MOST: &str = "codex_lane_most";
+
+/// The two limits all lanes of a Host are kept within, whatever their tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Room {
+    /// Live lanes, the one about to start included.
+    pub most: usize,
+    /// Bytes they may hold together.
+    pub budget: u64,
+}
 
 /// The owner's settings of lanes, in this Host's `config.toml`, read anew at each use so they
 /// change without a build or a restart. Top-level keys, before any table:
@@ -107,15 +118,18 @@ const MOST: &str = "codex_lane_most";
 /// ```toml
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
-/// lane_memory_mb = 2200         # what all lanes, of every tool, may hold together; the
-///                               # longest idle one leaves first
+/// codex_lane_most = 8           # live lanes this Host keeps, of every tool
+/// lane_memory_mb = 2200         # and what they may hold together (PSS); a lane starts only
+///                               # when both allow it, the longest idle one leaving first
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
     /// Each tool's switch, in the order of [`Tool::ALL`].
     chat: [bool; Tool::ALL.len()],
     pub idle_ms: u64,
-    /// The cap: bytes all lanes of this Host may hold together.
+    /// Live lanes this Host keeps, the one about to start included.
+    pub most: usize,
+    /// Bytes all lanes of this Host may hold together.
     pub budget: u64,
 }
 
@@ -141,6 +155,7 @@ impl Settings {
             idle_ms: u64::try_from(number(IDLE_MINUTES, 15))
                 .unwrap_or(15)
                 .saturating_mul(60_000),
+            most: usize::try_from(number(MOST, 8)).unwrap_or(8),
             budget: u64::try_from(number(MEMORY_MB, 0))
                 .ok()
                 .filter(|mb| *mb > 0)
@@ -149,17 +164,12 @@ impl Settings {
         }
     }
 
-    /// What the owner's config says that this Host no longer reads, in words to log once at its
-    /// start: `codex_lane_most`, which the memory budget replaced.
-    fn replaced(file: Option<&toml::Table>) -> Option<String> {
-        let most = file?.get(MOST)?;
-        let most = most
-            .as_integer()
-            .map_or_else(|| format!("{most:?}"), |count| count.to_string());
-        Some(format!(
-            "{MOST} = {most} in config.toml is no longer read: lanes are kept within \
-             {MEMORY_MB} ({MEMORY_MB_DEFAULT} MB unless set), the memory all lanes may hold together"
-        ))
+    /// The limits a new lane is started within.
+    pub(crate) fn room(&self) -> Room {
+        Room {
+            most: self.most,
+            budget: self.budget,
+        }
     }
 
     /// Whether the owner runs this tool's chat turns on lanes.
@@ -169,13 +179,6 @@ impl Settings {
             .position(|each| *each == tool)
             .is_some_and(|at| self.chat[at])
     }
-}
-
-/// What this Host's config says of lanes that it no longer reads, for the Host to log once when
-/// it starts.
-pub fn replaced_settings() -> Option<String> {
-    let path = crate::config::host_config_dir().join("config.toml");
-    Settings::replaced(crate::owner::OwnerFile::new(Some(path)).read().as_ref())
 }
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
@@ -245,14 +248,14 @@ impl Endpoint {
     /// Decides whether the lane that runs is used for `thread` with options of `digest`: one
     /// started otherwise (another thread, other options, or what `kept` says the tool keeps from
     /// an earlier turn) is retired while idle; one that still runs work is used as it is, for
-    /// its own thread. Before a new lane starts, room is made for it within `budget` bytes.
+    /// its own thread. Before a new lane starts, room is made for it within `room`.
     pub(crate) fn place(
         &self,
         run: &Path,
         thread: Option<&str>,
         digest: &str,
         kept: impl FnOnce(&Status) -> bool,
-        budget: u64,
+        room: Room,
     ) -> io::Result<Place> {
         if let Ok(state) = self.inspect() {
             let same_thread = state.thread == thread.unwrap_or_default();
@@ -277,7 +280,7 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        make_room(run, self, budget);
+        make_room(run, self, room);
         Ok(Place::Free)
     }
 
@@ -388,17 +391,20 @@ pub(crate) fn once_more<T>(
     }
 }
 
-/// Keeps this Host's lanes, of every tool, within `budget` bytes together, the one about to start
-/// (`own`) included at its tool's typical size. A lane counts at what it weighed itself
-/// (`Status::memory_bytes`), or at its tool's typical size where it has not said one, or said
-/// nothing (its `/proc` could not be read). The idle lanes
-/// that held no turn the longest are asked to leave first, until the rest fit. A lane that runs a
-/// turn, or whose work may continue, refuses and counts. Read only when a lane is about to start.
-fn make_room(run: &Path, own: &Endpoint, budget: u64) {
+/// Keeps this Host's lanes, of every tool, the one about to start (`own`) included, within both
+/// limits of `room`: at most `room.most` of them, holding at most `room.budget` bytes together.
+/// A lane counts at what it weighed itself (`Status::memory_bytes`), or at its tool's typical
+/// size where it has not said one or said nothing (its `/proc` could not be read); the one about
+/// to start at its typical size. The idle lanes that held no turn the longest are asked to leave
+/// first, until both limits hold. A lane that runs a turn, or whose work may continue, refuses
+/// and counts. Read only when a lane is about to start. The Host reads no `/proc` here: each
+/// lane weighed itself, in its own process.
+fn make_room(run: &Path, own: &Endpoint, room: Room) {
     let Ok(entries) = std::fs::read_dir(run) else {
         return;
     };
     let mut idle = Vec::new();
+    let mut live = 1usize;
     let mut held = own.tool.typical_bytes();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -420,6 +426,7 @@ fn make_room(run: &Path, own: &Endpoint, budget: u64) {
             .memory_bytes
             .filter(|bytes| *bytes > 0)
             .unwrap_or_else(|| lane.tool.typical_bytes());
+        live += 1;
         held = held.saturating_add(memory);
         if state.claim.is_none() && state.available {
             idle.push((state.idle_ms, memory, lane));
@@ -427,10 +434,11 @@ fn make_room(run: &Path, own: &Endpoint, budget: u64) {
     }
     idle.sort_by_key(|(idle_ms, _, _)| std::cmp::Reverse(*idle_ms));
     for (_, memory, lane) in idle {
-        if held <= budget {
+        if live <= room.most && held <= room.budget {
             break;
         }
         if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
+            live -= 1;
             held = held.saturating_sub(memory);
         }
     }

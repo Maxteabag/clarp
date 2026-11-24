@@ -390,10 +390,6 @@ async fn serve(config: Config) -> Result<(), String> {
         .await
         .map_err(|e| e.0)?;
     clarp_host::media_manage::recover(&app).await;
-    // A setting of lanes the Host no longer reads is said once, here (issue 761).
-    if let Some(words) = clarp_host::lane::replaced_settings() {
-        eprintln!("clarp-host: {words}");
-    }
     // The janitors a Host has of its own are installed, each once, paused.
     if let Err(why) = clarp_host::janitors::install(&app).await {
         eprintln!("clarp-host: its own janitors were not installed: {}", why.0);

@@ -124,7 +124,7 @@ impl Lane {
         };
         let place =
             self.endpoint
-                .place(&profile.run_dir, thread, &digest, kept, settings.budget)?;
+                .place(&profile.run_dir, thread, &digest, kept, settings.room())?;
         if place == Place::Kept {
             return Ok(None);
         }

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
-use super::{Endpoint, Place, Settings, Tool, make_room, once_more, replied};
+use super::{Endpoint, Place, Room, Settings, Tool, make_room, once_more, replied};
 
 fn of(text: &str) -> Settings {
     Settings::of(Some(&text.parse::<toml::Table>().unwrap()))
@@ -18,60 +18,72 @@ fn of(text: &str) -> Settings {
 const MIB: u64 = 1024 * 1024;
 /// What a Codex lane counts at before it has weighed itself.
 const CODEX_LANE: u64 = 270 * MIB;
-/// Room for everything the tests' lanes hold.
-const ROOMY: u64 = u64::MAX;
+/// Room for everything the tests' lanes hold, by count and by bytes.
+const ROOMY: Room = Room {
+    most: usize::MAX,
+    budget: u64::MAX,
+};
+
+/// Only the count limits.
+fn counted(most: usize) -> Room {
+    Room {
+        most,
+        budget: u64::MAX,
+    }
+}
+
+/// Only the budget limits.
+fn in_bytes(budget: u64) -> Room {
+    Room {
+        most: usize::MAX,
+        budget,
+    }
+}
 
 #[test]
-fn the_lane_settings_are_off_and_fifteen_minutes_and_2200_mb_unless_the_owner_says() {
+fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_owner_says() {
     let default = Settings {
         chat: [false],
         idle_ms: 15 * 60_000,
+        most: 8,
         budget: 2_200 * MIB,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
     assert!(!default.chat(Tool::Codex));
-    let set = of("codex_chat_lane = true\ncodex_lane_idle_minutes = 2\nlane_memory_mb = 3000\n");
+    let set = of(
+        "codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\nlane_memory_mb = 3000\n",
+    );
     assert_eq!(
         set,
         Settings {
             chat: [true],
             idle_ms: 120_000,
+            most: 3,
             budget: 3_000 * MIB,
         }
     );
     assert!(set.chat(Tool::Codex));
+    assert_eq!(
+        set.room(),
+        Room {
+            most: 3,
+            budget: 3_000 * MIB
+        }
+    );
     // What is no setting keeps the default: a word, zero or less, or a key inside a table.
     assert_eq!(
-        of("codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\nlane_memory_mb = -1\n"),
+        of(
+            "codex_chat_lane = \"yes\"\ncodex_lane_idle_minutes = 0\ncodex_lane_most = -1\nlane_memory_mb = -1\n"
+        ),
         default
     );
     assert_eq!(
-        of("[other]\ncodex_chat_lane = true\nlane_memory_mb = 9\n"),
+        of("[other]\ncodex_chat_lane = true\ncodex_lane_most = 2\nlane_memory_mb = 9\n"),
         default
     );
-    // The default holds what the count of eight held: eight Codex lanes, the new one among them.
+    // Unweighed Codex lanes: the budget alone holds eight, as the count does.
     assert_eq!(default.budget / CODEX_LANE, 8);
-}
-
-#[test]
-fn the_count_of_lanes_is_no_longer_read_and_a_config_that_has_it_is_told() {
-    let old = of("codex_chat_lane = true\ncodex_lane_most = 2\n");
-    assert_eq!(old.budget, 2_200 * MIB);
-    let said = Settings::replaced(Some(&"codex_lane_most = 2\n".parse().unwrap())).unwrap();
-    assert!(
-        said.starts_with("codex_lane_most = 2 in config.toml is no longer read"),
-        "{said}"
-    );
-    assert!(
-        said.contains("lane_memory_mb (2200 MB unless set)"),
-        "{said}"
-    );
-    assert_eq!(
-        Settings::replaced(Some(&"lane_memory_mb = 9\n".parse().unwrap())),
-        None
-    );
-    assert_eq!(Settings::replaced(None), None);
 }
 
 #[test]
@@ -187,9 +199,8 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
     let busy = FakeLane::start(&run, "c", status("tc", "d", 0, true));
     std::fs::write(run.join("d-turn.token"), "not a lane").unwrap();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    // Three live lanes that have not weighed themselves, each at a Codex lane's typical size,
-    // and the new one: a budget of three Codex lanes, so the longest idle leaves.
-    make_room(&run, &own, 3 * CODEX_LANE);
+    // Three live lanes and the new one, for a count of three: the longest idle leaves.
+    make_room(&run, &own, counted(3));
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -296,7 +307,7 @@ fn the_budget_counts_what_each_lane_weighed_and_the_new_one_at_its_typical_size(
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // 3 x 100 weighed and 270 for the new lane: over 500, so the longest idle leaves and 470
     // fits; the busy one counts and stays.
-    make_room(&run, &own, 500 * MIB);
+    make_room(&run, &own, in_bytes(500 * MIB));
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -319,7 +330,7 @@ fn lanes_that_could_not_weigh_themselves_count_at_their_estimate_and_stay_bounde
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // The default budget: each counts at 270 MiB, the new one too, so eight fit, and the three
     // idle the longest (a0, a1, a2) leave.
-    make_room(&run, &own, Settings::of(None).budget);
+    make_room(&run, &own, in_bytes(Settings::of(None).budget));
     let left: Vec<usize> = lanes
         .iter()
         .enumerate()
@@ -333,7 +344,7 @@ fn lanes_that_could_not_weigh_themselves_count_at_their_estimate_and_stay_bounde
 #[test]
 fn the_default_budget_keeps_eight_codex_lanes_and_a_ninth_sends_the_longest_idle_away() {
     let run = run_dir("eight");
-    let budget = Settings::of(None).budget;
+    let budget = in_bytes(Settings::of(None).budget);
     let weighed = |idle_ms: u64| {
         let mut said = status("t", "d", idle_ms, false);
         said["memory_bytes"] = json!(CODEX_LANE);
@@ -358,4 +369,52 @@ fn the_default_budget_keeps_eight_codex_lanes_and_a_ninth_sends_the_longest_idle
     );
     assert_eq!(running.asked(), ["inspect"]);
     std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
+    let run = run_dir("both");
+    // Ten idle Codex lanes that weighed 110 MiB each, as idle app-servers measure: the budget
+    // alone would keep them all and the new one (270 + 10 x 110 = 1,370 MiB of 2,200), but the count
+    // of eight sends the three idle the longest away.
+    let lanes: Vec<FakeLane> = (0..10u64)
+        .map(|n| {
+            let mut said = status("t", "d", 100 - n, false);
+            said["memory_bytes"] = json!(110 * MIB);
+            FakeLane::start(&run, &format!("a{n}"), said)
+        })
+        .collect();
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    make_room(&run, &own, Settings::of(None).room());
+    let left = |lanes: &[FakeLane]| -> Vec<usize> {
+        lanes
+            .iter()
+            .enumerate()
+            .filter(|(_, lane)| lane.asked().contains(&"retire".to_owned()))
+            .map(|(n, _)| n)
+            .collect()
+    };
+    assert_eq!(left(&lanes), [0, 1, 2]);
+    // The same lanes under a budget of 600 MiB and the count of eight: the budget is the
+    // tighter one, and the lanes go until 270 MiB for the new one and three of 110 fit.
+    let run2 = run_dir("both-bytes");
+    let more: Vec<FakeLane> = (0..7u64)
+        .map(|n| {
+            let mut said = status("t", "d", 100 - n, false);
+            said["memory_bytes"] = json!(110 * MIB);
+            FakeLane::start(&run2, &format!("b{n}"), said)
+        })
+        .collect();
+    let own2 = Endpoint::of(Tool::Codex, &run2, "new");
+    make_room(
+        &run2,
+        &own2,
+        Room {
+            most: 8,
+            budget: 600 * MIB,
+        },
+    );
+    assert_eq!(left(&more), [0, 1, 2, 3]);
+    std::fs::remove_dir_all(&run).unwrap();
+    std::fs::remove_dir_all(&run2).unwrap();
 }
