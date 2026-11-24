@@ -252,9 +252,11 @@ class MuseBackend(StreamJsonBackend):
         ``--session-id`` both creates a session and continues it, so a new
         agent and a resumed one differ only in whether the id was just
         minted. ``--yolo`` turns approval and the sandbox off for the run,
-        the posture every Clarp backend runs with.
+        the posture every Clarp backend runs with. ``--disable-reminders``
+        keeps Muse's reminder agents, which run after the answer and before
+        the process exits, off the turn: it ends some seconds sooner.
         """
-        cmd = [self.required_binary, "exec", "--json", "--yolo"]
+        cmd = [self.required_binary, "exec", "--json", "--yolo", "--disable-reminders"]
         if model:
             cmd += ["--model", model]
         if effort:

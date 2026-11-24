@@ -12,11 +12,10 @@ Muse Code is Meta's terminal coding agent (`muse`, launcher in
 One headless process per turn, like Grok:
 
 ```
-muse exec --json --yolo --session-id <uuid> [--model M] [--reasoning-effort E] -- <prompt>
+muse exec --json --yolo --disable-reminders --session-id <uuid> [--model M] [--reasoning-effort E] -- <prompt>
 ```
 
-* Not passed yet, `--disable-reminders` (waits for the owner's answer to
-  decision-eb180055fd7e840f3f96e7c8): Muse's reminder agents (skill-, goal- and
+* `--disable-reminders`: Muse's reminder agents (skill-, goal- and
   verify-reminder) are model calls in child sessions, mid-turn and after the
   answer. An accepted one puts a short developer `<system-reminder>` into the
   agent's next step (28 of 1,453 proposals on one machine); none writes
@@ -90,7 +89,7 @@ with a `read_file` tool call, one echo-provider turn, and the matching
   starts 0.3 s after the turn before it ends (`server-rs/tools/turn-timings
   --backends muse`).
 * Each `exec` pays Muse's own start against Meta's API, 1.3 to 4 s (0.4 s
-  with the echo provider), and without `--disable-reminders` the reminder
+  with the echo provider), and until `--disable-reminders` the reminder
   agents' model call at the end.
 * A spoken turn is the slow one. The voice rules at the head of the prompt
   make Muse write the whole answer in its reasoning before the first word,
