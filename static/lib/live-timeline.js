@@ -36,8 +36,9 @@ function rowMs(row) {
  * `merged` with the live turn at `at`, split at every user row the turn read
  * while it ran: one written after the turn started and, once the turn ended,
  * not after its end. A steered message is such a row; a prompt sent once the
- * turn settled is not. Each part is an entry {type: 'live', key, from, to}
- * that draws the turn's items started in [from, to) (liveSegmentItems). The
+ * turn settled is not. Each part is an entry {type: 'live', key, from, to,
+ * last} that draws the turn's items started in [from, to) (liveSegmentItems);
+ * only the `last` part draws the turn's fold button and error (partFold). The
  * first part keeps LIVE_ENTRY's key, so a turn nobody steered is drawn as
  * before. Only times decide: a live event that changes no turn time rebuilds
  * nothing here.
@@ -58,7 +59,9 @@ export function withLiveSegments(merged, at, startedMs, endedMs) {
     if (t != null && t > started && t <= ended) reads.push({ index: i, t });
   }
   if (!reads.length) return withLiveEntry(merged, at);
-  const part = (k, from, to) => ({ type: 'live', key: k ? `live-turn:${k}` : LIVE_ENTRY.key, from, to });
+  const part = (k, from, to) => ({
+    type: 'live', key: k ? `live-turn:${k}` : LIVE_ENTRY.key, from, to, last: k === reads.length,
+  });
   const out = [...merged.slice(0, at), part(0, -Infinity, reads[0].t)];
   let k = 0;
   for (let i = at; i < merged.length; i++) {

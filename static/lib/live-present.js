@@ -199,6 +199,24 @@ export function settledFold(turn, rows) {
   return { label, folded, visible, error: turnError(turn) };
 }
 
+/**
+ * settledFold for one part of a live turn split at a steer (withLiveSegments).
+ * The turn's chrome, its "Worked for" label and its error, belongs to the
+ * part the turn ends in (`last`); an earlier part folds its own rows by the
+ * same shared fold state and draws no button or notice of its own, so a
+ * steered turn says how long it worked, and why it failed, once. `opens` says
+ * whether the last part draws the fold button: whether anything of the whole
+ * turn (`wholeRows`, every part's rows; default this part's) is folded, so an
+ * earlier part's folded work can always be opened.
+ */
+export function partFold(turn, rows, { last = true, wholeRows = null } = {}) {
+  const fold = settledFold(turn, rows);
+  if (!fold) return null;
+  if (!last) return { ...fold, label: null, error: null, opens: false };
+  const whole = wholeRows && wholeRows !== rows ? settledFold(turn, wholeRows) : fold;
+  return { ...fold, opens: whole.folded.length > 0 };
+}
+
 /** Why a failed turn failed (`turn.error`, Host contract 54); older Hosts
  * send no reason, and the turn still must not read as one that answered. */
 function turnError(turn) {
