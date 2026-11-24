@@ -79,3 +79,28 @@ fn a_transcript_that_is_no_transcript_holds_no_turns() {
         vec![json!({ "role": "user", "text": "Hi", "tools": [], "timestamp": "" })]
     );
 }
+
+#[test]
+fn a_message_that_cut_a_reply_is_read_as_the_user_sent_it() {
+    // As agy 1.5.16 kept it (24 Nov 2026): the reply the driver gave back stands before the
+    // user's words, within agy's mark.
+    let sent = clarp_acp::agy::steer::with_reply(
+        "1. **Pizza**: A baked flatbread.\n2. **Sushi**: Vinegared rice.\n",
+        "Change of plan: stop the list now and reply with only the word BANANA.",
+    );
+    let content = format!(
+        "<USER_REQUEST>\n{sent}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T15:06:53+01:00.\n</ADDITIONAL_METADATA>"
+    );
+    let step = json!({"step_index": 2, "source": "USER_EXPLICIT", "type": "USER_INPUT",
+                      "status": "DONE", "created_at": "2026-11-24T14:07:04Z", "content": content});
+    let read = history::agy(&format!("{step}\n"));
+    assert_eq!(
+        read,
+        vec![json!({
+            "role": "user",
+            "text": "Change of plan: stop the list now and reply with only the word BANANA.",
+            "tools": [],
+            "timestamp": "2026-11-24T14:07:04Z"
+        })]
+    );
+}

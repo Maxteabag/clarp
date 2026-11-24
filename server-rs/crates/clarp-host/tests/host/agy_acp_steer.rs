@@ -53,6 +53,10 @@ fn a_message_reaches_a_running_antigravity_turn_when_antigravity_takes_it_up() {
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+        // A message that comes while agy writes goes at once, as during a tool: what the Host
+        // shows of a reply agy goes on writing is what this test reads. The driver's own tests
+        // cut the reply for it.
+        ("CLARP_AGY_ACP_CUT", "off"),
     ];
     let host = place.start_in("", &[], &world);
     let features = host.get("/server-info");

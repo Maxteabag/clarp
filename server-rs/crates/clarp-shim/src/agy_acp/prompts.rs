@@ -24,12 +24,38 @@ use clarp_acp::client::{Answer, Ended};
 use clarp_acp::{method, schema};
 use serde_json::{Value, json};
 
-use super::{Outcome, Result, Turn, early_for, emit, failed_for, mark_poisoned, read_out, said};
+use super::{
+    Cut, Outcome, Result, Turn, early_for, emit, failed_for, mark_poisoned, read_out, said,
+};
 
 /// How long the driver waits, once nothing is open, for the Host to close its input: a message
 /// the Host wrote before it read the last answer is still taken up; one that comes later is
 /// left unread, and the Host runs it as a turn of its own.
 const INPUT_CLOSES_WITHIN: Duration = Duration::from_secs(5);
+
+/// How long a message held for a cut waits for a line end in what agy writes: then the reply
+/// is cut where it is.
+const LINE_END_WITHIN: Duration = Duration::from_secs(3);
+
+/// How long a cut waits for the cancelled prompt's answer: then the held message goes as a
+/// prompt all the same, and agy takes it as it takes any prompt sent while one runs.
+const CUT_ANSWER_WITHIN: Duration = Duration::from_secs(8);
+
+/// A message held to cut the reply agy is writing (Peter's ask of 24 Nov 2026, clarp #753).
+/// agy 1.5 reads a prompt sent while it writes only once it has written its whole answer: a
+/// list of fifty goes on to the end before a "stop" is read. So the reply is cut at its next
+/// line end: the prompt is cancelled there, and the message goes as the next prompt on the
+/// same conversation, with the reply so far given back before it, since agy forgets the text
+/// of a cancelled prompt (it keeps the tools it ran). The cut is no Stop: the turn goes on,
+/// and the message is read and answered as any other.
+struct Held {
+    uuid: String,
+    text: String,
+    /// The cancel was sent.
+    cancelled: bool,
+    /// When the wait for the line end, or for the cancel's answer, is over.
+    until: Instant,
+}
 
 /// A prompt sent and not answered.
 struct Sent {
@@ -46,7 +72,7 @@ struct Sent {
 
 /// An answer given while a newer prompt was on its way: the chain of work it ends, waiting for
 /// the newer prompt to take it over.
-struct Held {
+struct Handed {
     /// The message whose prompt was answered.
     uuid: String,
     covers: Vec<String>,
@@ -59,7 +85,12 @@ struct Prompts<'a> {
     /// The turn's own message.
     own: &'a str,
     flight: VecDeque<Sent>,
-    held: Option<Held>,
+    held: Option<Handed>,
+    /// A message held for a cut of the reply agy writes, and those that came after it.
+    cut: Option<Held>,
+    after_cut: Vec<(String, String)>,
+    /// Whether a reply is cut for a message at all ([`steer::CUT_ENV`]).
+    cuts_replies: bool,
     /// How the turn's own message was answered, once it was.
     outcome: Option<Outcome>,
     /// Every message the Host gave: each is sent, and read, at most once.
@@ -94,6 +125,9 @@ pub(super) fn converse(
             spent: Value::Null,
         }]),
         held: None,
+        cut: None,
+        after_cut: Vec::new(),
+        cuts_replies: std::env::var(steer::CUT_ENV).map_or(true, |said| said.trim() != "off"),
         outcome: None,
         given: BTreeSet::new(),
     };
@@ -117,6 +151,7 @@ pub(super) fn converse(
                 Err(Ended::Owner(Some(line))) => prompts.owner(turn, &line)?,
                 Err(Ended::Owner(None)) => turn.owner_done = true,
                 Err(Ended::Interrupted) => turn.stop(session)?,
+                Err(Ended::Woken) => {}
                 Err(Ended::Silent | Ended::Closed) | Ok(_) => break,
             }
             continue;
@@ -126,9 +161,14 @@ pub(super) fn converse(
         let short = turn.record.open_tools.is_empty();
         let bound = if short { silence } else { tool_silence };
         let ids: Vec<u64> = prompts.flight.iter().map(|sent| sent.id).collect();
+        let cut_until = prompts.cut.as_ref().map(|held| held.until);
+        let deadline = match (turn.stopping, cut_until) {
+            (Some(stop), Some(cut)) => Some(stop.min(cut)),
+            (stop, cut) => stop.or(cut),
+        };
         match turn
             .client
-            .wait_any(&ids, bound, turn.stopping, &mut turn.record)?
+            .wait_any(&ids, bound, deadline, &mut turn.record)?
         {
             Ok((id, answer)) => {
                 prompts.took(turn);
@@ -136,7 +176,14 @@ pub(super) fn converse(
             }
             Err(Ended::Owner(Some(line))) => prompts.owner(turn, &line)?,
             Err(Ended::Owner(None)) => turn.owner_done = true,
-            Err(Ended::Interrupted) => turn.stop(session)?,
+            Err(Ended::Interrupted) => {
+                turn.stop(session)?;
+                prompts.unhold(turn, "stopped")?;
+            }
+            Err(Ended::Woken) => prompts.woken(turn)?,
+            Err(Ended::Silent) if cut_until.is_some_and(|until| Instant::now() >= until) => {
+                prompts.cut_over(turn)?;
+            }
             Err(Ended::Silent)
                 if short && turn.stopping.is_none() && !turn.record.open_tools.is_empty() => {}
             Err(how) => {
@@ -180,9 +227,137 @@ impl Prompts<'_> {
             ))?;
             return Ok(());
         }
+        if self.cut.is_some() {
+            // One that comes while a message is held for a cut goes after it, in order.
+            emit(&said(
+                "steer",
+                json!({"uuid": uuid, "sent": false, "why": "after a cut"}),
+            ))?;
+            self.after_cut.push((uuid, text));
+            return Ok(());
+        }
+        if self.cuts(turn) {
+            emit(&said("cut", json!({"uuid": uuid, "stage": "held"})))?;
+            self.cut = Some(Held {
+                uuid,
+                text,
+                cancelled: false,
+                until: Instant::now() + LINE_END_WITHIN,
+            });
+            turn.record.cut = Cut::Line;
+            if turn.record.written.at_line_start() {
+                // agy's last word ended a line: the reply is cut there.
+                self.cut_now(turn)?;
+            }
+            return Ok(());
+        }
+        self.send(turn, uuid, &text)
+    }
+
+    /// Whether a message that comes now cuts the reply agy writes: agy is writing, no tool
+    /// runs, and the prompt it works on is the only one sent. Else it goes at once, as a
+    /// prompt agy takes over from the one it runs.
+    fn cuts(&self, turn: &Turn) -> bool {
+        self.cuts_replies
+            && turn.record.writing
+            && turn.record.open_tools.is_empty()
+            && self.held.is_none()
+            && self.flight.len() == 1
+            && self
+                .flight
+                .front()
+                .is_some_and(|sent| sent.unread.is_none())
+    }
+
+    /// The record saw what the cut waits for: the line end, or agy's stopping to write.
+    fn woken(&mut self, turn: &mut Turn) -> Result<()> {
+        match turn.record.cut {
+            Cut::Due => self.cut_now(turn),
+            Cut::Missed => self.release(turn, false),
+            Cut::None | Cut::Line | Cut::Cutting => Ok(()),
+        }
+    }
+
+    /// The prompt agy writes for is cancelled: the cut. What it writes from now on is left
+    /// out, until the prompt's answer.
+    fn cut_now(&mut self, turn: &mut Turn) -> Result<()> {
+        let Some(held) = self.cut.as_mut().filter(|held| !held.cancelled) else {
+            return Ok(());
+        };
+        let _ = turn
+            .client
+            .notify(method::SESSION_CANCEL, json!({"sessionId": self.session}));
+        held.cancelled = true;
+        held.until = Instant::now() + CUT_ANSWER_WITHIN;
+        turn.record.cut = Cut::Cutting;
+        // Not `cancel`, which is a Stop's: the turn goes on.
+        emit(&said(
+            "cut",
+            json!({"uuid": held.uuid, "stage": "cancel", "session": self.session}),
+        ))?;
+        Ok(())
+    }
+
+    /// The wait the cut set is over: no line end came, so the reply is cut where it is; or
+    /// the cancelled prompt did not answer, so the message goes all the same.
+    fn cut_over(&mut self, turn: &mut Turn) -> Result<()> {
+        match self.cut.as_ref().map(|held| held.cancelled) {
+            Some(false) => self.cut_now(turn),
+            Some(true) => self.release(turn, true),
+            None => Ok(()),
+        }
+    }
+
+    /// The held message goes as a prompt, after a cut with the reply so far before it, and
+    /// the messages that came after it follow.
+    fn release(&mut self, turn: &mut Turn, cut: bool) -> Result<()> {
+        let Some(held) = self.cut.take() else {
+            return Ok(());
+        };
+        turn.record.cut = Cut::None;
+        let mut text = held.text;
+        if cut {
+            let reply = turn
+                .record
+                .answer_text
+                .get(turn.record.since..)
+                .unwrap_or_default();
+            emit(&said(
+                "cut",
+                json!({"uuid": held.uuid, "stage": "sent", "given_back": reply.len(),
+                       "left_out": turn.record.dropped}),
+            ))?;
+            if !reply.trim().is_empty() {
+                text = steer::with_reply(reply, &text);
+            }
+        }
+        turn.record.dropped = 0;
+        self.send(turn, held.uuid, &text)?;
+        for (uuid, text) in std::mem::take(&mut self.after_cut) {
+            self.send(turn, uuid, &text)?;
+        }
+        Ok(())
+    }
+
+    /// A Stop, or the end of the wait: a message held for a cut is not taken, and nothing
+    /// names it but its refusal.
+    fn unhold(&mut self, turn: &mut Turn, why: &str) -> Result<()> {
+        turn.record.cut = Cut::None;
+        let held = self.cut.take().map(|held| held.uuid);
+        let after = std::mem::take(&mut self.after_cut)
+            .into_iter()
+            .map(|(uuid, _)| uuid);
+        for uuid in held.into_iter().chain(after) {
+            emit(&json!({"type": "steer_refused", "uuid": uuid, "reason": why}))?;
+        }
+        Ok(())
+    }
+
+    /// A message sent as a prompt: agy takes it over from the prompt it runs, if one runs.
+    fn send(&mut self, turn: &mut Turn, uuid: String, text: &str) -> Result<()> {
         let sent = turn.client.send_request(
             method::SESSION_PROMPT,
-            json!({"sessionId": self.session, "prompt": [schema::text_block(&text)]}),
+            json!({"sessionId": self.session, "prompt": [schema::text_block(text)]}),
         );
         let Ok(id) = sent else {
             emit(&said(
@@ -226,7 +401,23 @@ impl Prompts<'_> {
         front.covers.push(uuid);
     }
 
-    fn answered(&mut self, turn: &mut Turn, id: u64, answer: Answer) -> Result<()> {
+    fn answered(&mut self, turn: &mut Turn, id: u64, mut answer: Answer) -> Result<()> {
+        if self.cut.is_some() && self.flight.front().is_some_and(|sent| sent.id == id) {
+            // The prompt a message was held for answered: after a cut, as cancelled. The held
+            // message goes first, so that this answer hands the work over to it, as any
+            // answer given while a newer prompt is on its way. A cut is no Stop: should this
+            // answer stand alone (the message refused), it reads as ended.
+            let cut = self.cut.as_ref().is_some_and(|held| held.cancelled);
+            if cut
+                && let Answer::Result(result) = &mut answer
+                && result["stopReason"] == "cancelled"
+            {
+                result["stopReason"] = json!("end_turn");
+            }
+            turn.record.writing = false;
+            turn.record.written = super::Written::default();
+            self.release(turn, cut)?;
+        }
         // Answers come in the order the prompts were sent. One that passed over an older
         // prompt answered it too: what that one carried and had read goes with it.
         let Some(at) = self.flight.iter().position(|sent| sent.id == id) else {
@@ -288,7 +479,7 @@ impl Prompts<'_> {
         if let Answer::Result(result) = &answer {
             steer::add_usage(&mut spent, &result["usage"]);
         }
-        let held = Held {
+        let held = Handed {
             uuid: sent.uuid,
             covers: sent.covers,
             answer,
@@ -301,6 +492,7 @@ impl Prompts<'_> {
         } else {
             // A newer prompt is on its way: this answer hands the work to it.
             self.held = Some(held);
+            turn.record.since = turn.record.answer_text.len();
             self.next_unread(turn);
             Ok(())
         }
@@ -318,8 +510,9 @@ impl Prompts<'_> {
 
     /// An answer that ends the chain: printed as Antigravity gave it, with what the whole
     /// chain spent, and the messages it covers.
-    fn settle(&mut self, turn: &mut Turn, held: Held) -> Result<()> {
+    fn settle(&mut self, turn: &mut Turn, held: Handed) -> Result<()> {
         let text = std::mem::take(&mut turn.record.answer_text);
+        turn.record.since = 0;
         turn.record.settled = true;
         // The answer ends the message being written, as the Host reads it: what agy writes
         // next is a message of its own.
@@ -367,6 +560,7 @@ impl Prompts<'_> {
     /// over. An answer already given stands; a message not read stays unread; work that was
     /// under way fails, unless it was stopped.
     fn give_up(&mut self, turn: &mut Turn, how: Ended) -> Result<()> {
+        self.unhold(turn, "unanswered")?;
         if let Some(held) = self.held.take() {
             self.settle(turn, held)?;
         }

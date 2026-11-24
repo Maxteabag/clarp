@@ -607,3 +607,38 @@ fn a_chain_answered_under_the_steered_message_tells_the_turn_how_it_stopped() {
         "{reason}"
     );
 }
+
+#[test]
+fn a_reply_cut_for_a_message_is_no_stop_and_the_turn_answers_both() {
+    // As the driver prints a cut: the reply up to a line end, the cut's own lines (never
+    // `cancel`, which is a Stop's), the read of the message, its answer, and one result.
+    let lines = [
+        bound_as("primary"),
+        chunk("agent_message_chunk", "1. Pho\n2. Ramen\n"),
+        json!({"clarp": "cut", "uuid": "steered", "stage": "held"}),
+        json!({"clarp": "cut", "uuid": "steered", "stage": "cancel", "session": "conv-new"}),
+        json!({"clarp": "cut", "uuid": "steered", "stage": "sent", "given_back": 16,
+               "left_out": 4}),
+        json!({"clarp": "steer", "uuid": "steered", "sent": true}),
+        echo("steered"),
+        chunk("agent_message_chunk", "BANANA"),
+        answer("primary", "end_turn"),
+        result(&["primary", "steered"]),
+    ];
+    let signals = read(&lines, "", Some(0), None);
+    assert_eq!(replies(&signals), ["1. Pho\n2. Ramen\n", "BANANA"]);
+    assert_eq!(ended(&signals), &RunOutcome::Completed);
+
+    // agy refused the message after the cut: the cut prompt's answer stands, as ended.
+    let refused = [
+        bound_as("primary"),
+        chunk("agent_message_chunk", "1. Pho\n"),
+        json!({"clarp": "cut", "uuid": "steered", "stage": "cancel", "session": "conv-new"}),
+        json!({"type": "steer_refused", "uuid": "steered", "reason": null}),
+        answer("primary", "end_turn"),
+        result(&["primary"]),
+    ];
+    let signals = read(&refused, "", Some(0), None);
+    assert_eq!(replies(&signals), ["1. Pho\n"]);
+    assert_eq!(ended(&signals), &RunOutcome::Completed);
+}

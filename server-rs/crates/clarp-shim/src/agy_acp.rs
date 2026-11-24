@@ -106,6 +106,29 @@ struct Record {
     /// Where the message being written stands: its paragraph breaks and code blocks can begin
     /// in one piece and end in the next.
     written: Written,
+    /// A message is held to cut the reply being written at its next line end ([`prompts`]).
+    cut: Cut,
+    /// The prompts have something of the cut to act on: the wait ends.
+    wake: bool,
+    /// How much of what agy wrote after the line end a cut was made at was left out.
+    dropped: usize,
+    /// Where in `answer_text` the prompt agy works on began: what a cut gives back.
+    since: usize,
+}
+
+/// Where a cut of the reply being written stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cut {
+    None,
+    /// A message is held: the reply is cut at its next line end outside a code block.
+    Line,
+    /// The line end came: the prompt is to be cancelled. What agy writes after it is left out.
+    Due,
+    /// agy stopped writing before a line end came (a thought, a tool): the message goes as a
+    /// prompt of its own, as when nothing is written.
+    Missed,
+    /// The prompt is cancelled and its answer awaited. What agy writes meanwhile is left out.
+    Cutting,
 }
 
 impl Handler for Record {
@@ -133,9 +156,47 @@ impl Handler for Record {
         let kind = message["params"]["update"]["sessionUpdate"].as_str();
         let chunk = update && kind == Some("agent_message_chunk");
         let goes_on = self.writing && chunk;
-        let words = message["params"]["update"]["content"]["text"]
+        let mut words = message["params"]["update"]["content"]["text"]
             .as_str()
             .filter(|_| chunk);
+        // A cut ends the reply at a line end: what agy writes after it is left out, as agy
+        // itself forgets it when the prompt is cancelled. Should agy stop writing before a line
+        // end comes, the held message goes as a prompt of its own.
+        let mut cut_at = None;
+        match self.cut {
+            Cut::Due | Cut::Cutting
+                if update
+                    && matches!(kind, Some("agent_message_chunk" | "agent_thought_chunk")) =>
+            {
+                let left = &message["params"]["update"]["content"]["text"];
+                self.dropped += left.as_str().map_or(0, str::len);
+                return Ok(());
+            }
+            Cut::Line if goes_on => {
+                if let Some(whole) = words
+                    && let Some(end) = self.written.clone().line_end(whole)
+                {
+                    cut_at = Some(end);
+                    words = Some(&whole[..end]);
+                    self.dropped += whole.len() - end;
+                    self.cut = Cut::Due;
+                    self.wake = true;
+                }
+            }
+            Cut::Line if update && works(message, &self.seen_tools) => {
+                self.cut = Cut::Missed;
+                self.wake = true;
+            }
+            _ => {}
+        }
+        let shortened;
+        let message = match (cut_at, words) {
+            (Some(_), Some(head)) => {
+                shortened = with_words(message, head);
+                &shortened
+            }
+            _ => message,
+        };
         if chunk && !goes_on {
             self.written = Written::default();
         }
@@ -162,7 +223,8 @@ impl Handler for Record {
         }
         match schema::SessionUpdate::of_notification(message) {
             Some(schema::SessionUpdate::AgentMessageChunk { content }) => {
-                self.answer_text.push_str(content.text());
+                self.answer_text
+                    .push_str(words.unwrap_or_else(|| content.text()));
             }
             Some(
                 schema::SessionUpdate::ToolCall(call) | schema::SessionUpdate::ToolCallUpdate(call),
@@ -195,6 +257,10 @@ impl Handler for Record {
         } else {
             Ok(())
         }
+    }
+
+    fn wakes(&mut self) -> bool {
+        std::mem::take(&mut self.wake)
     }
 
     fn request(
@@ -271,6 +337,7 @@ impl Turn {
     fn stop(&mut self, session: &str) -> Result<()> {
         self.record.stopping = true;
         self.record.read_next = None;
+        self.record.cut = Cut::None;
         if self.stopping.is_none() {
             self.stopping = Some(Instant::now() + Duration::from_millis(shared::CANCEL_WAIT_MS));
             let _ = self
@@ -570,7 +637,7 @@ fn works(message: &Value, seen_tools: &BTreeSet<String>) -> bool {
 }
 
 /// What the driver knows of the message being written, for where a paragraph break in it ends.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Written {
     /// How many line breaks the message ends with, at most two.
     breaks: usize,
@@ -590,26 +657,48 @@ impl Written {
     fn take(&mut self, words: &str) -> Option<usize> {
         let mut found = None;
         for (at, c) in words.char_indices() {
-            match c {
-                '\n' => {
-                    self.breaks = (self.breaks + 1).min(2);
-                    self.ticks = 0;
-                    self.line_known = false;
-                }
-                '\r' => {}
-                _ => {
-                    if self.breaks >= 2 && !self.fenced && found.is_none() {
-                        found = Some(at);
-                    }
-                    self.breaks = 0;
-                    self.first_on_line(c);
-                }
+            if found.is_none() && !matches!(c, '\n' | '\r') && self.breaks >= 2 && !self.fenced {
+                found = Some(at);
             }
+            self.step(c);
         }
         if found.is_none() && self.breaks >= 2 && !self.fenced {
             found = Some(words.len());
         }
         found
+    }
+
+    /// Takes in a piece of the message up to its first line end outside a code block: where
+    /// that line end ends. None when the piece holds no such line end.
+    fn line_end(&mut self, words: &str) -> Option<usize> {
+        for (at, c) in words.char_indices() {
+            let ends = c == '\n' && !self.fenced;
+            self.step(c);
+            if ends {
+                return Some(at + 1);
+            }
+        }
+        None
+    }
+
+    /// The message stands at the start of a line outside a code block: a cut can come now.
+    fn at_line_start(&self) -> bool {
+        self.breaks > 0 && !self.fenced
+    }
+
+    fn step(&mut self, c: char) {
+        match c {
+            '\n' => {
+                self.breaks = (self.breaks + 1).min(2);
+                self.ticks = 0;
+                self.line_known = false;
+            }
+            '\r' => {}
+            _ => {
+                self.breaks = 0;
+                self.first_on_line(c);
+            }
+        }
     }
 
     /// A character of the line being written: the third backtick first on it opens or closes
@@ -651,7 +740,7 @@ fn early(stage: &str, how: Ended) -> io::Result<Outcome> {
 fn early_for(stage: &str, how: Ended, uuid: &str) -> io::Result<Outcome> {
     let text = match how {
         // The Host's lines never end a wait of the setup's, which keeps them for the prompt.
-        Ended::Closed | Ended::Owner(_) => "Antigravity ended before it answered",
+        Ended::Closed | Ended::Owner(_) | Ended::Woken => "Antigravity ended before it answered",
         Ended::Silent => "Antigravity stopped answering",
         Ended::Interrupted => return Ok(Outcome::Stopped),
     };
@@ -901,6 +990,10 @@ pub fn run(program: &str) -> Result<u8> {
             settled: false,
             writing: false,
             written: Written::default(),
+            cut: Cut::None,
+            wake: false,
+            dropped: 0,
+            since: 0,
         },
         stopping: None,
         waiting: Vec::new(),

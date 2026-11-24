@@ -700,6 +700,10 @@ fn settled(printed: &[Value]) -> Vec<&Value> {
         .collect()
 }
 
+/// The driver sends a message that comes while agy writes at once, as during a tool: the read
+/// of a reply agy goes on writing after it is what such a test is about.
+const NOT_CUT: (&str, &str) = (clarp_acp::agy::steer::CUT_ENV, "off");
+
 fn steering(place: &Place, case: &str) -> Order {
     let mut order = place.order("");
     order.prompt = case.into();
@@ -711,7 +715,9 @@ fn steering(place: &Place, case: &str) -> Order {
 fn a_message_sent_while_a_prompt_runs_is_read_when_antigravity_works_on_it_and_answered_with_it() {
     for mode in ["tool", "writing"] {
         let place = Place::new(&format!("steer-{mode}"), "steer");
-        let (mut child, mut input) = place.open(&steering(&place, &format!("case-{mode}")), &[]);
+        // agy writes in one mode: the message goes as it goes during a tool, not cut.
+        let (mut child, mut input) =
+            place.open(&steering(&place, &format!("case-{mode}")), &[NOT_CUT]);
         let mut printed = Printed::of(&mut child);
         wait_file(&place, &format!("working-{mode}"));
         steer(&mut input, "u-add", &format!("add-{mode}"));
@@ -993,7 +999,7 @@ fn a_command_begun_before_the_message_that_ends_after_it_is_no_read() {
 #[test]
 fn a_sentence_agy_goes_on_writing_after_the_hand_over_is_whole_before_the_read() {
     let place = Place::new("steer-sentence", "steer");
-    let (mut child, mut input) = place.open(&steering(&place, "case-sentence"), &[]);
+    let (mut child, mut input) = place.open(&steering(&place, "case-sentence"), &[NOT_CUT]);
     let mut printed = Printed::of(&mut child);
     wait_file(&place, "working-sentence");
     steer(&mut input, "u-add", "add-sentence");
@@ -1021,7 +1027,7 @@ fn a_sentence_agy_goes_on_writing_after_the_hand_over_is_whole_before_the_read()
 #[test]
 fn a_sentence_that_goes_on_to_the_new_prompts_answer_is_read_before_that_answer() {
     let place = Place::new("steer-closing", "steer");
-    let (mut child, mut input) = place.open(&steering(&place, "case-closing"), &[]);
+    let (mut child, mut input) = place.open(&steering(&place, "case-closing"), &[NOT_CUT]);
     let mut printed = Printed::of(&mut child);
     wait_file(&place, "working-closing");
     steer(&mut input, "u-add", "add-closing");
@@ -1046,7 +1052,7 @@ fn a_sentence_that_goes_on_to_the_new_prompts_answer_is_read_before_that_answer(
 /// pieces it printed from the turn of `case`, until the settled answer.
 fn written_through_the_hand_over(case: &str) -> Vec<Value> {
     let place = Place::new(&format!("steer-{case}"), "steer");
-    let (mut child, mut input) = place.open(&steering(&place, &format!("case-{case}")), &[]);
+    let (mut child, mut input) = place.open(&steering(&place, &format!("case-{case}")), &[NOT_CUT]);
     let mut printed = Printed::of(&mut child);
     wait_file(&place, &format!("working-{case}"));
     steer(&mut input, "u-add", &format!("add-{case}"));
@@ -1144,4 +1150,172 @@ fn a_blank_line_in_a_code_block_is_passed_over_and_the_read_goes_after_the_block
         ],
         "{seen:?}"
     );
+}
+
+/// A reply cut for a message in the turn of `case`: the stand-in writes its first piece, the
+/// message comes, and once the driver holds it the stand-in goes on (`go-<case>`). What the
+/// driver printed, and the prompt the message went as.
+fn cut_for_a_message(case: &str) -> (Vec<Value>, String) {
+    let place = Place::new(&format!("cut-{case}"), "steer");
+    let (mut child, mut input) = place.open(&steering(&place, &format!("case-{case}")), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, &format!("working-{case}"));
+    steer(&mut input, "u-add", &format!("add-{case}"));
+    printed.until("the message held", |line| {
+        line["clarp"] == "cut" && line["stage"] == "held"
+    });
+    std::fs::write(place.dir.join(format!("go-{case}")), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success(), "{:?}", printed.seen);
+    let seen = printed.seen;
+    // One answer for both, as when agy takes a message over: no Stop, and nothing new.
+    let answers = settled(&seen);
+    assert_eq!(answers.len(), 1, "{seen:?}");
+    assert_eq!(answers[0]["user_message_uuids"], json!(["u-own", "u-add"]));
+    assert_eq!(answers[0]["is_error"], false);
+    let prompted = driver(&seen, "prompted");
+    assert_eq!(prompted.len(), 1, "{seen:?}");
+    assert_eq!(prompted[0]["uuid"], "u-own");
+    assert_eq!(prompted[0]["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        prompted[0]["result"]["usage"],
+        json!({"inputTokens": 13, "outputTokens": 6})
+    );
+    assert!(
+        driver(&seen, "cancel").is_empty(),
+        "a cut is no Stop: {seen:?}"
+    );
+    assert_eq!(place.sent_of("session/cancel").len(), 1);
+    let prompts = place.sent_of("session/prompt");
+    assert_eq!(prompts.len(), 2, "{seen:?}");
+    let given = std::fs::read_to_string(place.dir.join(format!("prompt-{case}"))).unwrap();
+    // The read comes just before agy's first word for the message, after the cut.
+    let cut = printed_at(&seen, |line| {
+        line["clarp"] == "cut" && line["stage"] == "cancel"
+    });
+    let read = printed_at(&seen, |line| read_of(line) == Some("u-add"));
+    let banana = printed_at(&seen, |line| {
+        line["params"]["update"]["content"]["text"] == "BANANA"
+    });
+    assert!(cut < read && read + 1 == banana, "{seen:?}");
+    (seen, given)
+}
+
+fn printed_at(seen: &[Value], what: impl Fn(&Value) -> bool) -> usize {
+    seen.iter()
+        .position(what)
+        .unwrap_or_else(|| panic!("{seen:?}"))
+}
+
+/// The pieces of the reply printed, in order.
+fn pieces(seen: &[Value]) -> Vec<&str> {
+    seen.iter()
+        .filter(|line| line["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+        .filter_map(|line| line["params"]["update"]["content"]["text"].as_str())
+        .collect()
+}
+
+#[test]
+fn a_message_that_comes_while_agy_writes_cuts_the_reply_at_the_next_line_end() {
+    let (seen, given) = cut_for_a_message("list");
+    // The reply ends at the line end; what agy wrote after it, before and after the cancel
+    // landed, is left out, as agy itself forgets it.
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n", "BANANA"]);
+    let sent = driver(&seen, "cut")
+        .into_iter()
+        .find(|line| line["stage"] == "sent")
+        .unwrap();
+    assert_eq!(sent["given_back"], 16);
+    assert_eq!(sent["left_out"], "3. Udon".len() + "late".len());
+    // The message goes with the reply so far before it, marked at both ends.
+    assert_eq!(
+        given,
+        clarp_acp::agy::steer::with_reply("1. Pho\n2. Ramen\n", "add-list")
+    );
+}
+
+#[test]
+fn a_cut_inside_a_code_block_waits_for_the_line_that_closes_it() {
+    let (seen, given) = cut_for_a_message("blockend");
+    assert_eq!(
+        pieces(&seen),
+        ["Here:\n```sh\necho a\n", "echo b\n```\n", "BANANA"]
+    );
+    assert_eq!(
+        given,
+        clarp_acp::agy::steer::with_reply("Here:\n```sh\necho a\necho b\n```\n", "add-blockend")
+    );
+}
+
+#[test]
+fn a_code_block_that_does_not_close_is_cut_at_the_bound() {
+    let began = Instant::now();
+    let (seen, given) = cut_for_a_message("blockopen");
+    // No line end outside the block came: the reply is cut where it was, after the bound.
+    assert!(began.elapsed() >= Duration::from_secs(3));
+    assert_eq!(pieces(&seen), ["```\nx\n", "y\n", "BANANA"]);
+    assert_eq!(
+        given,
+        clarp_acp::agy::steer::with_reply("```\nx\ny\n", "add-blockopen")
+    );
+}
+
+#[test]
+fn a_message_during_a_tool_is_not_cut() {
+    let place = Place::new("cut-tool", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-tool"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-tool");
+    steer(&mut input, "u-add", "add-tool");
+    // Sent at once, as it is: agy takes it over from the prompt that runs the tool.
+    wait_file(&place, "received-add-tool");
+    std::fs::write(place.dir.join("taken-tool"), "").unwrap();
+    std::fs::write(place.dir.join("release-tool"), "").unwrap();
+    printed.until("the settled answer", |line| line["type"] == "result");
+    drop(input);
+    printed.rest();
+    assert!(child.wait().unwrap().success());
+    assert!(
+        driver(&printed.seen, "cut").is_empty(),
+        "{:?}",
+        printed.seen
+    );
+    assert!(place.sent_of("session/cancel").is_empty());
+    assert_eq!(
+        settled(&printed.seen)[0]["user_message_uuids"],
+        json!(["u-own", "u-add"])
+    );
+}
+
+#[test]
+fn a_stop_while_a_message_is_held_ends_the_turn_and_the_message_is_not_taken() {
+    let place = Place::new("cut-holdstop", "steer");
+    let (mut child, mut input) = place.open(&steering(&place, "case-holdstop"), &[]);
+    let mut printed = Printed::of(&mut child);
+    wait_file(&place, "working-holdstop");
+    steer(&mut input, "u-add", "add-holdstop");
+    printed.until("the message held", |line| {
+        line["clarp"] == "cut" && line["stage"] == "held"
+    });
+    kill(Pid::from_raw(child.id() as i32), Signal::SIGUSR1).unwrap();
+    printed.until("the Stop's cancel", |line| line["clarp"] == "cancel");
+    std::fs::write(place.dir.join("go-holdstop"), "").unwrap();
+    printed.rest();
+    drop(input);
+    let status = child.wait().unwrap();
+    assert_eq!(status.signal(), Some(Signal::SIGTERM as i32), "{status:?}");
+    let seen = &printed.seen;
+    assert!(seen.iter().all(|line| read_of(line).is_none()), "{seen:?}");
+    assert!(
+        seen.iter()
+            .any(|line| line["type"] == "steer_refused" && line["uuid"] == "u-add"),
+        "{seen:?}"
+    );
+    for answer in settled(seen) {
+        assert_eq!(answer["user_message_uuids"], json!(["u-own"]), "{seen:?}");
+    }
+    // The message never went: the only prompt is the turn's own.
+    assert_eq!(place.sent_of("session/prompt").len(), 1);
 }

@@ -48,6 +48,9 @@ pub enum Ended {
     Silent,
     /// The client's owner said this (`None`: it has no more to say). The answer may still come.
     Owner(Option<Value>),
+    /// The handler asked to act on something the agent said ([`Handler::wakes`]). The answer
+    /// may still come.
+    Woken,
 }
 
 /// What the client's caller does with what the agent says that answers nothing it asked.
@@ -57,6 +60,11 @@ pub trait Handler {
     /// A request of the agent's: its result, or an error code and message.
     fn request(&mut self, method: &str, params: &Value)
     -> io::Result<Result<Value, (i64, String)>>;
+    /// After a notification: whether the wait ends here, for the caller to act on what was
+    /// said before anything more is read.
+    fn wakes(&mut self) -> bool {
+        false
+    }
 }
 
 pub struct Client<W: Write> {
@@ -149,6 +157,9 @@ impl<W: Write> Client<W> {
                         )));
                     }
                     self.other(&message, handler)?;
+                    if handler.wakes() {
+                        return Ok(Err(Ended::Woken));
+                    }
                 }
                 Ok(Inbound::Interrupt) => return Ok(Err(Ended::Interrupted)),
                 Ok(Inbound::Owner(line)) => return Ok(Err(Ended::Owner(line))),

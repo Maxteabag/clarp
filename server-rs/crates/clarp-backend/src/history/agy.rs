@@ -18,6 +18,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use clarp_acp::agy::steer;
 use clarp_kernel::python;
 use clarp_kernel::tools::{self, cells};
 use regex::Regex;
@@ -136,14 +137,16 @@ pub(super) fn title(text: &str) -> String {
 }
 
 /// What the user wrote: what stands within the tool's mark, where it has one, without what
-/// a Host wrote before it.
+/// a Host wrote before it or the reply a cut gave back.
 fn asked(content: Option<&Value>) -> String {
     let Some(Value::String(content)) = content else {
         return String::new();
     };
     let within = ASKED.captures(content).and_then(|found| found.get(1));
     let said = within.map_or(content.as_str(), |found| found.as_str());
-    without_preamble(python::strip(said)).to_string()
+    // A message that cut agy's reply carries that reply before it: the user's words are what
+    // follows (`clarp_acp::agy::steer::with_reply`).
+    steer::without_reply(without_preamble(python::strip(said))).to_string()
 }
 
 /// A text agy wrote as JSON once more, as the text it is.

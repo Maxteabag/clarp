@@ -77,6 +77,49 @@ pub fn settled_line(is_error: bool, text: &str, uuids: &[String]) -> Value {
     })
 }
 
+/// The driver's environment says `off` here to send a message that comes while Antigravity
+/// writes at once, as it sends one while a tool runs, rather than cut the reply for it: for an
+/// agy that answers a cancel otherwise than 1.5.16 does.
+pub const CUT_ENV: &str = "CLARP_AGY_ACP_CUT";
+
+/// The line before the reply given back with a message that cut it ([`with_reply`]).
+pub const REPLY_BEGINS: &str = "<<< Your reply so far, cut off when the message below arrived >>>";
+/// The line after it.
+pub const REPLY_ENDS: &str = "<<< End of your reply so far >>>";
+/// The most of a reply given back, in bytes: of a longer one, the end is kept.
+pub const REPLY_MOST: usize = 24 * 1024;
+/// The line in place of the start of a reply too long to give back whole.
+pub const REPLY_LEFT_OUT: &str = "[The start of your reply is left out here.]";
+
+/// A message that cut Antigravity's reply short, with the reply it had written so far before
+/// it. Antigravity forgets the text of a prompt that is cancelled (seen with agy 1.5.16 on
+/// 24 Nov 2026: asked, it said it had written nothing), so the driver gives it back.
+pub fn with_reply(reply: &str, message: &str) -> String {
+    let mut start = reply.len().saturating_sub(REPLY_MOST);
+    while !reply.is_char_boundary(start) {
+        start += 1;
+    }
+    let left_out = if start > 0 {
+        format!("{REPLY_LEFT_OUT}\n")
+    } else {
+        String::new()
+    };
+    let kept = reply[start..].trim_end_matches('\n');
+    format!("{REPLY_BEGINS}\n{left_out}{kept}\n{REPLY_ENDS}\n\n{message}")
+}
+
+/// A user's words as they were sent: without a reply the driver gave back before them
+/// ([`with_reply`]).
+pub fn without_reply(text: &str) -> &str {
+    let Some(rest) = text.strip_prefix(REPLY_BEGINS) else {
+        return text;
+    };
+    match rest.find(&format!("\n{REPLY_ENDS}")) {
+        Some(at) => rest[at + 1 + REPLY_ENDS.len()..].trim_start_matches(['\n', '\r']),
+        None => text,
+    }
+}
+
 /// Adds what one answer spent to what the answers before it in the same work spent: every
 /// count the two have, field by field. agy says each prompt's usage apart, and an answer that
 /// covers prompts Antigravity handed over to it is told with what all of them spent.
@@ -139,6 +182,27 @@ mod tests {
         let long = "\u{e9}".repeat(SETTLED_TEXT_MOST);
         let cut = settled_line(true, &long, &[]);
         assert!(cut["result"].as_str().unwrap().len() <= SETTLED_TEXT_MOST);
+    }
+
+    #[test]
+    fn a_reply_given_back_is_marked_at_both_ends_and_taken_off_again() {
+        let sent = with_reply("1. Pho\n2. Ramen\n", "Stop the list.");
+        assert_eq!(
+            sent,
+            format!("{REPLY_BEGINS}\n1. Pho\n2. Ramen\n{REPLY_ENDS}\n\nStop the list.")
+        );
+        assert_eq!(without_reply(&sent), "Stop the list.");
+        // Words that only look like it, or never close it, are the user's as they are.
+        assert_eq!(without_reply("Stop the list."), "Stop the list.");
+        let open = format!("{REPLY_BEGINS}\nno end");
+        assert_eq!(without_reply(&open), open);
+        // A long reply keeps its end, within the bound, and says the start is left out.
+        let long = "é".repeat(REPLY_MOST);
+        let sent = with_reply(&long, "B");
+        assert!(sent.contains(REPLY_LEFT_OUT), "{}", &sent[..200]);
+        assert!(sent.len() < REPLY_MOST + 300);
+        assert!(sent.ends_with(&format!("é\n{REPLY_ENDS}\n\nB")));
+        assert_eq!(without_reply(&sent), "B");
     }
 
     #[test]

@@ -7,7 +7,7 @@
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
 # first prompt's text says how (`case-tool`, `case-writing`, `case-sentence`, `case-closing`, `case-background`, `case-refused`,
-# `case-stop`, `case-after`, `case-hold`, and the paragraph cases in `WRITTEN`); a prompt that names `add-...` and no case is a message run as a turn of its
+# `case-stop`, `case-after`, `case-hold`, the paragraph cases in `WRITTEN`, and the cut cases in `CUTS`); a prompt that names `add-...` and no case is a message run as a turn of its
 # own, answered `separate-add-...`. It waits for files beside it (`taken-<mode>`: say a word
 # under the new prompt; `release-<mode>`: answer) and leaves files for the test
 # (`working-<mode>`, `received-<message>`).
@@ -138,9 +138,47 @@ WRITTEN = {
 }
 
 
+# A reply the driver cuts for a message (agy 1.5.16, 24 Nov 2026): what agy wrote before the
+# message came, and what it writes once the test says `go-<mode>`. At the cancel, agy answers the
+# prompt `cancelled` at once; a word it wrote before the cancel landed comes first.
+CUTS = {
+    # A list that goes on past a line end: the cut comes there.
+    "list": ("1. Pho\n2. Ra", "men\n3. Udon"),
+    # A code block is open: its lines are no place to cut; the end of the line that closes it is.
+    "blockend": ("Here:\n```sh\necho a\n", "echo b\n```\nDone.\nMore"),
+    # A code block that never closes: the cut comes at the driver's bound.
+    "blockopen": ("```\nx\n", "y\n"),
+    # A Stop while the message is held.
+    "holdstop": ("1. Pho\n2. Ra", None),
+}
+
+
+def cut(mid, sid, mode):
+    before, after = CUTS[mode]
+    text(sid, "agent_message_chunk", before)
+    touch("working-" + mode)
+    wait_file("go-" + mode)
+    if after:
+        text(sid, "agent_message_chunk", after)
+    while read().get("method") != "session/cancel":
+        pass
+    touch("cancelled-" + mode)
+    text(sid, "agent_message_chunk", "late")
+    result(mid, {"stopReason": "cancelled", "usage": {"inputTokens": 3, "outputTokens": 1}})
+    if mode == "holdstop":
+        return
+    second = next_prompt()
+    with open(os.path.join(here, "prompt-" + mode), "w") as kept:
+        kept.write(said_in(second))
+    text(sid, "agent_message_chunk", "BANANA")
+    result(second["id"], {"stopReason": "end_turn", "usage": {"inputTokens": 10, "outputTokens": 5}})
+
+
 def steering(mid, sid, words):
     found = re.search(r"case-([a-z]+)", words)
     mode = found.group(1) if found else ""
+    if mode in CUTS:
+        return cut(mid, sid, mode)
     if mode == "after":
         # Answered before anything else comes: what comes later is a prompt of its own.
         text(sid, "agent_message_chunk", "first-after")
