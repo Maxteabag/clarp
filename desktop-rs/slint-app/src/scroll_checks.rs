@@ -1562,6 +1562,37 @@ struct Shake {
     flashes: usize,
     posted: usize,
     done: usize,
+    frames: Vec<crate::scroll_journal::Frame>,
+}
+
+impl Shake {
+    /// Takes the frames drawn since the last look.
+    fn look(&mut self) {
+        let last = self.frames.last().map(|f| f.at);
+        let new: Vec<_> = crate::scroll_journal::frames(&self.pane).into_iter().filter(|f| last.is_none_or(|at| f.at > at)).collect();
+        self.frames.extend(new);
+    }
+
+    /// Prints each step of 2 px or more the frames looked at show (the
+    /// two frames, what happened before the second), then forgets them.
+    fn steps(&mut self, part: &str) {
+        let mut shown = 0;
+        for pair in self.frames.windows(2) {
+            let Some(step) = crate::unasked::movement(&pair[0], &pair[1]) else { continue };
+            if step.dy.abs() < crate::unasked::STEP || shown >= 40 {
+                continue;
+            }
+            shown += 1;
+            let line = |f: &crate::scroll_journal::Frame| {
+                let s = &f.shot;
+                format!("{:.0}ms offset {:.1} content {:.1} view {:.1} follow {} rows {} top {}#{} y {:.1} h {:.1} bottom {} y {:.1} h {:.1}",
+                        f.at.as_secs_f64() * 1000.0, s.offset, s.content, s.viewport, s.follow, s.rows, s.top, s.top_index, s.top_y, s.top_h, s.bottom, s.bottom_y, s.bottom_h)
+            };
+            println!("note {part} step {:.1} share {:.2} counted {}: {} -> {} [{}]", step.dy, step.fraction, step.counted, line(&pair[0]), line(&pair[1]), pair[1].events.join(", "));
+        }
+        println!("note {part}: {} frames, {shown} steps of 2 px or more", self.frames.len());
+        self.frames.clear();
+    }
 }
 
 /// `--check scroll-shake --out DIR`: unasked movement in a chat following
@@ -1633,11 +1664,13 @@ pub(super) fn scroll_shake_check(out: String) {
             st.pane = app.active_id().to_string();
             st.moved = moved_now();
             st.posted = crate::scroll_journal::flashes().len();
+            st.frames.clear();
             true
         })),
         // The last row grows and shrinks every 100 ms, nobody scrolling.
         ("heights settle up and down", Box::new(move |_, _, elapsed| {
             let mut st = s2.borrow_mut();
+            st.look();
             let due = (elapsed.as_millis() / 100) as usize;
             while st.done < FLIPS && st.done <= due {
                 upsert(SESSION, settle(st.done));
@@ -1648,6 +1681,8 @@ pub(super) fn scroll_shake_check(out: String) {
         })),
         ("a shake is found and posted", Box::new(move |_, _, _| {
             let mut st = s3.borrow_mut();
+            st.look();
+            st.steps("scroll-shake fixture");
             let now = moved_now();
             let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
             println!("note scroll-shake fixture: found shift {} shake {} layout_shift {}", found[0], found[1], found[2]);
@@ -1670,12 +1705,15 @@ pub(super) fn scroll_shake_check(out: String) {
         // Rows at the end and replies that only grow: the follow slide, no more.
         ("a settled chat streams at its end", Box::new(move |_, _, elapsed| {
             let mut st = s4.borrow_mut();
+            st.look();
             if st.done == 0 && elapsed < Duration::from_millis(800) {
                 return false;
             }
             if st.done == 0 {
                 st.moved = moved_now();
                 st.flashes = crate::scroll_journal::flashes_seen();
+                st.frames.clear();
+                st.look();
             }
             let due = ((elapsed.as_millis().saturating_sub(800)) / 150) as usize;
             while st.done < quiet_count && st.done <= due {
@@ -1686,6 +1724,8 @@ pub(super) fn scroll_shake_check(out: String) {
         })),
         ("none of the new rules", Box::new(move |_, _, _| {
             let mut st = s5.borrow_mut();
+            st.look();
+            st.steps("scroll-shake settled streaming");
             let now = moved_now();
             let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
             println!("note scroll-shake settled streaming: found shift {} shake {} layout_shift {}", found[0], found[1], found[2]);
@@ -1702,6 +1742,7 @@ pub(super) fn scroll_shake_check(out: String) {
         // Whole agent turns, measured (not judged): what the app does today.
         ("agent turns stream", Box::new(move |_, _, elapsed| {
             let mut st = s6.borrow_mut();
+            st.look();
             let due = (elapsed.as_millis() / 200) as usize;
             while st.done < turn_count && st.done <= due {
                 (turns[st.done].1)();
@@ -1710,6 +1751,7 @@ pub(super) fn scroll_shake_check(out: String) {
             if st.done < turn_count || elapsed < Duration::from_millis(200 * turn_count as u64 + 1500) {
                 return false;
             }
+            st.steps("scroll-shake agent turns");
             let now = moved_now();
             let found: Vec<usize> = (0..3).map(|i| now[i] - st.moved[i]).collect();
             let posted: Vec<String> = crate::scroll_journal::flashes()[st.posted..]
