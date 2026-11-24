@@ -77,6 +77,8 @@ struct Walk {
     /// The newest row since the last anchor that is conversation by itself: the turn's message
     /// or a note.
     fallback: Option<(Seq, String)>,
+    /// The turn's newest row was a call by itself: its id.
+    call: Option<String>,
 }
 
 impl Walk {
@@ -139,6 +141,7 @@ impl Walk {
             if read_into(log, item)?
                 && let Some(entry) = Entry::from_item(item).map_err(|why| corrupt(item, why))?
             {
+                self.call = None;
                 self.decide(log, item.seq, entry.id())?;
             }
             return Ok(());
@@ -151,15 +154,17 @@ impl Walk {
             return Ok(());
         }
         if is_conversation(&entry, None) {
+            self.call = None;
             if matches!(entry, Entry::Message(_) | Entry::Note(_)) {
                 self.fallback = Some((item.seq, id.to_owned()));
             }
             return Ok(());
         }
         self.rows += 1;
+        let call = self.call.take();
         match &entry {
             Entry::Reply(said) if !said.text.trim().is_empty() => {
-                if said.tools.is_empty() {
+                if said.tools.is_empty() && !announced(call.as_deref(), &said.id) {
                     // Words after words: those before were an answer.
                     self.decide(log, item.seq, id)?;
                     self.pending = Some(Pending {
@@ -174,7 +179,12 @@ impl Walk {
             }
             // Work: what was said before it was said along the way.
             Entry::Reply(said) if !said.tools.is_empty() => self.pending = None,
-            Entry::Tool(_) => self.pending = None,
+            Entry::Tool(tool) => {
+                self.pending = None;
+                if tool.reply.is_none() {
+                    self.call = Some(tool.id.clone());
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -243,6 +253,22 @@ impl Walk {
         }
         anchors
     }
+}
+
+/// Whether these words were written by OpenCode before this change, right after the call they
+/// announced: it wrote a step's call (`t-<name>-<call>`) as a row when the call began and the
+/// step's words (`r-<name>-<step>`) only when the next step began. Those words went with the
+/// call, and are no answer. It now writes them first, with the call, as every other tool does.
+fn announced(call: Option<&str>, reply: &str) -> bool {
+    let (Some(call), Some(reply)) = (call.and_then(|call| call.strip_prefix("t-")), reply.strip_prefix("r-"))
+    else {
+        return false;
+    };
+    reply.rsplit_once('-').is_some_and(|(name, step)| {
+        !step.is_empty()
+            && step.bytes().all(|byte| byte.is_ascii_digit())
+            && call.strip_prefix(name).is_some_and(|rest| rest.starts_with('-'))
+    })
 }
 
 /// Whether this row of another turn is a message read into a running turn of the agent's own
@@ -819,4 +845,24 @@ mod tests {
         assert!(ids.contains(&"r-first"), "{ids:?}");
         assert!(conversation(&recorder).contains(&"r-first".to_owned()));
     }
+
+    #[test]
+    fn words_old_opencode_wrote_after_the_call_they_announced_are_no_answer() {
+        // Before its words went with their call, OpenCode wrote a step's call when it began
+        // and the step's words when the next step began: call, words, call, words, words.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        call(&mut recorder, turn, "t-oc-call_1", &[]);
+        say(&mut recorder, turn, "r-oc-1", &[], &[]);
+        call(&mut recorder, turn, "t-oc-call_2", &["r-oc-1"]);
+        say(&mut recorder, turn, "r-oc-2", &[], &[]);
+        say(&mut recorder, turn, "r-oc-3", &[], &[]);
+        end(&mut recorder, turn, "r-oc-3");
+        assert_eq!(conversation(&recorder), ["u-ask", "r-oc-3"]);
+        // Words after a call of another tool are words after work, and may be an answer.
+        assert!(!super::announced(Some("c-codex-item_1"), "r-codex-item_2"));
+        assert!(!super::announced(Some("t-oc-call_1"), "r-other-2"));
+        assert!(super::announced(Some("t-oc-call_1"), "r-oc-2"));
+    }
+
 }
