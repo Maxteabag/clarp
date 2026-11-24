@@ -43,6 +43,16 @@ fn put_right(tool: &str, model: &str, effort: &str, theirs: Vec<String>) -> Vec<
     let mut want = theirs;
     match tool {
         "codex" => {
+            // This Host runs Codex without its analytics, so that a question ends at its
+            // answer, not seconds later (issue 757).
+            let after = want
+                .iter()
+                .position(|arg| arg == "--skip-git-repo-check")
+                .unwrap();
+            want.splice(
+                after + 1..after + 1,
+                ["-c".to_string(), "analytics.enabled=false".to_string()],
+            );
             let at = want
                 .iter()
                 .position(|arg| arg.starts_with("model_reasoning_effort="));
