@@ -597,6 +597,20 @@ async fn transcribe(State(app): State<App>, request: Request) -> Response {
 /// The chat a client says a recording is for.
 const NAMED_CHAT: &str = "x-transcription-session";
 
+/// What a recording for an agent whose words stay off the cloud (`cloud_speech` off) is
+/// answered with when no engine of this Host's own can hear it: it is sent to no engine in
+/// the cloud.
+pub(crate) const CLOUD_EARS_OFF: &str = "This agent's conversation stays off cloud speech, and \
+    this Host has no speech engine of its own to hear it. Type the message instead.";
+
+/// Whether the agent of this session keeps its conversation off cloud speech: what is said
+/// to it is heard only by an engine of this Host's own.
+pub(crate) fn hears_locally_only(directory: &crate::fleet::Directory, session: &str) -> bool {
+    directory
+        .named(session)
+        .is_some_and(|member| !member.record.speaks_to_cloud())
+}
+
 async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
@@ -811,10 +825,11 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
             crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
                 .await
                 .unwrap_or_default();
+        let local_only = recorded_for.is_some_and(|member| !member.record.speaks_to_cloud());
         let (said, fallback) = hear_chat(
             app,
             &ears,
-            &plan,
+            (&plan, local_only),
             session,
             &language,
             audit["payload"].as_str().unwrap_or(""),
@@ -919,14 +934,22 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
 async fn hear_chat(
     app: &App,
     ears: &Arc<Ears>,
-    plan: &ChatPlan,
+    (plan, local_only): (&ChatPlan, bool),
     session: &str,
     language: &str,
     listen_for: &str,
     clip: (&axum::body::Bytes, &str),
 ) -> Result<(Heard, Option<Value>), Told> {
     let own = ears.own_id();
-    let (order, repeats) = plan.order.chat_order(own.as_deref());
+    let (mut order, repeats) = plan.order.chat_order(own.as_deref());
+    // A recording for an agent whose conversation stays off cloud speech is heard by this
+    // Host's own engine, or by none.
+    if local_only {
+        order.retain(|model| !heard::is_cloud(model));
+        if order.is_empty() || own.is_none() {
+            return Err(refuse(StatusCode::CONFLICT, CLOUD_EARS_OFF));
+        }
+    }
     for engine in repeats {
         eprintln!(
             "clarp-host: sttEngineRepeatSkipped {}",

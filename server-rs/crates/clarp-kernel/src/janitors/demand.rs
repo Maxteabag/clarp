@@ -107,8 +107,13 @@ pub fn request_run_id(role: &str, request_id: &Value) -> Result<String, Refused>
     Ok(format!("janitor-demand-{hex}"))
 }
 
-/// Whether a janitor with this scope answers for an agent.
+/// Whether a janitor with this scope answers for an agent. An agent bound to a model provider
+/// of its own is in no janitor's scope: a janitor runs on the Host's models, and the agent's
+/// words go to no model but its own provider's (the lead's ruling of 24 Nov 2026).
 pub fn in_scope(scope: &Map<String, Value>, target: &Agent) -> bool {
+    if target.bound {
+        return false;
+    }
     let named = |side: &str| scope.get(side).and_then(Value::as_array);
     let id = json!(target.agent_id);
     let only = named("agent_ids").is_none_or(|only| only.is_empty() || only.contains(&id));

@@ -59,7 +59,10 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
     let mut facts = Vec::new();
     for member in ordered {
         let record = &member.record;
-        if record.is_janitor || record.archived_at_ms.is_some() {
+        // The checker asks a model of the Host's: an agent bound to a model provider of its
+        // own is never one it reads.
+        if record.is_janitor || record.archived_at_ms.is_some() || !record.codex_provider.is_empty()
+        {
             continue;
         }
         let view = member.agent.view();

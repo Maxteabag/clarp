@@ -42,6 +42,9 @@ pub struct Agent {
     pub archived: bool,
     /// A turn of it runs or waits, or its tool still has a process.
     pub busy: bool,
+    /// It is bound to a model provider of its own: what it says and does goes to no model
+    /// but that one, so no janitor reads it, whatever its scope says.
+    pub bound: bool,
 }
 
 /// What the book asks of the Host around it.

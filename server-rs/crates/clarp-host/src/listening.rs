@@ -222,6 +222,11 @@ async fn stream(
     }
     let of = |name: &str| asked.get(name).map(String::as_str);
     let session = python::strip(of("session").unwrap_or(""));
+    // Every engine that hears a stream is one in the cloud: an agent whose conversation stays
+    // off cloud speech is not streamed to.
+    if crate::heard::hears_locally_only(&app.fleet.directory(), session) {
+        return refused(StatusCode::CONFLICT, crate::heard::CLOUD_EARS_OFF.to_string());
+    }
     let chosen = app.ears.default_engine(&app.fleet.directory());
     let engine = of("model").filter(|model| !model.is_empty());
     let engine = python::strip(engine.unwrap_or(&chosen));

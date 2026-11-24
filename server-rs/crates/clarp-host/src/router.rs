@@ -271,7 +271,10 @@ async fn members(
         .collect();
     let mut seen = Vec::with_capacity(all.len());
     for (mut member, fellow) in all {
-        if chosen.contains(&member.agent_id) {
+        // The router asks a model of the Host's: an agent bound to a model provider of its
+        // own is shown by its name and state, never by its words.
+        let bound = !fellow.record.codex_provider.is_empty();
+        if chosen.contains(&member.agent_id) && !bound {
             member.said = said_of(fellow).await;
             let own = given.get(&member.agent_id);
             member.said.extend(own.into_iter().flatten().cloned());

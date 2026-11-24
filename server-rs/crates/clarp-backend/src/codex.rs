@@ -457,6 +457,12 @@ struct Bound {
     rollout: Option<PathBuf>,
     /// The turn was stopped for running on another provider: nothing it says after is taken.
     halted: bool,
+    /// What the turn runs on was read, and is the agent's provider. A turn of a lane is
+    /// verified by the lane, which holds Codex to the provider it names for the thread.
+    verified: bool,
+    /// What the turn said of its items before its provider was verified: taken once it is,
+    /// and never if it cannot be.
+    held: Vec<(Value, i64)>,
 }
 
 /// What the ids of Codex's live items begin with.
@@ -496,6 +502,8 @@ impl CodexInterpreter {
             own,
             rollout: None,
             halted: false,
+            verified: false,
+            held: Vec::new(),
         });
         self
     }
@@ -520,12 +528,26 @@ impl CodexInterpreter {
         };
         let named = crate::own_provider::named_providers(rollout);
         let Some(other) = named.iter().find(|named| **named != bound.own.provider) else {
+            bound.verified |= !named.is_empty();
             return false;
         };
         bound.halted = true;
+        bound.held.clear();
         self.failure = Some(bound.own.ran_on(other));
         out.push(Signal::Halt);
         true
+    }
+
+    /// A bound turn that is complete with no provider read for it fails closed: it is not
+    /// known to have run on the agent's provider, and what it said is not taken.
+    fn unverified(&mut self, out: &mut Vec<Signal>) {
+        let Some(bound) = self.bound.as_mut() else {
+            return;
+        };
+        bound.halted = true;
+        bound.held.clear();
+        self.failure = Some(bound.own.unverified());
+        out.push(Signal::Halt);
     }
 
     fn moved(&mut self, activity: Activity, out: &mut Vec<Signal>) {
@@ -558,6 +580,33 @@ impl CodexInterpreter {
         if checks && self.held_to_provider(out) {
             return;
         }
+        if let Some(bound) = self.bound.as_mut() {
+            // Only a lane prints this, and a lane verified its thread's provider itself.
+            if kind == "steer.open" {
+                bound.verified = true;
+            }
+            if !bound.verified {
+                if kind.starts_with("item.") {
+                    bound.held.push((event, t));
+                    return;
+                }
+                if kind == "turn.completed" {
+                    self.unverified(out);
+                    return;
+                }
+            }
+            if bound.verified && !bound.held.is_empty() {
+                for (event, t) in std::mem::take(&mut bound.held) {
+                    self.take(&event, t, out);
+                }
+            }
+        }
+        self.take(&event, t, out);
+    }
+
+    /// What one of Codex's events means, once it may be taken.
+    fn take(&mut self, event: &Value, t: i64, out: &mut Vec<Signal>) {
+        let kind = text_of(&event["type"]);
         match kind {
             "thread.started" => {
                 let thread = text_of(&event["thread_id"]).trim();
@@ -1653,6 +1702,73 @@ mod tests {
             clarp_kernel::failures::PROVIDER_MISMATCH
         );
         assert!(reason.contains("\"openai\""), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_bound_turn_whose_provider_cannot_be_read_fails_closed_and_shows_nothing() {
+        let thread = "019a0000-0000-7000-8000-00000000000d";
+        // A home whose rollout of the thread never appears.
+        let (home, own) = bound_home("019a0000-0000-7000-8000-00000000000e", "stand-in");
+        let lines = [
+            format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#),
+            r#"{"type":"turn.started"}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"an answer"}}"#.to_string(),
+            r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}"#.to_string(),
+        ];
+        let mut interpreter =
+            CodexInterpreter::reading(1, "u1", Some(own.sessions())).bound_to(own.clone());
+        let mut out = Vec::new();
+        for (t, line) in lines.iter().enumerate() {
+            let record = Record {
+                t: i64::try_from(t).unwrap(),
+                entry: Entry::Out(line.clone()),
+            };
+            interpreter.on_record(&record, &mut out);
+        }
+        let exited = ShimEvent::Exited {
+            code: Some(0),
+            signal: None,
+        };
+        let record = Record {
+            t: 9,
+            entry: Entry::Shim(exited),
+        };
+        interpreter.on_record(&record, &mut out);
+        assert!(out.contains(&Signal::Halt), "{out:?}");
+        assert!(
+            !out.iter()
+                .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
+            "{out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH
+        );
+        assert!(reason.contains("could not be verified"), "{reason}");
+
+        // A lane's turn is verified by the lane: what it says is taken as it comes.
+        let mut lane =
+            CodexInterpreter::reading(1, "u2", Some(own.sessions())).bound_to(own.clone());
+        let mut out = Vec::new();
+        for (t, line) in [
+            r#"{"type":"turn.started"}"#,
+            r#"{"type":"steer.open"}"#,
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"a lane answer"}}"#,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let record = Record {
+                t: i64::try_from(t).unwrap(),
+                entry: Entry::Out((*line).to_string()),
+            };
+            lane.on_record(&record, &mut out);
+        }
+        assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))), "{out:?}");
         std::fs::remove_dir_all(home).unwrap();
     }
 

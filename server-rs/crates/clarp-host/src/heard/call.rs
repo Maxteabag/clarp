@@ -119,6 +119,9 @@ pub(super) async fn hear(
         (Value::Null, 0)
     };
     let listen_for = audit["payload"].as_str().unwrap_or("");
+    // A call with an agent whose conversation stays off cloud speech is heard by this Host's
+    // own engine, or by none.
+    let local_only = super::hears_locally_only(&directory, session);
     for (i, step) in steps.iter().enumerate() {
         if let Some(reason) = step.skip_reason(&contacted) {
             report.skipped(&step.engine, reason);
@@ -131,6 +134,10 @@ pub(super) async fn hear(
         } else {
             &resolved.order[i]
         };
+        if local_only && heard::is_cloud(model) {
+            report.skipped(&step.engine, "cloud_speech_off");
+            continue;
+        }
         let lang = step
             .language
             .as_ref()
@@ -175,6 +182,12 @@ pub(super) async fn hear(
                 }
             }
         }
+    }
+    if local_only {
+        return Err((
+            StatusCode::CONFLICT,
+            json!({"ok":false,"error":super::CLOUD_EARS_OFF,"attempts":report.finish()["attempts"]}),
+        ));
     }
     Err((
         StatusCode::CONFLICT,
