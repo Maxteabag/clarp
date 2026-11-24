@@ -1592,6 +1592,11 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
         "/agents",
         json!({"name":"Oak","session":"oak","backend":"claude","role":"helper","parent":"boss"}),
     );
+    // A helper's own chat shows coordination unless the user hid it: this one is hidden.
+    host.post(
+        "/agent-coordination",
+        json!({"session":"oak","visibility":"hide"}),
+    );
     let row = |session| {
         host.get("/agents/snapshot")["agents"]
             .as_array()
@@ -1606,7 +1611,7 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
     let before = row("oak");
     assert!(before["working_audience"].is_null());
     assert_eq!(before["coordination_visibility"], "hide");
-    assert!(before["coordination_override"].is_null());
+    assert_eq!(before["coordination_override"], "hide");
     let heard = host.listen_at(&format!("/events?token={admin}"));
     wait_for("the event stream to subscribe", || {
         heard
@@ -1630,7 +1635,7 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
     let page = host.get("/log?session=oak&coordination=auto");
     assert_eq!(
         page["coordination"],
-        json!({"visibility":"hide","hidden":true,"source":"global"})
+        json!({"visibility":"hide","hidden":true,"source":"chat"})
     );
     assert!(
         page["hidden_after"]["messages"]
@@ -1705,4 +1710,119 @@ fn a_hiding_chat_shows_who_its_helper_works_with_and_keeps_the_visible_preview()
         json!({"session":"oak","visibility":"show"}),
     );
     assert_ne!(row("oak")["last_message_id"], idle["last_message_id"]);
+}
+
+#[test]
+fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it() {
+    let place = Place::new("helper-chat-shown");
+    let (tokens, _, _) = stand_in(&place);
+    let admin = "fixture-admin";
+    let host = start_host_as(&place, &[], admin);
+    host.post(
+        "/agents",
+        json!({"name":"Boss","session":"boss","backend":"claude"}),
+    );
+    host.post(
+        "/agents",
+        json!({"name":"Hal","session":"hal","backend":"claude","role":"helper","parent":"boss"}),
+    );
+    host.post(
+        "/agents",
+        json!({"name":"Oak","session":"oak","backend":"claude"}),
+    );
+    let hide = json!({"coordination_visibility":"hide"});
+    assert_eq!(host.post("/coordination-settings", hide.clone()), hide);
+    let reminder = "Coordination: this turn answers a message from another agent";
+    // Boss writes to an agent, and the turn it starts is over: what its tool was given.
+    let from_boss = |session: &str, text: &str, id: &str| {
+        let sent = host.post(
+            "/send",
+            json!({"session":session,"text":text,"client_msg_id":id,
+                   "sender":"boss","origin":"agent"}),
+        );
+        wait_for("the coordination turn to end", || {
+            answered(&host, session, &sent["trace_id"])
+        });
+        let input: Value =
+            serde_json::from_slice(&std::fs::read(tokens.join(format!("{session}.prompt"))).unwrap())
+                .unwrap();
+        input["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let row = |session: &str| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    let for_agents = |page: &Value| {
+        page["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["audience"] == "agents")
+            .count()
+    };
+
+    // The helper's chat shows the turn under the global hide, and its tool is not told that
+    // the user will not see it.
+    let prompt = from_boss("hal", "look at the build", "to-hal");
+    assert!(!prompt.contains(reminder), "{prompt}");
+    let page = host.get("/log?session=hal&coordination=auto");
+    assert_eq!(
+        page["coordination"],
+        json!({"visibility":"show","hidden":false,"source":"global"})
+    );
+    assert!(for_agents(&page) > 0, "{page}");
+    assert!(page.get("hidden_after").is_none(), "{page}");
+    let hal = row("hal");
+    assert_eq!(hal["coordination_visibility"], "show");
+    assert!(hal["coordination_override"].is_null());
+    let reset = host.post(
+        "/agent-coordination",
+        json!({"session":"hal","visibility":"default"}),
+    );
+    assert_eq!(reset["coordination_visibility"], "show");
+    assert!(reset["coordination_override"].is_null());
+
+    // Any other chat keeps the global hide.
+    let prompt = from_boss("oak", "look at the tests", "to-oak");
+    assert!(prompt.contains(reminder), "{prompt}");
+    let page = host.get("/log?session=oak&coordination=auto");
+    assert_eq!(
+        page["coordination"],
+        json!({"visibility":"hide","hidden":true,"source":"global"})
+    );
+    assert_eq!(for_agents(&page), 0, "{page}");
+    assert!(page["hidden_after"]["messages"].as_u64().is_some_and(|n| n > 0));
+    assert_eq!(row("oak")["coordination_visibility"], "hide");
+    let reset = host.post(
+        "/agent-coordination",
+        json!({"session":"oak","visibility":"default"}),
+    );
+    assert_eq!(reset["coordination_visibility"], "hide");
+
+    // The user's own choice for the helper's chat wins.
+    let hidden = host.post(
+        "/agent-coordination",
+        json!({"session":"hal","visibility":"hide"}),
+    );
+    assert_eq!(hidden["coordination_visibility"], "hide");
+    assert_eq!(hidden["coordination_override"], "hide");
+    let page = host.get("/log?session=hal&coordination=auto");
+    assert_eq!(
+        page["coordination"],
+        json!({"visibility":"hide","hidden":true,"source":"chat"})
+    );
+    assert_eq!(for_agents(&page), 0, "{page}");
+    let hal = row("hal");
+    assert_eq!(hal["coordination_visibility"], "hide");
+    assert_eq!(hal["coordination_override"], "hide");
+    let prompt = from_boss("hal", "and the deploy", "to-hal-hidden");
+    assert!(prompt.contains(reminder), "{prompt}");
 }
