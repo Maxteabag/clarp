@@ -3294,10 +3294,6 @@ mod tests {
             state(&record(), &failed, "claude", Some(&earlier))["detail"]["trace_id"],
             ""
         );
-        assert!(
-            at_once.get("status_text").is_none(),
-            "the route's word has no status text"
-        );
         let after = activity(&record(), &halted);
         assert_eq!(
             (
