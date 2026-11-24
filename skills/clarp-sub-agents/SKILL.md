@@ -242,8 +242,8 @@ start, and the command exits 1.
 
    A helper whose worktree you already closed out cannot run: on the Rust Host
    with `folder_missing` (contract 173) its turn fails at once with the kind
-   `folder_missing`, and you are told your message was never run, with the
-   folder. Recreate the worktree at that path (`git worktree add PATH BRANCH`)
+   `folder_missing`, and its conversation says your message was never run and
+   names the folder. Recreate the worktree at that path (`git worktree add PATH BRANCH`)
    and send the message again, or start a new helper.
 
    A queued prompt is not proof the work started; check the helper's own new
