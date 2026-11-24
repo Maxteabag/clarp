@@ -191,7 +191,11 @@ impl Walk {
         self.decided.decides.insert(by.to_owned(), pending.id);
         self.rows -= pending.rows;
         self.words = None;
-        if self.fallback.as_ref().is_some_and(|(seq, _)| *seq < pending.seq) {
+        if self
+            .fallback
+            .as_ref()
+            .is_some_and(|(seq, _)| *seq < pending.seq)
+        {
             self.fallback = None;
         }
     }
@@ -328,6 +332,9 @@ mod tests {
     use super::super::{REVISION_STEP, Span, Versioned, Which, after, tail};
     use super::AnchorCache;
 
+    /// One thing the turn does, written to its log.
+    type Step = Box<dyn Fn(&mut Recorder)>;
+
     fn open() -> Recorder {
         let log = clarp_store_mem::MemEngine::new()
             .open(
@@ -365,9 +372,7 @@ mod tests {
     /// A turn of the user's that runs: its message is `u-ask`.
     fn start(recorder: &mut Recorder) -> TurnId {
         let turn = accept(recorder, "u-ask", 100);
-        recorder
-            .handle(Command::TurnStarted { turn }, 110)
-            .unwrap();
+        recorder.handle(Command::TurnStarted { turn }, 110).unwrap();
         turn
     }
 
@@ -616,7 +621,13 @@ mod tests {
         let mut recorder = open();
         let turn = start(&mut recorder);
         for at in 0..300 {
-            say(&mut recorder, turn, &format!("r-{at}"), &[&format!("t-{at}")], &[]);
+            say(
+                &mut recorder,
+                turn,
+                &format!("r-{at}"),
+                &[&format!("t-{at}")],
+                &[],
+            );
         }
         let cache = AnchorCache::default();
         let read = |recorder: &Recorder| {
@@ -650,7 +661,7 @@ mod tests {
         let turn = start(&mut recorder);
         let mut entered: BTreeSet<String> = BTreeSet::new();
         let (mut held, mut cursor) = (Vec::<String>::new(), 0);
-        let mut steps: Vec<Box<dyn Fn(&mut Recorder)>> = vec![
+        let mut steps: Vec<Step> = vec![
             Box::new(move |r| say(r, turn, "r-a", &[], &[])),
             Box::new(move |r| say(r, turn, "r-b", &[], &[])),
             Box::new(move |r| call(r, turn, "t-1", &["r-b"])),
