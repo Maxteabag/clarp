@@ -135,4 +135,3 @@ fn a_helper_that_reports_mid_turn_reads_running_until_the_turn_is_over() {
     let_go();
     assert_eq!(state(), "done");
 }
-

@@ -480,7 +480,9 @@ fn dispatched(heard: &Mutex<Vec<Value>>, session: &str, client_msg_id: &str) -> 
 /// A stand-in for Claude Code that writes down the token of the turn it runs in,
 /// under its agent's session, and runs on, where the test marked its session to hold, until
 /// the test lets it go. It answers "on it".
-pub(super) fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+pub(super) fn stand_in(
+    place: &Place,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
     let (tokens, release, holds) = (
         place.root.join("tokens"),
         place.root.join("release"),

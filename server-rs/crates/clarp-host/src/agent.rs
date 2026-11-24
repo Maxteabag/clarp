@@ -5069,9 +5069,8 @@ impl Worker {
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
         // A helper that reported is shown working while a turn of its runs: when a turn
         // begins or ends, the apps are told to read the list again to see it.
-        let shown = |in_turn| {
-            clarp_kernel::helpers::shown_state(record.helper_state.as_deref(), in_turn)
-        };
+        let shown =
+            |in_turn| clarp_kernel::helpers::shown_state(record.helper_state.as_deref(), in_turn);
         if shown(was_live.is_some()) != shown(status.live.is_some()) {
             hub.publish(wire::roster("helper-state", &record.session), now);
         }
