@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyLiveEvent, applyLiveSnapshot, blankLive } from '@core/live-items.js';
-import { composeTimeline } from '@core/live-timeline.js';
+import { LIVE_ENTRY, composeTimeline, liveSegmentItems, withLiveSegments } from '@core/live-timeline.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(fs.readFileSync(path.join(here, '..', '..', 'contract', 'live', 'turn-full.json'), 'utf8'));
@@ -62,5 +62,44 @@ describe('composeTimeline', () => {
     const first = composeTimeline({ turns: [prompt, liveRow], liveState: replay(8) });
     const again = composeTimeline({ turns: [prompt, liveRow], liveState: replay(9), previousHidden: first.hidden });
     expect(again.hidden).toBe(first.hidden);
+  });
+});
+
+describe('withLiveSegments: a message the turn read while it ran', () => {
+  const T = 1795000000000;
+  const at = ms => new Date(ms).toISOString();
+  const u1 = { id: 'u1', role: 'user', timestamp: at(T - 100) };
+  const steer = { id: 'u2', role: 'user', timestamp: at(T + 5000) };
+  const after = { id: 'u3', role: 'user', timestamp: at(T + 30000) };
+  const entries = rows => rows.map(item => ({ type: 'turn', key: `t:${item.id}`, item }));
+  const keys = list => list.map(e => (e.type === 'live' ? e.key : e.item.id));
+  const items = [
+    { id: 'list', started_at_ms: T + 200 },
+    { id: 'banana', started_at_ms: T + 5000 },
+    { id: 'later', started_at_ms: T + 9000 },
+  ];
+
+  it('splits the running turn at the steer, so the answer to it is drawn below it', () => {
+    const out = withLiveSegments(entries([u1, steer]), 1, T, null);
+    expect(keys(out)).toEqual(['u1', 'live-turn', 'u2', 'live-turn:1']);
+    expect(liveSegmentItems(items, out[1]).map(i => i.id)).toEqual(['list']);
+    expect(liveSegmentItems(items, out[3]).map(i => i.id)).toEqual(['banana', 'later']);
+  });
+
+  it('keeps one block, under its prompt, when nothing was read into the turn', () => {
+    const out = withLiveSegments(entries([u1]), 1, T, null);
+    expect(out[1]).toBe(LIVE_ENTRY);
+    expect(liveSegmentItems(items, out[1])).toBe(items);
+  });
+
+  it('does not split at a prompt sent after the turn ended', () => {
+    const out = withLiveSegments(entries([u1, after]), 1, T, T + 20000);
+    expect(keys(out)).toEqual(['u1', 'live-turn', 'u3']);
+  });
+
+  it('splits at the steer but not at a later prompt once the turn ended', () => {
+    const out = withLiveSegments(entries([u1, steer, after]), 1, T, T + 20000);
+    expect(keys(out)).toEqual(['u1', 'live-turn', 'u2', 'live-turn:1', 'u3']);
+    expect(liveSegmentItems(items, out[3]).map(i => i.id)).toEqual(['banana', 'later']);
   });
 });
