@@ -219,8 +219,13 @@ impl Lane {
         serde_json::to_writer(file, resume).map_err(io::Error::other)?;
         let program = clarp_backend::program("codex")
             .ok_or_else(|| io::Error::other("Codex is not configured"))?;
-        let mut command =
-            launcher.lane_command(Self::TOOL, self.endpoint.socket(), &program, config, &profile.cwd);
+        let mut command = launcher.lane_command(
+            Self::TOOL,
+            self.endpoint.socket(),
+            &program,
+            config,
+            &profile.cwd,
+        );
         command
             .envs(
                 profile
@@ -271,11 +276,6 @@ impl Lane {
     /// reconcile it with the lane lock/claim before choosing another launcher.
     pub(crate) fn watch(&self, observe: impl FnMut(Snapshot) -> bool) -> io::Result<()> {
         self.endpoint.watch(&Request::Watch, observe)
-    }
-
-    /// Ask an idle lane to leave, and wait until it has.
-    pub(crate) fn retire(&self) -> io::Result<()> {
-        self.endpoint.retire()
     }
 
     pub(crate) fn released(&self) -> io::Result<bool> {

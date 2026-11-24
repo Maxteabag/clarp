@@ -90,10 +90,7 @@ mod tests {
         // As `lane::codex` digested its options before the layer: a running lane is kept.
         let resume = serde_json::json!({"cwd": "/w", "model": "m"});
         let home = "/h";
-        let before = format!(
-            "{:x}",
-            Sha256::digest(format!("{resume}{home}").as_bytes())
-        );
+        let before = format!("{:x}", Sha256::digest(format!("{resume}{home}").as_bytes()));
         let now = OptionsDigest::new()
             .text(&resume.to_string())
             .text(home)
@@ -107,12 +104,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("opencode.json");
-        let content = |path: &std::path::Path| {
-            OptionsDigest::new()
-                .file(path, 1024)
-                .unwrap()
-                .finish()
-        };
+        let content =
+            |path: &std::path::Path| OptionsDigest::new().file(path, 1024).unwrap().finish();
         let stamp = |path: &std::path::Path| OptionsDigest::new().stamp(path).finish();
 
         let missing = content(&path);

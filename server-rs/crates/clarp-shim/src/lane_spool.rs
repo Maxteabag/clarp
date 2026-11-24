@@ -41,7 +41,12 @@ impl ClaimSpool {
     }
 
     /// Ends a claim that bound no turn of the tool: how it ended, synced.
-    pub(super) fn end(mut self, code: Option<i32>, signal: Option<i32>, now_ms: i64) -> io::Result<()> {
+    pub(super) fn end(
+        mut self,
+        code: Option<i32>,
+        signal: Option<i32>,
+        now_ms: i64,
+    ) -> io::Result<()> {
         self.writer.append(&Record {
             t: now_ms,
             entry: Entry::Shim(ShimEvent::Exited { code, signal }),
@@ -77,7 +82,11 @@ mod tests {
         let read = clarp_spool::SpoolReader::new(&claim.spool)
             .read_from(0)
             .unwrap();
-        let entries: Vec<_> = read.records.into_iter().map(|record| record.entry).collect();
+        let entries: Vec<_> = read
+            .records
+            .into_iter()
+            .map(|record| record.entry)
+            .collect();
         assert_eq!(
             entries,
             [

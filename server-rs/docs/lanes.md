@@ -55,12 +55,21 @@ lane_memory_mb = 4096         # what they may hold together (unset: no budget)
   OpenCode's, come with their drivers.
 - **The idle time and the cap are shared by every tool.** They keep the names they had when
   Codex had the only lane, so an installed config means exactly what it meant.
-- **The memory budget is one budget for every lane of the Host.** Each lane's memory is the
-  proportional set size of its process tree, read from `/proc`: the shim, its tool, and what
-  the tool started.
+- **The memory budget is one budget in bytes for every lane of the Host.** The weight of a lane
+  differs by tool: measured on 24 Nov 2026, an idle Codex lane about 270 MB, a Muse serve
+  274-301 MB, an OpenCode serve 571-590 MB. A count alone would let eight OpenCode lanes take
+  about 5 GB, so the budget counts bytes. Each lane's memory comes from, in this order:
+  - what its driver reads itself and says in its status (`memory_bytes`);
+  - else the proportional set size of its process tree, read from `/proc` (the shim, its tool,
+    and what the tool started);
+  - else its tool's typical size.
+  The lane about to start counts at its tool's typical size.
 - **Room is made before a lane starts.** The idle lanes leave, longest idle first, until the
   count is under the cap and the memory is within the budget. A lane that runs a turn, or whose
   work may continue (an active goal), refuses to leave and counts.
+- **The budget's default is the lead's to set.** Until he does, it is unset, and only the count
+  holds, as before. Whether the count still applies once lanes of other tools exist is the same
+  decision.
 - **Who sets them.** `install-host` carries these keys through an install. Switching a lane on
   for the owner's agents is his decision.
 
@@ -72,9 +81,16 @@ of them is not done.
 - **One writer per session.** One process writes a tool's conversation at a time.
   - A lane takes its thread's lock (`clarp_shim::lane::thread_lock`) exclusive, and keeps it
     until its tool has been reaped.
-  - A per-turn process of the same thread takes it shared and without waiting (Codex:
-    `lane::codex::guard_exec`), so it fails rather than writes beside a lane.
-  - A fork, the terminal takeover, a compaction, or a move of the agent ends the lane first.
+  - A per-turn process of the same thread takes it shared and without waiting
+    (`lane::guard_exec`, for every tool that has lanes), so it fails rather than writes beside
+    a lane.
+  - Before any per-turn process starts, every lane of the agent, of any tool, is retired and
+    waited for until its tool has exited (`lane::clear_before_exec`). Waiting matters because
+    a tool may refuse a second process at once instead of waiting: Muse fails `muse exec` on a
+    session a `muse serve` holds.
+  - A fork, the terminal takeover, a compaction, or a move of the agent ends the lane first. A
+    tool that can fork inside its own process (Muse's `session/fork`) may do so on the lane
+    instead.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool, and only such an
   attempt is offered to a new lane, once (`lane::once_more`).
@@ -130,20 +146,40 @@ trait). Only Codex is built:
 - Muse's MSP over stdio;
 - OpenCode's serve.
 
+What every driver gets from the layer, built once:
+
+- **Switch**: `Tool` names each tool's switch, socket suffix, shim word (the lane process's
+  subcommand), lock folder and typical size.
+- **Starting the lane process**: `Launcher::lane_command(tool, ...)`.
+- **Claim requests**: `clarp_shim::lane::Control` (`Inspect`, `Watch`, `Prompt`, `Stop`,
+  `Retire`). These are the same lines as Codex's requests of those names; Codex's goal requests
+  stay its own. Steer, Stop and Follow of a running turn come on the claim's socket.
+- **Claim spool**: admitted by `lane_spool::ClaimSpool` before anything reaches the tool. A
+  claim that bound no turn of the tool is ended there, once.
+- **Login**: one login file per driver (`Login.file`, from the backend). The shim compares the
+  account the driver's reader names in it, or the whole file where it names none (OpenCode's
+  `auth.json`).
+- **Restart digest**: `lane::digest::OptionsDigest` covers options as text, a file by its
+  content (bounded; a file over the bound keeps no lane), and a file by its path, length and
+  time of change (a program, or settings a tool reads by time).
+- **Process locks**: the owner lock, the thread lock and the exec guard.
+- **Room and registry**: idle retirement, the turn-identity file and `once_more`.
+
 What a driver answers, and where:
 
 - **start**: `lane::Driver::start` in the Host. Attach where `Endpoint::place` says the
   running lane is the one wanted, else start the lane process.
 - **send a turn**: `lane::Driver::submit` in the Host, then `lane_driver::Driver::send_turn`
-  in the lane.
+  in the lane. The agent's attempt reaches the driver of its tool
+  (`Worker::launch_on_native_lane`, by `Tool::of(backend)`).
 - **steer**, **Stop**: on the claim's own socket, as for any turn, answered by the lane's
   `Driver::steer` and `Driver::stop` in the tool's words.
 - **end of turn**: `lane_driver::Driver::end_turn` when the tool says it ended (Codex
   `turn/completed`, Claude its `result` line).
 - **health**: the lane's snapshot, which any Host reads as `clarp_shim::lane::Status`
   (`Endpoint::inspect`).
-- **memory reading**: `Endpoint::memory`, from the lane process's tree. It is the same for
-  every driver.
+- **memory reading**: the driver's own `memory_bytes` in its status where it reads it. Else the
+  Host reads the lane process's tree (`Endpoint::memory`). Else the tool's typical size.
 
 What in Clarp assumes a process per turn, and must be held by the Claude driver before
 `claude_chat_lane` exists, is listed in issue 761.

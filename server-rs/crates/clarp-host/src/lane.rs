@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::Duration;
 
-use clarp_shim::lane::{LOGIN_CHANGED, Control, Status, owner_lock};
+use clarp_shim::lane::{Control, LOGIN_CHANGED, Status, owner_lock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
