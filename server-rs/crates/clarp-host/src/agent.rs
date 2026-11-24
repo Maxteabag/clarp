@@ -2211,7 +2211,13 @@ impl Worker {
                 .teams
                 .clone()
                 .map(|teams| teams as Arc<dyn clarp_actor::teams::Runtime>),
-            Some(Box::new(move |backend| telling.launch_defaults(backend))),
+            // An agent bound to a provider of its own takes no default of the Host's: the
+            // machine's models are not its provider's, and Codex takes its home's own.
+            if self.setup.record.codex_provider.is_empty() {
+                Some(Box::new(move |backend| telling.launch_defaults(backend)))
+            } else {
+                None
+            },
         )
         .map_err(|error| error.to_string())?;
         // The agent's log changed its tool, and its record still says the tool it changed
