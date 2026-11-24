@@ -388,11 +388,16 @@ fn below_share(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) ->
 /// When an account of the desk that has no room regains it: when the last of its windows that
 /// bear on the turn and are all used begins anew. A window read as all used counts by its reset
 /// however old the reading is, since its reset was set in advance; one of an account that was
-/// used up and began anew since counts at the reset that passed: the account regained room then,
-/// and the Host reads the seats again to see it. `None` where that is not known (a full window
+/// used up and began anew since counts at the reset that passed, where it passed after the
+/// reading (`observed_at`): the account regained room then, and the Host reads the seats again
+/// to see it. `None` where that is not known (a full window
 /// that does not say when, an account used up with no window read as full) and for an account
 /// that is signed out, which no reset frees.
-fn regains(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) -> Option<i64> {
+fn regains(
+    account: &Value,
+    bears: &dyn Fn(&str) -> bool,
+    (served_at, observed_at): (i64, i64),
+) -> Option<i64> {
     if account["state"] == "auth_error" {
         return None;
     }
@@ -403,7 +408,15 @@ fn regains(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) -> Opt
         let full = window["used_ratio"]
             .as_f64()
             .is_some_and(|used| used * 100.0 >= ROOM_UNTIL);
-        if !bears(kind) || !(full || (was_out && begun_anew(window, served_at))) {
+        // A reset that passed counts only where it passed after the reading the seat is judged
+        // by: a reading taken since that still shows no room says the reset did not free it
+        // (a seat whose row keeps failing carries windows that reset long ago).
+        let regained = was_out
+            && begun_anew(window, served_at)
+            && window["resets_at"]
+                .as_i64()
+                .is_some_and(|reset| reset > observed_at);
+        if !bears(kind) || !(full || regained) {
             continue;
         }
         let reset = window["resets_at"].as_i64()?;
@@ -418,11 +431,12 @@ fn regains(account: &Value, bears: &dyn Fn(&str) -> bool, served_at: i64) -> Opt
 fn regains_at(read: &Value, model: &str, desk: &Value) -> Option<i64> {
     let bears = of_model(crate::seats::family(&json!(model)));
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
+    let observed_at = read["observed_at"].as_i64().unwrap_or(i64::MAX);
     read["accounts"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|account| regains(account, &bears, served_at))
+        .filter_map(|account| regains(account, &bears, (served_at, observed_at)))
         .min()
 }
 
@@ -451,9 +465,10 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
     }
     let seats = switcher_seats(provider, desk).filter(|_| fresh_read(provider, desk).is_some());
     let served_at = desk["served_at"].as_i64().unwrap_or(0);
+    let observed_at = read["observed_at"].as_i64().unwrap_or(i64::MAX);
     let next = accounts
         .iter()
-        .filter_map(|account| regains(account, &general, served_at))
+        .filter_map(|account| regains(account, &general, (served_at, observed_at)))
         .min();
     let (mut with_room, mut used_up, mut unread) = (0_usize, 0_usize, false);
     for seat in seats.iter().flatten() {
@@ -1024,6 +1039,22 @@ mod tests {
         );
         let (_, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
         assert_eq!(regains, Some(NOW + 40 * HOUR));
+        // A seat whose row keeps failing carries windows that reset days before this reading:
+        // that moment is no answer, and the row names the next real one.
+        let failing = json!({ "alias": "failing", "active_default": false, "state": "unknown", "windows": [
+            { "kind": "5h", "used_ratio": null, "stale": true, "resets_at": NOW - 48 * HOUR },
+        ]});
+        let desk = judged_by(
+            served(json!([in_use, failing])),
+            json!([
+                sw("work", true, Some(0), Some(50)),
+                sw("failing", false, None, None)
+            ]),
+        );
+        let (_, regains) = used_up_failover(Accounts::Select, "claude", "", true, &desk);
+        assert_eq!(regains, Some(NOW + 3 * HOUR));
+        let summary = pool("claude", &desk).unwrap();
+        assert_eq!(summary["next_reset_at"], json!(moment(NOW + 3 * HOUR)));
     }
 
     #[test]

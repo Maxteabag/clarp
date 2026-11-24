@@ -517,11 +517,19 @@ impl Seats {
         let accounts = merge(previous.as_ref(), reading["accounts"].clone(), stamp);
         // The same answer as the switcher reads it, kept beside: whether a seat would take a
         // turn is judged by the switcher's own reading, never served (`switcher`). Each seat
-        // under the alias that may be shown, as every alias that is kept.
-        let mut switcher = crate::seat_switch::parse(provider, payload);
-        for seat in &mut switcher {
-            seat.alias = display_alias(&json!(seat.alias));
-        }
+        // under the alias that may be shown, as every alias that is kept, and the keyed tag of
+        // its alias, which the account of the same seat carries too: what a switch finds it by,
+        // since two aliases may be shown alike.
+        let switcher: Vec<Value> = crate::seat_switch::parse(provider, payload)
+            .into_iter()
+            .map(|mut seat| {
+                let tag = self.alias_tag(provider, &json!(seat.alias));
+                seat.alias = display_alias(&json!(seat.alias));
+                let mut kept = json!(seat);
+                kept["tag"] = json!(tag);
+                kept
+            })
+            .collect();
         let kept = json!({
             "v": 1, "observed_at": stamp, "attempt_at": received_at, "read_state": "ok",
             "error_code": null, "inventory": reading["inventory"], "partial": reading["partial"],
@@ -543,24 +551,18 @@ impl Seats {
     /// the seat switched to as the one whose account the tool is on. Nothing changes where the
     /// reading has no such seat.
     pub fn mark_active(&mut self, provider: &str, alias: &str) {
+        // By the keyed tag of the alias, which is one a seat: two aliases may be shown alike.
+        let tag = self.alias_tag(provider, &json!(alias));
         let Some(kept) = self.snapshots.get_mut(provider) else {
             return;
         };
-        let shown = display_alias(&json!(alias));
-        if let Some(seats) = kept.get_mut("switcher").and_then(Value::as_array_mut)
-            && seats.iter().any(|seat| seat["alias"] == shown.as_str())
-        {
-            for seat in seats.iter_mut() {
-                seat["active"] = json!(seat["alias"] == shown.as_str());
-            }
-        }
-        if let Some(accounts) = kept.get_mut("accounts").and_then(Value::as_array_mut)
-            && accounts
-                .iter()
-                .any(|account| account["alias"] == shown.as_str())
-        {
-            for account in accounts.iter_mut() {
-                account["active"] = json!(account["alias"] == shown.as_str());
+        for list in ["switcher", "accounts"] {
+            if let Some(seats) = kept.get_mut(list).and_then(Value::as_array_mut)
+                && seats.iter().any(|seat| seat["tag"] == tag.as_str())
+            {
+                for seat in seats.iter_mut() {
+                    seat["active"] = json!(seat["tag"] == tag.as_str());
+                }
             }
         }
     }

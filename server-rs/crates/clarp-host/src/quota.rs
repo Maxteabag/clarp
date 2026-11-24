@@ -163,6 +163,10 @@ pub struct Desk {
     /// from an account that is used up, as last judged ([`look_again`]): what a hard limit of
     /// the tool is told with ([`Desk::pooled`]).
     pooled: std::sync::Mutex<BTreeMap<String, Pooled>>,
+    /// A hard limit of each tool that was not told because the pool took the turn: told once the
+    /// pool can no longer take it ([`judge_pools`]), as the tool tells no limit twice; let go
+    /// when its limit is over.
+    held: std::sync::Mutex<BTreeMap<String, Value>>,
 }
 
 /// Whether another seat of a tool's pool would take a turn from its used-up account, the
@@ -803,7 +807,37 @@ impl Desk {
             |pooled| (pooled.failover, pooled.regains),
         );
         drop(pooled);
-        clarp_kernel::quota_near::limit_event(event, failover, regains)
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let kind = event["kind"].as_str().unwrap_or("").to_string();
+        let told = clarp_kernel::quota_near::limit_event(event.clone(), failover, regains);
+        match (kind.as_str(), &told) {
+            // Not told now: kept, to be told if the pool cannot take the turn after all.
+            ("hard_limit", None) => {
+                held.insert(tool.to_string(), event);
+            }
+            // Told, or over: nothing is held for it any more.
+            ("hard_limit" | "recovered" | "unknown", _) => {
+                held.remove(tool);
+            }
+            _ => {}
+        }
+        told
+    }
+
+    /// The hard limit held for a tool ([`Desk::pooled`]), to be told now that the pool cannot
+    /// take the turn: with `failover` and when the pool regains room. Nothing where none is
+    /// held, or its window has begun anew since.
+    fn release(&self, tool: &str, pooled: Pooled, now_ms: i64) -> Option<Value> {
+        let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        if pooled.failover == clarp_kernel::quota_near::Failover::Spare {
+            return None;
+        }
+        let event = held.remove(tool)?;
+        let resets = event["resets_at"].as_str().and_then(quota::from_text);
+        if resets.is_some_and(|resets| resets <= now_ms) {
+            return None;
+        }
+        clarp_kernel::quota_near::limit_event(event, pooled.failover, pooled.regains)
     }
 
     /// Whether another seat of the tool's pool would take a turn on its default model from the
@@ -1079,10 +1113,18 @@ async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
         };
         judged.insert(tool.to_string(), pooled);
     }
+    let releases: Vec<Value> = judged
+        .iter()
+        .filter_map(|(tool, pooled)| app.limits.release(tool, *pooled, now))
+        .collect();
     *app.limits
         .pooled
         .lock()
         .unwrap_or_else(PoisonError::into_inner) = judged;
+    // A hard limit the pool was to take, which it can no longer: told now.
+    for event in releases {
+        app.hub.publish(event, now);
+    }
 }
 
 /// That an account is used up or near a limit stops being so with time, and nothing happens
@@ -1433,6 +1475,57 @@ mod tests {
         assert_eq!(told["pool_regains_at"], quota::moment(5_000));
         // Another tool's turns are not judged by it.
         assert_eq!(desk.shown_reset(CLAUDE, Some(9_000), 0), Some(9_000));
+    }
+
+    #[test]
+    fn a_hard_limit_the_pool_took_is_told_once_the_pool_cannot_take_the_turn() {
+        use clarp_kernel::quota_near::Failover;
+        let desk = Desk::default();
+        let pooled = |failover, regains| Pooled {
+            failover,
+            regains,
+            until_ms: 1_000,
+        };
+        desk.pooled
+            .lock()
+            .unwrap()
+            .insert(CODEX.to_string(), pooled(Failover::Spare, None));
+        let hard = json!({ "type": "provider-limit", "kind": "hard_limit", "provider_id": "codex",
+            "resets_at": quota::moment(9_000_000) });
+        assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
+        // While the pool still takes it, nothing; once it cannot, the limit, told once.
+        assert!(
+            desk.release(CODEX, pooled(Failover::Spare, None), 0)
+                .is_none()
+        );
+        let told = desk
+            .release(CODEX, pooled(Failover::None, Some(5_000)), 0)
+            .unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"], &told["pool_regains_at"]),
+            (
+                &json!("hard_limit"),
+                &json!("none"),
+                &json!(quota::moment(5_000))
+            )
+        );
+        assert!(
+            desk.release(CODEX, pooled(Failover::None, None), 0)
+                .is_none()
+        );
+        // A limit that is over is let go, and one whose window began anew is not told.
+        assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
+        let over = json!({ "type": "provider-limit", "kind": "recovered", "provider_id": "codex" });
+        assert!(desk.pooled(CODEX, over, 0).is_some());
+        assert!(
+            desk.release(CODEX, pooled(Failover::None, None), 0)
+                .is_none()
+        );
+        assert!(desk.pooled(CODEX, hard, 0).is_none());
+        assert!(
+            desk.release(CODEX, pooled(Failover::Unknown, None), 9_000_000)
+                .is_none()
+        );
     }
 
     #[test]

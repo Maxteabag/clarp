@@ -199,4 +199,26 @@ fn the_switchers_reading_is_kept_and_a_switch_marks_the_seat_switched_to() {
     // A seat the reading does not have changes nothing.
     seats.mark_active("claude", "nobody");
     assert!(seats.switcher("claude").unwrap()[1].active);
+    // Two aliases shown alike: a switch marks the one it was to, found by its tag.
+    let alike = serde_json::json!({ "accounts": [
+        { "alias": "work", "is_active": true, "usage": usage(1.0) },
+        { "alias": "pa@ex.invalid", "is_active": false, "usage": usage(0.1) },
+        { "alias": "pb@ex.invalid", "is_active": false, "usage": usage(0.2) },
+    ]});
+    let mut seats = Seats::with_salt("a-salt");
+    seats.read("claude", &alike, 1_899_999_000_000);
+    seats.mark_active("claude", "pb@ex.invalid");
+    let kept = seats.switcher("claude").unwrap();
+    let marked: Vec<(&str, bool)> = kept
+        .iter()
+        .map(|seat| (seat.alias.as_str(), seat.active))
+        .collect();
+    assert_eq!(marked, [("work", false), ("p…@e…", false), ("p…@e…", true)]);
+    let served = seats.served(true, 1_899_999_000_000);
+    let accounts = served["providers"][0]["accounts"].as_array().unwrap();
+    let active: Vec<bool> = accounts
+        .iter()
+        .map(|account| account["active_default"] == true)
+        .collect();
+    assert_eq!(active, [false, false, true]);
 }
