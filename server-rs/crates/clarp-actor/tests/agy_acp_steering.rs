@@ -123,6 +123,7 @@ impl World {
                     Action::Stop { turn, .. } => self.stopped.push(turn.0),
                     Action::Follow { .. } => {}
                     Action::Fork(_) | Action::ForkFollow { .. } => panic!("agy-acp has no fork"),
+                    Action::CheckNetwork { .. } => panic!("no connection fails here"),
                 }
             }
         }
