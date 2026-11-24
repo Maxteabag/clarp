@@ -164,13 +164,16 @@ impl State {
         closes: &str,
     ) -> Result<(), ActorError> {
         match self.stream.observe(event) {
-            Observation::Echo(uuid) => {
+            observed @ (Observation::Echo(uuid) | Observation::Separate(uuid)) => {
+                // A lane that ran the words as a turn of their own says so; Claude's process
+                // reads them so once its first result is in.
+                let apart = matches!(observed, Observation::Separate(_));
                 let follow = agent
                     .joins()
                     .iter()
                     .find(|(_, follow)| follow.join.uuid == uuid);
                 match follow {
-                    Some((_, follow)) if self.parent.is_none() => {
+                    Some((_, follow)) if self.parent.is_none() && !apart => {
                         self.joined_speech |= message_at(log, follow.message_seq)?.speak;
                     }
                     Some((turn, follow)) if self.separate.is_none() => {
@@ -205,7 +208,11 @@ impl State {
         out: &mut Outputs,
     ) -> Result<Option<Sharing>, ActorError> {
         match self.stream.observe(event) {
-            Observation::Echo(uuid) => {
+            observed @ (Observation::Echo(uuid) | Observation::Separate(uuid)) => {
+                // Words read after the answer they were steered into, as a turn of their own: a
+                // lane says so (`steer.read` with `separate`), Claude's process by reading them
+                // past its first result. Either takes the separate-turn path.
+                let apart = matches!(observed, Observation::Separate(_));
                 let Some((&turn, follow)) =
                     batch.agent().joins().iter().find(|(_, follow)| {
                         follow.join.uuid == uuid && follow.stage == Stage::Pending
@@ -218,7 +225,7 @@ impl State {
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
                     queue_started(batch, out, turn, &message);
                     let speak = message.speak;
-                    if self.parent.is_some() {
+                    if self.parent.is_some() || apart {
                         if self.separate.is_none() {
                             self.separate(turn, message);
                         }

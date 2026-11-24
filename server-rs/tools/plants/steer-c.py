@@ -38,7 +38,7 @@ PLANTS = [
     (J, "journal", "the joined user row is never entered", "self.enter(*turn, join.message_seq, now_ms);", "let _ = (turn, join);"),
     (J, "journal", "the host lets a user edit the text already offered to stdin", "if self.agent.joins().contains_key(&turn) {", "if !self.agent.joins().contains_key(&turn) {"),
     (C, "host", "a different UUID is taken as this echo", "follow.join.uuid == uuid && follow.stage == Stage::Pending", "follow.join.uuid != uuid && follow.stage == Stage::Pending"),
-    (C, "host", "every echo joins the original answer", "if self.parent.is_some() {\n                        if self.separate.is_none()", "if self.parent.is_none() {\n                        if self.separate.is_none()"),
+    (C, "host", "every echo joins the original answer", "if self.parent.is_some() || apart {\n                        if self.separate.is_none()", "if self.parent.is_none() && !apart {\n                        if self.separate.is_none()"),
     (C, "host", "no matching UUID can close the original answer", "prompt.as_str() == Some(uuid)", "prompt.as_str() != Some(uuid)"),
     (C, "host", "a read receipt need not make the row due", "batch.command(Command::JoinRead { turn }, now_ms)", "batch.command(Command::JoinRead { turn: TurnId(0) }, now_ms)"),
     (C, "host", "the queue is never told which follow-up was read", "out.joined_reads.push(JoinedRead", "drop(JoinedRead"),

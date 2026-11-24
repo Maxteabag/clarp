@@ -61,6 +61,19 @@ pub(super) trait Driver {
 
     /// The tool said the claim's turn is over: the claim is settled and let go, the login
     /// released, the idle clock started again, and what the turn left running ended.
+    ///
+    /// A tool that runs words steered during its final answer as a follow-up turn of their own
+    /// in the same process (Muse 0.08-0.4 s after the answer, with the steer's `commandId` as the
+    /// follow-up's id; Claude Code past its `result`) does not end the claim at the first
+    /// turn's end. The claim follows the follow-up. The lane writes, in order:
+    /// - the first turn's end;
+    /// - `{"type":"steer.read","id":<the steer's id>,"separate":true}` when the follow-up starts;
+    /// - the follow-up's own lines;
+    /// - the follow-up's end.
+    /// It calls this only then. The actor takes the follow-up on its separate-turn path
+    /// (`clarp_kernel::steering::Observation::Separate`): a turn of its own with its own reply,
+    /// neither counted as the first turn nor dropped. Codex reads every steered word inside its
+    /// running turn and never writes it.
     fn end_turn(&mut self) -> io::Result<()>;
 
     /// The claim's lease dropped while its tool was still busy with it: a Stop whose grace

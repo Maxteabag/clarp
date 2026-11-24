@@ -217,6 +217,13 @@ What a driver says of itself, rather than the layer assuming it:
 - **what starts it again** (`lane::Driver::restart_for`, with the digest). What the tool takes
   with a turn or by a call to its running process (a model on Codex's `turn/start`, Muse's
   `session/setModel`) is applied in place. What it reads only at start is in the digest.
+- **a follow-up turn in the same process.** A tool may run words steered during its final
+  answer as a turn of their own, right after that answer (Muse, 0.08-0.4 s later; Claude Code
+  past its `result`). The claim then follows the follow-up turn, and the lane writes
+  `steer.read` with `separate: true` when the follow-up starts. The actor takes it on its
+  separate-turn path (`Observation::Separate`): its own turn and reply, neither counted as the
+  first turn nor dropped. Codex reads every steered word inside its running turn and never
+  writes it.
 - **goals** (`lane::Goals`). Codex's native goals, with its `Reserve`, `Goal`, `Recover` and
   `Probe` requests, are an optional capability that only Codex has.
 - **steering**: a tool that takes steered words on its lane says so with `Steers::Words`. The

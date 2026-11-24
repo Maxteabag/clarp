@@ -1,5 +1,5 @@
 //! Evidence that a running turn can take more input and when it actually reads it: Claude's
-//! replayed input, or a Codex lane's `steer.read`.
+//! replayed input, or a lane's `steer.read` (Codex today).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -112,6 +112,12 @@ pub struct Stream {
 pub enum Observation<'a> {
     Other,
     Echo(&'a str),
+    /// A lane's tool read these steered words as a turn of their own, after the answer of the
+    /// one it was giving (`steer.read` with `separate: true`): Muse runs words steered during
+    /// its final answer so, as Claude Code does words read after a `result`. The words are the
+    /// follow-up's own message, its answer is theirs, and the turn they were steered into ended
+    /// before it. Codex reads every steered word inside its running turn and never says it.
+    Separate(&'a str),
     Result { prompts: &'a [Value], failed: bool },
 }
 
@@ -124,10 +130,17 @@ impl Stream {
         if event["type"] == "user" && event["isReplay"] == true {
             return nonempty(&event["uuid"]).map_or(Observation::Other, Observation::Echo);
         }
-        // A Codex lane's turn: the reading of steered words, and the end of the turn, after
-        // which nothing more is taken into it.
+        // A lane's turn: the reading of steered words, and the end of the turn, after which
+        // nothing more is taken into it.
         if event["type"] == "steer.read" {
-            return nonempty(&event["id"]).map_or(Observation::Other, Observation::Echo);
+            let Some(id) = nonempty(&event["id"]) else {
+                return Observation::Other;
+            };
+            return if event["separate"] == true {
+                Observation::Separate(id)
+            } else {
+                Observation::Echo(id)
+            };
         }
         if event["type"] == "turn.completed" || event["type"] == "turn.failed" {
             self.input_ended = true;
@@ -170,6 +183,18 @@ mod tests {
         let mut failed = Stream::default();
         failed.observe(&json!({"type": "turn.failed", "error": "gone"}));
         assert!(!failed.can_join());
+    }
+
+    #[test]
+    fn a_lane_says_when_steered_words_ran_as_a_turn_of_their_own() {
+        let mut stream = Stream::default();
+        let own = json!({"type": "steer.read", "id": "words", "separate": true});
+        assert!(matches!(stream.observe(&own), Observation::Separate("words")));
+        // Said otherwise, or not at all, the words were read into the running turn.
+        let inside = json!({"type": "steer.read", "id": "words", "separate": false});
+        assert!(matches!(stream.observe(&inside), Observation::Echo("words")));
+        let nameless = json!({"type": "steer.read", "id": "", "separate": true});
+        assert!(matches!(stream.observe(&nameless), Observation::Other));
     }
 
     #[test]
