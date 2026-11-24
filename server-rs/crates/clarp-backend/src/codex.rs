@@ -468,11 +468,15 @@ struct Bound {
     began: Option<i64>,
 }
 
-/// How long a bound exec turn may go on with a rollout in the agent's home that names no
-/// provider: Codex names it as the thread begins, so a rollout that says nothing of it this
-/// long is not to be trusted, and the turn is stopped. A rollout that is not found yet (Codex
-/// may flush it after the turn's end) is judged when the process is gone.
+/// How long a bound exec turn may go on, from its first item, with a rollout in the agent's
+/// home that names no provider: Codex names it as the thread begins, so a rollout that says
+/// nothing of it this long is not to be trusted, and the turn is stopped.
 const VERIFY_WITHIN_MS: i64 = 3_000;
+/// How long it may go on, from its first item, with no rollout in the agent's home at all:
+/// Codex may flush a first turn's rollout late, but one that is still not there is being
+/// written in another `CODEX_HOME`, and every round-trip and tool of the turn would go to
+/// another provider. It is stopped. A shorter turn is judged when its process is gone.
+const FIND_WITHIN_MS: i64 = 30_000;
 
 /// What the ids of Codex's live items begin with.
 const SHOWN: &str = "cx";
@@ -642,10 +646,14 @@ impl CodexInterpreter {
                 // what it said is not taken. Before that, what it says waits; its end too, as
                 // Codex may say it before its rollout is flushed: the verdict is then given
                 // when its process is gone.
-                let late = bound.rollout.is_some()
-                    && bound
-                        .began
-                        .is_some_and(|began| t.saturating_sub(began) >= VERIFY_WITHIN_MS);
+                let window = if bound.rollout.is_some() {
+                    VERIFY_WITHIN_MS
+                } else {
+                    FIND_WITHIN_MS
+                };
+                let late = bound
+                    .began
+                    .is_some_and(|began| t.saturating_sub(began) >= window);
                 if late && kind.starts_with("item.") {
                     self.unverified(out, true);
                     return;
@@ -1888,6 +1896,49 @@ mod tests {
         let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
             panic!("{out:?}");
         };
+        assert!(reason.contains("could not be verified"), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_bound_exec_turn_whose_rollout_never_appears_is_stopped_at_its_window() {
+        // Codex runs with another home: the agent's never gets a rollout of the thread.
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000fc", "stand-in");
+        let thread =
+            r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000fd"}"#;
+        let item = r#"{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"ls","status":"in_progress"}}"#;
+        let later = r#"{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"rm -rf build","status":"in_progress"}}"#;
+        let out = bound_run(
+            &own,
+            &[
+                (0, thread),
+                (10, r#"{"type":"turn.started"}"#),
+                (500, item),
+                (500 + FIND_WITHIN_MS - 1, item),
+                (500 + FIND_WITHIN_MS, later),
+                (500 + FIND_WITHIN_MS + 1_000, later),
+            ],
+            ShimEvent::Exited {
+                code: None,
+                signal: Some(15),
+            },
+        );
+        assert_eq!(
+            out.iter().filter(|signal| **signal == Signal::Halt).count(),
+            1,
+            "stopped once, at its window: {out:?}"
+        );
+        assert!(
+            !out.iter().any(|signal| matches!(signal, Signal::Tool(_))),
+            "no tool of it is taken: {out:?}"
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH
+        );
         assert!(reason.contains("could not be verified"), "{reason}");
         std::fs::remove_dir_all(home).unwrap();
     }
