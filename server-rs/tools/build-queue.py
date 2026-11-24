@@ -407,6 +407,22 @@ def make_room(root, current, floor):
 SEED = '.target-seed'
 
 
+def newer_than_the_clone(copy):
+    """Give every file of this checkout's copy, but its target, the time of now.
+
+    Cargo decides that a workspace crate is up to date when none of its sources is newer than its
+    last build. In a cloned target that build is the other checkout's, and this checkout's
+    sources may have arrived before it (while waiting for the slot): a crate that differs between
+    the two would be passed over, and the build would hold the other checkout's code. Newer than
+    any build in the clone, each workspace crate is built again from this checkout's sources.
+    """
+    for parent, dirs, files in os.walk(copy):
+        if Path(parent) == copy / 'server-rs':
+            dirs[:] = [d for d in dirs if d not in ('target', SEED)]
+        for name in files:
+            os.utime(os.path.join(parent, name), follow_symlinks=False)
+
+
 def host_library_built(target):
     try:
         with directory('debug', target) as debug, directory('deps', debug) as deps:
@@ -422,7 +438,7 @@ def seed_target(root, current, workspace):
 
     The clone shares its data with the original (a reflink), so it costs the disk little, and the
     new checkout starts with every crates.io dependency already built: cargo builds only the
-    workspace's crates again, once, since their fingerprints name the other checkout's sources.
+    workspace's crates again, once (see newer_than_the_clone).
     One target dir cannot be shared outright: cargo gives a workspace crate the same unit name in
     every checkout, so checkouts building in turn would rebuild each other's crates every time.
     Where the filesystem cannot clone, nothing is copied and the build starts cold.
@@ -465,6 +481,7 @@ def seed_target(root, current, workspace):
             cloned = None
         if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
             os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
+            newer_than_the_clone(QUEUE / current)
             return name
         try:
             shutil.rmtree(SEED, dir_fd=workspace)

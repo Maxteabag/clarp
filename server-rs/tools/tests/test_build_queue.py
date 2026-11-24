@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import runpy
 import subprocess
+import time
 
 queue = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'build-queue.py'))
 
@@ -73,6 +74,12 @@ def test_a_checkout_without_a_target_starts_from_the_last_built_one(tmp_path, mo
     # Built last, but only checked: its target holds the dependencies' metadata, not their libraries.
     lane(tmp_path, 'checked', 4 * 10**18, built=False)
     here = lane(tmp_path, 'here', 10**17, target=False)
+    # Sources that arrived before the other checkout's build.
+    now = time.time_ns()
+    for path in here.rglob('*'):
+        os.utime(path, ns=(now - 10**12, now - 10**12))
+    for path in newer.rglob('*'):
+        os.utime(path, ns=(now - 10**11, now - 10**11))
     with queue['directory'](tmp_path) as root, queue['directory'](here) as workspace:
         source = queue['seed_target'](root, 'here', workspace)
         if reflinks(tmp_path):
@@ -82,6 +89,11 @@ def test_a_checkout_without_a_target_starts_from_the_last_built_one(tmp_path, mo
             # Hard links inside the target stay links, as cargo made them.
             assert seeded.stat().st_ino == (here / 'target/debug/libserde.rlib').stat().st_ino
             assert seeded.stat().st_ino != (newer / 'target/debug/deps/libserde-1111111111111111.rlib').stat().st_ino
+            # This checkout's sources are newer than any build in the clone, so cargo builds its
+            # workspace crates from them; the clone keeps the times cargo recorded.
+            source = here / 'crates/clarp-host/Cargo.toml'
+            assert source.stat().st_mtime_ns > seeded.stat().st_mtime_ns
+            assert seeded.stat().st_mtime_ns == (newer / 'target/debug/deps/libserde-1111111111111111.rlib').stat().st_mtime_ns
         else:
             # Without clones the build starts cold rather than copying the data.
             assert source is None
