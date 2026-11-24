@@ -20,7 +20,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use clarp_acp::agy::{self as shared, Failure, steer};
-use clarp_acp::client::{Answer, Ended};
+use clarp_acp::client::{Answer, Ended, Handler};
 use clarp_acp::{method, schema};
 use serde_json::{Value, json};
 
@@ -325,8 +325,11 @@ impl Prompts<'_> {
             return Ok(());
         };
         // A cancelled prompt not answered yet (the bound passed) still has what it writes
-        // left out, until its answer.
-        if !self.flight.iter().any(|sent| sent.cut) {
+        // left out, until it leaves the flight; what is left out from now on is kept, since it
+        // may be the message's.
+        if self.flight.iter().any(|sent| sent.cut) {
+            turn.record.keep_late = true;
+        } else {
             turn.record.cut = Cut::None;
         }
         let mut text = held.text;
@@ -357,6 +360,8 @@ impl Prompts<'_> {
     /// names it but its refusal.
     fn unhold(&mut self, turn: &mut Turn, why: &str) -> Result<()> {
         turn.record.cut = Cut::None;
+        turn.record.keep_late = false;
+        turn.record.late.clear();
         let held = self.cut.take().map(|held| held.uuid);
         let after = std::mem::take(&mut self.after_cut)
             .into_iter()
@@ -417,19 +422,16 @@ impl Prompts<'_> {
     }
 
     fn answered(&mut self, turn: &mut Turn, id: u64, mut answer: Answer) -> Result<()> {
-        if self.flight.iter().any(|sent| sent.id == id && sent.cut) {
-            // The answer of a prompt cancelled for a cut, in time or after the bound: agy
-            // stopped where it was cut. A cut is no Stop: should this answer stand alone (the
-            // message refused), it reads as ended. What agy writes next is a message of its own.
-            if turn.stopping.is_none()
-                && let Answer::Result(result) = &mut answer
-                && result["stopReason"] == "cancelled"
-            {
-                result["stopReason"] = json!("end_turn");
-            }
-            turn.record.cut = Cut::None;
-            turn.record.writing = false;
-            turn.record.written = super::Written::default();
+        let own_cut = self.flight.iter().any(|sent| sent.id == id && sent.cut);
+        // The answer of a prompt cancelled for a cut, in time or after the bound: agy stopped
+        // where it was cut. A cut is no Stop: should this answer stand alone (the message
+        // refused), it reads as ended.
+        if own_cut
+            && turn.stopping.is_none()
+            && let Answer::Result(result) = &mut answer
+            && result["stopReason"] == "cancelled"
+        {
+            result["stopReason"] = json!("end_turn");
         }
         if self.cut.is_some() && self.flight.front().is_some_and(|sent| sent.id == id) {
             // The prompt a message was held for answered. The held message goes first, so that
@@ -457,6 +459,19 @@ impl Prompts<'_> {
             }
             return Ok(());
         }
+        // A prompt cancelled for a cut leaves the flight with this answer: its own, or one
+        // that passed over it (agy never answered it). What agy writes next is not of it, and
+        // a message of its own.
+        let passes_cut = self.flight.iter().take(at).any(|sent| sent.cut);
+        let late = if own_cut || passes_cut {
+            turn.record.cut = Cut::None;
+            turn.record.writing = false;
+            turn.record.written = super::Written::default();
+            turn.record.keep_late = false;
+            std::mem::take(&mut turn.record.late)
+        } else {
+            Vec::new()
+        };
         let mut before: Vec<Sent> = self.flight.drain(..at).collect();
         let Some(mut sent) = self.flight.pop_front() else {
             return Ok(());
@@ -496,6 +511,14 @@ impl Prompts<'_> {
                 sent.spent = held.spent;
             }
             sent.covers.push(uuid);
+        }
+        if passes_cut {
+            // What agy wrote after the message went was the message's, since its answer
+            // passed over the cancelled prompt: it follows the message's read. Had the
+            // cancelled prompt answered, it would have been that prompt's, and left out.
+            for message in late {
+                turn.record.notification(&message)?;
+            }
         }
         let mut spent = std::mem::take(&mut sent.spent);
         if let Answer::Result(result) = &answer {

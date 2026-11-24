@@ -636,11 +636,13 @@ pub fn agy(transcript: &str) -> Vec<Value> {
         let at = text(row.get("created_at"));
         match kind.as_str() {
             "USER_INPUT" => {
-                reading.flush(&at);
                 let (reply, said) = asked(row.get("content"));
+                // The reply a cut gave back is the next thing the agent said after the tools of
+                // the cut prompt: they go with it, not away as tools before the user speaks.
                 if let Some(reply) = reply {
                     reading.cut_reply(reply, &at);
                 }
+                reading.flush(&at);
                 if !said.is_empty() {
                     reading.turns.push(Turn {
                         by_user: true,

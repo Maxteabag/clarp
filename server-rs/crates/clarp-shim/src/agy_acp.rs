@@ -121,6 +121,11 @@ struct Record {
     dropped: usize,
     /// Where in `answer_text` the prompt agy works on began: what a cut gives back.
     since: usize,
+    /// The message went at the bound while its cancelled prompt was not answered yet: what is
+    /// left out from then on is kept here. It is the cancelled prompt's if that prompt answers,
+    /// and the message's if the message's answer passes over it ([`prompts`]).
+    keep_late: bool,
+    late: Vec<Value>,
 }
 
 /// Where a cut of the reply being written stands.
@@ -177,6 +182,9 @@ impl Handler for Record {
             {
                 let left = &message["params"]["update"]["content"]["text"];
                 self.dropped += left.as_str().map_or(0, str::len);
+                if self.keep_late {
+                    self.late.push(message.clone());
+                }
                 return Ok(());
             }
             Cut::Line if goes_on => {
@@ -1013,6 +1021,8 @@ pub fn run(program: &str) -> Result<u8> {
             wake: false,
             dropped: 0,
             since: 0,
+            keep_late: false,
+            late: Vec::new(),
         },
         stopping: None,
         waiting: Vec::new(),

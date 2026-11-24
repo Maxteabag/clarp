@@ -1465,3 +1465,26 @@ fn a_message_that_comes_while_one_is_held_goes_after_it_in_order() {
     );
     assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n", "BANANA"]);
 }
+
+#[test]
+fn a_message_answered_over_a_cancel_never_answered_is_shown_and_nothing_later_is_left_out() {
+    let (seen, place) = held_for("skip", |_, _| {});
+    // agy never answered the cancelled prompt: the message's answer passed over it. What agy
+    // wrote after the message went was the message's, and follows its read.
+    assert_eq!(pieces(&seen), ["1. Pho\n2. Ra", "men\n", "BANANA"]);
+    assert_eq!(
+        kept_prompt(&place, "skip"),
+        clarp_acp::agy::steer::with_reply("1. Pho\n2. Ramen\n", "add-skip")
+    );
+    let read = printed_at(&seen, |line| read_of(line) == Some("u-add"));
+    let banana = printed_at(&seen, |line| {
+        line["params"]["update"]["content"]["text"] == "BANANA"
+    });
+    assert!(read < banana, "{seen:?}");
+    let answer = &settled(&seen)[0];
+    assert_eq!(answer["user_message_uuids"], json!(["u-own", "u-add"]));
+    assert!(
+        answer["result"].as_str().unwrap().ends_with("BANANA"),
+        "{answer}"
+    );
+}

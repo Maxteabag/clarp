@@ -135,3 +135,43 @@ fn a_message_that_cut_a_reply_is_read_as_the_cut_reply_then_the_user_message() {
     assert_eq!(read[1]["text"], reply.trim_end());
     assert_eq!(read[2], turn("user", words, "2026-11-24T14:07:04Z"));
 }
+
+#[test]
+fn the_tools_of_a_cut_prompt_go_with_its_reply() {
+    // agy 1.5 keeps the tools a cancelled prompt ran (24 Nov 2026), and no text of it: the
+    // reply given back is what the agent said after them.
+    let request = |said: &str| format!("<USER_REQUEST>\n{said}\n</USER_REQUEST>");
+    let reply = "1. Pho\n2. Ramen\n";
+    let sent = clarp_acp::agy::steer::with_reply(reply, "Stop the list.");
+    let steps = [
+        json!({"step_index": 0, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE",
+               "created_at": "2026-11-24T14:06:53Z",
+               "content": request("Write note.txt, then a list of 50 foods.")}),
+        json!({"step_index": 1, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE",
+               "created_at": "2026-11-24T14:06:55Z",
+               "tool_calls": [{"name": "write_file",
+                               "args": {"TargetFile": "\"note.txt\"", "CodeContent": "\"KIWI\""}}]}),
+        json!({"step_index": 2, "source": "MODEL", "type": "GENERIC", "status": "DONE",
+               "created_at": "2026-11-24T14:06:56Z",
+               "content": "Created At: 2026-11-24T15:06:56+01:00\nCompleted At: 2026-11-24T15:06:56+01:00\nWrote note.txt"}),
+        json!({"step_index": 4, "source": "USER_EXPLICIT", "type": "USER_INPUT", "status": "DONE",
+               "created_at": "2026-11-24T14:07:04Z", "content": request(&sent)}),
+        json!({"step_index": 5, "source": "MODEL", "type": "PLANNER_RESPONSE", "status": "DONE",
+               "created_at": "2026-11-24T14:07:05Z", "content": "BANANA"}),
+    ];
+    let transcript: String = steps.iter().map(|step| format!("{step}\n")).collect();
+    let read = history::agy(&transcript);
+    let roles: Vec<&str> = read
+        .iter()
+        .filter_map(|turn| turn["role"].as_str())
+        .collect();
+    assert_eq!(
+        roles,
+        ["user", "assistant", "user", "assistant"],
+        "{read:?}"
+    );
+    assert_eq!(read[1]["text"], reply.trim_end());
+    let tools = read[1]["tools"].as_array().unwrap();
+    assert_eq!(tools.len(), 1, "{read:?}");
+    assert_eq!(read[2]["text"], "Stop the list.");
+}

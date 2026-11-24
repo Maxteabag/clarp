@@ -259,10 +259,30 @@ fn a_message_sent_while_antigravity_writes_cuts_its_reply_at_a_line_end() {
             .any(|event| event["type"] == "agent-roster")
     });
     let session = "acp-cut-list";
-    host.post(
+    let made = host.post(
         "/agents",
         json!({"name": session, "session": session, "backend": "agy-acp"}),
     );
+    let spool = place
+        .root
+        .join("data/agents")
+        .join(made["agent"]["agent_id"].as_str().unwrap())
+        .join("spool");
+    // Whether the driver has printed that it holds the message, in the turn's spool.
+    let held = || {
+        std::fs::read_dir(&spool)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|file| file.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .flat_map(|text| text.lines().map(str::to_owned).collect::<Vec<_>>())
+            .filter_map(|row| serde_json::from_str::<Value>(&row).ok())
+            .filter(|row| row["s"] == "out")
+            .filter_map(|row| serde_json::from_str::<Value>(row["d"].as_str()?).ok())
+            .any(|line| line["clarp"] == "cut" && line["stage"] == "held")
+    };
     let first = host.send(session, "case-list", "first");
     assert_eq!(first["queued"], false, "{first}");
     wait_for("working-list", || place.root.join("working-list").exists());
@@ -282,7 +302,7 @@ fn a_message_sent_while_antigravity_writes_cuts_its_reply_at_a_line_end() {
         queue_status().as_deref() == Some("started")
     });
     // The driver holds it the moment it reads it; then agy goes on past a line end.
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    wait_for("the driver holding the message", held);
     std::fs::write(place.root.join("go-list"), "").unwrap();
     answered(&host, session, "BANANA");
     wait_for("the agent to finish", || host.state(session) == "done");

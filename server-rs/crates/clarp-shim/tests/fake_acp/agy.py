@@ -158,9 +158,10 @@ CUTS = {
 
 # What agy does otherwise while a message is held (`go-<mode>`): it answers the cancel only after
 # the driver's bound, with what it wrote before, and then takes the message (`slow`) or turns it
-# away (`slowrefused`); it stops writing for a thought before any line end (`missed`); or it ends
-# its reply by itself before any line end (`ends`).
-HELD = {"slow", "slowrefused", "missed", "ends"}
+# away (`slowrefused`); it never answers the cancel and answers only the message (`skip`); it stops
+# writing for a thought before any line end (`missed`); or it ends its reply by itself before any
+# line end (`ends`).
+HELD = {"slow", "slowrefused", "skip", "missed", "ends"}
 
 
 def held(mid, sid, mode):
@@ -187,7 +188,7 @@ def held(mid, sid, mode):
     if mode == "slow":
         # Still the cancelled prompt's: written before its answer.
         text(sid, "agent_message_chunk", "tail")
-    if mode != "ends":
+    if mode not in ("ends", "skip"):
         stop = "cancelled" if mode == "slow" else "end_turn"
         result(mid, {"stopReason": stop, "usage": {"inputTokens": 3, "outputTokens": 1}})
     text(sid, "agent_message_chunk", "BANANA")
