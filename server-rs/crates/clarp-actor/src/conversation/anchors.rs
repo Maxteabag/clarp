@@ -925,8 +925,20 @@ mod tests {
             .turn
             .unwrap();
         recorder.handle(Command::TurnStarted { turn }, 110).unwrap();
-        say(&mut recorder, turn, "r-look", &["t-1"], &[]);
-        say(&mut recorder, turn, "r-answer", &[], &[]);
+        // What the agent says for it carries the turn's origin, as the actor writes it.
+        for (id, tools) in [("r-look", vec!["t-1".to_owned()]), ("r-answer", Vec::new())] {
+            let reply = Entry::Reply(Reply {
+                id: id.into(),
+                turn: turn.0,
+                text: id.into(),
+                tools,
+                origin: message.origin.clone(),
+                ..Reply::default()
+            });
+            let mut batch = recorder.batch();
+            batch.item(reply.to_item(200).unwrap());
+            batch.commit().unwrap();
+        }
         end(&mut recorder, turn, "r-answer");
         let read = |which: Which| -> Vec<(String, Option<usize>)> {
             tail(recorder.log(), &[], span(&recorder), 100, which)

@@ -7497,3 +7497,70 @@ fn a_process_that_lingers_too_long_is_stopped_and_then_left_behind() {
     assert_eq!(actor.linger_due_at(), None);
     assert_eq!(actor.status().last.unwrap().id, TurnId(1));
 }
+
+/// Issue 745: a helper's chat holds the turns other agents give it. Once a chat is read as a
+/// helper's, it stays one whatever the agent's role becomes, so nothing that entered its
+/// Conversation view leaves it. A turn the Host began by itself for the agents (a schedule's
+/// wake) is no conversation there.
+#[test]
+fn a_chat_once_read_as_a_helpers_keeps_the_turns_other_agents_gave_it() {
+    let mut world = World::new("helper-chat");
+    let mut actor = world.open();
+    let (asked, marks) = from_an_agent("u-a1", "tr-1");
+    let (_, out) = actor
+        .send_marked(&asked, Admission::Queue, None, &marks, world.tick())
+        .unwrap()
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(1, "Asked and answered.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    // A schedule wakes the agent: a turn for the agents, which no agent began.
+    let wake = Message {
+        origin: Origin::Trigger {
+            name: "schedule".to_string(),
+        },
+        trace_id: Some("tr-2".to_string()),
+        ..message("u-wake", "wake up")
+    };
+    let housekeeping = Marks {
+        coordination: Some("a-self".to_string()),
+        trace_named: true,
+        user_word: false,
+    };
+    let (_, out) = actor
+        .send_marked(&wake, Admission::Queue, None, &housekeeping, world.tick())
+        .unwrap()
+        .unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(2, "Woke and said so.");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+
+    let conversation = |actor: &mut Actor, world: &mut World, helper: bool| -> Vec<String> {
+        let asked = Which::chat(true).of_helper(helper).conversation_view(true);
+        let which = actor.chat_of(asked, world.tick()).unwrap();
+        actor
+            .tail_of(100, which)
+            .unwrap()
+            .entries
+            .iter()
+            .map(|row| match &row.entry {
+                Entry::Message(message) => message.text.clone(),
+                Entry::Reply(reply) => reply.text.clone(),
+                other => other.id().to_string(),
+            })
+            .collect()
+    };
+    // Never read as a helper's: the agents' turns are not the user's conversation.
+    assert!(conversation(&mut actor, &mut world, false).is_empty());
+    // A helper's: the agent's message and its answer; not the wake's answer.
+    let helper = conversation(&mut actor, &mut world, true);
+    assert_eq!(helper, ["from an agent", "Asked and answered."]);
+    // The agent is a helper no more: what entered stays.
+    assert_eq!(conversation(&mut actor, &mut world, false), helper);
+    // And after a restart, from the log alone.
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(conversation(&mut actor, &mut world, false), helper);
+}

@@ -747,14 +747,19 @@ Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carrie
   every row of a turn with `audience` `agents`.
 
 A helper's chat (an agent whose `role` is `helper`) is the exception (feature
-`helper_conversation`, contract 175; an older Host tags these turns `session`): a turn another agent
-started (its parent or any other) is that chat's conversation. Its prompt (a user row of origin
-`agent`) is `conversation`, and its answers anchor by the rules below exactly as a user's turn's
-do, with `session_rows`; its tool rows and commentary stay `session`. The turn's `audience` stays
-`agents`, and in a helper's chat `view=conversation` does not leave such turns out as
-coordination. Whether a chat is a helper's is decided from the agent's role, so a row's view is
-the same at every read. Every other chat keeps agent turns out of the Conversation view as above,
-and `view=session` is unchanged.
+`helper_conversation`, contract 175; an older Host tags these turns `session`): a turn another
+agent began is that chat's conversation, whichever agent sent the message (its parent, a peer, or
+another agent's message read into a running turn). Its prompt (a user row of origin `agent`) is
+`conversation`, and its answers anchor by the rules below exactly as a user's turn's do, with
+`session_rows`; its tool rows and commentary stay `session`. The turn's `audience` stays `agents`,
+and in a helper's chat `view=conversation` does not leave such turns out as coordination. A turn
+the Host began by itself for the agents (a self-prompt, a scheduled wake, a goal's continuation)
+is not one another agent began: its answers stay `session` in a helper's chat too. A chat is a
+helper's from the first time it is read as one, and stays one when the agent's role changes
+afterwards (a relaunch as an agent, a janitor), so a row that entered its Conversation view never
+leaves it. Agent turns from before the agent became a helper join its Conversation view then.
+Every other chat keeps agent turns out of the Conversation view as above, and `view=session` is
+unchanged.
 
 The conversation view only grows (feature `conversation_view_grows`, contract 174): a row that
 has entered `view=conversation` never leaves it, so a client that reads only that view never has
