@@ -41,6 +41,13 @@ use crate::{
 const MAX_TOOL_OUTPUT: usize = crate::TOOL_OUTPUT_KEPT;
 /// The variable that names Codex's own directory.
 pub const CODEX_HOME: &str = "CODEX_HOME";
+
+/// Every `codex exec` runs without Codex's analytics. With them, Codex sends its events after
+/// `turn.completed` and exits only then: 3.1 and 4.6 s later on 24 Nov 2026 (0.167.1), and 12 s
+/// on a slow link to the provider, against 0.03 s without (issue 757). The Host ends an exec
+/// turn at the exit, so the user saw it working that long after its answer, and a queued
+/// message waited as long. Nothing else of what the tool does changes.
+const QUIET_EXIT: &str = "analytics.enabled=false";
 /// What Codex is started without when it is only to read ([`Backend::reads`]).
 const NOTHING_TO_ACT_WITH: [&str; 18] = [
     "shell_tool",
@@ -154,6 +161,8 @@ impl Backend for Codex {
             "exec",
             "--json",
             "--dangerously-bypass-approvals-and-sandbox",
+            "-c",
+            QUIET_EXIT,
         ]
         .iter()
         .map(|arg| (*arg).to_string())
@@ -250,6 +259,8 @@ impl Backend for Codex {
             "workspace-write",
             "--ephemeral",
             "--skip-git-repo-check",
+            "-c",
+            QUIET_EXIT,
         ]
         .iter()
         .map(|arg| (*arg).to_string())
@@ -1016,6 +1027,8 @@ mod tests {
                 "exec",
                 "--json",
                 "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "analytics.enabled=false",
                 "-"
             ],
             "a new thread: Codex names it, the Host cannot"
@@ -1039,6 +1052,8 @@ mod tests {
                 "exec",
                 "--json",
                 "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "analytics.enabled=false",
                 "--model",
                 "gpt-9",
                 "-c",
@@ -1582,6 +1597,8 @@ mod tests {
                 "workspace-write",
                 "--ephemeral",
                 "--skip-git-repo-check",
+                "-c",
+                "analytics.enabled=false",
                 "--model",
                 "gpt-6-sol",
                 "-c",
@@ -1597,7 +1614,7 @@ mod tests {
             prompt: "x".to_string(),
             ..Question::default()
         };
-        assert_eq!(codex.once(&plain).unwrap().args.len(), 7);
+        assert_eq!(codex.once(&plain).unwrap().args.len(), 9);
 
         // The answer is the agent's last message. What is no message is passed over.
         let printed = [
@@ -1664,6 +1681,8 @@ mod tests {
                 "exec",
                 "--json",
                 "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "analytics.enabled=false",
                 "-c",
                 r#"model_provider="stand-in""#,
                 "--model",
