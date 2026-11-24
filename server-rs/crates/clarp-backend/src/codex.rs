@@ -557,7 +557,14 @@ impl CodexInterpreter {
         };
         bound.halted = true;
         bound.held.clear();
-        self.failure = Some(bound.own.unverified());
+        // What went wrong before it is kept below the mismatch's words: a provider that
+        // refused the turn (a 401, say) is what the owner needs to see to put it right.
+        let earlier = self.failure.take().or_else(|| self.stderr.text());
+        let words = bound.own.unverified();
+        self.failure = Some(match earlier.filter(|said| !said.trim().is_empty()) {
+            Some(said) => format!("{words}\n\n{said}"),
+            None => words,
+        });
         if running {
             out.push(Signal::Halt);
         }
@@ -2035,6 +2042,44 @@ mod tests {
             clarp_kernel::failures::classify_error(reason),
             clarp_kernel::failures::PROVIDER_MISMATCH,
             "it ended without completing, and that is all: {reason}"
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn an_unverified_turn_keeps_what_went_wrong_before_below_its_words() {
+        // No rollout of the thread in the agent's home; the provider refused the turn.
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000fa", "stand-in");
+        let out = bound_run(
+            &own,
+            &[
+                (
+                    0,
+                    r#"{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000fb"}"#,
+                ),
+                (1, r#"{"type":"turn.started"}"#),
+                (
+                    2,
+                    r#"{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized"}}"#,
+                ),
+            ],
+            ShimEvent::Exited {
+                code: Some(1),
+                signal: None,
+            },
+        );
+        let Some(Signal::Ended(RunOutcome::Failed { reason })) = out.last() else {
+            panic!("{out:?}");
+        };
+        assert_eq!(
+            clarp_kernel::failures::classify_error(reason),
+            clarp_kernel::failures::PROVIDER_MISMATCH,
+            "{reason}"
+        );
+        assert!(reason.contains("could not be verified"), "{reason}");
+        assert!(
+            reason.ends_with("unexpected status 401 Unauthorized"),
+            "{reason}"
         );
         std::fs::remove_dir_all(home).unwrap();
     }
