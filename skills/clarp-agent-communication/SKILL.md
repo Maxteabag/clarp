@@ -62,7 +62,13 @@ message instead of being lost; `reply` says `held` when that happens, so do
 not resend. A user's Stop also pauses the agent's queue: plain `prompt` and
 `reply` messages still run (and end the pause when nothing else is held),
 but a send with `queue_if_busy` waits, unannounced, until the user resumes
-the queue; do not use it to reach a stopped agent. Requests work between agents on this Host; for
+the queue; do not use it to reach a stopped agent. On the Rust Host the pause
+outlasts the user's own waiting messages, which the Stop lets run: after they
+have run, the agent stays held until the user writes to it again or presses
+Resume. A `queue_if_busy` send, a goal's check-in or a schedule that reaches
+it then waits, held: its answer says `queued: true`, and `GET /turn-queue`
+says `paused: true`. Do not resume a queue the user stopped yourself; if what
+waits is urgent, tell the user through their front desk. Requests work between agents on this Host; for
 a peer server use `prompt`.
 
 A message from the user, or a front desk's relay of the user's words, that
