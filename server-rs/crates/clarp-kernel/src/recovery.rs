@@ -6,7 +6,7 @@
 //! the machine reaches the provider at all ([`after_network_check`]). Where it does not, the
 //! turn waits for the network, checked every few seconds, a quarter of an hour at most, and is
 //! tried again when it is back. Where it does, the turn is tried again after 2, 4, 8, 16 and 30
-//! seconds, a minute in all. A call's turn keeps the Python Host's shorter rule
+//! seconds, a minute in all; one that timed out, three times in all, as before. A call's turn keeps the Python Host's shorter rule
 //! (`turn_retry._handle_failure`: three attempts in all, a second after the first, two after
 //! the second): someone listens. A provider that turned an attempt away for a moment
 //! (overloaded, or holding requests back) passes too, more slowly: the turn waits half a
@@ -267,6 +267,8 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
 pub struct Checked {
     /// The machine reaches the provider.
     pub up: bool,
+    /// The attempt failed on a timeout (`failures::TIMEOUT`), not on its connection.
+    pub timed_out: bool,
     /// An earlier check of this wait found the network gone.
     pub was_gone: bool,
     /// Which attempt of the turn failed, from 1.
@@ -287,7 +289,9 @@ pub struct Checked {
 /// The network came back after it was gone: the turn is tried again at once, and that try is
 /// none against a bad line. It is there and was never gone: the connection failed for another
 /// reason, and the turn is tried again after 2, 4, 8, 16 and 30 seconds, then it ends as it
-/// failed. It is gone: it is checked again in a few seconds, until the wait's end, and then
+/// failed. A timeout with the network there keeps the three attempts of the Python Host's rule,
+/// a second and then two apart: a tool that stalls can take a watchdog's whole window each
+/// time, and five of those are no short wait. It is gone: it is checked again in a few seconds, until the wait's end, and then
 /// the turn ends and says that the network was gone.
 pub fn after_network_check(checked: Checked) -> Next {
     if checked.up && checked.was_gone {
@@ -301,6 +305,15 @@ pub fn after_network_check(checked: Checked) -> Next {
             .attempt
             .saturating_sub(checked.account_waits)
             .saturating_sub(checked.offline);
+        if checked.timed_out {
+            if !(1..MAX_ATTEMPTS).contains(&tries) {
+                return Next::Fail;
+            }
+            return Next::Retry {
+                after_ms: BACKOFF_BASE_MS << (tries - 1),
+                resume: checked.resume,
+            };
+        }
         if !(1..=LINE_RETRIES).contains(&tries) {
             return Next::Fail;
         }
@@ -486,6 +499,7 @@ mod tests {
     fn checked(up: bool, attempt: u32) -> Checked {
         Checked {
             up,
+            timed_out: false,
             was_gone: false,
             attempt,
             account_waits: 0,
@@ -605,6 +619,60 @@ mod tests {
             }
         );
         assert_eq!(after_network_check(checked(true, 0)), Next::Fail);
+    }
+
+    #[test]
+    fn a_timeout_while_the_network_is_there_is_tried_three_times_and_waits_for_it_when_gone() {
+        let timeout = |up, attempt| Checked {
+            timed_out: true,
+            ..checked(up, attempt)
+        };
+        // There: three attempts in all, a second and then two apart, as before.
+        assert_eq!(
+            after_network_check(timeout(true, 1)),
+            Next::Retry {
+                after_ms: 1_000,
+                resume: true
+            }
+        );
+        assert_eq!(
+            after_network_check(timeout(true, 2)),
+            Next::Retry {
+                after_ms: 2_000,
+                resume: true
+            }
+        );
+        assert_eq!(after_network_check(timeout(true, 3)), Next::Fail);
+        // Gone: it waits for the network as a connection does, and goes on when it is back,
+        // and that attempt uses none of the three.
+        assert_eq!(
+            after_network_check(timeout(false, 3)),
+            Next::Offline {
+                check_at_ms: 15_000
+            }
+        );
+        let back = Checked {
+            was_gone: true,
+            ..timeout(true, 3)
+        };
+        assert_eq!(
+            after_network_check(back),
+            Next::Retry {
+                after_ms: 0,
+                resume: true
+            }
+        );
+        let after_it = Checked {
+            offline: 1,
+            ..timeout(true, 3)
+        };
+        assert_eq!(
+            after_network_check(after_it),
+            Next::Retry {
+                after_ms: 2_000,
+                resume: true
+            }
+        );
     }
 
     #[test]

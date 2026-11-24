@@ -5690,6 +5690,7 @@ impl Actor {
         };
         let next = recovery::after_network_check(recovery::Checked {
             up,
+            timed_out: parked.kind == failures::TIMEOUT,
             was_gone: watch.gone,
             attempt: parked.attempts,
             account_waits: parked.account.count,

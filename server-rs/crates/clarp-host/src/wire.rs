@@ -300,11 +300,13 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
         // checked yet is as busy as before. One whose network is there reconnects.
         Wait::Network { .. } if live.waits_for_the_network => None,
         Wait::Network { .. } => live.network_retry_at_ms.map(|at_ms| {
-            (
-                tries + 1,
-                at_ms - parked.since_ms,
-                recovery::LINE_RETRIES + 1,
-            )
+            // A timeout keeps its three attempts; a connection has a minute's.
+            let of = if parked.kind == failures::TIMEOUT {
+                recovery::MAX_ATTEMPTS
+            } else {
+                recovery::LINE_RETRIES + 1
+            };
+            (tries + 1, at_ms - parked.since_ms, of)
         }),
     }
 }
