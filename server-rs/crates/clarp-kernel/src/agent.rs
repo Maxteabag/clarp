@@ -2179,9 +2179,11 @@ impl Work {
         // resume. Were it to end when the last of the Stop's own starts, the queue a Stop
         // leaves would depend on how soon the stopped turn's process exits, and agree with what
         // the Stop answered only when it was read before that.
-        let sent_by_hand = self.decision.events.iter().any(
-            |event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == next.id),
-        );
+        let sent_by_hand = self
+            .decision
+            .events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == next.id));
         let released = self.agent.stop_released.contains(&next.id) || sent_by_hand;
         let (turn, message_seq) = (next.id, next.message_seq);
         self.record(AgentEvent::Turn {
