@@ -683,6 +683,19 @@ impl Hub {
         self.answered.extend(answers);
     }
 
+    /// The conversation decided that the message written into this row was an answer: other
+    /// words came after it with no work between. It stays an answer whatever work follows.
+    pub fn close_answer(&mut self, row: &str) {
+        let answers: Vec<String> = self
+            .view
+            .items()
+            .into_iter()
+            .filter(|item| text_of(&item["kind"]) == "message" && text_of(&item["row_id"]) == row)
+            .map(|item| text_of(&item["id"]).to_string())
+            .collect();
+        self.answered.extend(answers);
+    }
+
     /// The tool asks the provider again, after a refusal (`headline` says which try and why),
     /// or no longer.
     pub fn provider_retry(&mut self, headline: Option<&str>, now: i64) -> Vec<Value> {
