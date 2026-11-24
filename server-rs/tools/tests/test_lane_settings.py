@@ -9,12 +9,17 @@ TOOLS = Path(__file__).resolve().parents[1]
 SCRIPT = (TOOLS / "install-host").read_text()
 
 
-def carried_top(config_text, tmp_path):
-    """What install-host keeps of an existing config's top-level keys: its own heredoc, run on it."""
+def run_carry(config_text, tmp_path):
+    """install-host's heredoc for top-level keys, run on a config: what it keeps, and what it says."""
     body = re.search(r"carried_top=\"\$\(python3 - \"\$own_config\" <<'PYTHON'\n(.*?)\nPYTHON\n", SCRIPT, re.S)[1]
     config = tmp_path / "config.toml"
     config.write_text(config_text)
-    return subprocess.run([sys.executable, "-c", body, str(config)], capture_output=True, text=True, check=True).stdout
+    return subprocess.run([sys.executable, "-c", body, str(config)], capture_output=True, text=True, check=True)
+
+
+def carried_top(config_text, tmp_path):
+    """What install-host keeps of an existing config's top-level keys."""
+    return run_carry(config_text, tmp_path).stdout
 
 
 def written(carried):
@@ -37,6 +42,14 @@ def test_only_top_level_switches_of_their_kind_are_kept(tmp_path):
     assert tomllib.loads(carried_top(config, tmp_path)) == {"codex_lane_most": 4}
     assert carried_top("[server]\nkind = \"clarp-host\"\n", tmp_path) == ""
     assert carried_top("not toml [", tmp_path) == ""
+
+
+def test_each_switch_keeps_its_own_kind_only(tmp_path):
+    wrong = "codex_chat_lane = 5\ncodex_lane_idle_minutes = true\ncodex_lane_most = false\n"
+    said = run_carry(wrong, tmp_path)
+    assert said.stdout == ""
+    for name in ("codex_chat_lane", "codex_lane_idle_minutes", "codex_lane_most"):
+        assert f"install-host: {name} in " in said.stderr
 
 
 def test_the_written_file_has_them_above_the_server_table(tmp_path):

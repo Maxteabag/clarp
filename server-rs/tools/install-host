@@ -830,12 +830,18 @@ try:
         config = tomllib.load(source)
 except (OSError, UnicodeError, ValueError):
     config = {}
-for name in ("codex_chat_lane", "codex_lane_idle_minutes", "codex_lane_most"):
-    item = config.get(name)
-    if isinstance(item, bool):
+# One kind per switch; a bool is not taken for a number (Python counts it as one).
+for name, kind in (("codex_chat_lane", bool), ("codex_lane_idle_minutes", int), ("codex_lane_most", int)):
+    if name not in config:
+        continue
+    item = config[name]
+    if kind is bool and isinstance(item, bool):
         print(f"{name} = {'true' if item else 'false'}")
-    elif isinstance(item, int):
+    elif kind is int and isinstance(item, int) and not isinstance(item, bool):
         print(f"{name} = {item}")
+    else:
+        wanted = "true or false" if kind is bool else "a whole number"
+        print(f"install-host: {name} in {sys.argv[1]} is not {wanted}; it is not kept", file=sys.stderr)
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.
