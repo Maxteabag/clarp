@@ -3642,19 +3642,35 @@ impl Worker {
                 limit,
                 which,
                 answer,
-            } => return read(actor.tail_of(limit, which), answer),
+            } => {
+                // A chat once read as a helper's stays one ([`Actor::chat_of`]).
+                let which = actor.chat_of(which, now);
+                return read(which.and_then(|which| actor.tail_of(limit, which)), answer);
+            }
             Ask::After {
                 revision,
                 limit,
                 which,
                 answer,
-            } => return read(actor.after_of(revision, limit, which), answer),
+            } => {
+                let which = actor.chat_of(which, now);
+                return read(
+                    which.and_then(|which| actor.after_of(revision, limit, which)),
+                    answer,
+                );
+            }
             Ask::Before {
                 id,
                 limit,
                 which,
                 answer,
-            } => return read(actor.before_of(&id, limit, which), answer),
+            } => {
+                let which = actor.chat_of(which, now);
+                return read(
+                    which.and_then(|which| actor.before_of(&id, limit, which)),
+                    answer,
+                );
+            }
             Ask::Label { text, answer } => {
                 answered(actor.label(&text, now).map(|out| ((), out)), answer)?
             }

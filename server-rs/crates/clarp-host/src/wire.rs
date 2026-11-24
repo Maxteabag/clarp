@@ -1796,7 +1796,7 @@ pub fn log_response(
                     &version.entry,
                     version.session_rows,
                     for_agents,
-                    record.is_helper(),
+                    page.helper_chat,
                 ) {
                     View::Conversation
                 } else {

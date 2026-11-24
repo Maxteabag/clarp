@@ -69,7 +69,8 @@ impl Which {
     }
 
     /// The chat of a helper (`helper`), whose conversation is the turns other agents give it.
-    /// Decided from the agent's role, so a row's view is the same at every read.
+    /// The actor keeps a chat that was once read so a helper's ([`crate::Actor::chat_of`]), so
+    /// a row's view stays what it was when the agent's role changes.
     pub fn of_helper(self, helper: bool) -> Self {
         match self {
             Self::Chat {
@@ -79,7 +80,7 @@ impl Which {
                 ..
             } => Self::Chat {
                 include_automated,
-                hide_coordination,
+                hide_coordination: hide_coordination && !(helper && conversation_only.is_some()),
                 conversation_only,
                 helper,
             },
@@ -106,7 +107,8 @@ impl Which {
         }
     }
 
-    fn helper(self) -> bool {
+    /// Whether it reads a helper's chat.
+    pub fn is_helper_chat(self) -> bool {
         matches!(self, Self::Chat { helper: true, .. })
     }
 
@@ -194,7 +196,16 @@ pub fn in_conversation_view(
     for_agents: bool,
     helper: bool,
 ) -> bool {
-    (helper || !for_agents) && conversation_in(entry, session_rows, helper)
+    (!for_agents || (helper && given_by_an_agent(entry)))
+        && conversation_in(entry, session_rows, helper)
+}
+
+/// Whether a row is of a turn another agent began: its message, and what the agent said and did
+/// for it, which carry the origin of the turn. A turn the Host began on its own (a schedule, a
+/// wake, a goal's continuation) is not, though it is for the agents too: its answers are no
+/// conversation even in a helper's chat.
+fn given_by_an_agent(entry: &Entry) -> bool {
+    entry.origin_name() == "agent"
 }
 
 /// Rows that are conversation without needing to be a turn's anchor, in a helper's chat
@@ -292,6 +303,9 @@ pub struct Page {
     pub begins_after: u64,
     pub hidden_before: HashMap<String, HiddenRun>,
     pub hidden_after: Option<HiddenRun>,
+    /// It was read as a helper's chat ([`in_conversation_view`]): the view of each row is told
+    /// so too.
+    pub helper_chat: bool,
 }
 
 impl Page {
@@ -623,7 +637,7 @@ impl<'a> Reader<'a> {
     /// For this reader of the conversation: a helper's chat counts the turns other agents give
     /// it as its conversation.
     fn reading(mut self, which: Which) -> Self {
-        self.helper = which.helper();
+        self.helper = which.is_helper_chat();
         self
     }
 
@@ -803,9 +817,9 @@ impl<'a> Reader<'a> {
         let Some(respect_audience) = which.conversation_only() else {
             return Ok(true);
         };
-        let helper = which.helper();
+        let helper = which.is_helper_chat();
         if respect_audience
-            && !helper
+            && !(helper && given_by_an_agent(entry))
             && (self.hidden(item, entry)?.is_some()
                 || matches!(entry, Entry::Imported(import) if import.row["audience"] == "agents"))
         {
@@ -1457,6 +1471,7 @@ pub(crate) fn older(
         begins_after: span.floor * REVISION_STEP,
         hidden_before,
         hidden_after,
+        helper_chat: which.is_helper_chat(),
     })
 }
 
@@ -1578,6 +1593,7 @@ pub(crate) fn after(
         begins_after: span.floor * REVISION_STEP,
         hidden_before,
         hidden_after,
+        helper_chat: which.is_helper_chat(),
     })
 }
 
