@@ -404,6 +404,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // ends), each answer to each message of the user's stays there, and no row ever leaves it
     // (`clarp_actor::conversation::anchors`, issue 745).
     ("conversation_view_grows", 174),
+    // An answer is spoken only when its send asks for it (`synthesize_audio: true`), on every
+    // tool and for every sender: a send that says nothing is answered in text, a person's
+    // too, and its tool is not told how to speak. A person's words in a call are speech, as
+    // before (owner, 24 Nov 2026). A reword and a Send now take the app's setting now in
+    // place of the waiting message's, and an answer to a request is spoken when it asks.
+    ("spoken_when_asked", 171),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -3380,7 +3386,14 @@ async fn send_as(
         },
         (false, _) => Origin::User,
     };
-    let origin_is_user = origin == Origin::User;
+    // A person's words in a call are speech, answered aloud unless the app says otherwise:
+    // its greeting, and what it sends with the call's id.
+    let in_a_call = binding.is_some()
+        || request
+            .call_id
+            .as_deref()
+            .is_some_and(|call| !python::strip(call).is_empty());
+    let spoken_unasked = in_a_call && origin == Origin::User;
     // What the Host sends by itself on its own schedule (the Python Host's
     // `ROUTINE_AUTOMATION_ORIGINS`).
     let routine = matches!(&origin, Origin::Trigger { name }
@@ -3434,12 +3447,10 @@ async fn send_as(
         trace_id: Some(trace_id.clone()),
         sender,
         client: request.client.as_deref().and_then(client_name),
-        // What a person sends is answered aloud unless the app says otherwise; anything
-        // else only when it is asked for.
-        speak: match request.synthesize_audio {
-            Some(asked) => asked,
-            None => origin_is_user,
-        },
+        // Answered aloud only when the app asks for it: it does when its user has voice on.
+        // A send that says nothing is answered in text, whoever sent it, but for a person's
+        // words in a call.
+        speak: request.synthesize_audio.unwrap_or(spoken_unasked),
         unheard,
         // An agent the user spoke to in a call, not long ago, is told who else is in the
         // call and what was said since it last spoke.
@@ -4046,6 +4057,7 @@ async fn reword(
     if text.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
     }
+    let speak = audio_asked(&said)?;
     let Some((member, waiting)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());
     };
@@ -4058,12 +4070,29 @@ async fn reword(
             "a goal's check-in is the Host's own and cannot be edited",
         ));
     }
-    match member.agent.reword(waiting.turn, text.to_string()).await? {
+    match member
+        .agent
+        .reword(waiting.turn, text.to_string(), speak)
+        .await?
+    {
         Reworded::Done => Ok(Json(json!({ "ok": true }))),
         Reworded::NotWaiting => Err(not_waiting()),
         Reworded::InConversation => Err(ApiError::new(
             StatusCode::CONFLICT,
             "message is already in the conversation",
+        )),
+    }
+}
+
+/// `synthesize_audio` of a body that changes a waiting message: the app's audio setting now,
+/// which replaces the message's own. Absent (or null), the message keeps its own.
+fn audio_asked(said: &Value) -> Result<Option<bool>, ApiError> {
+    match said.get("synthesize_audio") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(audio)) => Ok(Some(*audio)),
+        Some(_) => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "synthesize_audio must be a boolean",
         )),
     }
 }
@@ -4074,13 +4103,23 @@ async fn reword(
 async fn send_by_hand(
     State(app): State<App>,
     Path(id): Path<String>,
+    body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
+    // The body may be empty: then the message keeps how it was to be answered. One that says
+    // something says it in JSON.
+    let said: Value = if body.iter().all(u8::is_ascii_whitespace) {
+        Value::Null
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "invalid JSON body"))?
+    };
+    let speak = audio_asked(&said)?;
     let Some((member, waiting)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());
     };
     match member
         .agent
-        .send_now(waiting.turn, "user".to_string())
+        .send_now(waiting.turn, "user".to_string(), speak)
         .await?
     {
         ByHand::Sent => {
@@ -4568,6 +4607,62 @@ mod tests {
         assert_eq!(message.origin.name(), "agent");
         assert_eq!(message.sender.unwrap().name, "experience-watch");
         assert!(!message.speak);
+    }
+
+    /// A send is answered aloud only when it asks for it, whoever sent it: a person's send
+    /// that says nothing is answered in text. A person's words in a call are speech, answered
+    /// aloud unless the app says otherwise.
+    #[tokio::test]
+    async fn a_send_is_spoken_only_when_it_asks_or_a_person_speaks_in_a_call() {
+        use clarp_kernel::conversation::Entry;
+
+        let place = crate::unkept::at_the_port::place("spoken-when-asked");
+        let app = place.app().await;
+        let cases = [
+            ("unsaid", None, None, None, false),
+            ("asked", Some(true), None, None, true),
+            ("refused", Some(false), None, None, false),
+            ("scheduled", None, Some("schedule"), None, false),
+            ("scheduled-aloud", Some(true), Some("schedule"), None, true),
+            ("in-a-call", None, None, Some("call-1"), true),
+            ("quiet-in-a-call", Some(false), None, Some("call-1"), false),
+            (
+                "an-agent-in-a-call",
+                None,
+                Some("agent"),
+                Some("call-1"),
+                false,
+            ),
+        ];
+        for (id, asked, origin, call, spoken) in cases {
+            // An agent of its own for each, idle: its message's row is written as it is sent.
+            let record = app
+                .fleet
+                .create(CreateAgentRequest {
+                    name: format!("Listener {id}"),
+                    backend: Some("scripted".into()),
+                    ..CreateAgentRequest::default()
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            let request = SendRequest {
+                session: record.session.clone(),
+                text: format!("words of {id}"),
+                client_msg_id: Some(id.into()),
+                synthesize_audio: asked,
+                origin: origin.map(str::to_string),
+                call_id: call.map(str::to_string),
+                ..SendRequest::default()
+            };
+            send_message(&app, request).await.unwrap();
+            let member = app.member(&record.session).unwrap();
+            let row = member.agent.row(format!("u-{id}")).await.unwrap();
+            let Some(Entry::Message(message)) = row.map(|row| row.entry) else {
+                panic!("{id}: the message is in the conversation")
+            };
+            assert_eq!(message.speak, spoken, "{id}");
+        }
     }
 
     #[tokio::test]

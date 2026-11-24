@@ -69,6 +69,14 @@ pub struct Delivery {
     pub created_at: i64,
     #[serde(default)]
     pub delivered_at: Option<i64>,
+    /// The message this end becomes for the agent is answered aloud: the app that answered
+    /// asked for it (`synthesize_audio: true` on the resolve). Absent means not.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub synthesize_audio: bool,
+}
+
+fn is_false(truth: &bool) -> bool {
+    !*truth
 }
 
 /// What a request is to be made from, as the caller gave it.
@@ -503,6 +511,8 @@ pub struct Given<'a> {
     pub expected_revision: i64,
     pub choice: Option<&'a Value>,
     pub answer: Option<&'a Value>,
+    /// The app that answers asks for the agent's reply to be spoken.
+    pub synthesize_audio: bool,
 }
 
 /// Who answers a request in the user's place, when someone does.
@@ -579,6 +589,7 @@ impl ArtifactBook {
                         answer: Value::Null,
                         created_at: now,
                         delivered_at: None,
+                        synthesize_audio: false,
                     });
                 }
                 artifact
@@ -668,6 +679,7 @@ impl ArtifactBook {
                 answer: normalized,
                 created_at: now,
                 delivered_at: None,
+                synthesize_audio: given.synthesize_audio,
             });
         }
         Ok((artifact, true))

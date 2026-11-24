@@ -412,8 +412,8 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
         })
     };
 
-    host.send(&quiet, "<speak>words kept off the cloud</speak>", "u-quiet");
-    host.send(&spoken, "<speak>words spoken aloud</speak>", "u-spoken");
+    host.send_aloud(&quiet, "<speak>words kept off the cloud</speak>", "u-quiet");
+    host.send_aloud(&spoken, "<speak>words spoken aloud</speak>", "u-spoken");
     wait_for("the other agent spoken", || asked("words spoken aloud"));
     wait_for("the quiet agent's answer", || {
         host.conversation(&quiet)
@@ -437,7 +437,7 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
         "/agent-provider",
         json!({"session": quiet, "cloud_speech": true}),
     );
-    host.send(&quiet, "<speak>now spoken too</speak>", "u-quiet-2");
+    host.send_aloud(&quiet, "<speak>now spoken too</speak>", "u-quiet-2");
     wait_for("the agent spoken once allowed", || asked("now spoken too"));
 }
 

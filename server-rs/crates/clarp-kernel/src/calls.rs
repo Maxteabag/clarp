@@ -280,7 +280,7 @@ struct Routed {
 }
 
 impl Call {
-    fn is_live(&self) -> bool {
+    pub fn is_live(&self) -> bool {
         self.state == LIVE
     }
 

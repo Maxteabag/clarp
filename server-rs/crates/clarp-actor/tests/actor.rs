@@ -6661,7 +6661,7 @@ fn an_agents_stop_gives_the_users_messages_back_and_the_users_stop_ends_them() {
     // Their rows are in the conversation: new words would part a row from what the tool is
     // given, and stand refused.
     let (reworded, _) = actor
-        .reword(TurnId(3), "other words", world.tick())
+        .reword(TurnId(3), "other words", None, world.tick())
         .unwrap();
     assert_eq!(reworded, clarp_kernel::journal::Reworded::InConversation);
 

@@ -11,6 +11,7 @@ use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::journal::{Batch, kind};
 use clarp_kernel::steering::{self, InputOwner, Join, Observation, Recovery, Stage};
 use clarp_kernel::takeover;
+use clarp_kernel::told;
 use clarp_kernel::turn::{COMPACTION, Origin, RunOutcome, TurnId};
 use clarp_spool::{Entry as Line, ShimEvent};
 use serde_json::Value;
@@ -34,7 +35,11 @@ pub(super) struct State {
     pub(super) separate: Option<Separate>,
     /// Once a separate turn was read, the process's exit is no longer the parent's verdict.
     crossed: bool,
-    pub(super) joined_speech: bool,
+    /// Whether the newest of the user's messages read into the turn asked for speech, where
+    /// one was: each send carries the app's audio setting when it was sent.
+    pub(super) joined_speech: Option<bool>,
+    /// Another sender's message read into the turn asked for speech.
+    pub(super) joined_asked: bool,
     pub(super) mixed: bool,
     /// The turn is Codex's: what it can take is told by its lane's lines, not a process's.
     codex: bool,
@@ -46,6 +51,8 @@ pub(super) struct State {
 
 pub(super) struct Sharing {
     pub(super) speak: bool,
+    /// The message is the user's own: its flag is the app's audio setting now.
+    pub(super) user: bool,
     pub(super) revealed: bool,
 }
 
@@ -199,7 +206,12 @@ impl State {
                     .find(|(_, follow)| follow.join.uuid == uuid);
                 match follow {
                     Some((_, follow)) if self.parent.is_none() => {
-                        self.joined_speech |= message_at(log, follow.message_seq)?.speak;
+                        let message = message_at(log, follow.message_seq)?;
+                        if message.origin.is_user_send() {
+                            self.joined_speech = Some(message.speak);
+                        } else {
+                            self.joined_asked |= message.speak;
+                        }
                     }
                     Some((turn, follow)) if self.separate.is_none() => {
                         self.separate(*turn, message_at(log, follow.message_seq)?);
@@ -245,7 +257,7 @@ impl State {
                 let into = follow.join.into;
                 if batch.command(Command::JoinRead { turn }, now_ms).is_ok() {
                     queue_started(batch, out, turn, &message);
-                    let speak = message.speak;
+                    let (speak, user) = (message.speak, message.origin.is_user_send());
                     if self.parent.is_some() {
                         if self.separate.is_none() {
                             self.separate(turn, message);
@@ -258,7 +270,11 @@ impl State {
                         || (conversation::mark_of(batch.log(), turn.0)?.is_none()
                             && conversation::split(batch, into, open, now_ms)?);
                     self.mixed |= revealed;
-                    return Ok(Some(Sharing { speak, revealed }));
+                    return Ok(Some(Sharing {
+                        speak,
+                        user,
+                        revealed,
+                    }));
                 }
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
@@ -567,13 +583,41 @@ impl Actor {
         let prompt = brief
             .as_ref()
             .map_or_else(|| text.to_owned(), |brief| brief.prompt(text));
+        // A message that asks for its answer to be spoken, read into a turn whose tool was not
+        // told how to speak: it is told now, as it would have been at the turn's launch, so
+        // that the answer is written for the ear.
+        let seq = self
+            .recorder
+            .agent()
+            .waiting()
+            .find(|waiting| waiting.id == turn);
+        let seq = seq.map(|waiting| waiting.message_seq);
+        let asks = match seq {
+            Some(seq) => message_at(self.recorder.log(), seq)?.speak,
+            None => false,
+        };
+        let tell = (asks && !live.told_speech)
+            .then_some(self.profile.told.as_ref())
+            .flatten()
+            .map(|told| told::Turn {
+                persona: told.persona.clone(),
+                spoken: Some(told.sound),
+                call: None,
+            });
+        let blocks = match &tell {
+            Some(told) => self
+                .backend
+                .steered_with_speech(told, &self.profile.session, &prompt),
+            None => vec![prompt],
+        };
         let input = if codex {
             Steering::Words {
                 id: uuid.clone(),
-                text: prompt,
+                text: blocks.join("\n\n"),
             }
         } else {
-            let mut line = takeover::claude_user_line(&uuid, &[&prompt]).to_string();
+            let texts: Vec<&str> = blocks.iter().map(String::as_str).collect();
+            let mut line = takeover::claude_user_line(&uuid, &texts).to_string();
             line.push('\n');
             Steering::Stdin(line)
         };
@@ -598,6 +642,11 @@ impl Actor {
             )?);
         }
         batch.commit()?;
+        if tell.is_some()
+            && let Some(live) = self.live.as_mut()
+        {
+            live.told_speech = true;
+        }
         Ok(Some(Action::Steer { socket, input }))
     }
 }

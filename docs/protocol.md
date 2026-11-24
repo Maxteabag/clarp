@@ -1079,6 +1079,24 @@ Rules:
 - While a turn process of the agent is still running, no second one starts:
   every send waits until it exits, even after the Host recorded that turn as
   finished.
+- `synthesize_audio: true` asks for the answer to be spoken: the agent's tool is
+  told how to speak, and what it marks with `<speak>` becomes clips. Send it when
+  the app's voice output is on. Without it, or with `false`, the answer is text
+  only, whoever sent the message (Rust Host contract 171, feature
+  `spoken_when_asked`; an older Host speaks a user's send that leaves the
+  field out, so send it either way). A person's words in a call that is still
+  on (with `call_id`, or the greeting with `call_opening`) are spoken unless the
+  send says `false`. The user's messages read together, and a message of the
+  user's that steers a running turn, follow the newest of them: each carries the
+  app's setting when it was sent, so turning voice off takes effect with the
+  next message. Another sender's message read into a turn can only ask for
+  speech. A message that asks for speech, read into a turn whose tool was not
+  told how to speak, tells it then, so its answer is written for the ear.
+  Answers to forms (`POST /artifacts/<id>/submit`) take the same field with the
+  same rule. The one exception: in hands-free dictation the router of spoken
+  messages speaks its own short questions and confirmations ("Was that for
+  Nadia?") whatever the send says, because the user started a voice
+  conversation with it; the agent's answer still follows the flag.
 - `hands_free: true` is for dictation: the server may route the text to a
   different agent (name routing or the orchestrator) and answers with the
   session it chose.
@@ -1145,6 +1163,21 @@ deletes an item of either kind until its turn starts; after that both answer
 404. Each sends `queue-updated` with the item's `client_msg_id`, `origin`, `sender` and
 `queue_change`: `edited` (with the new `text`) or `deleted`. A goal wake the Host retires
 sends `queue-updated` with its `client_msg_id`, `origin` and `sender` too.
+
+**The app's audio setting where a message is changed or an answer is given** (Rust Host
+contract 171, feature `spoken_when_asked`). `PUT /turn-queue/<id>` takes an optional
+`synthesize_audio` (bool) beside `text`, and `POST /turn-queue/<id>/send` takes an optional
+body `{"synthesize_audio": bool}` (an empty body is still accepted; a body that is not JSON
+answers 400 `invalid JSON body`). The value sent replaces the item's own flag, so send the
+app's current setting: the one the item was queued with is stale if voice was turned on or off
+since. Absent or `null`, the item keeps its flag. A Send now that is refused because a turn
+still runs (409) has already applied the flag, the item waits with it, and `queue-updated` is
+sent. An item a turn gave back to the queue, whose row is already in the conversation, keeps
+its own flag on a Send now. `POST /decisions/<id>/resolve` takes an optional `synthesize_audio` (bool):
+the message the answer becomes for the agent is spoken only when it is `true`; absent or
+`null`, it is not. Any of the three answers 400 `synthesize_audio must be a boolean` for another type.
+Older Hosts ignore the field: on Send now and reword they use the item's flag, and on a
+resolve the answer is not spoken.
 
 **The user's word goes first** (feature `queue_user_first`). An agent takes one
 queued item each time a turn ends. An item that carries the user's own word is

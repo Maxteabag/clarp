@@ -174,6 +174,7 @@ fn what_an_agent_made_and_asked_arrives_as_it_was() {
         expected_revision: decision.revision,
         choice: Some(&yes),
         answer: None,
+        synthesize_audio: false,
     };
     let (answered, _) = there
         .book

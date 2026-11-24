@@ -183,7 +183,11 @@ fn a_sends_origin_and_sender_are_the_python_hosts_from_what_it_claims_and_who_ma
                     "synthesize_audio": coordination::synthesize_audio(&origin, None),
                     "coordination": coordination,
                 });
-                assert_eq!(ours, case["made"], "{case}");
+                // The Python Host spoke a person's send that said nothing of it; this Host
+                // speaks only a send that asks, and no send here asks.
+                let mut theirs = case["made"].clone();
+                theirs["synthesize_audio"] = json!(false);
+                assert_eq!(ours, theirs, "{case}");
                 made += 1;
                 marked += usize::from(coordination);
             }
@@ -198,13 +202,13 @@ fn a_sends_origin_and_sender_are_the_python_hosts_from_what_it_claims_and_who_ma
 }
 
 #[test]
-fn a_send_is_spoken_as_it_asks_where_the_user_sent_it_and_otherwise_only_when_it_asks() {
+fn a_send_is_spoken_only_when_it_asks_whoever_sent_it() {
     use coordination::synthesize_audio as spoken;
-    assert!(spoken("user", None));
+    assert!(!spoken("user", None));
     assert!(!spoken("agent", None));
     assert!(spoken("user", Some(&json!(true))));
-    assert!(spoken("user", Some(&json!(null))));
-    assert!(spoken("user", Some(&json!(0))));
+    assert!(!spoken("user", Some(&json!(null))));
+    assert!(!spoken("user", Some(&json!(0))));
     assert!(!spoken("user", Some(&json!(false))));
     assert!(spoken("agent", Some(&json!(true))));
     assert!(!spoken("agent", Some(&json!(1))));

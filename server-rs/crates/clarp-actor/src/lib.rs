@@ -695,6 +695,8 @@ struct LiveTurn {
     plan: Option<serde_json::Value>,
     /// What the turn's replies mark for the ear is said aloud.
     speak: bool,
+    /// The tool was told how to speak: at the turn's launch, or with a message read into it.
+    told_speech: bool,
     /// What the tool has said of itself so far: its model, what the turn cost, and how
     /// full its conversation was at its newest answer.
     model: Option<String>,
@@ -1718,6 +1720,7 @@ impl Actor {
                 said_worked: false,
                 plan: None,
                 speak: message.speak,
+                told_speech: message.speak,
                 interpreter: actor
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
@@ -4427,16 +4430,22 @@ impl Actor {
 
     /// Changes the words of a message that waits outside the conversation. Its turn answers
     /// the new words; everything else about it stays: its id, its place, who sent it.
+    /// `speak`, where it is given, replaces whether the message is answered aloud: the app
+    /// says its current audio setting.
     pub fn reword(
         &mut self,
         turn: TurnId,
         text: &str,
+        speak: Option<bool>,
         now_ms: i64,
     ) -> Result<(Reworded, Outputs), ActorError> {
         let unreadable = |error: serde_json::Error| JournalError::Encode(error.to_string());
         let anew = |kept: &[u8]| {
             let mut message: Message = serde_json::from_slice(kept).map_err(unreadable)?;
             message.text = text.to_string();
+            if let Some(speak) = speak {
+                message.speak = speak;
+            }
             serde_json::to_vec(&message).map_err(unreadable)
         };
         let reworded = self.recorder.reword(turn, anew, now_ms)?;
@@ -4452,12 +4461,39 @@ impl Actor {
 
     /// Sends one waiting message now, whatever holds the mailbox: its user sends it by hand.
     /// The rest of what waits stays as it is, held where it was held.
+    /// `speak`, where it is given, first replaces whether the message is answered aloud: the
+    /// app says its current audio setting, which may differ from the one it was sent with.
+    /// A message that cannot be changed any more (its row is in the conversation) keeps its
+    /// own.
     pub fn send_now(
         &mut self,
         turn: TurnId,
         by: &str,
+        speak: Option<bool>,
         now_ms: i64,
     ) -> Result<(ByHand, Outputs), ActorError> {
+        let mut respoken = false;
+        // What the message says already is not written again.
+        let seq = self
+            .recorder
+            .agent()
+            .waiting()
+            .find(|waiting| waiting.id == turn);
+        let seq = seq.map(|waiting| waiting.message_seq);
+        let current = match seq {
+            Some(seq) => Some(self.message_at(seq)?.speak),
+            None => None,
+        };
+        let speak = speak.filter(|speak| current.is_some_and(|now| now != *speak));
+        if let Some(speak) = speak {
+            let unreadable = |error: serde_json::Error| JournalError::Encode(error.to_string());
+            let anew = |kept: &[u8]| {
+                let mut message: Message = serde_json::from_slice(kept).map_err(unreadable)?;
+                message.speak = speak;
+                serde_json::to_vec(&message).map_err(unreadable)
+            };
+            respoken = self.recorder.reword(turn, anew, now_ms)? == Reworded::Done;
+        }
         let command = Command::SendNow {
             turn,
             by: by.to_string(),
@@ -4465,7 +4501,15 @@ impl Actor {
         let effects = match self.recorder.handle(command, now_ms) {
             Ok(effects) => effects,
             Err(JournalError::Refused(Refusal::AtWork)) => {
-                return Ok((ByHand::AtWork, Outputs::default()));
+                // It waits on, as the app now says it is to be answered.
+                let out = Outputs {
+                    changed: Changed {
+                        queue: respoken,
+                        ..Changed::default()
+                    },
+                    ..Outputs::default()
+                };
+                return Ok((ByHand::AtWork, out));
             }
             Err(JournalError::Refused(_)) => return Ok((ByHand::NotWaiting, Outputs::default())),
             Err(error) => return Err(error.into()),
@@ -5002,7 +5046,9 @@ impl Actor {
         } else {
             self.together(turn, gather, out, now_ms)?
         };
-        let speak = message.speak || together.iter().any(|one| one.speak);
+        // Each of the user's sends carries the app's audio setting when it was sent: the
+        // newest of those read together says whether the turn is spoken.
+        let speak = together.last().map_or(message.speak, |one| one.speak);
         let unheard = message.unheard || together.iter().any(|one| one.unheard);
         let text = if together.is_empty() {
             message.text.clone()
@@ -5225,6 +5271,7 @@ impl Actor {
             said_worked,
             plan: None,
             speak,
+            told_speech: speak,
             client_id,
             message_id: message.id,
             trace_id: message.trace_id,
@@ -5515,7 +5562,9 @@ impl Actor {
             draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
             self.shown_revision = draft.revision;
         }
-        let speak = message.speak || steering.joined_speech;
+        // As when the turn ran: the newest of the user's messages read into it decides, and
+        // another sender's can only ask for speech.
+        let speak = steering.joined_speech.unwrap_or(message.speak) || steering.joined_asked;
         let input_skipped = steering.input_skipped;
         let in_call = opening_message(&message) || message.call.is_some();
         let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
@@ -5539,6 +5588,7 @@ impl Actor {
             said_worked,
             plan: None,
             speak,
+            told_speech: speak,
             model,
             tokens,
             total,
@@ -6711,7 +6761,14 @@ impl Actor {
                         t,
                         out,
                     )? {
-                        live.speak |= sharing.speak;
+                        // The user's own message carries the app's audio setting now: it
+                        // turns the turn's speech on or off. Another sender's can only
+                        // ask for it.
+                        if sharing.user {
+                            live.speak = sharing.speak;
+                        } else {
+                            live.speak |= sharing.speak;
+                        }
                         if sharing.revealed {
                             revealed_at = Some(t);
                         }

@@ -269,7 +269,7 @@ PLANTS = [
     (R, 'vectors', 'a version may be any value', '    if !matches!(version, J::Text(_)) {', '    if matches!(version, J::Null) {'),
     (R, 'vectors', 'answers may be a byte larger', '    if checks.canonical(answers, "/answers")?.len() > ANSWERS_MOST {', '    if checks.canonical(answers, "/answers")?.len() > ANSWERS_MOST + 1 {'),
     (R, 'vectors', 'answers of the most bytes are too large', '    if checks.canonical(answers, "/answers")?.len() > ANSWERS_MOST {', '    if checks.canonical(answers, "/answers")?.len() >= ANSWERS_MOST {'),
-    (R, 'host', 'answers that say nothing of the audio do not want it', '        None => true,\n        Some(J::Bool(audio)) => *audio,', '        None => false,\n        Some(J::Bool(audio)) => *audio,'),
+    (R, 'host', 'answers that say nothing of the audio want it', '        None => false,\n        Some(J::Bool(audio)) => *audio,', '        None => true,\n        Some(J::Bool(audio)) => *audio,'),
     (R, 'vectors', 'an audio preference may be any value', '        Some(_) => return refuse("audio_preference", "/synthesize_audio"),', '        Some(_) => true,'),
     (R, 'vectors', 'answers are weighed without their artifact', '        J::Text(Text::from(artifact_id)),', '        J::Text(Text::from("")),'),
     (R, 'vectors', 'other answers under a used id are the same', '        if previous.payload_hash != digest {', '        if previous.payload_hash.is_empty() {'),

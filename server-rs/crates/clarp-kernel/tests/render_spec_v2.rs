@@ -121,7 +121,8 @@ fn v2_payloads_answers_and_client_levels_match_the_reference() {
                         answers_json,
                         synthesize_audio,
                     }) => {
-                        assert!(synthesize_audio);
+                        // No answer here asks for a spoken reply, so none is spoken.
+                        assert!(!synthesize_audio);
                         assert_eq!(
                             json!({"repeat": false, "payload_hash": payload_hash, "answers_json": answers_json}),
                             case["admitted"]

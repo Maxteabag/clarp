@@ -788,12 +788,15 @@ def a_form_and_its_answers(w: World) -> None:
     answers('form-1', 'sub-0000-0000-0001', {'budget': 'x', 'when': 5}, note='the first thing the schema asks is said')
     w.call('pending_submissions', note='nothing was taken yet')
     # Answers that fit: kept once, however often they are sent.
-    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']})
+    # Each says it is to be spoken: the Rust Host speaks a reply only when it is asked for, and
+    # the Python Host also when nothing is said, so only what is said is the same on both.
+    answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
+            synthesize_audio=True)
     w.call('pending_submissions')
     answers('form-1', 'sub-0000-0000-0001', {'steps': ['a', 'b'], 'notes': 'blåbær, "quoted" 🎉', 'budget': 12.5, 'when': 'now'},
             note='the same answers in another order are the same answers')
     answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
-            synthesize_audio=True, note='and said to be spoken, as they are when nothing is said')
+            synthesize_audio=True, note='and said to be spoken again')
     answers('form-1', 'sub-0000-0000-0001', {'when': 'now', 'budget': 12.5, 'notes': 'blåbær, "quoted" 🎉', 'steps': ['a', 'b']},
             synthesize_audio=False, note='another wish for the same answers')
     answers('form-1', 'sub-0000-0000-0001', {'when': 'later'}, note='other answers under a used id')
@@ -810,7 +813,7 @@ def a_form_and_its_answers(w: World) -> None:
     answers('form-1', 'sub-0000-0000-0002', {'when': 'later', 'budget': 1e16, 'steps': []}, synthesize_audio=False)
     form(w.omar, 'form-2', title='Omar asks')
     answers('form-2', 'sub-0000-0000-0001', {'when': 'now'}, note='an id is used once on the whole Host')
-    answers('form-2', 'sub-0000-0000-0003', {'when': 'now', 'budget': 0})
+    answers('form-2', 'sub-0000-0000-0003', {'when': 'now', 'budget': 0}, synthesize_audio=True)
     w.call('pending_submissions', note='the oldest first')
     w.call('mark_submission_delivered', submission_id='sub-0000-0000-0003')
     w.call('pending_submissions')

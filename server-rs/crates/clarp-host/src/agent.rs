@@ -326,12 +326,16 @@ enum Ask {
     SendNow {
         turn: TurnId,
         by: String,
+        /// Whether it is answered aloud, where the app says it now.
+        speak: Option<bool>,
         answer: Answer<ByHand>,
     },
     /// Change the words of a message that waits outside the conversation.
     Reword {
         turn: TurnId,
         text: String,
+        /// Whether it is answered aloud, where the app says it now.
+        speak: Option<bool>,
         answer: Answer<Reworded>,
     },
     /// The Host says something quiet in the conversation, once under its id.
@@ -1005,13 +1009,37 @@ impl AgentHandle {
     }
 
     /// Sends one waiting message now, past whatever holds the mailbox.
-    pub async fn send_now(&self, turn: TurnId, by: String) -> Result<ByHand, Unavailable> {
-        self.ask(|answer| Ask::SendNow { turn, by, answer }).await
+    /// `speak`, where it is given, replaces whether the message is answered aloud.
+    pub async fn send_now(
+        &self,
+        turn: TurnId,
+        by: String,
+        speak: Option<bool>,
+    ) -> Result<ByHand, Unavailable> {
+        self.ask(|answer| Ask::SendNow {
+            turn,
+            by,
+            speak,
+            answer,
+        })
+        .await
     }
 
-    /// Changes the words of a message that waits outside the conversation.
-    pub async fn reword(&self, turn: TurnId, text: String) -> Result<Reworded, Unavailable> {
-        self.ask(|answer| Ask::Reword { turn, text, answer }).await
+    /// Changes the words of a message that waits outside the conversation, and with `speak`
+    /// whether it is answered aloud.
+    pub async fn reword(
+        &self,
+        turn: TurnId,
+        text: String,
+        speak: Option<bool>,
+    ) -> Result<Reworded, Unavailable> {
+        self.ask(|answer| Ask::Reword {
+            turn,
+            text,
+            speak,
+            answer,
+        })
+        .await
     }
 
     /// Writes a quiet word of the Host's into the conversation, once under its id: that the
@@ -1535,8 +1563,14 @@ pub fn spawn(setup: Setup) -> AgentHandle {
 }
 
 enum QueueEdit {
-    Edited { item: Waiting, text: String },
+    Edited {
+        item: Waiting,
+        text: String,
+    },
     Deleted(Waiting),
+    /// A waiting message was changed in a way the queue's own events do not name: whether it
+    /// is answered aloud, by a Send now that had to wait.
+    Changed,
 }
 
 struct Worker {
@@ -3559,16 +3593,30 @@ impl Worker {
                 let queue = actor.queue_state();
                 answered(withdrawn.map(|(was, out)| ((was, queue), out)), answer)?
             }
-            Ask::SendNow { turn, by, answer } => {
+            Ask::SendNow {
+                turn,
+                by,
+                speak,
+                answer,
+            } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
                     return Ok(());
                 }
-                answered(actor.send_now(turn, &by, now), answer)?
+                let sent = actor.send_now(turn, &by, speak, now);
+                if matches!(&sent, Ok((ByHand::AtWork, out)) if out.changed.queue) {
+                    self.queue_edit = Some(QueueEdit::Changed);
+                }
+                answered(sent, answer)?
             }
-            Ask::Reword { turn, text, answer } => {
+            Ask::Reword {
+                turn,
+                text,
+                speak,
+                answer,
+            } => {
                 let item = actor.queue_item(turn)?;
-                let reworded = actor.reword(turn, &text, now);
+                let reworded = actor.reword(turn, &text, speak, now);
                 if matches!(reworded, Ok((Reworded::Done, _))) {
                     self.queue_edit = item.map(|item| QueueEdit::Edited { item, text });
                 }
@@ -5200,6 +5248,7 @@ impl Worker {
                 item,
                 sender_name: name(item.sender_agent_id.as_deref()),
             }),
+            Some(QueueEdit::Changed) => Some(wire::QueueUpdate::Mailbox),
             None if (held_or_let_go && !told_with_its_turn)
                 || taken_back
                 || changed.stop_released_waiting =>

@@ -360,14 +360,24 @@ async fn give(app: &App, give: &Give) -> (Done, Option<ApiError>) {
     if request.client_msg_id.is_none() {
         request.client_msg_id = came.map(|came| came.client_id.clone());
     }
+    // A message of a call that is over by now is no speech in a call any more: it is
+    // answered aloud only when it asked.
+    if let Some(call) = request
+        .call_id
+        .clone()
+        .filter(|call| !call.trim().is_empty())
+        && !app.calls.is_up(app, call.trim()).await
+    {
+        request.call_id = None;
+    }
     let request = SendRequest {
         session: give.session.clone(),
         text: give.text.clone(),
         trace_id: Some(give.trace_id.clone()),
         force_session: Some(true),
         orchestrator_fallback: None,
-        // It was routed to the agent of its call when it came in.
-        call_id: None,
+        // It was routed to the agent of its call when it came in; a call it names that is
+        // still on says it is speech, answered aloud unless the app said otherwise.
         ..request
     };
     match edge::send_from(app, request, &made).await {

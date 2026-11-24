@@ -75,6 +75,11 @@ impl Backend for Claude {
         crate::Steers::Stdin
     }
 
+    /// The words, and the Host's reminder after them, as a turn is given its message.
+    fn steered_with_speech(&self, told: &told::Turn, session: &str, text: &str) -> Vec<String> {
+        vec![text.to_string(), reminder(told, session)]
+    }
+
     /// A message Claude Code read inside a tool call can be in its session file without an
     /// echo on its output.
     fn records_reads(&self) -> bool {
@@ -141,12 +146,7 @@ impl Backend for Claude {
         };
         // Normal turns keep the Host's reminder after the user's text. A takeover uses
         // exactly two user blocks, so its reminder travels with the system instructions.
-        let reminder = spec.told.as_ref().map(|told| {
-            let said = told::beside(&told.persona, &spec.session, told.spoken);
-            let said = told::in_call(said, told.call.as_deref());
-            let (opens, ends) = REMINDER;
-            format!("{opens}\n{said}\n{ends}")
-        });
+        let reminder = spec.told.as_ref().map(|told| reminder(told, &spec.session));
         let identity = if first.is_some() {
             let instructions = spec
                 .identity
@@ -306,6 +306,15 @@ const SHOWN: &str = "cl";
 
 /// The marks between which Claude Code hands the model what is not the user's own words.
 const REMINDER: (&str, &str) = ("<system-reminder>", "</system-reminder>");
+
+/// What the Host says after the user's words: who the agent is, whose turn it is, and how to
+/// speak when the answer is read aloud.
+fn reminder(told: &told::Turn, session: &str) -> String {
+    let said = told::beside(&told.persona, session, told.spoken);
+    let said = told::in_call(said, told.call.as_deref());
+    let (opens, ends) = REMINDER;
+    format!("{opens}\n{said}\n{ends}")
+}
 
 /// What kind of item a block of a message is shown as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
