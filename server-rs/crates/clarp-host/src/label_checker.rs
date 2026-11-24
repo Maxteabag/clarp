@@ -30,7 +30,7 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
         if record.is_helper() {
             family.sessions.push(record.session.clone());
         }
-        if record.helper_state.as_deref() != Some("running") {
+        if member.shown_helper_state() != Some("running") {
             continue;
         }
         let view = member.agent.view();

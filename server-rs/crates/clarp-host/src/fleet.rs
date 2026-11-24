@@ -434,6 +434,15 @@ pub struct Member {
     pub agent: AgentHandle,
 }
 
+impl Member {
+    /// The helper state it is shown in, to the apps and to agents alike: the stored one, read
+    /// as a turn of its runs or not ([`helpers::shown_state`]).
+    pub(crate) fn shown_helper_state(&self) -> Option<&str> {
+        let in_turn = self.agent.view().status.live.is_some();
+        helpers::shown_state(self.record.helper_state.as_deref(), in_turn)
+    }
+}
+
 pub(crate) struct Adopted {
     pub member: Arc<Member>,
     pub cwd_created: bool,
@@ -4304,15 +4313,15 @@ impl Fleet {
 pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
     {
         let view = member.agent.view();
-        let children: Vec<&AgentRecord> = members
+        let children: Vec<&Member> = members
             .iter()
-            .map(|child| &child.record)
-            .filter(|child| child.parent_agent_id.as_ref() == Some(&member.record.agent_id))
+            .map(|child| &**child)
+            .filter(|child| child.record.parent_agent_id.as_ref() == Some(&member.record.agent_id))
             .collect();
         let helper_sessions: Vec<&str> = children
             .iter()
-            .filter(|child| child.is_helper())
-            .map(|child| child.session.as_str())
+            .filter(|child| child.record.is_helper())
+            .map(|child| child.record.session.as_str())
             .collect();
         let processes = view
             .jobs
@@ -4327,9 +4336,10 @@ pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
         helpers::Doing {
             busy: view.status.live.is_some() || !view.status.waiting.is_empty(),
             active_jobs: processes.count(),
+            // A helper that reported and is still in its turn works for it all the same.
             running_children: children
                 .iter()
-                .filter(|child| child.helper_state.as_deref() == Some("running"))
+                .filter(|child| child.shown_helper_state() == Some("running"))
                 .count(),
             idle_since_ms: [Some(member.record.created_at_ms), last_job, last_turn]
                 .into_iter()

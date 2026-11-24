@@ -1454,12 +1454,8 @@ impl Families {
             if record.is_helper() {
                 family.helper_sessions.push(record.session.clone());
             }
-            let view = member.agent.view();
-            let shown = clarp_kernel::helpers::shown_state(
-                record.helper_state.as_deref(),
-                view.status.live.is_some(),
-            );
-            if shown == Some("running") {
+            if member.shown_helper_state() == Some("running") {
+                let view = member.agent.view();
                 let state = wire::state_name(&wire::state_kind(&view.status));
                 // What it says it is doing, or what its state says.
                 let said = view.status.label.trim();

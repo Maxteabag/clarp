@@ -5068,9 +5068,10 @@ impl Worker {
         }
         let (hub, record) = (self.setup.hub.clone(), self.setup.record.clone());
         // A helper that reported is shown working while a turn of its runs: when a turn
-        // begins or ends, the apps are told to read the list again to see it. A turn its
-        // parent's message began is told by the fleet, which moves the helper back to work
-        // for that message, so it is not told twice.
+        // begins or ends, the apps are told to read the list again to see it, once the view
+        // they read has the new status (below). A turn its parent's message began is told by
+        // the fleet, which moves the helper back to work for that message, so it is not told
+        // twice.
         let shown =
             |in_turn| clarp_kernel::helpers::shown_state(record.helper_state.as_deref(), in_turn);
         let for_its_parent = was_live.is_none()
@@ -5078,9 +5079,8 @@ impl Worker {
                 record.parent_agent_id.is_some()
                     && actor.live_sender_agent_id(live.turn) == record.parent_agent_id.as_deref()
             });
-        if shown(was_live.is_some()) != shown(status.live.is_some()) && !for_its_parent {
-            hub.publish(wire::roster("helper-state", &record.session), now);
-        }
+        let helper_moved =
+            shown(was_live.is_some()) != shown(status.live.is_some()) && !for_its_parent;
 
         let began_from_the_queue = status
             .live
@@ -5340,6 +5340,9 @@ impl Worker {
         }
         self.told = Some(status);
         self.publish_view();
+        if helper_moved {
+            hub.publish(wire::roster("helper-state", &record.session), now);
+        }
         if changed.conversation && !tell_read {
             let now = Instant::now();
             match self.transcript_sent {

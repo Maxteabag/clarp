@@ -473,7 +473,7 @@ async fn gather(
                 agent_id: record.agent_id.clone(),
                 session: record.session.clone(),
                 backend: record.backend.clone(),
-                helper_state: record.helper_state.clone(),
+                helper_state: member.shown_helper_state().map(str::to_owned),
                 archived: record.archived_at_ms.is_some(),
                 last_report: None,
                 last_final: None,
