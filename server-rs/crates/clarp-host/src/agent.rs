@@ -514,6 +514,12 @@ enum Ask {
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now.
     LoginChanged,
+    /// From a check of the network for a turn that waits for it: whether this machine
+    /// reaches the provider of the agent's tool.
+    NetworkChecked {
+        turn: TurnId,
+        up: bool,
+    },
     /// A terminal on the agent's own tool is to be opened: what the tool is started with
     /// there, of what the agent's turns are started with.
     TerminalFacts {
@@ -624,6 +630,8 @@ pub struct Setup {
     /// The pool of the accounts of the agent's tool, on a Host that runs the owner's
     /// selector itself and has one for this tool.
     pub pools: Vec<Arc<crate::pool::Service>>,
+    /// What says whether this machine reaches the provider of the agent's tool.
+    pub network: Arc<dyn crate::network::Check>,
 }
 
 impl Setup {
@@ -3788,6 +3796,7 @@ impl Worker {
             }
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
+            Ask::NetworkChecked { turn, up } => (actor.network_checked(turn, up, now)?, nobody()),
             Ask::TerminalFacts { answer } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
@@ -4332,6 +4341,18 @@ impl Worker {
                 return;
             }
             Action::Fork(order) => self.launch_fork(*order, tx),
+            // The check can take seconds: it runs on a thread of its own, and its answer
+            // comes back as any other.
+            Action::CheckNetwork { turn } => {
+                let network = self.setup.network.clone();
+                let backend = self.setup.record.backend.clone();
+                std::thread::Builder::new()
+                    .name("network".to_string())
+                    .spawn(move || {
+                        let up = network.reachable(&backend);
+                        let _ = tx.send(Ask::NetworkChecked { turn, up });
+                    })
+            }
             Action::ForkFollow {
                 turn,
                 attempt,
@@ -5541,6 +5562,7 @@ fn refuse_for(
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
+                | Ask::NetworkChecked { .. }
                 | Ask::HelperRead { .. }
                 | Ask::VisitProvider(_)
                 | Ask::ExpireProviderLinks(_)

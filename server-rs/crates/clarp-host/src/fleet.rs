@@ -1949,6 +1949,7 @@ fn setup(
         tally: works.tally.clone(),
         turns: works.turns.clone(),
         pools: works.pools.clone(),
+        network: crate::network::checker(works.config.network_down_file.clone()),
     })
 }
 

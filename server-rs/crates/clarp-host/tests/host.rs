@@ -333,6 +333,11 @@ impl Place {
         self.start_in(token, more, &[])
     }
 
+    /// The file whose presence tells the Hosts of this place that the machine has no network.
+    fn network_down(&self) -> PathBuf {
+        self.root.join("network-down")
+    }
+
     /// Starts the Host with more on its command line and more in its environment.
     fn start_in(&self, token: &str, more: &[&str], world: &[(&str, &str)]) -> Host {
         self.start_without(token, more, world, &[])
@@ -377,6 +382,10 @@ impl Place {
             .args(["--run", self.root.join("run").to_str().unwrap()])
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
+            // A test's Host checks no real network: the network is there until a test puts
+            // this file in place (`Place::network_down`).
+            .arg("--network-down-file")
+            .arg(self.network_down())
             .args(more)
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)

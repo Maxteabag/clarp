@@ -282,18 +282,45 @@ fn reconnecting(live: &LiveStatus) -> Option<(u32, i64, u32)> {
     } else {
         recovery::MAX_ATTEMPTS
     };
+    // Waits for an account are no tries against a bad line, nor attempts after the network
+    // came back.
+    let tries = parked
+        .attempts
+        .saturating_sub(parked.account.count)
+        .saturating_sub(parked.offline);
     match parked.wait {
         Wait::Retry { until_ms, .. } => Some((
-            // Waits for an account are no tries against a bad line.
             live.handoff_retry
-                .map_or(parked.attempts - parked.account.count + 1, |failures| {
-                    failures + 1
-                }),
+                .map_or(tries + 1, |failures| failures + 1),
             until_ms - parked.since_ms,
             of,
         )),
         Wait::Account { .. } => None,
+        // One whose network is gone waits for it, and says so.
+        Wait::Network { .. } if live.waits_for_the_network => None,
+        // One whose network is there, or not known yet, reconnects: after how long, once
+        // that is known.
+        Wait::Network { .. } => Some((
+            tries + 1,
+            live.network_retry_at_ms
+                .map_or(0, |at_ms| at_ms - parked.since_ms),
+            recovery::LINE_RETRIES + 1,
+        )),
     }
+}
+
+/// What a live turn that waits for the network says it waits for: when it waits for it, and
+/// a check found it gone.
+fn waiting_for_network(live: &LiveStatus) -> Option<String> {
+    live.waits_for_the_network
+        .then(|| failures::NETWORK_WAIT.to_string())
+}
+
+/// What a live turn that waits for an account, or for the network, says it waits for: when
+/// it waits for one. The apps show both alike: the turn keeps its place, and makes no
+/// progress until what it waits for is there.
+fn waiting_for(live: &LiveStatus, backend: &str) -> Option<String> {
+    waiting_for_network(live).or_else(|| waiting_for_account(live, backend))
 }
 
 /// What a live turn that waits for an account says it waits for: when it waits for one.
@@ -446,11 +473,12 @@ pub fn state(
                 "summary": retry_said(live),
             })
         }
-        // It waits for an account: it keeps its place, and says what it waits for.
-        (Some(live), _) if waiting_for_account(live, backend).is_some() => json!({
+        // It waits for an account, or for the network: it keeps its place, and says what it
+        // waits for.
+        (Some(live), _) if waiting_for(live, backend).is_some() => json!({
             "account_recovery": "waiting",
             "dispatch": backend,
-            "message": waiting_for_account(live, backend).unwrap_or_default(),
+            "message": waiting_for(live, backend).unwrap_or_default(),
             "origin": live.origin.name(),
             "trace_id": live.trace_id.clone().unwrap_or_default(),
         }),
@@ -686,7 +714,7 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         .map_or(summary, |told| told.summary.as_str());
     // A turn that waits for an account keeps its place and is not thinking: it makes no
     // progress until an account is there. The line says what it waits for.
-    let waiting = running.and_then(|live| waiting_for_account(live, &record.backend));
+    let waiting = running.and_then(|live| waiting_for(live, &record.backend));
     let (action, phase, state, summary) = match &waiting {
         Some(message) => (
             "waiting for account",
@@ -2000,7 +2028,7 @@ pub fn summary(
         let line = |name: &str, category: &str, label: &str| {
             Some(clarp_kernel::tools::headline(name, category, label))
         };
-        let waiting = live.and_then(|live| waiting_for_account(live, backend));
+        let waiting = live.and_then(|live| waiting_for(live, backend));
         let (state, headline) = match (live.map(|live| &live.activity), tools.last(), completed) {
             // A turn that waits for an account: limited, and what it waits for.
             (Some(_), ..) if waiting.is_some() => ("limited", waiting),
@@ -2404,6 +2432,8 @@ mod tests {
                 held_for_an_account: false,
                 waits_for_its_model: None,
                 failed_attempts: 0,
+                waits_for_the_network: false,
+                network_retry_at_ms: None,
             }),
             last: last.map(|outcome| Settled {
                 id: TurnId(1),

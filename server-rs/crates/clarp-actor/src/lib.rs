@@ -262,6 +262,10 @@ pub enum Action {
         attempt: u32,
         socket: PathBuf,
     },
+    /// Check whether this machine reaches the provider of the agent's tool, for this turn
+    /// that waits for the network, and say what was found: [`Actor::network_checked`]. The
+    /// check is the Host's, never the turn's tool's.
+    CheckNetwork { turn: TurnId },
 }
 
 /// What is different after a call, for whoever tells the clients.
@@ -574,6 +578,11 @@ pub struct LiveStatus {
     pub waits_for_its_model: Option<String>,
     /// How many attempts of the turn have failed so far.
     pub failed_attempts: u32,
+    /// It waits for the network, which a check found gone.
+    pub waits_for_the_network: bool,
+    /// It failed on its connection while the machine had a network, and is tried again at
+    /// this time.
+    pub network_retry_at_ms: Option<i64>,
 }
 
 /// What an agent is doing, for a snapshot.
@@ -793,6 +802,36 @@ const POOL_MARGIN_MS: i64 = 300_000;
 const STOPPED_FOR_AN_ACCOUNT: &str =
     "usage limit reached: the account was out, and the turn was stopped to wait for another";
 
+/// What this Host knows of the network for a turn that waits for it. None of it is in the log:
+/// a Host that starts again checks the network anew.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NetworkWatch {
+    /// The turn, and how many attempts it had: the wait this is of.
+    turn: TurnId,
+    attempts: u32,
+    /// A check of this wait found the network gone.
+    gone: bool,
+    next: NetworkStep,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NetworkStep {
+    /// The network is checked at this time.
+    Check(i64),
+    /// A check was asked for. Where no answer has come by this time, it is asked again.
+    Asked(i64),
+    /// The network is there: the turn is tried again at this time.
+    Retry(i64),
+}
+
+impl NetworkStep {
+    fn at(self) -> i64 {
+        match self {
+            Self::Check(at) | Self::Asked(at) | Self::Retry(at) => at,
+        }
+    }
+}
+
 pub struct Actor {
     launch_defaults: Option<LaunchDefaults>,
     teams: Option<Arc<dyn teams::Runtime>>,
@@ -812,6 +851,8 @@ pub struct Actor {
     held_for_an_account: bool,
     /// The turn waits for an account that serves its model, while the rest of the pool works.
     for_its_model: bool,
+    /// What this Host found of the network for the turn that waits for it.
+    network: Option<NetworkWatch>,
     /// The refusals of the live turn's launch so far (R121), counted as the Python Host counts
     /// them: in memory, so a Host that starts again counts from nothing, as that one does.
     refused: Option<(TurnId, launch_refused::Refusals)>,
@@ -1538,6 +1579,7 @@ impl Actor {
             stopped_for_pool: false,
             held_for_an_account: false,
             for_its_model: false,
+            network: None,
             refused: None,
             never_run: None,
             shown,
@@ -1843,7 +1885,11 @@ impl Actor {
             }
         }
         if self.shown_turn.is_some() {
-            let waits = self.held_for_an_account
+            // A turn whose network is gone waits as one that waits for an account does, and
+            // says what it waits for.
+            let offline = self.network_gone();
+            let waits = offline
+                || self.held_for_an_account
                 || matches!(
                     self.recorder.agent().live(),
                     Some(Turn::Parked(parked)) if matches!(parked.wait, Wait::Account { .. })
@@ -1859,7 +1905,11 @@ impl Actor {
                 Some(Turn::Parked(parked)) => resets_of(parked),
                 _ => None,
             };
-            let said = failures::with_reset(plan.as_deref().unwrap_or(ACCOUNT_WAIT), resets);
+            let said = if offline {
+                failures::NETWORK_WAIT.to_string()
+            } else {
+                failures::with_reset(plan.as_deref().unwrap_or(ACCOUNT_WAIT), resets)
+            };
             let events = self
                 .shown
                 .account_recovery(waits.then_some(said.as_str()), now_ms);
@@ -2205,6 +2255,8 @@ impl Actor {
                 held_for_an_account: self.held_for_an_account,
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempt.saturating_sub(1),
+                waits_for_the_network: false,
+                network_retry_at_ms: None,
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
                 turn: turn.id,
@@ -2225,6 +2277,8 @@ impl Actor {
                 held_for_an_account: false,
                 waits_for_its_model: None,
                 failed_attempts: turn.attempt.saturating_sub(1),
+                waits_for_the_network: false,
+                network_retry_at_ms: None,
             }),
             // Between two attempts no tool works: the turn is as busy as one that thinks.
             Some(Turn::Parked(turn)) => Some(LiveStatus {
@@ -2249,6 +2303,11 @@ impl Actor {
                 held_for_an_account: false,
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempts,
+                waits_for_the_network: self.network_gone(),
+                network_retry_at_ms: self.network_of(turn).and_then(|watch| match watch.next {
+                    NetworkStep::Retry(at) => Some(at),
+                    _ => None,
+                }),
             }),
             _ => None,
         };
@@ -5514,6 +5573,10 @@ impl Actor {
             // A turn whose launch was refused, and whose count a Host that started since has
             // not: the Python Host's queue tries it at once when it starts (R121).
             Some(Turn::Parked(parked)) if self.refusal_uncounted(parked) => Some(parked.since_ms),
+            // A turn that waits for the network: when it is checked next, or tried again.
+            Some(Turn::Parked(parked)) if parked.wait.is_for_the_network() => {
+                self.network_of(parked).map(|watch| watch.next.at())
+            }
             Some(Turn::Parked(parked)) => Some(parked.wait.until_ms()),
             _ => None,
         }
@@ -5543,12 +5606,156 @@ impl Actor {
                 .is_some_and(|live| live.turn == parked.id && !live.opening)
     }
 
-    /// Starts the next attempt of a turn whose wait is over. Nothing happens before then.
+    /// Starts the next attempt of a turn whose wait is over. Nothing happens before then. A
+    /// turn that waits for the network has it checked first ([`Action::CheckNetwork`]).
     pub fn retry_due(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
         if self.retry_at().is_none_or(|at| at > now_ms) {
             return Ok(Outputs::default());
         }
-        self.retry(now_ms)
+        let watch = match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => self.network_of(parked),
+            _ => None,
+        };
+        match watch {
+            Some(watch @ NetworkWatch {
+                next: NetworkStep::Retry(_),
+                ..
+            }) => self.retry_as(now_ms, watch.gone),
+            Some(watch) => {
+                self.network = Some(NetworkWatch {
+                    next: NetworkStep::Asked(now_ms + recovery::NETWORK_ANSWER_MS),
+                    ..watch
+                });
+                Ok(Outputs {
+                    actions: vec![Action::CheckNetwork { turn: watch.turn }],
+                    ..Outputs::default()
+                })
+            }
+            None => self.retry(now_ms),
+        }
+    }
+
+    /// What this Host knows of the network for a turn that waits for it: `None` for a turn
+    /// that waits for something else. A wait nothing is known of yet is checked at once.
+    fn network_of(&self, parked: &Parked) -> Option<NetworkWatch> {
+        if !parked.wait.is_for_the_network() {
+            return None;
+        }
+        let known = self
+            .network
+            .filter(|watch| watch.turn == parked.id && watch.attempts == parked.attempts);
+        Some(known.unwrap_or(NetworkWatch {
+            turn: parked.id,
+            attempts: parked.attempts,
+            gone: false,
+            next: NetworkStep::Check(parked.since_ms),
+        }))
+    }
+
+    /// Whether the turn waits for the network, and a check found it gone.
+    pub fn network_gone(&self) -> bool {
+        match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => self.network_of(parked).is_some_and(|watch| watch.gone),
+            _ => false,
+        }
+    }
+
+    /// What the Host found when it checked the network for this turn, which waits for it
+    /// ([`Action::CheckNetwork`]): `up`, the machine reaches the provider of the agent's
+    /// tool. Where it does, the turn is tried again (`recovery::after_network_check`); where
+    /// it does not, it waits on and says that it waits for the network, until the wait is
+    /// over and the turn ends. An answer that comes late, or that nobody asked for, changes
+    /// nothing.
+    pub fn network_checked(
+        &mut self,
+        turn: TurnId,
+        up: bool,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        let mut out = Outputs::default();
+        let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
+            return Ok(out);
+        };
+        let Wait::Network { until_ms, resume } = parked.wait else {
+            return Ok(out);
+        };
+        let Some(watch) = self.network_of(parked).filter(|watch| {
+            watch.turn == turn && matches!(watch.next, NetworkStep::Asked(_))
+        }) else {
+            return Ok(out);
+        };
+        let next = recovery::after_network_check(recovery::Checked {
+            up,
+            was_gone: watch.gone,
+            attempt: parked.attempts,
+            account_waits: parked.account.count,
+            offline: parked.offline,
+            until_ms,
+            resume,
+            now_ms,
+        });
+        match next {
+            recovery::Next::Retry { after_ms, .. } if after_ms <= 0 => {
+                self.retry_as(now_ms, watch.gone)
+            }
+            recovery::Next::Retry { after_ms, .. } => {
+                self.network = Some(NetworkWatch {
+                    next: NetworkStep::Retry(now_ms + after_ms),
+                    ..watch
+                });
+                out.changed.status = true;
+                Ok(out)
+            }
+            recovery::Next::Offline { check_at_ms } => {
+                self.network = Some(NetworkWatch {
+                    gone: true,
+                    next: NetworkStep::Check(check_at_ms),
+                    ..watch
+                });
+                // What it waits for is shown as soon as it is known.
+                if !watch.gone {
+                    self.show_turn(now_ms);
+                    out.changed.status = true;
+                }
+                Ok(out)
+            }
+            recovery::Next::NetworkGone => {
+                self.give_up_waiting(turn, Command::NetworkGone { turn }, now_ms)
+            }
+            _ => self.give_up_waiting(turn, Command::WaitOver { turn }, now_ms),
+        }
+    }
+
+    /// The turn that waits ends on the failure it waited on, the way `command` says.
+    fn give_up_waiting(
+        &mut self,
+        turn: TurnId,
+        command: Command,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
+            return Ok(Outputs::default());
+        };
+        let kind = parked.kind.clone();
+        let reason = match command {
+            Command::NetworkGone { .. } => failures::network_gone(&parked.reason),
+            _ => parked.reason.clone(),
+        };
+        let model = self.turn_model().unwrap_or_default();
+        let Some(live) = self.live.as_ref().filter(|live| live.turn == turn) else {
+            return Ok(Outputs::default());
+        };
+        let told = failure_marker(Failure {
+            turn,
+            message_id: &live.message_id,
+            origin: &live.origin,
+            kind: &kind,
+            reason: &reason,
+            model: &model,
+            trace_id: live.trace_id.clone(),
+            resets: None,
+        });
+        self.finish_waiting_as(turn, told, command, now_ms)
     }
 
     /// Gives the actor the pool of its tool's accounts.
@@ -5679,14 +5886,26 @@ impl Actor {
         told: Option<Entry>,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
+        self.finish_waiting_as(turn, told, Command::WaitOver { turn }, now_ms)
+    }
+
+    /// The turn that waits ends the way `command` says, with `told` under it.
+    fn finish_waiting_as(
+        &mut self,
+        turn: TurnId,
+        told: Option<Entry>,
+        command: Command,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
         let mut out = Outputs::default();
         let Some(live) = self.live.as_mut().filter(|live| live.turn == turn) else {
             return Ok(out);
         };
         let mut batch = self.recorder.batch();
-        if batch.command(Command::WaitOver { turn }, now_ms).is_err() {
+        if batch.command(command, now_ms).is_err() {
             return Ok(out);
         }
+        self.network = None;
         if let Some(notice) = told {
             if closed_by_marker(&live.last_row, &live.message_id) {
                 live.last_row = notice.id().to_string();
@@ -5732,6 +5951,12 @@ impl Actor {
 
     /// Starts the next attempt of the turn that waits for one.
     fn retry(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        self.retry_as(now_ms, false)
+    }
+
+    /// Starts the next attempt of the turn that waits for one. `network_back`: it waited for
+    /// the network, which was gone and is back.
+    fn retry_as(&mut self, now_ms: i64, network_back: bool) -> Result<Outputs, ActorError> {
         if let Some(out) = self.settle_moved_wait(now_ms)? {
             return Ok(out);
         }
@@ -5755,12 +5980,15 @@ impl Actor {
             return self.finish_waiting(turn, Some(told), now_ms);
         }
         let mut batch = self.recorder.batch();
-        if batch
-            .command(Command::TurnRetried { turn }, now_ms)
-            .is_err()
-        {
+        let command = if network_back {
+            Command::NetworkBack { turn }
+        } else {
+            Command::TurnRetried { turn }
+        };
+        if batch.command(command, now_ms).is_err() {
             return Ok(out);
         }
+        self.network = None;
         // The next attempt has a spool of its own, read from its beginning.
         batch.cursor(turn, 0, now_ms);
         let effects = batch.commit()?.effects;
@@ -6028,6 +6256,7 @@ impl Actor {
                                 let kind = failures::classify_error(reason);
                                 let waits = batch.agent().live().map(Turn::account_waits);
                                 let waits = waits.unwrap_or_default();
+                                let offline = batch.agent().live().map_or(0, Turn::offline);
                                 // When the account has usage again, where the tool said so
                                 // with a usage limit.
                                 let resets_at_ms = live
@@ -6051,6 +6280,7 @@ impl Actor {
                                         kind,
                                         attempt: live.attempt,
                                         account_waits: waits.count,
+                                        offline,
                                         account_wait_since_ms: waits.since_ms,
                                         nothing_done,
                                         busy: failures::provider_busy(reason),
@@ -6070,6 +6300,11 @@ impl Actor {
                                         until_ms,
                                         resets_at_ms,
                                     }),
+                                    // The Host checks the network at once: the turn's wait
+                                    // is new, and nothing is known of it yet.
+                                    recovery::Next::Network { until_ms, resume } => {
+                                        Some(Wait::Network { until_ms, resume })
+                                    }
                                     recovery::Next::Pool { plan } => {
                                         let pool = self.pool.as_ref();
                                         let waits = pool.is_some_and(|pool| {
@@ -6082,7 +6317,9 @@ impl Actor {
                                             resets_at_ms,
                                         })
                                     }
-                                    recovery::Next::Fail => None,
+                                    recovery::Next::Fail
+                                    | recovery::Next::Offline { .. }
+                                    | recovery::Next::NetworkGone => None,
                                 };
                                 if let Some(wait) = wait {
                                     let parked = Command::TurnParked {
