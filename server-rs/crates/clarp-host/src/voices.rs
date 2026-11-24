@@ -515,7 +515,9 @@ async fn legacy_preview(State(app): State<App>, body: Bytes) -> Result<Json<Valu
         .await
         .map_err(|e| {
             ApiError::new(
-                if matches!(e.as_str(), "google_id_collision" | "google_id_unverifiable") {
+                if matches!(e.as_str(), "google_id_collision" | "google_id_unverifiable")
+                    || e == crate::voice::CLOUD_SPEECH_OFF
+                {
                     StatusCode::CONFLICT
                 } else {
                     StatusCode::INTERNAL_SERVER_ERROR

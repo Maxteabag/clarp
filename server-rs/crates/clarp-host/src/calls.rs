@@ -655,6 +655,21 @@ impl Desk {
             text(said, "reason"),
             text(said, "opening_line"),
         );
+        // A live ring is spoken by a voice in the cloud: one of an agent whose words stay off
+        // the cloud (`cloud_speech` off) is not placed.
+        if said["conversation_mode"] == "live" {
+            let directory = app.fleet.directory();
+            let kept_off = [turn_agent_id, agent.as_str()]
+                .iter()
+                .filter_map(|named| directory.named(named))
+                .any(|member| !member.record.speaks_to_cloud());
+            if kept_off {
+                return Ok(Err(Refused {
+                    status: 409,
+                    body: json!({ "ok": false, "error": live::CLOUD_SPEECH_OFF }),
+                }));
+            }
+        }
         let asked = rings::Asked {
             turn_agent_id,
             agent: &agent,
