@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 170;
+pub const HOST_CONTRACT: u64 = 171;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -391,6 +391,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Codex home and on that provider only, and fail as `provider_mismatch` otherwise. An
     // agent's `cloud_speech` keeps its words from speech providers in the cloud.
     ("codex_own_provider", 170),
+    // A turn is over when its tool says so in its own end line (Claude Code's `result`,
+    // Grok's end, Codex's `turn.completed`), not when its process exits a moment later: its
+    // `turn.ended_at_ms`, `worked_ms` and the agent's state say that line. The next
+    // turn is launched once the process is gone (`clarp_actor::lingering`, issue 750).
+    ("turn_over_at_answer", 171),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by

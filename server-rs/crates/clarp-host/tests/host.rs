@@ -63,6 +63,8 @@ mod cross_origin_read;
 mod delivery;
 #[path = "host/diagnostics.rs"]
 mod diagnostics;
+#[path = "host/end_at_answer.rs"]
+mod end_at_answer;
 #[path = "host/enter_at_start.rs"]
 mod enter_at_start;
 #[path = "host/goal_ledger.rs"]

@@ -540,6 +540,24 @@ the daily schedule.
 
 ## Rust-first features
 
+- **A turn is over at its tool's own end line (issue 750, Rust contract 171).** The Python Host
+  ended a turn when its tool's process exited. Claude Code prints its `result`, and Grok its end
+  line, 0.7 to 2.7 seconds before it exits (Claude Code sends what it counted first), and the
+  agent was shown at work for that long after its answer. The Rust Host ends the turn at that
+  line (Codex exec at `turn.completed`), when its answer is whole and nothing else of the turn
+  is owed: no message read into it and not answered, none given to it and not yet read, no
+  separate turn its process went on to, no tool call that runs, no work Claude Code left in the
+  background (it answers again when that is done, and the turn ends at that answer). The agent's
+  state, its live items and the row's `turn` (`ended_at_ms` and `worked_ms` with it) say the
+  end from that line. The process goes on until it exits, and the agent's next turn is
+  begun at once but launched only then: two processes never work in one conversation. A Stop
+  meanwhile ends the process and leaves the turn as it ended. A process that exits badly after
+  an answer it said was whole leaves the turn completed and is not tried again (that would answer
+  twice); the Host's log says so. Claude Code is asked to stop with SIGINT first, then SIGTERM
+  after three seconds: interrupted, it prints a `result` of `error_during_execution` some 40 ms
+  later, and the stopped turn ends there (with SIGTERM it printed nothing and went a second
+  later). A turn with a message given to it and not yet read still ends at the exit, as before.
+
 - **A turn whose model the account's plan does not offer (issue 720).** The Python
   coordinator ends such a turn after three answers of the owner's selector that leave its
   model out (`PLAN_CHECKS`, about three minutes). The Rust Host ends it on the first
