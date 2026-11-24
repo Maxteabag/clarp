@@ -540,7 +540,7 @@ the daily schedule.
 
 ## Rust-first features
 
-- **A turn is over at its tool's own end line (issue 750, Rust contract 171).** The Python Host
+- **A turn is over at its tool's own end line (issue 750, Rust contract 172).** The Python Host
   ended a turn when its tool's process exited. Claude Code prints its `result`, and Grok its end
   line, 0.7 to 2.7 seconds before it exits (Claude Code sends what it counted first), and the
   agent was shown at work for that long after its answer. The Rust Host ends the turn at that
