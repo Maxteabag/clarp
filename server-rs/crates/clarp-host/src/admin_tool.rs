@@ -688,6 +688,9 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
         "--effort",
         "--session",
         "--voice-id",
+        "--codex-home",
+        "--codex-provider",
+        "--cloud-speech",
     ];
     let usage = |why: &str| {
         ToolAnswer::said(
@@ -695,7 +698,8 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
             format!(
                 "usage: clarp-admin agent create [-h] [--parent PARENT] [--role {{agent,helper}}] \
                  [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] \
-                 [--session SESSION] [--voice-id VOICE_ID] [--test] name\n\
+                 [--session SESSION] [--voice-id VOICE_ID] [--codex-home CODEX_HOME] \
+                 [--codex-provider CODEX_PROVIDER] [--cloud-speech {{on,off}}] [--test] name\n\
                  clarp-admin agent create: error: {why}"
             ),
         )
@@ -733,6 +737,25 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
     }
     let voice = parsed.option("--voice-id").unwrap_or("{}");
     asked.insert("voice_id".to_string(), json!(voice));
+    // A Codex agent on a model provider of its own: its home is named from where the tool
+    // was called, as a working directory is.
+    if let Some(home) = parsed.option("--codex-home").filter(|home| !home.is_empty()) {
+        asked.insert("codex_home".to_string(), json!(named_from(call, home)));
+    }
+    if let Some(provider) = parsed.option("--codex-provider") {
+        asked.insert("codex_provider".to_string(), json!(provider));
+    }
+    match parsed.option("--cloud-speech") {
+        None => {}
+        Some(said @ ("on" | "off")) => {
+            asked.insert("cloud_speech".to_string(), json!(said == "on"));
+        }
+        Some(other) => {
+            return usage(&format!(
+                "argument --cloud-speech: invalid choice: '{other}' (choose from 'on', 'off')"
+            ));
+        }
+    }
     // A directory is named from where the tool was called.
     if let Some(cwd) = parsed.option("--cwd").filter(|cwd| !cwd.is_empty()) {
         asked.insert("cwd".to_string(), json!(named_from(call, cwd)));
@@ -1055,6 +1078,71 @@ async fn agent_transit(app: &App, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// `clarp-admin agent provider --session S [--codex-home DIR --codex-provider NAME | --clear]
+/// [--cloud-speech on|off|default]`: binds a Codex agent to a model provider of its own, or
+/// lets it go, and says whether its words may be spoken in the cloud
+/// ([`roster::bind`]); prints the Host's answer.
+async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent provider [-h] --session SESSION \
+                 [--codex-home CODEX_HOME] [--codex-provider CODEX_PROVIDER] [--clear] \
+                 [--cloud-speech {{on,off,default}}]\n\
+                 clarp-admin agent provider: error: {why}"
+            ),
+        )
+    };
+    let valued = [
+        "--session",
+        "--codex-home",
+        "--codex-provider",
+        "--cloud-speech",
+    ];
+    let parsed = match parse(args, &valued, &["--clear"], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let Some(session) = parsed.option("--session").filter(|said| !said.trim().is_empty()) else {
+        return usage("the following arguments are required: --session");
+    };
+    let mut asked = roster::Fields::new();
+    asked.insert("session".to_string(), json!(session));
+    if parsed.flags.contains("--clear") {
+        asked.insert("codex_home".to_string(), Value::Null);
+        asked.insert("codex_provider".to_string(), Value::Null);
+    } else {
+        if let Some(home) = parsed.option("--codex-home").filter(|home| !home.is_empty()) {
+            asked.insert("codex_home".to_string(), json!(named_from(call, home)));
+        }
+        if let Some(provider) = parsed.option("--codex-provider") {
+            asked.insert("codex_provider".to_string(), json!(provider));
+        }
+    }
+    match parsed.option("--cloud-speech") {
+        None => {}
+        Some("default") => {
+            asked.insert("cloud_speech".to_string(), Value::Null);
+        }
+        Some(said @ ("on" | "off")) => {
+            asked.insert("cloud_speech".to_string(), json!(said == "on"));
+        }
+        Some(other) => {
+            return usage(&format!(
+                "argument --cloud-speech: invalid choice: '{other}' (choose from 'on', 'off', 'default')"
+            ));
+        }
+    }
+    match roster::bind(app, &asked).await {
+        Ok(answer) => shown(&answer),
+        Err(refused) => {
+            let (status, body) = refused.answered();
+            ToolAnswer::said(1, format!("clarp-admin: HTTP {status}: {body}"))
+        }
+    }
+}
+
 /// `clarp-admin agent ...`: what an agent does about other agents.
 async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     match args.split_first() {
@@ -1062,10 +1150,11 @@ async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
         Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
         Some((command, rest)) if command == "fork" => agent_fork(app, call, rest).await,
         Some((command, rest)) if command == "transit" => agent_transit(app, rest).await,
+        Some((command, rest)) if command == "provider" => agent_provider(app, call, rest).await,
         Some((command, _)) => not_here(&format!("agent {command}")),
         None => ToolAnswer::said(
             2,
-            "usage: clarp-admin agent {create,fork,helper-state,transit} ...",
+            "usage: clarp-admin agent {create,fork,helper-state,provider,transit} ...",
         ),
     }
 }

@@ -319,8 +319,14 @@ pub(crate) async fn tune(app: &App, asked: &Fields) -> Result<Value, Refusal> {
 /// has it). What the request leaves out stays. Its next turn runs with what it now has; one
 /// that runs keeps what it was started with.
 async fn provider(State(app): State<App>, body: Bytes) -> Answered {
-    let asked = object(&body)?;
-    let session = edge::body_text(&asked, "session")?;
+    Ok(Json(bind(&app, &object(&body)?).await?))
+}
+
+/// Binds an agent to a provider of its own, or lets it go, from what a request said, and
+/// answers what the route answers. The agents' own tool for it (`clarp-admin agent provider`)
+/// asks the same thing.
+pub(crate) async fn bind(app: &App, asked: &Fields) -> Result<Value, Refusal> {
+    let session = edge::body_text(asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
     }
@@ -328,9 +334,9 @@ async fn provider(State(app): State<App>, body: Bytes) -> Answered {
         return Err(no_such_agent());
     };
     let before = &member.record;
-    let home = optional(&asked, "codex_home", "codex_home must be string or null")?
+    let home = optional(asked, "codex_home", "codex_home must be string or null")?
         .unwrap_or_else(|| before.codex_home.clone());
-    let provider = optional(&asked, "codex_provider", "codex_provider must be string or null")?
+    let provider = optional(asked, "codex_provider", "codex_provider must be string or null")?
         .unwrap_or_else(|| before.codex_provider.clone());
     let cloud_speech = match asked.get("cloud_speech") {
         None => before.cloud_speech,
@@ -358,15 +364,15 @@ async fn provider(State(app): State<App>, body: Bytes) -> Answered {
         provider,
         cloud_speech,
     };
-    let record = amend(&app, &before.agent_id, change).await?;
-    Ok(Json(json!({
+    let record = amend(app, &before.agent_id, change).await?;
+    Ok(json!({
         "ok": true,
         "session": record.session,
         "backend": record.backend,
         "codex_home": record.codex_home,
         "codex_provider": record.codex_provider,
         "cloud_speech": record.speaks_to_cloud(),
-    })))
+    }))
 }
 
 /// `GET /agents/archived?limit=&cursor=`: one page of the agents that are put away, the

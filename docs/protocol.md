@@ -463,6 +463,9 @@ Rules:
   among its newest rows that were written before its Host showed them so are sent once more,
   at a newer revision, so a delta gives an app that holds one the row as it is now, to replace
   where it stands; one the app does not hold belongs where its timestamp puts it.
+- **A turn on another model provider than its agent's is a failure of its own (Rust Host
+  contract 170, feature `codex_own_provider`).** The kind `provider_mismatch`: see
+  [Agent lifecycle](#8-agent-lifecycle). It is never tried again.
 - **A conversation too long for its model is a failure of its own (Rust Host contract 166,
   feature `prompt_too_long`).** Such a turn fails with the kind `prompt_too_long`, and its
   reason is "This conversation is too long for the model. Compact it or start a new one",
@@ -1288,6 +1291,32 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `agent-state` is `interrupted`, detail `source: "restart"`), so its answer
   never goes into the conversation the relaunch ends; unlike a Stop it holds
   nothing, and what waited behind the turn runs in the new conversation.
+- **A Codex agent on a model provider of its own (Rust Host contract 170, feature
+  `codex_own_provider`).** `POST /agents` also takes `codex_home` (an absolute directory) and
+  `codex_provider` (the name its `config.toml` defines the provider under), both or neither,
+  for a `codex` agent, and `cloud_speech` (bool). `POST /agent-provider` `{"session",
+  "codex_home"?, "codex_provider"?, "cloud_speech"?}` changes them later: what it leaves out
+  stays, empty or null `codex_home` and `codex_provider` let the binding go, null
+  `cloud_speech` returns to the default. It answers `{"ok", "session", "backend",
+  "codex_home", "codex_provider", "cloud_speech"}`, and 400 `invalid_codex_provider` (with a
+  `message`) when half a binding is given, the agent is no Codex agent, or the home is no
+  directory. Each turn of a bound agent runs with `CODEX_HOME` set to that home and
+  `model_provider` set to that provider (exec, chat lane and goal lane alike). A turn whose
+  home's `config.toml` does not set `model_provider = "<codex_provider>"` and define
+  `[model_providers.<codex_provider>]` is refused before Codex starts; a turn whose Codex
+  reports another provider for its thread is stopped at once. Both end the turn as the
+  failure kind `provider_mismatch`, never tried again, with the reason "This agent's turn did
+  not run: it would have used another model provider than the one it is bound to. Check its
+  Codex home and provider" and the Host's words of what it found below it. A bound agent
+  takes any model name (its provider's deployments), runs on its `config.toml`'s model when
+  it names none, takes its sessions (`resume_session_id`) from its own home, and cannot be
+  moved to another tool (`POST /agent-transit` answers 409 `own_provider`). `cloud_speech`
+  defaults to true, and to false for an agent with `codex_provider`; when false nothing the
+  agent says reaches a speech provider in the cloud: its lines are not spoken, nothing is
+  made in its voice, `POST /preview` for it answers 409, live calls and live rings for it
+  answer 409 `cloud_speech_off`, and the Oracle is told none of its words. The snapshot row
+  carries `codex_home` and `codex_provider` when the agent is bound, and `cloud_speech` (the
+  value in effect) when it is bound or the choice was set.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a

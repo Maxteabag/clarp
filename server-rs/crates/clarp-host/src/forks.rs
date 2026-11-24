@@ -255,6 +255,15 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
             asked.insert(key.to_string(), json!(value));
         }
     }
+    // The parent's binding to a provider of its own, and its choice of cloud speech, go with
+    // the conversation the child starts from.
+    if !record.codex_provider.is_empty() {
+        asked.insert("codex_home".into(), json!(record.codex_home));
+        asked.insert("codex_provider".into(), json!(record.codex_provider));
+    }
+    if let Some(cloud_speech) = record.cloud_speech {
+        asked.insert("cloud_speech".into(), json!(cloud_speech));
+    }
     let made = match edge::make_agent(app, &asked).await {
         Ok(made) => made,
         // In the words the Host has for an agent it does not make.
@@ -327,6 +336,15 @@ pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Ans
         if !child.backend.is_empty() && clarp_backend::by_id(&child.backend).is_none() {
             let why = format!("Unknown backend: {}", child.backend);
             return Err(told(&Refused::new(400, "invalid_backend", why)));
+        }
+        // A child of an agent bound to a provider of its own starts from its conversation: it
+        // runs on that provider too, and so on Codex alone.
+        let bound = !parent.record.codex_provider.is_empty();
+        if bound && !child.backend.is_empty() && child.backend != parent.record.backend {
+            let why = "An agent bound to a model provider of its own forks only onto Codex, \
+                on its own provider."
+                .to_string();
+            return Err(told(&Refused::new(409, "own_provider", why)));
         }
     }
     let seed = seed_of(&parent).await;
