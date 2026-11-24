@@ -440,3 +440,48 @@ fn an_agent_with_cloud_speech_off_is_never_sent_to_a_cloud_voice() {
     host.send(&quiet, "<speak>now spoken too</speak>", "u-quiet-2");
     wait_for("the agent spoken once allowed", || asked("now spoken too"));
 }
+
+#[test]
+fn the_use_of_tools_of_a_bound_agent_is_explained_by_no_model() {
+    let place = Place::new("codex-own-explained");
+    let (codex, asked) = explaining_model(&place);
+    let world = [("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let home = own_home(&place, "explained-home", "stand-in");
+    let bound = bound_agent(&host, "Ada", &home);
+    let open = host.new_agent("Mike");
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    assert_eq!(
+        post("/tool-explanations/settings", json!({ "enabled": true })).0,
+        200
+    );
+    let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let (status, on) = post(
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({ "expected_revision": explainer["revision"], "enabled": true }),
+    );
+    assert_eq!(status, 200, "{on}");
+    let explain = |session: &str, command: &str| {
+        let item = json!({ "id": "one", "activity": { "name": "Bash", "command": command } });
+        post(
+            "/tool-explanations",
+            json!({ "session": session, "detail_level": 2, "items": [item] }),
+        )
+        .1
+    };
+    let questions = || std::fs::read_to_string(&asked).unwrap_or_default();
+
+    // The bound agent's call is not handed to the explainer's model: nothing waits for it.
+    let kept = explain(&bound, "frobnicate kept-out.cfg");
+    assert_ne!(kept["items"][0]["status"], "pending", "{kept}");
+    // Another agent's is, and only that is ever asked.
+    wait_for("the other agent's explanation", || {
+        explain(&open, "frobnicate asked.cfg")["items"][0]["status"] == "ready"
+    });
+    let asked_of = questions();
+    assert!(asked_of.contains("asked.cfg"), "{asked_of}");
+    assert!(!asked_of.contains("kept-out.cfg"), "{asked_of}");
+    let again = explain(&bound, "frobnicate kept-out.cfg");
+    assert_ne!(again["items"][0]["status"], "pending", "{again}");
+    assert!(!questions().contains("kept-out.cfg"));
+}
