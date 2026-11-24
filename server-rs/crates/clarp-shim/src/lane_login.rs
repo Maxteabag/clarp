@@ -11,10 +11,10 @@ use serde_json::Value;
 
 /// Names the account of a tool's login file, when it names one: what a lane compares, so a token
 /// refreshed within the same account does not retire it. Each driver names its own file and
-/// reader: Codex `auth.json`'s `tokens.account_id`. A file that names no account (OpenCode's
-/// `auth.json`), or a reader that finds none, is compared whole: any change of it is a change of
-/// login.
-pub(super) type Account = fn(&Value) -> Option<&str>;
+/// reader: Codex `auth.json`'s `tokens.account_id`. A reader may derive the account from more
+/// than one field (OpenCode's `auth.json`, by provider), so it answers an owned name. A file whose
+/// reader finds none is compared whole: any change of it is a change of login.
+pub(super) type Account = fn(&Value) -> Option<String>;
 
 pub(super) struct Login {
     lock: Option<PathBuf>,
@@ -106,8 +106,8 @@ mod tests {
     use super::Login;
     use serde_json::{Value, json};
 
-    fn codex_account(value: &Value) -> Option<&str> {
-        value["tokens"]["account_id"].as_str()
+    fn codex_account(value: &Value) -> Option<String> {
+        value["tokens"]["account_id"].as_str().map(str::to_owned)
     }
 
     #[test]

@@ -203,10 +203,17 @@ What every driver gets from the layer, built once:
   `Retire`). These are the same lines as Codex's requests of those names; Codex's goal requests
   stay its own. Steer, Stop and Follow of a running turn come on the claim's socket.
 - **Claim spool**: admitted by `lane_spool::ClaimSpool` before anything reaches the tool. A
+  driver that copies its tool's own lines writes through it: the bound turn's `Session` and
+  `Spawned`, its `Out` lines, one `Exited`. Codex's lines go through its own `TurnSpool`. A
   claim that bound no turn of the tool is ended there, once.
+- **Spawn**: `lane_spawn::kept` starts a tool that does not end when its input closes
+  (OpenCode's serve) in a process group of its own, with a death signal from the lane.
+- **Claims run in the lane process**, for every driver. The claim is handed to the lane
+  process, not lent to a separate per-turn process, so a tool's address or password never
+  leaves it.
 - **Login**: one login file per driver (`Login.file`, from the backend). The shim compares the
-  account the driver's reader names in it, or the whole file where it names none (OpenCode's
-  `auth.json`).
+  account the driver's reader names in it, an owned name the reader may derive from several
+  fields (OpenCode's `auth.json`). Where the reader finds none, the whole file is compared.
 - **Restart digest**: `lane::digest::OptionsDigest`, taken at each turn's start, covers
   options as text and files by the hash of their content. A file over the driver's bound keeps
   no lane. It never uses a time of change (the lead's rule, issue 763): a file written again
@@ -264,12 +271,16 @@ What a driver answers, and where:
   (`Worker::launch_on_native_lane`, by `Tool::of(backend)`).
 - **steer**, **Stop**: on the claim's own socket, as for any turn, answered by the lane's
   `Driver::steer` and `Driver::stop` in the tool's words.
-- **end of turn**: `lane_driver::Driver::end_turn` when the tool says it ended (Codex
-  `turn/completed`, Claude its `result` line).
+- **end of turn**: decided by the driver, which calls `lane_driver::Driver::end_turn` when
+  its tool says the claim's turn ended. Codex says it with `turn/completed`, Muse with
+  `turn/completed`, OpenCode with `session.idle` after its session was busy, and Claude with
+  its `result` line.
 - **health**: the lane's snapshot, which any Host reads as `clarp_shim::lane::Status`
   (`Endpoint::inspect`).
-- **memory reading**: the driver's own `memory_bytes` in its status where it reads it. Else the
-  Host reads the lane process's tree (`Endpoint::memory`). Else the tool's typical size.
+- **memory reading**: the driver's own reading, in bytes, in its status (`Status.memory_bytes`;
+  bytes rather than MB, so the sum over lanes loses nothing). Else the Host reads the lane
+  process's tree (`Endpoint::memory`). Else the tool's typical size. The registry weighs lanes
+  by these bytes, never by their number.
 
 What in Clarp assumes a process per turn, and must be held by the Claude driver before
 `claude_chat_lane` exists, is listed in issue 761.

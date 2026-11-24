@@ -32,6 +32,26 @@ impl ClaimSpool {
         self.writer
     }
 
+    /// The turn the claim runs is bound: its conversation and the process that runs it, said
+    /// before any line of it, for a driver that copies its tool's own lines into the spool
+    /// (OpenCode's events, Claude's stream-json, Muse's MSP translated). Codex's turn spool says
+    /// these itself.
+    #[allow(
+        dead_code,
+        reason = "the spool writer of drivers that copy their tool's lines (issue 761); held by its tests"
+    )]
+    pub(super) fn bound(&mut self, session: &str, pid: u32, now_ms: i64) -> io::Result<()> {
+        for entry in [
+            Entry::Shim(ShimEvent::Session {
+                id: session.to_owned(),
+            }),
+            Entry::Shim(ShimEvent::Spawned { pid }),
+        ] {
+            self.writer.append(&Record { t: now_ms, entry })?;
+        }
+        self.writer.sync()
+    }
+
     /// One line of the tool's own, before the end (a failure in its words).
     pub(super) fn out(&mut self, line: String, now_ms: i64) -> io::Result<()> {
         self.writer.append(&Record {
@@ -77,6 +97,7 @@ mod tests {
         // The spool is there before anything reaches the tool, and a second admission fails.
         assert!(claim.spool.exists());
         assert!(ClaimSpool::admit(&claim).is_err());
+        spool.bound("s1", 42, 4).unwrap();
         spool.out("{\"type\":\"turn.failed\"}".into(), 5).unwrap();
         spool.end(Some(1), None, 6).unwrap();
         let read = clarp_spool::SpoolReader::new(&claim.spool)
@@ -90,6 +111,8 @@ mod tests {
         assert_eq!(
             entries,
             [
+                Entry::Shim(ShimEvent::Session { id: "s1".into() }),
+                Entry::Shim(ShimEvent::Spawned { pid: 42 }),
                 Entry::Out("{\"type\":\"turn.failed\"}".into()),
                 Entry::Shim(ShimEvent::Exited {
                     code: Some(1),

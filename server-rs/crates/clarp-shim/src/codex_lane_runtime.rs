@@ -53,8 +53,8 @@ pub(super) enum Input {
 const PROVIDER_MISMATCH: &str = "provider_mismatch:";
 
 /// The account a Codex login file names: a refreshed token of the same account keeps the lane.
-fn account(auth: &Value) -> Option<&str> {
-    auth["tokens"]["account_id"].as_str()
+fn account(auth: &Value) -> Option<String> {
+    auth["tokens"]["account_id"].as_str().map(str::to_owned)
 }
 
 impl Input {
