@@ -293,6 +293,17 @@ pub fn takes(seats: &[Seat], model: &str, floor: i64) -> Option<Option<String>> 
     }
 }
 
+/// The seat a tool is on, as the switcher's reading kept beside the desk says it, with the last
+/// switch marked: its keyed tag, one a seat. `None` where no seat is read as in use.
+pub fn seat_in_use(provider: &str, desk: &Value) -> Option<String> {
+    desk["switcher_seats"][provider]
+        .as_array()?
+        .iter()
+        .find(|seat| seat["active"] == true)?["tag"]
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Whether a seat has room for a turn of no model in particular, as the switcher reads it: some
 /// of its five hours left, and of its week unless it may run over (`overage`). `None` where its
 /// five hours could not be read.
@@ -1303,5 +1314,16 @@ mod tests {
         )]));
         assert_eq!(fresh_until("claude", &desk), Some(NOW - 60_000 + 600_000));
         assert_eq!(fresh_until("codex", &desk), None);
+    }
+
+    #[test]
+    fn the_seat_in_use_is_named_by_its_tag() {
+        let mut a = sw("a", false, Some(0), Some(50));
+        a["tag"] = json!("tag-a");
+        let mut b = sw("b", true, Some(40), Some(50));
+        b["tag"] = json!("tag-b");
+        let desk = judged_by(served(json!([])), json!([a, b]));
+        assert_eq!(seat_in_use("claude", &desk).as_deref(), Some("tag-b"));
+        assert_eq!(seat_in_use("codex", &desk), None);
     }
 }

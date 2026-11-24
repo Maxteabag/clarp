@@ -166,18 +166,29 @@ pub struct Desk {
     /// A hard limit of each tool that was not told because the pool took the turn: told once the
     /// pool can no longer take it ([`judge_pools`]), as the tool tells no limit twice; let go
     /// when its limit is over.
-    held: std::sync::Mutex<BTreeMap<String, Value>>,
+    held: std::sync::Mutex<BTreeMap<String, Held>>,
 }
 
 /// Whether another seat of a tool's pool would take a turn from its used-up account, the
 /// soonest moment a seat regains room where none would, and until when that holds: until the
 /// reading of the seats it was judged by grows old, and five minutes at most, after which it
 /// is judged again ([`watch`]).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Pooled {
     failover: clarp_kernel::quota_near::Failover,
     regains: Option<i64>,
     until_ms: i64,
+    /// The seat the tool was on when it was judged (`quota_near::seat_in_use`): a hard limit
+    /// held then is of that seat.
+    seat: Option<String>,
+}
+
+/// A hard limit of a tool that was not told because the pool would take the turn, and the seat
+/// it is of: the one the tool was on when it was held.
+#[derive(Debug, Clone)]
+struct Held {
+    event: Value,
+    seat: Option<String>,
 }
 
 /// What the apps were told of whether another seat would take the turns of a tool, by the tool
@@ -802,9 +813,9 @@ impl Desk {
     fn pooled(&self, tool: &str, event: Value, now_ms: i64) -> Option<Value> {
         let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
         let holds = pooled.get(tool).filter(|pooled| now_ms < pooled.until_ms);
-        let (failover, regains) = holds.map_or(
-            (clarp_kernel::quota_near::Failover::Unknown, None),
-            |pooled| (pooled.failover, pooled.regains),
+        let (failover, regains, seat) = holds.map_or(
+            (clarp_kernel::quota_near::Failover::Unknown, None, None),
+            |pooled| (pooled.failover, pooled.regains, pooled.seat.clone()),
         );
         drop(pooled);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
@@ -813,7 +824,7 @@ impl Desk {
         match (kind.as_str(), &told) {
             // Not told now: kept, to be told if the pool cannot take the turn after all.
             ("hard_limit", None) => {
-                held.insert(tool.to_string(), event);
+                held.insert(tool.to_string(), Held { event, seat });
             }
             // Told, or over: nothing is held for it any more.
             ("hard_limit" | "recovered" | "unknown", _) => {
@@ -825,14 +836,24 @@ impl Desk {
     }
 
     /// The hard limit held for a tool ([`Desk::pooled`]), to be told now that the pool cannot
-    /// take the turn: with `failover` and when the pool regains room. Nothing where none is
+    /// take the turn: with `failover` and when the pool regains room, and only while the tool is
+    /// still on the seat the limit is of. A switch away from that seat took the turn, as the
+    /// pool was to (judged after it, with the seat switched to taken as used up, no seat may be
+    /// left, which says nothing of the limit held): the hold is let go. Nothing where none is
     /// held, or its window has begun anew since.
-    fn release(&self, tool: &str, pooled: Pooled, now_ms: i64) -> Option<Value> {
+    fn release(&self, tool: &str, pooled: &Pooled, now_ms: i64) -> Option<Value> {
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let of = held.get(tool)?;
+        // The tool left the seat the limit is of: a switch took the turn, as the pool was to,
+        // and the limit is no longer the tool's to tell. Let go of it.
+        if of.seat.is_none() || of.seat != pooled.seat {
+            held.remove(tool);
+            return None;
+        }
         if pooled.failover == clarp_kernel::quota_near::Failover::Spare {
             return None;
         }
-        let event = held.remove(tool)?;
+        let event = held.remove(tool)?.event;
         let resets = event["resets_at"].as_str().and_then(quota::from_text);
         if resets.is_some_and(|resets| resets <= now_ms) {
             return None;
@@ -1110,12 +1131,13 @@ async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
             failover,
             regains,
             until_ms,
+            seat: clarp_kernel::quota_near::seat_in_use(tool, &desk),
         };
         judged.insert(tool.to_string(), pooled);
     }
     let releases: Vec<Value> = judged
         .iter()
-        .filter_map(|(tool, pooled)| app.limits.release(tool, *pooled, now))
+        .filter_map(|(tool, pooled)| app.limits.release(tool, pooled, now))
         .collect();
     *app.limits
         .pooled
@@ -1448,6 +1470,7 @@ mod tests {
                 failover,
                 regains,
                 until_ms,
+                seat: Some("a".to_string()),
             };
             let mut all = desk.pooled.lock().unwrap();
             all.insert(CODEX.to_string(), pooled);
@@ -1481,25 +1504,31 @@ mod tests {
     fn a_hard_limit_the_pool_took_is_told_once_the_pool_cannot_take_the_turn() {
         use clarp_kernel::quota_near::Failover;
         let desk = Desk::default();
-        let pooled = |failover, regains| Pooled {
+        let pooled = |failover, regains, seat: &str| Pooled {
             failover,
             regains,
             until_ms: 1_000,
+            seat: Some(seat.to_string()),
         };
-        desk.pooled
-            .lock()
-            .unwrap()
-            .insert(CODEX.to_string(), pooled(Failover::Spare, None));
+        let hold = |seat: &str| {
+            desk.pooled
+                .lock()
+                .unwrap()
+                .insert(CODEX.to_string(), pooled(Failover::Spare, None, seat));
+        };
         let hard = json!({ "type": "provider-limit", "kind": "hard_limit", "provider_id": "codex",
             "resets_at": quota::moment(9_000_000) });
+        // Seat A hits its limit while B has room: not told, held as A's.
+        hold("a");
         assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
-        // While the pool still takes it, nothing; once it cannot, the limit, told once.
+        // While the tool stays on A and the pool still takes it, nothing; once it cannot, the
+        // limit, told once.
         assert!(
-            desk.release(CODEX, pooled(Failover::Spare, None), 0)
+            desk.release(CODEX, &pooled(Failover::Spare, None, "a"), 0)
                 .is_none()
         );
         let told = desk
-            .release(CODEX, pooled(Failover::None, Some(5_000)), 0)
+            .release(CODEX, &pooled(Failover::None, Some(5_000), "a"), 0)
             .unwrap();
         assert_eq!(
             (&told["kind"], &told["failover"], &told["pool_regains_at"]),
@@ -1510,20 +1539,34 @@ mod tests {
             )
         );
         assert!(
-            desk.release(CODEX, pooled(Failover::None, None), 0)
+            desk.release(CODEX, &pooled(Failover::None, None, "a"), 0)
+                .is_none()
+        );
+        // The switch took the turn to B: judged with B as the seat in use, and B taken as used
+        // up, no seat is left; yet the limit was A's, and the tool left it. Nothing is told, and
+        // nothing is held any more, also once the tool is back on A.
+        hold("a");
+        assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
+        assert!(
+            desk.release(CODEX, &pooled(Failover::None, None, "b"), 0)
+                .is_none()
+        );
+        assert!(
+            desk.release(CODEX, &pooled(Failover::None, None, "a"), 0)
                 .is_none()
         );
         // A limit that is over is let go, and one whose window began anew is not told.
+        hold("a");
         assert!(desk.pooled(CODEX, hard.clone(), 0).is_none());
         let over = json!({ "type": "provider-limit", "kind": "recovered", "provider_id": "codex" });
         assert!(desk.pooled(CODEX, over, 0).is_some());
         assert!(
-            desk.release(CODEX, pooled(Failover::None, None), 0)
+            desk.release(CODEX, &pooled(Failover::None, None, "a"), 0)
                 .is_none()
         );
         assert!(desk.pooled(CODEX, hard, 0).is_none());
         assert!(
-            desk.release(CODEX, pooled(Failover::Unknown, None), 9_000_000)
+            desk.release(CODEX, &pooled(Failover::Unknown, None, "a"), 9_000_000)
                 .is_none()
         );
     }
