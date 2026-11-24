@@ -4233,7 +4233,8 @@ impl Worker {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
-                        let _ = crate::lane::make_way(&run_dir, &lane_agent, crate::lane::Touch::Exec);
+                        let _ =
+                            crate::lane::make_way(&run_dir, &lane_agent, crate::lane::Touch::Exec);
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);

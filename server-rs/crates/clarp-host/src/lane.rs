@@ -256,9 +256,12 @@ pub(crate) enum Touch {
 pub(crate) fn make_way(run: &Path, agent_id: &str, touch: Touch) -> io::Result<()> {
     let mut first = Ok(());
     for tool in Tool::ALL {
-        let result = Endpoint::of(tool, run, agent_id)
-            .retire()
-            .map_err(|why| io::Error::new(why.kind(), format!("{touch:?} waits for the {} lane: {why}", tool.name())));
+        let result = Endpoint::of(tool, run, agent_id).retire().map_err(|why| {
+            io::Error::new(
+                why.kind(),
+                format!("{touch:?} waits for the {} lane: {why}", tool.name()),
+            )
+        });
         if first.is_ok() {
             first = result;
         }

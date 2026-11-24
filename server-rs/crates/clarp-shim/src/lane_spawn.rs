@@ -50,7 +50,10 @@ mod tests {
             let comm = format!("/proc/{}/comm", child.id());
             let since = Instant::now();
             while std::fs::read_to_string(&comm).unwrap_or_default().trim() != "sleep" {
-                assert!(since.elapsed() < Duration::from_secs(10), "setpriv did not run");
+                assert!(
+                    since.elapsed() < Duration::from_secs(10),
+                    "setpriv did not run"
+                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             send.send(child).unwrap();
@@ -62,7 +65,10 @@ mod tests {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
             }
-            assert!(since.elapsed() < Duration::from_secs(10), "the tool outlived its lane");
+            assert!(
+                since.elapsed() < Duration::from_secs(10),
+                "the tool outlived its lane"
+            );
             std::thread::sleep(Duration::from_millis(20));
         };
         assert_eq!(status.signal(), Some(nix::libc::SIGTERM));
