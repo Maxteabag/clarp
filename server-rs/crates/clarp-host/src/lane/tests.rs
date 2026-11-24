@@ -45,7 +45,7 @@ fn in_bytes(budget: u64) -> Room {
 #[test]
 fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_owner_says() {
     let default = Settings {
-        chat: [false],
+        chat: [false, false],
         idle_ms: 15 * 60_000,
         most: 8,
         budget: 2_200 * MIB,
@@ -53,13 +53,14 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
     assert!(!default.chat(Tool::Codex));
+    assert!(!default.chat(Tool::Claude));
     let set = of(
         "codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\nlane_memory_mb = 3000\n",
     );
     assert_eq!(
         set,
         Settings {
-            chat: [true],
+            chat: [true, false],
             idle_ms: 120_000,
             most: 3,
             budget: 3_000 * MIB,
@@ -73,6 +74,11 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
             budget: 3_000 * MIB
         }
     );
+    // Each tool's switch is its own.
+    assert!(!set.chat(Tool::Claude));
+    let claude = of("claude_chat_lane = true\n");
+    assert!(claude.chat(Tool::Claude));
+    assert!(!claude.chat(Tool::Codex));
     // What is no setting keeps the default: a word, zero or less, or a key inside a table.
     assert_eq!(
         of(
@@ -95,7 +101,11 @@ fn every_tool_with_a_lane_has_its_own_switch_and_socket_name() {
         assert!(tool.suffix().ends_with(".sock"), "{tool:?}");
     }
     assert_eq!(Tool::of("codex"), Some(Tool::Codex));
-    assert_eq!(Tool::of("claude"), None);
+    assert_eq!(Tool::of("claude"), Some(Tool::Claude));
+    assert_eq!(Tool::of("grok"), None);
+    // Two tools' lanes of one agent never share a socket.
+    let names: std::collections::BTreeSet<_> = Tool::ALL.map(Tool::suffix).into_iter().collect();
+    assert_eq!(names.len(), Tool::ALL.len());
 }
 
 #[test]

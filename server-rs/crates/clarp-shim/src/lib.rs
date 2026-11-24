@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+pub mod claude_lane;
 pub mod codex_app;
 pub mod codex_lane;
 pub mod codex_turn;

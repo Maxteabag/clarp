@@ -14,6 +14,22 @@ pub const TURN_CONTEXT: &str = concat!(
     "are disabled on this Host, tell the user you will not be woken."
 );
 
+/// What a background Bash call is told in a turn of a Claude process Clarp keeps between turns
+/// (the owner's `claude_chat_lane`): the process does not exit when the reply ends.
+pub const LANE_TURN_CONTEXT: &str = concat!(
+    "Clarp: this background command belongs to the current turn. Clarp keeps this ",
+    "Claude process between turns, so the task may run on after your reply ends, but ",
+    "it stops whenever Clarp ends the process (after an idle while, a change of model, ",
+    "login or settings, a compaction, or a restart), and you will not be notified when it ",
+    "finishes. A process you detach with setsid can outlive the process and a Host ",
+    "restart; nothing reports its result to you. When the result must reach you, launch ",
+    "the work only with the clarp-background-jobs skill's run_detached_job.sh --goal ",
+    "<your goal> (\"Completion that must wake you\"): it exits 0 only once the ",
+    "job, its worker and your goal's wake are stored, and starts nothing ",
+    "otherwise. Wakes follow the goal: if it or your queue is paused, or wakes ",
+    "are disabled on this Host, tell the user you will not be woken."
+);
+
 pub fn valid_id(id: &str) -> bool {
     (1..=160).contains(&id.len())
         && id
@@ -24,6 +40,13 @@ pub fn valid_id(id: &str) -> bool {
 /// The reference emits origin and turn advice independently. A missing or
 /// malformed identity can never supply provenance to a registered job.
 pub fn background_hook(agent: &str, has_turn: bool, payload: &Value) -> Option<Value> {
+    background_hook_told(agent, has_turn.then_some(TURN_CONTEXT), payload)
+}
+
+/// As [`background_hook`], with the words the turn's advice is given in: [`TURN_CONTEXT`] for a
+/// process of its own, [`LANE_TURN_CONTEXT`] for a kept one, none outside a managed turn.
+pub fn background_hook_told(agent: &str, told: Option<&str>, payload: &Value) -> Option<Value> {
+    let has_turn = told.is_some();
     let tool = match &payload["tool_name"] {
         Value::Null => payload["tool"]["name"].as_str(),
         Value::String(name) if name.is_empty() => payload["tool"]["name"].as_str(),
@@ -52,8 +75,8 @@ pub fn background_hook(agent: &str, has_turn: bool, payload: &Value) -> Option<V
         }
         result["updatedInput"] = Value::Object(updated);
     }
-    if has_turn {
-        result["additionalContext"] = json!(TURN_CONTEXT);
+    if let Some(told) = told {
+        result["additionalContext"] = json!(told);
     }
     if result.get("updatedInput").is_none() && !has_turn {
         return None;

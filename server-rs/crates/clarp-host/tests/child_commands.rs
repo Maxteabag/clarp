@@ -124,6 +124,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "Standalone shim executable starts the assigned tool after the Host supplied its environment.",
     ),
     (
+        "crates/clarp-shim/src/claude_lane_runtime.rs",
+        "Only the standalone Claude lane shim starts this Claude Code. The Host already prepared its environment, including the agent session and no per-turn token, which the lane keeps in its turn file.",
+    ),
+    (
         "crates/clarp-shim/src/codex_lane_runtime.rs",
         "Only the standalone goal-lane shim starts this app-server. The Host already prepared its environment, including the assigned agent session and no per-turn token.",
     ),

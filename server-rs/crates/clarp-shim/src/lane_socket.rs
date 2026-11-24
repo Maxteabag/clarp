@@ -35,6 +35,8 @@ pub(super) enum TurnAsk {
     Stop(u64),
     /// Steered words, under the id their reading is told by.
     Steer(String, String),
+    /// A line for the tool's standard input, taken only where the lane says so (Claude Code).
+    Stdin(String),
 }
 
 impl Socket {
@@ -55,11 +57,13 @@ impl Socket {
         })
     }
 
-    /// The socket of the attempt `claim` names, for as long as the lane runs it.
+    /// The socket of the attempt `claim` names, for as long as the lane runs it. `stdin`: the
+    /// lane takes lines for its tool's input (Claude Code's steering); any other refuses them.
     pub(super) fn turn<I: Send + 'static>(
         claim: &Claim,
         input: SyncSender<I>,
         wrap: fn((u64, u32), TurnAsk, UnixStream) -> I,
+        stdin: bool,
     ) -> io::Result<Self> {
         let attempt = (claim.turn, claim.attempt);
         Self::listen(&claim.socket, move |mut stream| {
@@ -67,6 +71,7 @@ impl Socket {
                 Ok(TurnRequest::Follow) => TurnAsk::Follow,
                 Ok(TurnRequest::Stop { grace_ms }) => TurnAsk::Stop(grace_ms),
                 Ok(TurnRequest::Steer { id, text }) => TurnAsk::Steer(id, text),
+                Ok(TurnRequest::Stdin { data }) if stdin => TurnAsk::Stdin(data),
                 _ => {
                     let _ = write(&mut stream, &Reply::failed("Unsupported lane turn request"));
                     return;

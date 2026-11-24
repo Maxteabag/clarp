@@ -287,6 +287,30 @@ identity from `CLARP_PROVIDER_TURN_FILE` (`<run>/<agent>-turn.token`), which the
 lane rewrites at each turn. The apps do not yet advertise Codex steering
 (`supports_steer`); the Python Host steers Codex in its own way.
 
+## Claude chat turns on a kept process (Rust Host, not built into any release yet)
+
+On a Rust Host built with issue 761's Claude lane (branch `speed-loop/claude-driver` until it
+lands; check that `clarp-host` knows `claude_chat_lane` before you rely on it), a Claude agent's
+chat turns after the first can run on one kept `claude -p --input-format stream-json` per agent
+instead of a new `claude -p --resume` per message. It is off unless the owner sets it, and
+switching it on for the owner's agents is his decision. A top-level key of the Rust Host's own
+`~/.config/clarp-host/config.toml`, read at each turn; the idle time
+(`codex_lane_idle_minutes`), the count of lanes (`codex_lane_most`, 8) and the memory budget
+(`lane_memory_mb`, 2,200 MB) are shared by every lane:
+
+```toml
+claude_chat_lane = true       # off by default; false rolls back to a process per turn
+```
+
+No turn waits for the lane: a turn with no free lane started as it would start Claude Code runs
+in a process of its own as before, and the lane starts once that process is gone. Stop is Claude
+Code's own interrupt and keeps the process; steering is as before. A background Bash command of
+a lane turn can run on after the reply, but ends whenever the lane leaves (idle, a change of
+model, effort, identity, MCP servers or account, an error or compaction, a terminal, a move):
+start work that must outlive it with `clarp-background-jobs`. A lane is `<run>/<agent>-cll.sock`;
+its `inspect` shows the session, the claim, `claims` and `idle_ms`. Turning the key off is the
+rollback: the lane leaves before the agent's next turn.
+
 ## Docker Container Administration
 
 When diagnosing or managing Clarp inside a Docker container:

@@ -147,6 +147,22 @@ impl Launcher {
         command
     }
 
+    /// A Claude lane, under the same launcher and lifetime scope as an ordinary turn: the
+    /// shim keeps one Claude Code for the agent between its turns. As for a Codex lane, no
+    /// turn's identity is carried in its environment.
+    pub(crate) fn claude_lane_command(&self, socket: &Path, options: &Path, cwd: &Path) -> Command {
+        let mut command = self.shim_command(&format!("clarp-claude-lane-{}", ids::hex(4)));
+        command
+            .arg("claude-lane")
+            .arg(socket)
+            .arg(options)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit());
+        command
+    }
+
     /// The command that starts a shim for this order.
     pub fn command(&self, order: &ShimOrder) -> Command {
         let mut command =
