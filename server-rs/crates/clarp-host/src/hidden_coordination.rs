@@ -67,7 +67,14 @@ impl Roster {
                         Some(&agent.backend),
                         true,
                     );
-                (agent.agent_id.clone(), Chat { default, own, hides })
+                (
+                    agent.agent_id.clone(),
+                    Chat {
+                        default,
+                        own,
+                        hides,
+                    },
+                )
             })
             .collect();
         Self { global, chats }

@@ -1743,9 +1743,10 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
         wait_for("the coordination turn to end", || {
             answered(&host, session, &sent["trace_id"])
         });
-        let input: Value =
-            serde_json::from_slice(&std::fs::read(tokens.join(format!("{session}.prompt"))).unwrap())
-                .unwrap();
+        let input: Value = serde_json::from_slice(
+            &std::fs::read(tokens.join(format!("{session}.prompt"))).unwrap(),
+        )
+        .unwrap();
         input["message"]["content"][0]["text"]
             .as_str()
             .unwrap()
@@ -1799,7 +1800,11 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
         json!({"visibility":"hide","hidden":true,"source":"global"})
     );
     assert_eq!(for_agents(&page), 0, "{page}");
-    assert!(page["hidden_after"]["messages"].as_u64().is_some_and(|n| n > 0));
+    assert!(
+        page["hidden_after"]["messages"]
+            .as_u64()
+            .is_some_and(|n| n > 0)
+    );
     assert_eq!(row("oak")["coordination_visibility"], "hide");
     let reset = host.post(
         "/agent-coordination",

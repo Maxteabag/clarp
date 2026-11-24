@@ -2991,8 +2991,7 @@ impl Fleet {
         // What the chat shows now: the choice made, or what holds for it without one.
         let effective = choice.unwrap_or_else(|| match at {
             Some(at) => {
-                crate::hidden_coordination::chat_choices(&self.settings, &self.members[at].record)
-                    .0
+                crate::hidden_coordination::chat_choices(&self.settings, &self.members[at].record).0
             }
             None => self
                 .settings
