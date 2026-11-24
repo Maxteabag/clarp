@@ -751,19 +751,25 @@ has entered `view=conversation` never leaves it, so a client that reads only tha
 to remove a row. A turn's **answers** enter it as the turn runs. An assistant text row (words,
 no tool name, not a note) whose message called no tools is `session` while what it is can still
 change, and enters once it can no longer: when the turn's next row is other words, when a
-message of the user's is read into the running turn (steering), or when the turn ends. If work
-comes next (a tool call), the words were said along the way (`phase` `commentary`) and never
-enter. Each message the turn answers keeps its answer, also one given before a follow-up was read
-into the turn; two replies with no work between them are both answers. When the turn ends
-(settles; a turn a follow-up replaced has none), what came after its last answer is settled: its
-newest words, else its last note or user prompt, enter as the turn's last anchor. An anchor
-carries `session_rows`, how many of the turn's rows since the anchor before it the conversation
-view leaves out (with the rows of a message that had no answer of its own), so a client offers
-"Show work" there and opens that turn in the session view. A row is given again, with a new
-revision, when it enters: the row or the end that decided it brings it, also to a delta
-(`after_revision`) and to a reader of `view=conversation` alone, so a row a client holds as
-`session` arrives again as `conversation`; never the other way round. The Rust Host derives the
-anchors and their revisions from its turn records, also for turns written before contract 174.
+message is read into the running turn (steering: any message read into it, the user's, another
+agent's or a relayed one, but not one the agent's conversation fork read), or when the turn
+ends. If work comes next (a tool call, or a plan the tool updates), the words were said along
+the way (`phase` `commentary`) and do not enter as an answer. Each message the turn answers keeps
+its answer, also one given before a follow-up was read into the turn; two replies with no work
+between them are both answers. When the turn ends (settles; a turn a follow-up replaced has
+none), what came after its last answer is settled: its newest words enter as the turn's last
+anchor, also when work followed them (a turn that ended on words along the way shows those),
+else its last note or user prompt; if nothing after the last answer was said, the last answer
+counts that work. An anchor carries `session_rows`, how many of the turn's rows since the anchor
+before it the conversation view leaves out (with the rows of a message that had no answer of its
+own), so a client offers "Show work" there and opens that turn in the session view. A row is
+given again, with a new revision, when it enters or its count grows: the row or the end that
+decided it brings it, also to a delta (`after_revision`) and to a reader of `view=conversation`
+alone, so a row a client holds as `session` arrives again as `conversation`; never the other
+way round. The Rust Host derives the anchors and their revisions from its turn records, also for
+turns written before contract 174: on a Host that lists `conversation_view_grows` for the first
+time, turns already read gain answers whose revisions lie below a client's cursor, so a client
+drops what it holds of a conversation view once, and reads it anew.
 
 `GET /log?view=conversation` returns only `conversation` rows, filtered before the page limit,
 for a snapshot, a delta and an older page alike, and echoes `view`. With `view=session`, or
