@@ -23,6 +23,7 @@ mod agy_acp;
 mod codex_lane_runtime;
 mod codex_lane_turns;
 mod lane_login;
+mod lane_memory;
 mod lane_own;
 mod lane_socket;
 mod opencode;

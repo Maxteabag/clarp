@@ -241,6 +241,10 @@ if sys.argv[1] == "exec":
 
 assert sys.argv[1:] == ["app-server", "--stdio"], sys.argv
 note("launches", "app-server")
+# A test of the memory budget gives each app-server a known weight, in memory it touched, before
+# its lane weighs itself.
+weight = root / "weight-mb"
+ballast = b"\x01" * (int(weight.read_text()) << 20) if weight.exists() else b""
 out = threading.Lock()
 state = threading.Lock()
 thread = None
@@ -621,10 +625,15 @@ fn an_idle_lane_leaves_after_its_time_and_the_next_turn_starts_another_on_the_sa
 
 #[test]
 fn a_lane_beyond_the_cap_retires_the_one_idle_longest() {
+    // The cap is bytes (`lane_memory_mb`). A lane about to start counts at a Codex lane's
+    // typical 270 MiB; each running one at what it weighed: its shim, and an app-server holding
+    // 50 MiB of ballast (with the interpreters, about 65 to 85 MiB). 270 and one lane fit in
+    // 370 MiB, 270 and two do not, whatever the interpreters weigh within 50 MiB of each other.
     let (place, world) = lane_place(
         "codex-lane-cap",
-        "codex_lane_idle_minutes = 5\ncodex_lane_most = 2\n",
+        "codex_lane_idle_minutes = 5\nlane_memory_mb = 370\n",
     );
+    std::fs::write(place.root.join("weight-mb"), "50").unwrap();
     let _lanes = Lanes(place.root.clone());
     let host = start_lane_host(&place, &world);
     let a = lane_agent(&host, &place, "cap-a");
@@ -635,7 +644,7 @@ fn a_lane_beyond_the_cap_retires_the_one_idle_longest() {
     asked(&host, "cap-b", "ask-b1");
     assert!(
         lane_lives(&a) && lane_lives(&b),
-        "two lanes are within the cap"
+        "two lanes are within the budget"
     );
 
     // A third: the lane idle longest (a's) leaves, b's stays.
