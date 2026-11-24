@@ -418,3 +418,28 @@ fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
     std::fs::remove_dir_all(&run).unwrap();
     std::fs::remove_dir_all(&run2).unwrap();
 }
+
+#[test]
+fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
+    let run = run_dir("heavy");
+    // Six idle lanes of a heavy tool's weight (an OpenCode serve measured 571-590 MiB): the
+    // count of eight would keep them all, but 270 MiB for the new one and six of 590 is over
+    // 2,200, so the three idle the longest leave and 270 + 3 x 590 = 2,040 MiB fits.
+    let lanes: Vec<FakeLane> = (0..6u64)
+        .map(|n| {
+            let mut said = status("t", "d", 100 - n, false);
+            said["memory_bytes"] = json!(590 * MIB);
+            FakeLane::start(&run, &format!("h{n}"), said)
+        })
+        .collect();
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    make_room(&run, &own, Settings::of(None).room());
+    let left: Vec<usize> = lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, lane)| lane.asked().contains(&"retire".to_owned()))
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(left, [0, 1, 2]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
