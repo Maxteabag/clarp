@@ -268,6 +268,9 @@ def cancelled(signum, frame):
 # workspace or its target through a symlink.
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 STAMP = '.clarp-last-build'
+# A second name of the stamp's file, made when the build's command exited 0. Each build replaces
+# the stamp with a new file, so the two are one file exactly while the last build succeeded.
+GOOD = '.clarp-last-good-build'
 
 
 @contextmanager
@@ -342,6 +345,10 @@ def trim_test_executables(deps):
 
 
 def make_room(root, current, floor):
+    # Free space is the filesystem's own count (statvfs, as df reports it), never a sum of du:
+    # a target cloned from another (seed_target) shares most of its data with it, and du counts
+    # that data in full for each, so du overstates what a seeded checkout costs and what
+    # removing its target frees. Removal is followed by the filesystem's count again.
     free = shutil.disk_usage('.').free
     removed = []
     tests = 0
@@ -404,6 +411,122 @@ def make_room(root, current, floor):
     return free >= floor
 
 
+SEED = '.target-seed'
+
+
+def newer_than_the_clone(copy):
+    """Give every file of this checkout's copy, but its target, the time of now.
+
+    Cargo decides that a workspace crate is up to date when none of its sources is newer than its
+    last build. In a cloned target that build is the other checkout's, and this checkout's
+    sources may have arrived before it (while waiting for the slot): a crate that differs between
+    the two would be passed over, and the build would hold the other checkout's code. Newer than
+    any build in the clone, each workspace crate is built again from this checkout's sources.
+    """
+    for parent, dirs, files in os.walk(copy):
+        if Path(parent) == copy / 'server-rs':
+            dirs[:] = [d for d in dirs if d not in ('target', SEED)]
+        for name in files:
+            os.utime(os.path.join(parent, name), follow_symlinks=False)
+
+
+def last_good_build(copy):
+    """The time of this checkout's last build when that build succeeded, else None."""
+    try:
+        stamp = os.stat(STAMP, dir_fd=copy, follow_symlinks=False)
+        good = os.stat(GOOD, dir_fd=copy, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISREG(stamp.st_mode) or not os.path.samestat(stamp, good):
+        return None
+    return stamp.st_mtime_ns
+
+
+def host_library_built(target):
+    try:
+        with directory('debug', target) as debug, directory('deps', debug) as deps:
+            return any(name.startswith('libclarp_host-') and name.endswith('.rlib') for name in os.listdir(deps))
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
+def seed_target(root, current, workspace):
+    """Give a checkout without a target a clone of the target of another checkout whose last
+    build succeeded: the latest of those that hold the Host's library built (so every dependency
+    of it, not only their metadata, as after a check or clippy), or else the latest of them.
+
+    The clone shares its data with the original (a reflink), so it costs the disk little, and the
+    new checkout starts with every crates.io dependency already built: cargo builds only the
+    workspace's crates again, once (see newer_than_the_clone).
+    One target dir cannot be shared outright: cargo gives a workspace crate the same unit name in
+    every checkout, so checkouts building in turn would rebuild each other's crates every time.
+    Where the filesystem cannot clone, nothing is copied and the build starts cold: one file is
+    cloned first to find out, and the target is cloned only with --reflink=always, never copied.
+    The caller holds the slot, so no build writes to the source while it is cloned; the eviction
+    lock keeps a drop from removing it meanwhile.
+    Returns the source checkout's name, or None.
+    """
+    try:
+        os.stat('target', dir_fd=workspace, follow_symlinks=False)
+        return None
+    except FileNotFoundError:
+        pass
+    with (QUEUE / 'eviction-lock').open('a') as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX)
+        sources = []
+        for name in os.listdir(root):
+            if name == current:
+                continue
+            try:
+                with directory(name, root) as copy, directory('server-rs', copy) as other:
+                    with directory('target', other) as target:
+                        built = host_library_built(target)
+                    good = last_good_build(copy)
+                    if good is not None and last_build(name, copy, other) is not None:
+                        sources.append((built, good, name))
+            except (FileNotFoundError, NotADirectoryError, PermissionError):
+                continue
+        if not sources:
+            return None
+        name = max(sources)[2]
+        try:
+            shutil.rmtree(SEED, dir_fd=workspace)
+        except FileNotFoundError:
+            pass
+        try:
+            with directory(name, root) as copy, directory('server-rs', copy) as other:
+                # A file of this checkout's own, cloned beside it, tells whether the filesystem
+                # clones at all; the checkouts and their targets are on that one filesystem.
+                fd = os.open(SEED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=workspace)
+                with os.fdopen(fd, 'w') as probe:
+                    probe.write('clone probe\n')
+                cloned = subprocess.run(
+                    ['cp', '--reflink=always', f'/proc/self/fd/{workspace}/{SEED}', f'/proc/self/fd/{workspace}/{SEED}.clone'],
+                    pass_fds=(workspace,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                for probe in (SEED, f'{SEED}.clone'):
+                    try:
+                        os.unlink(probe, dir_fd=workspace)
+                    except FileNotFoundError:
+                        pass
+                if cloned.returncode == 0:
+                    cloned = subprocess.run(
+                        ['cp', '-a', '--reflink=always', f'/proc/self/fd/{other}/target', f'/proc/self/fd/{workspace}/{SEED}'],
+                        pass_fds=(other, workspace), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        except (FileNotFoundError, NotADirectoryError):
+            cloned = None
+        if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
+            os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
+            newer_than_the_clone(QUEUE / current)
+            return name
+        try:
+            shutil.rmtree(SEED, dir_fd=workspace)
+        except FileNotFoundError:
+            pass
+        detail = cloned.stderr.strip().splitlines()[-1:] if cloned is not None else ['source removed']
+        print(f"Build target: could not clone {quote(name, safe='')}'s target ({' '.join(detail)}); building cold.", flush=True)
+        return None
+
+
 def prepare_debug(workspace, profile):
     """Keep one dev/test profile generation in this target. The caller holds the slot."""
     mark = '.clarp-debug-profile'
@@ -443,7 +566,9 @@ def prepare_debug(workspace, profile):
 
 
 @contextmanager
-def build_space(floor, debug=False):
+def build_space(floor, debug=False, outcome=None):
+    """Prepare this checkout's target and yield whether the build may run. The caller puts the
+    command's exit code in `outcome` (a dict, under 'code'): only a 0 marks the build good."""
     if floor is None:  # repo-gates does not produce a Cargo target
         yield True
         return
@@ -454,6 +579,10 @@ def build_space(floor, debug=False):
         with directory('server-rs', copy) as workspace:
             if not os.path.samestat(os.fstat(workspace), os.stat('.')):
                 raise SystemExit('Build workspace changed during admission.')
+            started = time.monotonic()
+            source = seed_target(root, cwd.parent.name, workspace)
+            if source:
+                print(f"Build target: cloned from {quote(source, safe='')} in {time.monotonic() - started:.1f} s.", flush=True)
             if debug:
                 profile = [os.environ[k] for k in ('CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG')]
                 if prepare_debug(workspace, profile):
@@ -470,6 +599,9 @@ def build_space(floor, debug=False):
             temp = f'{STAMP}.{os.getpid()}'
             fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=copy)
             os.close(fd)
+            if outcome is not None and outcome.get('code') == 0:
+                os.link(temp, f'{GOOD}.{os.getpid()}', src_dir_fd=copy, dst_dir_fd=copy)
+                os.replace(f'{GOOD}.{os.getpid()}', GOOD, src_dir_fd=copy, dst_dir_fd=copy)
             os.replace(temp, STAMP, src_dir_fd=copy, dst_dir_fd=copy)
 
 
@@ -489,11 +621,13 @@ def run(lock, who, command, floor=None, debug=False):
         since = datetime.datetime.now().strftime('%H:%M:%S')
         identity = f'{os.getpid()}:{process_start(os.getpid())}:{lock}'
         HOLDER.write_text(f'{identity} {prefix}{who} since {since}\n')
-        with build_space(floor, debug) as ready:
+        outcome = {}
+        with build_space(floor, debug, outcome) as ready:
             if not ready:
                 return 1
             child = subprocess.Popen(command)
             result = child.wait()
+            outcome['code'] = result
         return result if result >= 0 else 128 - result
     finally:
         for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):

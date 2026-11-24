@@ -32,7 +32,11 @@
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
 # to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
-# with a target directory per checkout, so a second run is incremental.
+# with a target directory per checkout, so a second run is incremental. A checkout's first build
+# starts from a reflink clone of the target of the latest checkout whose last build succeeded with
+# the Host's library built (build-queue.py's seed_target): the clone shares that target's data on
+# disk (du counts it in full for each; df does not), and cargo builds only the workspace's crates
+# again. Where the filesystem cannot clone, the first build starts cold.
 set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
