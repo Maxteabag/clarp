@@ -218,7 +218,8 @@ impl Lane {
         serde_json::to_writer(file, resume).map_err(io::Error::other)?;
         let program = clarp_backend::program("codex")
             .ok_or_else(|| io::Error::other("Codex is not configured"))?;
-        let mut command = launcher.goal_lane_command(self.endpoint.socket(), &program, config, &profile.cwd);
+        let mut command =
+            launcher.goal_lane_command(self.endpoint.socket(), &program, config, &profile.cwd);
         command
             .envs(
                 profile

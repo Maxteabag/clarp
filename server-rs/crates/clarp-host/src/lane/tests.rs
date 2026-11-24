@@ -65,7 +65,10 @@ fn a_lane_is_named_by_its_agent_and_tool_in_the_run_folder() {
         Some(lane)
     );
     assert_eq!(Endpoint::found(PathBuf::from("/run/clarp/a1.sock")), None);
-    assert_eq!(Endpoint::found(PathBuf::from("/run/clarp/a1-cxg.lock")), None);
+    assert_eq!(
+        Endpoint::found(PathBuf::from("/run/clarp/a1-cxg.lock")),
+        None
+    );
 }
 
 /// A lane process as the Host sees it: it answers `inspect` with `status`, holds its owner lock
@@ -124,9 +127,7 @@ impl FakeLane {
 }
 
 fn status(thread: &str, options: &str, idle_ms: u64, busy: bool) -> Value {
-    let claim = busy.then(|| {
-        json!({"turn": 1, "attempt": 1, "spool": "/s", "socket": "/t"})
-    });
+    let claim = busy.then(|| json!({"turn": 1, "attempt": 1, "spool": "/s", "socket": "/t"}));
     json!({
         "thread": thread,
         "available": !busy,
@@ -216,7 +217,10 @@ fn an_attempt_that_reached_nothing_is_offered_once_more() {
     // A spool: the tool may have it, and it is never offered again.
     std::fs::write(&spool, "").unwrap();
     let kept = once_more(login(), &spool, &lane, || panic!("offered twice"));
-    assert_eq!(kept.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(
+        kept.unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
     assert_eq!(once_more(Ok(1), &spool, &lane, || Ok(2)).unwrap(), 1);
     std::fs::remove_dir_all(&run).unwrap();
 }
@@ -227,7 +231,8 @@ fn a_changed_login_is_told_by_its_kind_and_a_reply_without_state_by_its_words() 
         let text = format!("{line}\n");
         replied::<Status>(&mut text.as_bytes(), Tool::Codex)
     };
-    let changed = read(json!({"ok": false, "error": "the Codex login changed", "code": LOGIN_CHANGED}));
+    let changed =
+        read(json!({"ok": false, "error": "the Codex login changed", "code": LOGIN_CHANGED}));
     assert_eq!(
         changed.unwrap_err().kind(),
         std::io::ErrorKind::PermissionDenied
