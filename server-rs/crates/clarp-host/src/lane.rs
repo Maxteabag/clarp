@@ -185,7 +185,7 @@ impl Settings {
 /// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
 /// exited: one writer per conversation. A lane that still runs a turn refuses, and the terminal
 /// opens as it did before lanes (the lead's decision of 25 Nov 2026: that two-writer case is
-/// older than lanes, and is its own issue). Blocking: it waits for the lane's tool to exit.
+/// older than lanes, and is issue #770). Blocking: it waits for the lane's tool to exit.
 pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
     for tool in Tool::ALL {
         let _ = Endpoint::of(tool, run, agent_id).retire();

@@ -125,7 +125,7 @@ of them is not done.
     - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
       retired and waited for until its tool has exited, and the terminal then opens as before
       (the lead's decision of 25 Nov 2026). While a turn runs, the terminal opens as before,
-      with no refusal; that two-writer case is older than lanes and is its own issue.
+      with no refusal; that two-writer case is older than lanes and is issue #770.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an
   attempt is offered to a new lane, and only once (`lane::once_more`).
