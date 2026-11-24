@@ -1563,13 +1563,18 @@ struct Shake {
     posted: usize,
     done: usize,
     frames: Vec<crate::scroll_journal::Frame>,
+    /// The newest frame looked at (kept when the frames are let go).
+    seen: Option<Duration>,
 }
 
 impl Shake {
     /// Takes the frames drawn since the last look.
     fn look(&mut self) {
-        let last = self.frames.last().map(|f| f.at);
+        let last = self.seen;
         let new: Vec<_> = crate::scroll_journal::frames(&self.pane).into_iter().filter(|f| last.is_none_or(|at| f.at > at)).collect();
+        if let Some(newest) = new.last() {
+            self.seen = Some(newest.at);
+        }
         self.frames.extend(new);
     }
 

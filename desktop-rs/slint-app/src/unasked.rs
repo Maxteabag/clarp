@@ -71,8 +71,9 @@ fn cover(viewport: f32, before: (f32, f32), after: (f32, f32)) -> f32 {
 /// not asked for and anything moved half a px or more. The rows measured
 /// are the one across the top and the one across the bottom, where each
 /// was drawn in both frames; without either (the frame shows other rows),
-/// the offset's change, unless the list re-estimated its rows (the offset
-/// moves, the view does not).
+/// the offset's change, but only while the rows and the content height
+/// hold: the offset is in the list's estimate of its rows' heights, which
+/// changes as rows come and are drawn (the offset moves, the view does not).
 pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let (a, b) = (&before.shot, &after.shot);
     if a.viewport < 1.0 || b.viewport < 1.0 || after.events.iter().any(|e| asked(e) || e.starts_with("reset:")) {
@@ -95,7 +96,8 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
             moved.push((dy, cover(viewport, (a.bottom_y, a.bottom_h), (b.bottom_y, b.bottom_h))));
         }
     }
-    if anchors == 0 && !after.events.iter().any(|e| e == "estimate") {
+    let same_rows = a.rows == b.rows && (a.content - b.content).abs() < 0.5;
+    if anchors == 0 && same_rows && !after.events.iter().any(|e| e == "estimate") {
         let dy = b.offset - a.offset;
         if dy.abs() >= 0.5 {
             moved.push((dy, 1.0));
@@ -105,8 +107,13 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     // Both ends moved the same way: every row between them did too.
     let fraction = if moved.len() == 2 && moved[0].0.signum() == moved[1].0.signum() { 1.0 } else { moved.iter().map(|m| m.1).sum::<f32>().min(1.0) };
     // The follow slide: following, every moved row went up, and the view is
-    // at the end it was not at before (or the chat grew there).
-    let slide = b.follow && moved.iter().all(|m| m.0 < 0.0) && at_end(b) && (!at_end(a) || b.content > a.content + 0.5);
+    // at the end it was not at before, or something arrived there (a row,
+    // a row's new height, a live update; the content height is the list's
+    // estimate and may even shrink as a row lands).
+    let arrived = b.rows > a.rows
+        || b.content > a.content + 0.5
+        || after.events.iter().any(|e| e == "height" || e == "live" || (e.starts_with("rows ") && !e.contains(" +0 ~0")));
+    let slide = b.follow && moved.iter().all(|m| m.0 < 0.0) && at_end(b) && (!at_end(a) || arrived);
     Some(Step { dy, fraction, counted: !slide })
 }
 
@@ -296,6 +303,19 @@ mod tests {
         let late = frame(32, pinned(4040.0, -60.0, 140.0), &["follow"]);
         assert_eq!(movement(&a, &short), None, "the last row grew below the viewport; nothing visible moved");
         assert_eq!(movement(&short, &late).map(|s| s.counted), Some(false));
+    }
+
+    #[test]
+    fn a_row_landing_while_the_estimate_shrinks_is_the_slide_and_other_rows_are_no_move() {
+        // Seen in CI: a row lands at the end, the list's estimate of the
+        // content drops 248 px, the rows on screen slide up 74 px.
+        let a = frame(0, pinned(7015.0, -36.0, 157.0), &[]);
+        let b = frame(16, Shot { rows: 21, bottom: "row-20".into(), ..pinned(6767.0, -110.0, 74.0) }, &["rows -0 +1 ~0", "follow", "height"]);
+        assert_eq!(movement(&a, &b).map(|s| (s.dy, s.counted)), Some((-74.0, false)));
+        // Neither row drawn in both, a row more: the offset (an estimate)
+        // says nothing.
+        let other = Shot { top: "row-11".into(), bottom: "row-20".into(), rows: 21, offset: -9000.0, content: 9480.0, ..pinned(4000.0, -20.0, 100.0) };
+        assert_eq!(movement(&a, &frame(16, other, &["rows -0 +1 ~0"])), None);
     }
 
     #[test]
