@@ -24,20 +24,24 @@
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
 #   server-rs/tools/build status           who holds the queue, the machine's load and free build space
-#   server-rs/tools/build drop             remove this checkout's copy and its target from the build machine,
-#                                          once its branch has landed (a copy is 5 to 14 GB there)
+#   server-rs/tools/build drop             remove this checkout's copy from the build machine once its branch
+#                                          has landed; the shared target stays
 # A build that needs another free-space floor sets CLARP_BUILD_MIN_FREE_BYTES to its own byte count,
 # higher or lower.
 #
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
-# to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
-# with a target directory per checkout, so a second run is incremental.
+# to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority.
+# Every checkout builds into one shared target there (build-queue.py sets CARGO_TARGET_DIR to
+# /var/tmp/clarp-build/target), so the crates.io dependencies are built once and a new checkout
+# starts warm; each checkout still compiles the workspace's own crates, and a second run is
+# incremental. A command reads what it built from "$CARGO_TARGET_DIR", never from target/.
 set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
 JOBS="${CLARP_BUILD_JOBS:-6}"
-# The queue frees room (other checkouts' targets, oldest built first) below this much free space. The
+# The queue frees room (superseded test executables, checkouts' own targets from before the shared
+# one, the shared incremental data, and the shared target last) below this much free space. The
 # build machine's disk is shared with other builds (Android, since 23 Nov 2026), and at 10 GiB it filled.
 floor="${CLARP_BUILD_MIN_FREE_BYTES:-25769803776}" # 24 GiB
 # Extra environment for the remote cargo, as NAME=value words. The tests that run a real tool
@@ -47,6 +51,11 @@ EXTRA_ENV="${CLARP_BUILD_ENV:-}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../server-rs
 name="$(basename "$(dirname "$here")")"                            # the worktree's name keys the remote copy
 remote="/var/tmp/clarp-build/$name"
+# The shared target has this name beside the checkouts' copies.
+if [ "$name" = target ]; then
+    echo "a checkout named target would build inside the build machine's shared target: rename it" >&2
+    exit 2
+fi
 # Two checkouts of one name share that copy (a working tree and the clean checkout a landing is
 # built from). One of them at a time copies its sources and builds: the other waits here, so
 # that nothing is built from the sources of both.
@@ -67,11 +76,12 @@ ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 cmd="${1:-check}"; shift || true
 
 if [ "$cmd" = status ]; then
-    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; python3 - status && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf "build disk: %s free\n"' < "$here/tools/build-queue.py"
+    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; python3 - status && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf "build disk: %s free\n"; printf "shared target: %s\n" "$(du -sh /var/tmp/clarp-build/target 2>/dev/null | cut -f1)"; set -- /var/tmp/clarp-build/*/server-rs/target; [ -e "$1" ] || set --; printf "targets of checkouts from before it: %s\n" "$#"' < "$here/tools/build-queue.py"
 fi
 if [ "$cmd" = drop ]; then
     # A landed branch's copy is only disk there. This checkout's locks are held (above), and the
     # queue's eviction lock keeps another checkout's build from freeing room in it at that moment.
+    # What it built into the shared target stays: the queue trims that when the disk needs it.
     # The name reaches a remote shell: only a plain checkout name is removed, never a queue file.
     if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == . || "$name" == .. || "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* ]]; then
         echo "refusing to drop a copy under this checkout name: $name" >&2
@@ -92,15 +102,19 @@ case "$cmd" in
     test)   cargo_cmd="cargo build -j $JOBS -p clarp-shim --bins && cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
     clippy) cargo_cmd="cargo clippy --workspace --all-targets --locked --keep-going -j $JOBS -- -D warnings" ;;
     fmt)    cargo_cmd="cargo fmt --all" ;;
-    conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
-    answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
+    # The binaries are read from the shared target in the same slot that built them: the next
+    # build, of any checkout, puts its own there.
+    conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust \"\$CARGO_TARGET_DIR\"/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
+    answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust \"\$CARGO_TARGET_DIR\"/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     voice-timeline-read)
-        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-voice-timeline.py target/release/clarp-host'"
+        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-voice-timeline.py \"\$CARGO_TARGET_DIR\"/release/clarp-host'"
         ;;
     snapshot-read)
-        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-snapshot.py target/release/clarp-host'"
+        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-snapshot.py \"\$CARGO_TARGET_DIR\"/release/clarp-host'"
         ;;
-    fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host -p clarp-shim --bins" ;;
+    # fleet-load runs in later slots than the build, so the build keeps this checkout's binaries
+    # beside its copy (outside server-rs/, which every upload mirrors), where fleet-load starts them.
+    fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host -p clarp-shim --bins && mkdir -p ../fleet-load-bin && ln -f \"\$CARGO_TARGET_DIR\"/release/clarp-host \"\$CARGO_TARGET_DIR\"/release/clarp-shim ../fleet-load-bin/" ;;
     fleet-load)
         [[ $# = 2 && $1 == /var/tmp/* && $1 != *$'\n'* && $2 =~ ^(move|empty|full|populate|observe)$ ]] || exit 2
         # A campaign with less than one full slice left may lower its hard timeout.
@@ -219,12 +233,12 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../server/" "$HOST:$remote/server/"
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
-# Cargo releases the slot before rsync fetches the binaries. Keep links for the
-# transfer so a later build can evict this target without interrupting the fetch.
+# Cargo releases the slot before rsync fetches the binaries. Keep links for the transfer, so that
+# a later build, which replaces them in the shared target or trims it, cannot change the fetch.
 if [ "$cmd" = release ]; then
     export_dir=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.release-XXXXXXXX")
     trap 'ssh "${ssh_opts[@]}" "$HOST" "rm -f -- $export_dir/clarp-host $export_dir/clarp-shim && rmdir -- $export_dir"' EXIT
-    cargo_cmd+=" && ln target/release/clarp-host target/release/clarp-shim $export_dir/"
+    cargo_cmd+=" && ln \"\$CARGO_TARGET_DIR\"/release/clarp-host \"\$CARGO_TARGET_DIR\"/release/clarp-shim $export_dir/"
 fi
 set +e
 printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$queue_mode" "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"

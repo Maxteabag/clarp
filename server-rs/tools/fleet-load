@@ -18,7 +18,8 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-BINARY = Path("target/release/clarp-host").resolve()
+# tools/build fleet-load-build keeps this checkout's release binaries here, beside its copy.
+BINARY = Path("../fleet-load-bin/clarp-host").resolve()
 NOW = time.monotonic
 AUTH = "synthetic-benchmark-token"
 

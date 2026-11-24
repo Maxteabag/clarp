@@ -73,8 +73,8 @@ PLANTS = [
 
 def built_size():
     """Use the workspace build the plant workflow already made, before modifying any code."""
-    binary = Path(__file__).resolve().parents[2] / 'target/debug/clarp-shim'
-    workspace = binary.parents[2]
+    workspace = Path(__file__).resolve().parents[2]
+    binary = Path(os.environ.get('CARGO_TARGET_DIR') or workspace / 'target') / 'debug/clarp-shim'
     edges = subprocess.check_output(
         ['cargo', 'tree', '--locked', '-p', 'clarp-shim', '--edges', 'normal,build', '--prefix', 'none'],
         text=True, cwd=workspace)

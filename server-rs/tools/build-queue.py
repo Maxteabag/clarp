@@ -20,6 +20,12 @@ import time
 from urllib.parse import quote
 
 QUEUE = Path('/var/tmp/clarp-build')
+# Every checkout builds into this one cargo target, beside the checkouts' copies. Cargo keys a
+# crates.io dependency by its name, version, features and profile, not by the workspace that
+# asks for it, so each dependency is built once for every checkout and a new checkout starts
+# warm. The workspace's own crates are keyed by their path, so each checkout still compiles
+# its own. The slot runs one build at a time, and cargo locks the target as well.
+SHARED = 'target'
 LOCK = QUEUE / 'lock'
 HOLDER = QUEUE / 'holder'
 RETRY_SECONDS = 0.2
@@ -303,14 +309,8 @@ def last_build(name, copy, workspace):
         stamp = os.stat(STAMP, dir_fd=copy, follow_symlinks=False)
         return stamp.st_mtime_ns if stat.S_ISREG(stamp.st_mode) else None
     except FileNotFoundError:
-        pass
-    # Cargo's latest compiler-info update is the initial age of an old copy.
-    with directory('target', workspace) as target:
-        try:
-            info = os.stat('.rustc_info.json', dir_fd=target, follow_symlinks=False)
-        except FileNotFoundError:
-            info = os.fstat(target)
-        return info.st_mtime_ns
+        # A copy without a stamp predates it, so it counts as the oldest.
+        return 0
 
 
 def free_after_removal(floor):
@@ -342,19 +342,28 @@ def trim_test_executables(deps):
 
 
 def make_room(root, current, floor):
+    """Free the build disk down to the floor, cheapest loss first. The caller holds the slot."""
     free = shutil.disk_usage('.').free
     removed = []
     tests = 0
     incremental = 'no'
+    shared = 'kept'
     if free < floor:
+        # Test executables of an earlier build, of this checkout or another, are rebuilt
+        # cheaply from the libraries beside them.
         try:
-            with directory('target') as target, directory('debug', target) as debug, directory('deps', debug) as deps:
+            with directory(SHARED, root) as target, directory('debug', target) as debug, \
+                    directory('deps', debug) as deps:
                 tests = trim_test_executables(deps)
         except (FileNotFoundError, NotADirectoryError):
             pass
         if tests:
             free = free_after_removal(floor)
     if free < floor:
+        # A checkout's own server-rs/target is what builds used before the shared target, and
+        # what a checkout of a branch from before it still builds into. A checkout's first
+        # build with the shared target removes its own; this removes those of checkouts that
+        # have not built since, oldest built first. It never removes a checkout's copy.
         # Serialize this scan with publication of a new lease. A keeper may
         # release its lease during cleanup; retaining its copy is safe.
         with (QUEUE / 'eviction-lock').open('a') as guard:
@@ -363,7 +372,7 @@ def make_room(root, current, floor):
                       if description.startswith('lease ')]
             candidates = []
             for name in os.listdir(root):
-                if name == current or any(lease.endswith(' ' + name) for lease in leases):
+                if name in (current, SHARED) or any(lease.endswith(' ' + name) for lease in leases):
                     continue
                 try:
                     with directory(name, root) as copy, directory('server-rs', copy) as workspace:
@@ -389,29 +398,60 @@ def make_room(root, current, floor):
                     break
     if free < floor:
         try:
-            with directory('target') as target, directory('debug', target) as debug:
+            with directory(SHARED, root) as target, directory('debug', target) as debug:
                 with directory('incremental', debug):
                     shutil.rmtree('incremental', dir_fd=debug)
                 incremental = 'yes'
                 free = free_after_removal(floor)
         except (FileNotFoundError, NotADirectoryError):
             pass
+    if free < floor:
+        # The last resort: every checkout's next build starts cold.
+        try:
+            with directory(SHARED, root):
+                shutil.rmtree(SHARED, dir_fd=root)
+            shared = 'removed'
+            free = free_after_removal(floor)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
     verdict = ('ready' if free >= floor else
                f'Build stopped before cargo because less than {floor} bytes are free; {floor - free} more bytes needed')
     print(f"Build disk: for {quote(current, safe='')}, superseded tests={tests}, "
-          f"removed targets={','.join(removed) or 'none'}, incremental removed={incremental}, "
-          f"free={free} bytes, {verdict}.", file=sys.stdout if free >= floor else sys.stderr, flush=True)
+          f"removed checkout targets={','.join(removed) or 'none'}, shared incremental removed={incremental}, "
+          f"shared target={shared}, free={free} bytes, {verdict}.",
+          file=sys.stdout if free >= floor else sys.stderr, flush=True)
     return free >= floor
 
 
-def prepare_debug(workspace, profile):
-    """Keep one dev/test profile generation in this target. The caller holds the slot."""
-    mark = '.clarp-debug-profile'
+def shared_target(root):
+    """The shared target, made if missing. Never one reached through a symlink."""
     try:
-        os.mkdir('target', dir_fd=workspace)
+        os.mkdir(SHARED, dir_fd=root)
     except FileExistsError:
         pass
-    with directory('target', workspace) as target:
+    with directory(SHARED, root):
+        pass
+    return str(QUEUE / SHARED)
+
+
+def drop_own_target(workspace):
+    """Remove the target this checkout built into before the shared one. The caller holds the slot."""
+    try:
+        with directory('target', workspace):
+            shutil.rmtree('target', dir_fd=workspace)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def prepare_debug(root, profile):
+    """Keep one dev/test profile generation in the shared target. The caller holds the slot."""
+    mark = '.clarp-debug-profile'
+    try:
+        os.mkdir(SHARED, dir_fd=root)
+    except FileExistsError:
+        pass
+    with directory(SHARED, root) as target:
         wanted = json.dumps(profile).encode() + b'\n'
         try:
             fd = os.open(mark, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=target)
@@ -450,18 +490,27 @@ def build_space(floor, debug=False):
     cwd = Path.cwd()
     if cwd.name != 'server-rs' or cwd.parent.parent != QUEUE:
         raise SystemExit('Build workspace is outside the managed build directory.')
+    if cwd.parent.name == SHARED:
+        raise SystemExit(f'A checkout named {SHARED} would build inside the shared target.')
+    profile = [os.environ[k] for k in ('CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG')] if debug else None
     with directory(QUEUE) as root, directory(cwd.parent.name, root) as copy:
         with directory('server-rs', copy) as workspace:
             if not os.path.samestat(os.fstat(workspace), os.stat('.')):
                 raise SystemExit('Build workspace changed during admission.')
-            if debug:
-                profile = [os.environ[k] for k in ('CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG')]
-                if prepare_debug(workspace, profile):
-                    print('Build profile changed: cleared target/debug.', flush=True)
-                    free_after_removal(floor)
+            if drop_own_target(workspace):
+                print('Removed this checkout\'s own target: builds use the shared one now.', flush=True)
+        shared_target(root)
+        if debug and prepare_debug(root, profile):
+            print('Build profile changed: cleared the shared target/debug.', flush=True)
+            free_after_removal(floor)
         if not make_room(root, cwd.parent.name, floor):
             yield False
             return
+        # make_room may have removed the whole shared target, and with it the mark of the
+        # debug generation, which this build would otherwise leave unmarked.
+        os.environ['CARGO_TARGET_DIR'] = shared_target(root)
+        if debug:
+            prepare_debug(root, profile)
         try:
             yield True
         finally:
