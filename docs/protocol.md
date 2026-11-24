@@ -312,7 +312,10 @@ Rules:
   beside its `windows` (`providers.<tool>.pool`): `{"seats" (in all),
   "with_room" (seats with room for a turn of no model in particular, as the
   switcher reads them), "used_up", "active_alias" (the seat in use, or null),
-  "next_alias", "next_reset_at" (the soonest moment a used-up seat regains room,
+  "next_alias", "switched" (the last switch of the tool's seats this Host made, by
+  its switcher or by hand: `{"from_alias", "to_alias", "at"}`, or null; a switch
+  by the owner's selector alone shows as a new `active_alias`), "next_reset_at"
+  (the soonest moment a used-up seat regains room,
   or null), "regains_room_at" (only where every seat is used up: when the first
   regains room; else null), "stale", "observed_at"}`, moments in UTC to the
   second. `next_alias` is the seat the Host's switcher would move to were the one

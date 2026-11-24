@@ -432,8 +432,9 @@ fn regains_at(read: &Value, model: &str, desk: &Value) -> Option<i64> {
 /// particular: how many seats there are, how many have room for a turn and how many are used
 /// up as the switcher reads them ([`has_room`]), the alias of the one in use and of the one the
 /// switcher would move to were it used up ([`takes`]), the soonest moment a used-up seat
-/// regains room, and where every seat is used up, when the first does. A seat that cannot be
-/// read is counted in neither.
+/// regains room, and where every seat is used up, when the first does; and the last switch of
+/// the tool's seats this Host made (`switched`: from which seat to which, and when). A seat
+/// that cannot be read is counted in neither.
 ///
 /// Where the reading is old or failed (`stale`), no seat is counted as having room or as used
 /// up, none is named next, and nothing says that every seat is used up: an old reading says
@@ -473,6 +474,18 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
         .and_then(|account| account["alias"].as_str());
     let fresh = seats.is_some();
     let all_used_up = fresh && with_room == 0 && !unread;
+    // The last switch of the tool's seats this Host made, by its switcher or by hand.
+    let switched = desk["actions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|action| action["provider"] == provider && action["kind"] == "switched")
+        .map(|action| {
+            json!({
+                "from_alias": action["from_alias"], "to_alias": action["to_alias"],
+                "at": action["at"].as_i64().map(moment),
+            })
+        });
     let at = |ms: Option<i64>| ms.map(moment);
     Some(json!({
         "seats": accounts.len(),
@@ -480,6 +493,7 @@ pub fn pool(provider: &str, desk: &Value) -> Option<Value> {
         "used_up": fresh.then_some(used_up),
         "active_alias": active,
         "next_alias": next_alias,
+        "switched": switched,
         "next_reset_at": at(next),
         "regains_room_at": at(next.filter(|_| all_used_up)),
         "stale": !fresh,
@@ -1141,9 +1155,22 @@ mod tests {
             summary,
             json!({
                 "seats": 4, "with_room": 1, "used_up": 2, "active_alias": "work",
-                "next_alias": "spare", "next_reset_at": moment(NOW + 3 * HOUR),
+                "next_alias": "spare", "switched": null, "next_reset_at": moment(NOW + 3 * HOUR),
                 "regains_room_at": null, "stale": false, "observed_at": moment(NOW - 60_000),
             })
+        );
+        // A switch this Host made: from which seat to which, and when.
+        let mut desk = judged_by(
+            served(accounts.clone()),
+            json!([sw("work", true, Some(0), Some(80))]),
+        );
+        desk["actions"] = json!([
+            { "provider": "codex", "kind": "switched", "at": NOW, "from_alias": "x", "to_alias": "y" },
+            { "provider": "claude", "kind": "switched", "at": NOW - 60_000, "from_alias": "old", "to_alias": "work" },
+        ]);
+        assert_eq!(
+            pool("claude", &desk).unwrap()["switched"],
+            json!({ "from_alias": "old", "to_alias": "work", "at": moment(NOW - 60_000) })
         );
         // Of two seats with room, the switcher's choice: more of the five hours left.
         let roomier = timed("roomier", false, "ok", &[("5h", 0.05, NOW + HOUR)]);
