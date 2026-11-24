@@ -1727,7 +1727,11 @@ mod tests {
         let (mut now, mut after) = (now, gap);
         let back = loop {
             now += after;
-            assert_eq!(pool.fired(Timer::Recovery, now), vec![only_b.clone()], "{now}");
+            assert_eq!(
+                pool.fired(Timer::Recovery, now),
+                vec![only_b.clone()],
+                "{now}"
+            );
             let answered = pool.answered(Verdict::NoAccount, now);
             let [Effect::Timer { after_ms, .. }] = answered.as_slice() else {
                 break answered;
