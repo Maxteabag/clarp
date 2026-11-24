@@ -485,3 +485,68 @@ fn the_use_of_tools_of_a_bound_agent_is_explained_by_no_model() {
     assert_ne!(again["items"][0]["status"], "pending", "{again}");
     assert!(!questions().contains("kept-out.cfg"));
 }
+
+#[test]
+fn what_is_said_to_an_agent_with_cloud_speech_off_is_heard_by_the_hosts_own_engine_only() {
+    let place = Place::new("cloud-ears-off");
+    let worker = place.root.join("whisper-stand-in.sh");
+    std::fs::write(&worker, WHISPER_STAND_IN).unwrap();
+    let token = "speech-token";
+    let no_key = [("ELEVEN_API_KEY", ""), ("DEEPGRAM_API_KEY", "")];
+    let hear = |host: &Host, session: &str| -> (u16, Value) {
+        let headers = [
+            ("Content-Type", "audio/mp4"),
+            ("X-Transcription-Session", session),
+        ];
+        let answer = fetch(
+            host,
+            token,
+            "POST",
+            "/transcribe",
+            &headers,
+            b"a clip of speech",
+        );
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+    let quiet_on = |host: &Host| {
+        let made = host.post(
+            "/agents",
+            json!({"name": "Quiet", "backend": "scripted", "cloud_speech": false}),
+        );
+        made["session"].as_str().unwrap().to_string()
+    };
+
+    // With an engine of its own, the Host hears it there.
+    let engine = [
+        "--whisper-python",
+        "sh",
+        "--whisper-worker",
+        worker.to_str().unwrap(),
+    ];
+    let host = place.start_in(token, &engine, &no_key);
+    let quiet = quiet_on(&host);
+    wait_for("the engine to have loaded its model", || {
+        hear(&host, &quiet).0 == 200
+    });
+    let (status, said) = hear(&host, &quiet);
+    assert_eq!(status, 200, "{said}");
+    assert!(
+        said["text"].as_str().unwrap_or("").contains("Open the log"),
+        "{said}"
+    );
+    drop(host);
+
+    // With none, it is refused in plain words, and sent nowhere.
+    let bare = Place::new("cloud-ears-off-bare");
+    let host = bare.start_in(token, &[], &no_key);
+    let quiet = quiet_on(&host);
+    let (status, said) = hear(&host, &quiet);
+    assert_eq!(status, 409, "{said}");
+    assert!(
+        said["error"]
+            .as_str()
+            .is_some_and(|why| why.contains("stays off cloud speech")),
+        "{said}"
+    );
+}
