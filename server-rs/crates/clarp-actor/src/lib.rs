@@ -2978,6 +2978,35 @@ impl Actor {
         self.tail_of(limit, Which::All)
     }
 
+    /// How a chat is read: as a helper's (`which` says so, from the agent's role now), or as one
+    /// that was ever read as a helper's. The first read as a helper's marks the chat so, once
+    /// and for good: the turns other agents gave it stay its conversation when its role changes,
+    /// so a row that entered that view never leaves it.
+    ///
+    /// The read never fails for the mark: one that cannot be read or written now is read as
+    /// absent, and written at a later read.
+    pub fn chat_of(&mut self, which: Which, now_ms: i64) -> Which {
+        if !matches!(which, Which::Chat { .. }) {
+            return which;
+        }
+        let marked = self
+            .recorder
+            .log()
+            .find(kind::HELPER_CHAT_KEY)
+            .ok()
+            .flatten()
+            .is_some_and(|item| item.kind == kind::HELPER_CHAT);
+        if which.is_helper_chat() && !marked {
+            let mut batch = self.recorder.batch();
+            batch.item(
+                NewItem::new(kind::HELPER_CHAT, now_ms, Vec::new()).keyed(kind::HELPER_CHAT_KEY),
+            );
+            // A mark not written now is written at a later read: this one goes on without it.
+            let _ = batch.commit();
+        }
+        which.of_helper(which.is_helper_chat() || marked)
+    }
+
     /// The newest `limit` things a reader asks for.
     pub fn tail_of(&self, limit: usize, which: Which) -> Result<Page, ActorError> {
         let page = conversation::tail(

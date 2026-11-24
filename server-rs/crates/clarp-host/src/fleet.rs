@@ -190,6 +190,11 @@ pub struct AgentRecord {
     /// any other.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub role: String,
+    /// Its chat was a helper's, and stays one when its role changes ([`Self::is_helper_chat`]):
+    /// the turns other agents gave it are its conversation and are shown, so nothing that
+    /// entered its Conversation view leaves it (issue 745).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub helper_chat: bool,
     /// It has a job of maintenance and is no agent to chat with ([`clarp_kernel::janitors`]).
     /// It is a member of the fleet and not of the roster: the apps list it apart.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -256,6 +261,18 @@ impl AgentRecord {
 
     pub fn is_helper(&self) -> bool {
         self.role == "helper"
+    }
+
+    /// Whether its chat is a helper's: it is a helper, or was one. The turns other agents give
+    /// a helper are its conversation, and stay so when its role changes.
+    pub fn is_helper_chat(&self) -> bool {
+        self.is_helper() || self.helper_chat
+    }
+
+    /// Gives it another role. A chat that was a helper's stays one.
+    pub fn change_role(&mut self, role: String) {
+        self.helper_chat = self.is_helper_chat();
+        self.role = role;
     }
 
     /// Whether it is bound to a model provider of its own: either half of a binding is set,
@@ -3509,6 +3526,8 @@ impl Fleet {
             } else {
                 role.to_string()
             },
+            // A chat that was a helper's stays one when the agent is launched again as another.
+            helper_chat: before.is_helper_chat(),
             helper_state: if change_lineage {
                 helpers::initial_state(role).map(str::to_string)
             } else {
@@ -4062,11 +4081,11 @@ impl Fleet {
             // the heartbeat. Let go, it is an agent like any other again.
             Amend::Janitor(is) => {
                 record.is_janitor = is;
-                record.role = if is {
+                record.change_role(if is {
                     JANITOR.to_string()
                 } else {
                     String::new()
-                };
+                });
                 record.heartbeat_enabled = record.heartbeat_enabled && !is;
             }
             Amend::Portraits { kept, worn } => {

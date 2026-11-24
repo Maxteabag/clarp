@@ -34,14 +34,15 @@ struct Chat {
 /// no choice of its own, and its own choice. A helper's own chat shows them by default
 /// whatever the global choice is: every turn of a helper is started by its parent or another
 /// agent, so under a global `hide` its chat would always be empty. The global choice keeps
-/// agent chatter out of the chats the owner talks in, and a helper's chat is its work. A
-/// choice the owner made for the chat still wins.
+/// agent chatter out of the chats the owner talks in, and a helper's chat is its work. A chat
+/// that was a helper's stays one when the agent's role changes, so nothing it showed is hidden
+/// afterwards. A choice the owner made for the chat still wins.
 pub(crate) fn chat_choices(
     settings: &BTreeMap<String, String>,
     agent: &AgentRecord,
 ) -> (Visibility, Option<Visibility>) {
     let read = |key: &str| settings.get(key).and_then(|word| Visibility::read(word));
-    let default = if agent.is_helper() {
+    let default = if agent.is_helper_chat() {
         Visibility::Show
     } else {
         read(rules::GLOBAL_KEY).unwrap_or_default()
@@ -69,7 +70,7 @@ impl Roster {
                         Some(&agent.backend),
                         true,
                     );
-                let source = if agent.is_helper() {
+                let source = if agent.is_helper_chat() {
                     "helper"
                 } else {
                     "global"
@@ -322,5 +323,45 @@ mod tests {
         );
         assert!(hides(&hidden, "hal"));
         assert_eq!(policy(&hidden, "hal", auto).source, "chat");
+    }
+
+    /// Issue 745: what a helper's chat showed stays shown when the agent is a helper no more
+    /// (made a janitor, launched again as an agent), also under a global `hide`.
+    #[test]
+    fn a_chat_that_was_a_helpers_keeps_showing_coordination_when_its_role_changes() {
+        let mut hal = AgentRecord {
+            agent_id: "hal".into(),
+            backend: "claude".into(),
+            role: "helper".into(),
+            ..AgentRecord::default()
+        };
+        hal.change_role("janitor".into());
+        assert!(!hal.is_helper());
+        assert!(hal.is_helper_chat());
+        hal.change_role(String::new());
+        assert!(hal.is_helper_chat(), "it stays so whatever role comes next");
+        let settings = BTreeMap::from([(rules::GLOBAL_KEY.into(), "hide".into())]);
+        let shown = Directory {
+            coordination: Roster::of(&settings, [&hal].into_iter()),
+            ..Directory::default()
+        };
+        assert_eq!(visibility(&shown, "hal"), (Visibility::Show, None));
+        assert!(!hides(&shown, "hal"));
+        let auto = rules::Mode::Auto;
+        assert_eq!(
+            (
+                policy(&shown, "hal", auto).source,
+                policy(&shown, "hal", auto).hidden
+            ),
+            ("helper", false)
+        );
+        // An agent that never was a helper keeps the global choice.
+        let mut oak = AgentRecord {
+            agent_id: "oak".into(),
+            backend: "claude".into(),
+            ..AgentRecord::default()
+        };
+        oak.change_role("janitor".into());
+        assert!(!oak.is_helper_chat());
     }
 }

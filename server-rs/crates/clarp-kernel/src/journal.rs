@@ -102,6 +102,10 @@ pub mod kind {
         /// session that answers the user while the agent works for other agents, keyed by
         /// [`FORK_LANE`]. The newest is the one that counts.
         const FORK= 907;
+        /// The agent's chat is a helper's, keyed by [`HELPER_CHAT_KEY`], written once when it was
+        /// first read as one: the turns other agents gave it are its conversation from then on,
+        /// whatever its role becomes, so a row that entered that view never leaves it.
+        const HELPER_CHAT= 908;
 
         /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
         const JOB= 300;
@@ -141,6 +145,8 @@ pub mod kind {
     pub const ROWS: Kinds = Kinds::range(MESSAGE, AGENT_NOTE);
     /// The key of the agent's conversation fork, as it stands now.
     pub const FORK_LANE: &str = "fork-lane";
+    /// The key of the mark that the agent's chat is a helper's ([`HELPER_CHAT`]).
+    pub const HELPER_CHAT_KEY: &str = "helper-chat";
 }
 
 const PAGE: usize = 1_000;

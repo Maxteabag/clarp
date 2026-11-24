@@ -417,6 +417,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // a hard limit (`provider-limit`) is not told while a seat would take the turn, and a turn
     // that waits for an account shows the pool's reset.
     ("quota_pool", 176),
+    // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
+    // a turn another agent started has its prompt and its answers in `view=conversation`,
+    // anchored as a user's turn's are, its audience still the agents'
+    // (`clarp_actor::conversation::in_conversation_view`, issue 745).
+    ("helper_conversation", 175),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -2688,7 +2693,9 @@ async fn log(
         .include_automated
         .as_deref()
         .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
-    let which = Which::chat(include_automated);
+    // A helper's chat holds the turns other agents give it as its conversation (issue 745). The
+    // actor keeps a chat once read so a helper's, whatever the agent's role becomes.
+    let which = Which::chat(include_automated).of_helper(member.record.is_helper_chat());
     // Only an agent that can leave a note for its user has rows for the agents.
     let hides = coordination::can_leave_note(
         &member.record.agent_id,
