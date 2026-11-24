@@ -1754,22 +1754,14 @@ fn a_helpers_own_chat_shows_the_turns_other_agents_start_unless_the_user_hid_it(
             .unwrap()
             .iter()
             .filter(|event| event["kind"] == "coordination-changed")
-            .map(|event| {
-                (
-                    event.get("session").cloned().unwrap_or(Value::Null),
-                    event["coordination_visibility"].clone(),
-                )
-            })
+            .map(|event| (event["session"].clone(), event["coordination_visibility"].clone()))
             .collect()
     };
     wait_for("the helper's own value to be told", || changed().len() >= 2);
-    assert_eq!(
-        changed(),
-        [
-            (Value::Null, json!("hide")),
-            (json!("hal"), json!("show"))
-        ]
-    );
+    let told = changed();
+    assert_eq!(told.len(), 2, "{told:?}");
+    assert_eq!(told[0], (Value::Null, json!("hide")));
+    assert_eq!(told[1], (json!("hal"), json!("show")));
     let reminder = "Coordination: this turn answers a message from another agent";
     // Boss writes to an agent, and the turn it starts is over: what its tool was given.
     let from_boss = |session: &str, text: &str, id: &str| {

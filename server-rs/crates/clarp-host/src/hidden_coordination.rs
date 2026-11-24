@@ -69,7 +69,11 @@ impl Roster {
                         Some(&agent.backend),
                         true,
                     );
-                let source = if agent.is_helper() { "helper" } else { "global" };
+                let source = if agent.is_helper() {
+                    "helper"
+                } else {
+                    "global"
+                };
                 let chat = Chat {
                     default,
                     source,
@@ -100,13 +104,10 @@ pub(crate) fn visibility(
 /// where it comes from (the request, the chat's own choice, a helper's own chat, the Host).
 pub(crate) fn policy(directory: &Directory, agent_id: &str, mode: rules::Mode) -> rules::Policy {
     let roster = &directory.coordination;
-    let (default, own) = roster
-        .chats
-        .get(agent_id)
-        .map_or(((roster.global, "global"), None), |chat| {
-            ((chat.default, chat.source), chat.own)
-        });
-    mode.policy_over(default, own)
+    match roster.chats.get(agent_id) {
+        Some(chat) => mode.policy_over((chat.default, chat.source), chat.own),
+        None => mode.policy_over((roster.global, "global"), None),
+    }
 }
 
 pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {

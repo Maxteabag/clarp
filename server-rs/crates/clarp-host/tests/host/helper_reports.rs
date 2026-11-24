@@ -49,11 +49,7 @@ fn a_helper_that_reports_mid_turn_reads_running_until_the_turn_is_over() {
     let (tokens, release, holds) = stand_in(&place);
     // The fleet's own look at its helpers is kept out of the way: every event here is a turn's
     // or a message's.
-    let host = start_host_as(
-        &place,
-        &["--helpers-checked-every-ms", "3600000"],
-        "fixture-admin",
-    );
+    let host = start_host_as(&place, &["--helpers-checked-every-ms", "3600000"], "fixture-admin");
     host.post(
         "/agents",
         json!({"name":"Boss","session":"boss","backend":"claude"}),

@@ -3017,9 +3017,8 @@ impl Fleet {
             event
         };
         let now = self.now_ms();
-        self.works
-            .hub
-            .publish(told(chat.as_ref().map(|(_, s)| s.as_str()), effective), now);
+        let session = chat.as_ref().map(|(_, session)| session.as_str());
+        self.works.hub.publish(told(session, effective), now);
         // An app sets every chat without a choice of its own to the Host's new value. A chat
         // that does not follow it (a helper's own) is told its value right after, so no app
         // shows it under the Host's.
@@ -3028,9 +3027,8 @@ impl Fleet {
                 let (default, own) =
                     crate::hidden_coordination::chat_choices(&self.settings, &member.record);
                 if own.is_none() && default != effective {
-                    self.works
-                        .hub
-                        .publish(told(Some(&member.record.session), default), now);
+                    let event = told(Some(&member.record.session), default);
+                    self.works.hub.publish(event, now);
                 }
             }
         }
