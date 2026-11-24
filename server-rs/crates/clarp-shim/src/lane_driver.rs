@@ -60,4 +60,3 @@ pub(super) trait Driver {
     /// The lane's health, as Inspect, Watch and every reply say it.
     fn health(&mut self) -> Self::Health;
 }
-

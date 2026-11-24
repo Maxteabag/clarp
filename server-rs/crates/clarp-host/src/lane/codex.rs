@@ -163,7 +163,7 @@ impl Lane {
     /// The Codex lane of an agent, in its run folder.
     pub(crate) fn of(run: &Path, agent_id: &str) -> Self {
         Self {
-            endpoint: Endpoint::of(Tool::Codex, run, agent_id),
+            endpoint: Endpoint::of(Self::TOOL, run, agent_id),
         }
     }
 

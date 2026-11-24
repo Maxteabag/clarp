@@ -16,7 +16,11 @@ fn of_in(proc: &Path, pid: u32) -> Option<u64> {
     let own = pss(proc, pid)?;
     let mut children: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
     for entry in std::fs::read_dir(proc).ok()?.flatten() {
-        let Some(each) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+        let Some(each) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
             continue;
         };
         if let Some(parent) = parent(proc, each) {
@@ -49,8 +53,7 @@ fn parent(proc: &Path, pid: u32) -> Option<u32> {
 }
 
 fn pss(proc: &Path, pid: u32) -> Option<u64> {
-    let rollup =
-        std::fs::read_to_string(proc.join(pid.to_string()).join("smaps_rollup")).ok()?;
+    let rollup = std::fs::read_to_string(proc.join(pid.to_string()).join("smaps_rollup")).ok()?;
     let kib = rollup
         .lines()
         .find_map(|line| line.strip_prefix("Pss:"))?
@@ -77,7 +80,10 @@ mod tests {
         .unwrap();
         std::fs::write(
             dir.join("smaps_rollup"),
-            format!("00400000-7fff [rollup]\nRss: {}\nPss: {pss_kib} kB\n", pss_kib * 2),
+            format!(
+                "00400000-7fff [rollup]\nRss: {}\nPss: {pss_kib} kB\n",
+                pss_kib * 2
+            ),
         )
         .unwrap();
     }

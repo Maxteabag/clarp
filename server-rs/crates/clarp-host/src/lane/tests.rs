@@ -210,16 +210,22 @@ fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
 
     let other = FakeLane::start(&run, "b", status("t", "old", 5, false));
-    let place = other.endpoint.place(&run, Some("t"), "new", |_| false, EIGHT);
+    let place = other
+        .endpoint
+        .place(&run, Some("t"), "new", |_| false, EIGHT);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(other.asked(), ["inspect", "retire"]);
     assert!(other.endpoint.released().unwrap());
 
     // A lane that still runs work is used as it is for its own thread, and refuses another.
     let busy = FakeLane::start(&run, "c", status("t", "old", 0, true));
-    let place = busy.endpoint.place(&run, Some("t"), "new", |_| false, EIGHT);
+    let place = busy
+        .endpoint
+        .place(&run, Some("t"), "new", |_| false, EIGHT);
     assert_eq!(place.unwrap(), Place::Kept);
-    let refused = busy.endpoint.place(&run, Some("u"), "new", |_| false, EIGHT);
+    let refused = busy
+        .endpoint
+        .place(&run, Some("u"), "new", |_| false, EIGHT);
     assert_eq!(
         refused.unwrap_err().to_string(),
         "the Codex lane owns another thread"
