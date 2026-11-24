@@ -1537,14 +1537,6 @@ enum QueueEdit {
     Deleted(Waiting),
 }
 
-/// The checks of the network an agent has asked for: whether one runs, and the one asked for
-/// meanwhile, which is made when it is over.
-#[derive(Default)]
-struct NetworkChecks {
-    running: bool,
-    next: Option<(TurnId, u32)>,
-}
-
 struct Worker {
     native: native_goal::Native,
     setup: Setup,
@@ -1601,7 +1593,7 @@ struct Worker {
     provider_requested: bool,
     provider_retry_at: Option<Instant>,
     /// The agent's checks of the network: one at a time.
-    network_checks: Arc<Mutex<NetworkChecks>>,
+    network_checks: Arc<crate::network::Checks>,
     historical_reading: bool,
     historical_sources: BTreeMap<String, Box<crate::helper_source::HelperSource>>,
     helper_generation: u64,
@@ -4360,13 +4352,8 @@ impl Worker {
             // made when it is over, the newest of them only.
             Action::CheckNetwork { turn, attempts } => {
                 let checks = self.network_checks.clone();
-                {
-                    let mut checks = checks.lock().unwrap_or_else(PoisonError::into_inner);
-                    if checks.running {
-                        checks.next = Some((turn, attempts));
-                        return;
-                    }
-                    checks.running = true;
+                if !checks.ask((turn, attempts)) {
+                    return;
                 }
                 let network = self.setup.network.clone();
                 let backend = self.setup.record.backend.clone();
@@ -4375,28 +4362,14 @@ impl Worker {
                     .spawn({
                         let checks = checks.clone();
                         move || {
-                            let mut asked = (turn, attempts);
-                            loop {
-                                let up = network.reachable(&backend);
+                            checks.run(network.as_ref(), &backend, (turn, attempts), |asked, up| {
                                 let (turn, attempts) = asked;
                                 let _ = tx.send(Ask::NetworkChecked { turn, attempts, up });
-                                let mut checks =
-                                    checks.lock().unwrap_or_else(PoisonError::into_inner);
-                                match checks.next.take() {
-                                    Some(next) => asked = next,
-                                    None => {
-                                        checks.running = false;
-                                        return;
-                                    }
-                                }
-                            }
+                            });
                         }
                     });
                 if spawned.is_err() {
-                    checks
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .running = false;
+                    checks.not_started();
                 }
                 spawned
             }

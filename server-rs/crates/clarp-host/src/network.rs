@@ -13,7 +13,7 @@
 
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 /// How long the look-up of a name may take before the check counts the network as gone.
@@ -48,7 +48,92 @@ pub fn provider_hosts(backend: &str) -> &'static [&'static str] {
 }
 
 /// The variables a proxy for the tools' connections is named in, in the order they count.
+/// `NO_PROXY` is not read, on purpose: where it sends the provider past the proxy, the check of
+/// the proxy can say "there" while the direct way is down, and the minute of tries decides.
 const PROXY_VARIABLES: [&str; 3] = ["HTTPS_PROXY", "https_proxy", "ALL_PROXY"];
+
+/// What a check is for: a turn, and how many attempts it had (the wait it is of).
+pub type Asked = (clarp_kernel::turn::TurnId, u32);
+
+/// The checks of the network an agent asked for. One runs at a time: a check asked for
+/// meanwhile is made when it is over, the newest of them only.
+#[derive(Default)]
+pub struct Checks {
+    state: Mutex<Queue>,
+}
+
+#[derive(Default)]
+struct Queue {
+    running: bool,
+    next: Option<Asked>,
+}
+
+impl Checks {
+    /// Asks for a check. True where none runs: the caller starts [`Checks::run`] for it. False
+    /// where one runs: this one is made after it.
+    pub fn ask(&self, asked: Asked) -> bool {
+        let mut queue = self.lock();
+        if queue.running {
+            queue.next = Some(asked);
+            return false;
+        }
+        queue.running = true;
+        true
+    }
+
+    /// The caller could not start the check it was told to: none runs.
+    pub fn not_started(&self) {
+        *self.lock() = Queue::default();
+    }
+
+    /// Whether a check runs.
+    pub fn running(&self) -> bool {
+        self.lock().running
+    }
+
+    /// Makes the check asked for first, then each asked for meanwhile, and tells each answer.
+    /// However it ends, a check that panicked included, no check runs any more after it, so
+    /// the next one asked for is started.
+    pub fn run(&self, network: &dyn Check, backend: &str, first: Asked, tell: impl Fn(Asked, bool)) {
+        let mut guard = Running {
+            checks: self,
+            armed: true,
+        };
+        let mut asked = first;
+        loop {
+            let up = network.reachable(backend);
+            tell(asked, up);
+            let mut queue = self.lock();
+            match queue.next.take() {
+                Some(next) => asked = next,
+                None => {
+                    queue.running = false;
+                    guard.armed = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Queue> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// While armed, the end of a run that did not end by itself: whatever was asked for meanwhile
+/// is let go with it (the actor asks again), and no check runs.
+struct Running<'a> {
+    checks: &'a Checks,
+    armed: bool,
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            *self.checks.lock() = Queue::default();
+        }
+    }
+}
 
 /// The check of a Host: of the real network, or of a switch a test holds.
 pub fn checker(switch: Option<PathBuf>) -> Arc<dyn Check> {
@@ -248,6 +333,67 @@ mod tests {
         assert_eq!(address("http://[::1]:3128"), Some(("::1".into(), 3128)));
         assert_eq!(address("http://proxy.corp:port"), None);
         assert_eq!(address(""), None);
+    }
+
+    use clarp_kernel::turn::TurnId;
+
+    /// A network that answers what it is told to, and keeps how often it was asked.
+    struct Scripted {
+        asked: std::sync::atomic::AtomicU32,
+        panics: bool,
+    }
+
+    impl Check for Scripted {
+        fn reachable(&self, _backend: &str) -> bool {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert!(!self.panics, "the check broke");
+            true
+        }
+    }
+
+    #[test]
+    fn one_check_runs_at_a_time_and_the_newest_asked_meanwhile_follows() {
+        let checks = Checks::default();
+        let network = Scripted {
+            asked: 0.into(),
+            panics: false,
+        };
+        assert!(checks.ask((TurnId(1), 1)));
+        // Asked for twice while it runs: the newest is made after it, once.
+        assert!(!checks.ask((TurnId(1), 1)));
+        assert!(!checks.ask((TurnId(1), 2)));
+        let told = Mutex::new(Vec::new());
+        checks.run(&network, "claude", (TurnId(1), 1), |asked, up| {
+            told.lock().unwrap().push((asked, up));
+        });
+        assert_eq!(
+            *told.lock().unwrap(),
+            vec![((TurnId(1), 1), true), ((TurnId(1), 2), true)]
+        );
+        assert!(!checks.running());
+        assert!(checks.ask((TurnId(1), 3)), "the next one starts");
+    }
+
+    #[test]
+    fn a_check_that_panics_leaves_no_check_running() {
+        let checks = Arc::new(Checks::default());
+        let network = Arc::new(Scripted {
+            asked: 0.into(),
+            panics: true,
+        });
+        assert!(checks.ask((TurnId(1), 1)));
+        assert!(!checks.ask((TurnId(1), 1)));
+        let ran = std::thread::spawn({
+            let (checks, network) = (checks.clone(), network.clone());
+            move || checks.run(network.as_ref(), "claude", (TurnId(1), 1), |_, _| {})
+        })
+        .join();
+        assert!(ran.is_err(), "the check panicked");
+        assert!(!checks.running());
+        // The next check asked for is started, not queued behind the one that died.
+        assert!(checks.ask((TurnId(1), 1)));
+        checks.not_started();
+        assert!(!checks.running());
     }
 
     #[test]

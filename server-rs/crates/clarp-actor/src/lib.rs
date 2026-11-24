@@ -5612,10 +5612,13 @@ impl Actor {
         if self.retry_at().is_none_or(|at| at > now_ms) {
             return Ok(Outputs::default());
         }
-        let watch = match self.recorder.agent().live() {
-            Some(Turn::Parked(parked)) => self.network_of(parked),
-            _ => None,
+        let (watch, until_ms) = match self.recorder.agent().live() {
+            Some(Turn::Parked(parked)) => (self.network_of(parked), parked.wait.until_ms()),
+            _ => (None, 0),
         };
+        // The latest a wait for the network lasts when no check of it answers: a check that
+        // never came back (its thread hung or died) does not keep the turn waiting for ever.
+        let unanswered_until = until_ms.saturating_add(recovery::NETWORK_ANSWER_MS);
         match watch {
             Some(
                 watch @ NetworkWatch {
@@ -5623,9 +5626,26 @@ impl Actor {
                     ..
                 },
             ) => self.retry_as(now_ms, watch.gone),
+            Some(
+                watch @ NetworkWatch {
+                    next: NetworkStep::Asked(_),
+                    ..
+                },
+            ) if now_ms >= unanswered_until => {
+                let turn = watch.turn;
+                self.give_up_waiting(turn, Command::NetworkGone { turn }, now_ms)
+            }
             Some(watch) => {
+                // A check asked for after that (a Host that started again late) is given its
+                // whole time to answer.
+                let answer_by = now_ms + recovery::NETWORK_ANSWER_MS;
+                let answer_by = if now_ms < unanswered_until {
+                    answer_by.min(unanswered_until)
+                } else {
+                    answer_by
+                };
                 self.network = Some(NetworkWatch {
-                    next: NetworkStep::Asked(now_ms + recovery::NETWORK_ANSWER_MS),
+                    next: NetworkStep::Asked(answer_by),
                     ..watch
                 });
                 Ok(Outputs {

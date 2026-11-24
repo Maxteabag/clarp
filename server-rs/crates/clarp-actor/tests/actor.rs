@@ -6973,3 +6973,43 @@ fn a_timeout_keeps_its_three_attempts_while_the_network_is_there_and_waits_when_
     };
     assert_eq!(kind, "timeout");
 }
+
+#[test]
+fn a_wait_whose_checks_never_answer_ends_half_a_minute_after_its_quarter_hour() {
+    use clarp_kernel::recovery::{NETWORK_ANSWER_MS, NETWORK_WAIT_MOST_MS};
+    let (mut world, mut actor) = a_turn_whose_connection_fails("network-silent");
+    world.write(1, Line::Err(UNREACHABLE.into()));
+    world.exits(1, Some(1), None);
+    world.hint(&mut actor);
+    let failed_at = world.now_ms;
+    // Every check is asked for, and none ever answers: its thread hung, or died.
+    let mut asked = 0;
+    while let Some(at) = actor.retry_at() {
+        world.now_ms = world.now_ms.max(at);
+        let out = actor.retry_due(world.now_ms).unwrap();
+        for action in &out.actions {
+            assert!(
+                matches!(action, Action::CheckNetwork { .. }),
+                "{:?}",
+                out.actions
+            );
+            asked += 1;
+        }
+        assert!(asked < 100, "the wait never ends");
+    }
+    // It ends as a wait whose network never came back, and no sooner than its quarter hour
+    // and the half minute a check has to answer.
+    let waited = world.now_ms - failed_at;
+    assert!(
+        (NETWORK_WAIT_MOST_MS..NETWORK_WAIT_MOST_MS + NETWORK_ANSWER_MS + 1_000).contains(&waited),
+        "{waited}"
+    );
+    assert!(asked >= 30, "asked again every half minute: {asked}");
+    let Outcome::Failed { reason, kind } = actor.status().last.unwrap().outcome else {
+        panic!("the turn failed");
+    };
+    assert_eq!(kind, "connection");
+    assert!(reason.starts_with("No network for 15 minutes"), "{reason}");
+    assert!(actor.tail(5).unwrap().entries.iter().any(|row| matches!(&row.entry,
+        Entry::Notice(notice) if notice.text.starts_with("This computer had no network"))));
+}
