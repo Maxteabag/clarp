@@ -1463,18 +1463,17 @@ fn push_request(app: &App, artifact: &Value) {
     let bound = directory
         .members
         .iter()
-        .any(|member| member.record.agent_id == asker && member.record.bound());
+        .find(|member| member.record.agent_id == asker && member.record.bound());
     let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
-    let (title, question) = if bound {
-        (
-            "A question".to_string(),
-            crate::pusher::KEPT_OFF.to_string(),
-        )
-    } else {
-        (
+    let (title, question) = match bound {
+        Some(member) => (
+            format!("{} asks", crate::pusher::display_name(&member.record)),
+            "Open Clarp to answer.".to_string(),
+        ),
+        None => (
             text(&artifact["title"]),
             or(text(&decision["question"]), text(&artifact["summary"])),
-        )
+        ),
     };
     app.pusher.requested(Requested {
         session: text(&artifact["session"]),

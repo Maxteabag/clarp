@@ -35,17 +35,23 @@ use crate::direct::Direct;
 use crate::fleet::{FleetHandle, Pushed};
 use crate::relay::{Outcome, Push, Relay};
 
-/// What a push says in place of the words of an agent bound to a model provider of its own:
-/// a push goes through the phone maker's service, and that agent's words go to none.
-pub const KEPT_OFF: &str = "Open Clarp to read it.";
-
-/// What a push shows of what an agent said: its words, or [`KEPT_OFF`] for an agent bound to
-/// a model provider of its own.
+/// What a push shows of what an agent said: its words, or, for an agent bound to a model
+/// provider of its own, only that it answered. A push goes through the phone maker's
+/// service, and that agent's words go to none.
 pub fn preview_of(record: &crate::fleet::AgentRecord, said: &str) -> String {
     if record.bound() {
-        KEPT_OFF.to_string()
+        format!("{} answered", display_name(record))
     } else {
         said.to_string()
+    }
+}
+
+/// The name a neutral line of a bound agent gives it.
+pub fn display_name(record: &crate::fleet::AgentRecord) -> &str {
+    if record.persona.is_empty() {
+        &record.session
+    } else {
+        &record.persona
     }
 }
 
