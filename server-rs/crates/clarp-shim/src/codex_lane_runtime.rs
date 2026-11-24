@@ -150,10 +150,12 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         retire_reply: None,
         deferred: VecDeque::new(),
         early: Vec::new(),
+        memory: None,
     };
     let init = lane.server.initialize()?;
     lane.response(init, None)?;
     lane.server.initialized()?;
+    lane.weigh();
     // The supervisor is ready, but no thread is loaded until the actor says so.
     println!("ready");
     io::stdout().flush()?;
@@ -221,6 +223,8 @@ struct Lane {
     retire_reply: Option<UnixStream>,
     deferred: VecDeque<Input>,
     early: Vec<(String, Value)>,
+    /// What the lane held in memory when last weighed, in bytes ([`Lane::weigh`]).
+    memory: Option<u64>,
 }
 
 impl Lane {
@@ -240,7 +244,15 @@ impl Lane {
             model: self.model.clone(),
             effort: self.effort.clone(),
             idle_ms: self.idle.ms(self.slot.claim().is_some()),
+            memory_bytes: self.memory,
         }
+    }
+
+    /// Weighs the lane: itself, the app-server and its group (issue 761). Done when the lane is
+    /// ready and when a claim has ended, after the turn's last spool line, so never on a turn's
+    /// path; the Host reads the last weight from the snapshot when it makes room.
+    fn weigh(&mut self) {
+        self.memory = crate::lane_memory::held(std::process::id(), self.server.pid());
     }
 
     fn show(&mut self) {
@@ -822,6 +834,7 @@ impl Lane {
         self.followers.clear();
         self.turn_socket = None;
         self.login.release();
+        self.weigh();
         self.show();
         Ok(())
     }

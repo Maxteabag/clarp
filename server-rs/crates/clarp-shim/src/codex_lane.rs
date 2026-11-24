@@ -106,6 +106,11 @@ pub struct Snapshot {
     /// How long the lane has held no claim, in milliseconds.
     #[serde(default)]
     pub idle_ms: u64,
+    /// What the lane holds in memory, in bytes: itself, the app-server and its group, weighed
+    /// when it was ready and after each claim (proportional set size). The Host's room for lanes
+    /// is counted in these bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
 }
 
 /// The lane never hands a spontaneous start to an unclaimed actor slot.

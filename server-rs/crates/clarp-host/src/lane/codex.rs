@@ -122,9 +122,9 @@ impl Lane {
                     || (effort.is_none() && state.effort.is_some())
             })
         };
-        let place = self
-            .endpoint
-            .place(&profile.run_dir, thread, &digest, kept, settings.most)?;
+        let place =
+            self.endpoint
+                .place(&profile.run_dir, thread, &digest, kept, settings.room())?;
         if place == Place::Kept {
             return Ok(None);
         }
