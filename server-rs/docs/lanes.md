@@ -47,15 +47,16 @@ Top-level keys of the Host's `config.toml`, read anew at each turn. They are off
 ```toml
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
-codex_lane_most = 8           # lanes this Host keeps, of every tool; the longest idle leaves first
-lane_memory_mb = 4096         # what they may hold together (unset: no budget)
+lane_memory_mb = 2200         # the cap: what all lanes may hold together, in MiB (unset: none yet)
+codex_lane_most = 8           # and, as before, at most this many lanes
 ```
 
 - **One switch per tool.** `codex_chat_lane` today; `claude_chat_lane`, and Muse's and
   OpenCode's, come with their drivers.
-- **The idle time and the cap are shared by every tool.** They keep the names they had when
-  Codex had the only lane, so an installed config means exactly what it meant.
-- **The memory budget is one budget in bytes for every lane of the Host.** The weight of a lane
+- **The idle time is shared by every tool.** It keeps the name it had when Codex had the only
+  lane, so an installed config means exactly what it meant.
+- **The cap is a memory budget, in bytes, one for every lane of the Host** (the lead's rule,
+  issue 763). It is not a count of lanes. The weight of a lane
   differs by tool: measured on 24 Nov 2026, an idle Codex lane about 270 MB, a Muse serve
   274-301 MB, an OpenCode serve 571-590 MB. A count alone would let eight OpenCode lanes take
   about 5 GB, so the budget counts bytes. Each lane's memory comes from, in this order:
@@ -67,9 +68,14 @@ lane_memory_mb = 4096         # what they may hold together (unset: no budget)
 - **Room is made before a lane starts.** The idle lanes leave, longest idle first, until the
   count is under the cap and the memory is within the budget. A lane that runs a turn, or whose
   work may continue (an active goal), refuses to leave and counts.
+- **`codex_lane_most` keeps its meaning as an extra count limit.** An installed config means
+  what it meant: at most that many lanes, 8 unless set. With Codex alone the count binds about
+  where a budget of 2,200 MB would: eight idle lanes at about 270 MB each.
 - **The budget's default is the lead's to set.** Until he does, it is unset, and only the count
-  holds, as before. Whether the count still applies once lanes of other tools exist is the same
-  decision.
+  holds, exactly as before the layer. The designs of the Muse and OpenCode drivers name 2,200 MB.
+  The other way to keep the count's meaning would be to map it onto the budget (`codex_lane_most`
+  times a Codex lane's typical size); it was not taken, because a measured lane can weigh more
+  than its typical size, and the same config would then keep fewer lanes than it does today.
 - **Who sets them.** `install-host` carries these keys through an install. Switching a lane on
   for the owner's agents is his decision.
 
@@ -177,9 +183,29 @@ What every driver gets from the layer, built once:
 - **Login**: one login file per driver (`Login.file`, from the backend). The shim compares the
   account the driver's reader names in it, or the whole file where it names none (OpenCode's
   `auth.json`).
-- **Restart digest**: `lane::digest::OptionsDigest` covers options as text, a file by its
-  content (bounded; a file over the bound keeps no lane), and a file by its path, length and
-  time of change (a program, or settings a tool reads by time).
+- **Restart digest**: `lane::digest::OptionsDigest`, taken at each turn's start, covers
+  options as text and files by the hash of their content. A file over the driver's bound keeps
+  no lane. It never uses a time of change (the lead's rule, issue 763): a file written again
+  with the same content keeps the lane, and a change made within the same second still restarts
+  it.
+- **The lease, its abort, and the kept child's death** (the lead's rule, issue 763: layer
+  mechanisms, not one tool's own).
+  - **The lease** is the claim: the lane is lent to one admitted attempt, from its admission
+    (its spool made) to its end (its `Exited` written). The attempt's text, model, effort and
+    identity travel with it. Its Stop, Steer and Follow come on the claim's socket, so the turn
+    needs no process of its own and nothing of the tool's (an address, a password) leaves the
+    lane process.
+  - **The abort of a lease that drops while the tool is busy** (`lane_driver::Driver::abort`).
+    Today's one cause is a Stop whose grace passed with the turn still running. Codex then ends
+    its group (D26), the turn is told as killed, and the lane leaves. A tool with a bounded
+    abort of its own (OpenCode's `POST /session/:id/abort`, then its idle) may keep its
+    process. A Host that is gone drops no lease: a shim never waits for the Host (D26), and a
+    lane's turn runs to its end and is followed again after a restart.
+  - **The kept child's death with its lane** (`lane_spawn::kept`). The tool runs in a process
+    group of its own, with `SIGTERM` set to reach it when the lane's starting thread ends
+    (`setpriv --pdeathsig`; this code allows no `unsafe`). A tool that does not end when its
+    input closes (OpenCode's serve listens on a port) cannot outlive a killed lane. Codex's
+    app-server ends with its standard input and is started as before.
 - **Process locks**: the owner lock, the thread lock and the exec guard.
 - **Room and registry**: idle retirement, the turn-identity file and `once_more`.
 

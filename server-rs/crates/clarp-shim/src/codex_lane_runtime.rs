@@ -280,11 +280,7 @@ impl Lane {
             self.stop_deadline = None;
             if self.holds(attempt) && self.slot.native_turn().is_some() {
                 // D26: the tool's own way first, bounded, then its group.
-                self.server.kill_group();
-                self.slot.killed(super::now_ms())?;
-                self.hint();
-                self.followers.clear();
-                self.turn_socket = None;
+                self.abort()?;
                 return Err(io::Error::other("Codex did not end its turn after a Stop"));
             }
             return Ok(false);
@@ -1073,6 +1069,17 @@ impl Driver for Lane {
     fn end_turn(&mut self) -> io::Result<()> {
         self.clear_slot()?;
         self.end_terminals();
+        Ok(())
+    }
+
+    /// Codex is ended with its group: its own `turn/interrupt` was the Stop that did not end
+    /// the turn in time.
+    fn abort(&mut self) -> io::Result<()> {
+        self.server.kill_group();
+        self.slot.killed(super::now_ms())?;
+        self.hint();
+        self.followers.clear();
+        self.turn_socket = None;
         Ok(())
     }
 

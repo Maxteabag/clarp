@@ -104,12 +104,14 @@ impl Tool {
     }
 }
 
-/// The idle time and cap are shared by every tool's lanes. They keep the names they had when
-/// Codex had the only lane, so an installed config (and `install-host`, which carries them)
-/// behaves as before.
+/// The idle time and the count of lanes are shared by every tool's lanes. They keep the names
+/// they had when Codex had the only lane, so an installed config (and `install-host`, which
+/// carries them) behaves as before.
 const IDLE_MINUTES: &str = "codex_lane_idle_minutes";
 const MOST: &str = "codex_lane_most";
-/// The memory all lanes of this Host may hold together, in MiB. None set: no budget, as before.
+/// The cap: the memory all lanes of this Host may hold together, in MiB (the lead's rule, issue
+/// 763). Unset, there is none yet: its default is the lead's to set, and the count alone holds,
+/// as before the layer.
 const MEMORY_MB: &str = "lane_memory_mb";
 
 /// The owner's settings of lanes, in this Host's `config.toml`, read anew at each use so they
@@ -118,9 +120,9 @@ const MEMORY_MB: &str = "lane_memory_mb";
 /// ```toml
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
-/// codex_lane_most = 8           # live lanes this Host keeps, of every tool; the longest idle
-///                               # one leaves first
-/// lane_memory_mb = 4096         # what they may hold together (unset: no budget)
+/// lane_memory_mb = 2200         # the cap: what all lanes may hold together (unset: none yet)
+/// codex_lane_most = 8           # and at most this many lanes, of every tool; the longest
+///                               # idle one leaves first
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
@@ -133,10 +135,11 @@ pub(crate) struct Settings {
 /// What all lanes of this Host may take together, whatever their tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Room {
-    /// Live lanes, the one about to start included.
+    /// Live lanes, the one about to start included: `codex_lane_most`, kept as a count beside
+    /// the budget so an installed config means what it meant.
     pub most: usize,
-    /// Bytes of memory the running lanes may hold together (proportional set size of each
-    /// lane's process tree), where the owner set a budget.
+    /// The cap: bytes the lanes may hold together, each at what its driver reads, else its
+    /// process tree, else its tool's typical size, where a budget is set.
     pub memory: Option<u64>,
 }
 
