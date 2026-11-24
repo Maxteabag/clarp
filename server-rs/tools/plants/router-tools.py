@@ -37,6 +37,8 @@ CODEX_FLAGS = '''            "--sandbox",
             "workspace-write",
             "--ephemeral",
             "--skip-git-repo-check",
+            "-c",
+            QUIET_EXIT,
         ]
         .iter()
         .map(|arg| (*arg).to_string())
