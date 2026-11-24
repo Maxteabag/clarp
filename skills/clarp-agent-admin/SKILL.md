@@ -49,6 +49,11 @@ non-builtin.
 For a disposable agent on the Rust Host, use `clarp-admin agent create NAME --test`
 or send `"test": true` in `POST /agents`. The experience watcher skips that agent.
 
+For a Codex agent that must run only on a model provider of its own (its own
+`CODEX_HOME`, with no way back to the default provider), on a Rust Host with the
+feature `codex_own_provider`, see "A Codex agent on a model provider of its own" in
+the `clarp-sessions` skill (`--codex-home`, `--codex-provider`, `--cloud-speech`).
+
 ## Scheduled Jobs
 
 Configure recurring autonomous turns for agent sessions:

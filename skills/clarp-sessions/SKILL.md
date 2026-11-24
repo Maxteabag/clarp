@@ -30,6 +30,59 @@ Use an exact ID from `available`; do not substitute a model the catalog does
 not list. The change applies from the agent's next turn, so the turn that ran
 the command keeps its current model. Janitors refuse model changes.
 
+## A Codex agent on a model provider of its own
+
+Only on a Rust Host that lists the feature `codex_own_provider` (contract 170) in
+`GET /server-info`; the Python Host and older Rust Hosts ignore the fields below and
+run the agent on the machine's own Codex, so check the feature first and do not use
+this where it is missing.
+
+Use it when an agent must run wholly on someone's own OpenAI-compatible provider (a
+deployment in a region of their choice, say) and never on the default one. Give the
+agent a Codex home of its own: a directory holding a `config.toml` that sets
+`model_provider = "<name>"` and defines `[model_providers.<name>]` (`base_url`,
+`wire_api = "responses"`, and its auth, for example a command that prints a fresh
+token). Codex reads a provider only from its home's `config.toml`: one in a
+project's `.codex/config.toml` is ignored. Never put the machine's own
+`~/.codex/config.toml` to this use, and never copy a customer's endpoint, key or
+token into a repository, a test or a message.
+
+```bash
+clarp-admin agent create Ada --backend codex --cwd ~/work \
+  --codex-home ~/codex-homes/ada --codex-provider their-provider \
+  --model their-deployment-name
+clarp-admin agent provider --session ada-1a2b --codex-home ~/codex-homes/ada \
+  --codex-provider their-provider          # bind an existing Codex agent
+clarp-admin agent provider --session ada-1a2b --clear   # back to the machine's Codex
+clarp-admin agent provider --session ada-1a2b --cloud-speech on|off|default
+```
+
+(The same over HTTP: `codex_home`, `codex_provider`, `cloud_speech` on
+`POST /agents`, and `POST /agent-provider`.) Both halves are given together; the
+Host refuses half of one, an agent that is not on Codex, or a home that is no
+directory (400 `invalid_codex_provider`).
+
+What the Host then does:
+
+- Every turn (exec, the chat lane, a goal) runs with `CODEX_HOME` set to that home
+  and `model_provider` set to the provider on the command line or the lane's thread.
+- Before a turn starts it reads the home's `config.toml`; if it does not set
+  `model_provider` to the agent's provider and define it, the turn does not run.
+  If Codex reports any other provider once it runs, the turn is stopped at once.
+  Either way the turn fails with the kind `provider_mismatch` and the Host's words
+  of what it found, and is not tried again: fix the home's `config.toml` (or the
+  agent's binding) and send again.
+- Any model name is taken (the provider's deployment names); with none, Codex
+  uses the model its `config.toml` names. It waits for none of the machine's Codex
+  accounts. Its sessions, for `resume_session_id`, are read from its own home.
+- It cannot be moved to another tool (`agent transit` answers 409 `own_provider`),
+  and helpers it forks (`clarp-admin agent fork`) run on the same home and provider.
+- `cloud_speech` is off for such an agent unless set: nothing it says is spoken by a
+  cloud speech provider (its replies stay text, no ring opening or announcement in
+  its voice, live calls and live rings for it answer 409 `cloud_speech_off`, and the
+  Oracle is told none of its words). This Host has no speech engine on the machine
+  itself, so off means not spoken. Any agent can have it set off the same way.
+
 ## Move an agent to another backend
 
 On a Rust Host that lists the feature `agent_backend_transit` (contract 158; the

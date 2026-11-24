@@ -3124,6 +3124,29 @@ def agent_create_payload(args) -> dict:
     payload["voice_id"] = args.voice_id if args.voice_id is not None else "{}"
     if payload.get("cwd"):
         payload["cwd"] = str(Path(payload["cwd"]).expanduser().resolve())
+    # A Codex agent on a model provider of its own (Rust Host, feature codex_own_provider).
+    if getattr(args, "codex_home", None):
+        payload["codex_home"] = str(Path(args.codex_home).expanduser().resolve())
+    if getattr(args, "codex_provider", None):
+        payload["codex_provider"] = args.codex_provider
+    if getattr(args, "cloud_speech", None) is not None:
+        payload["cloud_speech"] = args.cloud_speech == "on"
+    return payload
+
+
+def agent_provider_payload(args) -> dict:
+    """The ``POST /agent-provider`` body for ``clarp-admin agent provider``."""
+    payload = {"session": args.session}
+    if args.clear:
+        payload["codex_home"] = None
+        payload["codex_provider"] = None
+    else:
+        if args.codex_home:
+            payload["codex_home"] = str(Path(args.codex_home).expanduser().resolve())
+        if args.codex_provider:
+            payload["codex_provider"] = args.codex_provider
+    if args.cloud_speech is not None:
+        payload["cloud_speech"] = None if args.cloud_speech == "default" else args.cloud_speech == "on"
     return payload
 
 
@@ -3185,6 +3208,8 @@ def _cmd_agent(args) -> int:
         if args.role == "helper" and not args.parent:
             raise SystemExit("--role helper needs --parent SESSION")
         result = api_request("POST", "/agents", agent_create_payload(args))
+    elif args.agent_command == "provider":
+        result = api_request("POST", "/agent-provider", agent_provider_payload(args))
     elif args.agent_command == "fork":
         parent, body = agent_fork_request(args)
         # Worktrees and native forks take a moment per child; never retried,
@@ -3562,7 +3587,23 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     agent_create.add_argument("--effort")
     agent_create.add_argument("--session", help="explicit session id; minted when omitted")
     agent_create.add_argument("--voice-id", dest="voice_id")
+    agent_create.add_argument("--codex-home", dest="codex_home",
+                              help="a Codex agent's own CODEX_HOME (with --codex-provider)")
+    agent_create.add_argument("--codex-provider", dest="codex_provider",
+                              help="the provider its config.toml defines (with --codex-home)")
+    agent_create.add_argument("--cloud-speech", dest="cloud_speech", choices=("on", "off"),
+                              help="whether its words may be spoken by a cloud speech provider")
     agent_create.set_defaults(func=cmd_agent)
+    agent_provider = agent.add_parser(
+        "provider", help="bind a Codex agent to a model provider of its own, or let it go")
+    agent_provider.add_argument("--session", required=True)
+    agent_provider.add_argument("--codex-home", dest="codex_home")
+    agent_provider.add_argument("--codex-provider", dest="codex_provider")
+    agent_provider.add_argument("--clear", action="store_true",
+                                help="let the binding go: the agent runs on the machine's Codex")
+    agent_provider.add_argument("--cloud-speech", dest="cloud_speech",
+                                choices=("on", "off", "default"))
+    agent_provider.set_defaults(func=cmd_agent)
     agent_fork = agent.add_parser(
         "fork", help="fork the calling agent into helper agents that start from its "
                      "conversation and each get a task")
