@@ -58,7 +58,6 @@ def lane(root, name, stamp, target=True, built=True, good=True):
     if target:
         deps = copy / 'server-rs/target/debug/deps'
         deps.mkdir(parents=True)
-        (copy / 'server-rs/target/CACHEDIR.TAG').write_text('Signature: 8a477f597d28d172789f06886806bc55\n')
         (deps / 'libserde-1111111111111111.rlib').write_text(name)
         os.link(deps / 'libserde-1111111111111111.rlib', copy / 'server-rs/target/debug/libserde.rlib')
         if built:
@@ -106,7 +105,7 @@ def test_a_checkout_without_a_target_starts_from_the_last_good_build_with_librar
             # Without clones the build starts cold rather than copying the data.
             assert source is None
             assert not (here / 'target').exists()
-        assert not (here / '.target-seed').exists()
+        assert not (here / '.target-seed').exists() and not (here / '.target-seed.clone').exists()
         # A checkout with a target keeps it.
         (here / 'target').mkdir(exist_ok=True)
         (here / 'target/own').write_text('own')

@@ -495,14 +495,19 @@ def seed_target(root, current, workspace):
             pass
         try:
             with directory(name, root) as copy, directory('server-rs', copy) as other:
-                # Cargo writes CACHEDIR.TAG at the top of every target it makes.
+                # A file of this checkout's own, cloned beside it, tells whether the filesystem
+                # clones at all; the checkouts and their targets are on that one filesystem.
+                fd = os.open(SEED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=workspace)
+                with os.fdopen(fd, 'w') as probe:
+                    probe.write('clone probe\n')
                 cloned = subprocess.run(
-                    ['cp', '--reflink=always', f'/proc/self/fd/{other}/target/CACHEDIR.TAG', f'/proc/self/fd/{workspace}/{SEED}'],
-                    pass_fds=(other, workspace), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-                try:
-                    os.unlink(SEED, dir_fd=workspace)
-                except FileNotFoundError:
-                    pass
+                    ['cp', '--reflink=always', f'/proc/self/fd/{workspace}/{SEED}', f'/proc/self/fd/{workspace}/{SEED}.clone'],
+                    pass_fds=(workspace,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+                for probe in (SEED, f'{SEED}.clone'):
+                    try:
+                        os.unlink(probe, dir_fd=workspace)
+                    except FileNotFoundError:
+                        pass
                 if cloned.returncode == 0:
                     cloned = subprocess.run(
                         ['cp', '-a', '--reflink=always', f'/proc/self/fd/{other}/target', f'/proc/self/fd/{workspace}/{SEED}'],
