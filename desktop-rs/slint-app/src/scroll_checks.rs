@@ -1601,8 +1601,8 @@ impl Shake {
 }
 
 /// `--check scroll-shake --out DIR`: unasked movement in a chat following
-/// its end (unasked.rs). The last row's height settles up and down, ten
-/// times in a second, while the chat is pinned to its end: the dashcam
+/// its end (unasked.rs). The last row's height settles up and down
+/// (16 updates 180 ms apart) while the chat is pinned to its end: the dashcam
 /// finds a shake and posts one `scroll_flash` event with rule `shake`, its
 /// reversals and largest step. Then a settled, following chat that only
 /// gets rows at its end and a reply that grows finds none of the new
@@ -1611,7 +1611,10 @@ impl Shake {
 pub(super) fn scroll_shake_check(out: String) {
     const SESSION: &str = "shake";
     const ROWS: usize = 60;
-    const FLIPS: usize = 10;
+    const FLIPS: usize = 16;
+    // Apart enough that two updates seldom land in one frame (and cancel),
+    // near enough that three steps fall within the shake's 500 ms.
+    const FLIP_MS: u64 = 180;
     let state = Rc::new(RefCell::new(Shake::default()));
     let (s1, s2, s3, s4, s5, s6) = (state.clone(), state.clone(), state.clone(), state.clone(), state.clone(), state.clone());
     let settle = |n: usize| -> serde_json::Value { json!([{"id": "shake-settling", "role": "assistant", "text": LOREM.repeat(if n % 2 == 0 { 1 } else { 6 })}]) };
@@ -1672,17 +1675,17 @@ pub(super) fn scroll_shake_check(out: String) {
             st.frames.clear();
             true
         })),
-        // The last row grows and shrinks every 100 ms, nobody scrolling.
+        // The last row grows and shrinks every 180 ms, nobody scrolling.
         ("heights settle up and down", Box::new(move |_, _, elapsed| {
             let mut st = s2.borrow_mut();
             st.look();
-            let due = (elapsed.as_millis() / 100) as usize;
+            let due = (elapsed.as_millis() / u128::from(FLIP_MS)) as usize;
             while st.done < FLIPS && st.done <= due {
                 upsert(SESSION, settle(st.done));
                 st.done += 1;
             }
             // Then a second: the shake is posted half a second after it is found.
-            st.done >= FLIPS && elapsed >= Duration::from_millis(100 * FLIPS as u64 + 1000)
+            st.done >= FLIPS && elapsed >= Duration::from_millis(FLIP_MS * FLIPS as u64 + 1000)
         })),
         ("a shake is found and posted", Box::new(move |_, _, _| {
             let mut st = s3.borrow_mut();
