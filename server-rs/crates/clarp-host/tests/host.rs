@@ -141,6 +141,8 @@ mod queue_provenance;
 mod queue_together;
 #[path = "host/quota_near.rs"]
 mod quota_near;
+#[path = "host/quota_pool.rs"]
+mod quota_pool;
 #[path = "host/r108_stream_ids.rs"]
 mod r108_stream_ids;
 #[path = "host/r136_peer_wait.rs"]
