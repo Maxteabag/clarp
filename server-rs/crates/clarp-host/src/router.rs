@@ -273,7 +273,7 @@ async fn members(
     for (mut member, fellow) in all {
         // The router asks a model of the Host's: an agent bound to a model provider of its
         // own is shown by its name and state, never by its words.
-        let bound = !fellow.record.codex_provider.is_empty();
+        let bound = fellow.record.bound();
         if chosen.contains(&member.agent_id) && !bound {
             member.said = said_of(fellow).await;
             let own = given.get(&member.agent_id);

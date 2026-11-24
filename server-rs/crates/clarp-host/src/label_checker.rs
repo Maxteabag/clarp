@@ -61,8 +61,7 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
         let record = &member.record;
         // The checker asks a model of the Host's: an agent bound to a model provider of its
         // own is never one it reads.
-        if record.is_janitor || record.archived_at_ms.is_some() || !record.codex_provider.is_empty()
-        {
+        if record.is_janitor || record.archived_at_ms.is_some() || record.bound() {
             continue;
         }
         let view = member.agent.view();

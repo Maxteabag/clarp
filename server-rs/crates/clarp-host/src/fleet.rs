@@ -258,20 +258,38 @@ impl AgentRecord {
         self.role == "helper"
     }
 
-    /// The Codex home and provider it is bound to, when it is a Codex agent bound to one.
-    pub fn own_provider(&self) -> Option<clarp_backend::own_provider::OwnProvider> {
-        if self.backend != "codex" {
-            return None;
+    /// Whether it is bound to a model provider of its own: either half of a binding is set,
+    /// usable or not. What it says and does goes to no model or service of the Host's.
+    pub fn bound(&self) -> bool {
+        !self.codex_home.is_empty() || !self.codex_provider.is_empty()
+    }
+
+    /// The Codex home and provider it is bound to: `None` for an agent that is not bound, and
+    /// `Err` (why, in the words of a provider mismatch) for one whose binding cannot be used:
+    /// half of one, one that is malformed, or one of an agent not on Codex. Every place that
+    /// starts its tool asks this one question, and starts nothing on an `Err`.
+    pub fn binding(&self) -> Result<Option<clarp_backend::own_provider::OwnProvider>, String> {
+        if !self.bound() {
+            return Ok(None);
         }
-        clarp_backend::own_provider::OwnProvider::new(&self.codex_home, &self.codex_provider).ok()
+        let unusable = |why: &str| {
+            clarp_kernel::failures::provider_mismatch(&format!(
+                "the agent's binding to a model provider of its own cannot be used: {why}"
+            ))
+        };
+        if self.backend != "codex" {
+            return Err(unusable("only a Codex agent can be bound"));
+        }
+        clarp_backend::own_provider::OwnProvider::new(&self.codex_home, &self.codex_provider)
+            .map(Some)
+            .map_err(|why| unusable(&why))
     }
 
     /// Whether what it says may be spoken by a speech provider in the cloud: as it was set,
     /// else never for an agent bound to a provider of its own (whose words are kept off every
     /// service but that one), and always for any other.
     pub fn speaks_to_cloud(&self) -> bool {
-        self.cloud_speech
-            .unwrap_or(self.codex_provider.is_empty() && self.codex_home.is_empty())
+        self.cloud_speech.unwrap_or(!self.bound())
     }
 
     /// Whether the agent is quiet: it never claims its owner's attention by itself (the
@@ -1793,22 +1811,26 @@ pub(crate) fn non_empty(text: &str) -> Option<String> {
 /// own, and never on the machine's: where its binding cannot be used (it names half of one,
 /// or is not a Codex agent) it is not run at all.
 pub(crate) fn backend_of(record: &AgentRecord) -> Result<Arc<dyn clarp_backend::Backend>, String> {
-    if !record.codex_home.is_empty() || !record.codex_provider.is_empty() {
-        if record.backend != "codex" {
-            return Err(format!(
-                "agent {} is bound to a model provider of its own, which only a Codex agent can be",
-                record.session
-            ));
-        }
-        let own = clarp_backend::own_provider::OwnProvider::new(
-            &record.codex_home,
-            &record.codex_provider,
-        )
-        .map_err(|why| format!("agent {}: {why}", record.session))?;
-        return Ok(clarp_backend::codex_bound(own));
+    match record.binding() {
+        Ok(Some(own)) => return Ok(clarp_backend::codex_bound(own)),
+        Ok(None) => {}
+        Err(why) => return Err(format!("agent {}: {why}", record.session)),
     }
     clarp_backend::by_id(&record.backend)
         .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))
+}
+
+/// Whether a turn of an agent with this binding may start: none, or a usable one whose
+/// home's `config.toml` names and defines its provider. `Err`: the words of a provider
+/// mismatch the turn ends with, started nowhere.
+pub(crate) fn admitted(
+    binding: &Result<Option<clarp_backend::own_provider::OwnProvider>, String>,
+) -> Result<(), String> {
+    match binding {
+        Ok(None) => Ok(()),
+        Ok(Some(own)) => own.admits(),
+        Err(why) => Err(why.clone()),
+    }
 }
 
 /// Whether an agent of this tool may be bound to this Codex home and provider: a Codex agent,

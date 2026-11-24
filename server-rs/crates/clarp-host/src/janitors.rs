@@ -246,7 +246,7 @@ impl World for Around<'_> {
             is_janitor: record.is_janitor,
             archived: record.archived_at_ms.is_some(),
             busy: status.live.is_some() || !status.waiting.is_empty(),
-            bound: !record.codex_provider.is_empty(),
+            bound: record.bound(),
         })
     }
 

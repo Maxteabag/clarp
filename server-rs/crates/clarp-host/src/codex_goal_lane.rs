@@ -114,12 +114,19 @@ pub(crate) struct Login {
     pub file: Option<PathBuf>,
     /// The Codex home and provider of an agent bound to one of its own: its lane's Codex runs
     /// in that home and on that provider, and leaves when it names another.
-    pub own: Option<clarp_backend::own_provider::OwnProvider>,
+    /// `Err`: the agent is bound, and its binding cannot be used: no lane starts for it.
+    pub own: Result<Option<clarp_backend::own_provider::OwnProvider>, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Lane {
     socket: PathBuf,
+}
+
+/// The binding a lane runs with, where it has a usable one: a lane whose binding cannot be
+/// used never gets past [`Lane::start`].
+fn bound(login: &Login) -> Option<&clarp_backend::own_provider::OwnProvider> {
+    login.own.as_ref().ok().and_then(Option::as_ref)
 }
 
 impl Lane {
@@ -145,9 +152,7 @@ impl Lane {
         turn: Option<(&Option<String>, &Option<String>)>,
     ) -> io::Result<Option<Child>> {
         // A lane bound to a provider starts on that provider's configuration or not at all.
-        if let Some(own) = &login.own {
-            own.admits().map_err(io::Error::other)?;
-        }
+        crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
         let settings = Settings::read();
         let options = self.options(profile, login, thread, settings.idle_ms)?;
         let digest = options["_clarpOptionsDigest"]
@@ -181,7 +186,7 @@ impl Lane {
         let config = profile
             .dir
             .join(format!("native-goal-{}.json", crate::ids::hex(8)));
-        let home = login.own.as_ref().map(|own| own.home.as_path());
+        let home = bound(login).map(|own| own.home.as_path());
         let result = self.spawn(launcher, profile, &options, &config, home);
         let _ = std::fs::remove_file(config);
         result
@@ -222,7 +227,7 @@ impl Lane {
         // An agent bound to a provider of its own names it on its thread, where neither a
         // profile nor a project can move it. Its home is part of what makes the lane its own.
         let mut own_home = String::new();
-        if let Some(own) = &login.own {
+        if let Some(own) = bound(login) {
             resume["modelProvider"] = json!(own.provider);
             resume["config"]["model_provider"] = json!(own.provider);
             own_home = own.home.display().to_string();
@@ -242,7 +247,7 @@ impl Lane {
         resume["_clarpIdleMs"] = json!(idle_ms);
         resume["_clarpTurnFile"] = json!(self.turn_file(profile));
         resume["_clarpOptionsDigest"] = json!(digest);
-        if let Some(own) = &login.own {
+        if let Some(own) = bound(login) {
             resume["_clarpModelProvider"] = json!(own.provider);
         }
         Ok(resume)
