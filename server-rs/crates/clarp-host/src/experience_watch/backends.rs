@@ -73,8 +73,8 @@ pub(crate) fn said<'a>(rows: impl IntoIterator<Item = &'a Entry>, turn: u64) -> 
 
 /// How a settled turn counts: `None` for one that says nothing of its backend (a Stop, a
 /// usage limit the Hotseat handles, an agent whose folder is gone, a cut-off, a turn replaced
-/// or taken back). `answered`
-/// says whether the row that closed it is a reply with words in it or it left a note.
+/// or taken back). `answered` says whether the row that closed it is a reply with words in it
+/// or it left a note.
 pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Option<How> {
     match outcome {
         Outcome::Completed
