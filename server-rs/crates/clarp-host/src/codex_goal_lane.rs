@@ -154,7 +154,7 @@ impl Lane {
         // A lane bound to a provider starts on that provider's configuration or not at all.
         crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
         // Nor in a folder that is gone: the turn it was started for ends at once, as one.
-        if let Some(why) = crate::launcher::folder_gone(&profile.cwd) {
+        if let Some(why) = clarp_spool::folder_gone(&profile.cwd) {
             return Err(io::Error::new(io::ErrorKind::NotFound, why));
         }
         let settings = Settings::read();
@@ -297,7 +297,14 @@ impl Lane {
         if let Some(home) = home {
             command.env(clarp_backend::codex::CODEX_HOME, home);
         }
-        let mut child = command.spawn()?;
+        // A folder that went after `start` looked is said as the Host says it, so that the turn
+        // ends at once and is not tried again as a launch that failed.
+        let mut child = command.spawn().map_err(|error| {
+            match clarp_spool::folder_gone(&profile.cwd) {
+                Some(gone) => io::Error::new(io::ErrorKind::NotFound, gone),
+                None => error,
+            }
+        })?;
         let mut ready = String::new();
         if let Some(stdout) = child.stdout.take() {
             BufReader::new(stdout).read_line(&mut ready)?;

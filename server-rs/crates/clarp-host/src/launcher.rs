@@ -61,12 +61,6 @@ pub enum Told {
     Failed(String),
 }
 
-/// The words a turn ends with when the folder it would run in is not there, or is no folder:
-/// nothing started in it can run, and no try brings it back. `None` while it is there.
-pub(crate) fn folder_gone(cwd: &Path) -> Option<String> {
-    (!cwd.is_dir()).then(|| clarp_kernel::failures::folder_missing(&cwd.display().to_string()))
-}
-
 impl Launcher {
     /// The launcher with this name in configuration.
     pub fn by_name(name: &str, shim: PathBuf) -> Option<Self> {

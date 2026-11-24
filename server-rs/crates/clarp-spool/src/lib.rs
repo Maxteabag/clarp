@@ -241,10 +241,74 @@ pub const MAX_LINE: u64 = 16 * 1024 * 1024;
 /// The longest piece of tool output the shim puts in one record.
 pub const MAX_OUTPUT_CHUNK: usize = 4 * 1024 * 1024;
 
+/// What the words of a launch begin with whose tool was to run in a folder that is gone: the
+/// Host's own words, before it starts anything, and the shim's in a `spawn-failed` record when
+/// the folder went after the Host looked. Whoever reads them (`clarp_kernel::failures`) reads
+/// them by this mark, so it is written in this one place.
+pub const FOLDER_MISSING_MARK: &str = "folder_missing:";
+
+/// What comes after the mark where the path is there and is no folder.
+pub const NOT_A_FOLDER: &str = "not a folder:";
+
+/// The words of a launch in this folder, which is gone, or which is no folder.
+pub fn folder_missing(dir: &str, not_a_folder: bool) -> String {
+    if not_a_folder {
+        format!("{FOLDER_MISSING_MARK} {NOT_A_FOLDER} {dir}")
+    } else {
+        format!("{FOLDER_MISSING_MARK} {dir}")
+    }
+}
+
+/// The words a launch in this folder fails with when nothing can be started in it: it is not
+/// there, a part of its path is no folder, or it is no folder itself. `None` while it is a
+/// folder, and also where looking at it failed otherwise (a mount that is away for a moment, a
+/// parent that may not be searched): that may pass, and the launch is tried as before.
+pub fn folder_gone(dir: &Path) -> Option<String> {
+    match std::fs::metadata(dir) {
+        Ok(found) if found.is_dir() => None,
+        Ok(_) => Some(folder_missing(&dir.display().to_string(), true)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Some(folder_missing(&dir.display().to_string(), false))
+        }
+        Err(_) => None,
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_is_gone_when_it_is_not_there_or_is_no_folder_and_only_then() {
+        let root = std::env::temp_dir().join(format!("clarp-spool-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        assert_eq!(folder_gone(&root), None);
+        let absent = root.join("absent");
+        assert_eq!(
+            folder_gone(&absent),
+            Some(format!("folder_missing: {}", absent.display()))
+        );
+        let file = root.join("file");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(
+            folder_gone(&file),
+            Some(format!("folder_missing: not a folder: {}", file.display()))
+        );
+        // A path through a file is no folder either.
+        let through = file.join("inside");
+        assert_eq!(
+            folder_gone(&through),
+            Some(format!("folder_missing: {}", through.display()))
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("clarp-spool-{name}-{}", std::process::id()));

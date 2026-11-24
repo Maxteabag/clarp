@@ -1854,6 +1854,8 @@ impl Worker {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
                 });
+            // And an agent whose goal waits for its folder to be back looks at it again.
+            let folder_due = self.native.folder_look;
             // And an agent whose turn waits for its next attempt wakes to start it.
             let retry_due = self.actor.as_ref().and_then(Actor::retry_at).map(|due| {
                 let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
@@ -1894,6 +1896,7 @@ impl Worker {
                 linger_due,
                 shown_due,
                 stall_due,
+                folder_due,
             ]
             .into_iter()
             .flatten()
@@ -1933,6 +1936,10 @@ impl Worker {
                     }
                     if looked.is_ok() && stall_due.is_some_and(|due| due <= now) {
                         looked = self.check_stall();
+                    }
+                    if looked.is_ok() && folder_due.is_some_and(|due| due <= now) {
+                        self.native.folder_look = None;
+                        looked = self.advance_native_goal();
                     }
                     if let Err(error) = looked {
                         eprintln!(
@@ -4257,7 +4264,7 @@ impl Worker {
                         // program (issue 758). A call's opening keeps its own gated rule: it
                         // tries again each second, and its gate holds what was claimed.
                         if order.opening.is_none()
-                            && let Some(why) = launcher::folder_gone(&order.cwd)
+                            && let Some(why) = clarp_spool::folder_gone(&order.cwd)
                         {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
@@ -4510,7 +4517,7 @@ impl Worker {
                     return;
                 }
                 // Nor in a folder that is gone.
-                if let Some(why) = launcher::folder_gone(&order.cwd) {
+                if let Some(why) = clarp_spool::folder_gone(&order.cwd) {
                     tell(&tx, turn, attempt, Told::Failed(why));
                     return;
                 }

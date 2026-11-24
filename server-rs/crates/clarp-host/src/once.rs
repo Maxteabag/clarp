@@ -355,9 +355,9 @@ async fn run_with(
 ) -> Result<String, Unanswered> {
     // Started in a folder that is gone, the tool would fail with words that name only its
     // program.
-    if !cwd.is_dir() {
+    if clarp_spool::folder_gone(cwd).is_some() {
         return Err(Unanswered::NotStarted(format!(
-            "the folder {} no longer exists",
+            "the folder {} is not there, or is no folder",
             cwd.display()
         )));
     }
