@@ -740,14 +740,23 @@ Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carrie
   Host or another agent sent (schedules, wakes, delivered answers, another agent's message), and
   every row of a turn with `audience` `agents`.
 
-A turn's **final reply** is its last assistant text row (words, no tool name, not a note), and
-only once the turn has ended (settled; a turn a follow-up replaced has none). While a turn runs
-all its text is `session`. When it ends, its anchor row is written again with a new revision:
-the final reply, or its last note or user prompt if there is no reply. The anchor carries
-`session_rows`, how many of the turn's rows the conversation view leaves out, so a client offers
-"Show work" there and opens that turn in the session view. A delta (`after_revision`) brings the
-anchor, so a row a client holds as `session` arrives again as `conversation`. The Rust Host
-derives the anchor and its revision from its turn records.
+A turn's **final reply** answers a message of the user's: the newest assistant text row (words,
+no tool name, not a note) written for that message, with no work after it. Each message a turn
+answers has its own: the turn's own message, and each message read into the running turn
+(steering), which closes what the turn said before it, so an answer given before a follow-up
+stays in the conversation. A final reply is `conversation` from its first write, while the
+turn still runs, and carries `session_rows` from then on: a client never shows it as work first.
+If a later reply answers the same message, the earlier one is written again as `session` and
+the later one is the answer; words that work follows (`phase` `commentary`) are written again as
+`session` the same way. When the turn ends (settles; a turn a follow-up replaced has none), its
+last anchor row is written again with a new revision and the turn's last count: the final reply,
+or, if nothing after the last answer had words, the newest reply with words, else its last note
+or user prompt. The anchor carries `session_rows`, how many of the turn's rows for that answer
+the conversation view leaves out (with the rows of any message before it that had no answer of
+its own), so a client offers "Show work" there and opens that turn in the session view. A delta
+(`after_revision`) brings each of these rewrites, so a row a client holds as `session` arrives
+again as `conversation`, and the other way round. The Rust Host derives the anchors and their
+revisions from its turn records, also for turns written before anchors were kept per message.
 
 `GET /log?view=conversation` returns only `conversation` rows, filtered before the page limit,
 for a snapshot, a delta and an older page alike, and echoes `view`. With `view=session`, or
