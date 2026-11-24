@@ -3,14 +3,16 @@
   // message text, one-line thinking rows, tool rows updated in place by id,
   // explore groups as one row, a plan card, a diff summary, and once the
   // turn settles its work folded behind "Worked for …".
-  import { liveRows, settledFold } from '@core/live-present.js';
+  import { currentTurnItems, liveRows, partFold } from '@core/live-present.js';
   import { renderText } from '../render.js';
   import LiveMessage from './LiveMessage.svelte';
   import LiveToolRow from './LiveToolRow.svelte';
   import TurnNotice from './TurnNotice.svelte';
   import { isOpen, toggle } from './expanded.svelte.js';
 
-  let { liveState, items, explanations = true } = $props();
+  // `last`: this part is the one the turn ends in (a turn split at a steer draws its
+  // fold button and error once, there); an unsplit turn is its own last part.
+  let { liveState, items, explanations = true, last = true } = $props();
 
   let running = $derived(items.some(i => i.status === 'running' || i.status === 'pending'));
   // Elapsed times and the 600 ms output delay need a clock, but only while
@@ -24,14 +26,22 @@
   });
 
   let rows = $derived(liveRows(items, { explanations, now, skewMs: liveState.skewMs || 0 }));
-  let fold = $derived(settledFold(liveState.turn, rows));
+  // The whole turn's rows, read only by the part the turn ends in and only when the turn
+  // was split: whether any part's work is folded decides its button.
+  let wholeRows = $derived.by(() => {
+    // Only a settled turn folds; a running one must not pay for this on every live event.
+    if (!last || !(liveState.turn && liveState.turn.ended_at_ms)) return null;
+    const all = currentTurnItems(liveState);
+    return all.length === items.length ? null : liveRows(all, { explanations, now, skewMs: liveState.skewMs || 0 });
+  });
+  let fold = $derived(partFold(liveState.turn, rows, { last, wholeRows }));
   let foldId = $derived(`fold:${liveState.turn ? liveState.turn.turn_id : ''}`);
   let foldOpen = $derived(isOpen(foldId));
   let shown = $derived(!fold || foldOpen ? rows : fold.visible);
 </script>
 
 <div class="live-turn" class:settled={!!fold}>
-  {#if fold && fold.folded.length}
+  {#if fold && fold.label && fold.opens}
     <button class="lv-fold" type="button" aria-expanded={foldOpen} onclick={() => toggle(foldId)}>
       <span class="lv-caret" class:open={foldOpen} aria-hidden="true">▸</span>{fold.label}
     </button>

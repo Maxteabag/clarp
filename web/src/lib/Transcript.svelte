@@ -235,7 +235,7 @@
       <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
     {:else if entry.type === 'live'}
-      <LiveTurn {liveState} items={liveSegmentItems(liveItems, entry)} explanations={live.explanations.enabled} />
+      <LiveTurn {liveState} items={liveSegmentItems(liveItems, entry)} last={entry.last !== false} explanations={live.explanations.enabled} />
     {:else if entry.type === 'artifact'}
       <RenderSpecCard row={entry.item} />
     {:else}
