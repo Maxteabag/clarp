@@ -178,6 +178,17 @@ pub fn replaced_settings() -> Option<String> {
     Settings::replaced(crate::owner::OwnerFile::new(Some(path)).read().as_ref())
 }
 
+/// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
+/// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
+/// exited: one writer per conversation. A lane that still runs a turn refuses, and the terminal
+/// opens as it did before lanes (the lead's decision of 25 Nov 2026: that two-writer case is
+/// older than lanes, and is its own issue). Blocking: it waits for the lane's tool to exit.
+pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
+    for tool in Tool::ALL {
+        let _ = Endpoint::of(tool, run, agent_id).retire();
+    }
+}
+
 /// Where an agent's lane keeps the identity of its running turn.
 pub(crate) fn turn_file(run: &Path, agent_id: &str) -> PathBuf {
     run.join(format!("{agent_id}-turn.token"))

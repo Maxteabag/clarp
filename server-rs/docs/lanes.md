@@ -71,8 +71,13 @@ lane_memory_mb = 2200         # what all lanes of the Host may hold together, in
   may continue (an active goal), refuses to leave and counts.
 - **The default is 2,200 MB.** This is the figure the owner approved for the Codex lane: eight
   lanes at about 270 MB. Switching on lanes of other tools never quietly raises what he agreed
-  to. With Codex as the only driver, the default keeps about eight Codex lanes, as the count of
-  eight did. Lanes that weigh more than 270 MB leave sooner, because the bytes decide.
+  to. The budget bounds memory, not a count (the lead's decision of 25 Nov 2026):
+  - Lanes not yet weighed, and every lane where `/proc` cannot be read, count at 270 MiB, so
+    eight fit.
+  - Weighed lanes count at what they hold. An idle Codex app-server measured 130-142 MiB of PSS
+    on elitebook (25 Nov 2026, Codex 0.167.1, one process, no thread loaded), so about fifteen
+    such lanes fit.
+  - A lane that weighs more leaves sooner, because the bytes decide.
 - **Who sets them.** `install-host` carries these keys through an install. Switching a lane on
   for the owner's agents is his decision.
 
@@ -120,10 +125,10 @@ of them is not done.
     - Transit writes the new tool's session from the Host's record and never opens the old one.
     - Helper forks are words. Conversation forks are Claude's only, and no Claude lane exists yet.
     - Status forks are a Clarp skill, not a route of this Host.
-    - The agent terminal (`GET /terminal/<session>`) does not retire the lane yet. A person who
-      opens a Codex agent's terminal while its lane is idle runs `codex resume` beside it, as
-      before the layer. Closing that refuses the terminal while a turn runs, which changes
-      Codex's behaviour, so it waits for the lead's word.
+    - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
+      retired and waited for until its tool has exited, and the terminal then opens as before
+      (the lead's decision of 25 Nov 2026). While a turn runs, the terminal opens as before,
+      with no refusal; that two-writer case is older than lanes and is its own issue.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an
   attempt is offered to a new lane, and only once (`lane::once_more`).
