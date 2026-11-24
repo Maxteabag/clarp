@@ -873,3 +873,23 @@ fn a_stop_codex_does_not_answer_ends_codex_and_its_long_command_and_a_new_lane_a
         "ask-first\nhold-cmddeaf\nask-after\n"
     );
 }
+
+#[test]
+fn the_terminal_of_an_idle_codex_agent_retires_its_lane_before_it_opens() {
+    let (place, world) = lane_place("codex-lane-terminal", "codex_lane_idle_minutes = 5\n");
+    let _lanes = Lanes(place.root.clone());
+    let host = start_lane_host(&place, &world);
+    let socket = lane_agent(&host, &place, "by-hand");
+    asked(&host, "by-hand", "ask-first");
+    assert!(lane_lives(&socket), "the turn left its lane idle");
+
+    // The terminal is opened only once the idle lane has left: the tool by hand is the
+    // conversation's one writer.
+    let terminal = socket_at(&host, "", "/terminal/by-hand");
+    assert!(terminal.is_ok(), "the terminal opens: {:?}", terminal.err());
+    assert!(
+        !lane_lives(&socket),
+        "the idle lane left before the terminal opened"
+    );
+    drop(terminal);
+}

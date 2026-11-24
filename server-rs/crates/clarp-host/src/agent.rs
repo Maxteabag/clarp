@@ -657,6 +657,8 @@ pub struct TerminalFacts {
     pub cwd: std::path::PathBuf,
     /// What is set on top of the Host's environment for a turn of the agent.
     pub env: Vec<(String, String)>,
+    /// Where the agent's lanes listen: an idle one makes way before the terminal opens.
+    pub run_dir: std::path::PathBuf,
 }
 
 /// The way to an agent's thread.
@@ -3843,6 +3845,7 @@ impl Worker {
                     env: std::iter::once(named)
                         .chain(profile.tool_env.iter().cloned())
                         .collect(),
+                    run_dir: profile.run_dir.clone(),
                 };
                 return read(Ok(facts), answer);
             }

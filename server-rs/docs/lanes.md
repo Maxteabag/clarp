@@ -123,9 +123,10 @@ of them is not done.
     - Transit writes the new tool's session from the Host's record and never opens the old one.
     - Helper forks are words. Conversation forks are Claude's only, and no Claude lane exists yet.
     - Status forks are a Clarp skill, not a route of this Host.
-    - The agent terminal (`GET /terminal/<session>`) does not retire the lane yet. A person who
-      opens a Codex agent's terminal while its lane is idle runs `codex resume` beside it, as
-      before the layer.
+    - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
+      retired and waited for until its tool has exited, and the terminal then opens as before
+      (the lead's decision of 25 Nov 2026). While a turn runs, the terminal opens as before,
+      with no refusal; that two-writer case is older than lanes and is issue #770.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an
   attempt is offered to a new lane, and only once (`lane::once_more`).

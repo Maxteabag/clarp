@@ -351,6 +351,13 @@ async fn of_an_agent(
         Ok(lease) => lease,
         Err(why) => return ApiError::from(why).into_response(),
     };
+    // With the terminal open no turn of the agent's starts; an idle lane leaves first, so the
+    // tool here is the conversation's one writer (issue 761). One that runs a turn stays.
+    let (run_dir, agent_id) = (facts.run_dir, member.record.agent_id.clone());
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::lane::make_way_if_idle(&run_dir, &agent_id);
+    })
+    .await;
     let program = Program {
         called: session.to_string(),
         argv,
