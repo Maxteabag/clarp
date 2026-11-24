@@ -269,12 +269,13 @@ impl Chip {
         // provider of its own is doing is told as that it works, never its tools or commands.
         let bound = directory
             .named(recipient)
-            .is_some_and(|member| member.record.bound())
-            && event["ops"][0]["activity"].is_object();
-        let event = if bound {
+            .filter(|member| member.record.bound())
+            .filter(|_| event["ops"][0]["activity"].is_object());
+        let event = if let Some(member) = bound {
+            let working = format!("{} is working", crate::pusher::display_name(&member.record));
             veiled = event.clone();
             let activity = &mut veiled["ops"][0]["activity"];
-            clarp_kernel::hidden_coordination::veil_live(activity, "Working");
+            clarp_kernel::hidden_coordination::veil_live(activity, &working);
             activity["veiled"] = json!(true);
             &veiled
         } else if hidden {

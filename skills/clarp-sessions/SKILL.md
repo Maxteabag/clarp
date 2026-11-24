@@ -84,24 +84,27 @@ What the Host then does:
   itself, so off means not spoken. What is said to it is heard only by the Host's own
   speech engine (refused in plain words where there is none). Any agent can have it set
   off the same way.
-- Its words reach no model of the Host's: no janitor reads it (whatever its scope says),
-  its tools are explained without a model, and the goal keeper, the label checker, the
-  spoken-message router and the other agents of a call leave its conversation out.
-- A turn whose provider Codex's own record (in the agent's home) does not name within a
-  few seconds, or by its end, fails closed (`provider_mismatch`, "could not be verified"),
+- The Host's own model calls leave it out: no janitor reads it (whatever its scope says),
+  its tools are explained without a model, and the goal keeper (also of a bound helper),
+  the label checker, the spoken-message router and the other agents of a call leave its
+  conversation out. Other agents can still read it (see the limits below).
+- A turn whose provider Codex's own record (in the agent's home) does not name within ten
+  seconds, or by the time its process is gone, fails closed (`provider_mismatch`, "could not be verified"),
   and its answer is not shown. This check after start only detects: by then the request has
   reached whatever provider Codex used. What prevents it is the home and the
   `model_provider` set on every launch, the chat lane, a fork and the agent's terminal.
-- Push notifications, questions and the lock-screen chip of a bound agent say that it
-  answered, asks or works, never its words, tools or commands. A binding that cannot be
+- Push notifications, questions and the lock-screen chip of a bound agent carry only a
+  neutral line ("<name> answered", "<name> asks", "<name> is working"), never its words,
+  tools or commands. A binding that cannot be
   used (half of one, a malformed one, one on another tool) starts nothing at all.
 
 Limits to know:
 
-- Other agents and anyone with access to this Host can still read a bound agent's
-  conversation (`GET /log`, the snapshot, a message it sends to another agent, a status
-  fork). Its words reach another agent's model only when someone or something hands them
-  over: keep bound agents out of teams and calls with agents on other providers.
+- Other agents can still read a bound agent's conversation through the Host: the log API
+  (`GET /log`, the snapshot), a status fork or a front desk's relay, a message it sends to
+  another agent or one another agent's tool reads, and a team leader's ticks. Those agents
+  run on their own providers. This is not gated yet: keep customer material away from
+  agents that are not bound to the same provider, and out of teams and calls with them.
 - Clearing the binding (`--clear`) moves the agent to the machine's own Codex: its next
   turn begins a new thread there, carrying the Host's record of the conversation to the
   default provider.

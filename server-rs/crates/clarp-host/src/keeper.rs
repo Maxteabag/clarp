@@ -439,7 +439,10 @@ async fn gather(
         .iter()
         .filter(|member| {
             let record = &member.record;
+            // A helper bound to a model provider of its own is read by no model of the Host's,
+            // whoever it helps.
             record.parent_agent_id.as_deref() == Some(owner_id)
+                && !record.bound()
                 && rules::is_helper(record.created_at_ms, false, plan.created_at)
         })
         .collect();

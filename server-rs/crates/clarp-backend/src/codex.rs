@@ -468,10 +468,10 @@ struct Bound {
 }
 
 /// How long a bound exec turn may go on before its rollout names its provider. Codex writes
-/// the rollout as it begins the turn; one that has not named the agent's provider by then is
-/// taken to run elsewhere (a rollout in another `CODEX_HOME` is never found in the agent's),
-/// and is stopped.
-const VERIFY_WITHIN_MS: i64 = 3_000;
+/// the rollout as the turn goes, and may flush it late; one that has named no provider after
+/// this long is taken to run elsewhere (a rollout in another `CODEX_HOME` is never found in
+/// the agent's), and is stopped. A shorter turn is judged when its process is gone.
+const VERIFY_WITHIN_MS: i64 = 10_000;
 
 /// What the ids of Codex's live items begin with.
 const SHOWN: &str = "cx";
@@ -547,16 +547,48 @@ impl CodexInterpreter {
         true
     }
 
-    /// A bound turn that is complete with no provider read for it fails closed: it is not
-    /// known to have run on the agent's provider, and what it said is not taken.
-    fn unverified(&mut self, out: &mut Vec<Signal>) {
+    /// A bound turn with no provider read for it fails closed: it is not known to have run on
+    /// the agent's provider, and what it said is not taken. `running`: its process is still
+    /// there, and is stopped.
+    fn unverified(&mut self, out: &mut Vec<Signal>, running: bool) {
         let Some(bound) = self.bound.as_mut() else {
             return;
         };
         bound.halted = true;
         bound.held.clear();
         self.failure = Some(bound.own.unverified());
-        out.push(Signal::Halt);
+        if running {
+            out.push(Signal::Halt);
+        }
+    }
+
+    /// The final verdict on a bound turn whose process is gone: its rollout is read once more.
+    /// Another provider, or none named, fails it; its own takes what it said, held till now.
+    fn judged_at_exit(&mut self, out: &mut Vec<Signal>) {
+        let waits = self
+            .bound
+            .as_ref()
+            .is_some_and(|bound| !bound.halted && !bound.verified);
+        if !waits {
+            return;
+        }
+        if self.held_to_provider(out) {
+            // Its process is gone already: there is nothing left to stop.
+            if out.last() == Some(&Signal::Halt) {
+                out.pop();
+            }
+            return;
+        }
+        let Some(bound) = self.bound.as_mut() else {
+            return;
+        };
+        if !bound.verified {
+            self.unverified(out, false);
+            return;
+        }
+        for (event, t) in std::mem::take(&mut bound.held) {
+            self.take(&event, t, out);
+        }
     }
 
     fn moved(&mut self, activity: Activity, out: &mut Vec<Signal>) {
@@ -596,14 +628,16 @@ impl CodexInterpreter {
             }
             let began = *bound.began.get_or_insert(t);
             if !bound.verified {
-                // Not verified by the end of the turn, or within the time its rollout had to
-                // name a provider: stopped, and what it said is not taken.
+                // Not verified within the time its rollout had to name a provider: stopped, and
+                // what it said is not taken. Before that, what it says waits; its end too, as
+                // Codex may say it before its rollout is flushed: the verdict is then given
+                // when its process is gone.
                 let late = t.saturating_sub(began) >= VERIFY_WITHIN_MS;
-                if kind == "turn.completed" || (late && kind.starts_with("item.")) {
-                    self.unverified(out);
+                if late && kind.starts_with("item.") {
+                    self.unverified(out, true);
                     return;
                 }
-                if kind.starts_with("item.") {
+                if kind.starts_with("item.") || kind == "turn.completed" {
                     bound.held.push((event, t));
                     return;
                 }
@@ -870,6 +904,7 @@ impl CodexInterpreter {
         if self.ended {
             return;
         }
+        self.judged_at_exit(out);
         self.ended = true;
         // A tool that still runs when the process goes is left as it is: what becomes of
         // it follows from how the turn ended, which is the Host's to say.
@@ -1752,7 +1787,6 @@ mod tests {
             entry: Entry::Shim(exited),
         };
         interpreter.on_record(&record, &mut out);
-        assert!(out.contains(&Signal::Halt), "{out:?}");
         assert!(
             !out.iter()
                 .any(|signal| matches!(signal, Signal::Reply(_) | Signal::Live(_))),
@@ -1848,6 +1882,54 @@ mod tests {
             panic!("{out:?}");
         };
         assert!(reason.contains("could not be verified"), "{reason}");
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_bound_turn_whose_rollout_is_flushed_after_its_end_is_judged_at_its_exit() {
+        let thread = "019a0000-0000-7000-8000-0000000000f4";
+        // The agent's home has no rollout of the thread yet.
+        let (home, own) = bound_home("019a0000-0000-7000-8000-0000000000f5", "stand-in");
+        let mut interpreter =
+            CodexInterpreter::reading(1, "w2", Some(own.sessions())).bound_to(own.clone());
+        let mut out = Vec::new();
+        let lines = [
+            format!(r#"{{"type":"thread.started","thread_id":"{thread}"}}"#),
+            r#"{"type":"turn.started"}"#.to_string(),
+            r#"{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"on time"}}"#.to_string(),
+            r#"{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}"#.to_string(),
+        ];
+        for (t, line) in lines.iter().enumerate() {
+            let record = Record {
+                t: i64::try_from(t).unwrap(),
+                entry: Entry::Out(line.clone()),
+            };
+            interpreter.on_record(&record, &mut out);
+        }
+        assert!(
+            !out.iter().any(|signal| matches!(signal, Signal::Reply(_) | Signal::Halt)),
+            "the answer waits for the verdict: {out:?}"
+        );
+        // Codex flushes its rollout as it exits.
+        let day = home.join("sessions/2026/11/24");
+        let meta = json!({"type": "session_meta", "payload": {"id": thread, "model_provider": "stand-in"}});
+        std::fs::write(
+            day.join(format!("rollout-2026-11-24T09-00-00-{thread}.jsonl")),
+            format!("{meta}\n"),
+        )
+        .unwrap();
+        let exited = ShimEvent::Exited {
+            code: Some(0),
+            signal: None,
+        };
+        let record = Record {
+            t: 9,
+            entry: Entry::Shim(exited),
+        };
+        interpreter.on_record(&record, &mut out);
+        assert!(out.iter().any(|signal| matches!(signal, Signal::Reply(_))), "{out:?}");
+        assert!(!out.contains(&Signal::Halt), "{out:?}");
+        assert_eq!(out.last(), Some(&Signal::Ended(RunOutcome::Completed)));
         std::fs::remove_dir_all(home).unwrap();
     }
 
