@@ -307,7 +307,9 @@ wire_api = "responses"
         std::fs::write(&rollout, lines.join("\n") + "\n").unwrap();
         assert_eq!(named_providers(&rollout), ["stand-in"]);
         let mut more = lines.join("\n");
-        more.push_str("\n{\"type\":\"turn_context\",\"payload\":{\"model_provider\":\"openai\"}}\n");
+        more.push_str(
+            "\n{\"type\":\"turn_context\",\"payload\":{\"model_provider\":\"openai\"}}\n",
+        );
         std::fs::write(&rollout, more).unwrap();
         assert_eq!(named_providers(&rollout), ["openai", "stand-in"]);
         assert!(named_providers(&dir.join("none.jsonl")).is_empty());

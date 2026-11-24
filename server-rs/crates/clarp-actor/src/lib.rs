@@ -4432,9 +4432,9 @@ impl Actor {
         let mismatch = failures::classify_error(reason) == failures::PROVIDER_MISMATCH;
         let refusable = !mismatch
             && self
-            .live
-            .as_ref()
-            .is_some_and(|live| live.turn == turn && !live.opening)
+                .live
+                .as_ref()
+                .is_some_and(|live| live.turn == turn && !live.opening)
             && self.recorder.agent().stopping().is_none()
             && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
         if refusable {

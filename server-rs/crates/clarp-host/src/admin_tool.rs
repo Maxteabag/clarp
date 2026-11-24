@@ -739,7 +739,10 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
     asked.insert("voice_id".to_string(), json!(voice));
     // A Codex agent on a model provider of its own: its home is named from where the tool
     // was called, as a working directory is.
-    if let Some(home) = parsed.option("--codex-home").filter(|home| !home.is_empty()) {
+    if let Some(home) = parsed
+        .option("--codex-home")
+        .filter(|home| !home.is_empty())
+    {
         asked.insert("codex_home".to_string(), json!(named_from(call, home)));
     }
     if let Some(provider) = parsed.option("--codex-provider") {
@@ -1104,7 +1107,10 @@ async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnsw
         Ok(parsed) => parsed,
         Err(why) => return usage(&why),
     };
-    let Some(session) = parsed.option("--session").filter(|said| !said.trim().is_empty()) else {
+    let Some(session) = parsed
+        .option("--session")
+        .filter(|said| !said.trim().is_empty())
+    else {
         return usage("the following arguments are required: --session");
     };
     let mut asked = roster::Fields::new();
@@ -1113,7 +1119,10 @@ async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnsw
         asked.insert("codex_home".to_string(), Value::Null);
         asked.insert("codex_provider".to_string(), Value::Null);
     } else {
-        if let Some(home) = parsed.option("--codex-home").filter(|home| !home.is_empty()) {
+        if let Some(home) = parsed
+            .option("--codex-home")
+            .filter(|home| !home.is_empty())
+        {
             asked.insert("codex_home".to_string(), json!(named_from(call, home)));
         }
         if let Some(provider) = parsed.option("--codex-provider") {
