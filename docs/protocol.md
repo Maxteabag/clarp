@@ -302,7 +302,10 @@ Rules:
   "active_alias" (the seat in use, or null), "next_reset_at" (the soonest
   moment a used-up seat regains room, or null), "regains_room_at" (only where
   every seat is used up: when the first regains room; else null), "stale",
-  "observed_at"}`, moments in UTC to the second. A seat that cannot be judged is
+  "observed_at"}`, moments in UTC to the second. `next_alias` is the seat the Host's switcher
+  would move to were the one in use used up (most of its five hours left, then of
+  its week; the owner's selector may choose otherwise), null where no other seat
+  has room or the reading is stale. A seat that cannot be judged is
   counted in neither number; on a `stale` reading (old, failed, or the switcher
   off) `with_room` and `used_up` are null and `regains_room_at` is null, since
   an old reading says nothing of now. A tool with no seats read has no `pool`.
@@ -963,6 +966,15 @@ the network", and `live_activity` `limited` with that `headline`. Show the words
 read `limited` alone as a usage limit. No contract number goes with it (see
 [compatibility](compatibility.md)).
 
+A turn that waits for an account on a Rust Host from contract 176 (feature `quota_pool`) shows the
+reset of the tool's pool, not only of the account that ran out: while another seat of the pool
+would take the turn (the Host is moving to it), its words carry no reset ("Waiting for a claude
+account with available usage"); where no seat has room, the reset is the moment the first seat
+regains room, where that is sooner ("... · resets 18:27"). The same reset is the one a turn that
+waited in vain fails with ("Usage limit reached · resets 18:27"). These are the words of
+`agent-state` `detail.message` (with `detail.account_recovery: "waiting"`), of `agent-activity`
+`summary` (phase `account_recovery`) and of `live_activity.headline` (state `limited`).
+
 One `text/event-stream` per client. Every event is a JSON object with a
 `type` field and, when the server recorded it durably, an SSE `id:` line.
 
@@ -996,7 +1008,7 @@ Event types and payloads:
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error`, and with the speech_outcome feature `reason`, `provider`, `trace_id` | A reply was not spoken; tell the user instead of playing silence. With speech_outcome: once per turn and reason, `trace_id` names the turn whose reply it is (write the line under that reply), `reason` is an open set (below). |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
-| `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. |
+| `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. From Rust Host contract 176 (feature `quota_pool`) a `hard_limit` is not sent while another seat of the tool's pool would take the turn (the Host moves to it), and when sent it carries `failover` (`none` or `unknown`) and `pool_regains_at` (ISO, UTC to the second: when the first seat of the pool regains room, where none has; else null). `resets_at` stays the window's own. Warnings, `recovered` and `unknown` are sent as before. |
 | `artifact-updated` | `session`, `agent_id`, `artifact_id` | An artifact was published or resolved; refetch `/artifacts/<id>`. Extension surface. |
 | `media-changed` | `session`, `agent_id`, `asset_id`, `change` ∈ created, deleted, favorite; `favorite` (only with change favorite); `at` (ms) | A chat's gallery changed (feature `media_manage`): re-read or patch `GET /media`; on `deleted` drop cached bytes of the image. Extension surface. |
 | `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |

@@ -177,6 +177,8 @@ fn a_used_up_account_is_said_only_where_no_seat_of_the_pool_would_take_the_turn(
         "{pool}"
     );
     assert!(pool["observed_at"].is_string(), "{pool}");
+    // Were the seat in use used up, the Host would move to the spare one.
+    assert_eq!(pool["next_alias"], "spare", "{pool}");
     // Codex has no seats read: no pool.
     assert!(host.get("/backend-usage")["providers"]["codex"]["pool"].is_null());
     host.kill();
@@ -225,4 +227,6 @@ fn a_used_up_account_is_said_only_where_no_seat_of_the_pool_would_take_the_turn(
         ),
         "{pool}"
     );
+    // No seat has room: none to move to.
+    assert_eq!(pool["next_alias"], Value::Null, "{pool}");
 }
