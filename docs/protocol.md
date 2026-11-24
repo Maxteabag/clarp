@@ -1097,6 +1097,13 @@ nor `/log` (it was deleted).
 resume), and broadcasts `agent-state` and `queue-updated`. Response:
 `{"ok": true, "terminated": n}`.
 
+On the Rust Host (issue 747) the user's Stop lets the user's messages that were
+already waiting run, oldest first, and they do not end the pause: after they ran,
+the queue is still paused until the user's next fresh message or a resume. The
+response's `queue_paused` is the queue as the Stop left it, and `GET /turn-queue`
+says the same afterwards. The stopped turn's `interrupted` state is told once on
+the event stream (one `agent-state` event per Stop).
+
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
 sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,

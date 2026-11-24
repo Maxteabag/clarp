@@ -569,23 +569,6 @@ pub fn removed(record: &AgentRecord, at_ms: i64) -> [Value; 2] {
     [state, activity]
 }
 
-/// The state a Stop leaves, as the route that took the Stop tells it at once.
-pub fn stopped(record: &AgentRecord, status: &Status, ended: Option<&TurnEnd>) -> Option<Value> {
-    let last = status.last.as_ref()?;
-    let Outcome::Stopped { .. } = last.outcome else {
-        return None;
-    };
-    Some(json!({
-        "type": "agent-state",
-        "agent_id": record.agent_id,
-        "session": record.session,
-        "persona": record.persona,
-        "kind": "interrupted",
-        "ts": state_since(record, status),
-        "detail": ending_detail(last, "", "", ended),
-    }))
-}
-
 /// The same state is sent in snapshots and activity transitions, including a clear.
 pub(crate) fn mark_stall(object: &mut Value, since: Option<i64>) {
     object["stalled_since"] = json!(since);
@@ -3272,25 +3255,22 @@ mod tests {
             "scripted"
         );
         assert_eq!(activity(&record(), &done)["summary"], "Done");
-        assert!(stopped(&record(), &done, None).is_none());
 
         let halted = status(None, Some(Outcome::stopped(control::Control::by("user"))));
-        let at_once = stopped(&record(), &halted, None).unwrap();
-        assert_eq!(at_once["kind"], "interrupted");
-        assert_eq!(at_once["detail"]["source"], "user_stop");
+        let told = state(&record(), &halted, "claude", None);
+        assert_eq!(told["kind"], "interrupted");
+        assert_eq!(told["detail"]["source"], "user_stop");
         // A Stop names the trace of the turn it stopped, where its end is known, and no other
         // (R92, the Python Host's PR 451): never the trace of a turn before it.
-        assert!(at_once["detail"].get("trace_id").is_none());
-        let of_it = stopped(&record(), &halted, Some(&ended())).unwrap();
-        assert_eq!(of_it["detail"]["trace_id"], "trace-1");
-        let mut earlier = ended();
-        earlier.turn = 0;
-        let not_of_it = stopped(&record(), &halted, Some(&earlier)).unwrap();
-        assert!(not_of_it["detail"].get("trace_id").is_none());
+        assert!(told["detail"].get("trace_id").is_none());
         assert_eq!(
             state(&record(), &halted, "claude", Some(&ended()))["detail"]["trace_id"],
             "trace-1"
         );
+        let mut earlier = ended();
+        earlier.turn = 0;
+        let not_of_it = state(&record(), &halted, "claude", Some(&earlier));
+        assert!(not_of_it["detail"].get("trace_id").is_none());
         // A failed turn names its trace, first, on every failure.
         let failed = status(
             None,
