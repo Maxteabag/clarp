@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """How responsive a turn is, per backend, measured on a disposable Host. Run by hand, never a gate.
 
-    server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--codex-lane] [--rounds N] [--cases LIST]
+    server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--codex-lane] [--claude-lane] [--rounds N] [--cases LIST]
                                         [--bin DIR] [--out DIR] [--model ROW=MODEL ...]
                                         [--effort ROW=EFFORT ...] [--keep-host]
                                         [--lane-idle-minutes N] [--lane-most N] [--lane-memory-mb N] [--lane-settle SECONDS]
@@ -33,6 +33,11 @@ times (default 5). The cases, and what each measures:
           the tool's process gone (`exited`), the Host settling the turn, the Host starting the
           next one, its spool made, `spawned`, the tool's first line, the model's first reply
           line and the Host's first activity of it; and to the second turn's end.
+
+`--claude-lane` adds the `claude-lane` row: Claude with `claude_chat_lane` on. Its first turn runs
+in a process of its own, as every turn does without a warm lane, and the agent's kept Claude Code is
+started once that process is gone; the row's warm-up waits for it. `--port` gives the disposable Host
+a port of its own choosing instead of any free one.
 
 `--codex-lane` adds the `codex-lane` row (as does naming it in `--backends`). It is Codex with the
 Host's `codex_chat_lane` setting on (written to the
@@ -99,15 +104,20 @@ RELEASE_BIN = HOME / ".local/share/clarp-host/bin"
 OUT = pathlib.Path("/var/tmp/turn-timings")
 BACKENDS = ("codex", "claude", "agy")
 # A row is a backend, or a backend run another way: `codex-lane` is Codex with the Host's
-# `codex_chat_lane` on, so its chat turns run on the agent's long-lived app-server lane.
-TOOL_OF = {"codex-lane": "codex"}
-SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}}
+# `codex_chat_lane` on, so its chat turns run on the agent's long-lived app-server lane;
+# `claude-lane` is Claude with `claude_chat_lane` on, so its turns after the first run on a kept
+# Claude Code.
+TOOL_OF = {"codex-lane": "codex", "claude-lane": "claude"}
+SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}, "claude-lane": {"claude_chat_lane": "true"}}
+LANE_SOCKETS = ("-cxg.sock", "-cll.sock")
 CASES = ("plain", "tool", "steer", "stop")
 # Cheap and low by default. Claude is on Sonnet: hard rule 8 of REBUILD.md.
-MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "agy": "gemini-3.8-flash-low",
+MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "claude-lane": "sonnet",
+          "agy": "gemini-3.8-flash-low",
           "grok": "grok-4.7", "muse": "muse-spark-1.3"}
 # agy folds its effort into the model's name.
-EFFORTS = {"codex": "low", "codex-lane": "low", "claude": "low", "agy": "", "grok": "low", "muse": "low"}
+EFFORTS = {"codex": "low", "codex-lane": "low", "claude": "low", "claude-lane": "low", "agy": "",
+           "grok": "low", "muse": "low"}
 TURN_TIMEOUT = 180.0
 ENDED = {"done", "idle", "stopped", "interrupted", "error", "failed"}
 
@@ -223,8 +233,8 @@ def login_links(root: pathlib.Path) -> list:
 class Host:
     """One disposable Host: started here, spoken to on its own port, stopped by its own pid."""
 
-    def __init__(self, root: pathlib.Path, bin_dir: pathlib.Path):
-        self.root, self.bin_dir = root, bin_dir
+    def __init__(self, root: pathlib.Path, bin_dir: pathlib.Path, port: int = 0):
+        self.root, self.bin_dir, self.port = root, bin_dir, port
         self.secret = secrets.token_hex(24)
         self.proc = None
         self.address = ""
@@ -241,7 +251,7 @@ class Host:
         binary = self.bin_dir / "clarp-host"
         shim = self.bin_dir / "clarp-shim"
         command = [str(binary), "--data", str(self.root / "data"), "--run", str(self.root / "run"),
-                   "--listen", "127.0.0.1:0", "--launcher", "direct", "--shim", str(shim),
+                   "--listen", f"127.0.0.1:{self.port}", "--launcher", "direct", "--shim", str(shim),
                    "--name", "turn-timings", "--cwd", str(self.root / "ws"), "--accounts", "none",
                    "--keep-spools"]
         self.log = open(self.root / "host.log", "w")
@@ -611,7 +621,7 @@ def lanes(host: Host) -> list:
         line = command_line(pid)
         if "codex-goal-lane" not in line or not names_folder(line, host.root):
             continue
-        socket_path = next((word for word in line.split() if word.endswith("-cxg.sock")), "")
+        socket_path = next((word for word in line.split() if word.endswith(LANE_SOCKETS)), "")
         children = [p for p, i in stats.items() if i["ppid"] == pid]
         groups = {stats[c]["pgid"] for c in children}
         # The app-server's group, and every process below the shim besides: a helper the
@@ -1293,6 +1303,8 @@ def run(args) -> int:
     backends = [b for b in args.backends.split(",") if b]
     if args.codex_lane and "codex-lane" not in backends:
         backends.insert(backends.index("codex") + 1 if "codex" in backends else len(backends), "codex-lane")
+    if args.claude_lane and "claude-lane" not in backends:
+        backends.insert(backends.index("claude") + 1 if "claude" in backends else len(backends), "claude-lane")
     cases = [c for c in args.cases.split(",") if c]
     models = {**MODELS, **pairs(args.model)}
     efforts = {**EFFORTS, **pairs(args.effort)}
@@ -1305,7 +1317,7 @@ def run(args) -> int:
         result["commit"] = commit.read_text().strip()
     elif bin_dir == RELEASE_BIN:
         result["commit"] = installed_release()
-    host = Host(root, bin_dir)
+    host = Host(root, bin_dir, args.port)
     out_json = folder / "timings.json"
 
     def save():
@@ -1344,6 +1356,11 @@ def run(args) -> int:
                 warm = agent.send("Warm-up. Reply with exactly one word: ok")
                 agent.wait_ended(warm["t_send"])
                 agent.wait_idle()
+                # A Claude lane is started once the first turn's own process is gone: the
+                # cases wait for it, so that they measure a warm lane.
+                settle = time.monotonic() + 20
+                while row == "claude-lane" and time.monotonic() < settle and not lane_of(agent, lanes(host)):
+                    time.sleep(0.2)
                 if "cold" not in row_cases:
                     row_cases.append("cold")
             for n in range(1, args.rounds + 1):
@@ -1618,6 +1635,9 @@ def main() -> int:
     go.add_argument("--keep-host", action="store_true", help="keep the disposable Host's folders afterwards")
     go.add_argument("--codex-lane", action="store_true",
                     help="add the codex-lane row: Codex with codex_chat_lane on in the disposable Host's config")
+    go.add_argument("--claude-lane", action="store_true",
+                    help="add the claude-lane row: Claude with claude_chat_lane on in the disposable Host's config")
+    go.add_argument("--port", type=int, default=0, help="the disposable Host's port (default: any free one)")
     go.add_argument("--lane-idle-minutes", type=int, default=None, help="codex_lane_idle_minutes for the lane row")
     go.add_argument("--lane-most", type=int, default=None, help="codex_lane_most for the lane row")
     go.add_argument("--lane-memory-mb", type=int, default=None,

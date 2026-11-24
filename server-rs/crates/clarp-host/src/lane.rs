@@ -15,10 +15,12 @@
 //!   changed login ([`clarp_shim::lane::LOGIN_CHANGED`]) or a lane that left by itself.
 //!
 //! A tool's driver adds what is its own: how its process is started, what its digest covers,
-//! and its requests. [`codex`] is the Codex app-server's, and the only one so far. The lane
-//! process's side of the same lifecycle is the shim's `lane_*` modules. What holds with a lane
-//! and without one is `server-rs/docs/lanes.md`.
+//! and its requests. [`codex`] is the Codex app-server's; [`claude`] is Claude Code's
+//! stream-json on stdin, which starts from a turn's own order (no turn waits for a cold lane).
+//! The lane process's side of the same lifecycle is the shim's `lane_*` modules. What holds
+//! with a lane and without one is `server-rs/docs/lanes.md`.
 
+pub(crate) mod claude;
 pub(crate) mod codex;
 
 use std::fs::OpenOptions;
@@ -42,15 +44,17 @@ pub(crate) const TURN_FILE_ENV: &str = "CLARP_PROVIDER_TURN_FILE";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tool {
     Codex,
+    Claude,
 }
 
 impl Tool {
-    pub(crate) const ALL: [Self; 1] = [Self::Codex];
+    pub(crate) const ALL: [Self; 2] = [Self::Codex, Self::Claude];
 
     /// The tool of an agent's backend, where that tool has a lane.
     pub(crate) fn of(backend: &str) -> Option<Self> {
         match backend {
             "codex" => Some(Self::Codex),
+            "claude" => Some(Self::Claude),
             _ => None,
         }
     }
@@ -59,6 +63,7 @@ impl Tool {
     fn switch(self) -> &'static str {
         match self {
             Self::Codex => "codex_chat_lane",
+            Self::Claude => "claude_chat_lane",
         }
     }
 
@@ -66,6 +71,7 @@ impl Tool {
     fn suffix(self) -> &'static str {
         match self {
             Self::Codex => "-cxg.sock",
+            Self::Claude => "-cll.sock",
         }
     }
 
@@ -73,6 +79,7 @@ impl Tool {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Codex => "Codex",
+            Self::Claude => "Claude",
         }
     }
 
@@ -82,6 +89,9 @@ impl Tool {
         match self {
             // An idle app-server with its shim, measured by `tools/turn-timings` (issue 761).
             Self::Codex => 270 * MIB,
+            // A kept Claude Code on Sonnet with no MCP server weighed 159 MiB after a turn
+            // (24 Nov 2026); an agent's MCP servers and the shim add to it.
+            Self::Claude => 300 * MIB,
         }
     }
 }
@@ -117,6 +127,7 @@ pub(crate) struct Room {
 ///
 /// ```toml
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
+/// claude_chat_lane = true       # Claude chat turns run on a kept Claude Code (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
 /// codex_lane_most = 8           # live lanes this Host keeps, of every tool
 /// lane_memory_mb = 2200         # and what they may hold together (PSS); a lane starts only
@@ -194,7 +205,7 @@ pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
 }
 
 /// How long the terminal waits for an idle lane's tool to exit before it opens anyway.
-const TERMINAL_WAIT: Duration = Duration::from_secs(15);
+pub(crate) const TERMINAL_WAIT: Duration = Duration::from_secs(15);
 /// How often a bounded wait looks at the owner lock again.
 const RELEASE_LOOK: Duration = Duration::from_millis(100);
 

@@ -20,6 +20,7 @@
 //! does not belongs to a turn whose program was never given anything to do.
 
 mod agy_acp;
+mod claude_lane_runtime;
 mod codex_lane_runtime;
 mod codex_lane_turns;
 mod lane_login;
@@ -1444,8 +1445,20 @@ fn background_hook(agent: Option<String>) {
     let Ok(payload) = serde_json::from_slice(&bytes) else {
         return;
     };
-    let managed = std::env::var_os("CLARP_PROVIDER_TURN").is_some_and(|value| !value.is_empty());
-    if let Some(reply) = clarp_provider_hook::background_hook(&agent, managed, &payload) {
+    let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+    // A turn of its own process names its turn in its environment; a kept process (a lane)
+    // keeps the running turn's in a file, and the process outlives the turn.
+    let told = if set("CLARP_PROVIDER_TURN") {
+        Some(clarp_provider_hook::TURN_CONTEXT)
+    } else if std::env::var_os("CLARP_PROVIDER_TURN_FILE")
+        .and_then(|file| std::fs::read_to_string(file).ok())
+        .is_some_and(|token| !token.trim().is_empty())
+    {
+        Some(clarp_provider_hook::LANE_TURN_CONTEXT)
+    } else {
+        None
+    };
+    if let Some(reply) = clarp_provider_hook::background_hook_told(&agent, told, &payload) {
         let _ = serde_json::to_writer(std::io::stdout().lock(), &reply);
     }
 }
@@ -1466,6 +1479,16 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("clarp-shim: Codex goal lane: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if argv.peek().is_some_and(|word| word == "claude-lane") {
+        argv.next();
+        return match claude_lane_runtime::from_args(argv) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("clarp-shim: Claude lane: {error}");
                 ExitCode::FAILURE
             }
         };

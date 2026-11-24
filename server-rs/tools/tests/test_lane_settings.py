@@ -31,10 +31,10 @@ def written(carried):
 
 
 def test_an_install_keeps_the_lane_switches(tmp_path):
-    config = ("# a comment\ncodex_chat_lane = true\ncodex_lane_idle_minutes = 20\ncodex_lane_most = 4\n"
-              "[server]\nkind = \"clarp-host\"\n[agents]\nreset_tell = [\"x\"]\n")
+    config = ("# a comment\ncodex_chat_lane = true\nclaude_chat_lane = false\ncodex_lane_idle_minutes = 20\n"
+              "codex_lane_most = 4\n[server]\nkind = \"clarp-host\"\n[agents]\nreset_tell = [\"x\"]\n")
     assert tomllib.loads(carried_top(config, tmp_path)) == {
-        "codex_chat_lane": True, "codex_lane_idle_minutes": 20, "codex_lane_most": 4}
+        "codex_chat_lane": True, "claude_chat_lane": False, "codex_lane_idle_minutes": 20, "codex_lane_most": 4}
 
 
 def test_only_top_level_switches_of_their_kind_are_kept(tmp_path):
@@ -45,10 +45,10 @@ def test_only_top_level_switches_of_their_kind_are_kept(tmp_path):
 
 
 def test_each_switch_keeps_its_own_kind_only(tmp_path):
-    wrong = "codex_chat_lane = 5\ncodex_lane_idle_minutes = true\ncodex_lane_most = false\n"
+    wrong = "codex_chat_lane = 5\nclaude_chat_lane = \"on\"\ncodex_lane_idle_minutes = true\ncodex_lane_most = false\n"
     said = run_carry(wrong, tmp_path)
     assert said.stdout == ""
-    for name in ("codex_chat_lane", "codex_lane_idle_minutes", "codex_lane_most"):
+    for name in ("codex_chat_lane", "claude_chat_lane", "codex_lane_idle_minutes", "codex_lane_most"):
         assert f"install-host: {name} in " in said.stderr
 
 

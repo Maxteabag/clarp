@@ -47,13 +47,14 @@ unless switched on:
 
 ```toml
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
+claude_chat_lane = true       # Claude chat turns after the first run on a kept Claude Code (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
 codex_lane_most = 8           # live lanes this Host keeps, of every tool (the default)
 lane_memory_mb = 2200         # what they may hold together, in MiB of PSS (the default)
 ```
 
-- **One switch per tool.** `codex_chat_lane` is the only one today. The switches for Claude,
-  Muse and OpenCode come with their drivers.
+- **One switch per tool.** `codex_chat_lane` and `claude_chat_lane`. The switches for Muse and
+  OpenCode come with their drivers.
 - **The idle time and the count are shared by every tool's lanes.** They keep the names they
   had when Codex had the only lane, so an installed config means exactly what it meant.
 - **Two limits, both always on** (the lead's decision of 25 Nov 2026). A lane starts only when
@@ -182,6 +183,14 @@ session.
   resumes the thread (`thread/resume`, up to 25 s for a long rollout) before `turn/start`. Codex
   stays so in step 1, until the lead says otherwise. Moving it means a lane that waits for the
   thread's lock, where today it fails at once while an exec turn holds it.
+- **Claude keeps the rule, but starts its lane after the per-turn process, not beside it.** A
+  stream-json Claude Code takes its conversation when it starts (`--resume <session>`) and has no
+  request that takes one up later, so a process spawned beside the per-turn one would have no
+  session to hand over to. Its lane is started once the per-turn shim has exited (and the agent
+  runs no turn, has no terminal open and is not moving), with that turn's own arguments. The
+  start (about 0.6 s, measured 24 Nov 2026) falls in the time the user reads the answer, so the
+  next turn finds the lane warm. A turn that comes sooner runs per turn again, as the rule says.
+  No turn ever waits for a Claude lane.
 
 ## A follow-up turn in the same process
 
@@ -199,8 +208,8 @@ process, right after that answer. Muse does so 0.08-0.4 s after the answer, with
 ## Fallback: a process per turn
 
 Every tool without a lane, and every tool whose switch is off, runs a process per turn exactly
-as D2 says. Today that is Claude, Muse, OpenCode, Antigravity and Grok, and Codex with
-`codex_chat_lane` off. A Codex agent then holds the shared thread lock for each `codex exec`
+as D2 says. Today that is Muse, OpenCode, Antigravity and Grok, Codex with `codex_chat_lane` off
+and Claude with `claude_chat_lane` off. A Codex agent then holds the shared thread lock for each `codex exec`
 turn, so a goal's lane and an exec turn never write one thread together.
 
 Some turns always run per turn, even with the switch on:
@@ -214,8 +223,10 @@ Some turns always run per turn, even with the switch on:
 
 The layer is `clarp-host`'s `src/lane.rs` (settings, endpoint, registry and budget, the
 reuse-or-restart rule, `once_more`, the turn file) and the shim's `lane.rs` (the wire),
-`lane_own.rs`, `lane_login.rs`, `lane_socket.rs` and `lane_memory.rs`. Codex's app-server is its
-only driver: `lane/codex.rs` in the Host, `codex_lane_runtime.rs` in the shim.
+`lane_own.rs`, `lane_login.rs`, `lane_socket.rs` and `lane_memory.rs`. Its drivers are Codex's
+app-server (`lane/codex.rs` in the Host, `codex_lane_runtime.rs` in the shim) and Claude Code's
+stream-json (`lane/claude.rs` and `agent/claude_lane.rs` in the Host, `claude_lane.rs` and
+`claude_lane_runtime.rs` in the shim).
 
 No trait or hook is built for drivers that do not exist yet (REBUILD.md section 5). Each
 driver's pull request adds what it needs, next to what Codex has, and moves into the layer what
@@ -302,3 +313,62 @@ Checked on 24 Nov 2026 against the Rust Host (the Python Host noted where it dif
   so the address goes into the digest.
 - **The shim's per-turn parts** (spool, socket, `--stdin-until result`, `launch_permitted`).
   The lane's claim, turn socket and spool copy replace them, as for Codex.
+
+## The Claude driver, as built (issue 761 step 2)
+
+**When a turn goes to the lane.** Only when a lane is already there for its conversation, free,
+and started with exactly what this turn would start Claude Code with. The digest covers the
+program; its arguments but the conversation's own (so model, effort, `--append-system-prompt`,
+the hook's `--settings`); the working folder; the environment but the turn's identity (so the
+Host's address and token); and the MCP choice. Any other turn runs per turn, as with the switch
+off, and holds its conversation's lock shared (`lane::claude::guard_turn`).
+
+**When the lane starts.** After the per-turn process is gone, not beside it: a stream-json
+Claude Code takes its conversation when it starts (`--resume`), and has no way to take one up
+later. So once that turn's shim has exited, and the agent runs no turn, has no terminal open and
+is not moving, the lane starts with that turn's own arguments: it takes the lock exclusive and
+runs `claude -p --input-format stream-json --resume <session>`. Its start (about 0.6 s) falls in
+the time the user reads the answer, so the next turn finds it warm. A conversation's first turn
+named it with `--session-id`; the lane resumes it.
+
+**A turn on the lane** (the shim's `claude_lane_runtime.rs`):
+- its attempt gets a spool of its own, opened as a turn's shim opens one (`session`, `spawned`,
+  `input-open` with the lane as the input's owner), then every line Claude Code prints, but its
+  replies to control requests;
+- the actor's stream-json user line is written to Claude Code's input as it is, so the prompt
+  keeps the uuid the turn's end at its `result` looks for (issue 750);
+- more of the user's words come as `Request::Stdin` on the attempt's socket while the input is
+  open, until the turn's first `result`, as with `--stdin-until result`. The Codex lane's socket
+  refuses them, as before;
+- the attempt ends at the `result` that settles every message written into it
+  (`user_message_uuids`), and `exited` code 0 follows at once: the linger of issue 750 lets the
+  next launch go on it. A message read after a `result` is a turn of its own in the same process
+  (the follow-up turn above);
+- Stop writes the interrupt `control_request`. Its `result` ends the turn (`exited` with SIGINT)
+  and the process is kept. One that does not answer within the Stop's grace is ended with its
+  group, and the lane leaves.
+
+**When the lane leaves.** Retired, idle, or Claude Code gone; when the account `.claude.json`
+names changed (`lane-login-changed`, the pool's seat switch); after a turn that ended in an
+error (a usage limit among them: the pool takes it as today); after a compaction (a Host
+`/compact` runs per turn after the lane left, and any `compact_boundary` the lane sees ends it
+after its attempt); when Claude Code answers with no turn of the Host's running; and before a
+terminal on the agent's tool or a move. For a terminal the layer's `make_way_if_idle` retires
+it too; the driver's own `end_claude_lane` also takes the agent's lane-start lock, so a lane that
+is starting at that moment is ended as well. A fork does not end it: a Claude fork runs
+`--fork-session`, which reads the conversation and writes a session of its own, so it is no
+second writer.
+
+**What the list above asked, and where it is held.**
+- The hook reads `CLARP_PROVIDER_TURN_FILE` where the variable is not set, and says
+  `LANE_TURN_CONTEXT`: a kept process outlives the turn, and ends when the lane leaves.
+- The turn's identity is the lane's turn file, rewritten at each claim; the lane's Claude Code
+  has no `CLARP_PROVIDER_TURN`.
+- The provider boundary is recorded for a lane's first attempt only; its later turns run in the
+  same process, and its tasks are closed when a per-turn process next starts.
+- A read-only turn (edit guard, `CLARP_FORK`), a takeover or rewind, an opening, a compaction and
+  a Claude Code too old to replay what it read run per turn.
+- No `guard_turn`: the lane holds the pool's login lock shared only while it owns a claim.
+- The MCP config the lane is given is the lane's own file, removed when it leaves.
+- Its weight is reported after each claim (`memory_bytes`); until then it counts at 300 MiB (a
+  kept Claude Code on Sonnet with no MCP server weighed 159 MiB after a turn).

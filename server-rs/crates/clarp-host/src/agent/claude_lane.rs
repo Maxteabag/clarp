@@ -1,0 +1,239 @@
+//! Runs an agent's Claude chat turns on its kept Claude Code while the owner's
+//! `claude_chat_lane` is on (issue 761). No turn waits for a cold lane: a turn goes to the lane
+//! only when one is there for its conversation, started as the turn would start Claude Code.
+//! Any other runs in a process of its own, and the lane is started once that process is gone.
+
+use std::path::PathBuf;
+use std::sync::mpsc;
+
+use clarp_actor::ShimOrder;
+use clarp_kernel::turn::{COMPACTION, TurnId};
+
+use crate::lane::claude::{self, Fit, Lane, Mcp};
+
+use super::{Action, Ask as WorkerAsk, Told, Worker, launch_permitted, launcher, tell};
+
+/// What a Claude lane's launch asks of the agent's thread.
+pub(super) enum Ask {
+    /// The lane did not take the attempt: it runs in a process of its own.
+    Missed(Box<ShimOrder>),
+    /// Whether a lane may be started now: the agent runs no turn, has no terminal open on its
+    /// tool and is not moving, and the owner's switch is still on.
+    Permit(mpsc::SyncSender<bool>),
+    /// The lane's first attempt: its background tasks are its own from here.
+    Boundary {
+        turn: TurnId,
+        attempt: u32,
+        answer: mpsc::SyncSender<Result<(), String>>,
+    },
+}
+
+/// What starts an agent's lane, carried to the thread of a turn of its own process.
+pub(super) struct Start {
+    pub(super) lane: Lane,
+    pub(super) run: PathBuf,
+    tx: mpsc::Sender<WorkerAsk>,
+    login: claude::Login,
+}
+
+impl Start {
+    /// Starts the lane for the next turn, with what this turn's process was started with, once
+    /// that process is gone. Nothing is started where the agent's thread says no.
+    pub(super) fn warm(
+        self,
+        launcher: &crate::launcher::Launcher,
+        order: &ShimOrder,
+        fit: &Fit,
+        mcp: &Mcp,
+    ) {
+        let hold = self.lane.hold();
+        let _held = claude::held(&hold);
+        let (answer, permit) = mpsc::sync_channel(1);
+        let asked = self
+            .tx
+            .send(WorkerAsk::ClaudeLane(Ask::Permit(answer)))
+            .is_ok();
+        if !(asked && permit.recv().unwrap_or(false)) {
+            return;
+        }
+        match self
+            .lane
+            .start(launcher, &self.run, order, fit, mcp, &self.login)
+        {
+            Ok(child) => reap(child),
+            Err(error) => eprintln!("claudeLaneStartFail: {error}"),
+        }
+    }
+}
+
+impl Worker {
+    pub(super) fn claude_lane(&self) -> Lane {
+        Lane::of(&self.setup.profile.run_dir, &self.setup.record.agent_id)
+    }
+
+    pub(super) fn claude_lane_start(&self) -> Start {
+        Start {
+            lane: self.claude_lane(),
+            run: self.setup.profile.run_dir.clone(),
+            tx: self.tx.clone(),
+            login: claude::Login {
+                lock: self
+                    .setup
+                    .pool()
+                    .and_then(|pool| pool.login_lock())
+                    .map(std::path::Path::to_owned),
+                file: Some(claude::login_file(&crate::config::home())),
+            },
+        }
+    }
+
+    /// Whether this launch goes to the agent's Claude lane: a Claude agent's turn, while the
+    /// owner's switch is on, that is no opening of a call and no compaction (the lane leaves
+    /// before one, and the turn after it starts a new process on the shortened conversation),
+    /// and that the lane has not already turned away.
+    pub(super) fn claude_lane_turn(&self, order: &ShimOrder) -> bool {
+        self.setup.record.backend == "claude"
+            && order.opening.is_none()
+            && self.claude_bypass != Some((order.turn, order.attempt))
+            && !self
+                .actor
+                .as_ref()
+                .and_then(|actor| actor.status().live)
+                .is_some_and(|live| live.origin.name() == COMPACTION)
+            && self.chat_lane()
+    }
+
+    pub(super) fn launch_on_claude_lane(&mut self, order: Box<ShimOrder>) {
+        // The turn as its own process would be started with it, before it is wrapped for one.
+        let mut lane_order = (*order).clone();
+        let agent_id = self.setup.record.agent_id.clone();
+        if let Some(settings) = self.setup.launcher.claude_settings(&agent_id) {
+            crate::conversation_forks::add_settings(&mut lane_order.args, &settings);
+        }
+        // Who the turn is, for the Clarp tools it calls: the lane keeps it in its turn file.
+        let token = self.setup.turns.token(&agent_id, order.turn.0);
+        let mcp: Mcp = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
+        let lane = self.claude_lane();
+        let (versions, runtime) = (self.setup.versions.clone(), self.setup.runtime.clone());
+        let tx = self.tx.clone();
+        let (turn, attempt) = (order.turn, order.attempt);
+        let spawned = std::thread::Builder::new()
+            .name(format!("turn-{}", turn.0))
+            .spawn(move || {
+                let missed = |order| {
+                    let _ = tx.send(WorkerAsk::ClaudeLane(Ask::Missed(order)));
+                };
+                runtime.block_on(launcher::gate_steering(&mut lane_order, &versions));
+                let Some(fit) = claude::fits(&lane_order, &mcp) else {
+                    return missed(order);
+                };
+                let hold = lane.hold();
+                let held = claude::held(&hold);
+                let Some(state) = lane.warm(&fit) else {
+                    drop(held);
+                    return missed(order);
+                };
+                if state.claims == 0 {
+                    let (answer, marked) = mpsc::sync_channel(1);
+                    let boundary = Ask::Boundary {
+                        turn,
+                        attempt,
+                        answer,
+                    };
+                    let mark = if tx.send(WorkerAsk::ClaudeLane(boundary)).is_ok() {
+                        marked
+                            .recv()
+                            .unwrap_or_else(|_| Err("the agent has closed".into()))
+                    } else {
+                        Err("the agent has closed".into())
+                    };
+                    if let Err(why) = mark {
+                        let why = format!("could not record provider turn boundary: {why}");
+                        return tell(&tx, turn, attempt, Told::Failed(why));
+                    }
+                }
+                if !launch_permitted(&tx, turn, attempt) {
+                    return;
+                }
+                let submitted = lane.submit(&lane_order, token);
+                drop(held);
+                match submitted {
+                    // Nothing of the attempt reached Claude Code (no spool): the login changed,
+                    // or the lane left between the look and the offer. It runs in a process
+                    // of its own, and the lane is started again after it.
+                    Err(_) if !order.spool.try_exists().unwrap_or(true) => missed(order),
+                    _ => launcher::follow(&order.socket, &|told| tell(&tx, turn, attempt, told)),
+                }
+            });
+        if let Err(error) = spawned {
+            tell(
+                &self.tx,
+                turn,
+                attempt,
+                Told::Failed(format!("could not start the turn's thread: {error}")),
+            );
+        }
+    }
+
+    pub(super) fn claude_lane_ask(&mut self, ask: Ask) {
+        match ask {
+            Ask::Missed(order) => {
+                self.claude_bypass = Some((order.turn, order.attempt));
+                if self.terminals > 0 {
+                    self.behind_terminal = Some(order);
+                } else {
+                    self.carry_out_now(Action::Launch(order));
+                }
+            }
+            Ask::Permit(answer) => {
+                let free = self.terminals == 0
+                    && self.behind_terminal.is_none()
+                    && self.held.is_none()
+                    && self.actor.as_ref().is_some_and(|actor| {
+                        actor.moved().is_none() && actor.status().live.is_none()
+                    })
+                    && self.chat_lane();
+                let _ = answer.send(free);
+            }
+            Ask::Boundary {
+                turn,
+                attempt,
+                answer,
+            } => {
+                let _ = answer.send(self.provider_turn_boundary(turn, attempt));
+            }
+        }
+    }
+
+    /// Ends the agent's Claude lane, once idle, before something else takes its conversation:
+    /// a terminal on its tool, or a move. Taken in turn with a lane's start, so one that is
+    /// starting now is ended too.
+    pub(super) fn end_claude_lane(&self) {
+        if self.setup.record.backend != "claude" {
+            return;
+        }
+        let lane = self.claude_lane();
+        let _ = std::thread::Builder::new()
+            .name("claude-lane-end".into())
+            .spawn(move || {
+                let hold = lane.hold();
+                let _held = claude::held(&hold);
+                // Bounded as the terminal's own wait for an idle lane is (`make_way_if_idle`).
+                match lane.retire_within(crate::lane::TERMINAL_WAIT) {
+                    Ok(true) => {}
+                    Ok(false) => eprintln!("claudeLaneEndFail: Claude Code did not exit in time"),
+                    Err(error) => eprintln!("claudeLaneEndFail: {error}"),
+                }
+            });
+    }
+}
+
+fn reap(child: Option<std::process::Child>) {
+    if let Some(mut child) = child {
+        let _ = std::thread::Builder::new()
+            .name("claude-lane-reaper".into())
+            .spawn(move || {
+                let _ = child.wait();
+            });
+    }
+}

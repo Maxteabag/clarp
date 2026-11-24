@@ -66,6 +66,8 @@ impl Input {
             TurnAsk::Follow => Self::Follow(attempt, stream),
             TurnAsk::Stop(grace_ms) => Self::Stop(attempt, grace_ms, stream),
             TurnAsk::Steer(id, text) => Self::Steer(attempt, id, text, stream),
+            // Never asked for: the Codex lane's socket refuses a line for the input.
+            TurnAsk::Stdin(_) => Self::Follow((0, 0), stream),
         }
     }
 }
@@ -476,7 +478,7 @@ impl Lane {
         if self.slot.claim().is_some() || self.rejected_turn.is_some() {
             return Err(io::Error::other("the Codex lane is already reserved"));
         }
-        let socket = Socket::turn(&claim, self.send.clone(), Input::turn)?;
+        let socket = Socket::turn(&claim, self.send.clone(), Input::turn, false)?;
         self.use_login()?;
         self.own.keep_token(token, "Codex");
         self.slot.reserve(Reservation::Goal(claim))?;
@@ -499,7 +501,7 @@ impl Lane {
         if self.slot.claim().is_some() || self.rejected_turn.is_some() {
             return Err(io::Error::other("the Codex lane cannot start a prompt now"));
         }
-        let socket = Socket::turn(&claim, self.send.clone(), Input::turn)?;
+        let socket = Socket::turn(&claim, self.send.clone(), Input::turn, false)?;
         self.use_login()?;
         self.load()?;
         self.own.keep_token(token, "Codex");

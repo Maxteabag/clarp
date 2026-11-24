@@ -57,6 +57,15 @@ pub(crate) fn check(backend: &str, names: Option<&[String]>) -> Result<(), Told>
 /// the launch thread holds it for the lifetime of the attempt.
 pub(crate) struct ScopedConfig(PathBuf);
 
+impl ScopedConfig {
+    /// The file is no longer removed with this: whoever takes it removes it (a lane, when it
+    /// leaves).
+    pub(crate) fn keep(self) -> PathBuf {
+        let this = std::mem::ManuallyDrop::new(self);
+        this.0.clone()
+    }
+}
+
 impl Drop for ScopedConfig {
     fn drop(&mut self) {
         if let Err(error) = fs::remove_file(&self.0)

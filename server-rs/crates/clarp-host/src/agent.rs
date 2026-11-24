@@ -162,9 +162,12 @@ pub struct DelegationState {
     pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
+mod claude_lane;
 mod native_goal;
 
 enum Ask {
+    /// What the launch of a Claude lane's turn asks of the agent's thread.
+    ClaudeLane(claude_lane::Ask),
     NativeGoal {
         action: clarp_shim::codex_lane::GoalAction,
         objective: String,
@@ -1478,6 +1481,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let now_ms = setup.clock.now_ms();
     let worker = Worker {
         native: native_goal::Native::default(),
+        claude_bypass: None,
         setup,
         actor: None,
         tx: tx.clone(),
@@ -1541,6 +1545,8 @@ enum QueueEdit {
 
 struct Worker {
     native: native_goal::Native,
+    /// The attempt the Claude lane did not take: it runs in a process of its own.
+    claude_bypass: Option<(TurnId, u32)>,
     setup: Setup,
     actor: Option<Actor>,
     /// The way to this thread, for the turns' threads.
@@ -2864,6 +2870,10 @@ impl Worker {
             Ask::NativeGoalRetired { thread, released } => {
                 return self.finish_native_retirement(&thread, released);
             }
+            Ask::ClaudeLane(ask) => {
+                self.claude_lane_ask(ask);
+                return Ok(());
+            }
             other => other,
         };
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
@@ -3096,7 +3106,8 @@ impl Worker {
             | Ask::NativeGoalSeen(_)
             | Ask::NativeGoalWatchLost
             | Ask::NativeGoalReconciled(_)
-            | Ask::NativeGoalRetired { .. } => unreachable!("native goal handled above"),
+            | Ask::NativeGoalRetired { .. }
+            | Ask::ClaudeLane(_) => unreachable!("lane asks handled above"),
             Ask::SetMove { to, answer } => {
                 let held = self
                     .held
@@ -3118,6 +3129,10 @@ impl Worker {
                 }
                 self.after(out);
                 if receipt.changed {
+                    // The conversation goes to another Host: a lane kept for it here leaves.
+                    if receipt.moved.is_some() {
+                        self.end_claude_lane();
+                    }
                     self.setup
                         .hub
                         .publish(wire::roster("agent-moved", &self.setup.record.session), now);
@@ -3927,6 +3942,10 @@ impl Worker {
             }
         }
         if open {
+            // The terminal resumes the conversation itself: a lane kept for it leaves first.
+            if self.terminals == 0 {
+                self.end_claude_lane();
+            }
             self.terminals += 1;
             return Ok(());
         }
@@ -4075,6 +4094,37 @@ impl Worker {
         }
     }
 
+    /// Where the background tasks of the agent's Claude conversation pass from the process that
+    /// ran before to this attempt's: a new process starts. A lane's turns after its first run in
+    /// the same process, and record none.
+    fn provider_turn_boundary(&mut self, turn: TurnId, attempt: u32) -> Result<(), String> {
+        let at = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return Ok(());
+        };
+        let native = actor
+            .helper_context()
+            .1
+            .unwrap_or(&self.setup.profile.conversation_id)
+            .to_owned();
+        let root = crate::past::projects(&crate::config::home());
+        crate::helper_source::boundary(&root, &self.setup.record.cwd, &native)
+            .map_err(|e| e.to_string())
+            .and_then(|identity| {
+                actor
+                    .provider_boundary(
+                        &native,
+                        Some(clarp_kernel::provider_tasks::Attempt {
+                            turn: turn.0,
+                            attempt,
+                        }),
+                        identity,
+                        at,
+                    )
+                    .map_err(|e| e.to_string())
+            })
+    }
+
     /// Each turn has a thread of its own for as long as its shim lives. It does the waiting, so
     /// the agent's thread never does.
     fn carry_out(&mut self, action: Action) {
@@ -4153,12 +4203,25 @@ impl Worker {
             }
             other => other,
         };
+        self.carry_out_now(action);
+    }
+
+    /// Carries out an action that neither a terminal nor the account pool holds back.
+    fn carry_out_now(&mut self, action: Action) {
         let action = match action {
             // An opening turn keeps its own gated launch.
             Action::Launch(order)
-                if self.native.owns() || (self.chat_lane() && order.opening.is_none()) =>
+                if self.native.owns()
+                    || (self.setup.record.backend == "codex"
+                        && self.chat_lane()
+                        && order.opening.is_none()) =>
             {
                 self.launch_on_native_lane(order);
+                return;
+            }
+            // A Claude turn runs on the agent's kept Claude Code, where one is there for it.
+            Action::Launch(order) if self.claude_lane_turn(&order) => {
+                self.launch_on_claude_lane(order);
                 return;
             }
             other => other,
@@ -4195,41 +4258,14 @@ impl Worker {
                         // that only reads), as a fork's are.
                         crate::conversation_forks::add_settings(&mut order.args, &settings);
                     }
-                    let at = self.now_ms();
-                    if let Some(actor) = self.actor.as_mut() {
-                        let native = actor
-                            .helper_context()
-                            .1
-                            .unwrap_or(&self.setup.profile.conversation_id)
-                            .to_owned();
-                        let root = crate::past::projects(&crate::config::home());
-                        let mark =
-                            crate::helper_source::boundary(&root, &self.setup.record.cwd, &native)
-                                .map_err(|e| e.to_string())
-                                .and_then(|identity| {
-                                    actor
-                                        .provider_boundary(
-                                            &native,
-                                            Some(clarp_kernel::provider_tasks::Attempt {
-                                                turn: order.turn.0,
-                                                attempt: order.attempt,
-                                            }),
-                                            identity,
-                                            at,
-                                        )
-                                        .map_err(|e| e.to_string())
-                                });
-                        if let Err(why) = mark {
-                            tell(
-                                &tx,
-                                order.turn,
-                                order.attempt,
-                                Told::Failed(format!(
-                                    "could not record provider turn boundary: {why}"
-                                )),
-                            );
-                            return;
-                        }
+                    if let Err(why) = self.provider_turn_boundary(order.turn, order.attempt) {
+                        tell(
+                            &tx,
+                            order.turn,
+                            order.attempt,
+                            Told::Failed(format!("could not record provider turn boundary: {why}")),
+                        );
+                        return;
                     }
                 }
                 let pool = self.setup.pool().cloned();
@@ -4251,6 +4287,14 @@ impl Worker {
                 let lane = self.lane();
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
+                // While the owner runs Claude turns on kept processes, this turn's process takes
+                // its conversation's lock shared, and the agent's lane is started once it is
+                // gone, for the next turn.
+                let claude_lane = (self.setup.record.backend == "claude" && self.chat_lane())
+                    .then(|| self.claude_lane_start());
+                // A Claude lane left from when the switch was on leaves before this turn too.
+                let claude_kept =
+                    (self.setup.record.backend == "claude").then(|| self.claude_lane());
                 let binding = self.setup.record.binding();
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
@@ -4273,10 +4317,34 @@ impl Worker {
                             return;
                         }
                         let _ = lane.retire();
+                        let claude_held = claude_kept.as_ref().map(|kept| kept.hold());
+                        let claude_guard = claude_held.as_deref().map(crate::lane::claude::held);
+                        if let Some(kept) = &claude_kept {
+                            let _ = kept.retire();
+                        }
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
+                        // What a lane for the next turn is started with: this turn's order as
+                        // its process would be started, before it is wrapped for it.
+                        let warm = claude_lane
+                            .zip(claude_mcp.clone())
+                            .and_then(|(start, mcp)| {
+                                let fit = crate::lane::claude::fits(&order, &mcp)?;
+                                Some((start, order.clone(), fit, mcp))
+                            });
                         if let Some(pool) = pool {
                             pool.guard_turn(&mut order);
                         }
+                        if let Some((start, _, fit, _)) = &warm
+                            && let Err(error) = crate::lane::claude::guard_turn(
+                                &mut order,
+                                &start.run,
+                                &fit.session,
+                            )
+                        {
+                            tell(&tx, turn, attempt, Told::Failed(error.to_string()));
+                            return;
+                        }
+                        drop(claude_guard);
                         let _mcp = claude_mcp.and_then(|(strict, servers)| {
                             crate::mcp::configure(&mut order, strict, servers.as_deref())
                         });
@@ -4350,6 +4418,10 @@ impl Worker {
                             launcher.launch_and_follow(&order, &starting, &|told| {
                                 tell(&tx, turn, attempt, told)
                             });
+                            // The turn's process is gone: the lane takes the conversation.
+                            if let Some((start, lane_order, fit, mcp)) = warm {
+                                start.warm(&launcher, &lane_order, &fit, &mcp);
+                            }
                         }
                     })
             }
@@ -5660,7 +5732,9 @@ fn refuse_for(
                 | Ask::NativeGoalSeen(_)
                 | Ask::NativeGoalWatchLost
                 | Ask::NativeGoalReconciled(_)
-                | Ask::NativeGoalRetired { .. },
+                | Ask::NativeGoalRetired { .. }
+                // Its answer is dropped: the launch that asked takes that as a no.
+                | Ask::ClaudeLane(_),
             ) => {}
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),
