@@ -619,7 +619,7 @@ def lanes(host: Host) -> list:
     found = []
     for pid, info in stats.items():
         line = command_line(pid)
-        if "codex-goal-lane" not in line or not names_folder(line, host.root):
+        if not ("codex-goal-lane" in line or "claude-lane" in line) or not names_folder(line, host.root):
             continue
         socket_path = next((word for word in line.split() if word.endswith(LANE_SOCKETS)), "")
         children = [p for p, i in stats.items() if i["ppid"] == pid]
