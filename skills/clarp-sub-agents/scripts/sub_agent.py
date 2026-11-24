@@ -62,7 +62,9 @@ CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "opencode", "deepseek")
 # A prompt longer than this many bytes is not inlined into the message; the helper is
 # told to read the copied prompt file instead (argv and chat rows stay small).
 INLINE_PROMPT_MAX = 60_000
-# helper_state -> the background job's end: reported and done are success.
+# helper_state -> the background job's end: reported and done are success. A Rust Host
+# shows a helper that reported mid-turn as running until that turn is over, so the job is
+# held through a progress message and ends with the reporting turn.
 JOB_END = {"reported": "finish", "done": "finish", "failed": "fail", "abandoned": "fail"}
 
 

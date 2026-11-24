@@ -479,13 +479,14 @@ pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
         )));
     };
     let record = &member.record;
+    let in_turn = member.agent.view().status.live.is_some();
     Ok(json!({
         "agent_id": record.agent_id,
         "session": record.session,
         "backend": record.backend,
         "role": record.role(),
         "parent_agent_id": record.parent_agent_id,
-        "helper_state": record.helper_state,
+        "helper_state": clarp_kernel::helpers::shown_state(record.helper_state.as_deref(), in_turn),
         "helper_completed_at": record.helper_completed_at_ms,
         "archived_at": record.archived_at_ms,
     }))

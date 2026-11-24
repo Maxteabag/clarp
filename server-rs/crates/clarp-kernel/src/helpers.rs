@@ -61,6 +61,20 @@ pub fn next_state(current: &str, event: &str) -> Option<Moved> {
     })
 }
 
+/// The state a helper is shown in, where the stored one is `stored` and `in_turn` says whether
+/// a turn of its runs now. A helper that reported and is still in a turn reads `running`: a
+/// progress message to its parent marks it reported while it goes on working, and a helper
+/// shown as finished then drops out of view. Once that turn is over with none begun after it,
+/// it reads `reported` again. Every other state is shown as stored: `done` is the parent's
+/// acceptance and stays `done` while the helper works on. The stored state and its moves
+/// ([`next_state`]) are not changed by this.
+pub fn shown_state(stored: Option<&str>, in_turn: bool) -> Option<&str> {
+    match stored {
+        Some("reported") if in_turn => Some("running"),
+        other => other,
+    }
+}
+
 /// The event that setting a state by hand means, for the states that may be set by hand.
 pub fn marked(state: &str) -> Option<&'static str> {
     match state {
@@ -273,6 +287,19 @@ mod tests {
             running_children,
             idle_since_ms,
         }
+    }
+
+    #[test]
+    fn a_helper_that_reported_reads_running_while_its_turn_runs() {
+        assert_eq!(shown_state(Some("reported"), true), Some("running"));
+        assert_eq!(shown_state(Some("reported"), false), Some("reported"));
+        assert_eq!(shown_state(Some("done"), true), Some("done"));
+        assert_eq!(
+            shown_state(Some("ended-unreported"), true),
+            Some("ended-unreported")
+        );
+        assert_eq!(shown_state(Some("running"), false), Some("running"));
+        assert_eq!(shown_state(None, true), None);
     }
 
     #[test]

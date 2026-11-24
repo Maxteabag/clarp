@@ -19,7 +19,10 @@ A Clarp sub-agent survives that. It comes in two modes:
   session, cwd = its worktree. It nests under you in the chat list, the owner
   can open its chat, watch its tool calls and message it, and it reports back
   to you as an agent-origin message. Its state (`running`, `reported`,
-  `done`, `failed`, `abandoned`) is in the snapshot.
+  `done`, `failed`, `abandoned`) is in the snapshot. On a Rust Host a
+  helper that messaged you mid-turn (progress, a question) reads `running`
+  until that turn is over and `reported` only then, so its watcher holds the
+  job until the reporting turn ends. `done` stays `done` while it works.
 - **Default (systemd).** A raw `claude -p` / `codex exec` process in its own
   systemd user unit. Use it for fire-and-forget workers nobody needs to open.
 

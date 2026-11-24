@@ -2102,7 +2102,7 @@ pub fn summary(
         "role": record.role(),
         "is_janitor": record.is_janitor,
         "parent_agent_id": record.parent_agent_id,
-        "helper_state": record.helper_state,
+        "helper_state": clarp_kernel::helpers::shown_state(record.helper_state.as_deref(), live.is_some()),
         // What the agent made: counted over the whole fleet, by whoever builds the list.
         "child_count": 0,
         "running_children": 0,

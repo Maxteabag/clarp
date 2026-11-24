@@ -292,7 +292,12 @@ Rules:
   (Rust feature `helper_ended_unreported`, its last turn settled without a report
   and it has no queued or background work), `done` (the parent or the user
   accepted it), `failed` or `abandoned` (the parent was deleted or archived;
-  helpers are flagged, never deleted with it). `child_count` counts live
+  helpers are flagged, never deleted with it). On a Rust Host a `reported`
+  helper reads `running` while a turn of its runs (a progress message to its
+  parent marks it reported while it works on) and `reported` again once that
+  turn is over; an `agent-roster` event (`kind: helper-state`) is sent at
+  each such change. `GET /agent-helper-state` answers the same. `done` stays
+  `done` while the helper works. `child_count` counts live
   agents whose parent is this one and `running_children` those still
   `running`. Nest helpers under their parent; a done helper is archived
   after the grace period (`[agents] helper_archive_grace_hours`, 24 by
