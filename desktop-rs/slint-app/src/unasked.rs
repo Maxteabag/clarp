@@ -102,9 +102,12 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
         }
     }
     // No row on screen in both frames: the offset's change is the movement,
-    // so a big jump is never missed (the shared rule). A re-estimate of the
-    // list's height moves the offset without moving anything: not counted.
-    if anchors == 0 && !after.events.iter().any(|e| e == "estimate") {
+    // but only while the rows and the content height held. On this list the
+    // offset is in estimated row heights: when a row lands or a height
+    // changes, its move is the estimate's, not the reader's view (CI showed
+    // false shifts and a false shake in a settled, following chat).
+    let same_rows = a.rows == b.rows && (a.content - b.content).abs() < 0.5;
+    if anchors == 0 && same_rows && !after.events.iter().any(|e| e == "estimate") {
         let dy = b.offset - a.offset;
         if dy.abs() >= 0.5 {
             moved.push((dy, 1.0));
@@ -322,27 +325,25 @@ mod tests {
         assert!(step.counted, "a message growing above another message counts {step:?}");
     }
 
-    /// No row on screen in both frames and nobody following: a big jump is
-    /// counted from the offset, whatever the content did.
+    /// No row on screen in both frames, the rows and content held, nobody
+    /// following: a big jump is counted from the offset.
     #[test]
     fn a_big_jump_with_no_row_in_both_frames_is_counted_from_the_offset() {
         let mut before = pinned(2000.0, 40.0, 200.0);
         before.follow = false;
         before.offset = -800.0;
         let mut after = before.clone();
-        after.rows = 21;
-        after.content = 2300.0;
         after.offset = -1500.0;
         after.top = "row-15".into();
         after.bottom = "row-18".into();
-        let step = movement(&frame(0, before, &[]), &frame(16, after, &["rows -0 +1 ~0"])).expect("the jump is seen");
+        let step = movement(&frame(0, before, &[]), &frame(16, after, &[])).expect("the jump is seen");
         assert!(step.counted && (step.dy + 700.0).abs() < 0.5, "{step:?}");
     }
 
     /// A reply taller than the window lands at the end while the chat
     /// follows it: no row is on screen in both frames, the content grew and
     /// the view moved up to the new end. That is the follow slide, never a
-    /// shift (the offset's move up to the new end is the slide).
+    /// shift (the offset, an estimate once the content changed, says nothing).
     #[test]
     fn a_reply_taller_than_the_window_landing_while_following_is_no_shift() {
         let before = pinned(2000.0, 40.0, 200.0);
