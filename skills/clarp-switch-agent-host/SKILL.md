@@ -34,9 +34,13 @@ turn-start doors refuse it) and the copy here is resumed. It does **not** carry 
 tool's own session, which is the model's memory. Put that on the target before the
 import, under the same id, so the first turn resumes it.
 
-1. **Survey.** The agent must be idle on the source. Read its row in the source's
-   snapshot: `backend`, `model`, `backend_session_id`, `cwd`. The `cwd` must exist
-   on the target.
+1. **Survey and hold.** The agent must be idle on the source. Read its row in the
+   source's snapshot: `backend`, `model`, `backend_session_id`, `cwd`, and
+   `last_turn_end`. The `cwd` must exist on the target. Pause its queue on the
+   source with `POST /stop {"session": ...}`, so nothing queued or automatic starts
+   there. A fresh message from the user still would, so do steps 2 and 3 back to
+   back. Just before step 3, check that `last_turn_end` has not moved; if it has, a
+   turn ran after the export, and you export again.
 2. **Carry the tool's own session** (per backend):
    - OpenCode and DeepSeek (OpenCode pinned to 1.18.33 by `~/.local/bin/opencode`,
      which the Host's PATH puts before `/usr/bin`). On the source, export with the
@@ -60,10 +64,11 @@ import, under the same id, so the first turn resumes it.
    on loopback. The tokens stay in the process environment, never printed or written:
    ```bash
    ssh -o ExitOnForwardFailure=yes -N -L 27690:127.0.0.1:7690 SOURCE & tunnel=$!
+   for i in $(seq 1 30); do curl -s -m 2 -o /dev/null http://127.0.0.1:27690/pairing/identity && break; sleep 1; done
    export CLARP_SOURCE_TOKEN="$(ssh SOURCE "sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env" | tr -d '"')"
    export CLARP_HOST_TOKEN="$(sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env | tr -d '"')"
    ~/.local/share/clarp-host/bin/clarp-host import --from 127.0.0.1:27690 --session SESSION --host 127.0.0.1:7690
-   unset CLARP_SOURCE_TOKEN; kill "$tunnel"
+   unset CLARP_SOURCE_TOKEN CLARP_HOST_TOKEN; kill "$tunnel"
    ```
    It answers in sentences: what it brought, that the source is marked moved, and
    that the agent is resumed. If files did not all arrive, run it again with
@@ -77,8 +82,9 @@ import, under the same id, so the first turn resumes it.
 5. **Verify.** On the target the row shows the same `backend`, `model` and
    `backend_session_id`, with `queue_paused: false`. Send one turn, with no tools,
    asking for something only its history knows. On the source the row shows `moved`.
-6. **Clean up** every copy of the session (both machines' `/var/tmp`): it is the
-   user's private conversation.
+6. **Clean up** every copy: `rm -rf /var/tmp/move` on the source, whose database
+   copy holds every OpenCode session of that machine, not only this one, and the
+   `session.json` on the target. It is the user's private conversation.
 
 ## Decide first: briefing or true resume?
 
