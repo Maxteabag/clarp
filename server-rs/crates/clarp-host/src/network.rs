@@ -94,7 +94,13 @@ impl Checks {
     /// Makes the check asked for first, then each asked for meanwhile, and tells each answer.
     /// However it ends, a check that panicked included, no check runs any more after it, so
     /// the next one asked for is started.
-    pub fn run(&self, network: &dyn Check, backend: &str, first: Asked, tell: impl Fn(Asked, bool)) {
+    pub fn run(
+        &self,
+        network: &dyn Check,
+        backend: &str,
+        first: Asked,
+        tell: impl Fn(Asked, bool),
+    ) {
         let mut guard = Running {
             checks: self,
             armed: true,

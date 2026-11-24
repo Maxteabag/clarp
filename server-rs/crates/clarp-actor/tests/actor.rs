@@ -7010,6 +7010,13 @@ fn a_wait_whose_checks_never_answer_ends_half_a_minute_after_its_quarter_hour() 
     };
     assert_eq!(kind, "connection");
     assert!(reason.starts_with("No network for 15 minutes"), "{reason}");
-    assert!(actor.tail(5).unwrap().entries.iter().any(|row| matches!(&row.entry,
-        Entry::Notice(notice) if notice.text.starts_with("This computer had no network"))));
+    assert!(
+        actor
+            .tail(5)
+            .unwrap()
+            .entries
+            .iter()
+            .any(|row| matches!(&row.entry,
+        Entry::Notice(notice) if notice.text.starts_with("This computer had no network")))
+    );
 }

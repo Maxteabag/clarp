@@ -4362,10 +4362,15 @@ impl Worker {
                     .spawn({
                         let checks = checks.clone();
                         move || {
-                            checks.run(network.as_ref(), &backend, (turn, attempts), |asked, up| {
-                                let (turn, attempts) = asked;
-                                let _ = tx.send(Ask::NetworkChecked { turn, attempts, up });
-                            });
+                            checks.run(
+                                network.as_ref(),
+                                &backend,
+                                (turn, attempts),
+                                |asked, up| {
+                                    let (turn, attempts) = asked;
+                                    let _ = tx.send(Ask::NetworkChecked { turn, attempts, up });
+                                },
+                            );
                         }
                     });
                 if spawned.is_err() {
