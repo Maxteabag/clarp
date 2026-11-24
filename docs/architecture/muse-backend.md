@@ -12,9 +12,14 @@ Muse Code is Meta's terminal coding agent (`muse`, launcher in
 One headless process per turn, like Grok:
 
 ```
-muse exec --json --yolo --session-id <uuid> [--model M] [--reasoning-effort E] -- <prompt>
+muse exec --json --yolo --disable-reminders --session-id <uuid> [--model M] [--reasoning-effort E] -- <prompt>
 ```
 
+* `--disable-reminders`: Muse's reminder agents (a memory reminder after
+  every answer) run after the answer and before the process exits, and the
+  session stays locked until then. They held every turn's end, and the start
+  of a message waiting behind it, about 2.5 s (measured 24 Nov 2026 on
+  1.4.25).
 * `--session-id` both creates and continues a session: a second `exec` with
   the same id appends to it (its sequence numbers continue). Clarp therefore
   pre-mints the UUID for a new agent and binds it before the process starts,
@@ -73,3 +78,22 @@ records but does not yet publish).
 `tests/fixtures/muse/` holds compacted real output: one `exec --json` turn
 with a `read_file` tool call, one echo-provider turn, and the matching
 `session.jsonl` rows (encrypted reasoning redacted, rules text dropped).
+
+## Speed (measured 24 Nov 2026, Muse 1.4.25, muse-spark-1.3)
+
+* The Host adds little: queue and launch under 0.05 s, a waiting message
+  starts 0.3 s after the turn before it ends (`server-rs/tools/turn-timings
+  --backends muse`).
+* Each `exec` pays Muse's own start against Meta's API, 1.3 to 4 s (0.4 s
+  with the echo provider), and until `--disable-reminders` the reminder
+  agents' 2.5 s at the end.
+* A spoken turn is the slow one. The voice rules at the head of the prompt
+  make Muse write the whole answer in its reasoning before the first word,
+  and weigh them against a short request ("reply only BANANA"): first text
+  after 48 to 68 s for a 50-item list against 7 to 13 s for the bare prompt,
+  and 11 to 32 s of reasoning for a one-word reply.
+* Steering needs a long-lived process: `exec` sessions refuse
+  `muse session-message` (`target_surface_excluded`). `muse serve` speaks
+  MSP over stdio (`session/start`/`session/resume`, `turn/start`,
+  `turn/steer` with `expectedTurnId`, `turn/interrupt`, `item/delta`
+  notifications) and would also keep the start off every turn.

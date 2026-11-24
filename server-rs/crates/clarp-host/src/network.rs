@@ -38,7 +38,8 @@ pub fn provider_hosts(backend: &str) -> &'static [&'static str] {
         "claude" => &["api.anthropic.com"],
         // Codex signed in with ChatGPT talks to chatgpt.com; with a key, to the API.
         "codex" => &["chatgpt.com", "api.openai.com"],
-        "grok" | "muse" => &["api.x.ai"],
+        "grok" => &["api.x.ai"],
+        "muse" => &["api.meta.ai"],
         "agy" => &[
             "cloudcode-pa.googleapis.com",
             "generativelanguage.googleapis.com",
@@ -251,6 +252,7 @@ mod tests {
         assert_eq!(provider_hosts("claude"), &["api.anthropic.com"]);
         assert!(provider_hosts("codex").contains(&"chatgpt.com"));
         assert_eq!(provider_hosts("grok"), &["api.x.ai"]);
+        assert_eq!(provider_hosts("muse"), &["api.meta.ai"]);
         assert_eq!(provider_hosts("opencode"), ANYWHERE);
         assert_eq!(provider_hosts("a tool nobody has heard of"), ANYWHERE);
     }
