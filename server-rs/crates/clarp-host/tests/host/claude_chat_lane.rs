@@ -157,9 +157,18 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
         .unwrap();
     };
     setting(true);
+    // Claude Code's credentials, which a switch of login may be the only file to change.
+    let home = place.root.join("home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    let credentials = |token: &str| {
+        let said = json!({"claudeAiOauth": {"refreshToken": token, "accessToken": "a"}});
+        std::fs::write(home.join(".claude/.credentials.json"), said.to_string()).unwrap();
+    };
+    credentials("r1");
     let world = [
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
         ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
     let made = host.post(
@@ -269,13 +278,26 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
         "each turn has its own identity"
     );
 
+    // Another login, written to the credentials file alone: the lane on the old one serves
+    // no more turns. The next turn runs in a process of its own, and a lane starts after it.
+    credentials("r2");
+    asked(&host, "kept", "ask-login");
+    wait_for("a lane on the new login", || {
+        noted(&place, "launches").lines().count() == 4
+    });
+    assert_eq!(
+        noted(&place, "launches"),
+        "--session-id turn=set\n--resume turn=absent\n--resume turn=set\n--resume turn=absent\n"
+    );
+
     // Turned off: the lane leaves before the next turn, which runs in a process of its own on
     // the same conversation.
     setting(false);
     asked(&host, "kept", "ask-six");
     assert_eq!(
-        noted(&place, "launches"),
-        "--session-id turn=set\n--resume turn=absent\n--resume turn=set\n"
+        noted(&place, "launches").lines().last(),
+        Some("--resume turn=set")
     );
+    assert_eq!(noted(&place, "launches").lines().count(), 5);
     assert!(lane_said(&socket, "inspect").is_none(), "the lane left");
 }

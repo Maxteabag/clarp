@@ -83,6 +83,7 @@ impl Worker {
                     .and_then(|pool| pool.login_lock())
                     .map(std::path::Path::to_owned),
                 file: Some(claude::login_file(&crate::config::home())),
+                credentials: self.setup.backend.login_file(&crate::config::home()),
             },
         }
     }
@@ -205,9 +206,9 @@ impl Worker {
         }
     }
 
-    /// Ends the agent's Claude lane, once idle, before something else takes its conversation:
-    /// a terminal on its tool, or a move. Taken in turn with a lane's start, so one that is
-    /// starting now is ended too.
+    /// Ends the agent's Claude lane, once idle, before something else takes its conversation
+    /// (a terminal on its tool, or a move) or when the tool's login changed. Taken in turn
+    /// with a lane's start, so one that is starting now is ended too.
     pub(super) fn end_claude_lane(&self) {
         if self.setup.record.backend != "claude" {
             return;

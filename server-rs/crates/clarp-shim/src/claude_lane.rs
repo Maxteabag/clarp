@@ -24,6 +24,9 @@ pub mod key {
     /// Files the lane owns for as long as it lives (the turn's private MCP configuration): it
     /// removes them when it leaves.
     pub const OWNED_FILES: &str = "_clarpOwnedFiles";
+    /// Claude Code's credentials file: a lane whose login there changed leaves, as one whose
+    /// account in its own file changed does.
+    pub const CREDENTIALS_FILE: &str = "_clarpCredentialsFile";
 }
 
 /// The `type` of Claude Code's own replies to a control request: they are the lane's, not the

@@ -82,11 +82,22 @@ impl Input {
 }
 
 /// The account Claude Code's own file says is logged in: a refreshed token of the same account
-/// keeps the lane, a seat switch to another retires it. A file that names none (a key, not a
-/// login) is one account, whatever else in it changes, since Claude Code rewrites that file at
-/// every start.
+/// keeps the lane, a seat switch to another retires it. A key login names its key there
+/// instead; a file that names neither is one account, whatever else in it changes, since Claude
+/// Code rewrites that file at every start.
 fn account(said: &Value) -> Option<&str> {
-    said["oauthAccount"]["accountUuid"].as_str().or(Some(""))
+    said["oauthAccount"]["accountUuid"]
+        .as_str()
+        .or(said["primaryApiKey"].as_str())
+        .or(Some(""))
+}
+
+/// The login Claude Code's credentials file holds: its refresh token, which a new login, a
+/// pasted token or a switch that writes only this file changes, and an access token's refresh
+/// does not. A file with none (a key login) is one login. Hashed by the login check, never
+/// shown.
+fn credentials(said: &Value) -> Option<&str> {
+    said["claudeAiOauth"]["refreshToken"].as_str().or(Some(""))
 }
 
 pub(super) fn from_args(mut args: impl Iterator<Item = String>) -> io::Result<()> {
@@ -126,6 +137,11 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
         let (send, input) = mpsc::sync_channel(256);
         let _listener = Socket::control(path, send.clone(), Input::control)?;
         let login = Login::read(&mut options, account)?;
+        // The credentials are a second login file, read the same way with no lock of its own.
+        let credentials = Login::read(
+            &mut json!({ clarp_shim::lane::key::LOGIN_FILE: options[key::CREDENTIALS_FILE].take() }),
+            credentials,
+        )?;
         let session = options[key::SESSION]
             .as_str()
             .unwrap_or_default()
@@ -177,6 +193,7 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
             own,
             idle,
             login,
+            credentials,
             stale_login: false,
             thread: session,
             cwd,
@@ -271,6 +288,7 @@ struct Lane {
     own: Own,
     idle: Idle,
     login: Login,
+    credentials: Login,
     stale_login: bool,
     thread: String,
     cwd: Option<PathBuf>,
@@ -448,7 +466,8 @@ impl Lane {
         }
         let uuid =
             uuid_of(text).ok_or_else(|| io::Error::other("the turn's message names no uuid"))?;
-        if !self.login.acquire()? {
+        if !self.login.acquire()? || !self.credentials.acquire()? {
+            self.login.release();
             self.stale_login = true;
             return Err(io::Error::other(
                 "the Claude login changed before this attempt",
@@ -716,7 +735,7 @@ fn uuid_of(line: &str) -> Option<String> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{account, uuid_of};
+    use super::{account, credentials, uuid_of};
     use serde_json::json;
 
     #[test]
@@ -728,9 +747,14 @@ mod tests {
     }
 
     #[test]
-    fn a_claude_login_is_its_account_and_a_key_is_one_account() {
+    fn a_claude_login_is_its_account_its_key_or_its_refresh_token() {
         let said = json!({"oauthAccount": {"accountUuid": "a"}, "numStartups": 4});
         assert_eq!(account(&said), Some("a"));
         assert_eq!(account(&json!({"numStartups": 5})), Some(""));
+        // A key login is told by its key.
+        assert_eq!(account(&json!({"primaryApiKey": "k1"})), Some("k1"));
+        let said = json!({"claudeAiOauth": {"refreshToken": "r1", "accessToken": "a1"}});
+        assert_eq!(credentials(&said), Some("r1"));
+        assert_eq!(credentials(&json!({})), Some(""));
     }
 }

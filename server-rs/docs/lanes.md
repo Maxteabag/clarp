@@ -320,8 +320,10 @@ Checked on 24 Nov 2026 against the Rust Host (the Python Host noted where it dif
 and started with exactly what this turn would start Claude Code with. The digest covers the
 program; its arguments but the conversation's own (so model, effort, `--append-system-prompt`,
 the hook's `--settings`); the working folder; the environment but the turn's identity (so the
-Host's address and token); and the MCP choice. Any other turn runs per turn, as with the switch
-off, and holds its conversation's lock shared (`lane::claude::guard_turn`).
+Host's address and token); the MCP choice; and what the catalog defines those servers as now
+(`mcp::definitions`), so a server edited under the same name starts a new lane. Any other turn
+runs per turn, as with the switch off, and holds its conversation's lock shared
+(`lane::claude::guard_turn`).
 
 **When the lane starts.** After the per-turn process is gone, not beside it: a stream-json
 Claude Code takes its conversation when it starts (`--resume`), and has no way to take one up
@@ -348,8 +350,13 @@ named it with `--session-id`; the lane resumes it.
   and the process is kept. One that does not answer within the Stop's grace is ended with its
   group, and the lane leaves.
 
-**When the lane leaves.** Retired, idle, or Claude Code gone; when the account `.claude.json`
-names changed (`lane-login-changed`, the pool's seat switch); after a turn that ended in an
+**When the lane leaves.** Retired, idle, or Claude Code gone; when the login changed, whatever
+wrote the change: the Host's own login watcher (`.credentials.json`) ends the lane once idle,
+and the lane itself refuses its next claim (`lane-login-changed`) when the account
+`.claude.json` names (or, for a key login, its key) or the login in `.credentials.json` (its
+refresh token) is another than at its start. A refreshed access token is no change, though the
+Host's watcher, which reads the whole file, may end an idle lane for one; the next turn then runs
+per turn and a lane starts after it. It also leaves after a turn that ended in an
 error (a usage limit among them: the pool takes it as today); after a compaction (a Host
 `/compact` runs per turn after the lane left, and any `compact_boundary` the lane sees ends it
 after its attempt); when Claude Code answers with no turn of the Host's running; and before a
@@ -358,6 +365,11 @@ it too; the driver's own `end_claude_lane` also takes the agent's lane-start loc
 is starting at that moment is ended as well. A fork does not end it: a Claude fork runs
 `--fork-session`, which reads the conversation and writes a session of its own, so it is no
 second writer.
+
+**What a kept process does not see.** Claude Code reads some of its setup only when it starts:
+an edited `CLAUDE.md`, or skills installed or changed meanwhile, may reach the agent's turns only
+once its lane has left (idle, or any of the above), where a process of its own would read them
+at once.
 
 **What the list above asked, and where it is held.**
 - The hook reads `CLARP_PROVIDER_TURN_FILE` where the variable is not set, and says

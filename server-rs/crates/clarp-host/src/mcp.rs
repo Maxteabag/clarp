@@ -97,6 +97,26 @@ fn scoped(input: &Path, names: &[String]) -> std::io::Result<Option<ScopedConfig
     Ok(Some(kept))
 }
 
+/// What the MCP servers a Claude turn is given are, as the catalog defines them now: for an
+/// agent held to its choice, the definitions of the servers it chose (none chosen: none);
+/// otherwise the whole catalog, which Claude Code reads itself. An edited server reads as
+/// another, whatever its name.
+pub(crate) fn definitions(strict: bool, names: Option<&[String]>) -> Value {
+    let mut catalog = catalog();
+    if !strict {
+        return Value::Object(catalog);
+    }
+    let Some(names) = names.filter(|names| !names.is_empty()) else {
+        return Value::Null;
+    };
+    Value::Object(
+        names
+            .iter()
+            .filter_map(|name| catalog.remove(name).map(|server| (name.clone(), server)))
+            .collect(),
+    )
+}
+
 pub(crate) fn configure(
     order: &mut ShimOrder,
     strict: bool,

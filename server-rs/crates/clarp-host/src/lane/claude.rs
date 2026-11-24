@@ -43,6 +43,9 @@ const TAKEOVER_FLAGS: [&str; 2] = ["--resume-session-at", "--resume-drops-turn"]
 pub(crate) struct Login {
     pub lock: Option<PathBuf>,
     pub file: Option<PathBuf>,
+    /// Claude Code's credentials file, the one the Host's own login watcher reads: a lane
+    /// whose login there changed leaves too, whatever wrote the change.
+    pub credentials: Option<PathBuf>,
 }
 
 /// What a turn's MCP servers are: whether the agent's choice is held to, and its choice.
@@ -89,7 +92,7 @@ pub(crate) fn fits(order: &ShimOrder, mcp: &Mcp) -> Option<Fit> {
     let session = flag(&order.args, "--resume").or_else(|| flag(&order.args, "--session-id"))?;
     Some(Fit {
         session: session.to_owned(),
-        digest: digest(order, mcp),
+        digest: digest(order, mcp, &crate::mcp::definitions(mcp.0, mcp.1.as_deref())),
     })
 }
 
@@ -133,15 +136,17 @@ fn lane_env(order: &ShimOrder) -> Vec<(String, String)> {
 
 /// The digest of what a lane is started with: the program, its arguments but the
 /// conversation's (model, effort, identity, hooks among them), where it runs, its environment
-/// (the Host's address and token among them) and the agent's MCP servers. A turn whose digest
-/// differs is not run on the lane, and the lane is started again after it.
-pub(crate) fn digest(order: &ShimOrder, mcp: &Mcp) -> String {
+/// (the Host's address and token among them) and the agent's MCP servers, both its choice and
+/// what the catalog defines them as now (`servers`, [`crate::mcp::definitions`]). A turn whose
+/// digest differs is not run on the lane, and the lane is started again after it.
+pub(crate) fn digest(order: &ShimOrder, mcp: &Mcp, servers: &Value) -> String {
     let said = json!({
         "program": order.program,
         "args": without_session(&order.args),
         "cwd": order.cwd,
         "env": lane_env(order),
         "mcp": [mcp.0, mcp.1],
+        "servers": servers,
     });
     format!("{:x}", Sha256::digest(said.to_string().as_bytes()))
 }
@@ -258,6 +263,7 @@ impl Lane {
             key::THREAD_LOCK: clarp_shim::lane::thread_lock(&dir, &fit.session),
             key::LOGIN_LOCK: login.lock,
             key::LOGIN_FILE: login.file,
+            own_key::CREDENTIALS_FILE: login.credentials,
             key::IDLE_MS: settings.idle_ms,
             key::TURN_FILE: self.endpoint.turn_file(run),
             key::OPTIONS_DIGEST: fit.digest,
@@ -417,13 +423,20 @@ mod tests {
         let mut two = order(&ARGS);
         two.turn = TurnId(4);
         two.env = vec![("CLARP_PROVIDER_TURN".into(), "token-4".into())];
-        assert_eq!(digest(&one, &mcp), digest(&two, &mcp));
+        let none = serde_json::Value::Null;
+        assert_eq!(digest(&one, &mcp, &none), digest(&two, &mcp, &none));
         let other_model = order(&["-p", "--model", "opus", "--resume", "s-1"]);
-        assert_ne!(digest(&one, &mcp), digest(&other_model, &mcp));
-        assert_ne!(digest(&one, &mcp), digest(&one, &(true, None)));
+        assert_ne!(digest(&one, &mcp, &none), digest(&other_model, &mcp, &none));
+        assert_ne!(digest(&one, &mcp, &none), digest(&one, &(true, None), &none));
+        // A server edited under the same name is another lane's.
+        let server = |command: &str| serde_json::json!({"a": {"command": command}});
+        assert_ne!(
+            digest(&one, &mcp, &server("old")),
+            digest(&one, &mcp, &server("new"))
+        );
         let mut moved = order(&ARGS);
         moved.env.push(("host_address".into(), "other".into()));
-        assert_ne!(digest(&one, &mcp), digest(&moved, &mcp));
+        assert_ne!(digest(&one, &mcp, &none), digest(&moved, &mcp, &none));
     }
 
     #[test]

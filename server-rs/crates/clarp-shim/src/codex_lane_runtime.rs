@@ -45,6 +45,8 @@ pub(super) enum Input {
     Stop((u64, u32), u64, UnixStream),
     /// Steered words for the attempt, under the id their reading is told by.
     Steer((u64, u32), String, String, UnixStream),
+    /// A request the Codex lane does not take: a line for the tool's input.
+    Refused(UnixStream),
 }
 
 /// What the words begin with of a turn the lane ended for running on another provider: the
@@ -66,8 +68,9 @@ impl Input {
             TurnAsk::Follow => Self::Follow(attempt, stream),
             TurnAsk::Stop(grace_ms) => Self::Stop(attempt, grace_ms, stream),
             TurnAsk::Steer(id, text) => Self::Steer(attempt, id, text, stream),
-            // Never asked for: the Codex lane's socket refuses a line for the input.
-            TurnAsk::Stdin(_) => Self::Follow((0, 0), stream),
+            // The Codex lane's socket is made refusing a line for the input; one that came all
+            // the same is refused here, never taken for another request.
+            TurnAsk::Stdin(_) => Self::Refused(stream),
         }
     }
 }
@@ -374,6 +377,9 @@ impl Lane {
                         Err(error) => Reply::failed(error.to_string()),
                     };
                     let _ = write(&mut stream, &reply);
+                }
+                Some(Input::Refused(mut stream)) => {
+                    let _ = write(&mut stream, &Reply::failed("Unsupported lane turn request"));
                 }
                 Some(Input::ProviderGone) | None => {
                     return Err(io::Error::other("Codex app-server disconnected"));

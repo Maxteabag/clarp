@@ -2908,6 +2908,12 @@ impl Worker {
                 self.claude_lane_ask(ask);
                 return Ok(());
             }
+            // A Claude lane runs on the login it started with: it leaves once idle, and the
+            // next turn starts on the new login (review of #774). The actor is told as before.
+            Ask::LoginChanged => {
+                self.end_claude_lane();
+                Ask::LoginChanged
+            }
             other => other,
         };
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
