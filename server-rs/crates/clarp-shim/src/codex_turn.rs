@@ -263,8 +263,12 @@ mod tests {
         spool.notification("item/completed", &item, 70_000).unwrap();
         // Another turn's deltas say nothing of this one.
         let other = json!({"threadId": "thread", "turnId": "other", "itemId": "m", "delta": "x"});
-        spool.notification("item/agentMessage/delta", &other, 200_000).unwrap();
-        spool.notification("item/agentMessage/delta", &params, 90_000).unwrap();
+        spool
+            .notification("item/agentMessage/delta", &other, 200_000)
+            .unwrap();
+        spool
+            .notification("item/agentMessage/delta", &params, 90_000)
+            .unwrap();
 
         let progress: Vec<i64> = SpoolReader::new(path)
             .read_from(0)
