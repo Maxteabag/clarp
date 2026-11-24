@@ -412,7 +412,7 @@ fn before_anything_else_opens_the_conversation_its_lanes_leave_or_it_does_not_go
     let run = run_dir("way");
     let idle = FakeLane::start(&run, "a", status("t", "d", 5, false));
     make_way(&run, "a", Touch::Exec).unwrap();
-    assert_eq!(idle.asked(), ["retire"]);
+    assert_eq!(idle.asked(), ["inspect", "retire"]);
     assert!(idle.endpoint.released().unwrap());
     // No lane at all: nothing to wait for.
     make_way(&run, "nobody", Touch::Fork).unwrap();
@@ -481,5 +481,25 @@ fn a_per_turn_process_holds_its_conversation_shared_and_never_waits() {
             "exec"
         ]
     );
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_lane_warm_with_no_session_is_not_ready_and_nothing_makes_way_for_it() {
+    use super::{Touch, make_way};
+    let run = run_dir("warming");
+    let mut said = status("", "d", 0, false);
+    said["warming"] = json!(true);
+    let warming = FakeLane::start(&run, "a", said);
+    // Up and initialized, holding no conversation: no claim goes to it yet.
+    assert!(!warming.endpoint.warm());
+    // A per-turn process of the agent's goes ahead beside it, and the lane stays.
+    make_way(&run, "a", Touch::Exec).unwrap();
+    assert_eq!(warming.asked(), ["inspect", "inspect"]);
+    assert!(!warming.endpoint.released().unwrap());
+    // The hand-over: the conversation is named to it.
+    let taken = warming.endpoint.take("thread-1").unwrap();
+    assert!(taken.warming);
+    assert_eq!(warming.asked(), ["inspect", "inspect", "take"]);
     std::fs::remove_dir_all(&run).unwrap();
 }

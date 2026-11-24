@@ -163,6 +163,12 @@ The lead's rule for the layer and every driver (24 Nov 2026). When no warm lane 
 turn runs per turn, the tool's exec path as with the switch off. The lane's process starts
 beside it, without the session.
 
+- **Warm, no session.** The lane's process is spawned and initialized (Muse in 0.35-0.58 s)
+  but holds no conversation and touches none. Its status says `warming: true`, no claim goes
+  to it (`Endpoint::warm` is false), and nothing makes way for it: a per-turn process of the
+  agent's goes ahead beside it (`lane::make_way` leaves it). The conversation is named to it
+  at its start, or, for a new conversation whose id only the per-turn turn learns, afterwards
+  with `Control::Take` (`Endpoint::take`).
 - **The hand-over.** The per-turn process holds the conversation's lock shared for its whole
   life (`lane::guard_exec`). The lane waits for that lock in its own process, never in a turn,
   then takes the session up: Muse's `session/resume`, OpenCode's `GET /session/:id`. Muse's own

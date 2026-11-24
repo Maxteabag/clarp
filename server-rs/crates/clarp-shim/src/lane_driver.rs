@@ -16,6 +16,17 @@
 //!   own end; the claim is let go and the lane is idle again;
 //! - health: the lane's snapshot, which every Host reads as a `clarp_shim::lane::Status`.
 //!
+//! The warm state, for a driver that never makes a turn wait for a cold lane (`lane::Cold::Beside`
+//! in the Host):
+//! - **Warm, no session.** The lane spawns and initializes its tool beside a per-turn process
+//!   (Muse in 0.35-0.58 s). It holds no conversation and touches none, says `warming: true` in
+//!   its status, and takes no claim.
+//! - **The hand-over.** Given its conversation at start or by `Control::Take`, the lane waits in
+//!   its own process for the conversation's lock as `Holder::Lane` (`lane_own::Take::Waiting`).
+//!   It gets the lock once the per-turn process has exited and released it.
+//! - **Ready.** It then takes the session up (Muse `session/resume`, OpenCode
+//!   `GET /session/:id`), says `warming: false`, and the next turn's claim runs on it.
+//!
 //! What a driver may leave out: goal requests (`Reserve`, `Goal`, `Recover`, `Probe`) are Codex's
 //! own (`codex_lane::Request`), since only its tool keeps goals; another driver's control loop
 //! reads `clarp_shim::lane::Control`, and a request it does not know is not answered. Which

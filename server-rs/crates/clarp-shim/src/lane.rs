@@ -119,6 +119,12 @@ pub enum Control {
     Stop { turn: u64, attempt: u32 },
     /// Leave once no claim is held; refused while one is.
     Retire,
+    /// Take up this conversation, for a lane that is warm and holds none: once the
+    /// conversation's lock is free of every per-turn process ([`Holder::Lane`]), waited for in
+    /// the lane's own process. Answered at once with the lane's status, still `warming` until
+    /// it holds the conversation. For a conversation whose id the Host learns only from the
+    /// per-turn turn that began it.
+    Take { thread: String },
 }
 
 /// What any lane's status says, read from its driver's snapshot (whose other fields are the
@@ -150,6 +156,12 @@ pub struct Status {
     /// process tree ([`Status::instance`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+    /// Warm, no session: the tool's process is up and initialized, and holds no conversation
+    /// yet. It is waiting for one ([`Control::Take`]) or for its lock to be free of a per-turn
+    /// process. No claim runs on it, and nothing else need make way for it. A Codex lane never
+    /// says it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub warming: bool,
 }
 
 #[cfg(test)]
@@ -209,6 +221,17 @@ mod tests {
     }
 
     #[test]
+    fn a_warm_lane_is_handed_its_conversation_in_one_line() {
+        let take = Control::Take {
+            thread: "t".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&take).unwrap(),
+            r#"{"op":"take","thread":"t"}"#
+        );
+    }
+
+    #[test]
     fn a_codex_snapshot_reads_as_a_status() {
         let snapshot = Snapshot {
             thread: "t".into(),
@@ -239,6 +262,7 @@ mod tests {
                 effort: None,
                 idle_ms: 42,
                 memory_bytes: None,
+                warming: false,
             }
         );
     }

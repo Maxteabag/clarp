@@ -268,7 +268,13 @@ pub(crate) enum Touch {
 pub(crate) fn make_way(run: &Path, agent_id: &str, touch: Touch) -> io::Result<()> {
     let mut first = Ok(());
     for tool in Tool::ALL {
-        let result = Endpoint::of(tool, run, agent_id).retire().map_err(|why| {
+        let lane = Endpoint::of(tool, run, agent_id);
+        // A lane warm with no session holds nothing to make way for: it takes the
+        // conversation up only once this process, too, is gone.
+        if !lane.released().unwrap_or(true) && lane.inspect().is_ok_and(|state| state.warming) {
+            continue;
+        }
+        let result = lane.retire().map_err(|why| {
             io::Error::new(
                 why.kind(),
                 format!("{touch:?} waits for the {} lane: {why}", tool.name()),
@@ -348,16 +354,22 @@ pub(crate) trait Driver {
         dead_code,
         reason = "the seam for drivers that warm beside a per-turn process (issue 761)"
     )]
+    ///
+    /// The lane is then warm, with no session (`Status::warming`): spawned and initialized
+    /// (Muse in 0.35-0.58 s), holding no conversation. `thread` is the conversation it takes up
+    /// once the per-turn process is gone. A new conversation has none yet; the Host hands it
+    /// over with [`Endpoint::take`] once the per-turn turn has named it.
     fn warm(
         &self,
         launcher: &crate::launcher::Launcher,
         profile: &clarp_actor::Profile,
         login: &Login,
+        thread: Option<&str>,
     ) -> io::Result<Option<Child>>
     where
         Self: Sized,
     {
-        let _ = (launcher, profile, login);
+        let _ = (launcher, profile, login, thread);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             format!("the {} lane does not start beside a turn", Self::TOOL.name()),
@@ -545,9 +557,22 @@ impl Endpoint {
         self.ask(&Control::Inspect)
     }
 
-    /// The lane runs, answers, and is free for a claim: a turn sent to it starts at once.
+    /// The lane runs, answers, holds its conversation, and is free for a claim: a turn sent to it
+    /// starts at once. A lane still warm with no session is not yet ready.
     pub(crate) fn warm(&self) -> bool {
-        self.inspect().is_ok_and(|state| state.available)
+        self.inspect()
+            .is_ok_and(|state| state.available && !state.warming)
+    }
+
+    /// Hands a lane that is warm with no session its conversation ([`Control::Take`]).
+    #[allow(
+        dead_code,
+        reason = "the hand-over of drivers that warm beside a turn (issue 761); held by its tests"
+    )]
+    pub(crate) fn take(&self, thread: &str) -> io::Result<Status> {
+        self.ask(&Control::Take {
+            thread: thread.to_owned(),
+        })
     }
 
     /// What the lane that said `state` holds in memory, in bytes: what its driver read itself
