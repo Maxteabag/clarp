@@ -306,7 +306,8 @@ impl Engine {
         self.updates.artifact_status.insert(artifact_id.to_owned(), "Sending…".into());
         self.changes.push(Change::Updates);
         let path = format!("/artifacts/{}/submit", clarp_core::endpoint::percent_encode_segment(artifact_id));
-        let body = json!({"submission_id": submission, "version": version.clone(), "answers": answers});
+        let mut body = json!({"submission_id": submission, "version": version.clone(), "answers": answers});
+        self.ask_voice(&mut body);
         self.api.post_json(&format!("form-submit:{artifact_id}|{submission}|{version}"), &path, body, None);
     }
 
@@ -427,12 +428,9 @@ impl Engine {
         self.updates.pending_actions.insert(key);
         self.changes.push(Change::Updates);
         let path = format!("/decisions/{}/resolve", clarp_core::endpoint::percent_encode_segment(decision_id));
-        self.api.post_json(
-            &format!("update-action:decision:{decision_id}"),
-            &path,
-            json!({"choice": choice, "expected_revision": revision}),
-            None,
-        );
+        let mut body = json!({"choice": choice, "expected_revision": revision});
+        self.ask_voice(&mut body);
+        self.api.post_json(&format!("update-action:decision:{decision_id}"), &path, body, None);
     }
 
     pub fn cancel_background_job(&mut self, job_id: &str) {

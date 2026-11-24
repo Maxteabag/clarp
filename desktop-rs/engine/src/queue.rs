@@ -86,7 +86,9 @@ impl Engine {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.update_queued_turn(queue_id, text));
         let text = text.trim();
         if !queue_id.is_empty() && !text.is_empty() {
-            self.queue_action("PUT", &Self::queue_item_path(queue_id), json!({"text": text}));
+            let mut body = json!({"text": text});
+            self.ask_voice(&mut body);
+            self.queue_action("PUT", &Self::queue_item_path(queue_id), body);
         }
     }
 
@@ -101,7 +103,9 @@ impl Engine {
     pub fn send_queued_turn(&mut self, queue_id: &str) {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.send_queued_turn(queue_id));
         if !queue_id.is_empty() {
-            self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), json!({}));
+            let mut body = json!({});
+            self.ask_voice(&mut body);
+            self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), body);
         }
     }
 

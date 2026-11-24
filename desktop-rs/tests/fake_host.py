@@ -193,6 +193,9 @@ turn_summaries = False
 # A turn that did not complete says why on its end (feature turn_end_reason,
 # Rust Host contract 162): off until /__control/turn-reason turns it on.
 turn_reasons = False
+# The Host speaks an answer only when its send asks for it (feature
+# spoken_when_asked, contract 173): off until /__control/spoken-when-asked.
+spoken_when_asked = False
 live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
@@ -1359,6 +1362,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if turn_reasons:
                 features.append("turn_end_reason")
+            if spoken_when_asked:
+                features.append("spoken_when_asked")
             if coordination["on"]:
                 features.append("hidden_coordination")
             if transit["on"]:
@@ -2038,6 +2043,12 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "agent-roster", "kind": "coordination-changed"})
             return self.reply(200, {"ok": True, "session": session, "coordination_visibility": coordination_effective(session),
                                     "coordination_override": coordination["overrides"].get(session)})
+        if url.path == "/__control/spoken-when-asked":
+            # Test control: the spoken_when_asked feature on or off (read from
+            # /server-info on connecting).
+            global spoken_when_asked
+            spoken_when_asked = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/turn-reason":
             # Test control: the turn_end_reason feature on or off (read from
             # /server-info on connecting). Rows carry turn.reason as their

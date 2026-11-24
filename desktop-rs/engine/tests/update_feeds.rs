@@ -138,3 +138,40 @@ fn an_older_host_that_refuses_flat_v1_gets_the_full_list() {
     d.until("doc1 changed", |e| e.update_artifacts().iter().any(|a| a["title"] == "Again"));
     assert!(host.requests("GET", "/artifacts/doc1")[0]["query"].get("representation").is_none());
 }
+
+/// Where the Host speaks an answer only when asked (`spoken_when_asked`), a
+/// form submit and a decision answer ask as the voice setting says; an older
+/// Host gets them without the field.
+#[test]
+fn form_submits_and_decision_answers_ask_for_voice_where_the_host_offers_it() {
+    let wait_for = |host: &Host, d: &mut Driver, path: &str, count: usize| {
+        for _ in 0..100 {
+            if host.requests("POST", path).len() >= count {
+                return;
+            }
+            d.settle(Duration::from_millis(50));
+        }
+        panic!("no POST {path}");
+    };
+    let old = Host::start("voice-old-host");
+    let mut d = Driver::new(&old.base);
+    d.connect();
+    d.engine.resolve_decision("d-old", "yes", 1);
+    wait_for(&old, &mut d, "/decisions/d-old/resolve", 1);
+    assert!(old.requests("POST", "/decisions/d-old/resolve")[0]["body"].get("synthesize_audio").is_none(), "an older Host gets no new field");
+
+    let host = Host::start("voice-new-host");
+    host.control("/__control/spoken-when-asked", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.engine.resolve_decision("d-1", "yes", 1);
+    d.engine.submit_html_form("a-1", json!(1), json!({"q": "a"}));
+    wait_for(&host, &mut d, "/decisions/d-1/resolve", 1);
+    wait_for(&host, &mut d, "/artifacts/a-1/submit", 1);
+    assert_eq!(host.requests("POST", "/decisions/d-1/resolve")[0]["body"]["synthesize_audio"], json!(true), "voice on: asked");
+    assert_eq!(host.requests("POST", "/artifacts/a-1/submit")[0]["body"]["synthesize_audio"], json!(true));
+    d.engine.set_muted(true);
+    d.engine.resolve_decision("d-2", "no", 1);
+    wait_for(&host, &mut d, "/decisions/d-2/resolve", 1);
+    assert_eq!(host.requests("POST", "/decisions/d-2/resolve")[0]["body"]["synthesize_audio"], json!(false), "muted: not asked");
+}

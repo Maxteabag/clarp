@@ -33,6 +33,9 @@ pub(crate) struct Live {
     pub turn_summaries: bool,
     /// A turn that did not complete says why on its end (`turn_end_reason`).
     pub turn_reasons: bool,
+    /// The Host speaks an answer only when its send asks for it
+    /// (`spoken_when_asked`, contract 173).
+    pub spoken_when_asked: bool,
     /// The Host's tool-explanation setting (§6), once it said.
     pub explanations: Option<Object>,
     /// Chats a live event (or a snapshot with something in it) has reached:
@@ -52,6 +55,18 @@ impl Engine {
     /// (`log_turn_summary`, docs/live-items.md §9).
     pub fn log_turn_summary(&self) -> bool {
         self.live.turn_summaries
+    }
+
+    /// Asks the Host to speak the answer a send starts as the voice setting
+    /// says (`synthesize_audio`), where the Host offers `spoken_when_asked`:
+    /// form submits, Send now, a reworded queued turn and decision answers.
+    /// An older Host gets the request unchanged.
+    pub(crate) fn ask_voice(&self, body: &mut Value) {
+        if self.live.spoken_when_asked
+            && let Some(object) = body.as_object_mut()
+        {
+            object.insert("synthesize_audio".into(), Value::Bool(!self.muted));
+        }
     }
 
     /// Whether a turn that did not complete says why on its end
@@ -131,6 +146,7 @@ impl Engine {
         self.live.explanation_setting = has("tool_explanation_setting");
         self.live.turn_summaries = has("log_turn_summary");
         self.live.turn_reasons = has(clarp_core::turn_reason::FEATURE);
+        self.live.spoken_when_asked = has("spoken_when_asked");
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
