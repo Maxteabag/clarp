@@ -126,7 +126,8 @@ fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
         ("GOOGLE_VERTEX_API_KEY", ""),
     ];
     let args = ["--speech-keys", owners.to_str().unwrap()];
-    let host = place.start_in("", &args, &world);
+    // With a token of its own, so that a paired phone is a device of its own that can call.
+    let host = place.start_in("admin", &args, &world);
     // Names of no persona the Host has built in: who the agent is says nothing of speech.
     let make = |name: &str, backend: &str| {
         let own = json!({ "cartesia": format!("fixture-voice-{backend}") }).to_string();
