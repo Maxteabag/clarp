@@ -7539,7 +7539,7 @@ fn a_chat_once_read_as_a_helpers_keeps_the_turns_other_agents_gave_it() {
 
     let conversation = |actor: &mut Actor, world: &mut World, helper: bool| -> Vec<String> {
         let asked = Which::chat(true).of_helper(helper).conversation_view(true);
-        let which = actor.chat_of(asked, world.tick()).unwrap();
+        let which = actor.chat_of(asked, world.tick());
         actor
             .tail_of(100, which)
             .unwrap()

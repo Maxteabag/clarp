@@ -2688,7 +2688,7 @@ async fn log(
         .is_some_and(|said| matches!(said.to_lowercase().as_str(), "0" | "false" | "no"));
     // A helper's chat holds the turns other agents give it as its conversation (issue 745). The
     // actor keeps a chat once read so a helper's, whatever the agent's role becomes.
-    let which = Which::chat(include_automated).of_helper(member.record.is_helper());
+    let which = Which::chat(include_automated).of_helper(member.record.is_helper_chat());
     // Only an agent that can leave a note for its user has rows for the agents.
     let hides = coordination::can_leave_note(
         &member.record.agent_id,

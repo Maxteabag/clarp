@@ -757,7 +757,8 @@ the Host began by itself for the agents (a self-prompt, a scheduled wake, a goal
 is not one another agent began: its answers stay `session` in a helper's chat too. A chat is a
 helper's from the first time it is read as one, and stays one when the agent's role changes
 afterwards (a relaunch as an agent, a janitor), so a row that entered its Conversation view never
-leaves it. Agent turns from before the agent became a helper join its Conversation view then.
+leaves it: in every read, also the whole log, and with the helper's default coordination
+visibility (`show`, source `helper`) under a global `hide`. Agent turns from before the agent became a helper join its Conversation view then.
 Every other chat keeps agent turns out of the Conversation view as above, and `view=session` is
 unchanged.
 

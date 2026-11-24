@@ -125,6 +125,27 @@ fn a_helpers_chat_holds_the_turns_other_agents_give_it_and_another_agents_does_n
     let chat = host.get("/log?session=hal&view=conversation");
     assert_eq!(texts(&chat), ["Count the files.", "One file."], "{chat}");
 
+    // The helper is made a janitor, under the Host's choice to hide what agents say to each
+    // other: what its chat showed stays shown, in the whole log as in the Conversation view.
+    host.post(
+        "/coordination-settings",
+        json!({"coordination_visibility": "hide"}),
+    );
+    let made = host.post("/janitors", json!({"session": "hal"}));
+    assert!(made.get("janitor").is_some(), "{made}");
+    let full = host.get("/log?session=hal&coordination=auto");
+    assert_eq!(
+        full["coordination"],
+        json!({"visibility": "show", "hidden": false, "source": "helper"}),
+        "{full}"
+    );
+    let rows = full["turns"].as_array().unwrap();
+    for text in ["Count the files.", "One file."] {
+        assert_eq!(view_of(rows, text), json!("conversation"), "{full}");
+    }
+    let chat = host.get("/log?session=hal&view=conversation&coordination=auto");
+    assert_eq!(texts(&chat), ["Count the files.", "One file."], "{chat}");
+
     // Another agent's chat: the message an agent sent is not the user's conversation.
     std::fs::remove_file(place.root.join("worked")).unwrap();
     ask("plain");
