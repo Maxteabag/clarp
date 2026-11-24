@@ -155,6 +155,8 @@ mod start_tolerance;
 mod steer_c;
 #[path = "host/stop_early.rs"]
 mod stop_early;
+#[path = "host/stop_events.rs"]
+mod stop_events;
 #[path = "host/stop_resume.rs"]
 mod stop_resume;
 #[path = "host/takeover_b.rs"]
