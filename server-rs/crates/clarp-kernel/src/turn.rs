@@ -334,10 +334,15 @@ impl Outcome {
         }
     }
 
-    /// A turn whose tool could not be started.
+    /// A turn whose tool could not be started. One the Host refused for its provider keeps
+    /// that kind: it is not tried again as a launch that failed would be.
     pub fn not_started(reason: String) -> Self {
+        let kind = match crate::failures::classify_error(&reason) {
+            crate::failures::PROVIDER_MISMATCH => crate::failures::PROVIDER_MISMATCH,
+            _ => crate::failures::NOT_STARTED,
+        };
         Self::Failed {
-            kind: crate::failures::NOT_STARTED.to_string(),
+            kind: kind.to_string(),
             reason,
         }
     }

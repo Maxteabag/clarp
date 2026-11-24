@@ -40,9 +40,24 @@ pub const TIMEOUT: &str = "timeout";
 pub const NOT_STARTED: &str = "not_started";
 pub const UNKNOWN: &str = "unknown";
 pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
+/// The tool would have run, or ran, on another model provider than the one its agent is
+/// bound to (an agent with a provider of its own, `codex_provider`). Never tried again: the
+/// agent's configuration has to be put right first. The Host names it itself, by the words
+/// [`provider_mismatch`] begins with; a tool's own words never read as it.
+pub const PROVIDER_MISMATCH: &str = "provider_mismatch";
+
+/// What the words of a provider mismatch begin with, so that wherever they are read they are
+/// read as that kind.
+const PROVIDER_MISMATCH_MARK: &str = "provider_mismatch:";
+
+/// The words a turn ends with whose tool was refused, or stopped, for running on another
+/// provider than its agent's: the mark of the kind, then why in plain words.
+pub fn provider_mismatch(why: &str) -> String {
+    format!("{PROVIDER_MISMATCH_MARK} {}", why.trim())
+}
 
 /// The kinds the user is told of, once the Host has stopped trying.
-pub const NOTIFY: [&str; 11] = [
+pub const NOTIFY: [&str; 12] = [
     CONNECTION,
     TRANSIENT,
     INTERRUPTED,
@@ -54,10 +69,11 @@ pub const NOTIFY: [&str; 11] = [
     TIMEOUT,
     NOT_STARTED,
     MUSE_SESSION_LOCKED,
+    PROVIDER_MISMATCH,
 ];
 
 /// The kinds this Host reads that the Python Host does not (`docs/differences.md`).
-pub const OWN_KINDS: [&str; 1] = [PROMPT_TOO_LONG];
+pub const OWN_KINDS: [&str; 2] = [PROMPT_TOO_LONG, PROVIDER_MISMATCH];
 
 /// The words a turn ends with whose tool said the conversation is too long for its model:
 /// the tool's own, after the Host's where they do not say it themselves, so that they are
@@ -216,6 +232,9 @@ pub fn classify_error(message: &str) -> &'static str {
     }
     if text.starts_with("muse_session_locked:") {
         return MUSE_SESSION_LOCKED;
+    }
+    if text.starts_with(PROVIDER_MISMATCH_MARK) {
+        return PROVIDER_MISMATCH;
     }
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
@@ -430,6 +449,9 @@ fn sentence(kind: &str, model: &str) -> String {
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
         NOT_STARTED => "The turn could not be started".to_string(),
+        PROVIDER_MISMATCH => "This agent's turn did not run: it would have used another model \
+             provider than the one it is bound to. Check its Codex home and provider"
+            .to_string(),
         PROMPT_TOO_LONG => "This conversation is too long for the model. Compact it or start \
              a new one"
             .to_string(),
