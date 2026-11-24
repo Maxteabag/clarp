@@ -256,3 +256,50 @@ fn the_seat_in_use_is_judged_by_its_tag_through_what_is_kept() {
         [false, true]
     );
 }
+
+#[test]
+fn a_used_up_seat_and_the_pool_are_judged_from_a_reading_as_it_is_kept() {
+    use clarp_kernel::quota_near::{self, Failover};
+    use clarp_kernel::recovery::Accounts;
+    let at = 1_899_999_000_000;
+    let usage = |used: f64| {
+        serde_json::json!({ "status": "allowed", "limited": used >= 1.0, "used_5h": used,
+            "reset_5h": 1_900_003_600, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+    };
+    let list = |spare: f64| {
+        serde_json::json!({ "accounts": [
+            { "alias": "work", "is_active": true, "usage": usage(1.0) },
+            { "alias": "someone@example.invalid", "is_active": false, "usage": usage(spare) },
+        ]})
+    };
+    // A seat with room beside the used-up one: the switcher would move the turn.
+    let mut seats = Seats::with_salt("a-salt");
+    seats.read("claude", &list(0.1), at);
+    let desk = seats.judged(true, at);
+    let of =
+        |desk: &Value| quota_near::used_up_failover(Accounts::Select, "claude", "", true, desk);
+    assert_eq!(of(&desk), (Failover::Spare, None));
+    let pool = quota_near::pool("claude", &desk).unwrap();
+    assert_eq!(
+        (
+            &pool["with_room"],
+            &pool["used_up"],
+            &pool["active_alias"],
+            &pool["next_alias"]
+        ),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1),
+            &serde_json::json!("work"),
+            &serde_json::json!("s…@e…")
+        ),
+        "{pool}"
+    );
+    // Both used up: none, with when the first regains room.
+    let mut seats = Seats::with_salt("a-salt");
+    seats.read("claude", &list(1.0), at);
+    let desk = seats.judged(true, at);
+    assert_eq!(of(&desk), (Failover::None, Some(1_900_003_600_000)));
+    let pool = quota_near::pool("claude", &desk).unwrap();
+    assert_eq!(pool["next_alias"], Value::Null, "{pool}");
+}

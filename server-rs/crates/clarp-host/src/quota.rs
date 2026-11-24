@@ -1117,22 +1117,7 @@ async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
             .await
             .unwrap_or_default();
         let selector = rows.selectors.contains(tool);
-        let (failover, regains) = clarp_kernel::quota_near::used_up_failover(
-            rows.accounts,
-            tool,
-            &model,
-            selector,
-            &desk,
-        );
-        let most = now + i64::try_from(LOOKED_EVERY.as_millis()).unwrap_or(i64::MAX);
-        let fresh = clarp_kernel::quota_near::fresh_until(tool, &desk);
-        let until_ms = fresh.map_or(most, |fresh| fresh.min(most));
-        let pooled = Pooled {
-            failover,
-            regains,
-            until_ms,
-            seat: clarp_kernel::quota_near::seat_in_use(tool, &desk),
-        };
+        let pooled = judge(rows.accounts, (tool, &model), selector, &desk, now);
         judged.insert(tool.to_string(), pooled);
     }
     let releases: Vec<Value> = judged
@@ -1146,6 +1131,28 @@ async fn judge_pools(app: &crate::edge::App, rows: &Rows) {
     // A hard limit the pool was to take, which it can no longer: told now.
     for event in releases {
         app.hub.publish(event, now);
+    }
+}
+
+/// Whether another seat of a tool's pool would take a turn of `model` from its used-up account,
+/// by the desk the Host judges by (`seats::judged`), and until when that holds: until the reading
+/// of the seats grows old, and five minutes at most; with the seat the tool is on.
+fn judge(
+    accounts: clarp_kernel::recovery::Accounts,
+    (tool, model): (&str, &str),
+    selector: bool,
+    desk: &Value,
+    now: i64,
+) -> Pooled {
+    let (failover, regains) =
+        clarp_kernel::quota_near::used_up_failover(accounts, tool, model, selector, desk);
+    let most = now + i64::try_from(LOOKED_EVERY.as_millis()).unwrap_or(i64::MAX);
+    let fresh = clarp_kernel::quota_near::fresh_until(tool, desk);
+    Pooled {
+        failover,
+        regains,
+        until_ms: fresh.map_or(most, |fresh| fresh.min(most)),
+        seat: clarp_kernel::quota_near::seat_in_use(tool, desk),
     }
 }
 
@@ -1569,6 +1576,72 @@ mod tests {
             desk.release(CODEX, &pooled(Failover::Unknown, None, "a"), 9_000_000)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_hard_limit_is_held_and_told_through_the_seats_as_a_host_reads_and_switches_them() {
+        use clarp_kernel::quota_near::Failover;
+        use clarp_kernel::recovery::Accounts;
+        use clarp_kernel::seats::Seats;
+        // The seats as the owner's tool lists them, read and kept as a Host keeps them; and the
+        // desk judged by, as the Host makes it (`seats::judged`).
+        let at = 1_899_999_000_000;
+        let usage = |used: f64, reset_s: i64| {
+            json!({ "status": "allowed", "limited": used >= 1.0, "used_5h": used,
+                "reset_5h": reset_s, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+        };
+        let list = |a: f64, b: f64| {
+            json!({ "accounts": [
+                { "alias": "a", "is_active": true, "usage": usage(a, 1_900_007_200) },
+                { "alias": "b", "is_active": false, "usage": usage(b, 1_900_003_600) },
+            ]})
+        };
+        let judged = |seats: &Seats| {
+            let desk = seats.judged(true, at);
+            judge(Accounts::Select, (CLAUDE, ""), true, &desk, at)
+        };
+        let hard = json!({ "type": "provider-limit", "kind": "hard_limit", "provider_id": "claude",
+            "resets_at": quota::moment(1_900_007_200_000) });
+        let hold = |desk: &Desk, seats: &Seats| {
+            let pooled = judged(seats);
+            assert_eq!(pooled.failover, Failover::Spare, "{pooled:?}");
+            assert!(pooled.seat.is_some(), "{pooled:?}");
+            desk.pooled
+                .lock()
+                .unwrap()
+                .insert(CLAUDE.to_string(), pooled);
+            assert!(desk.pooled(CLAUDE, hard.clone(), at).is_none());
+        };
+
+        // Seat a is used up, b has room: the limit is held, as a's.
+        let desk = Desk::default();
+        let mut seats = Seats::with_salt("a-salt");
+        seats.read(CLAUDE, &list(1.0, 0.1), at);
+        hold(&desk, &seats);
+        // The switch never came, and b filled up too: no seat has room, and the tool is still on
+        // a. The limit is told, with when the first seat regains room (b, in an hour).
+        let mut stayed = Seats::with_salt("a-salt");
+        stayed.read(CLAUDE, &list(1.0, 1.0), at);
+        let pooled = judged(&stayed);
+        assert_eq!(
+            (pooled.failover, pooled.regains),
+            (Failover::None, Some(1_900_003_600_000))
+        );
+        let told = desk.release(CLAUDE, &pooled, at).unwrap();
+        assert_eq!(
+            (&told["failover"], &told["pool_regains_at"]),
+            (&json!("none"), &json!(quota::moment(1_900_003_600_000)))
+        );
+
+        // Held again; this time the Host switches to b. Judged on b, with b taken as used up,
+        // no seat is left, but the limit was a's and the tool left a: nothing is told, then or
+        // later.
+        hold(&desk, &seats);
+        seats.mark_active(CLAUDE, "b");
+        let pooled = judged(&seats);
+        assert_eq!(pooled.failover, Failover::None, "{pooled:?}");
+        assert!(desk.release(CLAUDE, &pooled, at).is_none());
+        assert!(desk.release(CLAUDE, &judged(&stayed), at).is_none());
     }
 
     #[test]
