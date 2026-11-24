@@ -251,20 +251,16 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
     let providers: Map<String, Value> = TOOLS
         .iter()
         .map(|tool| {
-            let mut provider = if *tool == quota::CODEX {
-                left.provider.clone()
-            } else if *tool == quota::CLAUDE {
-                of_claude.clone()
-            } else if app.config.ask_usage || !agy["observed_at"].is_null() {
-                agy.clone()
-            } else {
-                json!({
-                    "freshness": "unknown", "observed_at": null, "provider_id": tool,
-                    "provider_instance_id": format!("{}:{tool}", app.server_id),
-                    "source": { "detail": NOT_ASKED, "kind": "unavailable" },
-                    "windows": [],
-                })
-            };
+            let mut provider = provider_row(
+                tool,
+                Accounts {
+                    codex: &left.provider,
+                    claude: &of_claude,
+                    agy: &agy,
+                },
+                app.config.ask_usage,
+                &app.server_id,
+            );
             // A tool with a pool of seats: how many have room, which is in use, and when a
             // used-up one regains room (`clarp_kernel::quota_near::pool`).
             if let Some(pool) = clarp_kernel::quota_near::pool(tool, &desk) {
@@ -282,6 +278,40 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
         "providers": providers,
         "schema_version": 1,
     })
+}
+
+/// What the accounts that are read said of themselves: Codex's, Claude's and Antigravity's.
+struct Accounts<'a> {
+    codex: &'a Value,
+    claude: &'a Value,
+    agy: &'a Value,
+}
+
+/// Whose account a tool's turns use: its own, or that of the tool it runs through
+/// (Antigravity over ACP runs on Antigravity's account; DeepSeek runs through OpenCode).
+fn account_of(tool: &str) -> &str {
+    match clarp_backend::by_id(tool).and_then(|backend| backend.runs_through()) {
+        Some(through) => through,
+        None => tool,
+    }
+}
+
+/// A tool's row in `providers`: what its own account said where it is read (Codex, Claude,
+/// and Antigravity once asked, for each tool on Antigravity's account), and otherwise that no
+/// provider is asked. Grok, OpenCode, DeepSeek and Muse once carried Antigravity's windows as
+/// their own; no tool shows another account's windows now.
+fn provider_row(tool: &str, accounts: Accounts<'_>, asks: bool, server_id: &str) -> Value {
+    match account_of(tool) {
+        quota::CODEX => accounts.codex.clone(),
+        quota::CLAUDE => accounts.claude.clone(),
+        "agy" if asks || !accounts.agy["observed_at"].is_null() => accounts.agy.clone(),
+        _ => json!({
+            "freshness": "unknown", "observed_at": null, "provider_id": tool,
+            "provider_instance_id": format!("{server_id}:{tool}"),
+            "source": { "detail": NOT_ASKED, "kind": "unavailable" },
+            "windows": [],
+        }),
+    }
 }
 
 pub fn routes() -> Router<App> {
@@ -315,6 +345,45 @@ mod tests {
             }
         }
         assert_eq!(moments, 13);
+    }
+
+    #[test]
+    fn a_tools_usage_row_is_its_own_accounts_and_never_another_tools() {
+        let codex = json!({"provider_id": "codex", "windows": [{"kind": "five_hour"}]});
+        let claude = json!({"provider_id": "claude", "windows": []});
+        let agy = json!({
+            "provider_id": "agy", "observed_at": "2026-11-24T23:56:11Z",
+            "windows": [{"label": "Gemini Models", "used_percentage": 37.7}],
+        });
+        let accounts = || Accounts {
+            codex: &codex,
+            claude: &claude,
+            agy: &agy,
+        };
+        let row = |tool| provider_row(tool, accounts(), true, "s");
+        assert_eq!(row("codex"), codex);
+        assert_eq!(row("claude"), claude);
+        assert_eq!(row("agy"), agy);
+        // Antigravity over ACP runs on Antigravity's account.
+        assert_eq!(row("agy-acp"), agy);
+        // Before 25 Nov 2026 these four showed Antigravity's Gemini windows as theirs.
+        for tool in ["grok", "opencode", "deepseek", "muse"] {
+            let told = row(tool);
+            assert_eq!(told["provider_id"], tool, "{tool}");
+            assert_eq!(told["provider_instance_id"], format!("s:{tool}"), "{tool}");
+            assert_eq!(told["source"]["kind"], "unavailable", "{tool}");
+            assert_eq!(told["windows"], json!([]), "{tool}");
+        }
+        // Antigravity not asked and never read: its own row says so as well.
+        let unread = json!({"observed_at": null});
+        let quiet = Accounts {
+            codex: &codex,
+            claude: &claude,
+            agy: &unread,
+        };
+        let told = provider_row("agy", quiet, false, "s");
+        assert_eq!(told["provider_id"], "agy");
+        assert_eq!(told["source"]["kind"], "unavailable");
     }
 
     #[test]
