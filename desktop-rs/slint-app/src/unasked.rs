@@ -52,7 +52,16 @@ pub struct Step {
 /// settling, a seek, a search hit or link revealed, an older page, the
 /// jump to the latest.
 pub fn asked(event: &str) -> bool {
-    ["reader", "key:", "vim:", "bar:", "seek", "reveal", "load-older", "jump-latest"].iter().any(|p| event.starts_with(p))
+    ["reader", "key:", "vim:", "bar:", "seek", "reveal", "load-older", "jump-latest", "resize"].iter().any(|p| event.starts_with(p))
+}
+
+/// After the window (or the chat's pane) is resized, its rows settle for a
+/// moment: frames within this of a resize are asked for too.
+pub const AFTER_RESIZE: Duration = Duration::from_millis(150);
+
+/// The chat's size changed between two frames: the reader's resize.
+fn resized(a: &Shot, b: &Shot) -> bool {
+    (a.viewport - b.viewport).abs() >= 0.5
 }
 
 fn at_end(s: &Shot) -> bool {
@@ -76,7 +85,7 @@ fn cover(viewport: f32, before: (f32, f32), after: (f32, f32)) -> f32 {
 /// changes as rows come and are drawn (the offset moves, the view does not).
 pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let (a, b) = (&before.shot, &after.shot);
-    if a.viewport < 1.0 || b.viewport < 1.0 || after.events.iter().any(|e| asked(e) || e.starts_with("reset:")) {
+    if a.viewport < 1.0 || b.viewport < 1.0 || resized(a, b) || after.events.iter().any(|e| asked(e) || e.starts_with("reset:")) {
         return None;
     }
     let viewport = b.viewport;
@@ -176,6 +185,8 @@ pub struct Motion {
     open_score: f32,
     open_sent: bool,
     minute: Option<(Duration, f32, bool)>,
+    /// A resize asks for movement until then.
+    resized_until: Option<Duration>,
 }
 
 impl Motion {
@@ -186,9 +197,15 @@ impl Motion {
             // Another chat (or every row again): a new open.
             *self = Motion { minute: self.minute.take(), ..Motion::default() };
         }
-        if after.events.iter().any(|e| asked(e)) {
+        if after.events.iter().any(|e| e.starts_with("resize")) || resized(&before.shot, &after.shot) {
+            self.resized_until = Some(after.at + AFTER_RESIZE);
+        }
+        if after.events.iter().any(|e| asked(e)) || self.resized_until.is_some_and(|until| after.at <= until) {
             self.steps.clear();
             self.shake = None;
+            if self.resized_until.is_some_and(|until| after.at <= until) {
+                return found;
+            }
         }
         while self.steps.front().is_some_and(|s| after.at.saturating_sub(s.0) > SHAKE_WITHIN) {
             self.steps.pop_front();
@@ -412,6 +429,21 @@ mod tests {
         // Under 2 px is not.
         let tiny = frame(16, Shot { top_y: -18.5, ..pinned(4000.0, -20.0, 100.0) }, &[]);
         assert!(Motion::default().frame(&a, &tiny).is_empty());
+    }
+
+    /// A window resize is asked for: the resize frame and the rows settling
+    /// for 0.15 s after it post nothing; movement after that counts again.
+    #[test]
+    fn a_resize_and_the_settling_after_it_are_asked_for() {
+        let a = frame(0, pinned(4000.0, -20.0, 100.0), &[]);
+        let wider = frame(16, Shot { viewport: 420.0, top_y: -80.0, ..pinned(4000.0, -20.0, 100.0) }, &["resize"]);
+        assert_eq!(movement(&a, &wider), None, "the resize frame");
+        let mut motion = Motion::default();
+        assert!(motion.frame(&a, &wider).is_empty());
+        let settle = frame(116, Shot { viewport: 420.0, top_y: -40.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert!(motion.frame(&wider, &settle).is_empty(), "rows settling within 0.15 s after it");
+        let later = frame(400, Shot { viewport: 420.0, top_y: 60.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert!(motion.frame(&settle, &later).iter().any(|f| f.rule == "shift"), "a jump well after the resize counts");
     }
 
     #[test]
