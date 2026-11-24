@@ -33,8 +33,9 @@
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
 # to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
 # with a target directory per checkout, so a second run is incremental. A checkout's first build
-# starts from a clone of the target of the checkout built last with its libraries (build-queue.py's seed_target): the
-# clone shares that target's data on disk, and cargo builds only the workspace's crates again.
+# starts from a clone of the target of the checkout built last with its libraries (build-queue.py's
+# seed_target): the clone shares that target's data on disk, and cargo builds only the workspace's
+# crates again.
 set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
