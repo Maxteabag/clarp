@@ -277,9 +277,7 @@ mod tests {
     /// A turn of the user's that runs: its message is `u-ask`.
     fn start(recorder: &mut Recorder) -> TurnId {
         let turn = accept(recorder, "u-ask", 100);
-        recorder
-            .handle(Command::TurnStarted { turn }, 110)
-            .unwrap();
+        recorder.handle(Command::TurnStarted { turn }, 110).unwrap();
         turn
     }
 
@@ -404,7 +402,10 @@ mod tests {
             .unwrap();
         assert_eq!(answer.session_rows, Some(0));
         assert!(answer.turn.is_some());
-        assert_eq!(counts(&since(&recorder, "r-answer")), [("r-answer", Some(0))]);
+        assert_eq!(
+            counts(&since(&recorder, "r-answer")),
+            [("r-answer", Some(0))]
+        );
         assert_eq!(conversation(&recorder), ["u-ask", "r-answer"]);
     }
 
@@ -479,7 +480,10 @@ mod tests {
         );
         // The end changes the answer of the last message only: the first is as it was.
         assert_eq!(settled[1], running[1]);
-        assert_eq!(counts(&since(&recorder, "r-second")), [("r-second", Some(1))]);
+        assert_eq!(
+            counts(&since(&recorder, "r-second")),
+            [("r-second", Some(1))]
+        );
     }
 
     #[test]
