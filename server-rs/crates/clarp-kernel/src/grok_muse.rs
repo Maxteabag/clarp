@@ -23,9 +23,7 @@ impl Tool {
                 "--output-format",
                 "streaming-json",
             ],
-            // Muse's reminder agents run after the answer, before the process ends: without
-            // them a turn ends, and the next one can start, some seconds sooner.
-            Self::Muse => &["exec", "--json", "--yolo", "--disable-reminders"],
+            Self::Muse => &["exec", "--json", "--yolo"],
         };
         let mut args: Vec<_> = flags.iter().map(|s| s.to_string()).collect();
         let session_flag = if self == Self::Grok && !fresh {

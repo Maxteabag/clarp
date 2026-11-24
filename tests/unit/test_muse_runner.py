@@ -119,7 +119,6 @@ def test_build_cmd_creates_and_continues_with_the_same_session_id():
     cmd = MUSE.build_cmd("sid-1", model="muse-wonder-1.0", effort="low")
     assert cmd[:3] == ["muse", "exec", "--json"]
     assert "--yolo" in cmd
-    assert "--disable-reminders" in cmd
     assert cmd[cmd.index("--session-id") + 1] == "sid-1"
     assert cmd[cmd.index("--model") + 1] == "muse-wonder-1.0"
     assert cmd[cmd.index("--reasoning-effort") + 1] == "low"
