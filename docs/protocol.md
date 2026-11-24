@@ -746,7 +746,8 @@ Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carrie
   Host or another agent sent (schedules, wakes, delivered answers, another agent's message), and
   every row of a turn with `audience` `agents`.
 
-A helper's chat (an agent whose `role` is `helper`) is the exception: a turn another agent
+A helper's chat (an agent whose `role` is `helper`) is the exception (feature
+`helper_conversation`, contract 175; an older Host tags these turns `session`): a turn another agent
 started (its parent or any other) is that chat's conversation. Its prompt (a user row of origin
 `agent`) is `conversation`, and its answers anchor by the rules below exactly as a user's turn's
 do, with `session_rows`; its tool rows and commentary stay `session`. The turn's `audience` stays
