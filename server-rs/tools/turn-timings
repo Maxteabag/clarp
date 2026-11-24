@@ -1185,6 +1185,31 @@ def undo_mentions(root: pathlib.Path) -> list:
     return done
 
 
+def live_claude_mtime():
+    try:
+        return (HOME / ".claude.json").stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def live_claude_check(root: pathlib.Path, before) -> dict:
+    """Did the run's Claude write the live ~/.claude.json or ~/.claude? Its mtime before and after
+    the run is recorded, but every Claude Code running on the machine writes that file, so a
+    moved mtime alone proves nothing: the run wrote it only if the file names the run's folder,
+    or the live ~/.claude got a conversation folder for the run's working folder."""
+    after = live_claude_mtime()
+    slug = re.sub(r"[^A-Za-z0-9]", "-", str(root / "ws"))
+    names = False
+    try:
+        names = str(root) in (HOME / ".claude.json").read_text(errors="replace")
+    except OSError:
+        pass
+    projects = (HOME / ".claude" / "projects" / slug).is_dir()
+    return {"mtime_before_ns": before, "mtime_after_ns": after, "mtime_moved": before != after,
+            "names_run_folder": names, "live_projects_folder_made": projects,
+            "run_wrote_live_claude": names or projects}
+
+
 def drop_claude_sessions(root: pathlib.Path) -> list:
     """Claude keeps a test agent's conversations in a folder named after its working folder,
     which is the run's own: remove it. Codex's and agy's records of the run's conversations are
@@ -1270,6 +1295,7 @@ def run(args) -> int:
     models = {**MODELS, **pairs(args.model)}
     efforts = {**EFFORTS, **pairs(args.effort)}
     settings_before = mentions(root)
+    claude_mtime = live_claude_mtime()
     result = {"run_id": run_id, "started": load(), "bin": str(bin_dir), "rounds": args.rounds,
               "host_version": "", "backends": {}, "settings": {"before": settings_before}}
     commit = bin_dir / "COMMIT"
@@ -1359,6 +1385,7 @@ def run(args) -> int:
         result["ended"] = load()
         result["left_after_host"] = host.stop()
         result["login_links"] = login_links(root)
+        result["live_claude"] = live_claude_check(root, claude_mtime)
         result["unowned_in_folder"] = host.unowned
         result["settings"]["after"] = mentions(root)
         result["settings"]["undone"] = undo_mentions(root) + drop_claude_sessions(root)
@@ -1481,6 +1508,23 @@ def summary(result: dict) -> str:
     settings = result.get("settings") or {}
     lines.append("## The tools' settings")
     lines.append("")
+    live = result.get("live_claude")
+    if live:
+        if live["run_wrote_live_claude"]:
+            lines.append("The run's Claude WROTE the live ~/.claude: "
+                         + ("~/.claude.json names the run's folder. " if live["names_run_folder"] else "")
+                         + ("~/.claude/projects got a folder for the run. " if live["live_projects_folder_made"] else "")
+                         + "CLAUDE_CONFIG_DIR did not hold.")
+        else:
+            lines.append("The run's Claude wrote nothing to the live ~/.claude: ~/.claude.json does not name the run's "
+                         "folder and ~/.claude/projects has no folder for it. Its mtime "
+                         + ("moved during the run (other Claude sessions on the machine write it)."
+                            if live["mtime_moved"] else "did not move."))
+        lines.append("")
+    for said in result.get("login_links") or []:
+        lines.append(f"- Login link {said}")
+    if result.get("login_links"):
+        lines.append("")
     if settings.get("undone"):
         lines += [f"- {u}" for u in settings["undone"]]
     else:
