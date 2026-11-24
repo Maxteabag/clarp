@@ -1352,7 +1352,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   choice whether coordination between agents is shown, default `hide` (out of the way unless
   the user asks for it; earlier releases defaulted to `show`; a stored choice is kept). A string that may
   gain values. `POST /agent-coordination` `{"session", "visibility": "show" | "hide" |
-  "default"}`: one chat's own choice (`default` follows the Host); it answers
+  "default"}`: one chat's own choice (`default` follows the Host, except in a helper's own
+  chat on a Rust Host, where it is `show`: every turn of a helper is started by another
+  agent, so under `hide` its chat would be empty); it answers
   `{"ok", "session", "coordination_visibility", "coordination_override"}`. Each change is
   written, then an `agent-roster` event (`kind: coordination-changed`) carries the new
   effective value; the next snapshot's agent rows carry it too

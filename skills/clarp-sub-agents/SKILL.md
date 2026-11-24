@@ -270,6 +270,11 @@ when that is so). To tell the user something from any turn, run
 chat that is always shown and notifies the user. It works only from your own
 running turn. Decision cards and artifacts are shown as always.
 
+A helper's own chat is the exception: on a Rust Host it shows the turns its
+parent and other agents start unless the user hid that chat, so a helper's
+replies reach the user there and its prompt carries no such line. A helper
+whose chat the user hid gets the line like any other agent.
+
 ## Notes
 
 - **Never use `pgrep -f` or `pkill -f` inside a sub-agent.** They match
