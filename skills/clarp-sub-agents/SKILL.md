@@ -252,8 +252,9 @@ start, and the command exits 1.
    git worktree add -b BRANCH PATH origin/main  # it was deleted at closeout
    ```
 
-   No command moves an agent to another folder; when the old path will not do,
-   start a new helper in a new worktree instead.
+   Or, as the row says, make a new agent in another folder: no command moves
+   an agent to another folder, so when the old path will not do, start a new
+   helper in a new worktree.
 
    A queued prompt is not proof the work started; check the helper's own new
    activity. `clarp-sub-agent stop NAME` stops only the watcher in this

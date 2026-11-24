@@ -65,13 +65,13 @@ pub fn missing_folder(said: &str) -> Option<&str> {
 pub fn folder_missing_sentence(missing: &str) -> String {
     match missing.strip_prefix(clarp_spool::NOT_A_FOLDER) {
         Some(dir) => format!(
-            "This agent's folder {} is not a folder. Recreate it as one, or give the agent \
-             another folder",
+            "This agent's folder {} is not a folder. Recreate it as a folder, or make a new \
+             agent in another folder",
             dir.trim()
         ),
         None => format!(
-            "This agent's folder {missing} no longer exists. Recreate it, or give the agent \
-             another folder"
+            "This agent's folder {missing} no longer exists. Recreate it, or make a new agent \
+             in another folder"
         ),
     }
 }
@@ -512,7 +512,7 @@ fn sentence(kind: &str, model: &str) -> String {
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
         NOT_STARTED => "The turn could not be started".to_string(),
         FOLDER_MISSING => "The turn could not start: the agent's folder no longer exists. \
-             Recreate it, or give the agent another folder"
+             Recreate it, or make a new agent in another folder"
             .to_string(),
         PROVIDER_MISMATCH => "This agent's turn was stopped: it ran, or would have run, on \
              another model provider than the one it is bound to. Check its Codex home and provider"
@@ -925,8 +925,8 @@ mod tests {
         );
         assert_eq!(missing_folder("flock: No such file or directory"), None);
         let told = told(FOLDER_MISSING, &said, "m", Known::default());
-        let sentence = "This agent's folder /work/helper no longer exists. Recreate it, or give \
-             the agent another folder";
+        let sentence = "This agent's folder /work/helper no longer exists. Recreate it, or make \
+             a new agent in another folder";
         assert_eq!(told.message, sentence);
         assert_eq!(told.row, format!("{sentence}."));
         assert_eq!(told.summary, format!("{sentence}. Your message is saved."));
@@ -936,8 +936,8 @@ mod tests {
         assert_eq!(classify_error(&file), FOLDER_MISSING);
         assert_eq!(
             told_of(&file),
-            "This agent's folder /work/helper is not a folder. Recreate it as one, or give the \
-             agent another folder"
+            "This agent's folder /work/helper is not a folder. Recreate it as a folder, or make \
+             a new agent in another folder"
         );
     }
 
