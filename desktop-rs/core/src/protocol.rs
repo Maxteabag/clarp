@@ -269,13 +269,17 @@ impl Agent {
         self.role == "helper" && !self.parent_agent_id.is_empty()
     }
 
-    /// A finished helper collapses into its parent's "N helpers done" line.
+    /// A finished helper collapses into its parent's "N helpers done" line:
+    /// idle and done, reported or abandoned (`sidebar::helper_finished`).
     pub fn helper_finished(&self) -> bool {
-        self.is_helper() && matches!(self.helper_state.as_str(), "done" | "reported" | "abandoned")
+        self.is_helper() && crate::sidebar::helper_finished(&self.helper_state, self.busy)
     }
 
+    /// Listed among its parent's active helpers: every helper that is not
+    /// finished (a working one whatever its state, an idle running or
+    /// ended-unreported one).
     pub fn helper_running(&self) -> bool {
-        self.is_helper() && self.helper_state == "running"
+        self.is_helper() && !self.helper_finished()
     }
 
     /// The warning shown above the composer before a send; empty when the

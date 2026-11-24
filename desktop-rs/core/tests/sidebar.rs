@@ -153,3 +153,17 @@ fn hiding_is_transitive_and_reveal_expands_the_ancestor() {
     assert_eq!(v.sidebar.depth("leaf"), 2);
     assert!(!v.sidebar.reveal("parent"), "nothing hides a root");
 }
+
+/// One rule for every app: a helper at work is active whatever its state; an
+/// idle one files under Finished when done, reported or abandoned.
+#[test]
+fn a_working_helper_stays_active_and_an_idle_finished_one_folds() {
+    use clarp_core::sidebar::helper_finished;
+    assert!(!helper_finished("done", true), "a done helper at work is active");
+    assert!(helper_finished("done", false));
+    assert!(helper_finished("reported", false));
+    assert!(helper_finished("abandoned", false));
+    assert!(!helper_finished("running", false));
+    assert!(!helper_finished("ended-unreported", false));
+    assert!(!helper_finished("reported", true));
+}

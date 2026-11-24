@@ -205,6 +205,7 @@ impl App {
                 agent_role: r.agent_role.clone(),
                 parent_agent_id: r.parent_agent_id.clone(),
                 helper_state: r.helper_state.clone(),
+                working: r.busy,
             })
             .collect();
         let filters: Vec<FilterInput> = rows
@@ -262,7 +263,7 @@ impl App {
             let chain = if tree_active { ancestors(row) } else { Vec::new() };
             if let Some(first) = chain.first() {
                 *folded_under.entry(first.clone()).or_default() += 1;
-                if !clarp_core::sidebar::finished_helper_state(&row.helper_state) {
+                if !clarp_core::sidebar::helper_finished(&row.helper_state, row.busy) {
                     *working_under.entry(first.clone()).or_default() += 1;
                 }
             }

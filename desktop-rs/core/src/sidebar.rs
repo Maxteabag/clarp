@@ -16,6 +16,8 @@ pub struct TreeInput {
     pub agent_role: String,
     pub parent_agent_id: String,
     pub helper_state: String,
+    /// The agent is at work now (busy: thinking, in a tool or compacting).
+    pub working: bool,
 }
 
 /// The roster fields the search and scope need.
@@ -49,6 +51,13 @@ pub struct Tree {
 
 pub fn finished_helper_state(state: &str) -> bool {
     matches!(state, "done" | "reported" | "abandoned")
+}
+
+/// Whether a helper files under its parent's finished helpers (one rule for
+/// every app): idle and done, reported or abandoned. A helper at work stays
+/// among the active ones whatever its state, a done one included.
+pub fn helper_finished(state: &str, working: bool) -> bool {
+    !working && finished_helper_state(state)
 }
 
 #[derive(Debug, Default)]
@@ -140,7 +149,7 @@ pub fn build_tree(rows: &[TreeInput], tree_active: bool, expanded: &HashSet<Stri
     for row in rows {
         let helper = row.agent_role == "helper";
         let parent = if helper { row.parent_agent_id.clone() } else { String::new() };
-        let done = helper && !parent.is_empty() && finished_helper_state(&row.helper_state);
+        let done = helper && !parent.is_empty() && helper_finished(&row.helper_state, row.working);
         nodes.push(TreeNode {
             id: if tree_active { row.agent_id.clone() } else { String::new() },
             parent_id: if tree_active { parent } else { String::new() },
@@ -228,6 +237,7 @@ impl From<&AgentRow> for TreeInput {
             agent_role: row.agent_role.clone(),
             parent_agent_id: row.parent_agent_id.clone(),
             helper_state: row.helper_state.clone(),
+            working: row.busy,
         }
     }
 }
