@@ -808,7 +808,8 @@ impl CodexInterpreter {
         // A tool that still runs when the process goes is left as it is: what becomes of
         // it follows from how the turn ended, which is the Host's to say.
         let halted = self.bound.as_ref().is_some_and(|bound| bound.halted);
-        let outcome = if let Some(reason) = self.failure.take().filter(|_| halted) {
+        let stopped_for_provider = if halted { self.failure.take() } else { None };
+        let outcome = if let Some(reason) = stopped_for_provider {
             // Stopped for running on another provider: that is how it ended, whatever signal
             // ended it.
             RunOutcome::Failed { reason }
