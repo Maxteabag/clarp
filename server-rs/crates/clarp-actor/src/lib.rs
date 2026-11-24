@@ -4516,17 +4516,16 @@ impl Actor {
         // trying again would only be refused again until the agent is put right.
         let kind = failures::classify_error(reason);
         let starting = self.recorder.agent().stopping().is_none()
-            && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn);
-        if starting && let Some(dir) = failures::missing_folder(reason) {
-            self.never_run = Some(launch_refused::folder_missing_notice(dir));
-        }
-        let refusable = kind != failures::PROVIDER_MISMATCH
-            && kind != failures::FOLDER_MISSING
+            && matches!(self.recorder.agent().live(), Some(Turn::Starting(start)) if start.id == turn)
             && self
                 .live
                 .as_ref()
-                .is_some_and(|live| live.turn == turn && !live.opening)
-            && starting;
+                .is_some_and(|live| live.turn == turn && !live.opening);
+        if starting && let Some(dir) = failures::missing_folder(reason) {
+            self.never_run = Some(launch_refused::folder_missing_notice(dir));
+        }
+        let refusable =
+            kind != failures::PROVIDER_MISMATCH && kind != failures::FOLDER_MISSING && starting;
         if refusable {
             let after = after_refusal(
                 &mut self.refused,
@@ -6178,8 +6177,10 @@ impl Actor {
                         // (R121).
                         let mut said = None;
                         // The agent's folder went between the Host's look and the launch:
-                        // the turn ends at once, as it would have before the launch.
+                        // the turn ends at once, as it would have before the launch. An
+                        // opening keeps its own rule.
                         let folder = failures::missing_folder(&reason)
+                            .filter(|_| !live.opening)
                             .map(launch_refused::folder_missing_notice);
                         if !stopping && folder.is_some() {
                             said = folder;

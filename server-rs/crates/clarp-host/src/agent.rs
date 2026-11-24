@@ -4254,8 +4254,11 @@ impl Worker {
                         }
                         // An agent whose folder is gone starts nothing, and is told so:
                         // started in it, the tool would fail with words that name only its
-                        // program (issue 758).
-                        if let Some(why) = launcher::folder_gone(&order.cwd) {
+                        // program (issue 758). A call's opening keeps its own gated rule: it
+                        // tries again each second, and its gate holds what was claimed.
+                        if order.opening.is_none()
+                            && let Some(why) = launcher::folder_gone(&order.cwd)
+                        {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
