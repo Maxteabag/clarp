@@ -117,6 +117,8 @@ mod media_manage;
 mod move_janitors;
 #[path = "host/native_agent_goal.rs"]
 mod native_agent_goal;
+#[path = "host/native_goal_folder.rs"]
+mod native_goal_folder;
 #[path = "host/network_wait.rs"]
 mod network_wait;
 #[path = "host/pairing_identity.rs"]
