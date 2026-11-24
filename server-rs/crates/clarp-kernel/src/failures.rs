@@ -103,7 +103,9 @@ const NETWORK_GONE_SAID: &str = "No network for 15 minutes";
 /// tool's, so that both the sentence and what the tool said are kept.
 pub fn network_gone(said: &str) -> String {
     let said = said.trim();
-    if said.is_empty() || said.starts_with(NETWORK_GONE_SAID) {
+    if said.starts_with(NETWORK_GONE_SAID) {
+        said.to_string()
+    } else if said.is_empty() {
         NETWORK_GONE_SAID.to_string()
     } else {
         format!("{NETWORK_GONE_SAID}: {said}")
@@ -796,6 +798,34 @@ pub fn keeper_code(failure: &CliFailure) -> Option<String> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_that_waited_for_the_network_in_vain_says_the_network_was_gone() {
+        let said = "API Error: Can't reach the API server (EAI_AGAIN)";
+        assert_eq!(classify_error(said), CONNECTION);
+        let gone = network_gone(said);
+        assert_eq!(
+            gone,
+            "No network for 15 minutes: API Error: Can't reach the API server (EAI_AGAIN)"
+        );
+        // Still read as the connection it was, and said once however often it is given.
+        assert_eq!(classify_error(&gone), CONNECTION);
+        assert_eq!(network_gone(&gone), gone);
+        assert_eq!(network_gone(""), "No network for 15 minutes");
+        let told = told(CONNECTION, &gone, "", Known::default());
+        assert_eq!(
+            told.message,
+            "This computer had no network for 15 minutes, so the turn stopped. Send it again \
+             once it is online"
+        );
+        assert!(told.row.contains("EAI_AGAIN"), "{}", told.row);
+        assert!(told.summary.ends_with("Your message is saved."));
+        // A connection lost while the network was there says what it always said.
+        assert_eq!(
+            super::told(CONNECTION, said, "", Known::default()).message,
+            "Connection lost — retries exhausted"
+        );
+    }
 
     #[test]
     fn a_prompt_too_long_for_the_model_is_read_before_what_its_count_looks_like() {

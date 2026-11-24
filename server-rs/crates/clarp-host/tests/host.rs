@@ -113,6 +113,8 @@ mod media_manage;
 mod move_janitors;
 #[path = "host/native_agent_goal.rs"]
 mod native_agent_goal;
+#[path = "host/network_wait.rs"]
+mod network_wait;
 #[path = "host/pairing_identity.rs"]
 mod pairing_identity;
 #[path = "host/peer_snapshot.rs"]
@@ -16863,7 +16865,8 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
 }
 
 #[test]
-fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_says_so() {
+fn a_connection_that_drops_is_tried_again_and_its_wait_ends_with_a_stop_and_outlasts_a_restart()
+{
     let place = Place::new("retried");
     // A stand-in for Claude Code whose connection drops as often as the message says: it
     // counts, in a file named after the message, how often it was given it.
@@ -16932,7 +16935,8 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
         (&json!("assistant"), &json!("completed"))
     );
     // While it waited for its second attempt, the apps were told that it reconnects: as busy
-    // as before, and which attempt comes after how long.
+    // as before, and which attempt comes after how long. The network was there (the Host's
+    // check found it), so the wait is the first of a minute's: two seconds, of six tries.
     let told = |kind: &str| -> Vec<Value> {
         events
             .lock()
@@ -16961,9 +16965,9 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
             &json!("thinking"),
             &json!({
                 "action": "reconnecting",
-                "after_ms": 1000,
+                "after_ms": 2000,
                 "dispatch": "claude",
-                "of": 3,
+                "of": 6,
                 "origin": "user",
                 "reconnect": 2,
                 "summary": "Reconnecting… Your message is saved.",
@@ -16985,52 +16989,17 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
         "a turn that is tried again has not failed"
     );
 
-    // It drops every time: three attempts, and then the turn says so.
-    host.send(&agent, "drop always", "romeo");
-    wait_for("the turn to give up", || {
-        host.turns(&agent).len() == 4 && host.state(&agent) == "interrupted"
-    });
-    assert_eq!(started(), 5, "three attempts and no more");
-    let rows = host.turns(&agent);
-    assert_eq!(
-        (&rows[2]["id"], &rows[2]["turn"]["status"]),
-        (&json!("u-romeo"), &json!("failed"))
-    );
-    assert_eq!(
-        (&rows[3]["id"], &rows[3]["text"]),
-        (
-            &json!("marker-u-romeo"),
-            &json!(
-                "Connection lost — retries exhausted.\n\nAPI Error: socket connection was closed unexpectedly"
-            )
-        )
-    );
-    let detail = events
-        .lock()
-        .unwrap()
-        .iter()
-        .rev()
-        .find(|event| event["type"] == "agent-state" && event["kind"] == "interrupted")
-        .map(|event| event["detail"].clone())
-        .expect("the apps were told the turn failed");
-    assert_eq!(
-        (&detail["reason"], &detail["attempts"], &detail["message"]),
-        (
-            &json!("connection"),
-            &json!(3),
-            &json!("Connection lost — retries exhausted")
-        )
-    );
-
     // A turn that waits for its next attempt and is stopped ends there: nothing is started
-    // again. (The next attempt is a second away.)
-    host.send(&agent, "drop always, again", "sierra");
-    wait_for("the first attempt to fail", || started() == 6);
+    // again. (The next attempt is two seconds away.) What a turn that never gets through says
+    // is the actor's test (`a_connection_that_fails_while_the_network_is_there_is_tried_for_a_
+    // minute`): it is tried for a minute first.
+    host.send(&agent, "drop always", "sierra");
+    wait_for("the first attempt to fail", || started() == 3);
     let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": agent })));
     assert_eq!(status, 200);
     wait_for("the stop", || host.state(&agent) == "interrupted");
-    std::thread::sleep(Duration::from_millis(1_500));
-    assert_eq!(started(), 6, "a stopped turn is not tried again");
+    std::thread::sleep(Duration::from_millis(2_500));
+    assert_eq!(started(), 3, "a stopped turn is not tried again");
 
     // And a Host that is started again while a turn waits takes the wait up.
     let (status, _) = host.ask(
@@ -17040,14 +17009,14 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
     );
     assert_eq!(status, 200);
     host.send(&agent, "drop once more", "tango");
-    wait_for("the first attempt to fail", || started() == 7);
+    wait_for("the first attempt to fail", || started() == 4);
     host.kill();
     let host = place.start_in(
         "",
         &[],
         &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
     );
-    wait_for("the second attempt after the restart", || started() >= 8);
+    wait_for("the second attempt after the restart", || started() >= 5);
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let (rows, state) = (host.turns(&agent), host.state(&agent));
@@ -17068,7 +17037,7 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
     }
     assert_eq!(
         started(),
-        8,
+        5,
         "the second attempt ran after the restart, once"
     );
 }

@@ -6909,8 +6909,8 @@ fn a_connection_that_fails_while_the_network_is_there_is_tried_for_a_minute() {
         let Some(out) = world.due(&mut actor) else {
             break;
         };
-        // Rounded down to the second: the clock of the test moves on with each step.
-        waits.push((world.now_ms - failed_at) / 1_000 * 1_000);
+        // To the second: the clock of the test moves on with each step.
+        waits.push((world.now_ms - failed_at + 500) / 1_000 * 1_000);
         world.carry_out(&mut actor, out);
         assert_eq!(actor.waits_for_an_account(), None);
     }
