@@ -30967,7 +30967,9 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         "{said}"
     );
     // In the fields, and their order, of the Python Host, and after them how much of the
-    // window is used (contract 167, feature `backend_quota_near`).
+    // window is used (contract 167, feature `backend_quota_near`) and whether another seat
+    // would take the turn (contract 176, feature `quota_pool`: none, on a Host that switches
+    // no accounts).
     let fields: Vec<&str> = said
         .as_object()
         .unwrap()
@@ -30983,8 +30985,9 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         "observed_at",
     ];
     assert_eq!(fields[..python.len()], python);
-    assert_eq!(fields[python.len()..], ["used_percentage"]);
+    assert_eq!(fields[python.len()..], ["used_percentage", "failover"]);
     assert_eq!(said["used_percentage"], 100.0, "{said}");
+    assert_eq!(said["failover"], "none", "{said}");
     // An agent of another tool says nothing of it, and the apps were told to read the rows
     // again.
     assert_eq!(quota_of(&host, &clara), Value::Null);
