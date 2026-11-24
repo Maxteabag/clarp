@@ -5283,6 +5283,12 @@ fn told_state(status: &Status) -> ToldState {
             "an account for its model".to_string()
         }
         _ if live.is_some_and(waits_for_an_account) => "an account".to_string(),
+        // It waits for the network, or the network was found there and the turn reconnects:
+        // the apps are told each as the check finds it.
+        _ if live.is_some_and(|live| live.waits_for_the_network) => "the network".to_string(),
+        _ if live.is_some_and(|live| live.network_retry_at_ms.is_some()) => {
+            "a reconnect".to_string()
+        }
         Some(Activity::Tool { name }) => name.clone(),
         Some(Activity::Responding) => wire::RESPONDING.to_string(),
         // Each try of a provider that would not answer changes the line the apps show.
@@ -5320,9 +5326,10 @@ fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
     live.held_for_an_account || parked.is_some_and(|parked| parked.wait.is_for_an_account())
 }
 
-/// Account waits and questions to the user leave an otherwise live chat eligible.
+/// Account waits, network waits and questions to the user leave an otherwise live chat
+/// eligible.
 fn working_for_badge(live: &clarp_actor::LiveStatus) -> bool {
-    live.activity != Activity::Waiting && !waits_for_an_account(live)
+    live.activity != Activity::Waiting && !waits_for_an_account(live) && !live.waits_for_the_network
 }
 
 /// Helpers belong to their root chat, so an archived ancestor rules out the helper too.
