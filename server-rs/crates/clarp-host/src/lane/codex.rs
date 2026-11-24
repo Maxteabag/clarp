@@ -106,7 +106,7 @@ impl Lane {
         crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
         let settings = Settings::read();
         let options = self.options(profile, login, thread, settings.idle_ms)?;
-        let digest = options["_clarpOptionsDigest"]
+        let digest = options[key::OPTIONS_DIGEST]
             .as_str()
             .unwrap_or_default()
             .to_owned();
@@ -307,10 +307,6 @@ impl Lane {
     /// Ask an idle lane to leave, and wait until it has.
     pub(crate) fn retire(&self) -> io::Result<()> {
         self.endpoint.retire()
-    }
-
-    pub(crate) fn wait_released(&self) -> io::Result<()> {
-        self.endpoint.wait_released()
     }
 
     pub(crate) fn released(&self) -> io::Result<bool> {
