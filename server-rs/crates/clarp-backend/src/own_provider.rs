@@ -129,6 +129,15 @@ impl OwnProvider {
         Ok(())
     }
 
+    /// The words a turn ends with whose provider could not be read before it was complete.
+    pub fn unverified(&self) -> String {
+        failures::provider_mismatch(&format!(
+            "Codex's record of this turn named no model provider, so it could not be verified \
+             that it ran on \"{}\"; its answer is not shown",
+            self.provider
+        ))
+    }
+
     /// The words a turn ends with whose Codex said it runs on `named`.
     pub fn ran_on(&self, named: &str) -> String {
         failures::provider_mismatch(&format!(

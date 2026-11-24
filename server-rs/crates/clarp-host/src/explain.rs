@@ -318,7 +318,15 @@ impl Desk {
         let looked = app.janitors.with(app, |book, world, now_ms| {
             janitor_of(book, world, target, now_ms)
         });
-        let janitor = looked.await?;
+        // An agent bound to a model provider of its own has its tools explained without a
+        // model: no janitor reads what it did (`in_scope` leaves it out), and none is named
+        // for it here either.
+        let bound = app
+            .fleet
+            .directory()
+            .named(target)
+            .is_some_and(|member| !member.record.codex_provider.is_empty());
+        let janitor = looked.await?.filter(|_| !bound);
         let mut held = self.held(app).await?;
         let desk = held.as_mut().ok_or_else(unread)?;
         let scripts = |activity: &Map<String, Value>| scripts_read(&cwd, activity);

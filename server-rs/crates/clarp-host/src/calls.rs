@@ -957,6 +957,11 @@ impl Desk {
             else {
                 continue;
             };
+            // What an agent bound to a model provider of its own said goes to no other agent's
+            // model: only that agent itself is told it.
+            if !member.record.codex_provider.is_empty() && member.record.session != session {
+                continue;
+            }
             let Ok(page) = member.agent.tail(LOOKED_AT, Which::WithoutAutomated).await else {
                 continue;
             };
