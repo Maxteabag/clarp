@@ -349,8 +349,8 @@ def make_room(root, current, floor):
     incremental = 'no'
     shared = 'kept'
     if free < floor:
-        # Test executables of an earlier build, of this checkout or another, are rebuilt
-        # cheaply from the libraries beside them.
+        # A test executable a later build superseded, of this checkout or another, is built
+        # again only when its checkout tests again.
         try:
             with directory(SHARED, root) as target, directory('debug', target) as debug, \
                     directory('deps', debug) as deps:
@@ -445,12 +445,8 @@ def drop_own_target(workspace):
 
 
 def prepare_debug(root, profile):
-    """Keep one dev/test profile generation in the shared target. The caller holds the slot."""
+    """Keep one dev/test profile generation in the shared target, which exists. The caller holds the slot."""
     mark = '.clarp-debug-profile'
-    try:
-        os.mkdir(SHARED, dir_fd=root)
-    except FileExistsError:
-        pass
     with directory(SHARED, root) as target:
         wanted = json.dumps(profile).encode() + b'\n'
         try:
