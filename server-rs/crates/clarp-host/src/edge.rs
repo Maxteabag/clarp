@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 173;
+pub const HOST_CONTRACT: u64 = 174;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -399,6 +399,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A turn whose agent's folder is gone fails at once, never tried again, as the kind
     // `folder_missing`, with a sentence that names the folder (issue 758).
     ("folder_missing", 173),
+    // The conversation view only grows: a reply enters `view=conversation` once what it is can
+    // no longer change (other words or a message read into the turn come next, or the turn
+    // ends), each answer to each message of the user's stays there, and no row ever leaves it
+    // (`clarp_actor::conversation::anchors`, issue 745).
+    ("conversation_view_grows", 174),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
