@@ -4471,8 +4471,9 @@ impl Worker {
             // What a Stop left held is not work the agent still has: nothing runs it until
             // someone resumes it, and a goal that is being worked was resumed after that Stop.
             let resting = status.live.is_none() && (status.waiting.is_empty() || status.paused);
-            // An agent that waits for an approval, or for an answer it said it cannot go on
-            // without, is not woken to go on.
+            // An agent that waits for an answer it said it cannot go on without is not woken
+            // to go on. A card asked without that does not hold it: the agent goes on with
+            // other work meanwhile, and its jobs and timers must still reach it.
             let busy = if actor.artifacts().has_blocking_decision(now) {
                 Some(("approval", "Waiting for an answer or approval"))
             } else if resting {

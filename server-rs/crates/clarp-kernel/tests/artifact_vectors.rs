@@ -127,6 +127,20 @@ impl Fleet {
             .position(|agent| agent.artifacts.of_decision(decision_id).is_some())
     }
 
+    /// Whether the agent has an approval open that it did not ask as blocking its progress:
+    /// the one case where this Host and the Python Host answer `has_blocking_decision`
+    /// differently on purpose (server-rs/docs/differences.md).
+    fn open_approval_that_lets_it_go_on(&self, agent_id: &str, now: i64) -> bool {
+        self.agents
+            .iter()
+            .filter(|agent| agent.agent_id == agent_id.trim())
+            .flat_map(|agent| agent.artifacts.artifacts())
+            .filter_map(|artifact| artifact.decision.as_ref())
+            .any(|decision| {
+                decision.open(now) && decision.response_type == "approval" && !decision.blocks_progress
+            })
+    }
+
     fn of_plan(&self, plan_id: &str) -> Option<usize> {
         self.agents
             .iter()
@@ -853,7 +867,14 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
             let context = format!("{name}, call {number} ({what} {})", call["args"]);
             compared += 1;
             let mut found = Vec::new();
+            // The Python Host held an agent's goal for every open approval; this one holds it
+            // only for an answer the agent said it cannot go on without.
+            let intended = what == "has_blocking_decision"
+                && said.as_ref().ok() == Some(&json!(false))
+                && call.get("result") == Some(&json!(true))
+                && fleet.open_approval_that_lets_it_go_on(&text(&call["args"], "agent_id"), now);
             match (&said, call.get("result"), call.get("error")) {
+                _ if intended => {}
                 (Ok(ours), Some(theirs), _) => {
                     differences("result", ours, theirs, &mut found);
                 }
@@ -911,4 +932,77 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
         shown.join("\n")
     );
     assert!(compared >= 500, "only {compared} calls were compared");
+}
+
+/// An open card holds the agent's goal only when the agent asked it as blocking its progress,
+/// an approval as much as a question; and answering it lets the goal go on.
+#[test]
+fn only_an_answer_the_agent_cannot_go_on_without_holds_its_goal() {
+    let agent_id = "0901aaaabbbbcccc";
+    let mut fleet = Fleet {
+        agents: vec![Agent {
+            agent_id: agent_id.to_string(),
+            session: "ida9".to_string(),
+            persona: "Ida".to_string(),
+            artifacts: ArtifactBook::new(),
+            goals: GoalBook::new(),
+            media: MediaBook::new(),
+        }],
+        ids: 0,
+        files: 0,
+        pages: HashMap::new(),
+        cursors: HashMap::new(),
+    };
+    let now = 1_800_000_000_000;
+    let agent = json!({ "agent_id": agent_id });
+    let ask = |fleet: &mut Fleet, extra: Value| {
+        let mut args = json!({
+            "session": "ida9", "title": "Switch it on?", "question": "Switch the setting on?",
+        });
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let asked = fleet.call("create_decision", &args, now).unwrap();
+        asked["decision"]["decision_id"].as_str().unwrap().to_string()
+    };
+
+    let lets_it_go_on = ask(&mut fleet, json!({}));
+    let holds = |fleet: &mut Fleet| fleet.call("has_blocking_decision", &agent, now).unwrap();
+    assert_eq!(holds(&mut fleet), json!(false), "an approval asked without blocking");
+    assert_eq!(
+        fleet.call("has_pending_decision", &agent, now).unwrap(),
+        json!(true),
+        "it is still waiting for the user"
+    );
+
+    let question = ask(
+        &mut fleet,
+        json!({
+            "response_type": "single_choice",
+            "options": [{"id": "on", "label": "On"}, {"id": "off", "label": "Off"}],
+        }),
+    );
+    assert_eq!(holds(&mut fleet), json!(false), "a question asked without blocking");
+
+    let blocking = ask(
+        &mut fleet,
+        json!({"blocks_progress": true, "priority_reason": "Nothing else can go on"}),
+    );
+    assert_eq!(holds(&mut fleet), json!(true), "an approval asked as blocking");
+
+    let answer = |fleet: &mut Fleet, id: &str, answer: Value| {
+        let mut args = json!({ "decision_id": id, "expected_revision": 1 });
+        args.as_object_mut()
+            .unwrap()
+            .extend(answer.as_object().unwrap().clone());
+        fleet.call("resolve", &args, now).unwrap();
+    };
+    answer(&mut fleet, &blocking, json!({"choice": "accepted"}));
+    assert_eq!(holds(&mut fleet), json!(false), "the blocking one is answered");
+    answer(&mut fleet, &question, json!({"answer": {"option_id": "on"}}));
+    answer(&mut fleet, &lets_it_go_on, json!({"choice": "rejected"}));
+    assert_eq!(
+        fleet.call("has_pending_decision", &agent, now).unwrap(),
+        json!(false)
+    );
 }

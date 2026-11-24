@@ -768,14 +768,16 @@ impl ArtifactBook {
         changed
     }
 
-    /// Whether the agent waits for an answer it may not go on without: any approval, and a
-    /// question that says it stops the work.
+    /// Whether the agent waits for an answer it may not go on without: an approval or a
+    /// question it asked as blocking its progress. One asked without that lets it go on with
+    /// other work while the user decides, so its goal still wakes it for a job's result or its
+    /// own timer. (The Python Host held the goal for every open approval.)
     pub fn has_blocking_decision(&self, now: i64) -> bool {
         self.artifacts().any(|artifact| {
-            artifact.decision.as_ref().is_some_and(|decision| {
-                decision.open(now)
-                    && (decision.response_type == "approval" || decision.blocks_progress)
-            })
+            artifact
+                .decision
+                .as_ref()
+                .is_some_and(|decision| decision.open(now) && decision.blocks_progress)
         })
     }
 

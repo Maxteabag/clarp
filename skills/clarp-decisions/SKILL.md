@@ -30,7 +30,9 @@ position, alter another agent's request, or inflate urgency to jump the queue.
 
 Optional creation flags:
 
-- `--blocks-progress`: this work cannot continue without the answer.
+- `--blocks-progress`: this work cannot continue without the answer. It also holds
+  your goal's automatic wakes (a job's result, a timer) until the card is answered,
+  withdrawn or expired; without it they go on while the user decides.
 - `--priority-reason TEXT`: what is blocked, why timing matters, and the effect
   of waiting. Required for blocking or time-sensitive requests.
 - `--urgency normal|time_sensitive`: time-sensitive breaks through the user's

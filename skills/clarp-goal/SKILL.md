@@ -212,8 +212,11 @@ within current authorization. A stale wake can never silently choose a new owner
 `next_work` can carry your dynamically composed continuation instructions,
 including what changed, current constraints, and work that must not be repeated.
 It remains provisional context on the next wake. Optional nonblocking questions
-may coexist with authorized independent work; approvals and questions explicitly
-marked as blocking still prevent automatic continuation.
+may coexist with authorized independent work. A card asked without
+`--blocks-progress`, approval or question, leaves the goal running: its jobs and
+timers still wake you while the user decides, so go on with work that does not
+depend on the answer. Only a card asked with `--blocks-progress` holds automatic
+continuation until it is answered, withdrawn or expired.
 
 A manually tracked goal (`enroll:false`) never claims an automatic wake. To opt
 it in later, verify its owner binding and use
