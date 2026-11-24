@@ -2144,7 +2144,7 @@ pub fn summary(
 /// What an agent's row says of a provider of its own and of cloud speech: only where it has
 /// either, so that the row of every other agent is the Python Host's, field for field.
 pub(crate) fn own_provider_fields(row: &mut Value, record: &AgentRecord) {
-    let bound = !record.codex_provider.is_empty() || !record.codex_home.is_empty();
+    let bound = record.bound();
     if bound {
         row["codex_home"] = json!(record.codex_home);
         row["codex_provider"] = json!(record.codex_provider);

@@ -663,7 +663,7 @@ async fn keep(
     };
     // What a goal of an agent bound to a model provider of its own did is read by no model
     // of the Host's.
-    if !owner.record.codex_provider.is_empty() {
+    if owner.record.bound() {
         return Ended::Skipped("bound to a model provider of its own");
     }
     let Some(read) = gather(app, &directory, owner, plan_id, now, (full, true)).await else {
@@ -845,7 +845,7 @@ fn open_goals(directory: &Directory, scope: &Map<String, Value>, now: i64) -> Ve
             agent_id: record.agent_id.clone(),
             is_janitor: record.is_janitor,
             archived: record.archived_at_ms.is_some(),
-            bound: !record.codex_provider.is_empty(),
+            bound: record.bound(),
             ..Agent::default()
         };
         if !in_scope(scope, &target) {

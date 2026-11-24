@@ -578,7 +578,7 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     // An agent bound to a provider of its own stays on it: moving it to another tool would
     // carry its conversation, and the summary of it, to other services. Its models are its
     // provider's deployments, which no catalogue lists.
-    let bound = before.own_provider().is_some();
+    let bound = before.bound();
     if bound && backend != before.backend {
         return Err(told(
             StatusCode::CONFLICT,

@@ -2054,7 +2054,7 @@ pub(crate) async fn make_agent(
         || {
             replacing
                 .as_ref()
-                .is_some_and(|record| !record.codex_provider.is_empty())
+                .is_some_and(AgentRecord::bound)
         },
         |provider| !provider.trim().is_empty(),
     );

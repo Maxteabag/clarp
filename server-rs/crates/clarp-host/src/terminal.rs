@@ -318,10 +318,25 @@ async fn of_an_agent(
             return line::refused(StatusCode::SERVICE_UNAVAILABLE, "the agent cannot be asked");
         }
     };
-    let argv = match command_of(tool, facts.tool_session.as_deref().unwrap_or("")) {
+    let mut argv = match command_of(tool, facts.tool_session.as_deref().unwrap_or("")) {
         Ok(argv) => argv,
         Err((status, none)) => return line::refused(status, &none),
     };
+    let mut env = facts.env;
+    // An agent bound to a model provider of its own is spoken to by hand in its own Codex
+    // home and on its provider, as its turns are, or not at all.
+    let binding = member.record.binding();
+    if let Err(why) = crate::fleet::admitted(&binding) {
+        return line::refused(StatusCode::CONFLICT, &why);
+    }
+    if let Ok(Some(own)) = &binding {
+        let provider = serde_json::Value::String(own.provider.clone());
+        argv.splice(1..1, ["-c".to_string(), format!("model_provider={provider}")]);
+        env.push((
+            clarp_backend::codex::CODEX_HOME.to_string(),
+            own.home.display().to_string(),
+        ));
+    }
     // Where the agent works, when that is still there: else the home, as for the Host's
     // own terminal.
     let cwd = if facts.cwd.is_dir() {
@@ -337,7 +352,7 @@ async fn of_an_agent(
         called: session.to_string(),
         argv,
         cwd,
-        env: facts.env,
+        env,
         _agent: Some(lease),
     };
     socket

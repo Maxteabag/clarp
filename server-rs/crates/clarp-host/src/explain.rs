@@ -325,7 +325,7 @@ impl Desk {
             .fleet
             .directory()
             .named(target)
-            .is_some_and(|member| !member.record.codex_provider.is_empty());
+            .is_some_and(|member| member.record.bound());
         let janitor = looked.await?.filter(|_| !bound);
         let mut held = self.held(app).await?;
         let desk = held.as_mut().ok_or_else(unread)?;

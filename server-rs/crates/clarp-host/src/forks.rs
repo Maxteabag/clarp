@@ -257,7 +257,7 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
     }
     // The parent's binding to a provider of its own, and its choice of cloud speech, go with
     // the conversation the child starts from.
-    if !record.codex_provider.is_empty() {
+    if record.bound() {
         asked.insert("codex_home".into(), json!(record.codex_home));
         asked.insert("codex_provider".into(), json!(record.codex_provider));
     }
@@ -339,7 +339,7 @@ pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Ans
         }
         // A child of an agent bound to a provider of its own starts from its conversation: it
         // runs on that provider too, and so on Codex alone.
-        let bound = !parent.record.codex_provider.is_empty();
+        let bound = parent.record.bound();
         if bound && !child.backend.is_empty() && child.backend != parent.record.backend {
             let why = "An agent bound to a model provider of its own forks only onto Codex, \
                 on its own provider."

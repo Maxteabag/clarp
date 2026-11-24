@@ -19,7 +19,6 @@ use clarp_actor::{
     QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
-use clarp_backend::own_provider::OwnProvider;
 use clarp_kernel::artifacts::decisions as requests;
 use clarp_kernel::artifacts::reports;
 use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
@@ -631,7 +630,7 @@ impl Setup {
     /// The pool of the accounts its tool runs on. An agent bound to a provider of its own runs
     /// on none of the machine's accounts, and never waits for one.
     fn pool(&self) -> Option<&Arc<crate::pool::Service>> {
-        if !self.record.codex_provider.is_empty() {
+        if self.record.bound() {
             return None;
         }
         self.pools
@@ -2165,13 +2164,21 @@ impl Worker {
             || record.codex_provider != was.codex_provider)
             && !another;
         if let Some(backend) = clarp_backend::by_id(&record.backend).filter(|_| another) {
-            self.setup.backend = crate::fleet::backend_of(&record).unwrap_or(backend);
+            // A binding that cannot be used on the new tool runs nothing: every launch asks the
+            // record's binding first ([`crate::fleet::admitted`]) and refuses on it.
+            self.setup.backend = match crate::fleet::backend_of(&record) {
+                Ok(bound) => bound,
+                Err(why) => {
+                    eprintln!("clarp-host: {why}; it starts no turn until it is put right");
+                    backend
+                }
+            };
             self.actor = None;
         }
         if rebound {
             match crate::fleet::backend_of(&record) {
                 Ok(backend) => self.setup.backend = backend,
-                Err(why) => eprintln!("clarp-host: {why}; its turns keep the binding they had"),
+                Err(why) => eprintln!("clarp-host: {why}; it starts no turn until it is put right"),
             }
             self.actor = None;
         }
@@ -2213,7 +2220,7 @@ impl Worker {
                 .map(|teams| teams as Arc<dyn clarp_actor::teams::Runtime>),
             // An agent bound to a provider of its own takes no default of the Host's: the
             // machine's models are not its provider's, and Codex takes its home's own.
-            if self.setup.record.codex_provider.is_empty() {
+            if !self.setup.record.bound() {
                 Some(Box::new(move |backend| telling.launch_defaults(backend)))
             } else {
                 None
@@ -4190,14 +4197,14 @@ impl Worker {
                 let lane = self.lane();
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
-                let own = self.setup.record.own_provider();
+                let binding = self.setup.record.binding();
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
                         // An agent bound to a provider of its own starts no Codex whose home
                         // would run it on another: refused before anything starts, and the
                         // turn ends as a provider mismatch.
-                        if let Some(Err(why)) = own.as_ref().map(OwnProvider::admits) {
+                        if let Err(why) = crate::fleet::admitted(&binding) {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
@@ -4391,12 +4398,12 @@ impl Worker {
         let (strict, servers) = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
         let (turn, attempt) = (order.turn, order.attempt);
         let starting = self.launches.begin(turn, &order.socket);
-        let own = self.setup.record.own_provider();
+        let binding = self.setup.record.binding();
         std::thread::Builder::new()
             .name(format!("fork-{}", turn.0))
             .spawn(move || {
                 // The agent's fork runs on the agent's provider, or not at all.
-                if let Some(Err(why)) = own.as_ref().map(OwnProvider::admits) {
+                if let Err(why) = crate::fleet::admitted(&binding) {
                     tell(&tx, turn, attempt, Told::Failed(why));
                     return;
                 }
