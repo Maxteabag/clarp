@@ -671,15 +671,24 @@ fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
     // Each round: a turn holds, two of the user's messages wait behind it and are read
     // together into the next turn, which holds in turn; the Host starts again while it does,
     // and then it answers.
-    for (round, first, second, aloud) in [
-        ("a", true, false, false),
-        ("b", false, true, true),
-    ] {
-        send(&host, &format!("busy-{round}"), &format!("hold-busy{round}"), false);
-        wait_for("the first turn to hold", || marked(&format!("holding-busy{round}")));
+    for (round, first, second, aloud) in [("a", true, false, false), ("b", false, true, true)] {
+        send(
+            &host,
+            &format!("busy-{round}"),
+            &format!("hold-busy{round}"),
+            false,
+        );
+        wait_for("the first turn to hold", || {
+            marked(&format!("holding-busy{round}"))
+        });
         let sent = send(&host, &format!("{round}1"), "the first of two", first);
         assert_eq!(sent["queued"], true, "{sent}");
-        let sent = send(&host, &format!("{round}2"), &format!("hold-{round}"), second);
+        let sent = send(
+            &host,
+            &format!("{round}2"),
+            &format!("hold-{round}"),
+            second,
+        );
         assert_eq!(sent["queued"], true, "{sent}");
         mark(&format!("release-busy{round}"));
         wait_for("the turn read together to hold", || {
@@ -703,4 +712,3 @@ fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
         wait_for("the agent to be done", || host.state(&agent) == "done");
     }
 }
-
