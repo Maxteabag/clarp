@@ -854,6 +854,8 @@ pub struct Actor {
     backend: Arc<dyn Backend>,
     recorder: Recorder,
     imported_anchors: conversation::ImportedAnchors,
+    /// The walks of its newest turns' anchors, kept between reads ([`conversation::AnchorCache`]).
+    anchor_cache: conversation::AnchorCache,
     live: Option<LiveTurn>,
     /// The pool of the tool's accounts, where this Host has one.
     pool: Option<Arc<dyn Pooled>>,
@@ -1606,6 +1608,7 @@ impl Actor {
             backend,
             recorder,
             imported_anchors: conversation::ImportedAnchors::default(),
+            anchor_cache: conversation::AnchorCache::default(),
             jobs,
             provider_sessions,
             job_events: Vec::new(),
@@ -2035,6 +2038,7 @@ impl Actor {
             floor: self.recorder.floor(),
             head_revision: self.head_revision(),
             imported_anchors: Some(&self.imported_anchors),
+            anchor_cache: Some(&self.anchor_cache),
         }
     }
 
@@ -2975,6 +2979,7 @@ impl Actor {
             floor: 0,
             head_revision: self.head_revision(),
             imported_anchors: Some(&self.imported_anchors),
+            anchor_cache: Some(&self.anchor_cache),
         };
         conversation::tail(self.recorder.log(), self.drafts(), whole, limit, which)
     }

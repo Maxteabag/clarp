@@ -109,6 +109,7 @@ mod tests {
             floor,
             head_revision: log.last_seq().unwrap() * REVISION_STEP,
             imported_anchors: None,
+            anchor_cache: None,
         }
     }
 
