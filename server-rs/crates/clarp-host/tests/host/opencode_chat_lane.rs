@@ -21,8 +21,14 @@ use super::*;
 /// a run of its own for that right after the run's idle, so that idle is stale when the lane reads
 /// it, and it refuses to delete a message while a run goes on; `done-<x>` is the same, but that
 /// run has answered before the lane reads the stale idle, and only its events are still to come;
-/// `skew-<x>` is never read, but the session holds an answer whose parent sorts after it, with
-/// no run behind it. It tells the sessions that run (`/session/status`) and a session's answers, each with the
+/// `skew-<x>` is never read, and a message stored before it has an id that sorts after it, with an
+/// answer (a clock that stepped back between them); `lost-<x>` has such a message before it too,
+/// and is read and answered, but the event of its answer's start is lost; `slow-<x>` comes as the run ends, with an order as wrong as
+/// skew's: the session goes idle, asks a permission whose answer takes 6.5 s, and starts a run for
+/// it, which stores its answer only after that; `flaky-<x>` is `lost-<x>` whose session fails the
+/// second read of its messages after it (the first recheck's), `broken-<x>` is `skew-<x>` whose
+/// session fails the second and third. The session lists its stored messages in the order it stored
+/// them. It tells the sessions that run (`/session/status`) and a session's answers, each with the
 /// message it answers. While the file `slow-delete` exists a delete takes two seconds. What it
 /// was asked is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
@@ -48,8 +54,11 @@ count = [0]
 # The steers stored and not read yet: their message and their word.
 stored = []
 running = [False]
-# The message each answer answers, in order.
-parents = []
+# The session's messages as it stores them, in order: users' and answers, each answer with the
+# message it answers.
+history = []
+# Reads of a session's messages since a flaky- or broken- steer was stored, and which of them fail.
+reads = [0, set()]
 named = [0, 0]
 
 def ascending():
@@ -79,14 +88,16 @@ def idle(sid):
     running[0] = False
     emit(status(sid, "idle"))
 
-def step(sid, word, parent, kept=False):
+def step(sid, word, parent, kept=False, quiet=False):
     """One step of the turn, answering `word`: False when the session was aborted in it. `kept`:
-    the answer is in the session already, and only told now."""
+    the answer is in the session already, and only told now. `quiet`: the answer's start is never
+    told (its event is lost)."""
     count[0] += 1
     mid = f"msg_{pid}_{count[0]}"
     if not kept:
-        parents.append(parent)
-    emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "assistant", "parentID": parent}}})
+        history.append({"id": mid, "role": "assistant", "parentID": parent})
+    if not quiet:
+        emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "assistant", "parentID": parent}}})
     emit(part(sid, mid, id=mid + "s", type="step-start"))
     if word.startswith("die-"):
         note("died", word)
@@ -116,19 +127,32 @@ def run(sid, words, user):
     # user message since its last answer: one answer, whose parent is the last of them.
     while True:
         with lock:
-            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-"))]
+            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-"))]
             if not ready:
                 break
             for s in ready:
                 stored.remove(s)
-        if not step(sid, *together(ready)):
+        quiet = any(word.startswith(("lost-", "flaky-")) for _, word in ready)
+        if not step(sid, *together(ready), quiet=quiet):
             return idle(sid)
     with lock:
-        # An answer the session holds whose parent sorts after these words, though no run took
-        # them in and none will come: what a clock that stepped back would make of the order.
-        for s in stored:
-            if s[1].startswith("skew-"):
-                parents.append(ascending())
+        slow = [s for s in stored if s[1].startswith("slow-")]
+        for s in slow:
+            stored.remove(s)
+    if slow:
+        # Words that came as the run ended, on which message order is wrong (an id stored
+        # before them sorts after them). The run's idle goes out with the session idle; then a
+        # permission the lane must answer, which takes 6.5 s, with the new run's busy behind it;
+        # the answer itself is stored only after that.
+        running[0] = False
+        emit(status(sid, "idle"))
+        emit({"type": "permission.asked", "properties": {"sessionID": sid, "id": "per_slow"}})
+        emit(status(sid, "busy"))
+        time.sleep(8)
+        running[0] = True
+        step(sid, *together(slow))
+        return idle(sid)
+    with lock:
         racing = [s for s in stored if s[1].startswith("race-")]
         done = [s for s in stored if s[1].startswith("done-")]
         for s in racing + done:
@@ -137,7 +161,7 @@ def run(sid, words, user):
         # Words that came as the run ended, which a run of their own answered before the lane
         # reads this run's idle: the session holds that answer, and its events come after.
         word, parent = together(done)
-        parents.append(parent)
+        history.append({"id": f"msg_{pid}_done", "role": "assistant", "parentID": parent})
         running[0] = False
         emit(status(sid, "idle"))
         emit(status(sid, "busy"))
@@ -180,7 +204,11 @@ class H(BaseHTTPRequestHandler):
         if path == "/session/status":
             return self._json(200, {s: {"type": "busy"} for s in sessions()} if running[0] else {})
         if path.startswith("/session/") and path.endswith("/message"):
-            return self._json(200, [{"info": {"role": "assistant", "parentID": p}} for p in parents[-50:]])
+            reads[0] += 1
+            note("reads", "failed" if reads[0] in reads[1] else "read")
+            if reads[0] in reads[1]:
+                return self._json(500, {"name": "UnknownError"})
+            return self._json(200, [{"info": m} for m in history[-50:]])
         if path == "/event":
             q = queue.Queue()
             with lock:
@@ -216,6 +244,9 @@ class H(BaseHTTPRequestHandler):
             with sessions_file.open("a") as f:
                 f.write(sid + "\n")
             return self._json(200, {"id": sid})
+        if path == "/permission/per_slow/reply":
+            time.sleep(6.5)
+            return self._json(200, True)
         if path.endswith("/abort"):
             note("aborts", str(pid))
             aborted.set()
@@ -223,11 +254,22 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew)-[a-z0-9]+", text)))
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken)-[a-z0-9]+", text)))
             word = words[0]
             if "messageID" in body:
                 note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
                 with lock:
+                    if word.startswith(("flaky-", "broken-")):
+                        # The idle's read goes through; the recheck's (and for broken-, the one
+                        # after it too) fails.
+                        reads[0], reads[1] = 0, {2} if word.startswith("flaky-") else {2, 3}
+                    if word.startswith(("skew-", "slow-", "lost-", "broken-")):
+                        # A message stored before these words with an id that sorts after them,
+                        # and its answer: what a clock that stepped back between them makes.
+                        ahead = "msg_ffffffffffff" + "".join(random.choice(string.ascii_letters) for _ in range(14))
+                        history.append({"id": ahead, "role": "user"})
+                        history.append({"id": f"msg_{pid}_ahead", "role": "assistant", "parentID": ahead})
+                    history.append({"id": body["messageID"], "role": "user"})
                     stored.append((body["messageID"], word))
                 self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
                 return
@@ -247,7 +289,10 @@ class H(BaseHTTPRequestHandler):
             note("tokens", token)
             aborted.clear()
             running[0] = True
-            threading.Thread(target=run, args=(sid, words, ascending()), daemon=True).start()
+            user = ascending()
+            with lock:
+                history.append({"id": user, "role": "user"})
+            threading.Thread(target=run, args=(sid, words, user), daemon=True).start()
             self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
             return
         self._json(200, True)
@@ -266,6 +311,7 @@ class H(BaseHTTPRequestHandler):
             found = [s for s in stored if s[0] == parts[4]]
             for s in found:
                 stored.remove(s)
+            history[:] = [m for m in history if m["id"] != parts[4]]
         if not found:
             return self._json(404, {"name": "NotFoundError"})
         note("deleted", parts[4])
@@ -1251,10 +1297,12 @@ fn a_steer_after_the_last_answers_parent_runs_once_as_its_own_turn() {
     assert_eq!(answers(&host, "after", "said-late-r"), 1);
 }
 
-/// Issue 864. At the idle, message order says an answer took the unread words in, but no run
-/// follows (an id from a clock that stepped back). The lane holds the turn open for a recheck
-/// only: with no busy event by then, the turn ends as the idle would have, the words are taken
-/// back and run once as a turn of their own. Nothing hangs.
+/// Issue 864, the skew case. An older answer's parent is a message stored before the steer, not
+/// one of this turn's steers, and a clock step makes the steer sort before it: message order
+/// says the steer was taken in, but no run follows. The lane holds the turn open for a recheck
+/// only. There no answer's parent is the steer or a later steer of this turn's own, so it is not
+/// read: the turn ends as the idle would have, and the steer is deleted and run once as a turn of
+/// its own, never marked read and never lost. Nothing hangs.
 #[test]
 fn a_turn_held_open_by_message_order_alone_ends_at_the_recheck() {
     let world = world("opencode-lane-skew", "");
@@ -1352,4 +1400,169 @@ fn the_second_turn_runs_on_the_lane_warmed_beside_the_first() {
         2,
         "the first turn's server and the lane's"
     );
+}
+
+/// Issue 864. The event of the answer that took two steered words in is lost, so the lane never
+/// writes their reading as it happens, and the ids around them are skewed (a message stored
+/// before them sorts after them). At the idle, message order holds the turn open; at the recheck
+/// the session's stored list holds the answer, whose parent is the later of the two: both are
+/// read into the turn then, the first proven by the later steer of the turn's own, whatever the
+/// ids say. Nothing is deleted, and they are answered exactly once.
+#[test]
+fn words_whose_answer_was_never_told_are_read_by_the_stored_list_at_the_recheck() {
+    let world = world("opencode-lane-lost-answer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "lost", "opencode");
+    asked(&host, "lost", "ask-first");
+    lane_ready(&socket);
+
+    host.send("lost", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("lost", "lost-b", "b");
+    wait_for("the first steer", || steers(&world).len() == 1);
+    host.send("lost", "lost-c", "c");
+    wait_for("the second steer", || steers(&world).len() == 2);
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the answer to the words", || {
+        answers(&host, "lost", "said-lost-b+lost-c") == 1
+    });
+    // The answer names the later steer: both were taken in, the first proven by the second.
+    wait_for("the words read into the turn at the recheck", || {
+        read_at(&host, "lost", "u-b") == "steer" && read_at(&host, "lost", "u-c") == "steer"
+    });
+    wait_for("the turn to end", || host.state("lost") == "done");
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    asked(&host, "lost", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "ask-after"]);
+    assert_eq!(answers(&host, "lost", "said-lost-b+lost-c"), 1);
+    assert_eq!(
+        world
+            .lines("answered")
+            .iter()
+            .filter(|w| *w == "lost-b+lost-c")
+            .count(),
+        1
+    );
+}
+
+/// Issue 864. The lane's loop falls more than five seconds behind (here a permission it answers
+/// takes 6.5 s) right after an idle that message order alone held open, with the new run's busy
+/// event already waiting. The recheck fires only once nothing waits: the busy event is taken
+/// first and cancels it, so the words are read into the turn and answered once, and nothing is
+/// deleted.
+#[test]
+fn a_late_loop_takes_the_waiting_busy_event_before_its_recheck() {
+    let world = world("opencode-lane-slow-loop", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "slow", "opencode");
+    asked(&host, "slow", "ask-first");
+    lane_ready(&socket);
+
+    host.send("slow", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("slow", "slow-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let began = Instant::now();
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the answer to the words", || {
+        answers(&host, "slow", "said-slow-b") == 1
+    });
+    wait_for("the turn to end", || host.state("slow") == "done");
+    assert!(
+        began.elapsed() > Duration::from_secs(6),
+        "{:?}",
+        began.elapsed()
+    );
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    assert_eq!(read_at(&host, "slow", "u-b"), "steer");
+    asked(&host, "slow", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "ask-after"]);
+    assert_eq!(answers(&host, "slow", "said-slow-b"), 1);
+}
+
+/// Issue 864. The recheck's read of the session's messages fails: the turn stays open for one more
+/// recheck, whose read succeeds and decides. The words' answer is there (its events were lost),
+/// with the steer as its parent: they are read into the turn, nothing is deleted, and they are
+/// answered once.
+#[test]
+fn a_failed_read_at_the_recheck_is_tried_once_more_and_that_read_decides() {
+    let world = world("opencode-lane-flaky-read", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "flaky", "opencode");
+    asked(&host, "flaky", "ask-first");
+    lane_ready(&socket);
+
+    host.send("flaky", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("flaky", "flaky-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the words read into the turn at the second recheck", || {
+        read_at(&host, "flaky", "u-b") == "steer"
+    });
+    wait_for("the turn to end", || host.state("flaky") == "done");
+    assert_eq!(world.lines("reads"), ["read", "failed", "read"]);
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    asked(&host, "flaky", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "ask-after"]);
+    assert_eq!(answers(&host, "flaky", "said-flaky-b"), 1);
+}
+
+/// Issue 864. Both rechecks' reads of the session's messages fail: after the second the turn
+/// ends as its idle would have, once, without the list. The words, which no run took in, are
+/// deleted and run once as a turn of their own.
+#[test]
+fn two_failed_reads_end_the_turn_once_without_the_list() {
+    let world = world("opencode-lane-broken-read", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "broken", "opencode");
+    asked(&host, "broken", "ask-first");
+    lane_ready(&socket);
+
+    host.send("broken", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("broken", "broken-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let steered = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the words taken back", || {
+        world.lines("deleted") == [steered.as_str()]
+    });
+    assert_eq!(world.lines("reads"), ["read", "failed", "failed"]);
+    wait_for("the words answered on their own", || {
+        answers(&host, "broken", "said-broken-b") == 1
+    });
+    wait_for("the last turn to end", || host.state("broken") == "done");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "broken-b"]);
+    assert_ne!(read_at(&host, "broken", "u-b"), "steer");
+    assert_eq!(answers(&host, "broken", "said-hold-a"), 1);
+    assert_eq!(answers(&host, "broken", "said-broken-b"), 1);
 }

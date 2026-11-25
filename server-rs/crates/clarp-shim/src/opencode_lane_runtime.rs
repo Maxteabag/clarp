@@ -299,6 +299,27 @@ fn taken_in(message: &str, parent: &str) -> bool {
     parent.starts_with("msg_") && message <= parent
 }
 
+/// Whether the session's stored message `list` proves that OpenCode took `message` in: it holds
+/// an answer whose parent is `message` or one of the turn's own steers `posted` after it, in the
+/// order the lane posted them. OpenCode answers the last message it took in, and takes in every
+/// message stored before it (issue 862), so such an answer is certain, whatever the ids or the
+/// clock say. An answer to a message not of this turn proves nothing.
+fn proven(list: &Value, posted: &[(String, String)], message: &str) -> bool {
+    let Some(own) = posted.iter().position(|(steered, _)| steered == message) else {
+        return false;
+    };
+    let answered: Vec<&str> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|stored| stored["info"]["role"] == "assistant")
+        .filter_map(|stored| stored["info"]["parentID"].as_str())
+        .collect();
+    posted[own..]
+        .iter()
+        .any(|(steered, _)| answered.contains(&steered.as_str()))
+}
+
 /// What the idle that ends a turn found of its unread steered words.
 enum Settle {
     /// None is left unread or untaken back: the turn ends.
@@ -381,8 +402,9 @@ struct Lane {
     turn_socket: Option<Socket>,
     followers: Vec<UnixStream>,
     stop_deadline: Option<(Instant, (u64, u32))>,
-    /// A turn held open at its idle by message order alone is looked at again then.
-    recheck: Option<Instant>,
+    /// A turn held open at its idle by message order alone is looked at again then; true once
+    /// a read of the session's messages at a recheck failed.
+    recheck: Option<(Instant, bool)>,
     stale_login: bool,
     model: Option<String>,
     effort: Option<String>,
@@ -435,6 +457,7 @@ impl Lane {
             return Some(at);
         }
         self.recheck
+            .map(|(at, _)| at)
             .into_iter()
             .chain(self.idle.deadline(self.turn.is_none()))
             .min()
@@ -462,11 +485,6 @@ impl Lane {
 
     fn next_input(&mut self) -> io::Result<Option<Input>> {
         loop {
-            if self.recheck.is_some_and(|at| Instant::now() >= at) {
-                self.recheck = None;
-                self.look_again();
-                continue;
-            }
             if self
                 .stop_deadline
                 .is_some_and(|(at, _)| Instant::now() >= at)
@@ -484,6 +502,15 @@ impl Lane {
                 Ok(input) => return Ok(Some(input)),
                 Err(RecvTimeoutError::Disconnected) => return Ok(None),
                 Err(RecvTimeoutError::Timeout) => {
+                    // A recheck fires only with nothing waiting: a busy event already in the
+                    // channel, however late the loop is, is taken first and cancels it.
+                    if let Some((at, failed)) = self.recheck
+                        && Instant::now() >= at
+                    {
+                        self.recheck = None;
+                        self.look_again(failed);
+                        continue;
+                    }
                     if self.expired()? {
                         return Err(io::Error::new(io::ErrorKind::TimedOut, "idle"));
                     }
@@ -750,6 +777,12 @@ impl Lane {
     /// an answer names the last message it took in (`parentID`), which is this one or one
     /// stored after it ([`taken_in`]). Unknown is no.
     fn answered(&self, messages: &[(String, String)]) -> bool {
+        self.stored()
+            .is_some_and(|list| any_taken_in(&list, messages))
+    }
+
+    /// The session's last messages, as OpenCode stored them and in the order it lists them.
+    fn stored(&self) -> Option<Value> {
         let path = format!(
             "/session/{}/message?limit=50",
             crate::opencode_http::component(&self.thread)
@@ -757,7 +790,8 @@ impl Lane {
         self.serve
             .client
             .get(&path, 10)
-            .is_ok_and(|list| any_taken_in(&list, messages))
+            .ok()
+            .filter(Value::is_array)
     }
 
     /// At the idle that ends the turn: the steered words OpenCode stored and has not read are
@@ -811,13 +845,40 @@ impl Lane {
         Ok(Settle::Done)
     }
 
-    /// The recheck of a turn held open by message order alone (issue 864): no busy event came,
-    /// so no run is coming. The turn ends as its idle would have without that order: its unread
-    /// words are taken back and run as a turn of their own.
-    fn look_again(&mut self) {
-        let Some(stopping) = self.turn.as_ref().map(|turn| turn.stopping) else {
+    /// The recheck of a turn held open by message order alone (issue 864): no run came, or its
+    /// events were lost. The session's stored messages decide, with no clock and no id order:
+    /// words OpenCode answered by one of this turn's own steers posted with or after them
+    /// ([`proven`]) were read, and are written so; the rest are taken back and run as a turn of
+    /// their own, and the turn ends as its idle would have. A list that cannot be read holds the
+    /// turn for one more recheck (`failed` says this is it); after that it ends without it.
+    fn look_again(&mut self, failed: bool) {
+        let Some((stopping, unread, posted)) = self
+            .turn
+            .as_ref()
+            .map(|turn| (turn.stopping, turn.unread(), turn.steered.clone()))
+        else {
             return;
         };
+        match self.stored() {
+            Some(list) => {
+                let now = super::now_ms();
+                let read = unread
+                    .iter()
+                    .filter(|(message, _)| proven(&list, &posted, message))
+                    .try_for_each(|(_, id)| match self.turn.as_mut() {
+                        Some(turn) => turn.spool.steer_read(id, now),
+                        None => Ok(()),
+                    });
+                if let Err(error) = read {
+                    return self.end(Some(1), None, Some(&error.to_string()));
+                }
+            }
+            None if !failed && !unread.is_empty() => {
+                self.recheck = Some((Instant::now() + RECHECK, true));
+                return self.hint();
+            }
+            None => {}
+        }
         match self.take_back_unread(stopping, false) {
             Ok(Settle::Runs) => self.hint(),
             Ok(_) if stopping => self.end(None, Some(nix::libc::SIGINT), None),
@@ -878,6 +939,12 @@ impl Lane {
             self.end(Some(1), None, Some(&error.to_string()));
             return;
         }
+        // A turn held open for its recheck: another idle of the same run (OpenCode tells each
+        // idle twice, as a status and as `session.idle`) decides nothing; the recheck does. A
+        // run that came since cleared the recheck with its busy event; a Stop's idle ends it.
+        if matches!(seen, Ok(true)) && self.recheck.is_some() && !stopping {
+            return self.hint();
+        }
         if matches!(seen, Ok(true)) {
             match self.take_back_unread(stopping, true) {
                 Ok(Settle::Done) => {}
@@ -885,7 +952,7 @@ impl Lane {
                 Ok(Settle::Runs) => return self.hint(),
                 // Only message order says a run took them in: it must show within RECHECK.
                 Ok(Settle::ByOrder) => {
-                    self.recheck = Some(Instant::now() + RECHECK);
+                    self.recheck = Some((Instant::now() + RECHECK, false));
                     return self.hint();
                 }
                 Err(error) => return self.end(Some(1), None, Some(&error.to_string())),
@@ -955,7 +1022,7 @@ impl Lane {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{MessageIds, any_taken_in, taken_in};
+    use super::{MessageIds, any_taken_in, proven, taken_in};
     use serde_json::json;
 
     #[test]
@@ -975,6 +1042,59 @@ mod tests {
         let later = ids.next(1_795_619_200_400).unwrap();
         assert!(!taken_in(&later, &second));
         assert!(!taken_in(&first, ""));
+    }
+
+    #[test]
+    fn only_an_answer_to_one_of_the_turns_own_steers_from_it_on_proves_it_read() {
+        let answer = |parent: &str| json!({"info": {"role": "assistant", "parentID": parent}});
+        let asked = |id: &str| json!({"info": {"role": "user", "id": id}});
+        let posted: Vec<(String, String)> = ["b", "c", "d"]
+            .iter()
+            .map(|m| ((*m).to_owned(), format!("u-{m}")))
+            .collect();
+        // Answered itself, or with a steer the lane posted after it (issue 862).
+        assert!(proven(&json!([answer("b")]), &posted, "b"));
+        assert!(proven(
+            &json!([asked("b"), asked("c"), answer("c")]),
+            &posted,
+            "b"
+        ));
+        // An answer to a steer posted before it, to a message not of this turn (whatever its id
+        // or place says: a clock that stepped back), or none: no proof (issue 864).
+        assert!(!proven(&json!([answer("b")]), &posted, "c"));
+        let ahead = "msg_ffffffffffffA";
+        assert!(!proven(
+            &json!([asked(ahead), answer(ahead), asked("d")]),
+            &posted,
+            "d"
+        ));
+        assert!(!proven(&json!([asked("d")]), &posted, "d"));
+        assert!(!proven(&json!({"not": "a list"}), &posted, "b"));
+        assert!(!proven(&json!([answer("x")]), &posted, "x"));
+        // A clock that stepped back between two posts: the later steer's id sorts before the
+        // earlier one's. Post order decides, and the earlier is still proven by it.
+        let mut ids = MessageIds::default();
+        let earlier = ids.next(1_795_619_200_400).unwrap();
+        let later = ids.next(1_795_619_200_100).unwrap();
+        assert!(later < earlier);
+        let skewed = vec![
+            (earlier.clone(), "u-1".to_owned()),
+            (later.clone(), "u-2".to_owned()),
+        ];
+        assert!(proven(
+            &json!([asked(&earlier), asked(&later), answer(&later)]),
+            &skewed,
+            &earlier
+        ));
+        assert!(!proven(&json!([answer(&earlier)]), &skewed, &later));
+        // An older answer whose parent is the turn's prompt, stored before the steer but with an
+        // id that sorts after it (a clock step): message order says the steer was taken in, but
+        // the answer's parent is no steer of this turn, so nothing proves it.
+        let prompt = ids.next(1_795_619_200_900).unwrap();
+        let steer = ids.next(1_795_619_200_500).unwrap();
+        assert!(taken_in(&steer, &prompt), "order alone says taken in");
+        let list = json!([asked(&prompt), answer(&prompt), asked(&steer)]);
+        assert!(!proven(&list, &[(steer.clone(), "u-s".to_owned())], &steer));
     }
 
     #[test]

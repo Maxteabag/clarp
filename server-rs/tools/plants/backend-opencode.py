@@ -218,7 +218,16 @@ PLANTS.append((LANE_SHIM, 'lane_shim', 'a message stored after an answer\'s pare
                '    parent.starts_with("msg_") && message <= parent', '    parent.starts_with("msg_")'))
 # A turn held open by message order alone is rechecked (issue 864).
 PLANTS.append((LANE_SHIM, 'lane_host', 'a turn held open by message order alone waits for a run that never comes',
-               '                    self.recheck = Some(Instant::now() + RECHECK);\n', ''))
+               '                    self.recheck = Some((Instant::now() + RECHECK, false));\n', ''))
+PLANTS.append((LANE_SHIM, 'lane_host', 'at the recheck an answer to a later own steer proves nothing',
+               '    posted[own..]\n', '    posted[own..=own]\n'))
+PLANTS.append((LANE_SHIM, 'lane_host', 'a late loop rechecks before it takes the busy event waiting for it',
+               '    fn next_input(&mut self) -> io::Result<Option<Input>> {\n        loop {\n',
+               '    fn next_input(&mut self) -> io::Result<Option<Input>> {\n        loop {\n            if let Some((at, failed)) = self.recheck\n                && Instant::now() >= at\n            {\n                self.recheck = None;\n                self.look_again(failed);\n                continue;\n            }\n'))
+PLANTS.append((LANE_SHIM, 'lane_host', 'a failed read at the recheck ends the turn at once',
+               '            None if !failed && !unread.is_empty() => {', '            None if false => {'))
+PLANTS.append((LANE_SHIM, 'lane_host', 'at the recheck the stored list is not asked',
+               '        match self.stored() {\n            Some(list) => {', '        match None::<Value> {\n            Some(list) => {'))
 # What OpenCode writes into its configuration folders itself is no part of a lane's digest (issue 864's warm lane).
 PLANTS.append((LANE_HOST, 'lane_digest', "OpenCode's own plugin in a package file moves the digest",
                '    dependencies.remove(OPENCODE_PLUGIN);\n', ''))
@@ -228,5 +237,7 @@ PLANTS.append((LANE_HOST, 'lane_digest', "OpenCode's default configuration moves
                'if fields.is_empty() { Vec::new() } else { bytes }', 'bytes'))
 PLANTS.append((LANE_HOST, 'lane_host', "OpenCode's own files in the global folder move the digest",
                '    dependencies.remove(OPENCODE_PLUGIN);\n', ''))
+PLANTS.append((LANE_SHIM, 'lane_host', 'a second idle of a held-open turn decides before its recheck',
+               '        if matches!(seen, Ok(true)) && self.recheck.is_some() && !stopping {', '        if false {'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
