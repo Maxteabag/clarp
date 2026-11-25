@@ -79,9 +79,10 @@ with up to 16 KB of detail. The experience watcher opens one finding per device
 (`scroll_flash_<platform>`) on its first flash and tells the app's owner and the
 front desk, again at most hourly while new flashes come, and clears it after 24
 hours without one (see the watcher configuration). An iOS or Android device's
-flashes count only from a released build number (four digits or more): a
-debug or simulator build (`1`) or a test build opens nothing. The log below
-still lists every flash:
+flashes count only from a released build number (four digits or more): an iOS
+debug or simulator build (`1`) or a test build opens nothing. The Android app
+sends its version code from every build type today, so its debug and emulator
+builds still count. The log below still lists every flash:
 
 ```bash
 clarp-admin client-log --event scroll_flash --since 1d

@@ -79,10 +79,13 @@ flashes of the last 24 hours, whatever the pass's window: the finding reads
 what changed at most once an hour while it stays open. It clears 24 hours
 after the device's newest flash. A phone app's flashes (`ios`, `android`)
 count only from a released build number, all digits and at least four of them
-(TestFlight and App Store builds, Android release builds): a debug or simulator
-build reports `1`, where jumps are made on purpose, and a test build that names
-itself is no build number either. Such a device opens nothing, and a finding it
-had clears on the next pass. The desktop and web apps report versions, not build
+(TestFlight and App Store builds, Android release builds): the iOS app's debug
+or simulator build reports `1`, where jumps are made on purpose, and a test build
+that names itself (`1152-debug`) is no build number either. Such a device opens
+nothing, and a finding it had clears on the next pass. The Android app reports
+its version code from every build type today, debug and emulator builds
+included, so its flashes count from every build until it marks a build that is
+not a release (`<code>-debug`). The desktop and web apps report versions, not build
 numbers, and their flashes count as before (`checks::counted`). Its owner is `owners.<kind>`, else
 `owners.scroll_flash`, else that platform's app-crash owner
 (`app_crash_<platform>`, else `app_crash`), and the front desk as for every

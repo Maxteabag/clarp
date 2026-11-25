@@ -258,12 +258,14 @@ const SCROLL_FLASH_KINDS: [&str; 4] = [
 ];
 
 /// Whether an app's scroll flash is counted: a phone app's (`ios`, `android`) only from a
-/// released build number, all digits and at least four of them (TestFlight and App Store builds,
-/// Android release builds). A debug or simulator build reports `1`, and jumps are made on purpose
-/// on one while it is worked on; a test build that names itself (`1112-synthetic`) is no
-/// released build either. A device whose only flashes came from such builds has no finding, so a
-/// finding it had clears on the next pass. The desktop and web apps report versions such as
-/// `0.1.0`, not build numbers: their flashes count as they come.
+/// released build number, all digits and at least four of them. The iOS app's debug and
+/// simulator builds report `1`, and jumps are made on purpose on one while it is worked on; a
+/// test build that names itself (`1112-synthetic`, `1152-debug`) is no released build either. A
+/// device whose only flashes came from such builds has no finding, so a finding it had clears on
+/// the next pass. The Android app reports its version code (the commit count) from every build
+/// type today, debug and emulator builds included, so its flashes count from every build until
+/// it marks a build that is not a release (`<code>-debug`). The desktop and web apps report
+/// versions such as `0.1.0`, not build numbers: their flashes count as they come.
 pub(super) fn counted(client: &str, build: &str) -> bool {
     !matches!(client, "ios" | "android")
         || (build.len() >= 4 && build.bytes().all(|sign| sign.is_ascii_digit()))
@@ -498,9 +500,10 @@ mod tests {
             }
         };
         let rows = [
-            // A simulator's debug build, and an emulator's: jumps made on purpose.
+            // The iOS simulator's debug build: jumps made on purpose.
             row("sim", "ios", "1", 1_800_000_000_000),
-            row("emulator", "android", "1", 1_800_000_000_000),
+            // An Android build that is not a release, once the app marks it so.
+            row("emulator", "android", "1152-debug", 1_800_000_000_000),
             // A test build that names itself, not a released build.
             row("synthetic", "android", "1112-synthetic", 1_800_000_000_000),
             // The desktop reports its version, and counts as before.
@@ -527,7 +530,7 @@ mod tests {
             ]
         );
         assert!(seen.found[&key("scroll_flash_ios", "ipad")].starts_with("1 chat-view"));
-        for build in ["1", "123", "", "1342a", "1112-synthetic"] {
+        for build in ["1", "123", "", "1342a", "1112-synthetic", "1152-debug"] {
             assert!(
                 !counted("ios", build) && !counted("android", build),
                 "{build:?}"
