@@ -680,3 +680,94 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
     assert_eq!(status, 200, "{one}");
     assert!(one.get("words_withheld").is_none(), "{one}");
 }
+
+/// What a helper bound otherwise than its maker says never reaches a reader of the maker who
+/// may not read the helper: not in the maker's line in the snapshot, nor in the one-row read,
+/// nor in an event's `parent` (issue 819). The owner reads it on the helper's own row.
+#[test]
+fn a_helper_bound_otherwise_than_its_maker_is_not_read_through_the_makers_line() {
+    let place = Place::new("bound-maker-line");
+    let codex = place.root.join("codex");
+    program(&codex, CODEX);
+    let host = place.start_in(
+        "bound-owner-token",
+        &["--helpers-checked-every-ms", "3600000"],
+        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
+    );
+    let dir = place.root.clone();
+    // Pat runs on the machine's own tools, and Ben reads it; its helper Hal is bound to a
+    // provider of its own, and Ben does not read Hal. Sid is another helper of Pat's, unbound.
+    let pat = host.new_agent("Pat");
+    let ben = host.new_agent("Ben");
+    host.send(&ben, "hello", "u-1");
+    wait_for("Ben's first turn", || host.state(&ben) == "done");
+    let home = own_home(&place, "home-h");
+    let made = host.post(
+        "/agents",
+        json!({
+            "name": "Hal", "backend": "codex", "model": "a-deployment-name", "role": "helper",
+            "parent": pat, "session": "hal", "codex_home": home, "codex_provider": "stand-in",
+        }),
+    );
+    assert_eq!(made["session"], "hal", "{made}");
+    let made = host.post(
+        "/agents",
+        json!({"name": "Sid", "backend": "scripted", "role": "helper", "parent": pat, "session": "sid"}),
+    );
+    assert_eq!(made["session"], "sid", "{made}");
+    const LINE: &str = "Ledger figures";
+    let on = tool(&host, &dir, None, &["clarp-agent-bg", "hal", "on", LINE]);
+    assert_eq!(on.0, 0, "{}", on.2);
+    let row_of = |snapshot: &Value, session: &str| {
+        snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    wait_for("Hal's line on its own row", || {
+        row_of(&host.get("/agents/snapshot"), "hal")["status_text"] == LINE
+    });
+    let ben_turn = first_turn_token(&place, &agent_id(&host, &ben));
+    let as_ben = [("X-Clarp-Turn", ben_turn.as_str())];
+
+    // Sid, whom Ben reads, is done: its event carries Pat's line, which is Hal's alone now and
+    // names Hal by its session only.
+    let heard = heard_as(&host, &as_ben, || {
+        let body = json!({ "session": "sid", "state": "done" });
+        assert_eq!(host.ask("POST", "/agent-helper-state", Some(&body)).0, 200);
+    });
+    let event = heard
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("data: ")
+                .or_else(|| line.strip_prefix("data:"))
+        })
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .rev()
+        .find(|event| event["kind"] == "helper-state" && event["session"] == "sid")
+        .unwrap_or_else(|| panic!("Ben hears of Sid's move: {heard}"));
+    assert!(event.get("words_withheld").is_none(), "{event}");
+    assert_eq!(event["parent"]["session"], json!(pat), "{event}");
+    assert_eq!(event["parent"]["fields"]["status_text"], "hal", "{event}");
+    assert!(!heard.contains(LINE), "{heard}");
+
+    // The snapshot and the one-row read say the same of Pat, to Ben and to the owner.
+    assert_eq!(
+        row_of(&host.get("/agents/snapshot"), &pat)["status_text"],
+        "hal"
+    );
+    let (_, snapshot) = read_as(&host, &as_ben, "/agents/snapshot");
+    let pats = row_of(&snapshot, &pat);
+    assert!(
+        pats.get("words_withheld").is_none(),
+        "Ben reads Pat: {pats}"
+    );
+    assert_eq!(pats["status_text"], "hal", "{pats}");
+    assert!(!snapshot.to_string().contains(LINE), "{snapshot}");
+    let (status, one) = read_as(&host, &as_ben, &format!("/agents/{pat}"));
+    assert_eq!(status, 200, "{one}");
+    assert_eq!(one, pats);
+}

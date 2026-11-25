@@ -1761,7 +1761,9 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
   and times kept, words blank, `words_withheld: true`. The event and its `parent` are each
   judged by their own `session`, frame by frame as the stream is sent. `head_revision` and
   `conversation_id` on `transcript-updated` are a number and an id, which such a reader's
-  snapshot row has too. `GET /agents/{session}`
+  snapshot row has too. A maker's `status_text` names a working helper bound otherwise than the maker (one
+  that some reader of the maker may not read) by its session alone, never with its line
+  (issue 819), so neither the maker's row nor `parent.fields` carries that helper's words. `GET /agents/{session}`
   of such an agent answers 200 with that row, never 403.
 
 ### The sync algorithm

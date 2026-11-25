@@ -99,6 +99,24 @@ pub fn may_read(reader: &Reader, record: &AgentRecord) -> bool {
     }
 }
 
+/// Whether every reader who may read `maker` may read `helper` too. Only then may what the
+/// helper says stand in its maker's line (`edge::Families`), which its maker's readers are
+/// given in the snapshot, in the one-row read and in an event's `parent` (issue 819). A helper
+/// that is not bound is read by everyone; one that is must be bound as its maker is, and read by
+/// each agent its maker lets in.
+pub fn read_with(helper: &AgentRecord, maker: &AgentRecord) -> bool {
+    if !helper.bound() {
+        return true;
+    }
+    maker.bound()
+        && helper.codex_home == maker.codex_home
+        && helper.codex_provider == maker.codex_provider
+        && maker
+            .readers
+            .iter()
+            .all(|reader| *reader == helper.agent_id || helper.readers.contains(reader))
+}
+
 /// The agents whose words a reader may not read, and every agent's names (which stay shown).
 #[derive(Debug, Default)]
 pub struct Withheld {
@@ -1427,6 +1445,32 @@ mod tests {
         assert!(may_read(&Reader::agent(&bound), &free));
         bound.readers.push(free.agent_id.clone());
         assert!(may_read(&Reader::agent(&free), &bound));
+    }
+
+    /// A helper's words stand in its maker's line only where every reader of the maker reads
+    /// the helper too (issue 819).
+    #[test]
+    fn bound_privacy_a_helper_is_read_with_its_maker_only_where_its_makers_readers_read_it() {
+        let free_maker = record("ben", "", "");
+        let mut bound_maker = record("ada", "/homes/ada", "theirs");
+        let free_helper = record("hal", "", "");
+        let mut twin_helper = record("tia", "/homes/ada", "theirs");
+        let own_helper = record("ola", "/homes/ola", "theirs");
+        // A helper nobody is kept from reads with any maker.
+        assert!(read_with(&free_helper, &free_maker));
+        assert!(read_with(&free_helper, &bound_maker));
+        // A bound helper of a maker that everyone reads, or one bound otherwise, does not.
+        assert!(!read_with(&twin_helper, &free_maker));
+        assert!(!read_with(&own_helper, &bound_maker));
+        // Bound as its maker is: it does, until the maker lets in a reader it does not.
+        assert!(read_with(&twin_helper, &bound_maker));
+        bound_maker.readers.push(free_maker.agent_id.clone());
+        assert!(!read_with(&twin_helper, &bound_maker));
+        twin_helper.readers.push(free_maker.agent_id.clone());
+        assert!(read_with(&twin_helper, &bound_maker));
+        // The helper itself among its maker's readers is no reader it lacks.
+        bound_maker.readers.push(twin_helper.agent_id.clone());
+        assert!(read_with(&twin_helper, &bound_maker));
     }
 
     #[test]

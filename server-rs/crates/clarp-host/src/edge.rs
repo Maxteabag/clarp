@@ -1559,7 +1559,7 @@ impl Families {
                 let said = view.status.label.trim();
                 let mut doing = wire::activity(record, &view.status);
                 let recovering = doing["phase"] == "account_recovery";
-                let text = if said.is_empty() {
+                let mut text = if said.is_empty() {
                     if view.can_leave_note
                         && crate::hidden_coordination::hides(directory, &record.agent_id)
                         && let Some(headline) =
@@ -1571,6 +1571,20 @@ impl Families {
                 } else {
                     said.to_string()
                 };
+                // What a helper bound otherwise than its maker says is not put in its maker's
+                // line, which the maker's readers read: its session alone is (issue 819).
+                if record.bound() {
+                    let maker = directory
+                        .members
+                        .iter()
+                        .chain(&directory.janitors)
+                        .find(|member| member.record.agent_id == *parent);
+                    if maker
+                        .is_none_or(|maker| !crate::bound_privacy::read_with(record, &maker.record))
+                    {
+                        text.clear();
+                    }
+                }
                 family.working.push(helpers::Working {
                     session: record.session.clone(),
                     text,
