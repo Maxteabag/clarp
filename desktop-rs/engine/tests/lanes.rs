@@ -27,6 +27,8 @@ fn lane_settings_are_read_changed_refused_and_read_again_on_the_event() {
     d.until("the answer", |e| most_of(e) == Some(12.0));
     assert_eq!(d.engine.lane_settings_error(), "");
 
+    // A late answer to an earlier change does not clear a later refusal.
+
     // Out of range: the Host's sentence, and its value back.
     d.engine.set_lane_setting("most", json!(40));
     d.until("the refusal", |e| !e.lane_settings_error().is_empty());

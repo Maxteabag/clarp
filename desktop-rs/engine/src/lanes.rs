@@ -20,7 +20,8 @@ pub const SWITCH_SUFFIX: &str = "_chat_lane";
 pub const NUMBERS: [&str; 3] = ["most", "memory_mb", "idle_minutes"];
 
 const READ: &str = "lane-settings";
-const WRITE: &str = "lane-settings-write";
+/// A change's tag: `lane-settings-write:<n>`, the n-th change.
+const WRITE: &str = "lane-settings-write:";
 
 #[derive(Default)]
 pub(crate) struct Lanes {
@@ -30,6 +31,10 @@ pub(crate) struct Lanes {
     pub answer: Option<Object>,
     /// Why the last change or read did not go through, as the Host said it.
     pub error: String,
+    /// Changes posted so far: only the latest one's answer is kept, so an
+    /// earlier change answering late neither puts back an old value nor
+    /// clears a later refusal.
+    pub writes: u64,
 }
 
 /// One tool's switch: its key, the tool's name, and whether it is on.
@@ -126,10 +131,12 @@ impl Engine {
             answer.insert(key.to_owned(), value.clone());
         }
         self.lanes.error.clear();
+        self.lanes.writes += 1;
         self.changes.push(Change::HostStatus);
+        let tag = format!("{WRITE}{}", self.lanes.writes);
         let mut body = Object::new();
         body.insert(key.to_owned(), value);
-        self.api.post_json(WRITE, "/lane-settings", Value::Object(body), None);
+        self.api.post_json(&tag, "/lane-settings", Value::Object(body), None);
     }
 
     /// `/server-info` answered.
@@ -163,11 +170,13 @@ impl Engine {
 
     /// Replies for the lane tags; true when it was one.
     pub(crate) fn lanes_json(&mut self, tag: &str, object: &Object) -> bool {
-        if tag != READ && tag != WRITE {
-            return false;
-        }
-        if tag == WRITE {
+        if let Some(n) = tag.strip_prefix(WRITE) {
+            if n.parse::<u64>().ok() != Some(self.lanes.writes) {
+                return true;
+            }
             self.lanes.error.clear();
+        } else if tag != READ {
+            return false;
         }
         self.lanes.answer = Some(object.clone());
         self.changes.push(Change::HostStatus);
@@ -177,7 +186,7 @@ impl Engine {
     /// A refused change or a failed read; true when it was one.
     pub(crate) fn lanes_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
         match tag {
-            WRITE => {
+            _ if tag.starts_with(WRITE) => {
                 // The Host's sentence as it came ("most must be between 1 and 32").
                 eprintln!("Engine: POST /lane-settings refused ({status}): {message}");
                 self.lanes.error = message.to_owned();
