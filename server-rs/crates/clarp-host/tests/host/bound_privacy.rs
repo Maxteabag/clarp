@@ -561,7 +561,7 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
         assert_eq!(status, 200, "{said}");
     };
     mark("done");
-    let owners = host.listen();
+    let owners = host.listen_at(&format!("/events?token={}", host.token));
     let heard = heard_as(&host, &as_ben, || {
         mark("running");
         wait_for("the owner hears the helper's move", || {

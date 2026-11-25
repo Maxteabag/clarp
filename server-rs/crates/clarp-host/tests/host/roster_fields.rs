@@ -145,7 +145,12 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
     // A conversation's change says its head revision and conversation as the row has them: an
     // app that holds that revision reads nothing.
     host.send(&maker, "hello", "u-1");
-    wait_for("the turn to settle", || host.state(&maker) == "done");
+    // Its helper is at work, so its row reads `background`: the turn is over once it is not
+    // busy and has ended one.
+    wait_for("the turn to settle", || {
+        let row = snapshot_row(&host, &maker);
+        row["busy"] == false && row["last_turn_end"].as_i64().is_some_and(|at| at > 0)
+    });
     wait_for("the newest transcript event to name the row's head", || {
         let row = snapshot_row(&host, &maker);
         heard
