@@ -630,12 +630,15 @@ pub(crate) fn message_row(
     // A row the Host writes itself (role "system", e.g. "Now on Codex ·
     // GPT-5.5. The conversation came along." after a backend move) reads as
     // a quiet line, not as the agent's reply. Notices that only carry origin
-    // "system" (a failed turn) stay as they are, so a failure stays loud.
+    // "system" (a failed turn) stay as they are, so a failure stays loud,
+    // except a turn whose process was ended from outside (`failure_kind`
+    // `ended_from_outside`, contract 191): that is no fault of the tool or
+    // the agent, so it reads as the Host's quiet line too.
     let author = if row.activity {
         "activity"
     } else if m.role == "user" {
         "user"
-    } else if m.role == "system" {
+    } else if m.role == "system" || m.failure_kind == clarp_core::protocol::ENDED_FROM_OUTSIDE {
         "system"
     } else {
         "assistant"
