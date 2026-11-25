@@ -327,7 +327,8 @@ session.
   It is tried once for the attempt, never again; where the start gets no place, fails, or no lane
   may start for the turn (one nobody waits on under pressure), the turn runs per turn as before.
   Codex already did so: its chat turns and goals offer a refused attempt to a new lane once
-  (`once_more`), started within the same limits.
+  (`once_more`), started within the same limits. OpenCode does so for a refused claim and for a
+  lane that differs from the turn's by the login alone (issue 857, in "OpenCode's lane").
 - **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
   Muse lane take its session, waits for that before its first output: the lane's start, or the
   session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the
@@ -469,7 +470,21 @@ serve would be one point of failure for every such agent.
   up to 1 MiB) its words, the agent's folder, the environment the serve inherits, and the
   contents (never sizes or times) of `opencode.json` and `opencode.jsonc` from the agent's
   folder up to its worktree's root, `.opencode/` there, the global configuration and `auth.json`.
-  A different digest runs the turn on its own serve and starts a new lane beside it.
+  The digest has two parts, everything but `auth.json` and then all of it, so the Host can tell a
+  lane that differs by the login alone; the lane compares the whole. A different digest runs the
+  turn on its own serve and starts a new lane beside it, unless the login alone differs (below).
+- **Another login starts the new lane as the turn** (issue 857). A lane that differs only by
+  `auth.json`, from a seat switch or a refreshed token (OpenCode's file names no account, so any
+  change of it is a changed login), and is free and fits the turn's session or holds none, is
+  replaced by the turn itself: the idle lane leaves within `LEAVE_WAIT`, the turn starts the new
+  lane in place of its own serve's start, which costs the same (about 1.3 to 1.6 s), and runs on
+  it. A claim the lane refused for its login (`lane-login-changed`, a change between the turn's
+  digest and the lane's claim) takes the same path once the lane has let go. Once per attempt;
+  with no place for the lane, a start that fails, or a turn nobody waits on under the machine's
+  pressure, the turn runs on its own serve and the lane starts beside it, as before. Any other
+  difference (the configuration, the program, the environment) keeps the own serve and the lane
+  beside it, so a turn started otherwise never replaces the lane itself. A turn with no lane
+  there at all (the first, or after the lane's idle time) runs on its own serve as before.
 - **Death.** A serve that exits under a turn fails that turn ("OpenCode server stopped before the
   turn finished"), and the lane leaves; the next turn runs on its own serve while a new lane
   starts.

@@ -101,6 +101,22 @@ impl Lane {
             && (state.thread.is_empty() || state.thread == session)
     }
 
+    /// Whether the lane there is free and fits this turn's session, or holds none yet, but was
+    /// started under another login alone ([`login_only`]): one a seat switch or a refreshed
+    /// token made stale, which the turn may start anew in place of its own server (issue 857).
+    pub(crate) fn another_login(&self, digest: &str, session: &str) -> bool {
+        self.look().is_ok_and(|state| {
+            state.available
+                && state.claim.is_none()
+                && (state.thread.is_empty() || state.thread == session)
+                && login_only(&state.options, digest)
+        })
+    }
+
+    pub(crate) fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
     /// Whether the lane holds `session` now (its lock with it).
     pub(crate) fn holds(&self, session: &str) -> bool {
         self.look().is_ok_and(|state| state.thread == session)
@@ -285,19 +301,14 @@ impl Start {
         env.dedup_by(|a, b| a.0 == b.0);
         let login_file = data_home.join("opencode").join("auth.json");
         let mut hash = Sha256::new();
-        let mut put = |label: &str, bytes: &[u8]| {
-            hash.update((label.len() as u64).to_le_bytes());
-            hash.update(label.as_bytes());
-            hash.update((bytes.len() as u64).to_le_bytes());
-            hash.update(bytes);
-        };
+        let mut put = |label: &str, bytes: &[u8]| feed(&mut hash, label, bytes);
         put("program", program.to_string_lossy().as_bytes());
         put("program-content", &program_identity(&program));
         put("cwd", cwd.to_string_lossy().as_bytes());
         for (key, value) in &env {
             put(key.as_str(), value.as_bytes());
         }
-        for path in config_files(cwd, config_home, &env, &login_file) {
+        for path in config_files(cwd, config_home, &env) {
             put(
                 path.to_string_lossy().as_ref(),
                 &std::fs::read(&path).unwrap_or_default(),
@@ -306,13 +317,42 @@ impl Start {
         for folder in project_folders(cwd) {
             hash_folder(&folder, &mut put)?;
         }
+        // The login last, in its own part: a lane whose digest differs by the login alone is
+        // one a seat switch or a refreshed token made stale (issue 857).
+        let rest = hash.clone().finalize();
+        feed(
+            &mut hash,
+            &login_file.to_string_lossy(),
+            &std::fs::read(&login_file).unwrap_or_default(),
+        );
         Some(Self {
             program,
             env,
             login_file: Some(login_file),
-            digest: format!("{:x}", hash.finalize()),
+            digest: format!("{rest:x}{LOGIN_PART}{:x}", hash.finalize()),
         })
     }
+}
+
+/// What parts a lane's digest: everything but the login before it, and all of it after.
+const LOGIN_PART: char = '.';
+
+fn feed(hash: &mut Sha256, label: &str, bytes: &[u8]) {
+    hash.update((label.len() as u64).to_le_bytes());
+    hash.update(label.as_bytes());
+    hash.update((bytes.len() as u64).to_le_bytes());
+    hash.update(bytes);
+}
+
+/// Whether a lane started with the digest `options` differs from one started with `digest` by
+/// the login alone (`auth.json`, a seat switch or a refreshed token): everything else it was
+/// started with is the same (issue 857).
+pub(crate) fn login_only(options: &str, digest: &str) -> bool {
+    options != digest
+        && matches!(
+            (options.split_once(LOGIN_PART), digest.split_once(LOGIN_PART)),
+            (Some((was, _)), Some((now, _))) if was == now
+        )
 }
 
 /// The program's content where it is a small wrapper (the pin is in its words), else its size
@@ -352,15 +392,10 @@ fn project_folders(cwd: &Path) -> Vec<PathBuf> {
     folders
 }
 
-/// The files whose content makes a kept server stale: the project's and the global
-/// configuration, files the environment names for it, and the login file (the lead's rule of
-/// 24 Nov 2026: a content hash, never a size or a time).
-fn config_files(
-    cwd: &Path,
-    config_home: &Path,
-    env: &[(String, String)],
-    login_file: &Path,
-) -> Vec<PathBuf> {
+/// The files whose content makes a kept server stale, but the login file, which the digest
+/// takes last: the project's and the global configuration, and files the environment names for
+/// it (the lead's rule of 24 Nov 2026: a content hash, never a size or a time).
+fn config_files(cwd: &Path, config_home: &Path, env: &[(String, String)]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for dir in project_folders(cwd) {
         files.push(dir.join("opencode.json"));
@@ -381,7 +416,6 @@ fn config_files(
             files.push(PathBuf::from(value));
         }
     }
-    files.push(login_file.to_owned());
     files
 }
 
@@ -476,6 +510,14 @@ mod tests {
         std::fs::write(data.join("opencode/auth.json"), r#"{"a":{"type":"api"}}"#).unwrap();
         let with_login = digest();
         assert_ne!(with_login, with_global);
+        // Another login, or a refreshed token, is the login alone; a configuration is not.
+        assert!(login_only(&with_global, &with_login));
+        std::fs::write(data.join("opencode/auth.json"), r#"{"a":{"type":"oauth"}}"#).unwrap();
+        assert!(login_only(&with_login, &digest()));
+        std::fs::write(data.join("opencode/auth.json"), r#"{"a":{"type":"api"}}"#).unwrap();
+        assert_eq!(digest(), with_login);
+        assert!(!login_only(&with_login, &with_login));
+        assert!(!login_only(&with_agent, &with_global));
         // The pin is in the wrapper's words.
         std::fs::write(&program, "exec mise x opencode@1.19.0 -- opencode \"$@\"\n").unwrap();
         assert_ne!(digest(), with_login);

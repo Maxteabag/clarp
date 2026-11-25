@@ -2,6 +2,13 @@
 //! the owner's `opencode_chat_lane` is on. No turn waits for the lane: a turn runs on it only
 //! when it is ready now, and otherwise on its own server as before, with the lane started
 //! beside it for the turns after.
+//!
+//! One exception (issue 857): a turn whose lane is there and free, but was started under another
+//! login alone (a seat switch, a refreshed token: `auth.json` changed and nothing else), or that
+//! the lane refused because its login changed, starts the new lane itself in place of its own
+//! server's start, which costs the same, and runs on it. Once; with no place for a lane, a start
+//! that fails, or a turn nobody waits on under the machine's pressure, it runs on its own server
+//! as before.
 
 use std::path::PathBuf;
 
@@ -9,7 +16,7 @@ use clarp_actor::ShimOrder;
 
 use super::{Ask, Told, Worker, launch_permitted, tell};
 use crate::lane::opencode::{Lane, Start, Words};
-use crate::lane::{Settings, Tool};
+use crate::lane::{LEAVE_WAIT, LoginChanged, Settings, Tool, Want};
 
 /// What the worker keeps of its OpenCode lane between turns.
 #[derive(Default)]
@@ -68,7 +75,15 @@ impl Worker {
             return Some(order);
         };
         let lane = self.opencode_lane_of();
-        if !lane.ready(&start.digest, &words.session) {
+        // A lane may be started for this turn: not for one nobody waits on while the machine is
+        // under pressure (issue 186).
+        let may_start = self.may_start_lane();
+        // The lane there differs from the one this turn needs by the login alone: the turn
+        // starts the new one itself. Any other difference runs it on its own server, with the
+        // lane started beside it, so a turn of other options never ends a lane the next needs.
+        let ready = lane.ready(&start.digest, &words.session);
+        let renew = !ready && may_start && lane.another_login(&start.digest, &words.session);
+        if !(ready || renew) {
             return Some(order);
         }
         let token = self
@@ -76,20 +91,68 @@ impl Worker {
             .turns
             .token(&self.setup.record.agent_id, order.turn.0);
         let tx = self.tx.clone();
+        let (launcher, profile) = (self.setup.launcher.clone(), self.setup.profile.clone());
         self.setup.runtime.spawn_blocking(move || {
             let (turn, attempt, socket) = (order.turn, order.attempt, order.socket.clone());
-            if !launch_permitted(&tx, turn, attempt) {
-                tell(
-                    &tx,
-                    turn,
-                    attempt,
-                    Told::Failed("the actor no longer admits this attempt".into()),
-                );
+            let session = words.session.clone();
+            // The lane under the login there now, in place of the turn's own server: the one
+            // there, idle, leaves first within LEAVE_WAIT (`place`). Whether it is ready.
+            let begin = || {
+                match lane.start(&launcher, &profile, &start, &session, Want::Optional) {
+                    Ok(Some(mut child)) => {
+                        let _ = std::thread::Builder::new()
+                            .name("opencode-lane-reaper".into())
+                            .spawn(move || {
+                                let _ = child.wait();
+                            });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("clarp-host: the OpenCode lane did not start: {error}");
+                    }
+                }
+                lane.ready(&start.digest, &session)
+            };
+            if renew && !begin() {
+                // No place, or the start failed: the turn runs on its own server.
+                let _ = tx.send(Ask::OpenCodeOwnServer(order));
                 return;
             }
-            let result = lane.submit(&order, words, token);
+            let permitted = || {
+                let admitted = launch_permitted(&tx, turn, attempt);
+                if !admitted {
+                    tell(
+                        &tx,
+                        turn,
+                        attempt,
+                        Told::Failed("the actor no longer admits this attempt".into()),
+                    );
+                }
+                admitted
+            };
+            if !permitted() {
+                return;
+            }
+            let reached = || order.spool.try_exists().unwrap_or(true);
+            let mut result = lane.submit(&order, words.clone(), token.clone());
+            // Refused because the login changed, with nothing of the turn reaching OpenCode: the
+            // lane is on its way out. Once it has gone, the turn starts the new lane, as above,
+            // and is offered to it; once, never again.
+            if let Err(error) = &result
+                && LoginChanged::is(error)
+                && may_start
+                && !reached()
+            {
+                let until = std::time::Instant::now() + LEAVE_WAIT;
+                if lane.endpoint().let_go_within(until, true).unwrap_or(false) && begin() {
+                    if !permitted() {
+                        return;
+                    }
+                    result = lane.submit(&order, words, token);
+                }
+            }
             // The lane makes the turn's spool before anything reaches OpenCode.
-            if order.spool.try_exists().unwrap_or(true) {
+            if reached() {
                 super::launcher::follow(&socket, &|out| tell(&tx, turn, attempt, out));
             } else if result.is_err() {
                 // Refused before it began (the session was still held, the lane left): the

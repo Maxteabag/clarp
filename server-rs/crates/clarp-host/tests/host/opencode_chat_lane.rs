@@ -504,3 +504,121 @@ fn a_turn_whose_lane_cannot_be_worked_out_runs_on_its_own_server() {
     assert_eq!(servers.len(), 2, "{servers:?}");
     assert_ne!(servers[0], servers[1]);
 }
+
+/// The turns that started OpenCode without a lane in the last hour, as the apps read them.
+fn cold(host: &Host) -> u64 {
+    host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["opencode"]
+        .as_u64()
+        .unwrap_or(0)
+}
+
+impl World {
+    /// OpenCode's login file, as a seat switch or a refreshed token writes it.
+    fn login(&self, said: &Value) {
+        let dir = self.place.root.join("data/opencode");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("auth.json"), said.to_string()).unwrap();
+    }
+
+    /// An agent whose second turn ran on its lane: the lane's server, and the socket.
+    fn on_lane(&self, host: &Host, session: &str) -> (String, std::path::PathBuf) {
+        let socket = self.agent(host, session, "opencode");
+        asked(host, session, "ask-one");
+        lane_ready(&socket);
+        asked(host, session, "ask-two");
+        let lane = lane_state(&socket).unwrap()["pid"].to_string();
+        assert_eq!(
+            self.servers().last(),
+            Some(&lane),
+            "the second turn ran on the lane"
+        );
+        assert_eq!(
+            self.lines("starts").len(),
+            2,
+            "the first turn's server and the lane's"
+        );
+        (lane, socket)
+    }
+}
+
+/// Issue 857. A seat switch, or a refreshed token, rewrites `auth.json`, and the lane's digest
+/// moved with it: the next turn ran on its own server, a cold start. Where the login alone
+/// changed, the turn now starts the new lane itself and runs on it: one server started, the
+/// lane's, and no turn without a lane. Any other change runs the turn on its own server, as
+/// before.
+#[test]
+fn a_changed_login_starts_the_new_lane_as_the_turn() {
+    let world = world("opencode-login-swap", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    world.login(&json!({"openai": {"type": "api", "key": "k1"}}));
+    let host = world.host();
+    let (first, socket) = world.on_lane(&host, "swapper");
+    let cold_before = cold(&host);
+
+    // Another account.
+    world.login(&json!({"anthropic": {"type": "oauth", "refresh": "r2", "access": "a2"}}));
+    asked(&host, "swapper", "ask-three");
+    assert_eq!(
+        world.lines("starts").len(),
+        3,
+        "one server started: the lane's"
+    );
+    let second = lane_state(&socket).unwrap()["pid"].to_string();
+    assert_ne!(second, first, "a lane on the new login");
+    assert_eq!(world.servers().last(), Some(&second), "the turn ran on it");
+    assert_eq!(cold(&host), cold_before, "no turn without a lane");
+
+    // A refreshed token of the same account: the same.
+    world.login(&json!({"anthropic": {"type": "oauth", "refresh": "r2", "access": "a3"}}));
+    asked(&host, "swapper", "ask-four");
+    assert_eq!(world.lines("starts").len(), 4);
+    let third = lane_state(&socket).unwrap()["pid"].to_string();
+    assert_ne!(third, second);
+    assert_eq!(world.servers().last(), Some(&third));
+    assert_eq!(cold(&host), cold_before);
+    let sessions: Vec<_> = world
+        .lines("turns")
+        .iter()
+        .map(|line| line.split(' ').nth(1).unwrap().to_owned())
+        .collect();
+    assert!(sessions.iter().all(|s| *s == sessions[0]), "{sessions:?}");
+
+    // The agent's configuration changed, not the login: the turn runs on its own server and
+    // the lane is started beside it, as before.
+    std::fs::write(world.place.root.join("work/opencode.json"), "{\"a\":1}").unwrap();
+    asked(&host, "swapper", "ask-five");
+    let own = world.servers().last().unwrap().clone();
+    assert_ne!(own, third, "the turn ran on its own server");
+    assert_eq!(cold(&host), cold_before + 1);
+    lane_ready(&socket);
+    let beside = lane_state(&socket).unwrap()["pid"].to_string();
+    assert_ne!(beside, own);
+    assert_ne!(beside, third);
+}
+
+/// Issue 857. Where no lane may start under the new login (no place within the limits), the
+/// turn runs on its own server, as before: tried once, never again.
+#[test]
+fn a_changed_login_with_no_place_for_a_lane_runs_the_turn_on_its_own_server() {
+    let world = world("opencode-login-swap-full", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    world.login(&json!({"openai": {"type": "api", "key": "k1"}}));
+    let host = world.host();
+    let (lane, socket) = world.on_lane(&host, "crowded");
+    let cold_before = cold(&host);
+    // Too little memory for any lane: none may start now.
+    world.setting("opencode_chat_lane = true\nlane_limits = \"fixed\"\nlane_memory_mb = 1\n");
+    world.login(&json!({"openai": {"type": "api", "key": "k2"}}));
+    asked(&host, "crowded", "ask-three");
+    assert_eq!(
+        world.lines("starts").len(),
+        3,
+        "the turn's own server alone"
+    );
+    let own = world.servers().last().unwrap().clone();
+    assert_ne!(own, lane, "the turn ran on its own server");
+    assert_eq!(cold(&host), cold_before + 1);
+    assert!(lane_state(&socket).is_none(), "no lane started");
+}
