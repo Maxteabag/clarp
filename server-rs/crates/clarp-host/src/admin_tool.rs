@@ -141,39 +141,45 @@ pub(crate) async fn prompt(
             }
         }
         // The timer runs outside any turn. What an agent bound to a provider of its own
-        // schedules is its words: it goes out under its name, so an agent that may not read
-        // it is given that it came and not what it says, and another Host is refused it
-        // (`bound_privacy`).
-        let bound_sender = if from.is_none() {
-            match crate::turn_identity::presented(app, token).await {
-                Ok(Some(own)) if own.record.bound() => Some(own.record.session.clone()),
-                Ok(_) => None,
-                Err(why) => {
-                    return ToolAnswer::said(
-                        4,
-                        format!("clarp-admin prompt: {}; nothing was sent", why.message()),
-                    );
-                }
+        // schedules for another agent is its words: it goes out under its name, whatever
+        // `--from` says, so an agent that may not read it is given that it came and not what
+        // it says, and another Host is refused it (`bound_privacy`). Its own timed wakeups
+        // (`--to` itself) stay as they were asked.
+        let own = match crate::turn_identity::presented(app, token).await {
+            Ok(own) => own,
+            Err(why) => {
+                return ToolAnswer::said(
+                    4,
+                    format!("clarp-admin prompt: {}; nothing was sent", why.message()),
+                );
             }
-        } else {
-            None
         };
+        let is_own = |named: Option<&str>, own: &crate::fleet::Member| {
+            named
+                .and_then(|named| app.anyone(python::strip(named)))
+                .is_some_and(|named| named.record.agent_id == own.record.agent_id)
+        };
+        let bound_sender = own.filter(|own| own.record.bound()).and_then(|own| {
+            let to_itself = is_own(parsed.option("--to"), &own);
+            let as_itself = is_own(from, &own);
+            (!to_itself && !as_itself).then(|| own.record.session.clone())
+        });
         let stamped;
         let parsed = match bound_sender {
             Some(session) => {
-                // Its own arguments, an `--origin` left out (it is no automation's), and itself
-                // as the sender.
+                // Its own arguments, with any `--from` and `--origin` left out (it is neither
+                // another sender's nor an automation's), and itself as the sender.
                 let mut sent: Vec<String> = Vec::with_capacity(args.len() + 2);
                 let mut skip = false;
                 for arg in args {
                     if std::mem::take(&mut skip) {
                         continue;
                     }
-                    if arg == "--origin" {
+                    if arg == "--origin" || arg == "--from" {
                         skip = true;
                         continue;
                     }
-                    if arg.starts_with("--origin=") {
+                    if arg.starts_with("--origin=") || arg.starts_with("--from=") {
                         continue;
                     }
                     sent.push(arg.clone());

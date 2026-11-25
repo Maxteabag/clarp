@@ -1650,7 +1650,10 @@ pub(crate) async fn decide(
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
     let done = ask_agent(member, want).await?;
-    if action == "resolve" {
+    if action != "resolve" {
+        // A card withdrawn or dismissed asks nothing any more: what the Host kept of it goes.
+        crate::bound_privacy::let_go(app, &decision_id, done.changed).await;
+    } else {
         // A card that asked whether an agent may read a bound agent: a yes lets it in.
         crate::bound_privacy::answered(
             app,

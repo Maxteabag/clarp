@@ -1294,6 +1294,22 @@ pub async fn answered(
     }
 }
 
+/// Lets go of the question the Host kept for a card that was withdrawn or dismissed
+/// (`changed`: it was so now). A card it kept none for changes nothing.
+pub async fn let_go(app: &App, decision_id: &str, changed: bool) {
+    if !changed {
+        return;
+    }
+    let kept = app.fleet.kept_book(ASKED, decision_id.to_string()).await;
+    if !matches!(kept, Ok(Some(_))) {
+        return;
+    }
+    let gone = vec![(ASKED, decision_id.to_string())];
+    if let Err(why) = app.fleet.change_together(Vec::new(), gone).await {
+        app.fleet.unkept(ASKED, &why.0);
+    }
+}
+
 /// Does what the owner allowed: a reader let in, or a binding changed (where its home still
 /// defines its provider).
 async fn apply(app: &App, asked: &Asked) {

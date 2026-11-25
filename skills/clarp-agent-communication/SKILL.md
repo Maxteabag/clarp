@@ -34,10 +34,12 @@ let in (`readers` on its row, by agent id):
 - What it sends such an agent (`prompt`, `request`/`reply`, a helper's report) arrives as
   "<name> sent you a message. Its words are withheld …", and its own `prompt` answers
   `words_withheld: true`: the recipient did not get the words. A `--delay` prompt it
-  schedules goes out under its name too. Send to another Host (`--server`) is refused. A
-  helper it makes with `agent create --parent` it is bound as it is (Codex only), so it
-  reads its parent and its parent reads it. Its `<team>` updates reach such teammates as "<name> posted an
-  update (words withheld …)".
+  schedules for another agent goes out under its name too, whatever `--from` says. Send to
+  another Host (`--server`) is refused. Its `<team>` updates reach such teammates as
+  "<name> posted an update (words withheld …)".
+- A helper made with it as the parent (`clarp-admin agent create --parent <it>`) is bound
+  to the same home and provider and must run on Codex, so the helper reads its parent and
+  its parent reads the helper.
 - From such an agent you cannot read its log, its goals, its artifacts or its status fork:
   reads answer `bound_conversation` (HTTP 403, or exit 77 in the tools), and its rows and
   events come with `words_withheld: true` and empty texts. Its name and state stay.

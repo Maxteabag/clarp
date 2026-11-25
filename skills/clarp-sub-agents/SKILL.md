@@ -200,7 +200,10 @@ start, and the command exits 1.
    <helper>`, and starts a small watcher unit that holds the background job
    until the helper reports (job finished) or fails or is abandoned (job
    failed). Any Clarp backend works (`claude`, `codex`, `grok`, `agy`,
-   `opencode`, `deepseek`). `NAME.session` holds the helper's session.
+   `opencode`, `deepseek`), except under an agent bound to a model provider of
+   its own (`codex_provider` on its row): its helpers must be `--backend codex`,
+   and are bound to its home and provider (another backend is refused, 409
+   `own_provider`). `NAME.session` holds the helper's session.
    Its report arrives in your chat as a message from the helper.
 4. **Model with quota.** Sub-agents share your account's quota. If your
    model is at its limit, a sub-agent on the same model dies on its first

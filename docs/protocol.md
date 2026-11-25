@@ -1513,8 +1513,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
     77 with `bound_conversation`; JSON a tool prints is blanked as above.
   - A message it sends to such an agent (`clarp-admin prompt`, a request's reply, a helper's
     report) arrives as "<name> sent you a message. Its words are withheld: …", and the send
-    answers `words_withheld: true`. A delayed prompt it schedules (`--delay`) goes out under
-    its name when it is sent, with or without `--from`. `clarp-admin prompt --server` from
+    answers `words_withheld: true`. A delayed prompt it schedules (`--delay`) for another agent
+    goes out under its name when it is sent, whatever `--from` says; one to itself keeps
+    its `--origin`. `clarp-admin prompt --server` from
     it (or naming it as the sender) is refused (409 `bound_conversation`). Its `<team>`
     updates reach such members' briefs (and a leader's tick) as "<name> posted an update
     (words withheld: …)"; an update whose sender or reader the Host cannot place is
