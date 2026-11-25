@@ -24,8 +24,8 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
 mod holder;
-mod scope;
 pub(crate) mod muse;
+mod scope;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Read, Write};

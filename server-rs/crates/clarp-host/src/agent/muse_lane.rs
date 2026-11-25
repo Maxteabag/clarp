@@ -243,13 +243,11 @@ impl Worker {
         let lane = self.muse_lane();
         let _ = std::thread::Builder::new()
             .name("muse-lane-end".into())
-            .spawn(
-                move || match lane.endpoint().retire_within(LEAVE_WAIT) {
-                    Ok(true) => {}
-                    Ok(false) => eprintln!("clarp-host: the Muse lane did not leave in time"),
-                    Err(error) => eprintln!("clarp-host: the Muse lane did not leave: {error}"),
-                },
-            );
+            .spawn(move || match lane.endpoint().retire_within(LEAVE_WAIT) {
+                Ok(true) => {}
+                Ok(false) => eprintln!("clarp-host: the Muse lane did not leave in time"),
+                Err(error) => eprintln!("clarp-host: the Muse lane did not leave: {error}"),
+            });
     }
 }
 
