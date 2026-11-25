@@ -575,6 +575,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::keeper::run(&app);
     // And an idle agent's own label that outlived its time is taken back.
     clarp_host::labels::run(&app);
+    // And a snoozed chat comes back when its moment comes or its agent writes to the user.
+    clarp_host::snooze::run(&app);
     eprintln!("clarp-host listens on {address}");
     // What could not be read of what it keeps, in one line: the door shows the same counts.
     // Said after where it listens, which is the Host's first line.

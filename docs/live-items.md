@@ -218,6 +218,15 @@ reported there as `thinking` so older clients stay busy.
 `worked_ms = ended_at_ms - started_at_ms` once settled. Render a settled turn's
 work behind `Worked for 1m 12s · 6 tools`.
 
+`context_tokens` and `context_window` (Rust Host contract 197, feature `context_meter`, issue
+869): how full the turn's conversation is and how many tokens its model holds, as the tool says
+them while the turn runs (Claude with each answer, OpenCode with each step, Antigravity over ACP
+with its usage updates, Codex at the turn's end). Absent until the tool says them. A `turn` op
+with the new values follows when the gauge moves a whole percent of the window (of 200,000 where
+no window is known) or the window changes, and the turn's end carries the newest. Draw the meter
+from them while the turn runs, and from the agent's row (`context_tokens`, `context_window`)
+otherwise.
+
 `read_rows` (Rust Host contract 185, feature `live_read_rows`): the ids of the `/log` rows of the
 messages read into the turn as it ran, oldest first: a message steered into the running turn, or
 messages read together with the turn's own at its start. Absent while none was read. A `turn` op

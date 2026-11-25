@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 196;
+pub const HOST_CONTRACT: u64 = 198;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -493,6 +493,17 @@ pub const FEATURES: &[(&str, u64)] = &[
     // may read that have the words, newest first, paged, from an index kept as rows change,
     // `partial` while older history is still being read into it (issue 803).
     ("message_search", 196),
+    // An agent's row says how full its conversation is for every tool that says so (Codex and
+    // OpenCode too), with the window its tool said for the model of that turn
+    // (`context_window`), the live turn carries both as they move, and the row says how much
+    // of its tool's account's windows is used (`account_quota`), told again by an
+    // `account-quota` event as a window's whole percent moves (issue 869).
+    ("context_meter", 197),
+    // A chat's snooze is the Host's, the same on every app: `snoozed_until` on its row, set
+    // and cleared by the owner's apps (`POST /agent-snooze`), told by `agent-roster`
+    // `snooze-changed` with the field, and ended when its moment comes or the agent writes
+    // something for the user (`crate::snooze`, issue 871).
+    ("snooze", 198),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -911,6 +922,7 @@ pub fn router(app: App) -> Router {
         .merge(push::routes())
         .merge(peers::routes())
         .merge(roster::routes())
+        .merge(crate::snooze::routes())
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
         .merge(crate::compact::routes())
@@ -1824,6 +1836,8 @@ pub(crate) fn agent_row(
     // Whether its tool's account is used up, or near a limit with no other seat to take its
     // turn: advice for whoever is about to write to it.
     row["backend_quota"] = quota.of(view.backend, &member.record.model);
+    // How much of its tool's account's windows is used, for a meter (issue 869).
+    row["account_quota"] = quota.account(view.backend, member.record.bound());
     // A change of its backend that runs now (feature `agent_backend_transit`), else null.
     row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);
     // The face it is shown with: the picture it has of its own; else, unless it has a

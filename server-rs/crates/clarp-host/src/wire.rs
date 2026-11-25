@@ -2181,6 +2181,8 @@ pub fn summary(
         "heartbeat_enabled": record.heartbeat_enabled,
         "dreaming_enabled": false,
         "muted": record.muted,
+        // Until when the owner put its chat out of sight, on every app (issue 871).
+        "snoozed_until": record.snoozed_until_ms,
         // A quiet agent (a janitor) is never unread and never counted among the agents at work.
         "quiet": record.is_quiet(),
         "archived_at": record.archived_at_ms,
@@ -2226,7 +2228,11 @@ pub fn summary(
         "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
         "context_tokens": status.context_tokens,
-        "context_window": clarp_backend::context_window(&record.backend),
+        // What the model of the turn that said `context_tokens` holds, as its tool said it;
+        // where none did, what the tool declares (issue 869).
+        "context_window": status
+            .context_window
+            .or_else(|| clarp_backend::context_window(&record.backend)),
         // What the user's last compaction did, from numbers: null until the first
         // (compaction_outcome).
         "last_compaction": status.last_compaction,
@@ -2234,6 +2240,7 @@ pub fn summary(
         "queued_turn_revision": status.queue_revision,
         "queue_paused": status.paused,
         "backend_quota": null,
+        "account_quota": null,
         "background_jobs": { "count": 0, "sub_agents": 0 },
     });
     own_provider_fields(&mut row, record);
@@ -2550,6 +2557,7 @@ mod tests {
             label_at_ms: None,
             resting: None,
             context_tokens: None,
+            context_window: None,
             last_compaction: None,
             completed_at_ms: None,
             answered_by: None,
@@ -2651,6 +2659,7 @@ mod tests {
             tokens_in: None,
             tokens_out: None,
             context_tokens: None,
+            context_window: None,
             cost_micros: None,
             cost_so_far: None,
             total: None,
@@ -2949,6 +2958,7 @@ mod tests {
             tokens_in: Some(5),
             tokens_out: Some(7),
             context_tokens: None,
+            context_window: None,
             cost_micros: None,
             cost_so_far: None,
             total: None,
@@ -3005,6 +3015,7 @@ mod tests {
         // The gauge and the model are what a turn last said, whichever turn that was.
         let busy = Status {
             context_tokens: Some(5),
+            context_window: Some(400_000),
             answered_by: Some("fable".to_string()),
             ..busy
         };
@@ -3149,12 +3160,15 @@ mod tests {
             (&row["model"], &row["context_tokens"]),
             (&json!("fable"), &json!(5))
         );
+        // The window the same turn's tool said, over the one the tool declares (issue 869).
+        assert_eq!(row["context_window"], json!(400_000));
         // Nothing compacted yet: the row says so (compaction_outcome).
         assert_eq!(row["last_compaction"], serde_json::Value::Null);
         assert_eq!(
             row.as_object().unwrap().len(),
-            // The Python Host's 55, and `transit` (Rust contract 158).
-            56,
+            // The Python Host's 55, `transit` (Rust contract 158), `account_quota` (Rust
+            // contract 197) and `snoozed_until` (Rust contract 198).
+            58,
             "the fields of the Python Host's row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
@@ -3580,6 +3594,7 @@ mod tests {
             tokens_in: None,
             tokens_out: None,
             context_tokens: None,
+            context_window: None,
             cost_micros: None,
             cost_so_far: None,
             total: None,

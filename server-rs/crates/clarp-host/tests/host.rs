@@ -191,6 +191,8 @@ mod render_spec_export;
 mod roster_fields;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
+#[path = "host/snooze.rs"]
+mod snooze;
 #[path = "host/source_trace.rs"]
 mod source_trace;
 #[path = "host/speech_unset.rs"]

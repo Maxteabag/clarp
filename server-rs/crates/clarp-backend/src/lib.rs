@@ -192,6 +192,11 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
+    /// How many tokens the conversation's model can hold, where the tool says so of the model
+    /// that answers: the other end of the gauge [`Signal::Context`] fills.
+    Window {
+        tokens: u64,
+    },
     /// The tool said how its turn went, in a result of its own: a failure after this is one
     /// the tool told, not a process that ended without a word.
     Concluded,

@@ -473,3 +473,36 @@ fn a_steps_words_are_written_when_it_finishes_before_the_next_step() {
     );
     assert_eq!(replies(&signals), ["first answer", "second answer"]);
 }
+
+/// Each step's end says what its answer was made from: sent anew, read from the cache and
+/// written to it. That is how full the conversation is (issue 869); a step that says no
+/// tokens says nothing of it.
+#[test]
+fn a_steps_end_says_how_full_the_conversation_is() {
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "gauge");
+    let mut signals = Vec::new();
+    let finish = |tokens: Value| {
+        json!({"type": "step_finish", "part": {"tokens": tokens, "cost": 0.0}}).to_string()
+    };
+    for line in [
+        finish(json!({"input": 1200, "output": 40, "cache": {"read": 30_000, "write": 800}})),
+        finish(json!({"input": 90, "output": 12, "cache": {"read": 32_000}})),
+        finish(json!({})),
+    ] {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            &mut signals,
+        );
+    }
+    let held: Vec<u64> = signals
+        .into_iter()
+        .filter_map(|signal| match signal {
+            Signal::Context { tokens } => Some(tokens),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held, [32_000, 32_090]);
+}

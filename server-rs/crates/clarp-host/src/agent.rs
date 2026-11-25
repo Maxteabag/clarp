@@ -1590,6 +1590,7 @@ pub(crate) fn never_ran() -> Status {
         label_at_ms: None,
         resting: None,
         context_tokens: None,
+        context_window: None,
         last_compaction: None,
         completed_at_ms: None,
         answered_by: None,

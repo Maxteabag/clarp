@@ -676,9 +676,14 @@ impl AcpInterpreter {
                 }));
             }
             SessionUpdate::UsageUpdate {
-                used: Some(used), ..
+                used: Some(used),
+                size,
             } => {
                 out.push(Signal::Context { tokens: used });
+                // What the conversation's model holds, where it says so (issue 869).
+                if let Some(size) = size.filter(|size| *size > 0) {
+                    out.push(Signal::Window { tokens: size });
+                }
             }
             SessionUpdate::ConfigOptionUpdate { config_options } => {
                 if let Some(model) = schema::current(&Value::Array(config_options), "model") {

@@ -65,8 +65,14 @@ The hand-over is a file or brief of about a page and holds: the goal of the piec
 and when it is done; the files to read; what is already decided; what
 is ruled out and why; and where state lives (branch, worktree, issue,
 scratch files). Write it from your own notes, not from the old helper's chat.
-For a Claude helper its conversation size shows as `context_tokens` in its
-row of the snapshot; for other backends the Host does not show it.
+A helper's conversation size shows as `context_tokens` in its row of the
+snapshot, beside `context_window`, what its model holds. Claude and Antigravity
+over ACP give it everywhere; on a Rust Host with feature `context_meter`
+(contract 197) Codex and OpenCode give it too, and `context_window` is the one
+the helper's own tool said for its model. Elsewhere it is null: judge by the
+number of turns instead. The same row's `account_quota` says how much of the
+account its tool runs on is used, per window (Claude and Codex, same feature):
+look there before starting a large helper on a tool that is nearly used up.
 
 `--effort` sets a helper's reasoning effort where it is a separate setting
 (Claude, Codex): `clarp-sub-agent start --clarp-agent ... --effort high` passes it

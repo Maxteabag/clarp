@@ -81,6 +81,9 @@ pub struct AgentSummary {
     pub context_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
+    /// The windows of the account the agent's tool is on (feature `context_meter`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_quota: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued_turn_count: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,6 +92,9 @@ pub struct AgentSummary {
     pub queue_paused: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muted: Option<bool>,
+    /// Until when the chat is out of sight, in milliseconds since the epoch (feature `snooze`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until: Option<i64>,
     /// An epoch in milliseconds or an ISO time, depending on the Host's age.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at: Option<Value>,

@@ -631,3 +631,38 @@ fn a_live_message_with_a_less_than_sign_keeps_streaming() {
         );
     }
 }
+
+/// Issue 869: the running turn carries how full its conversation is as its tool says so, and
+/// what its model holds. A move of less than a whole percent of the window is not told until
+/// the turn's end, which carries the newest; a new turn starts with none.
+#[test]
+fn a_turn_carries_how_full_its_conversation_is() {
+    let mut hub = Hub::new("e1", "a1", "s1").growing();
+    let gauge = |hub: &mut Hub, now: i64| {
+        let (snapshot, _) = hub.snapshot(now).unwrap();
+        let turn = &snapshot["turn"];
+        (
+            turn["context_tokens"].clone(),
+            turn["context_window"].clone(),
+        )
+    };
+    let _ = hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    assert_eq!(gauge(&mut hub, 11), (Value::Null, Value::Null));
+    let told = hub.gauge(Some(50_000), None, 20);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["ops"][0]["turn"]["context_tokens"], json!(50_000));
+    // Less than a whole percent of 200,000 where no window is known: not told now.
+    assert!(hub.gauge(Some(51_000), None, 21).is_empty());
+    // The window, once said, is told.
+    let told = hub.gauge(None, Some(1_000_000), 22);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(gauge(&mut hub, 23), (json!(51_000), json!(1_000_000)));
+    // A whole percent of that window is 10,000 tokens.
+    assert!(hub.gauge(Some(60_000), None, 24).is_empty());
+    assert_eq!(hub.gauge(Some(61_000), None, 25).len(), 1);
+    assert!(hub.gauge(Some(62_000), None, 26).is_empty());
+    let _ = hub.end_turn("completed", None, 30);
+    assert_eq!(gauge(&mut hub, 31), (json!(62_000), json!(1_000_000)));
+    let _ = hub.begin_turn("s1", "c1", "t-2", Some(40), "user", 40);
+    assert_eq!(gauge(&mut hub, 41), (Value::Null, Value::Null));
+}

@@ -713,14 +713,24 @@ impl CodexInterpreter {
             "turn.completed" => {
                 self.completed = true;
                 // The model that answered: what the rollout's context of the turn says.
-                let model = self
+                let rollout = self
                     .sessions
                     .as_deref()
                     .zip(self.thread.as_deref())
-                    .and_then(|(sessions, thread)| crate::past::codex_rollout(sessions, thread))
-                    .and_then(|rollout| crate::past::codex_turn_model(&rollout));
+                    .and_then(|(sessions, thread)| crate::past::codex_rollout(sessions, thread));
+                let model = rollout.as_deref().and_then(crate::past::codex_turn_model);
                 if let Some(model) = model {
                     out.push(Signal::Model(model));
+                }
+                // How full its conversation is, and what its model holds: its newest count of
+                // tokens (issue 869). What the turn took in, below, is the thread's running sum
+                // and says nothing of that.
+                let gauge = rollout.as_deref().and_then(crate::past::codex_turn_gauge);
+                if let Some((held, window)) = gauge {
+                    out.push(Signal::Context { tokens: held });
+                    if let Some(window) = window {
+                        out.push(Signal::Window { tokens: window });
+                    }
                 }
                 let count = |field: &str| event["usage"][field].as_u64();
                 // Codex counts on from turn to turn of a thread: what it says here is what the
@@ -1309,6 +1319,39 @@ mod tests {
         );
         assert!(models(Some(sessions.join("none"))).is_empty());
         std::fs::remove_dir_all(sessions).unwrap();
+    }
+
+    /// The gauge is the newest count of tokens that says one: what the last answer was made
+    /// from, and the window where the count names it (issue 869).
+    #[test]
+    fn the_gauge_is_the_newest_count_of_tokens_in_the_rollout() {
+        let file = std::env::temp_dir().join(format!(
+            "clarp-codex-gauge-{}-{}.jsonl",
+            std::process::id(),
+            crate::transit::uuid4().unwrap()
+        ));
+        let count = |held: u64, window: Value| {
+            json!({"type": "event_msg", "payload": {"type": "token_count", "info": {
+                "last_token_usage": {"input_tokens": held, "cached_input_tokens": held / 2},
+                "model_context_window": window,
+            }}})
+        };
+        let rollout = [
+            count(1_000, json!(272_000)),
+            count(52_000, json!(828_400)),
+            json!({"type": "event_msg", "payload": {"type": "token_count", "info": null}}),
+            json!({"type": "event_msg", "payload": {"type": "agent_message"}}),
+        ];
+        let written: Vec<String> = rollout.iter().map(Value::to_string).collect();
+        std::fs::write(&file, written.join("\n")).unwrap();
+        assert_eq!(
+            crate::past::codex_turn_gauge(&file),
+            Some((52_000, Some(828_400)))
+        );
+        std::fs::write(&file, count(7, Value::Null).to_string()).unwrap();
+        assert_eq!(crate::past::codex_turn_gauge(&file), Some((7, None)));
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(crate::past::codex_turn_gauge(&file), None);
     }
 
     #[test]

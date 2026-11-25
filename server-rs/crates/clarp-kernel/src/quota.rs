@@ -793,7 +793,7 @@ impl Kept {
     }
 
     /// The provider as an app's usage screen reads it (`_structured_provider`).
-    fn provider(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Value {
+    pub fn provider(&self, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64) -> Value {
         let shown = self.shown(login, now_ms);
         // The newest word among them; of two as new, the five hours'.
         let mut newest: Option<&Window> = None;

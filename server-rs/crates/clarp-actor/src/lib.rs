@@ -688,6 +688,9 @@ pub struct Status {
     /// How many tokens the tool's conversation held when a turn last said so: the gauge an
     /// app shows. A turn that says nothing of it (a tool that died) leaves it as it was.
     pub context_tokens: Option<u64>,
+    /// How many tokens the model can hold, as the same turn's tool said it: none where it did
+    /// not say (issue 869).
+    pub context_window: Option<u64>,
     /// What the user's last compaction of the agent did. None until its first.
     pub last_compaction: Option<LastCompaction>,
     /// When a turn last ran to its end, and the model that answered last. A turn that
@@ -765,6 +768,8 @@ struct LiveTurn {
     total: Option<(u64, u64)>,
     base: Option<(u64, u64)>,
     context: Option<u64>,
+    /// How many tokens the model can hold, where the tool says so.
+    window: Option<u64>,
     /// What the tool last said of its account's windows, and when.
     limits: Option<(i64, serde_json::Value)>,
     /// The tool's newest record that it made the conversation shorter, in this turn: what the
@@ -852,6 +857,7 @@ impl LiveTurn {
             total: self.total,
             base: self.base,
             context: self.context,
+            window: self.window,
             limits: self.limits.clone(),
             compacted: self.compacted,
             gauge: self.gauge,
@@ -1081,6 +1087,9 @@ fn shown_name(trace_id: Option<&str>, message_id: &str) -> String {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Remembered {
     context_tokens: Option<u64>,
+    /// What the model holds, as the turn that said `context_tokens` said it: the two are of
+    /// one turn, so a gauge never mixes one model's fill with another's window.
+    context_window: Option<u64>,
     completed_at_ms: Option<i64>,
     answered_by: Option<String>,
 }
@@ -1093,6 +1102,7 @@ impl Remembered {
     fn take(&mut self, end: &TurnEnd) {
         if let Some(tokens) = end.context_tokens {
             self.context_tokens = Some(tokens);
+            self.context_window = end.context_window;
         }
         if end.status == "completed" {
             self.completed_at_ms = Some(end.ended_at_ms);
@@ -1374,6 +1384,7 @@ struct Facts {
     total: Option<(u64, u64)>,
     base: Option<(u64, u64)>,
     context: Option<u64>,
+    window: Option<u64>,
     limits: Option<(i64, serde_json::Value)>,
     compacted: Option<Boundary>,
     gauge: Option<u64>,
@@ -1449,6 +1460,8 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
         });
     }
     end.context_tokens = facts.context;
+    // The window is of the model that made the answer the gauge is of: told with it only.
+    end.context_window = facts.context.and(facts.window);
     end.limits = facts.limits.map(|(at_ms, said)| LimitsSaid { at_ms, said });
     // What the tool tells of cost is what its whole conversation has cost so far: the turn's
     // share is what that grew by. Where what it stood at before is not known (a session that
@@ -1784,6 +1797,7 @@ impl Actor {
                 total: None,
                 base: actor.total_before(turn)?,
                 context: None,
+                window: None,
                 limits: None,
                 compacted: None,
                 gauge: actor.remembered.context_tokens,
@@ -2557,6 +2571,7 @@ impl Actor {
             label_at_ms: agent.label_at(),
             resting: agent.resting(),
             context_tokens: self.remembered.context_tokens,
+            context_window: self.remembered.context_window,
             last_compaction: agent.last_compaction().cloned(),
             completed_at_ms: self.remembered.completed_at_ms,
             answered_by: self.remembered.answered_by.clone(),
@@ -2589,7 +2604,10 @@ impl Actor {
                 kept.completed_at_ms = kept.completed_at_ms.or(older.completed_at_ms);
                 before_the_change = changed_at.is_some_and(|at| end.ended_at_ms <= at);
                 if !earlier && !before_the_change {
-                    kept.context_tokens = kept.context_tokens.or(older.context_tokens);
+                    if kept.context_tokens.is_none() {
+                        kept.context_tokens = older.context_tokens;
+                        kept.context_window = older.context_window;
+                    }
                     kept.answered_by = kept.answered_by.or(older.answered_by);
                 }
             }
@@ -4380,6 +4398,7 @@ impl Actor {
         // conversation that ended: the new one has no such word yet.
         self.shown_revision = 0;
         self.remembered.context_tokens = None;
+        self.remembered.context_window = None;
         self.remembered.answered_by = None;
         let out = Outputs {
             changed: Changed {
@@ -4578,6 +4597,7 @@ impl Actor {
         // agent left: its row says nothing of either until the new tool's first answer.
         self.remembered.answered_by = None;
         self.remembered.context_tokens = None;
+        self.remembered.context_window = None;
         let out = Outputs {
             changed: Changed {
                 conversation: !notice.trim().is_empty(),
@@ -5508,6 +5528,7 @@ impl Actor {
         // What the tool said of its account in an attempt before this one stands until it
         // says it anew.
         let limits = before.as_ref().and_then(|before| before.limits.clone());
+        let window = before.as_ref().and_then(|before| before.window);
         let (compacted, gauge) = before.as_ref().map_or_else(
             || (None, self.remembered.context_tokens),
             |before| (before.compacted, before.gauge),
@@ -5553,6 +5574,7 @@ impl Actor {
             total,
             base,
             context,
+            window,
             limits,
             compacted,
             gauge,
@@ -5693,6 +5715,7 @@ impl Actor {
         let mut last_row = message.id.clone();
         let mut per_turn_cost = None;
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
+        let mut window = None;
         let (mut total, mut limits) = (None, None);
         let mut compacted = None;
         let mut concluded = false;
@@ -5834,7 +5857,14 @@ impl Actor {
                             tokens_in,
                             tokens_out,
                         } => total = Some((tokens_in, tokens_out)),
-                        Signal::Context { tokens: held } => context = Some(held),
+                        Signal::Context { tokens: held } => {
+                            context = Some(held);
+                            let _ = self.shown.gauge(context, window, record.t);
+                        }
+                        Signal::Window { tokens: holds } => {
+                            window = Some(holds);
+                            let _ = self.shown.gauge(context, window, record.t);
+                        }
                         Signal::Compacted(record) => {
                             compacted = compaction::newest(compacted, Some(record));
                         }
@@ -5858,6 +5888,7 @@ impl Actor {
                         tokens,
                         total,
                         context,
+                        window,
                         limits: limits.clone(),
                         per_turn_cost,
                         cost,
@@ -5942,6 +5973,7 @@ impl Actor {
             total,
             base: self.total_before(turn)?,
             context,
+            window,
             limits,
             compacted,
             gauge: self.remembered.context_tokens,
@@ -7022,6 +7054,28 @@ impl Actor {
                         }
                         Signal::Context { tokens } => {
                             live.context = Some(tokens);
+                            // Of the turn that is shown, and of no other (issue 869).
+                            if self
+                                .shown_turn
+                                .as_ref()
+                                .is_some_and(|(held, _)| *held == turn)
+                            {
+                                let events = self.shown.gauge(live.context, live.window, t);
+                                self.shown_events.extend(events);
+                            }
+                            continue;
+                        }
+                        Signal::Window { tokens } => {
+                            live.window = Some(tokens);
+                            // Of the turn that is shown, and of no other (issue 869).
+                            if self
+                                .shown_turn
+                                .as_ref()
+                                .is_some_and(|(held, _)| *held == turn)
+                            {
+                                let events = self.shown.gauge(live.context, live.window, t);
+                                self.shown_events.extend(events);
+                            }
                             continue;
                         }
                         Signal::Compacted(record) => {

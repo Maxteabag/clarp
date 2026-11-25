@@ -213,13 +213,66 @@ type Told = BTreeMap<(String, String), (&'static str, Option<i64>)>;
 pub struct Looked {
     pub used_up: Arc<UsedUp>,
     pub near: Arc<UsedUp>,
+    /// What is known of the windows of the account each tool is on now, as an agent's row
+    /// says it (`account_quota`, issue 869): only where something is known of them.
+    pub accounts: Arc<UsedUp>,
 }
 
 /// What a tool's account is as an agent's row says it: used up, and else near a limit. Both
 /// have one shape (state, provider_id, reason, window, resets_at, observed_at) and say how
 /// much of the window they name is used (`used_percentage`, 0 to 100): on a used-up account
 /// null where that is not known (a limit that a turn failed for).
-type Said = (Option<Value>, Option<Value>);
+type Said = (Option<Value>, Option<Value>, Option<Value>);
+
+/// What an agent's row says of the windows of the account its tool is on (`account_quota`),
+/// from what an app's usage screen is shown of the tool (`provider`): the five hours and the
+/// week, how much of each is used and when it begins anew (UTC, to the second), when that was
+/// said and whether that is fresh. Nothing where no window of either is known.
+fn account_of(provider: &Value) -> Option<Value> {
+    let windows: Vec<Value> = provider["windows"]
+        .as_array()?
+        .iter()
+        .filter(|window| matches!(window["kind"].as_str(), Some("five_hour" | "seven_day")))
+        .map(|window| {
+            let resets_at = window["resets_at"].as_str().and_then(quota::from_text);
+            let used = window["used_percentage"].as_f64();
+            json!({
+                "kind": window["kind"],
+                "used_percentage": used.map(|used| used.clamp(0.0, 100.0)),
+                "resets_at": resets_at.map(quota::moment),
+            })
+        })
+        .collect();
+    if windows.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "provider_id": provider["provider_id"],
+        "observed_at": provider["observed_at"],
+        "freshness": provider["freshness"],
+        "windows": windows,
+    }))
+}
+
+/// A window as the apps are told again on it: its kind, its whole percent, its reset's minute.
+type WindowShown = (Value, Option<f64>, Option<i64>);
+
+/// What the apps are told again on, of an account's windows: freshness, and of each window
+/// its whole percent and its reset to the minute (Codex says a reset a second apart from
+/// record to record), so a meter follows without an event at every turn.
+fn account_shown(account: Option<&Value>) -> Option<(Value, Vec<WindowShown>)> {
+    let account = account?;
+    let windows = account["windows"].as_array().into_iter().flatten();
+    let windows = windows.map(|window| {
+        let resets = window["resets_at"].as_str().and_then(quota::from_text);
+        (
+            window["kind"].clone(),
+            window["used_percentage"].as_f64().map(f64::floor),
+            resets.map(|ms| (ms + 30_000).div_euclid(60_000)),
+        )
+    });
+    Some((account["freshness"].clone(), windows.collect()))
+}
 
 /// What is used of the window that a used-up account's row names, set on the row (no more
 /// than all of it), and when it begins anew written as the row's other moments are (UTC, to
@@ -242,7 +295,8 @@ fn codex_said(kept: &Kept, tool: Tool<'_>, login: Option<Login<'_>>, now_ms: i64
         None => kept.near(tool, login, now_ms),
         Some(_) => None,
     };
-    (used_up, near)
+    let account = account_of(&kept.provider(tool, login, now_ms));
+    (used_up, near, account)
 }
 
 fn claude_said(kept: &Standing, tool: Tool<'_>, active: Option<&str>, now_ms: i64) -> Said {
@@ -252,7 +306,8 @@ fn claude_said(kept: &Standing, tool: Tool<'_>, active: Option<&str>, now_ms: i6
         None => kept.near(tool, active, now_ms),
         Some(_) => None,
     };
-    (used_up, near)
+    let account = account_of(&kept.provider(tool, active, now_ms));
+    (used_up, near, account)
 }
 
 const VERIFICATION_MS: i64 = 60_000;
@@ -754,7 +809,7 @@ impl Desk {
     /// last look (used up or near, which window, until when, near by how many whole percent),
     /// the apps are told to read their agents' rows again. The first look at a tool tells
     /// nothing: nothing is known to have changed.
-    fn looked(&self, with: With<'_>, tool: &str, (used_up, near): Said) -> Looked {
+    fn looked(&self, with: With<'_>, tool: &str, (used_up, near, account): Said) -> Looked {
         let shown = |all: &Looked| {
             let (said, used) = match all.used_up.get(tool) {
                 Some(said) => (said, Value::Null),
@@ -787,12 +842,15 @@ impl Desk {
         let all = Looked {
             used_up: keep(&before.used_up, used_up),
             near: keep(&before.near, near),
+            accounts: keep(&before.accounts, account),
         };
         let first_look = !looked_at.iter().any(|at| at == tool);
         if first_look {
             looked_at.push(tool.to_string());
         }
         let changed = !first_look && shown(before) != shown(&all);
+        let account_changed = !first_look
+            && account_shown(before.accounts.get(tool)) != account_shown(all.accounts.get(tool));
         *before = all.clone();
         // The first window named that begins anew: looked at again when it has. Set while
         // what it is of is held, so that of two looks at once the later one's stands.
@@ -812,6 +870,17 @@ impl Desk {
         if changed {
             let again = json!({ "type": "agent-roster", "kind": "backend-quota" });
             with.hub.publish(again, with.now_ms);
+        }
+        // The meter of the agents on the tool: a type of its own, which an app that does not
+        // know it passes over, rather than a roster kind that would have it read the whole
+        // snapshot as the share grows (issue 869).
+        if account_changed {
+            let told = json!({
+                "type": "account-quota",
+                "provider_id": tool,
+                "account_quota": all.accounts.get(tool),
+            });
+            with.hub.publish(told, with.now_ms);
         }
         all
     }
@@ -1068,6 +1137,14 @@ impl Rows {
             return Value::Null;
         };
         clarp_kernel::quota_near::row(near, self.failover(tool, model))
+    }
+
+    /// What the row of an agent on this tool says of the windows of the account the tool is
+    /// on (`account_quota`): null where nothing is known of them, and for an agent bound to a
+    /// provider of its own, which runs on another account than the tool's (issue 869).
+    pub fn account(&self, tool: &str, bound: bool) -> Value {
+        let account = self.looked.accounts.get(tool).filter(|_| !bound);
+        account.cloned().unwrap_or(Value::Null)
     }
 
     /// Which tools' accounts are used up for an agent on the tool's default model: the tools
@@ -1676,6 +1753,56 @@ mod tests {
 
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    /// An agent's row says of its tool's account the five hours and the week, as the usage
+    /// screen is shown them, its resets in UTC to the second; nothing where neither is known,
+    /// and nothing to an agent bound to a provider of its own (issue 869). The apps are told
+    /// again as a window's whole percent or its reset's minute moves, not at every word.
+    #[test]
+    fn a_row_says_the_windows_of_its_tools_account() {
+        let provider = |used: f64, resets: &str| {
+            json!({
+                "provider_id": "codex", "freshness": "fresh",
+                "observed_at": "2026-11-26T10:00:00Z",
+                "windows": [
+                    {"kind": "five_hour", "used_percentage": used, "resets_at": resets},
+                    {"kind": "seven_day", "used_percentage": 12.0, "resets_at": null},
+                    {"kind": "unknown", "used_percentage": null, "resets_at": null},
+                ],
+            })
+        };
+        let account = account_of(&provider(41.5, "2026-11-26T12:00:00.400+00:00")).unwrap();
+        assert_eq!(
+            account,
+            json!({
+                "provider_id": "codex", "freshness": "fresh",
+                "observed_at": "2026-11-26T10:00:00Z",
+                "windows": [
+                    {"kind": "five_hour", "used_percentage": 41.5, "resets_at": "2026-11-26T12:00:00Z"},
+                    {"kind": "seven_day", "used_percentage": 12.0, "resets_at": null},
+                ],
+            })
+        );
+        let none = json!({"provider_id": "codex", "freshness": "unknown", "windows": []});
+        assert_eq!(account_of(&none), None);
+        let shown = |used, resets| account_shown(account_of(&provider(used, resets)).as_ref());
+        let at = "2026-11-26T12:00:00Z";
+        assert_eq!(shown(41.5, at), shown(41.9, "2026-11-26T12:00:20Z"));
+        assert_ne!(shown(41.5, at), shown(42.0, at));
+        assert_ne!(shown(41.5, at), shown(41.5, "2026-11-26T12:05:00Z"));
+        let mut accounts = UsedUp::new();
+        accounts.insert("codex".into(), account.clone());
+        let rows = Rows {
+            looked: Looked {
+                accounts: Arc::new(accounts),
+                ..Looked::default()
+            },
+            ..Rows::unasked()
+        };
+        assert_eq!(rows.account("codex", false), account);
+        assert_eq!(rows.account("codex", true), Value::Null);
+        assert_eq!(rows.account("claude", false), Value::Null);
     }
 
     #[test]

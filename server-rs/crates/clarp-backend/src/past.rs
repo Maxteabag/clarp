@@ -622,6 +622,36 @@ pub fn claude_source(
         .transpose()
 }
 
+/// How full a Codex conversation is and what its model holds, from the newest count of tokens
+/// its rollout holds (`token_count`, written with every answer): what the last answer was made
+/// from (`last_token_usage.input_tokens`, which counts what was read from the cache too), and
+/// `model_context_window` where it says so. Only the rollout's last mebibyte is read: a count is
+/// written with every answer, so the newest is near the end (issue 869).
+pub fn codex_turn_gauge(rollout: &Path) -> Option<(u64, Option<u64>)> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(rollout).ok()?;
+    let size = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(size.saturating_sub(1 << 20)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail).ok()?;
+    tail.split(|byte| *byte == b'\n')
+        .rev()
+        .filter(|line| line.windows(13).any(|w| w == b"\"token_count\""))
+        .find_map(|line| {
+            let entry: Value = serde_json::from_slice(line).ok()?;
+            let info = &entry["payload"]["info"];
+            if entry["payload"]["type"] != "token_count" {
+                return None;
+            }
+            let held = info["last_token_usage"]["input_tokens"].as_u64()?;
+            let window = info["model_context_window"]
+                .as_u64()
+                .filter(|tokens| *tokens > 0);
+            Some((held, window))
+        })
+}
+
 /// The model of the newest turn a Codex rollout holds: what its last `turn_context` says ran
 /// it. Read from the end, as far back as a turn's context is.
 pub fn codex_turn_model(rollout: &Path) -> Option<String> {

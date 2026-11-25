@@ -172,6 +172,11 @@ pub struct AgentRecord {
     /// The user muted it: what it says is marked unread and pages nobody.
     #[serde(default, skip_serializing_if = "is_false")]
     pub muted: bool,
+    /// The owner put its chat out of sight until then, in milliseconds since the epoch, on
+    /// every app at once (`crate::snooze`, issue 871): until the moment passes or the agent
+    /// writes something for the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until_ms: Option<i64>,
     /// It is woken from time to time to look at what it has standing (the heartbeat).
     #[serde(default, skip_serializing_if = "is_false")]
     pub heartbeat_enabled: bool,
@@ -338,6 +343,12 @@ fn is_zero(value: &i64) -> bool {
 pub enum Amend {
     /// Whether what it says pages the user.
     Mute(bool),
+    /// Until when its chat is out of sight (`None`: it is in sight again). Whoever asks has
+    /// checked the moment.
+    Snooze(Option<i64>),
+    /// Its chat comes back into sight because the moment it was put away until has come: only
+    /// where it is still put away until that very moment, so a later snooze stands.
+    SnoozeOver(i64),
     /// Whether it is woken by the heartbeat.
     Heartbeat(bool),
     /// Its name as a person reads it, as [`roster::display_name`] keeps one. Its session
@@ -4084,6 +4095,12 @@ impl Fleet {
         let edits_mcp = matches!(change, Amend::McpServers(_));
         match change {
             Amend::Mute(muted) => record.muted = muted,
+            Amend::Snooze(until) => record.snoozed_until_ms = until,
+            Amend::SnoozeOver(at) => {
+                if record.snoozed_until_ms == Some(at) {
+                    record.snoozed_until_ms = None;
+                }
+            }
             Amend::Heartbeat(on) => record.heartbeat_enabled = on,
             Amend::Rename(name) => {
                 if let Some(owner) = self.owner_of_name(&name, &record.agent_id) {
@@ -4220,6 +4237,8 @@ impl Fleet {
         let renamed = record.persona != before.persona && !assigned;
         let roster_kind = if record.muted != before.muted {
             Some("mute-changed")
+        } else if record.snoozed_until_ms != before.snoozed_until_ms {
+            Some(crate::snooze::KIND)
         } else if record.archived_at_ms.is_some() != before.archived_at_ms.is_some() {
             Some("archive-changed")
         } else {

@@ -410,8 +410,17 @@ impl Stream {
             out.push(Signal::Moved(Activity::Thinking));
         }
     }
-    fn usage(&mut self, p: &Value) {
+    fn usage(&mut self, p: &Value, out: &mut Vec<Signal>) {
         let tokens = &p["tokens"];
+        // How full the conversation is: what this step's answer was made from, sent anew and
+        // read from or written to the cache (issue 869). Every step reads it all again.
+        if let Some(sent) = tokens["input"].as_f64().filter(|sent| *sent >= 0.0) {
+            let cached = |kind: &str| tokens["cache"][kind].as_f64().unwrap_or(0.0).max(0.0);
+            let held = sent + cached("read") + cached("write");
+            out.push(Signal::Context {
+                tokens: held as u64,
+            });
+        }
         if tokens["input"].is_number() || tokens["output"].is_number() {
             let old = self.tokens.get_or_insert((0, 0));
             old.0 = old
@@ -446,7 +455,7 @@ impl Stream {
             // A step's words are written when it finishes, before anything of the next: a
             // message read into the turn between two steps (issue 784) comes after them.
             "step-finish" => {
-                self.usage(p);
+                self.usage(p, out);
                 self.flush(out);
             }
             "tool" => self.tool(p, t, out),
@@ -525,7 +534,7 @@ impl Stream {
             }
             "step_start" => self.step(out),
             "step_finish" => {
-                self.usage(part);
+                self.usage(part, out);
                 self.flush(out);
             }
             "reasoning" => out.push(Signal::Moved(Activity::Thinking)),

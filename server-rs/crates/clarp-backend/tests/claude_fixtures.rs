@@ -61,6 +61,7 @@ fn stored(signals: &[Signal]) -> Vec<&Signal> {
                     | Signal::Model(_)
                     | Signal::Usage { .. }
                     | Signal::Context { .. }
+                    | Signal::Window { .. }
                     | Signal::Concluded
                     | Signal::Answered
                     | Signal::Cost { .. }
@@ -436,4 +437,18 @@ fn a_real_turn_whose_conversation_does_not_fit_the_model_says_so() {
         "This conversation is too long for the model. Compact it or start a new one"
     );
     assert!(told.row.ends_with(reason.as_str()), "{}", told.row);
+}
+
+/// A turn's result says how many tokens its model holds, and the turn tells it as the other
+/// end of its gauge (issue 869). A turn whose result says nothing of it tells no window.
+#[test]
+fn a_real_turn_says_what_its_model_holds() {
+    let signals = read("claude-2.1.321-thinking.jsonl");
+    assert!(signals.contains(&Signal::Window { tokens: 1_000_000 }));
+    let signals = read("claude-2.1.321-plain.jsonl");
+    assert!(
+        !signals
+            .iter()
+            .any(|signal| matches!(signal, Signal::Window { .. }))
+    );
 }

@@ -414,6 +414,7 @@ impl State {
                 tokens_in: None,
                 tokens_out: None,
                 context_tokens: None,
+                context_window: None,
                 cost_micros: None,
                 cost_so_far: None,
                 total: None,

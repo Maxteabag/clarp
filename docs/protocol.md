@@ -186,7 +186,7 @@ row to read).
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
       "last_compaction": null,
       "queued_turn_count": 0, "queued_turn_revision": 0, "queue_paused": false,
-      "backend_quota": null,
+      "backend_quota": null, "account_quota": null,
       "background_jobs": {"count": 0, "sub_agents": 0},
       "parent_agent_id": null, "role": "agent", "helper_state": null,
       "child_count": 0, "running_children": 0,
@@ -283,6 +283,41 @@ Rules:
   preference, so a client can honour a toggle without refetching. The server
   leaves it empty for an agent with a portrait the user chose, so preferring
   it can never replace an uploaded or generated picture.
+- `context_tokens` and `context_window` (a meter of how full the conversation is): how many
+  tokens the conversation held at the last answer that said so, and how many its model holds.
+  On a Rust Host from contract 197 (feature `context_meter`, issue 869) `context_tokens` is
+  given for Claude (the last answer's input, cache read and cache write), Codex (its newest
+  count of tokens: what the last answer was made from, the cache included), OpenCode (the last
+  step's input with what it read from and wrote to the cache) and Antigravity over ACP (its
+  usage update); null for the others and until a turn says it. `context_window` is what the
+  same turn's tool said its model holds (Claude's result, Codex's count, ACP's usage update),
+  so the pair always belongs to one turn; where no turn said one, the tool's declared window
+  (Claude 1,000,000), else null. Both clear when the conversation starts anew. Draw a meter only
+  where both are numbers. The running turn carries the same two as they move ([Live
+  items](live-items.md) §1.4).
+- `account_quota` (Rust Host contract 197, feature `context_meter`): `null`, or the windows of
+  the account the agent's tool is on now, as `GET /backend-usage` shows them:
+  `{"provider_id", "observed_at", "freshness" (fresh | stale), "windows": [{"kind"
+  (five_hour | seven_day), "used_percentage" (0 to 100, or null where the tool did not say),
+  "resets_at" (UTC to the second, or null)}]}`. Given for Claude and Codex, the tools that say
+  their windows; null for the others, for an agent bound to a provider of its own (it runs on
+  another account) and where nothing is known of the account. Where the Host switches seats,
+  it is the seat in use. It is advice for a meter beside the composer, never a reason to
+  refuse a send; `backend_quota` stays the warning. An `account-quota` event
+  `{provider_id, account_quota}` is sent when a window's whole percent, its reset (to the
+  minute) or the freshness changes: set `account_quota` on every row whose `backend` is
+  `provider_id` and that has no `codex_provider`, and read nothing. Like `backend_quota`, it
+  is on the row wherever the row is read, the agents' tools included (their token reads
+  `GET /agents/snapshot`, contract 193): an agent may see how much of its tool's account is used.
+- `snoozed_until` (Rust Host contract 198, feature `snooze`, issue 871): `null`, or the moment
+  (milliseconds since the epoch) until which the owner put this chat out of sight, the same on
+  every app. Set and cleared with `POST /agent-snooze` (below). The Host clears it when that
+  moment comes and when the agent writes something for the user (whenever it sends the agent's
+  `user-notification`: an answer the user is shown, or a note, muted or not). Every change,
+  the Host's own included, is an `agent-roster` event with `kind: "snooze-changed"` and
+  `fields: {snoozed_until}`. This is the Host's rule, and the apps follow it: hide the chat
+  from the list while `snoozed_until` is in the future, keep no snooze of their own, and never
+  clear it on a message themselves.
 - `backend_quota` is `null` unless fresh provider evidence says this agent's
   backend cannot serve a new turn. Otherwise it is `{"state": "exhausted",
   "provider_id", "reason" (credits_depleted: the workspace must be refilled |
@@ -1266,7 +1301,8 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit, snooze-changed (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `account-quota` | `provider_id`, `account_quota` | Rust feature `context_meter` (contract 197): the windows of the account a tool is on moved by a whole percent, a reset or freshness. Set `account_quota` on every row whose `backend` is `provider_id` and that has no `codex_provider`; read nothing. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `agent-transit` | `agent_id`, `session`, `transit_id`, `backend`, `model`, `phase` ∈ reading, translating, registering, switching, done, failed, `error` (text on failed, else null), `previous_backend`, `previous_model`, `carried` (on done; its `summary` since contract 161) | Rust feature `agent_backend_transit` (contract 158): how a move of the agent to another backend goes. Show progress, then the result; see [Moving an agent to another backend](#moving-an-agent-to-another-backend). |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender`, `read_together` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). `read_together` (Rust Host contract 169, feature `queued_read_together`), on the event a message joined the queue with: as on its `GET /turn-queue` item. |
@@ -1907,6 +1943,14 @@ apply the broadcast, not re-post `/select`, or two clients loop.
 - `DELETE /agents/<session>` — release the agent (soft delete).
 - `POST /agent-mute`, `/agent-archive`, `/agent-heartbeat`, `/agent-dreaming`,
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
+- `POST /agent-snooze {"session", "until"}` (Rust Host contract 198, feature `snooze`, issue
+  871): puts the chat out of sight on every app until `until` (whole milliseconds since the
+  epoch, after now and at most a year ahead), or brings it back (`until` null, 0 or absent).
+  Answers `{"ok": true, "session", "snoozed_until"}`; 400 for another `until`, 404 for an
+  agent the Host does not have. Only the owner may: a paired device of full scope or the Host's
+  token, from no turn of an agent (`X-Clarp-Turn` is 403 `agents_may_not`).
+  Told as `agent-roster` `snooze-changed` with `fields: {snoozed_until}`; see the snapshot's
+  `snoozed_until` for when the Host ends it by itself.
 - On Rust Hosts with `agent_api_status`, a mute or archive change emits
   `agent-roster` with `kind: "mute-changed"` or `"archive-changed"` and the session.
   The resulting state and the agent's creation time (`created_at`, epoch milliseconds)
@@ -1970,6 +2014,7 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
     while it has nothing of its own to say). Patch both rows. A helper whose maker the Host no
     longer has carries no `parent`.
   - `mute-changed`: `muted`.
+  - `snooze-changed` (feature `snooze`, contract 198): `snoozed_until`.
   - `chat_view`: `chat_view` (the same value as the event's `chat_view`).
   - `agent-transit` as a change of backend begins: `transit`. The event at its end (`done` or
     `failed`) carries no `fields`: the agent's backend, model and what follows from them

@@ -93,6 +93,7 @@ fn a_turn_binds_its_conversation_names_its_model_and_answers_once() {
     }));
     assert!(signals.contains(&Signal::Model("claude-b".into())));
     assert!(signals.contains(&Signal::Context { tokens: 1234 }));
+    assert!(signals.contains(&Signal::Window { tokens: 1_000_000 }));
     assert!(signals.contains(&Signal::Usage {
         tokens_in: 13,
         tokens_out: 7

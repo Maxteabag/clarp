@@ -25,7 +25,13 @@ use serde_json::{Value, json};
 use crate::fleet::{Directory, Member};
 
 /// The kinds whose events carry `fields`.
-pub const CARRIED: [&str; 4] = ["helper-state", "mute-changed", "chat_view", "agent-transit"];
+pub const CARRIED: [&str; 5] = [
+    "helper-state",
+    "mute-changed",
+    crate::snooze::KIND,
+    "chat_view",
+    "agent-transit",
+];
 
 /// Adds what the event's change moved to an `agent-roster` event of a carried kind about one
 /// agent the Host has, from the roster as it stands. Any other event is left as it is.
@@ -72,6 +78,7 @@ fn fields(kind: &str, directory: &Directory, member: &Member) -> Option<Value> {
             "archived_at": record.archived_at_ms,
         })),
         "mute-changed" => Some(json!({ "muted": record.muted })),
+        crate::snooze::KIND => Some(json!({ "snoozed_until": record.snoozed_until_ms })),
         "chat_view" => Some(json!({
             "chat_view": crate::chat_view::preference(directory, &record.agent_id),
         })),

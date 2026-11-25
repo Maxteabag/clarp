@@ -118,6 +118,7 @@ pub mod schedules;
 pub mod screens;
 pub mod search;
 pub mod seats;
+pub mod snooze;
 mod takeover;
 pub mod teams;
 pub mod telling;

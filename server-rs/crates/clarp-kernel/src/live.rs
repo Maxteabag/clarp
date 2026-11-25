@@ -463,7 +463,13 @@ pub struct Hub {
     /// Every row the running turn read, also those its `read_rows` no longer holds: a row is
     /// added once, however often the rows read are told again (issue 808).
     read_seen: HashSet<String>,
+    /// How full the running turn's conversation is and what its model holds, as its tool last
+    /// said them ([`Hub::gauge`]): what its end tells, also where a move was too small to tell.
+    gauge: (Option<u64>, Option<u64>),
 }
+
+/// The window a gauge moves by a whole percent of where no window is known: Claude's smallest.
+const GAUGE_WINDOW_UNKNOWN: u64 = 200_000;
 
 impl Hub {
     pub fn new(epoch: &str, agent_id: &str, session: &str) -> Self {
@@ -486,6 +492,7 @@ impl Hub {
             pending: None,
             last_words: None,
             read_seen: HashSet::new(),
+            gauge: (None, None),
         }
     }
 
@@ -621,6 +628,7 @@ impl Hub {
         self.pending = None;
         self.last_words = None;
         self.read_seen.clear();
+        self.gauge = (None, None);
         self.flush(now, &mut out);
         self.explore_group = None;
         self.account_wait = None;
@@ -712,6 +720,40 @@ impl Hub {
         out
     }
 
+    /// How full the running turn's conversation is, as its tool says it as it runs: the turn
+    /// carries `context_tokens`, and `context_window` where the tool says what its model holds
+    /// (issue 869). A tool that says it with every answer would send a `turn` op with each: it
+    /// is told again only when it moved a whole percent of the window (of
+    /// [`GAUGE_WINDOW_UNKNOWN`] where none is known) or the window changed. The turn's end
+    /// carries the newest either way.
+    pub fn gauge(&mut self, tokens: Option<u64>, window: Option<u64>, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        self.gauge = (tokens.or(self.gauge.0), window.or(self.gauge.1));
+        if !self.open(None) {
+            return out;
+        }
+        let Some(mut turn) = self.view.turn.clone() else {
+            return out;
+        };
+        let told = |key: &str| turn.get(key).and_then(Value::as_u64);
+        let (was_tokens, was_window) = (told("context_tokens"), told("context_window"));
+        let (tokens, window) = self.gauge;
+        let step = (window.unwrap_or(GAUGE_WINDOW_UNKNOWN) / 100).max(1);
+        let moved = match (was_tokens, tokens) {
+            (None, Some(_)) => true,
+            (Some(was), Some(now)) => was.abs_diff(now) >= step,
+            (_, None) => false,
+        };
+        if !moved && window == was_window {
+            return out;
+        }
+        put_gauge(&mut turn, self.gauge);
+        self.flush(now, &mut out);
+        let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
+        self.emit(vec![op], (false, ""), now, &mut out);
+        out
+    }
+
     /// The turn ended: `completed`, `failed` or `interrupted`. What still ran is settled
     /// with it. A turn that failed says why (`error`: reason, message, the provider's words).
     pub fn end_turn(&mut self, status: &str, error: Option<&Value>, now: i64) -> Vec<Value> {
@@ -771,6 +813,7 @@ impl Hub {
             .filter(|at| *at != 0)
             .unwrap_or(now);
         let mut turn: Fields = held.into_iter().filter(|(key, _)| key != "error").collect();
+        put_gauge(&mut turn, self.gauge);
         turn.insert("status".to_string(), json!(status));
         turn.insert("ended_at_ms".to_string(), json!(now));
         turn.insert("worked_ms".to_string(), json!(now - started));
@@ -1833,4 +1876,14 @@ fn count_diff(old: &str, new: &str) -> (usize, usize, Vec<String>) {
         .filter(|line| !names_a_file(line))
         .collect();
     (added, removed, body)
+}
+
+/// The gauge on a turn, where its tool said it: `context_tokens` and `context_window`.
+fn put_gauge(turn: &mut Fields, (tokens, window): (Option<u64>, Option<u64>)) {
+    if let Some(tokens) = tokens {
+        turn.insert("context_tokens".to_string(), json!(tokens));
+    }
+    if let Some(window) = window {
+        turn.insert("context_window".to_string(), json!(window));
+    }
 }

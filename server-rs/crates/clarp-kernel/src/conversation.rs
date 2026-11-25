@@ -324,6 +324,10 @@ pub struct TurnEnd {
     /// every step of the turn anew.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
+    /// How many tokens the model that made that answer can hold, where the tool said so: the
+    /// other end of the same gauge (issue 869).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     /// What the turn cost, in millionths of a dollar, where that is known: what the tool's
     /// conversation cost more at the turn's end than before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -443,6 +447,7 @@ impl TurnEnd {
             tokens_in: None,
             tokens_out: None,
             context_tokens: None,
+            context_window: None,
             cost_micros: None,
             cost_so_far: None,
             total: None,
@@ -853,6 +858,7 @@ mod tests {
                 tokens_in: None,
                 tokens_out: None,
                 context_tokens: None,
+                context_window: None,
                 cost_micros: None,
                 cost_so_far: None,
                 total: None,

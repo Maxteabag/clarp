@@ -572,6 +572,31 @@ fn resets_at(info: &Value, window: &str) -> Option<i64> {
     (ms.is_finite() && ms > 0.0 && ms < 1e15).then_some(ms as i64)
 }
 
+/// How many tokens the model of the conversation holds, from a result's `modelUsage`: of the
+/// models a turn ran on (a helper of its own may run on another, smaller one), the one that
+/// read the most, as the conversation is read again with each of its answers.
+fn model_window(usage: &Value) -> Option<u64> {
+    let read = |model: &Value| {
+        [
+            "inputTokens",
+            "cacheReadInputTokens",
+            "cacheCreationInputTokens",
+        ]
+        .iter()
+        .filter_map(|name| model[*name].as_u64())
+        .sum::<u64>()
+    };
+    let models = usage.as_object()?.values();
+    let main = models
+        .filter(|model| {
+            model["contextWindow"]
+                .as_u64()
+                .is_some_and(|tokens| tokens > 0)
+        })
+        .max_by_key(|model| read(model))?;
+    main["contextWindow"].as_u64()
+}
+
 /// The text of a tool result, which is a string or a list of blocks.
 fn content_text(content: &Value) -> String {
     match content {
@@ -836,6 +861,11 @@ impl ClaudeInterpreter {
                             + count("cache_read_input_tokens"),
                         tokens_out: count("output_tokens"),
                     });
+                }
+                // How many tokens its model holds, as it says of each model the turn ran on:
+                // the one the conversation itself ran on is the one that read the most.
+                if let Some(window) = model_window(&event["modelUsage"]) {
+                    out.push(Signal::Window { tokens: window });
                 }
                 // What it says its session has cost so far: what the calls would be billed
                 // at, also on an account that pays by the month. The running total of the
@@ -1382,6 +1412,7 @@ mod tests {
                         | Signal::Model(_)
                         | Signal::Usage { .. }
                         | Signal::Context { .. }
+                        | Signal::Window { .. }
                         | Signal::Compacted(_)
                         | Signal::Concluded
                         | Signal::Answered
