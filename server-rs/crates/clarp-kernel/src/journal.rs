@@ -989,11 +989,11 @@ impl Batch<'_> {
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
                     if last {
-                        self.entered.push(item);
                         self.entered.push(
                             NewItem::new(kind::QUEUE_SHOWN, now_ms, Vec::new()).in_turn(turn.0),
                         );
                         self.work.queue_item_shown();
+                        self.entered.push(item);
                     } else {
                         self.queue_shown(turn, now_ms);
                         self.items.push(item);
