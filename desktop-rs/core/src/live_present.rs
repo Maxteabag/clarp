@@ -513,11 +513,11 @@ pub(crate) fn arrange_parts(
 ) -> Vec<Vec<Entry>> {
     let mut parts: Vec<Vec<&Object>> = vec![Vec::new(); cuts.len() + 1];
     let mut part = 0;
-    for item in shown {
+    for &item in shown {
         if let Some(began) = at(item) {
             part = part.max(cuts.iter().filter(|c| c.at_ms <= began).count());
         }
-        parts[part].push(*item);
+        parts[part].push(item);
     }
     let last = cuts.len();
     let mut timed = true;
