@@ -587,6 +587,9 @@ impl Ask {
         match self {
             Self::ClaudeLane(..) => "ClaudeLane",
             Self::CodexLaneFull(..) => "CodexLaneFull",
+            Self::MuseMissed(..) => "MuseMissed",
+            Self::MuseTake => "MuseTake",
+            Self::MuseTaken => "MuseTaken",
             Self::NativeGoal { .. } => "NativeGoal",
             Self::NativeGoalReply { .. } => "NativeGoalReply",
             Self::NativeGoalSeen(..) => "NativeGoalSeen",

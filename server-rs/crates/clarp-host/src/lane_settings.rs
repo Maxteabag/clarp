@@ -543,7 +543,7 @@ mod tests {
         assert!(settings.chat(Tool::Muse) && settings.chat(Tool::Codex));
         assert!(!settings.chat(Tool::Claude));
         assert!(text.find("muse_chat_lane = true").unwrap() < text.find("[server]").unwrap());
-        let answer = told(&settings, &Holding::default());
+        let answer = told(&settings, &Holding::default(), None);
         assert_eq!(answer["muse_chat_lane"], true);
         assert_eq!(
             answer["held"]["tools"]["muse"],
