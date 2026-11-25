@@ -164,7 +164,8 @@ fn the_kinds_and_who_is_told_are_the_python_hosts() {
         [
             failures::PROMPT_TOO_LONG,
             failures::PROVIDER_MISMATCH,
-            failures::FOLDER_MISSING
+            failures::FOLDER_MISSING,
+            failures::ENDED_FROM_OUTSIDE
         ]
     );
     let pythons = |kind: &&str| !failures::OWN_KINDS.contains(kind);

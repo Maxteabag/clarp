@@ -44,6 +44,12 @@ pub enum ShimEvent {
     SpawnFailed {
         error: String,
     },
+    /// A signal the Host did not send reached the shim (the Host stops a turn through the
+    /// shim's socket, never by a signal): something outside the Host ended the turn. The shim
+    /// ends its tool for it, as for a stop. Written once, before the stop's own records.
+    Signalled {
+        signal: String,
+    },
     /// Someone asked for the process to end; this is the signal it was sent.
     Stopping {
         signal: String,

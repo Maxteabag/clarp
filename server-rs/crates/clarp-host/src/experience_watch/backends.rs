@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_kernel::conversation::Entry;
-use clarp_kernel::failures::{AUTH, FOLDER_MISSING, INTERRUPTED, USAGE_LIMIT};
+use clarp_kernel::failures::{AUTH, ENDED_FROM_OUTSIDE, FOLDER_MISSING, INTERRUPTED, USAGE_LIMIT};
 use clarp_kernel::turn::{COMPACTION, Origin, Outcome};
 use jiff::tz::TimeZone;
 use serde::{Deserialize, Serialize};
@@ -72,8 +72,8 @@ pub(crate) fn said<'a>(rows: impl IntoIterator<Item = &'a Entry>, turn: u64) -> 
 }
 
 /// How a settled turn counts: `None` for one that says nothing of its backend (a Stop, a
-/// usage limit the Hotseat handles, an agent whose folder is gone, a cut-off, a turn replaced
-/// or taken back). `answered` says whether the row that closed it is a reply with words in it
+/// usage limit the Hotseat handles, an agent whose folder is gone, a turn whose process
+/// something outside the Host ended, a cut-off, a turn replaced or taken back). `answered` says whether the row that closed it is a reply with words in it
 /// or it left a note.
 pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Option<How> {
     match outcome {
@@ -84,7 +84,10 @@ pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Opti
         }
         Outcome::Completed => Some(How::Empty),
         Outcome::Failed { kind, .. }
-            if kind == USAGE_LIMIT || kind == INTERRUPTED || kind == FOLDER_MISSING =>
+            if kind == USAGE_LIMIT
+                || kind == INTERRUPTED
+                || kind == FOLDER_MISSING
+                || kind == ENDED_FROM_OUTSIDE =>
         {
             None
         }
@@ -284,6 +287,10 @@ mod tests {
             None
         );
         assert_eq!(judged(&failed("stopped", INTERRUPTED), &user, false), None);
+        // Ended by a signal from outside the Host: nothing of its backend (issue 829).
+        let outside = Outcome::failed(clarp_kernel::failures::ended_from_outside("SIGTERM"));
+        assert!(matches!(&outside, Outcome::Failed { kind, .. } if kind == ENDED_FROM_OUTSIDE));
+        assert_eq!(judged(&outside, &user, false), None);
         assert_eq!(
             judged(
                 &Outcome::stopped(clarp_kernel::control::Control::by("user")),

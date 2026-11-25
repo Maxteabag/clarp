@@ -748,6 +748,18 @@ impl Control {
         );
     }
 
+    /// A signal from outside the Host reached the shim: said in the spool before anything is
+    /// done for it, and kept there before the stop it starts.
+    fn outside(&self, signal: Signal) {
+        let (done, wait) = mpsc::channel();
+        let told = Entry::Shim(ShimEvent::Signalled {
+            signal: signal.as_str().to_string(),
+        });
+        if self.to_spool.send(ToSpool::Now(told, done)).is_ok() {
+            let _ = wait.recv();
+        }
+    }
+
     fn stop(&self, grace_ms: u64) {
         let mut stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
         if !matches!(*stage, StopStage::Ready) {
@@ -1429,7 +1441,14 @@ fn run(args: Args) -> Result<u8, String> {
     if signals_blocked {
         let control = control.clone();
         std::thread::spawn(move || {
-            while signals.wait().is_ok() {
+            // The Host stops a turn through the socket, never by a signal: one that comes is
+            // from outside, and the spool says which before the stop's own records (issue 829).
+            let mut told = false;
+            while let Ok(signal) = signals.wait() {
+                if !told {
+                    told = true;
+                    control.outside(signal);
+                }
                 control.stop(GRACE_ON_SIGNAL_MS);
             }
         });

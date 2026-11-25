@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 189;
+pub const HOST_CONTRACT: u64 = 190;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -464,6 +464,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // turn's trace (its `turn_id`) and number, from its first revision: the row alone tells a
     // message read into the running turn from one that waits (issue 845).
     ("read_into", 189),
+    // A turn whose process something outside the Host ended with a signal fails as the kind
+    // `ended_from_outside`, in the Host's words with the signal, never as the tool's failure,
+    // never tried again (issue 829).
+    ("ended_from_outside", 190),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

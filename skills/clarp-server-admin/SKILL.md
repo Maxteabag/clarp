@@ -43,8 +43,13 @@ crash events, failed sends, skill links, old decision cards, release-blocking
 jobs, and backends whose turns go wrong (`backend_failures`, one per backend:
 two or more turns of the last hour that failed, ended done with no reply or
 note recorded in any audience (a hidden coordination reply counts as a reply),
-or failed on sign-in, or every turn of the hour; usage limits and Stops do
-not count). Relaunch counts provide context for a crash finding.
+or failed on sign-in, or every turn of the hour; usage limits, Stops and turns
+ended from outside the Host do not count). Relaunch counts provide context for a
+crash finding. A turn that failed with the kind `ended_from_outside` (Rust Host
+contract 190, "The turn's process was ended from outside (SIGTERM)") was not the
+tool's failure: another process sent its shim a signal, as a manual `kill` or a
+service manager does. Look for who sent it; the Host never stops a turn by a
+signal.
 
 The watcher is off unless `[experience_watch] enabled = true` is set in
 the Host configuration. Each finding's owner and the configured front

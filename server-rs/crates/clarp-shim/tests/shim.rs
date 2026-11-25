@@ -306,6 +306,11 @@ fn a_stop_ends_the_tool_and_what_it_started() {
     assert!(all.iter().any(
         |r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping { signal }) if signal == "SIGTERM")
     ));
+    assert!(
+        !all.iter()
+            .any(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Signalled { .. }))),
+        "a stop through the socket is no signal from outside"
+    );
     assert!(matches!(
         all.last().unwrap().entry,
         Entry::Shim(ShimEvent::Exited { .. })
@@ -533,6 +538,21 @@ fn a_shim_that_is_told_to_go_ends_its_tool_first_and_says_so() {
         ),
         "it told the tool to end"
     );
+    // The Host stops through the socket, never by a signal: the spool says the signal came
+    // from outside, once and before the stop's own records (issue 829).
+    let outside = all.iter().position(
+        |r| matches!(&r.entry, Entry::Shim(ShimEvent::Signalled { signal }) if signal == "SIGTERM"),
+    );
+    let stopping = all
+        .iter()
+        .position(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping { .. })));
+    assert!(
+        outside.is_some() && outside < stopping,
+        "the outside signal is said before the stop: {all:?}"
+    );
+    let told =
+        |r: &&clarp_spool::Record| matches!(&r.entry, Entry::Shim(ShimEvent::Signalled { .. }));
+    assert_eq!(all.iter().filter(told).count(), 1);
     assert!(
         matches!(
             all.last().unwrap().entry,

@@ -585,6 +585,15 @@ Rules:
 - **A turn on another model provider than its agent's is a failure of its own (Rust Host
   contract 170, feature `codex_own_provider`).** The kind `provider_mismatch`: see
   [Agent lifecycle](#8-agent-lifecycle). It is never tried again.
+- **A turn ended from outside the Host is a failure of its own (Rust Host contract 190,
+  feature `ended_from_outside`).** The Host stops a turn through its shim, never by a signal.
+  When a signal from outside the Host (an operator's `kill`, a service manager) ends a turn's
+  process and the Host was not asked to stop it, the turn fails with the kind
+  `ended_from_outside` (`agent-state` `detail.reason`), and its reason is "The turn's process
+  was ended from outside (SIGTERM)", naming the signal, in place of what the tool wrote as it
+  was ended (Claude Code's "claude reported an error"). It is never tried again, and it is not
+  counted against the agent's backend. A Stop through the Host still ends the turn as
+  `interrupted`.
 - **A conversation too long for its model is a failure of its own (Rust Host contract 166,
   feature `prompt_too_long`).** Such a turn fails with the kind `prompt_too_long`, and its
   reason is "This conversation is too long for the model. Compact it or start a new one",

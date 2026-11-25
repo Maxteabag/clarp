@@ -143,6 +143,8 @@ mod native_agent_goal;
 mod native_goal_folder;
 #[path = "host/network_wait.rs"]
 mod network_wait;
+#[path = "host/outside_signal.rs"]
+mod outside_signal;
 #[path = "host/owner_preempts.rs"]
 mod owner_preempts;
 #[path = "host/pairing_identity.rs"]

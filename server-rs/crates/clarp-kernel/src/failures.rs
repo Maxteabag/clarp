@@ -46,6 +46,31 @@ pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
 /// [`provider_mismatch`] begins with; a tool's own words never read as it.
 pub const PROVIDER_MISMATCH: &str = "provider_mismatch";
 
+/// Something outside the Host ended the turn's process with a signal (an operator's `kill`, a
+/// service manager): not the tool's failure, nor a stop the Host was asked for. Never tried
+/// again, and not counted as the tool's failure. The Host names it itself, by the words
+/// [`ended_from_outside`] begins with (issue 829).
+pub const ENDED_FROM_OUTSIDE: &str = "ended_from_outside";
+
+/// What the words of a turn ended from outside begin with.
+const ENDED_FROM_OUTSIDE_MARK: &str = "ended_from_outside:";
+
+/// The words a turn ends with whose process a signal from outside the Host ended: the mark
+/// of the kind, then the sentence with the signal.
+pub fn ended_from_outside(signal: &str) -> String {
+    format!(
+        "{ENDED_FROM_OUTSIDE_MARK} The turn's process was ended from outside ({})",
+        signal.trim()
+    )
+}
+
+/// The sentence of a turn ended from outside, without its mark. `None` for any other words.
+pub fn outside_sentence(said: &str) -> Option<&str> {
+    said.trim()
+        .strip_prefix(ENDED_FROM_OUTSIDE_MARK)
+        .map(str::trim)
+}
+
 /// The agent's working folder is not there, or is no folder (a worktree removed after its
 /// branch landed): nothing can be started in it. Never tried again: no try brings the folder
 /// back. The Host names it itself, by the words [`clarp_spool::folder_gone`] makes; a tool's
@@ -92,7 +117,7 @@ pub fn provider_mismatch(why: &str) -> String {
 }
 
 /// The kinds the user is told of, once the Host has stopped trying.
-pub const NOTIFY: [&str; 13] = [
+pub const NOTIFY: [&str; 14] = [
     CONNECTION,
     TRANSIENT,
     INTERRUPTED,
@@ -106,10 +131,16 @@ pub const NOTIFY: [&str; 13] = [
     MUSE_SESSION_LOCKED,
     PROVIDER_MISMATCH,
     FOLDER_MISSING,
+    ENDED_FROM_OUTSIDE,
 ];
 
 /// The kinds this Host reads that the Python Host does not (`docs/differences.md`).
-pub const OWN_KINDS: [&str; 3] = [PROMPT_TOO_LONG, PROVIDER_MISMATCH, FOLDER_MISSING];
+pub const OWN_KINDS: [&str; 4] = [
+    PROMPT_TOO_LONG,
+    PROVIDER_MISMATCH,
+    FOLDER_MISSING,
+    ENDED_FROM_OUTSIDE,
+];
 
 /// The words a turn ends with whose tool said the conversation is too long for its model:
 /// the tool's own, after the Host's where they do not say it themselves, so that they are
@@ -294,6 +325,9 @@ pub fn classify_error(message: &str) -> &'static str {
     }
     if text.starts_with(clarp_spool::FOLDER_MISSING_MARK) {
         return FOLDER_MISSING;
+    }
+    if text.starts_with(ENDED_FROM_OUTSIDE_MARK) {
+        return ENDED_FROM_OUTSIDE;
     }
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
@@ -541,6 +575,18 @@ pub fn told(kind: &str, said: &str, model: &str, known: Known) -> Told {
     // no words of a tool's to add.
     if let Some(dir) = missing_folder(said) {
         let message = folder_missing_sentence(dir);
+        return Told {
+            summary: format!("{message}. Your message is saved."),
+            error: said.chars().take(200).collect(),
+            provider_message: String::new(),
+            row: format!("{message}."),
+            message,
+        };
+    }
+    // So is a turn ended from outside: the Host's sentence names the signal, and the tool's
+    // words, written as it was ended, say nothing of it.
+    if let Some(sentence) = outside_sentence(said) {
+        let message = sentence.to_string();
         return Told {
             summary: format!("{message}. Your message is saved."),
             error: said.chars().take(200).collect(),

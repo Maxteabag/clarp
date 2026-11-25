@@ -809,6 +809,10 @@ struct LiveTurn {
     /// ([`Actor::stop_for_an_account`]): however it ends short of completing, the turn
     /// waits for an account.
     for_account: bool,
+    /// A signal from outside the Host reached the attempt's shim (its spool says so): the
+    /// signal's name. Unless the Host was asked to stop the turn, it ends as ended from outside,
+    /// whatever the tool said as it was ended (issue 829).
+    outside: Option<String>,
     /// How many tools the attempt has begun, for what is shown of it beside a fork's turn.
     tool_count: u32,
     /// The calls of the attempt counted in `tool_count`, by id.
@@ -1803,6 +1807,7 @@ impl Actor {
                 over: true,
                 attempt,
                 for_account: false,
+                outside: None,
                 tool_count: 0,
                 counted: HashSet::new(),
                 came_done: 0,
@@ -5589,6 +5594,7 @@ impl Actor {
             over: false,
             attempt,
             for_account: false,
+            outside: None,
             tool_count: 0,
             counted: HashSet::new(),
             came_done: 0,
@@ -5770,6 +5776,7 @@ impl Actor {
         let stopped_at = self.recorder.agent().stopping_since_ms();
         let mut counted_calls: HashSet<String> = HashSet::new();
         let mut came_done: u32 = 0;
+        let mut outside = None;
         while offset < until {
             let read = reader
                 .read_window(offset, until, WINDOW)
@@ -5778,6 +5785,9 @@ impl Actor {
                 break; // the spool is shorter than the log says: go on from what is there
             }
             for record in &read.records {
+                if let Line::Shim(ShimEvent::Signalled { signal }) = &record.entry {
+                    outside.get_or_insert_with(|| signal.clone());
+                }
                 if after_stop(record, stopped_at) {
                     continue;
                 }
@@ -5971,6 +5981,7 @@ impl Actor {
             over: false,
             attempt,
             for_account: false,
+            outside,
             tool_count: 0,
             counted: counted_calls,
             came_done,
@@ -6744,6 +6755,9 @@ impl Actor {
                         live.over = true;
                     }
                     Line::Shim(ShimEvent::Exited { .. }) => live.over = true,
+                    Line::Shim(ShimEvent::Signalled { signal }) => {
+                        live.outside.get_or_insert_with(|| signal.clone());
+                    }
                     _ => {}
                 }
                 live.interpreter.on_record(record, &mut signals);
@@ -6789,6 +6803,19 @@ impl Actor {
                                 }
                             } else {
                                 outcome
+                            };
+                            // Ended from outside the Host, which was not asked to stop it: not
+                            // the tool's failure, whatever it wrote as it went (issue 829).
+                            let outcome = match &live.outside {
+                                Some(signal)
+                                    if outcome != RunOutcome::Completed
+                                        && batch.agent().stopping().is_none() =>
+                                {
+                                    RunOutcome::Failed {
+                                        reason: failures::ended_from_outside(signal),
+                                    }
+                                }
+                                _ => outcome,
                             };
                             if steering::recover_reads(
                                 &mut batch,
