@@ -640,12 +640,7 @@ fn owner_only() -> Response {
 
 /// Which agents a request names: one whose words are withheld from the reader, by its name,
 /// before any other.
-async fn named(
-    app: &App,
-    uri: &axum::http::Uri,
-    names: Names,
-    withheld: &Withheld,
-) -> About {
+async fn named(app: &App, uri: &axum::http::Uri, names: Names, withheld: &Withheld) -> About {
     let query = uri.query().unwrap_or("");
     let mut asked: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| names != Nobody && (key == "session" || key == "agent_id"))
