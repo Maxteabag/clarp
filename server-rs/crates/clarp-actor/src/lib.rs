@@ -5547,11 +5547,11 @@ impl Actor {
                                 &reply.id,
                                 !text.trim().is_empty(),
                                 !reply.tools.is_empty(),
-                                Shown {
+                                Some(Shown {
                                     hub: &mut self.shown,
                                     now: record.t,
                                     events: &mut unsent,
-                                },
+                                }),
                             );
                             if let Some(separate) = steering.separate.as_mut() {
                                 separate.closes = reply.id;
@@ -6771,11 +6771,11 @@ impl Actor {
                                 &reply.id,
                                 !reply.text.trim().is_empty(),
                                 !reply.tools.is_empty(),
-                                Shown {
+                                Some(Shown {
                                     hub: &mut self.shown,
                                     now: t,
                                     events: &mut self.shown_events,
-                                },
+                                }),
                             );
                             follow(&mut batch, followed, turn, t)?;
                             // What the reply marks for the ear waits to be spoken from the

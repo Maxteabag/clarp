@@ -2,9 +2,11 @@
 //! answer or was said along the way. The live turn and the replay of its spool after a Host
 //! restart apply these same rules, record by record, so that a restart changes nothing of which
 //! replies are answers, neither in the log nor for those who watch the turn. The replay only
-//! does not write again what the log holds already.
+//! does not write again what the log holds already. The agent's fork follows its own turns by
+//! the same rules, and keeps their state in its record in the log.
 
 use clarp_kernel::live::Hub;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::ActorError;
@@ -17,18 +19,24 @@ pub(super) struct Shown<'a> {
     pub(super) events: &'a mut Vec<Value>,
 }
 
-#[derive(Default)]
+/// Kept in a fork's record under the names that record has always given the first two
+/// (`open`, `open_worked`), so that a record written before loads as it was.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct Unfollowed {
     /// The replies of this turn that said something and that no tool work has followed yet,
     /// oldest first. Tool work that comes makes them commentary.
+    #[serde(rename = "open", default)]
     replies: Vec<String>,
     /// The newest of `replies` carried tool calls: it announced work, and is no answer.
+    #[serde(rename = "open_worked", default)]
     worked: bool,
     /// The steps of the plan the tool last told in this turn. A plan told again unchanged (Codex
     /// closes its list so when the task is complete, after its last words) is no work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     plan: Option<Value>,
     /// What this attempt said or did decided what was said before it: from here on it does
-    /// not matter what an attempt before this one left.
+    /// not matter what an attempt before this one left. Only a replay asks.
+    #[serde(skip)]
     decided: bool,
 }
 
@@ -65,13 +73,14 @@ impl Unfollowed {
     }
 
     /// A reply was written: `words` whether it says something, `calls` whether it calls tools.
-    /// Returns the replies its calls make said along the way.
+    /// Returns the replies its calls make said along the way. `shown`: those who watch the
+    /// turn, where they watch it.
     pub(super) fn reply(
         &mut self,
         id: &str,
         words: bool,
         calls: bool,
-        shown: Shown<'_>,
+        shown: Option<Shown<'_>>,
     ) -> Vec<String> {
         // The tools it calls are work after what the turn said before.
         let followed = if calls {
@@ -84,9 +93,12 @@ impl Unfollowed {
                 if self.worked {
                     self.replies.clear();
                 }
-                for answer in self.replies.drain(..) {
-                    let events = shown.hub.close_answer(&answer, shown.now);
-                    shown.events.extend(events);
+                let answers = std::mem::take(&mut self.replies);
+                if let Some(shown) = shown {
+                    for answer in &answers {
+                        let events = shown.hub.close_answer(answer, shown.now);
+                        shown.events.extend(events);
+                    }
                 }
                 self.decided = true;
             }

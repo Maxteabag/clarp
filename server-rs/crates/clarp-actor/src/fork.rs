@@ -37,7 +37,7 @@ use serde_json::json;
 
 use super::{
     Action, Actor, ActorError, Outputs, ShimOrder, WINDOW, attempt_of, conversation, ending_notice,
-    follow, io_error, kept, record_item, steering, turn_name, write_whole, written,
+    follow, io_error, kept, record_item, said, steering, turn_name, write_whole, written,
 };
 
 /// What a fork's tool is started with in its environment. The Host's own tools refuse, when
@@ -110,12 +110,10 @@ struct Asked {
     /// The row that closes its turn so far.
     #[serde(default)]
     last_row: String,
-    /// The fork's replies that no tool work has followed yet.
-    #[serde(default)]
-    open: Vec<String>,
-    /// The newest of `open` called tools: it announced work, and is no answer.
-    #[serde(default)]
-    open_worked: bool,
+    /// What the fork's turn has said that the work after it decides on, by the rules of the
+    /// agent's own turn. Its fields sit in this record as they always did.
+    #[serde(flatten)]
+    open: said::Unfollowed,
     /// For the note: what the user said, what the fork answered last, what it did.
     #[serde(default)]
     said: String,
@@ -458,8 +456,7 @@ impl Actor {
             read: false,
             offset: 0,
             last_row: String::new(),
-            open: Vec::new(),
-            open_worked: false,
+            open: said::Unfollowed::default(),
             said: shortened(&message.text),
             replied: String::new(),
             did: Vec::new(),
@@ -664,28 +661,24 @@ impl Actor {
                             reply.origin = message.origin.clone();
                             reply.backend_session = Some(session.clone());
                             reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
-                            if !reply.tools.is_empty() {
-                                follow(&mut batch, std::mem::take(&mut asked.open), turn, t)?;
-                            } else if !reply.text.trim().is_empty() {
-                                // Words after words: those before were an answer, as in the
-                                // agent's own turn, and those who watch are shown so. Words
-                                // whose own message called tools were said along the way.
-                                if asked.open_worked {
-                                    asked.open.clear();
-                                }
-                                let shown =
-                                    self.fork.shown.as_mut().filter(|shown| shown.turn == turn);
-                                if let Some(shown) = shown {
-                                    for answer in &asked.open {
-                                        let events = shown.hub.close_answer(answer, t);
-                                        shown.events.extend(events);
-                                    }
-                                }
-                                asked.open.clear();
-                            }
-                            if !reply.text.trim().is_empty() {
-                                asked.open.push(reply.id.clone());
-                                asked.open_worked = !reply.tools.is_empty();
+                            // Those who watch are shown the fork's turn while it is the one shown.
+                            let shown = self
+                                .fork
+                                .shown
+                                .as_mut()
+                                .filter(|shown| shown.turn == turn)
+                                .map(|shown| said::Shown {
+                                    hub: &mut shown.hub,
+                                    now: t,
+                                    events: &mut shown.events,
+                                });
+                            let words = !reply.text.trim().is_empty();
+                            let followed =
+                                asked
+                                    .open
+                                    .reply(&reply.id, words, !reply.tools.is_empty(), shown);
+                            follow(&mut batch, followed, turn, t)?;
+                            if words {
                                 asked.replied = shortened(&reply.text);
                             }
                             if message.speak {
@@ -709,7 +702,7 @@ impl Actor {
                             if call.reply.is_none()
                                 && (call.status == ToolStatus::Running || !known)
                             {
-                                follow(&mut batch, std::mem::take(&mut asked.open), turn, t)?;
+                                follow(&mut batch, asked.open.work(), turn, t)?;
                             }
                             if call.status == ToolStatus::Running && !known {
                                 let summary = summarize(&call.name, &call.input).summary;
@@ -726,6 +719,12 @@ impl Actor {
                         Signal::Notice(notice) if asked.read => Entry::Notice(notice),
                         // What the fork does as it runs is shown as the turn the user talks to.
                         Signal::Glimpse(glimpse) => {
+                            // A plan that changes is work, as in the agent's own turn.
+                            if let clarp_kernel::live::Glimpse::Plan { steps, .. } = &glimpse
+                                && let Some(followed) = asked.open.plan(steps)
+                            {
+                                follow(&mut batch, followed, turn, t)?;
+                            }
                             if let Some(shown) =
                                 self.fork.shown.as_mut().filter(|shown| shown.turn == turn)
                             {
@@ -1381,5 +1380,33 @@ impl Actor {
         self.fork_reconcile(out, now_ms)?;
         self.fork_next(out, now_ms)?;
         self.resume_deferred(out, now_ms)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// A fork's record written before its replies were kept by the agent's own rules still
+    /// loads with them, and is written again under the same names.
+    #[test]
+    fn a_question_written_before_keeps_its_open_replies() {
+        let before = json!({
+            "turn": 4, "message_seq": 9, "stage": "running", "read": true, "offset": 120,
+            "last_row": "r-2", "open": ["r-1", "r-2"], "open_worked": true,
+            "said": "what is it", "replied": "this", "did": [], "stopped": false,
+        });
+        let mut asked: Asked = serde_json::from_value(before).unwrap();
+        let again = serde_json::to_value(&asked).unwrap();
+        assert_eq!(again["open"], json!(["r-1", "r-2"]));
+        assert_eq!(again["open_worked"], json!(true));
+        assert!(again.get("plan").is_none());
+        // Work that comes makes them said along the way.
+        assert_eq!(asked.open.work(), ["r-1", "r-2"]);
+        // A record with neither, as the first ones were written, loads with nothing open.
+        let first = json!({"turn": 1, "message_seq": 2, "stage": "waiting"});
+        let asked: Asked = serde_json::from_value(first).unwrap();
+        assert!(asked.open.is_empty());
     }
 }
