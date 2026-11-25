@@ -248,6 +248,9 @@ pub struct Engine {
     rooms: Vec<Value>,
     rooms_in_flight: bool,
     rooms_dirty: bool,
+    /// The Host answered 404 to `/agent-conversations`: it has no pair rooms,
+    /// so it is not asked again until the desktop connects anew.
+    rooms_unsupported: bool,
     rooms_refresh: u64,
     selected: String,
     waiting_for_session_choice: bool,
@@ -414,6 +417,7 @@ impl Engine {
             rooms: Vec::new(),
             rooms_in_flight: false,
             rooms_dirty: false,
+            rooms_unsupported: false,
             rooms_refresh: 0,
             selected: String::new(),
             waiting_for_session_choice: false,
@@ -903,6 +907,7 @@ impl Engine {
     }
 
     pub fn reconnect(&mut self) {
+        self.rooms_unsupported = false;
         let endpoint = match Url::parse(&self.base_url) {
             Ok(url) if url.host_str().is_some_and(|h| !h.is_empty()) => url,
             _ => {
@@ -1156,7 +1161,7 @@ impl Engine {
             self.rooms_dirty = true;
             return;
         }
-        if self.token.is_empty() {
+        if self.token.is_empty() || self.rooms_unsupported {
             return;
         }
         self.rooms_in_flight = true;
@@ -1717,8 +1722,16 @@ impl Engine {
             if std::mem::take(&mut self.rooms_dirty) {
                 self.schedule_agent_conversations();
             }
-            // A Host without this route simply has no pair rooms to show.
-            eprintln!("clarp-engine: agent conversations failed: {message} (HTTP {status})");
+            // A Host without this route simply has no pair rooms to show; it
+            // is said once and not asked again until the next connection.
+            if status == 404 {
+                if !self.rooms_unsupported {
+                    eprintln!("clarp-engine: this Host has no pair conversations (GET /agent-conversations: HTTP 404)");
+                }
+                self.rooms_unsupported = true;
+            } else {
+                eprintln!("clarp-engine: agent conversations failed: {message} (HTTP {status})");
+            }
             if !self.rooms.is_empty() {
                 self.rooms.clear();
                 self.changes.push(Change::Rooms);
