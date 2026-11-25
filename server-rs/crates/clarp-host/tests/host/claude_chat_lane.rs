@@ -520,9 +520,9 @@ fn a_turn_that_meets_a_lane_on_its_way_out_waits_for_it_and_starts_the_lane() {
     std::fs::write(place.root.join("slow-exit"), "").unwrap();
     let mut retire = std::os::unix::net::UnixStream::connect(&socket).unwrap();
     writeln!(retire, "{}", json!({"op": "retire"})).unwrap();
-    wait_for("the lane to stop answering", || {
-        lane_said(&socket, "inspect").is_none()
-    });
+    // Its socket goes first, before it ends its Claude Code; a look at it would wait on a
+    // listener that no longer answers, so the test watches the socket's file.
+    wait_for("the lane to stop answering", || !socket.exists());
     let owner = socket.with_extension("lock");
     let held = std::fs::File::open(&owner).unwrap();
     assert!(
