@@ -571,6 +571,7 @@ impl Ask {
     fn kind(&self) -> &'static str {
         match self {
             Self::ClaudeLane(..) => "ClaudeLane",
+            Self::CodexLaneFull(..) => "CodexLaneFull",
             Self::NativeGoal { .. } => "NativeGoal",
             Self::NativeGoalReply { .. } => "NativeGoalReply",
             Self::NativeGoalSeen(..) => "NativeGoalSeen",
