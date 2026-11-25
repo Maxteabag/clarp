@@ -1315,17 +1315,24 @@ fn a_tool_ended_while_it_is_held_is_killed_without_running_again() {
             .into_iter()
             .map(|r| r.entry)
             .collect();
+        // A signal from outside is said first (issue 829); a stop through the socket is not.
+        let mut expected = Vec::new();
+        if how == "signal" {
+            expected.push(Entry::Shim(ShimEvent::Signalled {
+                signal: "SIGTERM".into(),
+            }));
+        }
+        expected.extend([
+            Entry::Shim(ShimEvent::Stopping {
+                signal: "SIGKILL".into(),
+            }),
+            Entry::Shim(ShimEvent::Exited {
+                code: None,
+                signal: Some(9),
+            }),
+        ]);
         assert_eq!(
-            then,
-            [
-                Entry::Shim(ShimEvent::Stopping {
-                    signal: "SIGKILL".into()
-                }),
-                Entry::Shim(ShimEvent::Exited {
-                    code: None,
-                    signal: Some(9)
-                }),
-            ],
+            then, expected,
             "nothing more is printed, and the end is a stopped turn's: {how}"
         );
         wait_for("the child to be gone", || gone(child));

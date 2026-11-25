@@ -30003,8 +30003,14 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
                 .any(|r| path(r) == format!("{session}/abort"))
         );
         assert_eq!(host.state(&agent), "interrupted");
+        // A signal from outside the Host ended it: its own kind and words, not the tool's
+        // (issue 829).
         let turns = host.turns(&agent);
-        assert_eq!(turns.last().unwrap()["turn"]["status"], "interrupted");
+        let end = turns.iter().rev().find(|r| r["turn"].is_object()).unwrap();
+        assert_eq!(end["turn"]["status"], "failed", "{end}");
+        let words = "The turn's process was ended from outside (SIGTERM)";
+        let said = turns.iter().any(|r| r.to_string().contains(words));
+        assert!(said, "{turns:?}");
         let written = std::fs::read_to_string(root.join("signalled-spool")).unwrap();
         let last: Value = serde_json::from_str(written.lines().last().unwrap()).unwrap();
         assert_eq!(last["d"], json!({"event":"exited","signal":15,"code":null}));
