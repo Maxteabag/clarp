@@ -551,6 +551,15 @@ Rules:
   long reply), or leaves it out (the desktop). The written body is the text outside the
   `<speak>` blocks, with the voice's own markup (`<vox>`, `<break>`, emotion tags) taken out. A
   row with nothing written has its spoken words as its answer.
+- **A row's text comes before its tools.** An assistant row's `text` is what the agent wrote, and
+  its `tools` (and `display_cells`) the calls its message made, in the order it made them: draw
+  the text first, then the calls, while the turn runs and once it is settled alike. A message
+  that wrote, called a tool and wrote again (Claude, text and `tool_use` blocks in one message)
+  is one row on the Rust Host: its `text` holds all its words, the blocks joined by a blank line,
+  and its `tools` its calls. Where between the words a call stood is not kept, so it is drawn
+  after them; the live turn shows the message's item before its call's item too. A row imported
+  from a transcript is split at the message's blocks (`blk-…` rows, above), so there the rows
+  stand in the order the agent wrote them.
 - **The other agents a row names are the roster's.** The other agents a row
   names (`sender_name` and `sender_session` by `sender_agent_id`,
   `reply_to_name` and `reply_to_session` by `reply_to_agent_id`) are the
