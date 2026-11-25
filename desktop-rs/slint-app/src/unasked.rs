@@ -71,6 +71,10 @@ pub const AFTER_INPUT: Duration = Duration::from_millis(400);
 /// this of it are asked for too.
 pub const AFTER_RESIZE: Duration = Duration::from_millis(150);
 
+/// After the reader's own scroll (or a move they asked for) the list keeps
+/// settling a moment: frames within this of the last asked one are theirs too.
+pub const AFTER_ASKED: Duration = Duration::from_millis(350);
+
 /// The chat's height changed between two frames.
 fn resized(a: &Shot, b: &Shot) -> bool {
     (a.viewport - b.viewport).abs() >= 0.5
@@ -207,6 +211,9 @@ pub struct Motion {
     input: Option<Duration>,
     /// The user's resize asks for movement until then.
     resized_until: Option<Duration>,
+    /// The reader's own scroll (or a move they asked for) asks for the
+    /// settling after it until then.
+    asked_until: Option<Duration>,
 }
 
 impl Motion {
@@ -215,7 +222,7 @@ impl Motion {
         let mut found = Vec::new();
         if after.events.iter().any(|e| e.starts_with("reset:")) {
             // Another chat (or every row again): a new open.
-            *self = Motion { minute: self.minute.take(), input: self.input, resized_until: self.resized_until, ..Motion::default() };
+            *self = Motion { minute: self.minute.take(), input: self.input, resized_until: self.resized_until, asked_until: self.asked_until, ..Motion::default() };
         }
         if after.events.iter().any(|e| e == INPUT) {
             self.input = Some(after.at);
@@ -226,10 +233,14 @@ impl Motion {
         if resize(before, after) && self.input.is_some_and(|input| after.at.saturating_sub(input) <= AFTER_INPUT) {
             self.resized_until = Some(after.at + AFTER_RESIZE);
         }
-        if after.events.iter().any(|e| asked(e)) || self.resized_until.is_some_and(|until| after.at <= until) {
+        if after.events.iter().any(|e| asked(e)) {
+            self.asked_until = Some(after.at + AFTER_ASKED);
+        }
+        let settling = self.asked_until.is_some_and(|until| after.at <= until);
+        if after.events.iter().any(|e| asked(e)) || settling || self.resized_until.is_some_and(|until| after.at <= until) {
             self.steps.clear();
             self.shake = None;
-            if self.resized_until.is_some_and(|until| after.at <= until) {
+            if settling || self.resized_until.is_some_and(|until| after.at <= until) {
                 return found;
             }
         }
@@ -503,6 +514,20 @@ mod tests {
         let still = frame(300, pinned(4000.0, -20.0, 100.0), &["live"]);
         assert!(motion.frame(&typed, &still).is_empty());
         assert_eq!(shifts(&motion.frame(&still, &resized_at(500, &["resize"]))), 1);
+    }
+
+    /// The list settling within 0.35 s after the reader's own scroll is
+    /// theirs; movement after that counts again.
+    #[test]
+    fn the_settling_after_the_readers_scroll_is_theirs() {
+        let a = frame(0, pinned(4000.0, -20.0, 100.0), &[]);
+        let scrolled = frame(16, Shot { top_y: -60.0, ..pinned(4000.0, -20.0, 100.0) }, &["reader"]);
+        let mut motion = Motion::default();
+        assert!(motion.frame(&a, &scrolled).is_empty());
+        let settle = frame(300, Shot { top_y: -40.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert!(motion.frame(&scrolled, &settle).is_empty(), "settling 0.28 s after the scroll");
+        let later = frame(800, Shot { top_y: 60.0, ..pinned(4000.0, -20.0, 100.0) }, &[]);
+        assert!(motion.frame(&settle, &later).iter().any(|f| f.rule == "shift"), "a jump 0.8 s after it counts");
     }
 
     #[test]
