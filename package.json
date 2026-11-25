@@ -11,8 +11,7 @@
     "preview": "vite build && vite preview",
     "desktop": "tauri dev",
     "tauri": "tauri",
-    "test": "vitest run",
-    "e2e": "scripts/test_e2e_docker.sh"
+    "test": "vitest run"
   },
   "keywords": [],
   "author": "",

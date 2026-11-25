@@ -13,9 +13,8 @@ This is the contract between the Clarp server and any client: the PWA in
    implements none.
 
 The wire constants (event type names, agent states, clip statuses) are defined
-once in `server/lib/protocol.py` and mirrored in `static/lib/protocol.js` and
-the PWA client models. A test fails the build when
-they drift.
+once in the Host (`server-rs/crates/clarp-protocol`) and mirrored in
+`static/lib/protocol.js` and the web app's client models.
 
 ## Vocabulary
 
@@ -1711,8 +1710,9 @@ flight, run one more fetch after it completes rather than starting a second.
 ## Extension surfaces
 
 These are the routes only the native app uses today. A new client may adopt
-any subset. Payload shapes are documented in the handler docstrings in
-`server/server.py` and the modules named here.
+any subset. Payload shapes are documented with the Host's handlers in
+`server-rs/crates/clarp-host/src`. The last column names the module of the
+retired Python Host each surface came from, kept as a record.
 
 | Surface | Routes | Server module |
 |---|---|---|
@@ -1741,8 +1741,7 @@ any subset. Payload shapes are documented in the handler docstrings in
 status plus `restart_scheduled`. Every provider but Cartesia needs a Host
 restart; the Host restarts its own service half a second after the answer.
 
-Only the installed Host does that (Host contract 99, [installation.md](installation.md)
-"Who may touch the services"). Any other Host still saves, and answers
+Only the installed Host does that (Host contract 99). Any other Host still saves, and answers
 `restart_scheduled: false` with
 `restart_refusal: {"reason": "not_in_unit" | "no_definition" | "foreign_directories" | "disposable_host", "message": "…"}`.
 `restart_refusal` is absent whenever a restart was scheduled or none was
@@ -1786,7 +1785,7 @@ client shows it and derives nothing from `voice_id`.
   `[gemini_tts.voices]`; null for an id in no map), Google's and Deepgram's voice names.
 - An archived agent has no `voice_profile`: not on its snapshot row, and not in the creation
   answer or a roster event about it.
-- The rule both Hosts hold (vectors in `tests/unit/test_voice_v2a.py`): no voice of its own =
+- The rule the Host holds: no voice of its own =
   the provider's default voice where the provider has exactly one, silence (`no_voice`) where
   it has none; a migrated agent must not fall silent where it spoke before.
 - `speech.shared_with`: how many other active agents speak with the same provider and
@@ -1864,7 +1863,7 @@ contact, the first-install roster) and a new contact (`POST /personas`) end with
 is heard under the Host's configured provider and under its configured fallback. The Host keeps
 every voice the request gave and adds, for each of those providers it has none for, a free
 voice from its pool (`[cartesia] pool` when set; else, for an English agent, the curated list
-in `server/lib/cartesia_voice_pool.json` less the voices Cartesia no longer offers, and for
+in `server-rs/crates/clarp-kernel/src/cartesia_voice_pool.json` less the voices Cartesia no longer offers, and for
 another language Cartesia's catalogue in that language; the ElevenLabs and Gemini
 catalogues). A free voice is one no agent (archived ones included) or contact speaks with; when
 there is none, one is reused (below). With this feature an app may create an agent or contact
@@ -2395,8 +2394,7 @@ The core conversation protocol is **additive-only**. Fields and event
 types are added, never renamed, removed, or retyped. A change that cannot
 be expressed additively ships as a new event type or a new endpoint, and
 the old one keeps working until `min_app_version` (below) moves past
-every client that used it. The database schema follows the same rule
-(`server/lib/db.py`).
+every client that used it. The database schema follows the same rule.
 
 Clients **must ignore** unknown event types and unknown fields on known
 types, and must treat a missing optional field as the documented default.
@@ -2432,7 +2430,7 @@ contract=<n>` on every request, and the Host echoes its verdict back as
 `client.status` (`compatible`, `client_outdated`, `unknown`). The app shows a
 persistent red banner while either floor is unmet and an amber one while a
 feature the user has turned on is missing from the Host. Every bump is a row
-in `docs/compatibility.md`; `tests/unit/test_client_contract.py` keeps the
+in `docs/compatibility.md`; `server-rs/tools/tests/test_rust_contract.py` keeps the
 table honest. `clarp_version` and `min_app_version` remain for apps that
 predate the contract; a server that sends no `contract` block is treated as
 contract 0 and therefore older than any app minimum.
@@ -2440,7 +2438,7 @@ contract 0 and therefore older than any app minimum.
 Inside that window, features are negotiated per surface rather than by
 version. `/server-info` also carries `capabilities.features`, the product
 surfaces this Host implements (`teams`, `oracle`, `dreaming`, …,
-`server_identity.FEATURES`), so a client hides an entry point the Host
+`FEATURES` in `server-rs/crates/clarp-host/src/edge.rs`), so a client hides an entry point the Host
 lacks instead of showing a dead toggle; a Host that sends no block hides
 nothing. The same idea drives the per-surface catalogues: backends
 (`/agent-model-options`, above), sign-in rows (`/backend-auth` lists every

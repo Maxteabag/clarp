@@ -137,7 +137,7 @@ def source_check():
 def unchanged(generator):
     # Check the repository outputs, including generated Rust tables. Tools
     # themselves can be under development when running the guard locally.
-    paths = ['.', ':(exclude)server-rs/tools', ':(exclude)server-rs/conformance/conform.py']
+    paths = ['.', ':(exclude)server-rs/tools']
     changed = subprocess.check_output(['git', 'diff', '--name-only', 'HEAD', '--', *paths], cwd=REPO, text=True)
     changed += subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '--', *paths], cwd=REPO, text=True)
     if changed.strip():

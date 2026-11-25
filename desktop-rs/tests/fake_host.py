@@ -180,8 +180,9 @@ CLOSE = object()
 # GET /live answers from the Host's reference reducer fed the same steps.
 REPO = pathlib.Path(__file__).resolve().parents[2]
 LIVE_FIXTURES = REPO / "contract" / "live"
-sys.path.insert(0, str(REPO / "server"))
-from lib.live_items import LiveView  # noqa: E402
+# The reference reducer, kept beside this file since the Python Host it came from was removed.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from live_projection import LiveView  # noqa: E402
 
 live_features = False
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current

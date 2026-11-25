@@ -23,19 +23,17 @@ libraries are live without a build.
 
 One dev-only substitution: `/sw.js` is replaced with a no-op service worker.
 The real one caches the shell and would keep serving the previous bundle after
-every hot update. To exercise the actual service worker, run
-`make deploy-static` and use the real server.
+every hot update. To exercise the actual service worker, build with
+`npm run build` and open the page through a Rust Host that serves that build.
 
-`scripts/deploy_static.sh` runs the build itself before syncing, so
-`make deploy-static` cannot ship a stale bundle. The build output under
-`static/` **is committed** — the Python server serves `static/` directly and
-the deploy target has no Node toolchain.
+The build output under `static/app/` is not committed. The Rust Host serves
+`static/` from its own share (`~/.local/share/clarp-host/static`); the release
+owner places a fresh build there.
 
 ## Why the build lands where it does
 
-The Python server's asset routing is fixed: `/` serves `static/index.html`,
-`/static/*` serves `static/*`, and a few root paths are special-cased in
-`server.py`. Anything else falls through to the API router and 404s. So Vite
+The Host's asset routing is fixed: `/` serves `static/index.html`,
+`/static/*` serves `static/*`, and a few root paths are special-cased. Anything else falls through to the API router and 404s. So Vite
 is configured with `base: '/static/'` and `outDir: '../static'`, and the bundle
 name is **not** content-hashed — `static/sw.js` has to list it as a literal
 path in its offline shell, and cache invalidation already happens through the

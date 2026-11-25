@@ -9,8 +9,8 @@ contract=<n>` on every request. A pair is compatible when
 `host ≥ minimumHost` and `current ≥ min_ios`.
 
 **Every change to `HOST_CONTRACT` or `MIN_IOS_CONTRACT` in
-`server/lib/server_identity.py` adds a row at the top of this table.**
-`tests/unit/test_client_contract.py` fails when the newest row and the
+`server-rs/crates/clarp-host/src/edge.rs` adds a row at the top of this table.**
+`server-rs/tools/tests/test_rust_contract.py` fails when the newest row and the
 constants disagree. The iOS repository keeps the mirror table in its own
 `docs/compatibility.md`, checked by `scripts/verify_static.py`.
 

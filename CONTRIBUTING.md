@@ -9,74 +9,35 @@ design is in [ARCHITECTURE.md](ARCHITECTURE.md) and the client contract in
 ```bash
 git clone https://github.com/Maxteabag/clarp
 cd clarp
-uv sync --frozen          # Python 3.12+, locked environment in .venv
-npm ci                   # Svelte, Vite, vitest, Playwright from the lockfile
+npm ci                   # the web app's Svelte, Vite and vitest, from the lockfile
 ```
 
-Run `uv run python server/runtime.py` and `uv run python server/server.py` in
-separate terminals. The PWA hot-reloads with `npm run dev`, which proxies API
-calls to the server on `127.0.0.1:7682` (override with `CLARP_UPSTREAM`).
+The Host is in `server-rs/`; read [server-rs/REBUILD.md](server-rs/REBUILD.md)
+before changing it. Its Rust compiles on the build machine through
+`server-rs/tools/build` (`check`, `test`, `release`), one build at a time. The
+web app hot-reloads with `npm run dev`, which proxies API calls to a Host
+(`CLARP_UPSTREAM`).
 
 ## Tests
 
-| Command | What | Time |
-|---|---|---|
-| `make test-critical` | What can brick the Host or lose data (`tests/critical.txt`); part of the one pass at the end of a piece of work | ~1 min |
-| `make py` | Python unit and integration tests, all cores, 60 s per-test timeout | ~30 s |
-| `make js` | JavaScript unit tests (vitest) | ~15 s |
-| `make e2e` | Playwright against a throwaway Docker node | minutes |
-| `make docker-test` | Build the image; exercise install, restart, backup | minutes |
-| `make isolated-codex` | Fake Codex writer locks and AGY timeout checks; no live auth | ~30 s |
-
-Tests never touch a real install: every test owns a temporary database,
-config, and cache; `systemctl` and `launchctl` are shimmed; and any socket to
-a non-loopback address fails the test. Keep it that way: stub the provider
-call, do not lower the guard.
-
-The browser suite refuses to run without `CLARP_BASE_URL`. `make e2e` sets it
-to a disposable container; never point it at a server you care about.
+- `server-rs/tools/final-pass`: the one short pass before a Host is installed.
+- `server-rs/tools/build test [filter]`: the Rust tests, on the build machine.
+- `npm test`: the web app's JavaScript tests (vitest).
+- The desktop app's checks run in GitHub Actions only (`desktop-checks.yml`).
 
 ## Making changes
 
-- **Wire constants** live in `server/lib/protocol.py`, `static/lib/protocol.js`,
-  and the PWA protocol module. Change them together.
-- **Schema changes**: edit `_SCHEMA_SQL` in `server/lib/db.py`, bump
-  `_SCHEMA_VERSION`, and add a `_migrate_to_vN` that upgrades an existing
-  database. `tests/unit/test_db_migrations.py` checks the two agree.
-- **Endpoints**: handlers in `server/server.py` delegate to a module in
-  `server/lib/`. Add the route to `docs/protocol.md` if a client is meant to
-  call it.
-- **The PWA bundle** (`static/app/`) is committed. Run `npm run build` and
-  include the result when you change anything under `web/src` or `static/lib`.
-- **Runtime compatibility is deliberate.** The private runtime RPC must remain
-  compatible while an older runtime finishes turns beside a newer HTTP server.
-  Add protocol fields; do not repurpose them. Host and native clients also
-  release independently: the external core contract is additive, unknown
-  response fields are ignored, and optional features use capabilities.
-  Breaking changes require a protocol version and an explicit upgrade path.
-  Internal implementation details do not need compatibility wrappers.
-
-## When a new model ships
-
-The container pins the agent CLIs (`CLAUDE_CODE_VERSION`, `CODEX_VERSION` in the
-`Dockerfile`). A model refuses a CLI older than its own minimum — every turn
-comes back `400 ... does not support this model; version X or newer is
-required` — and a container user cannot fix that from inside: `stable` only
-publishes on a `v*` tag, so the pin is what they are stuck with until the next
-release.
-
-So a model release means a release here:
-
-1. Bump `CLAUDE_CODE_VERSION` (and `CODEX_VERSION` while you are there) in the
-   `Dockerfile`.
-2. Tag it — `git tag vX.Y.Z && git push origin vX.Y.Z`. `edge` is published only by a
-   Docker run started by hand on `main`; `stable` needs the tag.
-3. On each deployment: `docker compose pull && docker compose up -d`.
-4. **Relaunch the running agents.** A live agent keeps the CLI process it
-   started with, so it keeps failing until it is relaunched — updating the
-   package alone does nothing for it. Pass `resume_session_id` when you
-   relaunch, or the agent comes back with its chat history on screen and no
-   memory of it.
+- **Wire constants** live in the Host (`server-rs/crates/clarp-protocol`) and
+  `static/lib/protocol.js`. Change them together.
+- **Endpoints**: add the route to `docs/protocol.md` if a client is meant to
+  call it, and a row to `docs/compatibility.md` when the Host contract moves.
+- **The web app bundle** (`static/app/`) is built, not committed. After a change
+  under `web/src` or `static/lib`, run `npm run build` and have the release owner
+  place `static/` on the Rust Hosts (`~/.local/share/clarp-host/static`).
+- **Compatibility is deliberate.** The Host and the native clients release
+  independently: the external core contract is additive, unknown response
+  fields are ignored, and optional features use capabilities. Breaking
+  changes require a protocol version and an explicit upgrade path.
 
 ## Commits and pull requests
 

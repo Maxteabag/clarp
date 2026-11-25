@@ -1,7 +1,7 @@
 # Lifecycles
 
 Status: accepted 2026-11-03 as part of the server refactor program
-(`REFACTOR.md`, section 3, "Lifecycle kit"). Owner: Peter; kept by the
+("Lifecycle kit"; the program's record is in git history). Owner: Peter; kept by the
 contract owner. It extends rules 1, 4 and 6 of `state-and-boundaries.md`.
 
 A **lifecycle** is a long-lived thing with a state that changes over time and

@@ -13,27 +13,22 @@ these files are the parts a computer can verify.
   runner (`tests/contract/fixtures.test.js`) feeds them through the pure
   modules (`static/lib/conversation-sync.js`, `delivery.js`, `protocol.js`).
   The PWA's conversation store (`web/src/stores/conversations.svelte.js`)
-  is an adapter over the same reducer, so the fixtures test what ships;
-  `tests/contract/test_fixtures_validate.py` checks the embedded payloads
-  against `schemas/` so fixtures cannot describe a server that does not
-  exist.
+  is an adapter over the same reducer, so the fixtures test what ships.
+  The Host's protocol tests (`server-rs/crates/clarp-protocol/tests`) read
+  them too.
 - `fixtures/voice-display.json` — the written text left once `<vox>` fillers
   are hidden: cases from real replies with the expected display string. The
-  Host (`tests/unit/test_voice_display_fixture.py`), web
-  (`tests/state/voice-markup.test.js`), desktop (`desktop-rs/core/tests/voice_display.rs`)
-  and iOS (`VoiceDisplayFixtureTests`) all run it; the Host skips the
-  `streaming` cases because it never renders a reply still arriving.
+  web (`tests/state/voice-markup.test.js`), desktop
+  (`desktop-rs/core/tests/voice_display.rs`) and iOS (`VoiceDisplayFixtureTests`)
+  run it.
 - `fixtures/goal-ledger.json` with `schemas/goal-ledger.json` — the goal
   ledger payloads (contract 52, `goal_ledger`): a plan with its subgoals and
   ledger summary, a `GET /goal-ledger` page and `GET /goal-ledger/delegations`,
-  produced by the real Host from one pinned scenario
-  (`tests/contract/test_goal_ledger_fixture.py` fails when the Host stops
-  emitting exactly this). Regenerate with `CLARP_UPDATE_FIXTURES=1` only for an
-  additive change, and tell the native clients.
+  produced by the real Host from one pinned scenario. Change it only
+  additively, and tell the native clients.
 - `live/` — recorded `live` SSE streams plus the state a client must reach
   (docs/live-items.md). Desktop, web and iOS replay them through their own
-  reducers; `tests/contract/test_live_fixtures.py` validates them against
-  `schemas/live.json` and the Host's reference reducer (`server/lib/live_items.py`).
+  reducers (`tests/contract/live-fixtures.test.js` for the web).
   Steps are `{"snapshot": <GET /live body>}` or `{"event": <live event>}`;
   `expect` lists the effects (`fetch_live`), the final `lseq`, `activity`,
   `turn` and the items in order (expected fields are a subset of the item).
@@ -44,7 +39,5 @@ these files are the parts a computer can verify.
   fixtures are shared. Native consumers must reject unsupported expectations,
   not count an ignored scenario as verified.
 - `reference-client/` — `clarp-client.mjs`, a minimal working client
-  (under 250 lines, no dependencies beyond global fetch).
-  `tests/contract/test_reference_client.py` runs it through one turn
-  against the harness. If it cannot stay small while passing, the
-  contract is too complex.
+  (under 250 lines, no dependencies beyond global fetch). If it cannot stay
+  small, the contract is too complex.
