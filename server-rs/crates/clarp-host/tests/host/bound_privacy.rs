@@ -64,7 +64,7 @@ fn bound_agent(host: &Host, name: &str, home: &std::path::Path) -> String {
         .to_string()
 }
 
-fn agent_id(host: &Host, session: &str) -> String {
+pub(crate) fn agent_id(host: &Host, session: &str) -> String {
     host.get("/agents/snapshot")["agents"]
         .as_array()
         .unwrap()
@@ -76,7 +76,7 @@ fn agent_id(host: &Host, session: &str) -> String {
 }
 
 /// The token of an agent's first turn, as the Host makes it with its own key.
-fn first_turn_token(place: &Place, id: &str) -> String {
+pub(crate) fn first_turn_token(place: &Place, id: &str) -> String {
     let kept = kept_records(place, "turn-identity");
     let key = kept["key"]["key"].as_str().unwrap();
     let key: Vec<u8> = (0..key.len() / 2)

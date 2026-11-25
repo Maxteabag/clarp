@@ -143,6 +143,15 @@ existing audience split. Python's issue 702 implementation already made the prom
 Session-only. It excluded an agent addressing itself from coordination, so
 the final reply of that turn could still appear in Conversation.
 
+**How the snapshot and the artifact list may be kept (issue 805, Rust contract 181).** The
+Python Host answers `GET /agents/snapshot` and `GET /artifacts` with `Cache-Control: no-store`.
+The Rust Host answers them with `private, no-cache` and a weak `ETag`, and answers a held tag
+with 304, so a phone's own HTTP cache, where it keeps them, revalidates them instead of fetching
+them whole each time (an app may also send the tag itself).
+The lead's decision of 25 Nov 2026: the Python Host is retired, and its recorded header no longer
+binds these two routes. The next conformance run gives these differences their ids. Every other
+route keeps `no-store`.
+
 Each has its id in `../conformance/intended.txt`. The id is a hash of the place and both values:
 it covers that exact difference and nothing else.
 

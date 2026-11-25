@@ -126,7 +126,34 @@ and every other answer sent as it is made), WebSocket upgrades, a request with `
 partial answer, media and files that are no text, answers without a body (`HEAD`, 204, 304) and
 answers above 64 MiB. URLSession and OkHttp ask for gzip and decode it themselves; a client that
 sets `Accept-Encoding` by hand must decode what it asked for. Through the connection relay the
-Host is asked for gzip only where the relay passes the packed body through untouched.
+Host is asked for gzip only where the relay passes the packed body through untouched. The Host's
+recorded request durations (diagnostics `requests`) include the packing.
+
+### Unchanged lists: `ETag` and 304 (feature `list_etags`, Rust Host contract 181)
+
+`GET /agents/snapshot` and `GET /artifacts` (any query) answer 200 with a weak `ETag`,
+`W/"<32 hex signs>"`; one tag names the answer whether it is sent plain or gzipped. Send it back
+in `If-None-Match` on the next fetch of the same URL. While the answer would be byte for byte the
+same for the same caller, the Host answers `304 Not Modified` with the tag and no body, and the
+client keeps what it holds. The tag is a digest of the answer as it is sent and of who reads it:
+the owner (a paired device, the administrator without a turn), a device paired with limited
+access, each agent by its turn, an agent's tool without a turn, and another Host each get tags of
+their own, so a caller shown fewer agents (feature `bound_privacy`) or fewer fields never holds a
+tag that matches the owner's answer. Compare a tag for equality only; it is no revision.
+
+What a 304 saves is the transfer and the packing, not building the answer: the Host builds it to
+know whether it changed. Both lists change with the clock as well as by events (agents' activity,
+an artifact's state, a plan's `server_now` and `elapsed_ms`), so on a Host whose agents are
+working a fetch seldom gets a 304; on a quiet Host most do. Both answers (and their 304s) say
+`Cache-Control: private, no-cache`: a client may keep them for itself, and must ask the Host
+before each use. An HTTP stack whose cache keeps the answer then sends `If-None-Match` by itself
+and hands the app the kept body on a 304. That holds only where the cache keeps it: URLSession's
+shared `URLCache` skips a response larger than about a twentieth of its disk size (a full snapshot
+or artifact list of a large fleet can be), and OkHttp caches only with a `Cache` configured. An
+app gets 304s once its client keeps the response. The iOS build that carries the list cache keeps
+these two answers in a memory-only `URLCache` of 32 MB, so an answer of up to about 1.6 MB
+(decoded) is revalidated by URLSession itself; a larger one is fetched whole. Any other app
+that wants the saving keeps the body and its tag itself and sends `If-None-Match` explicitly. Every other route stays `no-store`. A Host without the feature sends no `ETag` and ignores `If-None-Match`.
 
 ## Core conversation protocol
 

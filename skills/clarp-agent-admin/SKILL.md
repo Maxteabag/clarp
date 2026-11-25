@@ -114,6 +114,13 @@ To see which voice an agent got, read its `voice_profile.speech` row in
 example "Voice: Brooke (Cartesia)"). When nothing would be heard,
 `silent_reason` says why.
 
+A script that reads `GET /agents/snapshot` or `GET /artifacts` again and again
+can send the last answer's `ETag` back in `If-None-Match`: a Rust Host that
+lists the feature `list_etags` answers `304` with no body while nothing changed
+for that reader. Other Hosts send no tag and answer in full, so keep the body
+you have and fall back to it only on a 304. While agents work, both lists change
+every few seconds, so a 304 is mostly for quiet periods.
+
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
 

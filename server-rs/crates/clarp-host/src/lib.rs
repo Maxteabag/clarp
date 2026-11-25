@@ -210,3 +210,4 @@ pub mod vocabulary;
 pub mod controller_actions;
 
 mod controller_action_tool;
+pub mod tagged;

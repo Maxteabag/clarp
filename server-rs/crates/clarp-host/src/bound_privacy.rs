@@ -630,7 +630,30 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
         Ok(reader) => reader,
         Err(refused) => return refused.into_response(),
     };
-    if reader == Reader::Owner {
+    let mut response = judged(&app, request, next, class, &reader).await;
+    // Who the answer was made for: a list's tag is its caller's (`tagged.rs`).
+    let limited = matches!(
+        principal,
+        Some(Principal::Device {
+            scope: crate::pairing::Scope::Limited,
+            ..
+        })
+    );
+    response
+        .extensions_mut()
+        .insert(crate::tagged::Caller { reader, limited });
+    response
+}
+
+/// The answer to a read of this class, as this reader may have it.
+async fn judged(
+    app: &App,
+    request: Request,
+    next: Next,
+    class: Class,
+    reader: &Reader,
+) -> Response {
+    if *reader == Reader::Owner {
         return next.run(request).await;
     }
     // A stream is judged frame by frame, against the fleet as it is when each event is sent:
@@ -639,9 +662,9 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
     if class == Stream {
         let response = next.run(request).await;
         let (parts, body) = response.into_parts();
-        return Response::from_parts(parts, sse_filtered(body, app.clone(), reader));
+        return Response::from_parts(parts, sse_filtered(body, app.clone(), reader.clone()));
     }
-    let Some(withheld) = Withheld::of(&app, &reader) else {
+    let Some(withheld) = Withheld::of(app, reader) else {
         return next.run(request).await;
     };
     // Owned: the body a request holds may not be shared across what the guard waits for.
@@ -649,14 +672,14 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
     match class {
         NoWords => next.run(request).await,
         OwnerOnly(names) => {
-            if named(&app, &uri, names, &withheld).await == About::Readable {
+            if named(app, &uri, names, &withheld).await == About::Readable {
                 return next.run(request).await;
             }
             owner_only()
         }
         Stream => next.run(request).await,
         Words(names) => {
-            let about = named(&app, &uri, names, &withheld).await;
+            let about = named(app, &uri, names, &withheld).await;
             if let About::Withheld(persona) = &about {
                 return refused(persona);
             }

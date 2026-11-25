@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 180;
+pub const HOST_CONTRACT: u64 = 181;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -104,6 +104,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `GET /attention/inbox`: what agents made, a page at a time.
     ("attention_index", 2),
     ("artifact_summary_v1", 73),
+    // `GET /agents/snapshot` and `GET /artifacts` carry a weak `ETag` per caller, and
+    // `If-None-Match` with it is answered 304 (issue 805).
+    ("list_etags", 181),
     // Render specs: a small form drawn by the app from a closed catalog, answered once; a
     // spec only for an exact client name at its minimum. Contract 111 adds per-client
     // negotiation and administrator export while retaining the original feature number.
@@ -880,13 +883,17 @@ pub fn router(app: App) -> Router {
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .layer(middleware::from_fn(declared_framing))
+        // The snapshot and the artifact list carry a tag of their answer for its reader, and
+        // a client that holds it gets a 304 (issue 805); after the guards, before the packer.
+        .layer(middleware::from_fn(crate::tagged::layer))
+        // What every route answers whole goes gzipped to a client that takes it (issue 805),
+        // after every guard has made it what it is.
+        .layer(middleware::from_fn(crate::packed::layer))
+        // Around the packer, so a request's recorded duration includes packing its answer.
         .layer(middleware::from_fn_with_state(
             (app.capture.clone(), app.clock.clone()),
             crate::diagnostics::request,
         ))
-        // Outermost: what every route answers whole goes gzipped to a client that takes it
-        // (issue 805), after every guard has made it what it is.
-        .layer(middleware::from_fn(crate::packed::layer))
         .with_state(app)
 }
 

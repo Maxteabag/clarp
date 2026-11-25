@@ -8,7 +8,8 @@ and the slowest, with the size of the answer. Run through `tools/build snapshot-
 Then what the apps download (issue 805): it grows the fleet to 310 agents, publishes a hundred
 documents of about 80 KB, and for the snapshot and the artifact list prints the size of the answer
 plain and gzipped, the time of an answer and the Host's CPU time per answer (its user and system
-time from /proc), for a client that does not take gzip and one that does. The documents are words
+time from /proc), for a client that does not take gzip, one that does, and one that sends back
+the tag it holds (feature `list_etags`). The documents are words
 drawn from a small vocabulary, so their gzip ratio is near that of prose, not of repeated bytes.
 """
 import gzip
@@ -49,6 +50,19 @@ def request(address, method, path, body=None, headers=None, full=False):
         if full:
             return data, elapsed_ms, response
         return data, elapsed_ms
+    finally:
+        conn.close()
+
+
+def request_any(address, path, headers):
+    """A GET whose answer may be a 304: its body, its time and the answer."""
+    conn = http.client.HTTPConnection(address, timeout=60)
+    try:
+        start = time.monotonic_ns()
+        conn.request("GET", path, None, headers)
+        response = conn.getresponse()
+        data = response.read()
+        return data, (time.monotonic_ns() - start) / 1_000_000, response
     finally:
         conn.close()
 
@@ -95,6 +109,15 @@ def wire(address, pid):
             spent = (cpu_ms(pid) - before) / WIRE_TIMED
             line.append(f"{name}: median {statistics.median(times):.1f} ms, "
                         f"p90 {times[int(WIRE_TIMED * 0.9) - 1]:.1f} ms, Host CPU {spent:.1f} ms an answer")
+        tag = answer.getheader("ETag")
+        if tag:
+            held = {"Accept-Encoding": "gzip", "If-None-Match": tag}
+            body, _, again = request_any(address, path, held)
+            before = cpu_ms(pid)
+            times = sorted(request_any(address, path, held)[1] for _ in range(WIRE_TIMED))
+            spent = (cpu_ms(pid) - before) / WIRE_TIMED
+            line.append(f"held tag: {again.status} with {len(body)} bytes, "
+                        f"median {statistics.median(times):.1f} ms, Host CPU {spent:.1f} ms an answer")
         print("; ".join(line), flush=True)
 
 

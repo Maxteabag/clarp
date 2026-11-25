@@ -33,14 +33,19 @@ const LEVEL: u32 = 5;
 /// level 5 (11%).
 const FAST_ABOVE: usize = 2 << 20;
 
-pub async fn layer(request: Request, next: Next) -> Response {
-    let asked = request.method() != Method::HEAD
-        && !request.headers().contains_key(header::RANGE)
-        && request
-            .headers()
+/// Whether a request takes its answer gzipped: one with a body, whole, from a client that
+/// takes gzip.
+pub fn asked(method: &Method, headers: &HeaderMap) -> bool {
+    method != Method::HEAD
+        && !headers.contains_key(header::RANGE)
+        && headers
             .get(header::ACCEPT_ENCODING)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(clarp_kernel::connector::accepts_gzip);
+            .is_some_and(clarp_kernel::connector::accepts_gzip)
+}
+
+pub async fn layer(request: Request, next: Next) -> Response {
+    let asked = asked(request.method(), request.headers());
     let response = next.run(request).await;
     if !packable(response.status(), response.headers(), response.body()) {
         return response;

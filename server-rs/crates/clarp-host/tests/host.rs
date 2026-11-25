@@ -121,6 +121,8 @@ mod launch_directories;
 mod launch_refused;
 #[path = "host/leader_memory.rs"]
 mod leader_memory;
+#[path = "host/list_etags.rs"]
+mod list_etags;
 #[path = "host/live_model.rs"]
 mod live_model;
 #[path = "host/managed_skills.rs"]
