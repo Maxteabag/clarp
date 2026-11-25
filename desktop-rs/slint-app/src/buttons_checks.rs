@@ -5,7 +5,9 @@
 //! moves when it comes), a dot on it when a message arrives below while
 //! the reader is up, which stays while a reply streams and after it
 //! finished below, and it brings the chat back to its end, where both go.
-//! Stop says its word beside its icon in the composer's one line.
+//! Stop says its word beside its icon in the composer's one line. A draft
+//! that grows the composer to several lines leaves the window's scale and
+//! size as they were.
 //! Needs the fake Host.
 
 use std::cell::Cell;
@@ -76,25 +78,40 @@ fn conversation_text(app: &crate::App, id: &str) -> String {
     conversation.index_of(id).and_then(|at| conversation.rows().get(at)).map(|row| row.text.clone()).unwrap_or_default()
 }
 
+thread_local! {
+    /// The composer's editor, one line high (empty).
+    static ONE_LINE: Cell<f32> = const { Cell::new(0.0) };
+}
+
+/// A draft that wraps the composer onto several lines.
+const LONG_DRAFT: &str = "sent by the button, a draft long enough to wrap the composer onto several lines: token bucket, leaky bucket, sliding window log, sliding window counter, clock skew, race conditions, failure modes, observability and testing, with an example in every section.";
+
 pub fn buttons_check(out: String) {
     let (out1, out2, out3) = (out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
-        ("ready", Box::new(|app, _, elapsed| {
+        ("ready", Box::new(|app, window, elapsed| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
             if !open || !report().composer_focused || elapsed < Duration::from_millis(300) {
                 return false;
             }
             check(!drawn("composer-send"), "an empty composer shows no Send button");
             check(!drawn("composer-stop"), "an idle agent shows no Stop button");
-            headless::type_text("sent by the button");
+            check_window_size_free(window, "with the composer one line high");
+            ONE_LINE.with(|line| line.set(element("composer-editor").map_or(0.0, |e| e.size().height)));
+            headless::type_text(LONG_DRAFT);
             true
         })),
-        ("send shown", Box::new(move |_, _, elapsed| {
-            if app_now().active_draft() != "sent by the button" || elapsed < Duration::from_millis(200) {
+        ("send shown", Box::new(move |_, window, elapsed| {
+            if app_now().active_draft() != LONG_DRAFT || elapsed < Duration::from_millis(200) {
                 return false;
             }
+            // The composer grew to several lines and the window kept its
+            // scale and size (#852).
+            let (one, now) = (ONE_LINE.with(Cell::get), element("composer-editor").map_or(0.0, |e| e.size().height));
+            check(one > 0.0 && now >= one * 1.8, &format!("the long draft grows the composer to several lines: {now} tall, one line {one}"));
+            check_window_size_free(window, "with the composer grown to several lines");
             check(drawn("composer-send"), "with text, the composer shows Send");
             shot(&out1, "buttons-01-send");
             check(press("composer-send"), "Send is pressed");

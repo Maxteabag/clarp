@@ -152,7 +152,8 @@ fn check(ok: bool, what: &str) {
 /// that changes (with the chat shown, a send) has the window system resize
 /// the window, at its own scale rather than the reader's. None, and only
 /// the user and the window system size it. The headless window is never
-/// resized, so its size alone would prove nothing.
+/// resized, so its size alone would prove nothing. Also that the window
+/// still draws at the scale and logical size the check first saw.
 pub(crate) fn check_window_size_free(window: &crate::AppWindow, when: &str) {
     use i_slint_core::item_tree::ItemTreeRc;
     use i_slint_core::layout::Orientation;
@@ -162,6 +163,29 @@ pub(crate) fn check_window_size_free(window: &crate::AppWindow, when: &str) {
     let v = component.as_ref().layout_info(Orientation::Vertical);
     let free = h.min <= 0.0 && v.min <= 0.0 && h.max >= 1.0e6 && v.max >= 1.0e6;
     check(free, &format!("{when}: the window sets no minimum or maximum size of its own (width {}..{}, height {}..{})", h.min, h.max, v.min, v.max));
+    // The window draws at the scale and logical size it had when the check
+    // first looked: a chat switch, a send, a composer grown to several
+    // lines or a '/' search never changes either (#852).
+    let scale = window.window().scale_factor();
+    let root = i_slint_core::window::WindowInner::from_pub(window.window())
+        .window_item()
+        .map(|item| (item.as_pin_ref().width().get(), item.as_pin_ref().height().get()))
+        .unwrap_or_default();
+    let now = (scale, root.0, root.1);
+    let first = FIRST_LOOK.with(|first| {
+        if first.get().is_none() {
+            first.set(Some(now));
+        }
+        first.get().unwrap_or(now)
+    });
+    let same = (now.0 - first.0).abs() < 0.001 && (now.1 - first.1).abs() < 0.5 && (now.2 - first.2).abs() < 0.5;
+    check(same, &format!("{when}: the window draws at scale {:.2} on {:.0}x{:.0} logical px, as it did ({:.2} on {:.0}x{:.0})", now.0, now.1, now.2, first.0, first.1, first.2));
+}
+
+thread_local! {
+    /// The window's scale and its root's logical size when a check first
+    /// looked (`check_window_size_free`).
+    static FIRST_LOOK: std::cell::Cell<Option<(f32, f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
 fn finish() {

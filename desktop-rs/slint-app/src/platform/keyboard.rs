@@ -98,6 +98,41 @@ pub fn tracing() -> bool {
     *ON.get_or_init(|| std::env::var("CLARP_KEY_TRACE").is_ok_and(|v| v == "1"))
 }
 
+/// What has the keyboard, for the trace: where it is in the window, what it
+/// says it is (a text field with its words), and the nearest element
+/// around it that has a name.
+pub fn focus_described(window: &slint::Window) -> String {
+    use i_slint_core::accessibility::AccessibleStringProperty;
+    use i_slint_core::item_tree::ParentItemTraversalMode;
+    let inner = i_slint_core::window::WindowInner::from_pub(window);
+    let Some(item) = inner.focus_item.borrow().upgrade() else { return "nothing".into() };
+    let geometry = item.geometry();
+    let origin = item.map_to_window(geometry.origin);
+    let field = item.downcast::<i_slint_core::items::TextInput>().map(|input| format!(" text field {:?}", input.as_pin_ref().text()));
+    let mut named = None;
+    let mut around = Some(item.clone());
+    while let Some(current) = around {
+        let id = current.accessible_string_property(AccessibleStringProperty::Id).filter(|id| !id.is_empty());
+        let label = current.accessible_string_property(AccessibleStringProperty::Label).filter(|label| !label.is_empty());
+        if let Some(name) = id.or(label) {
+            named = Some(name);
+            break;
+        }
+        around = current.parent_item(ParentItemTraversalMode::StopAtPopups);
+    }
+    format!(
+        "{:?} at {:.0},{:.0} {:.0}x{:.0}{}{} in {:?}",
+        item.accessible_role(),
+        origin.x,
+        origin.y,
+        geometry.size.width,
+        geometry.size.height,
+        if item.is_visible() { "" } else { " (hidden)" },
+        field.unwrap_or_default(),
+        named.unwrap_or_default()
+    )
+}
+
 /// A key's text as code points, for the trace ("U+006B 'k'").
 pub fn code_points(text: &str) -> String {
     text.chars()

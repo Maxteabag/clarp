@@ -6,6 +6,9 @@
 //! same way. Ctrl+F inside Ctrl+K's switcher turns it into message search
 //! with the words already typed, and what is typed next arrives once. With
 //! no match it says it searched the messages loaded on this computer.
+//! Ctrl+F while the chat list has the keyboard takes what is typed right
+//! after it into its field, and a '/' search leaves the window's scale and
+//! size as they were.
 //!
 //! `--check mention`: `@` in the composer lists the agents, the arrows move
 //! through them, Tab completes the name, the route chip says where Enter
@@ -50,7 +53,7 @@ fn cache_root() -> std::path::PathBuf {
 
 pub fn message_search_check(out: String) {
     use slint::platform::Key;
-    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     let stages: Vec<Stage> = vec![
         ("live", Box::new(|app, _, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
@@ -302,6 +305,59 @@ pub fn message_search_check(out: String) {
             check(window.get_switcher_query() == "walrus", &format!("and what is typed goes into its field: {:?}", window.get_switcher_query()));
             shot(&out5, "message-search-05-ctrl-f-after-updates");
             headless::press(Key::Escape);
+            true
+        })),
+        // Ctrl+F while the chat list has the keyboard, the words typed in
+        // one go right after it: they land in message search's field (#852).
+        ("explorer", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "e");
+            true
+        })),
+        ("ctrl f from the explorer", Box::new(|_, window, elapsed| {
+            if !window.get_sidebar_focused() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_sidebar_focused(), "Ctrl+E gives the chat list the keyboard");
+            headless::press_with(&[Key::Control], "f");
+            headless::type_text("walrus");
+            true
+        })),
+        ("typed from the explorer", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "walrus" && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_open(), "Ctrl+F from the chat list opens message search");
+            check(window.get_switcher_query() == "walrus", &format!("and what is typed right after goes into its field: {:?}", window.get_switcher_query()));
+            shot(&out6, "message-search-06-ctrl-f-from-the-explorer");
+            headless::press(Key::Escape);
+            true
+        })),
+        // '/' searches the chat; Enter leaves the window's scale and size
+        // as they were (#852).
+        ("chat has the keyboard", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            app_now().focus_transcript();
+            true
+        })),
+        ("slash search", Box::new(|_, _, elapsed| {
+            if !super::report().transcript_focused && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            headless::press("/");
+            headless::type_text("walrus");
+            headless::press(Key::Return);
+            true
+        })),
+        ("searched", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check_window_size_free(window, "after a '/' search and Enter");
             true
         })),
     ];
