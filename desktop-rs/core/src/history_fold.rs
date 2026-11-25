@@ -323,8 +323,15 @@ fn turn(
     }
     // Without a phase (an older row) the last text is the answer.
     let answer = members.iter().rposition(|m| !m.display_text.trim().is_empty());
+    // Text written with its own tool calls, with more words after it in the
+    // turn, was said along the way: the live turn shows it as commentary
+    // the moment its tool begins. The Host's /log can still call it final (a
+    // reply's own calls never mark it there), and taking that word made the
+    // text fold while the turn was live and come back once history took the
+    // turn over (#827).
+    let along_the_way = |index: usize, row: &Message| calls(row).next().is_some() && answer.is_some_and(|a| a > index);
     let final_text = |index: usize, row: &Message| match row.phase.as_str() {
-        "final" => true,
+        "final" => !along_the_way(index, row),
         "commentary" => false,
         _ => answer == Some(index),
     };

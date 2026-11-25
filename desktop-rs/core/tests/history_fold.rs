@@ -559,3 +559,74 @@ fn a_rows_text_reads_before_its_tool_calls_settled_as_live() {
         }
     }
 }
+
+/// The run of #827, with its rows as the Host gave them: the turn wrote
+/// PRELUDE with its own `ls`, then FINALE. The Host's /log called both
+/// rows final; its live items called PRELUDE commentary the moment `ls`
+/// began. Grouped, the settled live turn folded PRELUDE into its work row,
+/// and history, once the next message took the turn over, showed it again
+/// above the row. Both read the turn alike now, in every mode.
+#[test]
+fn text_written_with_its_tool_reads_the_same_settled_live_and_in_history() {
+    const TRACE: &str = "ab4ca986741e0fe7";
+    const PRELUDE: &str = "r-011ChPGpst6eXKS6UgKFNeTL";
+    const FINALE: &str = "r-011ChPGq2zYRt5BnM63audez";
+    const CALL: &str = "toolu_017t44njdj18onwm8LKSn1AA";
+    let durable = turn(&[
+        json!({"id": "u-tt-claude-1795592693159-1", "role": "user", "origin": "user", "trace_id": TRACE, "view": "conversation",
+            "timestamp": "2026-11-25T07:44:53.177Z", "text": "[t1] First write one sentence containing the word PRELUDE. Then run the shell command `ls`. Then reply with only the word FINALE."}),
+        json!({"id": PRELUDE, "role": "assistant", "origin": "user", "trace_id": TRACE, "view": "session", "phase": "final",
+            "timestamp": "2026-11-25T07:44:58.288Z", "text": "PRELUDE: I'll start by listing the directory contents.",
+            "tools": [{"id": CALL, "name": "Bash", "command": "ls", "summary": "ls", "status": "ok", "result": "(Bash completed with no output)"}]}),
+        json!({"id": FINALE, "role": "assistant", "origin": "user", "trace_id": TRACE, "view": "conversation", "phase": "final", "session_rows": 1,
+            "timestamp": "2026-11-25T07:44:59.703Z", "text": "FINALE",
+            "turn": {"turn_id": TRACE, "status": "completed", "started_at_ms": 1795592693177_i64, "ended_at_ms": 1795592699713_i64, "tool_count": 1}}),
+    ]);
+    let next = row(&json!({"id": "u-tt-claude-1795592707454-2", "role": "user", "origin": "user", "trace_id": "e4d61fa4e638c873",
+        "timestamp": "2026-11-25T07:45:07.455Z", "text": "[t2] Reply with only the word NEXT."}));
+    let mut history = durable.clone();
+    history.push(next);
+
+    // The settled live turn as GET /live had it.
+    let item = |id: &str, kind: &str, ordinal: i64, extra: Value| {
+        let mut item = json!({"id": id, "kind": kind, "rev": 1, "conv": "c-1", "turn_id": TRACE, "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1795592697461_i64 + ordinal * 100, "ended_at_ms": 1795592697461_i64 + ordinal * 100 + 50});
+        item.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        item
+    };
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": 1795592702000_i64,
+        "activity": {"state": "idle", "turn_id": TRACE},
+        "turn": {"turn_id": TRACE, "status": "completed", "started_at_ms": 1795592693177_i64, "ended_at_ms": 1795592699713_i64, "tool_count": 1},
+        "items": [
+            item("cl:msg_011ChPGpst6eXKS6UgKFNeTL:0", "message", 1, json!({"phase": "commentary", "row_id": PRELUDE, "text": "PRELUDE: I'll start by listing the directory contents."})),
+            item(&format!("cl:{CALL}"), "tool", 2, json!({"tool": {"name": "Bash", "call_id": CALL, "category": "exec", "group": null, "label": "ls", "command": "ls"}})),
+            item("cl:msg_011ChPGq2zYRt5BnM63audez:0", "message", 3, json!({"phase": "final", "row_id": FINALE, "text": "FINALE"})),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+
+    for show_commentary in [false, true] {
+        let live_options = clarp_core::live_present::Options { explanations: true, show_commentary, ..Default::default() };
+        let live = clarp_core::live_present::present(&view, &durable, &live_options);
+        let live_read: Vec<String> = live.entries.iter().map(|e| if e.row.is_empty() { format!("{:?}", e.kind) } else { format!("row {}", e.row) }).collect();
+        let folded = present(&history, None, &Options { show_commentary, ..options(&[]) });
+        assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
+        let history_read: Vec<String> = folded.folds[0].pieces.iter().map(|p| match p {
+            Piece::Row(id) => format!("row {id}"),
+            Piece::Entry(e) => format!("{:?}", e.kind),
+        }).collect();
+        let expected: Vec<String> = if show_commentary {
+            vec![format!("row {PRELUDE}"), "Fold".to_owned(), format!("row {FINALE}")]
+        } else {
+            vec!["Fold".to_owned(), format!("row {FINALE}")]
+        };
+        assert_eq!(live_read, expected, "live, show_commentary {show_commentary}");
+        assert_eq!(history_read, expected, "history, show_commentary {show_commentary}");
+        assert_eq!(folded.hidden_rows.contains(PRELUDE), !show_commentary, "PRELUDE folds with its tool only where commentary folds");
+        assert_eq!(live.hidden_rows.contains(&PRELUDE.to_owned()), !show_commentary);
+    }
+    // Opened, PRELUDE reads in place above its tool, as live.
+    let open = present(&history, None, &options(&["live:fold:ab4ca986741e0fe7"]));
+    let read = read(&open.folds[0]);
+    assert_eq!(read.iter().filter(|p| p.starts_with("row ")).cloned().collect::<Vec<_>>(), [format!("row {PRELUDE}"), format!("row {FINALE}")]);
+}
