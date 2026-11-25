@@ -230,12 +230,16 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
 fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     let run = run_dir("place");
     let same = FakeLane::start(&run, "a", status("t", "d", 5, false));
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, ROOMY, false);
+    let place = same
+        .endpoint
+        .place(&run, Some("t"), "d", |_| false, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Kept);
     assert_eq!(same.asked(), ["inspect"]);
 
     // What the driver says the tool kept from an earlier turn starts it again.
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, ROOMY, false);
+    let place = same
+        .endpoint
+        .place(&run, Some("t"), "d", |_| true, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
 
@@ -552,7 +556,11 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
     let mut lanes: Vec<FakeLane> = (0..7u64)
         .map(|n| FakeLane::start(&run, &format!("b{n}"), status("t", "d", 0, true)))
         .collect();
-    lanes.push(FakeLane::start(&run, "idle", status("t", "d", 60_000, false)));
+    lanes.push(FakeLane::start(
+        &run,
+        "idle",
+        status("t", "d", 60_000, false),
+    ));
     let next = Endpoint::of(Tool::Codex, &run, "next");
     let place = next
         .place(&run, Some("t"), "d", |_| false, defaults, false)

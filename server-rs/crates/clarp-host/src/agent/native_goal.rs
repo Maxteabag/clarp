@@ -146,7 +146,7 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, Some(&thread), None)
+                .start(&launcher, &profile, &login, Some(&thread), None, true)
                 .and_then(|child| {
                     reap(child);
                     lane.ask(Request::Goal { action, objective })
@@ -589,7 +589,7 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, Some(&thread), None)
+                .start(&launcher, &profile, &login, Some(&thread), None, true)
                 .and_then(|child| {
                     reap(child);
                     if stopping {
