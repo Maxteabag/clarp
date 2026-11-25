@@ -579,7 +579,11 @@ fn eight(run: &Path, busy: usize, his: &[usize]) -> Vec<FakeLane> {
             if his.contains(&n) {
                 mark_owners_view(run, &format!("a{n}"));
             }
-            let idle_ms = if n < busy { 0 } else { 100_000 - u64::try_from(n).unwrap() };
+            let idle_ms = if n < busy {
+                0
+            } else {
+                100_000 - u64::try_from(n).unwrap()
+            };
             FakeLane::start(run, &format!("a{n}"), status("t", "d", idle_ms, n < busy))
         })
         .collect()
