@@ -11,7 +11,10 @@
 //! the reason when another device or an agent stopped the chat.
 //!
 //! The line says what Stop did and never what will happen next: Stop pauses,
-//! it does not resume.
+//! it does not resume. It is plain: when you stopped the chat yourself the
+//! transcript already says it was stopped, so the line names only what is
+//! worth knowing beyond that (messages left waiting, goals paused) and is
+//! empty otherwise.
 
 use serde_json::Value;
 
@@ -91,27 +94,31 @@ impl StopReceipt {
         self.queue_paused.is_some() || self.goals_paused.is_some()
     }
 
-    /// " by you", " by Theo (verified)", " by ops (claimed)"; "" when the
-    /// actor is unknown. `name` gives an agent session's display name.
+    /// The actor is you (a user's Stop, from any of your devices).
+    fn by_you(&self) -> bool {
+        self.actor.as_deref() == Some("user")
+    }
+
+    /// " by Theo", " by ops (unverified)"; "" when the actor is unknown or
+    /// is you. `name` gives an agent session's display name.
     fn by(&self, name: &dyn Fn(&str) -> Option<String>) -> String {
         let Some(actor) = &self.actor else { return String::new() };
-        let (who, user) = match actor.strip_prefix("agent:") {
-            Some(session) => (name(session).unwrap_or_else(|| session.to_owned()), false),
-            None if actor == "user" => ("you".to_owned(), true),
-            None => (actor.clone(), false),
+        if self.by_you() {
+            return String::new();
+        }
+        let who = match actor.strip_prefix("agent:") {
+            Some(session) => name(session).unwrap_or_else(|| session.to_owned()),
+            None => actor.clone(),
         };
-        // You stopping your own chat needs no "(verified)"; a claim always
-        // says it is one.
-        let mark = match self.actor_verified {
-            Some(true) if !user => " (verified)",
-            Some(false) => " (claimed)",
-            _ => "",
-        };
+        // Someone else's Stop the Host could not confirm says so.
+        let mark = if self.actor_verified == Some(false) { " (unverified)" } else { "" };
         format!(" by {who}{mark}")
     }
 
-    /// The chat's line. `name` resolves `agent:<session>` actors.
-    pub fn said(&self, name: &dyn Fn(&str) -> Option<String>) -> Said {
+    /// The chat's line ("" when the transcript's own Stop line says it all).
+    /// `name` resolves `agent:<session>` actors; `waiting` says whether the
+    /// chat has messages queued, the only time its queue is worth naming.
+    pub fn said(&self, name: &dyn Fn(&str) -> Option<String>, waiting: bool) -> Said {
         if self.origin == Origin::Response {
             if self.ok == Some(false) {
                 return Said::Error("Stop did not take effect".into());
@@ -122,28 +129,37 @@ impl StopReceipt {
                 return Said::Error("Stop did not take effect".into());
             }
         }
-        let mut head = format!("Stopped{}", self.by(name));
-        if let Some(reason) = &self.reason {
-            head = format!("{head}: {reason}");
+        let mut parts = Vec::new();
+        if !self.by_you() {
+            let mut head = format!("Stopped{}", self.by(name));
+            if let Some(reason) = &self.reason {
+                head = format!("{head}: {reason}");
+            }
+            parts.push(head);
+        } else if let Some(reason) = &self.reason {
+            parts.push(reason.clone());
         }
-        let mut parts = vec![head];
-        match self.queue_paused {
-            Some(true) => parts.push("queue paused".into()),
-            Some(false) => parts.push("queue not paused".into()),
-            None => {}
+        if waiting {
+            match self.queue_paused {
+                Some(true) => parts.push("queue paused".into()),
+                Some(false) => parts.push("queue not paused".into()),
+                None => {}
+            }
         }
         match self.goals_paused {
-            Some(0) => parts.push("no goals paused".into()),
+            Some(0) | None => {}
             Some(1) => parts.push("1 goal paused".into()),
             Some(n) => parts.push(format!("{n} goals paused")),
-            None => {}
         }
-        if self.origin == Origin::Response && !self.effects_known() {
+        if self.origin == Origin::Response && !self.effects_known() && self.actor.is_none() {
             if !self.from_newer_host() && self.terminated == Some(0) {
                 parts[0] = "Stop sent".into();
             }
             parts.push("effects unknown".into());
         }
-        Said::Line(parts.join(" · "))
+        // A line that starts with an effect ("Queue paused") reads as a sentence.
+        let line = parts.join(" · ");
+        let mut chars = line.chars();
+        Said::Line(chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default())
     }
 }

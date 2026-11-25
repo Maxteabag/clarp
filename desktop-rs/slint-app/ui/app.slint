@@ -493,41 +493,6 @@ export component AppWindow inherits Window {
                     update => { root.preview-update(); }
                     versions => { root.run-command("preview-versions"); }
                 }
-                if root.error != "": Rectangle {
-                    height: 36px;
-                    background: Palette.danger-surface;
-                    HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 16px;
-                        Text {
-                            font-size: ChromeText.body;
-                            text: root.error;
-                            color: Palette.danger;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                        }
-                        // The key that dismisses it, as the shortcut bar spells keys.
-                        if root.error-dismiss-key != "": HorizontalLayout {
-                            spacing: 4px;
-                            padding-left: 12px;
-                            Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
-                            Text { text: "Dismiss"; color: Palette.danger; font-size: 11 * Look.unit; vertical-alignment: center; }
-                        }
-                        Rectangle {
-                            width: 28px;
-                            accessible-role: button;
-                            accessible-label: "Dismiss";
-                            Image {
-                                source: @image-url("icons/rail-close.svg");
-                                width: 16px;
-                                height: 16px;
-                                colorize: Palette.danger;
-                            }
-                            TouchArea { clicked => { root.dismiss-error(); } }
-                        }
-                    }
-                }
                 // The surfaces share this area; the workspace stays alive
                 // (its panes keep their place) while another shows.
                 Rectangle {
@@ -627,6 +592,54 @@ export component AppWindow inherits Window {
                     open-chat(session) => { root.open-chat(session); }
                 }
                 FocusRing { shown: Focus.mode == "settings" || Focus.mode == "settings-search" || Focus.mode == "updates" || Focus.mode == "teams"; }
+                    // The error banner floats over the top of the surfaces:
+                    // it never moves a row, a pane or the tab bar.
+                    if root.error != "": Rectangle {
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: 36px;
+                        // Opaque under the theme's colour, whatever its alpha.
+                        background: Palette.window;
+                        drop-shadow-blur: 8px;
+                        drop-shadow-color: #00000060;
+                        accessible-role: text;
+                        accessible-label: "Error banner";
+                        Rectangle { background: Palette.danger-surface; }
+                        // Clicks on the banner stay on it.
+                        TouchArea {}
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            Text {
+                                font-size: ChromeText.body;
+                                text: root.error;
+                                color: Palette.danger;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            // The key that dismisses it, as the shortcut bar spells keys.
+                            if root.error-dismiss-key != "": HorizontalLayout {
+                                spacing: 4px;
+                                padding-left: 12px;
+                                Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
+                                Text { text: "Dismiss"; color: Palette.danger; font-size: 11 * Look.unit; vertical-alignment: center; }
+                            }
+                            Rectangle {
+                                width: 28px;
+                                accessible-role: button;
+                                accessible-label: "Dismiss";
+                                Image {
+                                    source: @image-url("icons/rail-close.svg");
+                                    width: 16px;
+                                    height: 16px;
+                                    colorize: Palette.danger;
+                                }
+                                TouchArea { clicked => { root.dismiss-error(); } }
+                            }
+                        }
+                    }
                 }
             }
         }

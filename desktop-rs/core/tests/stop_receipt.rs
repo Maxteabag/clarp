@@ -15,7 +15,11 @@ fn names(session: &str) -> Option<String> {
 }
 
 fn said(response: Value) -> Said {
-    StopReceipt::from_response(&object(response)).said(&names)
+    said_waiting(response, true)
+}
+
+fn said_waiting(response: Value, waiting: bool) -> Said {
+    StopReceipt::from_response(&object(response)).said(&names, waiting)
 }
 
 fn line(text: &str) -> Said {
@@ -48,19 +52,22 @@ fn a_verified_agent_names_itself_its_reason_and_the_effects() {
     let receipt = StopReceipt::from_response(&object(response.clone()));
     assert_eq!(receipt.actor.as_deref(), Some("agent:theo-97e5"));
     assert_eq!((receipt.actor_verified, receipt.queue_paused, receipt.goals_paused), (Some(true), Some(true), Some(1)));
-    assert_eq!(said(response), line("Stopped by Theo (verified): Pebble busy with no process · queue paused · 1 goal paused"));
+    assert_eq!(said(response), line("Stopped by Theo: Pebble busy with no process · queue paused · 1 goal paused"));
 }
 
 #[test]
-fn a_claimed_actor_says_it_is_a_claim_and_unknown_goals_are_left_out() {
+fn your_own_stop_leaves_the_stopping_to_the_transcript_and_names_only_waiting_messages() {
     let response = json!({"ok": true, "terminated": 0, "stop_actor": "user", "stop_actor_verified": false, "stop_reason": "", "queue_paused": true});
-    assert_eq!(said(response), line("Stopped by you (claimed) · queue paused"));
+    assert_eq!(said(response.clone()), line("Queue paused"), "no 'Stopped by you', no 'claimed'");
+    assert_eq!(said_waiting(response, false), line(""), "nothing waits: the transcript's line says it all");
 }
 
 #[test]
-fn a_paired_user_is_you_and_no_goals_paused_is_said() {
+fn no_goals_paused_is_left_out_and_paused_goals_are_said() {
     let response = json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true, "stop_reason": "", "queue_paused": true, "goals_paused": 0});
-    assert_eq!(said(response), line("Stopped by you · queue paused · no goals paused"));
+    assert_eq!(said(response), line("Queue paused"));
+    let response = json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true, "queue_paused": true, "goals_paused": 2});
+    assert_eq!(said_waiting(response, false), line("2 goals paused"));
 }
 
 #[test]
@@ -79,7 +86,7 @@ fn a_stop_the_runtime_refused_is_only_an_error() {
 #[test]
 fn an_unknown_agent_or_other_actor_reads_as_given_and_effects_unknown_once_terminated() {
     let response = json!({"ok": true, "terminated": 2, "stop_actor": "agent:nora-1", "stop_actor_verified": false});
-    assert_eq!(said(response), line("Stopped by nora-1 (claimed) · effects unknown"));
+    assert_eq!(said(response), line("Stopped by nora-1 (unverified)"));
     let response = json!({"ok": true, "terminated": 1, "stop_actor": "ops-script", "queue_paused": false, "goals_paused": 3});
     assert_eq!(said(response), line("Stopped by ops-script · queue not paused · 3 goals paused"));
 }
@@ -90,9 +97,9 @@ fn the_interrupted_detail_says_who_stopped_and_why_without_effects() {
         "stop_actor_verified": true, "stop_reason": "Pebble busy with no process"}));
     let receipt = StopReceipt::from_detail(&detail).expect("a Stop's detail");
     assert_eq!(receipt.origin, Origin::Detail);
-    assert_eq!(receipt.said(&names), line("Stopped by Theo (verified): Pebble busy with no process"));
+    assert_eq!(receipt.said(&names, false), line("Stopped by Theo: Pebble busy with no process"));
     let older = object(json!({"source": "user_stop", "message": "Turn stopped"}));
-    assert_eq!(StopReceipt::from_detail(&older).unwrap().said(&names), line("Stopped"), "an older Host's detail names no one");
+    assert_eq!(StopReceipt::from_detail(&older).unwrap().said(&names, false), line("Stopped"), "an older Host's detail names no one");
     assert_eq!(StopReceipt::from_detail(&object(json!({"source": "server_restart"}))), None);
 }
 

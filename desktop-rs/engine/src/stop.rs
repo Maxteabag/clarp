@@ -30,10 +30,15 @@ impl Engine {
         on_peer!(self.peer_ref(session), |engine, local| engine.stop_notice(local));
         let Some((receipt, _)) = self.stops.receipts.get(session) else { return String::new() };
         let name = |s: &str| self.roster.find(s).map(|a| display_name(a).to_owned());
-        match receipt.said(&name) {
+        match receipt.said(&name, self.queue_waiting(session)) {
             Said::Line(line) => line,
             Said::Error(_) => String::new(),
         }
+    }
+
+    /// Whether messages wait in the chat's queue.
+    fn queue_waiting(&self, session: &str) -> bool {
+        self.roster.find(session).is_some_and(|a| a.queued_turn_count > 0)
     }
 
     pub(crate) fn stop_requested(&mut self, session: &str) {
@@ -60,7 +65,7 @@ impl Engine {
         let receipt = StopReceipt::from_response(object);
         let said = {
             let name = |s: &str| self.roster.find(s).map(|a| display_name(a).to_owned());
-            receipt.said(&name)
+            receipt.said(&name, self.queue_waiting(&session))
         };
         match said {
             Said::Line(_) => self.set_receipt(&session, Some(receipt)),

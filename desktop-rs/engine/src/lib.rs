@@ -66,6 +66,9 @@ use url::Url;
 
 /// A send not confirmed by `/log` within this window is marked failed.
 pub const DELIVERY_TIMEOUT: Duration = Duration::from_millis(20_000);
+/// Set once this desktop has played an agent's clip: speech is set up here,
+/// so a later "not spoken" failure is worth saying.
+pub const SPEECH_HEARD: &str = "audio/speechHeard";
 /// Snapshots are coalesced to at most one per interval.
 pub const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_millis(700);
 
@@ -303,6 +306,9 @@ pub struct Engine {
     /// Optional requests whose failure was already logged once.
     quiet_failures: HashSet<String>,
     stops: stop::Stops,
+    /// Chats whose "not spoken" banner showed since their voice last worked:
+    /// it shows once per chat, not after every reply.
+    voice_errors_shown: HashSet<String>,
     /// The request whose failure the error shows (empty for other errors).
     error_source: String,
     narrator: std::cell::RefCell<clarp_core::narrator::Narrator>,
@@ -445,6 +451,7 @@ impl Engine {
             has_stored_credential: false,
             quiet_failures: HashSet::new(),
             stops: stop::Stops::default(),
+            voice_errors_shown: HashSet::new(),
             error_source: String::new(),
             narrator,
             panes: workspace::Panes::new(workspace_store),
@@ -1243,9 +1250,11 @@ impl Engine {
         }
         self.waiting_for_session_choice = false;
         let changed = self.selected != session;
-        self.selected = session.to_owned();
+        let left = std::mem::replace(&mut self.selected, session.to_owned());
         if changed {
             self.end_coordination_visits(session);
+            // The chat left takes its "not spoken" banner with it.
+            self.with_conversation(&left, |c| c.set_voice_error(""));
         }
         self.mutate_roster(|r| r.clear_unread(session));
         if changed {
@@ -1791,14 +1800,25 @@ impl Engine {
         self.lifecycle_event(&kind, &session);
         match kind.as_str() {
             "audio" => {
-                // A clip for the chat means its voice works again.
+                // A clip for the chat means its voice works again: a later
+                // failure may say so once more. Speech is now set up here.
+                if !self.settings.boolean(SPEECH_HEARD, false) {
+                    self.settings.set(SPEECH_HEARD, true);
+                }
                 if !session.is_empty() {
+                    self.voice_errors_shown.remove(&session);
                     self.ensure_conversation(&session);
                     self.with_conversation(&session, |c| c.set_voice_error(""));
                 }
                 self.changes.push(Change::Clips(vec![event.clone()]));
             }
             "tts-error" => {
+                // Speech that is muted here, or never worked on this desktop
+                // (a Host without a voice), is not an error the user asked
+                // to hear about; and a chat says it once, not every reply.
+                if self.muted || !self.settings.boolean(SPEECH_HEARD, false) || (!session.is_empty() && !self.voice_errors_shown.insert(session.clone())) {
+                    return;
+                }
                 let message = event.get("message").and_then(Value::as_str).map_or_else(|| json::string(event, "error"), str::to_owned);
                 if session.is_empty() {
                     self.set_error(&message);
