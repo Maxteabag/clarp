@@ -90,6 +90,10 @@ fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_
     let note = note_text().unwrap();
     assert!(note.contains("Peer"), "{note}");
     assert!(note.contains("work for the peer"), "{note}");
+    assert!(
+        note.contains("answer Peer (`clarp-admin reply` for a request"),
+        "the note names whom to answer: {note}"
+    );
     let turns = host.turns(target);
     let owner = turns.iter().position(answered).unwrap();
     if let Some(noted) = turns

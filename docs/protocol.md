@@ -1215,7 +1215,8 @@ Rules:
   stopped for a newer message, and the send runs next, ahead of everything
   that waits. Behind it the Host leaves the agent a message of origin
   `made-way` (`u-made-way-<turn>`) that quotes the cut message and asks the
-  agent to take that work up again. It runs after what already waits, and a
+  agent to take that work up again and, where another agent sent it, to
+  answer that agent when it is done. It runs after what already waits, and a
   Stop holds it like other background work. A heartbeat, a leader's tick,
   dreaming or a watcher come again by themselves and get no such message.
   A turn that carries the user's own words (the user's turn, a front desk's

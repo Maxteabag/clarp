@@ -2221,27 +2221,39 @@ impl Actor {
             return Ok(Some(GoesFirst { note: None }));
         }
         let message = self.message_at(live.message_seq())?;
-        let what = match (cut, &message.sender) {
-            (Origin::Agent { .. }, Some(sender)) => {
-                let name = [&sender.name, &sender.session, &sender.agent_id]
+        // Whom the cut turn answered: another agent, who learns nothing from a stopped turn
+        // and is told not to send again, is answered once the work is done.
+        let sender = match (cut, &message.sender) {
+            (Origin::Agent { .. }, Some(sender)) => Some(
+                [&sender.name, &sender.session, &sender.agent_id]
                     .into_iter()
                     .find(|name| !name.trim().is_empty())
-                    .map_or("another agent", |name| name.as_str());
-                format!("the message from {name}")
-            }
-            (Origin::Agent { .. }, None) => "another agent's message".to_owned(),
-            _ if clarp_kernel::turn::message_automation_kind(cut.name(), &message.id)
+                    .map_or("that agent", |name| name.as_str()),
+            ),
+            (Origin::Agent { .. }, None) => Some("that agent"),
+            _ => None,
+        };
+        let what = match sender {
+            Some("that agent") => "another agent's message".to_owned(),
+            Some(name) => format!("the message from {name}"),
+            None if clarp_kernel::turn::message_automation_kind(cut.name(), &message.id)
                 == clarp_kernel::turn::GOAL_WAKE =>
             {
                 "your goal's wake".to_owned()
             }
-            _ => format!("the {} message", cut.name()),
+            None => format!("the {} message", cut.name()),
         };
+        let answer = sender.map_or_else(String::new, |name| {
+            format!(
+                " When it is done, answer {name} (`clarp-admin reply` for a request, else \
+                 `clarp-admin prompt`), since your cut turn told them nothing."
+            )
+        });
         let said = clarp_kernel::python::first(message.text.trim(), 600);
         let text = format!(
             "Your turn on {what} was cut short because the owner wrote to you, and the \
              owner's message went first. Take that work up again now: finish what you had \
-             begun, or do it if you had not begun. It said: \u{ab}{said}\u{bb}"
+             begun, or do it if you had not begun.{answer} It said: \u{ab}{said}\u{bb}"
         );
         Ok(Some(GoesFirst {
             note: Some(Message {
