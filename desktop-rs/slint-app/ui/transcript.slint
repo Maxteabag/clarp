@@ -955,6 +955,8 @@ component TranscriptRow inherits HorizontalLayout {
                     x: 0;
                 }
             }
+            // A row's tool calls under its text: the order a settled turn
+            // reads in too (history_fold::text_before_tools).
             if root.message.expanded: VerticalLayout {
                 preferred-width: content-width;
                 spacing: 1px;
