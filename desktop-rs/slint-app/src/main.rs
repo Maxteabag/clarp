@@ -895,6 +895,7 @@ fn main() {
         if reading {
             scroll_journal::event(&pane, "reader");
         }
+        scroll_journal::view(&pane, offset, content, viewport);
         let bottom_trailing = app().is_some_and(|app| app.row_trailing(&pane, &bottom));
         let shot = scroll_journal::Shot { offset, content, viewport, top: top.into(), top_index, follow, rows, top_y, top_h, bottom: bottom.into(), bottom_y, bottom_h, bottom_trailing };
         scroll_journal::shot(&pane, shot);

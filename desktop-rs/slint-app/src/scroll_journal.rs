@@ -1008,3 +1008,19 @@ mod tests {
         assert!(detail.get("reversals").is_none());
     }
 }
+
+thread_local! {
+    /// Each pane's last drawn scroll (offset, content, viewport heights, px),
+    /// kept whether or not the dashcam records, for the observe check.
+    static VIEWS: std::cell::RefCell<HashMap<String, (f32, f32, f32)>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// A pane's transcript drew with this scroll.
+pub fn view(pane: &str, offset: f32, content: f32, viewport: f32) {
+    VIEWS.with(|v| v.borrow_mut().insert(pane.to_owned(), (offset, content, viewport)));
+}
+
+/// A pane's last drawn scroll: (offset, content, viewport) in px.
+pub fn last_view(pane: &str) -> Option<(f32, f32, f32)> {
+    VIEWS.with(|v| v.borrow().get(pane).copied())
+}

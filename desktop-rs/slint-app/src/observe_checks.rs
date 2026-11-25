@@ -7,7 +7,9 @@
 //! With `CLARP_OBSERVE_ROWS=1` it also prints one JSON line per tick (up to
 //! 5 Hz with `CLARP_OBSERVE_EVERY_MS=200`): the rows drawn, in screen order,
 //! with their kind, id, full text, y and height, and the scroll
-//! (`{"t","session","scroll":{"top","h","ch"},"rows":[{"k","id","t","y","h"}]}`).
+//! (`{"t","session","scroll":{"top","h","ch"},"rows":[{"k","id","t","y","h"}]}`;
+//! `top` px scrolled from the content's top, `h` the chat's visible height,
+//! `ch` the content height, all px).
 //! `CLARP_OBSERVE_SHOTS=0` leaves the screenshots out. Meant for disposable
 //! Hosts with synthetic prompts: the line carries the messages' text.
 
@@ -119,10 +121,11 @@ fn row_kind(row: &crate::MessageRow) -> String {
 fn rows_line(app: &crate::App, session: &str) -> String {
     use slint::Model;
     let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    let offset = super::report().offset;
-    let (viewport, starts) = app.active_view().map_or((0.0, Vec::new()), |v| (v.height, v.before.iter().collect::<Vec<f32>>()));
-    let content = starts.last().copied().unwrap_or(0.0);
     let pane = app.active_id().to_string();
+    let starts: Vec<f32> = app.active_view().map(|v| v.before.iter().collect()).unwrap_or_default();
+    // The drawn scroll in px (the pane's own geometry is a share of the window).
+    let (offset, content, viewport) = crate::scroll_journal::last_view(&pane)
+        .unwrap_or_else(|| (super::report().offset, starts.last().copied().unwrap_or(0.0), 0.0));
     let rows: Vec<serde_json::Value> = app
         .active_messages()
         .map(|model| {
