@@ -33,11 +33,7 @@ fn a_call_that_comes_done_is_counted_in_the_turns_end_and_its_live_turn() {
     let place = Place::new("codex-counts");
     let codex = place.root.join("codex");
     program(&codex, CODEX);
-    let host = place.start_in(
-        "",
-        &[],
-        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
-    );
+    let host = place.start_in("", &[], &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())]);
     let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
     let session = made["session"].as_str().unwrap().to_owned();
     host.send(&session, "Fix the test.", "codex-counts");
