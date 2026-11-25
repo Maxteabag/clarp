@@ -307,7 +307,7 @@ impl Start {
         for path in config_files(cwd, config_home, &env) {
             put(
                 path.to_string_lossy().as_ref(),
-                &std::fs::read(&path).unwrap_or_default(),
+                &said(&path, std::fs::read(&path).unwrap_or_default()),
             );
         }
         for folder in project_folders(cwd) {
@@ -388,9 +388,68 @@ fn project_folders(cwd: &Path) -> Vec<PathBuf> {
     folders
 }
 
+/// What OpenCode writes into its configuration folders itself, on its first start and as it
+/// installs its plugins: its own `.gitignore` names them with `package.json`. They say nothing
+/// of how a server is started, and no digest reads them, or a lane started before OpenCode first
+/// wrote them would never fit a turn after (issue 864's warm lane: written during the first
+/// turn). `package.json` is read for the plugins in it ([`plugins`]).
+const OPENCODE_OWN: &[&str] = &[
+    "node_modules",
+    "package-lock.json",
+    "bun.lock",
+    ".gitignore",
+];
+
+/// The dependency OpenCode writes into a configuration folder's `package.json` itself, with its
+/// own version, on its first start.
+const OPENCODE_PLUGIN: &str = "@opencode-ai/plugin";
+
+/// What a configuration folder's file says, for the digest, by its name: a `package.json` its
+/// plugins, a configuration its settings, any other file its bytes.
+fn said(path: &Path, bytes: Vec<u8>) -> Vec<u8> {
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("package.json") => plugins(bytes),
+        Some("opencode.json" | "opencode.jsonc" | "config.json") => settings(bytes),
+        _ => bytes,
+    }
+}
+
+/// The plugins a `package.json` adds: its dependencies but OpenCode's own ([`OPENCODE_PLUGIN`]),
+/// whose version OpenCode writes itself. None says nothing, as the file's absence does; a file
+/// that is no JSON object says its bytes.
+fn plugins(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(Value::Object(package)) = serde_json::from_slice::<Value>(&bytes) else {
+        return bytes;
+    };
+    let mut dependencies = match package.get("dependencies") {
+        Some(Value::Object(dependencies)) => dependencies.clone(),
+        _ => serde_json::Map::new(),
+    };
+    dependencies.remove(OPENCODE_PLUGIN);
+    if dependencies.is_empty() {
+        Vec::new()
+    } else {
+        Value::Object(dependencies).to_string().into_bytes()
+    }
+}
+
+/// What a configuration file says, for the digest: its bytes, except that a JSON object with no
+/// key but `$schema` (what OpenCode writes as its default `opencode.jsonc` on its first start)
+/// says nothing, as the file's absence does.
+fn settings(bytes: Vec<u8>) -> Vec<u8> {
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(Value::Object(mut fields)) => {
+            fields.remove("$schema");
+            if fields.is_empty() { Vec::new() } else { bytes }
+        }
+        _ => bytes,
+    }
+}
+
 /// The files whose content makes a kept server stale, but the login file, which the digest
 /// takes last: the project's and the global configuration, and files the environment names for
-/// it (the lead's rule of 24 Nov 2026: a content hash, never a size or a time).
+/// it (the lead's rule of 24 Nov 2026: a content hash, never a size or a time), each read for
+/// what it says ([`said`]).
 fn config_files(cwd: &Path, config_home: &Path, env: &[(String, String)]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for dir in project_folders(cwd) {
@@ -416,7 +475,8 @@ fn config_files(cwd: &Path, config_home: &Path, env: &[(String, String)]) -> Vec
 }
 
 /// A project's `.opencode` folder (agents, commands, plugins) and one an `OPENCODE_CONFIG_DIR`
-/// names: names and contents, `node_modules` left out. `None` past the folder limits.
+/// names: names and what each says ([`said`]), what OpenCode writes there itself
+/// ([`OPENCODE_OWN`]) left out. `None` past the folder limits.
 fn hash_folder(dir: &Path, put: &mut impl FnMut(&str, &[u8])) -> Option<()> {
     let root = dir.join(".opencode");
     let mut stack = vec![root];
@@ -428,7 +488,10 @@ fn hash_folder(dir: &Path, put: &mut impl FnMut(&str, &[u8])) -> Option<()> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if entry.file_name() == "node_modules" {
+            if OPENCODE_OWN
+                .iter()
+                .any(|own| entry.file_name() == std::ffi::OsStr::new(own))
+            {
                 continue;
             }
             let Ok(kind) = entry.file_type() else {
@@ -448,10 +511,14 @@ fn hash_folder(dir: &Path, put: &mut impl FnMut(&str, &[u8])) -> Option<()> {
     }
     found.sort();
     for path in found {
-        put(
-            path.to_string_lossy().as_ref(),
-            &std::fs::read(&path).unwrap_or_default(),
-        );
+        let bytes = std::fs::read(&path).unwrap_or_default();
+        let says = said(&path, bytes.clone());
+        // A package file or configuration that says nothing is as if it were not there, as
+        // the global folder's absent files are (an empty file of any other kind is still one).
+        if says.is_empty() && !bytes.is_empty() {
+            continue;
+        }
+        put(path.to_string_lossy().as_ref(), &says);
     }
     Some(())
 }
@@ -500,7 +567,53 @@ mod tests {
         // Written again with the same words (a new time): the same lane.
         std::fs::write(&agent, r#"{"provider":{}}"#).unwrap();
         assert_eq!(digest(), with_agent);
-        std::fs::write(config.join("opencode/opencode.json"), "{}").unwrap();
+        // What OpenCode writes there itself on its first start moves nothing: its default
+        // configuration, which names only its schema, its plugins' package files and its
+        // `.gitignore`, in the global folder and the project's `.opencode` alike (issue 864).
+        let global = config.join("opencode");
+        std::fs::write(
+            global.join("opencode.jsonc"),
+            "{\n  \"$schema\": \"https://opencode.ai/config.json\"\n}",
+        )
+        .unwrap();
+        std::fs::create_dir_all(work.join(".opencode/node_modules/x")).unwrap();
+        for dir in [&global, &work.join(".opencode")] {
+            std::fs::write(
+                dir.join("package.json"),
+                r#"{"dependencies":{"@opencode-ai/plugin":"1.18.33"}}"#,
+            )
+            .unwrap();
+            std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+            std::fs::write(dir.join("bun.lock"), "x").unwrap();
+            std::fs::write(dir.join(".gitignore"), "node_modules").unwrap();
+        }
+        std::fs::write(work.join(".opencode/node_modules/x/a.js"), "x").unwrap();
+        assert_eq!(digest(), with_agent);
+        // OpenCode writing its own plugin's newer version holds it too; a plugin someone adds,
+        // in the global folder or the project's, moves it.
+        std::fs::write(
+            global.join("package.json"),
+            r#"{"dependencies":{"@opencode-ai/plugin":"1.19.6"}}"#,
+        )
+        .unwrap();
+        assert_eq!(digest(), with_agent);
+        for dir in [&global, &work.join(".opencode")] {
+            let package = dir.join("package.json");
+            std::fs::write(
+                &package,
+                r#"{"dependencies":{"@opencode-ai/plugin":"1.18.33","their-plugin":"2.0.0"}}"#,
+            )
+            .unwrap();
+            assert_ne!(digest(), with_agent, "{}", package.display());
+            std::fs::write(
+                &package,
+                r#"{"dependencies":{"@opencode-ai/plugin":"1.18.33"}}"#,
+            )
+            .unwrap();
+            assert_eq!(digest(), with_agent);
+        }
+        // A configuration with something in it does.
+        std::fs::write(global.join("opencode.json"), r#"{"model":"m"}"#).unwrap();
         let with_global = digest();
         assert_ne!(with_global, with_agent);
         std::fs::write(data.join("opencode/auth.json"), r#"{"a":{"type":"api"}}"#).unwrap();

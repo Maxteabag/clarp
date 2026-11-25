@@ -219,5 +219,14 @@ PLANTS.append((LANE_SHIM, 'lane_shim', 'a message stored after an answer\'s pare
 # A turn held open by message order alone is rechecked (issue 864).
 PLANTS.append((LANE_SHIM, 'lane_host', 'a turn held open by message order alone waits for a run that never comes',
                '                    self.recheck = Some(Instant::now() + RECHECK);\n', ''))
+# What OpenCode writes into its configuration folders itself is no part of a lane's digest (issue 864's warm lane).
+PLANTS.append((LANE_HOST, 'lane_digest', "OpenCode's own plugin in a package file moves the digest",
+               '    dependencies.remove(OPENCODE_PLUGIN);\n', ''))
+PLANTS.append((LANE_HOST, 'lane_digest', "a plugin someone adds to a package file moves nothing",
+               '        Value::Object(dependencies).to_string().into_bytes()', '        Vec::new()'))
+PLANTS.append((LANE_HOST, 'lane_digest', "OpenCode's default configuration moves the digest",
+               'if fields.is_empty() { Vec::new() } else { bytes }', 'bytes'))
+PLANTS.append((LANE_HOST, 'lane_host', "OpenCode's own files in the global folder move the digest",
+               '    dependencies.remove(OPENCODE_PLUGIN);\n', ''))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

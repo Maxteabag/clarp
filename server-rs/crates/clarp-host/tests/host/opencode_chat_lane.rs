@@ -12,7 +12,8 @@ use super::*;
 /// session another server made. A word `ask-<x>` is answered `said-ask-<x>` at once; `hold-<x>`
 /// once the file `release-<x>` exists, unless the session is aborted first; a prompt of several
 /// such words (messages given to a turn together) is answered word by word; `die-<x>` ends the
-/// server under the turn. A prompt's user message is named in OpenCode's ascending form. A prompt
+/// server under the turn. The first prompt any server is given writes OpenCode's own files into
+/// the global configuration folder, as OpenCode does on its first start. A prompt's user message is named in OpenCode's ascending form. A prompt
 /// that names its `messageID` is a steer: it is stored, and the steers stored since the last
 /// answer are read together at the turn's next step, as OpenCode reads them: one answer, whose
 /// parent is the last of them, says `said-<word>+<word>...`. Not so a word `late-<x>`, which the
@@ -230,6 +231,15 @@ class H(BaseHTTPRequestHandler):
                     stored.append((body["messageID"], word))
                 self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
                 return
+            # As OpenCode does on its first start: its default configuration, its plugins'
+            # package file and its .gitignore, in the global configuration folder.
+            config = os.environ.get("XDG_CONFIG_HOME", "")
+            own = Path(config) / "opencode"
+            if config and not (own / "package.json").exists():
+                own.mkdir(parents=True, exist_ok=True)
+                (own / "opencode.jsonc").write_text('{\n  "$schema": "https://opencode.ai/config.json"\n}')
+                (own / "package.json").write_text('{"dependencies": {"@opencode-ai/plugin": "1.18.33"}}')
+                (own / ".gitignore").write_text("node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore\n")
             token_file = os.environ.get("CLARP_PROVIDER_TURN_FILE", "")
             token = os.environ.get("CLARP_PROVIDER_TURN") or (Path(token_file).read_text() if token_file else "")
             for each in words:
@@ -1289,4 +1299,57 @@ fn a_turn_held_open_by_message_order_alone_ends_at_the_recheck() {
     assert_eq!(prompted(&world), ["ask-first", "hold-a", "skew-b"]);
     assert_ne!(read_at(&host, "skew", "u-b"), "steer");
     assert_eq!(answers(&host, "skew", "said-skew-b"), 1);
+}
+
+/// The lanes live now, as the apps read them: `(lanes, busy)` of OpenCode's.
+fn live(host: &Host) -> (u64, u64) {
+    let tool = &host.get("/lane-settings")["live"]["tools"]["opencode"];
+    (
+        tool["lanes"].as_u64().unwrap_or(0),
+        tool["busy"].as_u64().unwrap_or(0),
+    )
+}
+
+/// Issue 864's warm lane. OpenCode writes its own files into its configuration folder during the
+/// first turn (its default configuration, its plugins' package file), after the lane beside that
+/// turn was started. They are no part of how a server is started: the second turn runs on the
+/// warm lane, which is busy with it, and nothing starts cold.
+#[test]
+fn the_second_turn_runs_on_the_lane_warmed_beside_the_first() {
+    let world = world("opencode-lane-warm", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "warm", "opencode");
+    asked(&host, "warm", "ask-first");
+    assert!(
+        world
+            .place
+            .root
+            .join("config/opencode/package.json")
+            .exists(),
+        "OpenCode's own files were written during the first turn"
+    );
+    lane_ready(&socket);
+    let lane_pid = lane_state(&socket).unwrap()["pid"].to_string();
+    assert_eq!(live(&host), (1, 0));
+    let cold_before = cold(&host);
+
+    host.send("warm", "hold-second", "second");
+    wait_for("the second turn", || {
+        world.place.root.join("holding-second").exists()
+    });
+    assert_eq!(live(&host), (1, 1), "the warm lane runs the second turn");
+    std::fs::write(world.place.root.join("release-second"), "").unwrap();
+    wait_for("its answer", || {
+        answers(&host, "warm", "said-hold-second") == 1
+    });
+    wait_for("the turn to end", || host.state("warm") == "done");
+    assert_eq!(world.servers().last().unwrap(), &lane_pid);
+    assert_eq!(cold(&host), cold_before, "nothing started cold");
+    assert_eq!(
+        world.lines("starts").len(),
+        2,
+        "the first turn's server and the lane's"
+    );
 }
