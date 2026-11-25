@@ -308,6 +308,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
     MessageRow {
         id: entry.key.clone().into(),
         author: if message { "assistant" } else { "live" }.into(),
+        spoken: entry.spoken_text.clone().into(),
         blocks: ModelRc::new(VecModel::from(blocks)),
         stamp: SharedString::new(),
         meta: SharedString::new(),

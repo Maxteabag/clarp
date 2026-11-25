@@ -643,6 +643,13 @@ pub(crate) fn message_row(
     // A reply is only ever its written form: a row whose voice markup was
     // all there was shows nothing rather than the tags.
     let text = if row.body.is_empty() && !row.activity && author == "user" { m.text.clone() } else { row.body.clone() };
+    // A reply that holds a spoken part shows it as a quiet summary line
+    // above its written part (#823); spoken only, its words are its text.
+    let (spoken, text) = if author == "assistant" && clarp_core::text::carries_speech(&m.text) {
+        clarp_core::text::reply_parts(&m.text, m.kind == "live")
+    } else {
+        (String::new(), text)
+    };
     let receipt = if author == "user" { receipt_row(m) } else { None };
     // Another agent's message folds to one line until opened by its key
     // (a resolved decision is its receipt instead).
@@ -674,6 +681,7 @@ pub(crate) fn message_row(
     MessageRow {
         id: m.id.clone().into(),
         author: author.into(),
+        spoken: spoken.into(),
         blocks: ModelRc::new(VecModel::from({
             let mut shown: Vec<crate::MessageBlock> = blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user" && prompt.is_none())).collect();
             // Image blocks the keyboard reaches (J/K) and enlarges: not the

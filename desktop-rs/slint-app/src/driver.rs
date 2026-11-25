@@ -2729,6 +2729,17 @@ fn sidebar_check(out: String) {
     run_stages(stages);
 }
 
+/// Whether an element with accessible id `id` is drawn with a size.
+fn spoken_drawn(id: &str) -> bool {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return false };
+    let id = id.to_owned();
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0 && e.size().height > 0.0)
+        .find_first()
+        .is_some()
+}
+
 fn transcript_check(out: String) {
     {
     let tools = serde_json::json!({"session": "rachel", "turns": [
@@ -2739,8 +2750,12 @@ fn transcript_check(out: String) {
          "tools": [{"name": "Read", "file_path": "src/main.rs", "status": "completed", "result": "fn main() {}"},
                    {"name": "Bash", "command": "sleep 60", "status": "failed", "result": "<tool_use_error>Blocked: standalone sleep 60.</tool_use_error>"}]},
         {"id": "t5", "role": "assistant", "text": "Done."},
+        // A reply with a spoken gist, and one that is only spoken (#823).
+        {"id": "t6", "role": "assistant", "text": "<speak>Sure, the gist: <vox>um,</vox> the build is green.</speak>\n## Build report\n\nAll **42** tests pass."},
+        {"id": "t7", "role": "assistant", "text": "<speak>Anything else?</speak>"},
     ]});
     let fill = |count: usize| serde_json::json!({"session": "mike", "count": count, "prefix": "Line"});
+    let out_spoken = out.clone();
     let out2 = out.clone();
     let out3 = out.clone();
     let offset = Rc::new(Cell::new(0.0f32));
@@ -2753,6 +2768,28 @@ fn transcript_check(out: String) {
             check(control("/__control/turns", &tools).is_ok(), "the Host takes a transcript with tool calls");
             app.engine.borrow_mut().select("rachel");
             crate::pump();
+            true
+        })),
+        ("spoken summary", Box::new(move |_, window, elapsed| {
+            let rows = rows(window);
+            let (Some(gist), Some(only)) = (rows.iter().find(|r| r.id == "t6"), rows.iter().find(|r| r.id == "t7")) else { return false };
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            let first = gist.blocks.row_data(0);
+            check(gist.spoken == "Sure, the gist: the build is green.", &format!("a reply's spoken part is its summary line, fillers out: {:?}", gist.spoken));
+            check(
+                first.as_ref().is_some_and(|b| b.kind == "heading") && gist.blocks.iter().all(|b| !format!("{:?}", b.styled).contains("gist")),
+                "the written part is the reply's Markdown, opening with its heading, without the gist",
+            );
+            check(spoken_drawn("spoken:t6"), "the summary line is drawn");
+            let words: Vec<String> = only.blocks.iter().map(|b| format!("{:?}", b.styled)).collect();
+            check(
+                only.spoken.is_empty() && only.blocks.row_count() == 1 && words[0].contains("Anything else?"),
+                &format!("a reply that is only spoken shows its words once, as its text: {:?} / {words:?}", only.spoken),
+            );
+            check(!spoken_drawn("spoken:t7"), "a spoken-only reply draws no summary line");
+            shot(&out_spoken, "transcript-00-spoken-summary");
             true
         })),
         ("tool rows fold", Box::new(|_, window, _| {
