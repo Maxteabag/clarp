@@ -3323,11 +3323,18 @@ impl Worker {
             }
             _ => false,
         };
-        if can_offer_steering && let Some(actor) = self.actor.as_mut() {
+        if can_offer_steering {
             // Read any input fence that reached the spool before this send, even if its
-            // wakeup is still behind the send in the mailbox.
-            let read = actor.spool_changed(now)?;
-            self.after(read);
+            // wakeup is still behind the send in the mailbox: to its end, each window shown
+            // as soon as it is on disk (issue 831).
+            while let Some(actor) = self.actor.as_mut() {
+                let (read, more) = actor.spool_step(now)?;
+                self.after(read);
+                self.tell_shown();
+                if !more {
+                    break;
+                }
+            }
         }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
@@ -4121,7 +4128,16 @@ impl Worker {
                 };
                 (out, nobody())
             }
-            Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
+            Ask::SpoolChanged => {
+                // One window of the spool at a time: what it wrote is shown when this ask is
+                // done, and the next window is read with another, behind what waits in the
+                // mailbox (issue 831).
+                let (out, more) = actor.spool_step(now)?;
+                if more {
+                    let _ = self.tx.send(Ask::SpoolChanged);
+                }
+                (out, nobody())
+            }
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
             Ask::NetworkChecked { turn, attempts, up } => {
                 (actor.network_checked(turn, attempts, up, now)?, nobody())

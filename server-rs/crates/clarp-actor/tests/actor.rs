@@ -1364,6 +1364,148 @@ fn a_message_of_the_agent_is_one_row_with_the_tools_it_calls() {
     );
 }
 
+/// An agent's log that counts its commits: each append is one transaction, one sync to disk in
+/// a store that syncs.
+struct Commits {
+    inner: Box<dyn AgentLog>,
+    appends: Arc<AtomicU64>,
+}
+
+impl AgentLog for Commits {
+    fn append(&mut self, items: &[clarp_ports::log::NewItem]) -> Result<u64, LogError> {
+        self.appends.fetch_add(1, Ordering::SeqCst);
+        self.inner.append(items)
+    }
+    fn last_seq(&self) -> Result<u64, LogError> {
+        self.inner.last_seq()
+    }
+    fn read_after(
+        &self,
+        after: u64,
+        kinds: Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, LogError> {
+        self.inner.read_after(after, kinds, limit)
+    }
+    fn read_before(
+        &self,
+        before: u64,
+        kinds: Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, LogError> {
+        self.inner.read_before(before, kinds, limit)
+    }
+    fn find(&self, key: &str) -> Result<Option<clarp_ports::log::Item>, LogError> {
+        self.inner.find(key)
+    }
+}
+
+/// A Claude agent whose commits are counted, with a turn running: its tool calls a tool, the
+/// tool returns, it answers and its process exits, all in the spool and none of it read yet.
+fn a_turn_written_and_unread(name: &str) -> (World, Actor, Arc<AtomicU64>) {
+    let mut world = World::new(name);
+    world.backend = Arc::new(Claude::new());
+    let appends = Arc::new(AtomicU64::new(0));
+    let log = Commits {
+        inner: world
+            .engine
+            .open(&world.profile.dir, standard_set("zstd").unwrap())
+            .unwrap(),
+        appends: appends.clone(),
+    };
+    let now = world.tick();
+    let (mut actor, out) = Actor::open(
+        world.profile.clone(),
+        world.backend.clone(),
+        Box::new(log),
+        now,
+    )
+    .unwrap();
+    world.carry_out(&mut actor, out);
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
+    claude_returns(&mut world, 1, "t1", "a.txt", false);
+    claude_message(&mut world, 1, "c", "Done.", &[]);
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    );
+    world.exits(1, Some(0), None);
+    (world, actor, appends)
+}
+
+/// The keys of the rows that are on disk, read from the store and not from the actor.
+fn rows_on_disk(world: &World) -> Vec<String> {
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let items = log.read_after(0, kind::ROWS, 100).unwrap();
+    items.into_iter().filter_map(|item| item.key).collect()
+}
+
+/// Issue 831: a turn's spool read in steps goes to the log one window at a time, each window
+/// in one commit, and a step ends once its window is on disk: what it wrote can be shown
+/// before the next window is read, so the turn's answer is not held back until a long reading
+/// is over. The turn is not told over before its answer is on disk, and the steps together
+/// make no more commits than one reading of the whole spool.
+#[test]
+fn a_spool_read_in_steps_is_on_disk_a_window_at_a_time() {
+    // One reading of the whole spool, as before: its commits, and where it leaves the chat.
+    let (mut whole, mut read_whole, counted) = a_turn_written_and_unread("steps-whole");
+    let before = counted.load(Ordering::SeqCst);
+    whole.hint(&mut read_whole);
+    let whole_commits = counted.load(Ordering::SeqCst) - before;
+    let whole_chat = chat(&read_whole.tail(10).unwrap());
+    assert_eq!(
+        read_whole.status().last.unwrap().outcome,
+        Outcome::Completed
+    );
+    assert!(whole_commits >= 2, "the turn moved on: {whole_commits}");
+
+    // The same spool, a step at a time.
+    let (mut world, mut actor, counted) = a_turn_written_and_unread("steps");
+    let _ = actor.take_shown(world.now_ms);
+    let mut steps: Vec<(u64, bool, Vec<String>)> = Vec::new();
+    loop {
+        let before = counted.load(Ordering::SeqCst);
+        let now = world.tick();
+        let (out, more) = actor.spool_step(now).unwrap();
+        world.carry_out(&mut actor, out);
+        let on_disk = rows_on_disk(&world);
+        // What is told of the turn is what is on disk: it is not over before its answer is.
+        let _ = actor.take_shown(now);
+        if actor.status().last.is_some() {
+            assert!(on_disk.contains(&"r-c".to_string()), "{on_disk:?}");
+        }
+        steps.push((counted.load(Ordering::SeqCst) - before, more, on_disk));
+        if !more {
+            break;
+        }
+        assert!(steps.len() < 20, "the steps end: {steps:?}");
+    }
+    assert!(steps.len() >= 2, "more than one window: {steps:?}");
+    let (first_commits, first_more, first_on_disk) = &steps[0];
+    assert_eq!(*first_commits, 1, "the first window is one commit");
+    assert!(*first_more, "the first step says there is more to read");
+    assert!(
+        !first_on_disk.contains(&"r-c".to_string()),
+        "the answer is read after the first window is on disk: {first_on_disk:?}"
+    );
+    for (commits, more, _) in &steps {
+        if *more {
+            assert_eq!(
+                *commits, 1,
+                "a step that ends at a window commits it once: {steps:?}"
+            );
+        }
+    }
+    let stepped: u64 = steps.iter().map(|(commits, ..)| commits).sum();
+    assert_eq!(stepped, whole_commits, "{steps:?}");
+    assert_eq!(chat(&actor.tail(10).unwrap()), whole_chat);
+    assert_eq!(actor.status().last.unwrap().outcome, Outcome::Completed);
+}
+
 /// The headlines of the status lines among live events, in order.
 fn status_headlines(events: &[serde_json::Value]) -> Vec<String> {
     events
