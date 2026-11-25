@@ -19,6 +19,13 @@ pub(crate) struct TurnQueue {
     generation: u64,
     /// tag → the session whose queue the action changes
     action_sessions: HashMap<String, String>,
+    /// The Send now tags in flight.
+    sends: std::collections::HashSet<String>,
+    /// The Host's answer to the last refused Send now (a turn still runs),
+    /// and its chat. A reload keeps it: the Host reloads the queue with
+    /// `queue-updated` on the same refusal.
+    refused: String,
+    refused_session: String,
 }
 
 impl Engine {
@@ -41,6 +48,12 @@ impl Engine {
     pub fn turn_queue_loading(&self) -> bool {
         on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_loading());
         self.queue.loading
+    }
+    /// The Host's answer to `session`'s last refused Send now, in its own
+    /// words ("agent is still working"), or "".
+    pub fn turn_queue_refusal(&self, session: &str) -> String {
+        on_peer!(self.peer_ref(session), |engine, local| engine.turn_queue_refusal(local));
+        if session.is_empty() || session != self.queue.refused_session { String::new() } else { self.queue.refused.clone() }
     }
     pub fn turn_queue_error(&self) -> &str {
         on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_error());
@@ -71,6 +84,13 @@ impl Engine {
         }
         let tag = format!("queue-action:{}", uuid::Uuid::new_v4());
         self.queue.action_sessions.insert(tag.clone(), self.queue.session.clone());
+        // A new action answers the last refusal.
+        if self.queue.refused_session == self.queue.session {
+            self.queue.refused.clear();
+        }
+        if path.ends_with("/send") {
+            self.queue.sends.insert(tag.clone());
+        }
         match method {
             "PUT" => self.api.put_json(&tag, path, body),
             "DELETE" => self.api.delete(&tag, path),
@@ -126,10 +146,15 @@ impl Engine {
             }
             self.queue.items = json::array(object, "items");
             self.queue.paused = json::boolean(object, "paused");
+            // Nothing left waiting: nothing left refused.
+            if self.queue.items.is_empty() && self.queue.refused_session == session {
+                self.queue.refused.clear();
+            }
             self.queue.loading = false;
             self.queue.error.clear();
             self.changes.push(Change::Queue(session.to_owned()));
         } else if tag.starts_with("queue-action:") {
+            self.queue.sends.remove(tag);
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
             if !session.is_empty() && session == self.queue.session {
                 self.load_turn_queue(&session);
@@ -140,19 +165,28 @@ impl Engine {
         true
     }
 
-    /// A queue failure is the queue's error, not the window's.
-    pub(crate) fn queue_failure(&mut self, tag: &str, detail: &str) -> bool {
+    /// A queue failure is the queue's error, not the window's. A Send now
+    /// the Host refused because a turn still runs (409) is its refusal, in
+    /// the Host's words: the message waits on.
+    pub(crate) fn queue_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
+        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         if let Some(rest) = tag.strip_prefix("turn-queue:") {
             if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) != Some(self.queue.generation) {
                 return true;
             }
             self.queue.loading = false;
         } else if tag.starts_with("queue-action:") {
-            self.queue.action_sessions.remove(tag);
+            let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
+            if self.queue.sends.remove(tag) && status == 409 {
+                self.queue.refused = if message.trim().is_empty() { "a turn still runs".to_owned() } else { message.trim().to_owned() };
+                self.queue.refused_session = session.clone();
+                self.changes.push(Change::Queue(session));
+                return true;
+            }
         } else {
             return false;
         }
-        self.queue.error = detail.to_owned();
+        self.queue.error = detail;
         let session = self.queue.session.clone();
         self.changes.push(Change::Queue(session));
         true

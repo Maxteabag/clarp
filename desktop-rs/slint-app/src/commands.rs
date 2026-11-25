@@ -82,6 +82,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         artifact: crate::artifacts_view::selected(app).is_some(),
         layout_warning: !window.get_save_warning().is_empty(),
         work: engine.roster().find(selected).is_some_and(|a| engine.roster().running_work(a) > 0),
+        queued: crate::queue_strip::first_waiting(&engine, selected).is_some(),
     }
 }
 
@@ -491,6 +492,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             crate::launch_view::open_start_agent(app, window, &selected, &name);
         }
         "manage-queue" if !selected.is_empty() => crate::agent_dialogs_view::open_queue(app, window, &selected),
+        "send-queued" => {
+            if !crate::queue_strip::send_first(app) {
+                return false;
+            }
+        }
         // The value editor puts the old value back.
         "escape" if matches!(app.overlay.borrow().as_str(), crate::look::EDITOR | crate::look::CONFIRM) => crate::look::cancel_editor(app, window),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
@@ -648,11 +654,26 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             }
         }
         // The sidebar's views (minimal UI hides their chips and switches).
-        "list-all" | "list-unread" => {
+        "list-all" | "list-unread" | "list-working" | "list-needs-you" | "list-done" | "list-snoozed" => {
             window.invoke_show_pairs(false);
             window.invoke_show_archive(false);
-            window.invoke_choose_scope(if action == "list-all" { "all" } else { "unread" }.into());
+            window.invoke_choose_scope(action.trim_start_matches("list-").into());
             window.set_sidebar_visible(true);
+        }
+        // Snooze: the explorer's row under the keyboard, else the open chat.
+        "snooze-chat" | "snooze-chat-hour" | "snooze-chat-morning" | "wake-chat" | "snooze-toggle" => {
+            let target = if window.get_sidebar_focused() && !window.get_sidebar_cursor().is_empty() { window.get_sidebar_cursor().to_string() } else { selected.clone() };
+            if target.is_empty() || target.starts_with("pair:") {
+                return false;
+            }
+            let how = match action {
+                "snooze-chat-hour" => "hour",
+                "snooze-chat-morning" => "morning",
+                "wake-chat" => "wake",
+                "snooze-toggle" if crate::triage::is_snoozed(&app.engine.borrow(), &target) => "wake",
+                _ => "message",
+            };
+            crate::triage::set(app, &target, how);
         }
         "list-rooms" | "list-archive" => {
             if action == "list-rooms" { window.invoke_show_pairs(true) } else { window.invoke_show_archive(true) }
@@ -1254,6 +1275,7 @@ pub fn refresh_keys(app: &App, window: &AppWindow) {
     let keys = window.global::<crate::ComposerKeys>();
     keys.set_stop(shown(&["stop-agent"]).into());
     keys.set_latest(shown(&["jump-latest"]).into());
+    keys.set_send_now(shown(&["send-queued"]).into());
 }
 
 pub fn keymap_export(app: &App, window: &AppWindow) {

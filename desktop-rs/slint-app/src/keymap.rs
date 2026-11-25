@@ -42,6 +42,8 @@ pub enum Guard {
     LayoutWarning,
     /// The selected agent runs background jobs or helpers.
     Work,
+    /// The open chat's queue strip lists a message Send now can hand over.
+    Queued,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,7 +87,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send, Work};
+    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Queued, Rows, Send, Work};
     let b = binding;
     match name {
         "main" => vec![
@@ -105,6 +107,14 @@ fn state(name: &str) -> Vec<Binding> {
             b("connection", &[], "Host connection", false, Always, false),
             b("list-all", &[], "Agents: all chats", false, Always, false),
             b("list-unread", &[], "Agents: unread only", false, Always, false),
+            b("list-working", &[], "Agents: working", false, Always, false),
+            b("list-needs-you", &[], "Agents: needs you", false, Always, false),
+            b("list-done", &[], "Agents: done", false, Always, false),
+            b("list-snoozed", &[], "Agents: snoozed", false, Always, false),
+            b("snooze-chat", &[], "Snooze chat", false, Agent, false),
+            b("snooze-chat-hour", &[], "Snooze chat for an hour", false, Agent, false),
+            b("snooze-chat-morning", &[], "Snooze chat until morning", false, Agent, false),
+            b("wake-chat", &[], "Wake chat", false, Agent, false),
             b("list-rooms", &[], "Agent conversations", false, Always, false),
             b("list-archive", &[], "Archived agents", false, Always, false),
             b("agent-profile", &[], "Agent profile", false, Agent, false),
@@ -151,6 +161,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("retry-message", &["Ctrl+Alt+R"], "Retry failed message", false, Agent, false),
             b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, false),
             b("auto-assign-agent", &["Ctrl+Shift+A"], "Auto assign", false, Agent, false),
+            // The queue strip's first Send now, from the chat or the composer.
+            b("send-queued", &["Ctrl+Shift+Return"], "Send now", true, Queued, false),
             b("escape", &["Escape"], "Navigate", false, Always, false),
             b("keep-layout", &["Ctrl+Shift+S"], "Keep this layout", true, LayoutWarning, false),
             b("move-left", &["Ctrl+Alt+Left"], "Left pane", false, Always, false),
@@ -229,6 +241,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-search", &["/"], "Search", true, Always, false),
             b("toggle-preview", &["P"], "Preview", true, Always, false),
             b("toggle-compact", &["V"], "Compact view", true, Always, false),
+            // The cursor's chat: snoozed until its next message, or woken.
+            b("snooze-toggle", &["S"], "Snooze", true, Rows, false),
             // The row's own badge, by key (P is the preview).
             b("agent-processes", &["Shift+P", "Ctrl+Shift+P"], "Processes", false, Agent, false).hinted_while(Work),
             b("fold", &["Left"], "Fold", true, Folds, false),
@@ -324,6 +338,7 @@ pub struct Facts {
     pub artifact: bool,
     pub layout_warning: bool,
     pub work: bool,
+    pub queued: bool,
 }
 
 impl Facts {
@@ -342,6 +357,7 @@ impl Facts {
             Guard::Artifact => self.artifact,
             Guard::LayoutWarning => self.layout_warning,
             Guard::Work => self.work,
+            Guard::Queued => self.queued,
         }
     }
 }
@@ -960,7 +976,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true, work: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true, work: true, queued: true }
     }
 
     #[test]

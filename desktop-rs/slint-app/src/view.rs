@@ -268,6 +268,7 @@ pub(crate) fn start_turn_clock() {
         if let Some(app) = crate::app() {
             app.tick_turn_stamps();
             app.tick_stall_notices();
+            crate::triage::tick(&app);
         }
     });
     TURN_CLOCK.with(|t| *t.borrow_mut() = Some(timer));
@@ -352,24 +353,50 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
         },
         Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
-        Block::Table(rows) => MessageBlock {
-            kind: "table".into(),
-            styled: slint::StyledText::default(),
-            text: SharedString::new(),
-            level: 0,
-            rows: ModelRc::new(VecModel::from(
-                rows.iter()
-                    .enumerate()
-                    .map(|(index, cells)| TableRow {
-                        cells: ModelRc::new(VecModel::from(cells.iter().map(|c| styled(c, false)).collect::<Vec<_>>())),
-                        header: index == 0,
-                    })
-                    .collect::<Vec<_>>(),
-            )),
-            ..MessageBlock::default()
-        },
+        Block::Table(rows) => {
+            let columns = table_columns(rows);
+            MessageBlock {
+                kind: "table".into(),
+                table_chars: columns.iter().sum(),
+                columns: ModelRc::new(VecModel::from(columns)),
+                styled: slint::StyledText::default(),
+                text: SharedString::new(),
+                level: 0,
+                rows: ModelRc::new(VecModel::from(
+                    rows.iter()
+                        .enumerate()
+                        .map(|(index, cells)| TableRow {
+                            cells: ModelRc::new(VecModel::from(cells.iter().map(|c| styled(c, false)).collect::<Vec<_>>())),
+                            header: index == 0,
+                        })
+                        .collect::<Vec<_>>(),
+                )),
+                ..MessageBlock::default()
+            }
+        }
         Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
     }
+}
+
+/// The characters each column of a table needs: its widest cell's longest
+/// word, or the cell's whole text up to `ROOM` (a longer cell wraps), and
+/// at most `CAP` (a longer word breaks). At least 3.
+pub(crate) fn table_columns(rows: &[Vec<String>]) -> Vec<i32> {
+    const ROOM: usize = 24;
+    const CAP: usize = 32;
+    let count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    (0..count)
+        .map(|column| {
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| {
+                    let word = cell.split_whitespace().map(|w| w.chars().count()).max().unwrap_or(0);
+                    word.max(cell.chars().count().min(ROOM)).clamp(3, CAP)
+                })
+                .max()
+                .unwrap_or(3) as i32
+        })
+        .collect()
 }
 
 /// Only web and mail links open, in the desktop's browser; tests record
@@ -841,6 +868,17 @@ impl RowCache {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_table_column_is_as_wide_as_its_widest_cell_needs() {
+        let row = |cells: &[&str]| cells.iter().map(|c| (*c).to_owned()).collect::<Vec<_>>();
+        let rows = vec![row(&["Id", "Description", "x"]), row(&["1", "a long sentence that goes on well past the room a cell has", "y"]), row(&["2"])];
+        // The long cell wraps at its room; a short column keeps 3.
+        assert_eq!(super::table_columns(&rows), vec![3, 24, 3]);
+        let url = row(&["https://example.com/a/very/long/path/that/does/not/break/anywhere"]);
+        assert_eq!(super::table_columns(&[url]), vec![32]);
+        assert!(super::table_columns(&[]).is_empty());
+    }
+
     /// The explorer's preview and activity lines are one line each: a helper
     /// running a multi-line command must not spill over the next chat.
     #[test]

@@ -2,8 +2,8 @@ import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, Focus, FocusRing, ChatLook, Motion, Look, VimBridge, SendFlight, ChromeText } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
-import { Attachment, MentionRow, MentionBridge, ComposerKeys } from "composer.slint";
-export { MentionRow, MentionBridge, ComposerKeys }
+import { Attachment, MentionRow, MentionBridge, ComposerKeys, WaitingTurn } from "composer.slint";
+export { MentionRow, MentionBridge, ComposerKeys, WaitingTurn }
 import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror, ChatMenu, ChatChoice } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
@@ -156,6 +156,10 @@ export component AppWindow inherits Window {
     in property <[ChatRow]> rooms;
     in property <[ChatRow]> archived;
     in property <int> unread-rooms;
+    // The explorer's triage chips' counts (triage.rs).
+    in property <int> triage-working;
+    in property <int> triage-needs;
+    in property <int> triage-snoozed;
     // The explorer's note while the agent list is stale (Sidebar).
     in property <string> roster-note;
     in property <string> roster-note-detail;
@@ -491,6 +495,9 @@ export component AppWindow inherits Window {
                 rooms: root.rooms;
                 archived: root.archived;
                 unread-rooms: root.unread-rooms;
+                triage-working: root.triage-working;
+                triage-needs: root.triage-needs;
+                triage-snoozed: root.triage-snoozed;
                 roster-note: root.roster-note;
                 roster-note-detail: root.roster-note-detail;
                 cursor: root.sidebar-cursor;

@@ -109,6 +109,23 @@ fn backend_quota_notice_names_reason_reset_and_fallback() {
 }
 
 #[test]
+fn the_quota_meter_says_a_near_or_used_up_limit_and_nothing_else() {
+    let now = parse_iso_date("2026-09-17T06:00:00Z").unwrap();
+    let mut base = json!({"agent_id": "a", "session": "gordon", "backend": "claude"});
+    let meter = |row: &Value| Agent::from_json(row.as_object().unwrap()).quota_meter(now);
+    assert_eq!(meter(&base), None);
+    base["backend_quota"] = json!({"state": "near", "provider_id": "claude", "reason": "usage_limit", "window": "five_hour",
+        "used_percentage": 86.6, "resets_at": "2026-09-17T08:05:00Z", "failover": "none"});
+    assert_eq!(meter(&base), Some(("Claude 86% used · resets in 2h 5m".to_owned(), false)));
+    // Near is not the composer's "out of quota" warning.
+    assert_eq!(Agent::from_json(base.as_object().unwrap()).quota_notice(now), "");
+    base["backend_quota"] = json!({"state": "exhausted", "provider_id": "codex", "reason": "usage_limit", "resets_at": null});
+    assert_eq!(meter(&base), Some(("Codex limit reached".to_owned(), true)));
+    base["backend_quota"] = json!({"state": "throttled"});
+    assert_eq!(meter(&base), None);
+}
+
+#[test]
 fn agent_row_parses_background_and_helper_fields_safely() {
     let old = Agent::from_json(&obj(json!({"session": "a"})));
     assert_eq!((old.background_job_count, old.background_sub_agent_count), (0, 0));

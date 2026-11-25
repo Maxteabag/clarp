@@ -1,5 +1,5 @@
 import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight, ChromeText } from "theme.slint";
-import { Composer, Attachment, MentionRow, TipButton, ComposerKeys } from "composer.slint";
+import { Composer, Attachment, MentionRow, TipButton, ComposerKeys, QueueStrip, WaitingTurn } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
@@ -44,6 +44,9 @@ export global ChatMenu {
     in property <string> view-label;
     in property <[ChatChoice]> view-choices;
     in property <bool> activity-shown: true;
+    // Snooze (triage.rs): "Off" or until when, and its choices.
+    in property <string> snooze-label;
+    in property <[ChatChoice]> snooze-choices;
     callback opened(string);
     callback pick(string, string);
     // Opens the chat's agent's artifacts (its profile's Artifacts).
@@ -121,6 +124,16 @@ export struct PaneView {
     queued: int,
     // A Stop paused the queue: its messages wait until sent.
     queue-paused: bool,
+    // The waiting messages the queue strip lists (the open chat's, once
+    // its queue is loaded; at most three), and the Host's answer to a
+    // refused Send now.
+    waiting: [WaitingTurn],
+    waiting-refused: string,
+    // The composer frame's meter: the context the agent's conversation
+    // holds ("21K / 1M · 2%"), and its account's limit when near or used
+    // up; "" when unknown. `meter-warn` draws it in the warning colour.
+    meter: string,
+    meter-warn: bool,
     quota-notice: string,
     // What the last Stop did, who stopped it and why (engine stop_notice).
     stop-notice: string,
@@ -623,6 +636,12 @@ export component Pane inherits Rectangle {
                     value: ChatMenu.activity-label;
                     clicked => { ChatMenu.submenu = "activity"; }
                 }
+                if ChatMenu.submenu == "": ChatMenuItem {
+                    id: "chat-menu-snooze";
+                    text: "Snooze";
+                    value: ChatMenu.snooze-label;
+                    clicked => { ChatMenu.submenu = "snooze"; }
+                }
                 // The agent's artifacts, as its profile's Artifacts shows them.
                 if ChatMenu.submenu == "": ChatMenuItem {
                     id: "chat-menu-artifacts";
@@ -642,6 +661,13 @@ export component Pane inherits Rectangle {
                         id: "chat-menu-view:" + choice.value;
                         text: (choice.current ? "✓  " : "     ") + choice.label;
                         clicked => { ChatMenu.pick("view", choice.value); }
+                    }
+                }
+                if ChatMenu.submenu == "snooze": VerticalLayout {
+                    for choice in ChatMenu.snooze-choices: ChatMenuItem {
+                        id: "chat-menu-snooze:" + choice.value;
+                        text: (choice.current ? "✓  " : "     ") + choice.label;
+                        clicked => { ChatMenu.pick("snooze", choice.value); }
                     }
                 }
                 if ChatMenu.submenu == "activity": VerticalLayout {
@@ -740,6 +766,17 @@ export component Pane inherits Rectangle {
                 clicked => { root.stop(); }
             }
         }
+        // The messages waiting behind the turn, each with Send now.
+        if root.pane.waiting.length > 0 && !root.pane.pair: QueueStrip {
+            items: root.pane.waiting;
+            count: Math.max(root.pane.queued, root.pane.waiting.length);
+            busy: root.pane.busy;
+            paused: root.pane.queue-paused;
+            refused: root.pane.waiting-refused;
+            pane-id: root.pane.id;
+            send-now(id) => { AgentDialogs.queue-send(id); }
+            manage => { AgentDialogs.queue-open(root.pane.session); }
+        }
         // Pair rooms are the Host's read-only projection: no composer.
         composer-box := Rectangle {
           visible: !root.pane.pair;
@@ -762,6 +799,7 @@ export component Pane inherits Rectangle {
             attachments: root.pane.attachments;
             queued: root.pane.queued;
             queue-paused: root.pane.queue-paused;
+            strip-shown: root.pane.waiting.length > 0;
             quota-notice: root.pane.quota-notice;
             stop-notice: root.pane.stop-notice;
             busy: root.pane.busy;
@@ -792,6 +830,10 @@ export component Pane inherits Rectangle {
             label: "Insert";
             active: root.pane.active && Focus.mode == "composer";
             surface: root.background;
+            // The context and quota meter, quiet on the frame's right end.
+            info: root.pane.meter;
+            info-color: root.pane.meter-warn ? Palette.warning : Palette.faint;
+            info-id: "composer-meter:" + root.pane.id;
           }
           // Folded, the editor is out of reach under the line: a click on
           // the line gives it the keyboard in the same event, so what is

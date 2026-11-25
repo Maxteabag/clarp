@@ -2363,6 +2363,7 @@ fn sidebar_check(out: String) {
     let out6 = out.clone();
     let out7 = out.clone();
     let out8 = out.clone();
+    let (out9, out10, out11) = (out.clone(), out.clone(), out.clone());
     // `session` gets activity newer than every chat in `order`.
     fn news(app: &crate::App, order: &[String], session: &str, text: &str) {
         let newest = order.iter().filter_map(|s| app.engine.borrow().roster().find(s).map(|a| a.last_activity)).max().unwrap_or(0);
@@ -2773,10 +2774,94 @@ fn sidebar_check(out: String) {
             }
             check(!app.list_frozen.get(), "the composer taking the keyboard lets the order go");
             check(sessions(window) == [order[1].clone(), order[0].clone()], &format!("and the list catches up in one update: {:?}", sessions(window)));
+            // Triage: Rachel works, Mike waits for an answer.
+            let set = control("/__control/agent", &serde_json::json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true}}))
+                .and_then(|()| control("/__control/agent", &serde_json::json!({"session": "mike", "set": {"latest_state": "waiting", "busy": false, "last_message": "Which region?"}})));
+            check(set.is_ok(), &format!("Rachel works and Mike waits for an answer: {set:?}"));
+            true
+        })),
+        ("triage counts", Box::new(|_, window, elapsed| {
+            if window.get_triage_working() < 1 || window.get_triage_needs() < 1 {
+                check(elapsed < Duration::from_secs(5), &format!("the chips count who works ({}) and who needs you ({})", window.get_triage_working(), window.get_triage_needs()));
+                return elapsed >= Duration::from_secs(5);
+            }
+            run_command(window, "list-working");
+            true
+        })),
+        ("working", Box::new(move |_, window, elapsed| {
+            let shown = sessions(window);
+            if window.get_scope() != "working" || shown.contains(&"mike".to_owned()) || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), &format!("Working lists the working chats only: {shown:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(shown.contains(&"rachel".to_owned()), &format!("Rachel, at work, is in Working: {shown:?}"));
+            shot(&out9, "sidebar-07-working");
+            run_command(window, "list-needs-you");
+            true
+        })),
+        ("needs you", Box::new(move |_, window, elapsed| {
+            let shown = sessions(window);
+            if window.get_scope() != "needs-you" || !shown.contains(&"mike".to_owned()) || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), &format!("Needs you lists Mike, who waits for an answer: {shown:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(!shown.contains(&"rachel".to_owned()), &format!("and not Rachel, who works: {shown:?}"));
+            shot(&out10, "sidebar-08-needs-you");
+            // S on Mike's row in the explorer snoozes him until his next message.
+            run_command(window, "focus-sidebar");
+            window.set_sidebar_cursor("mike".into());
+            true
+        })),
+        ("snooze key", Box::new(|_, window, elapsed| {
+            if !window.get_sidebar_focused() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press("s");
+            true
+        })),
+        ("snoozed", Box::new(move |app, window, elapsed| {
+            let shown = sessions(window);
+            if shown.contains(&"mike".to_owned()) || window.get_triage_snoozed() != 1 {
+                check(elapsed < Duration::from_secs(5), &format!("S snoozes Mike: out of Needs you ({shown:?}), one snoozed ({})", window.get_triage_snoozed()));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(app.engine.borrow().settings().get(crate::triage::SETTING).and_then(|v| v.get("mike")).is_some(), "the snooze is kept on this device");
+            run_command(window, "list-snoozed");
+            true
+        })),
+        ("snoozed list", Box::new(move |_, window, elapsed| {
+            let mike = window.get_chats().iter().find(|r| r.session == "mike");
+            if window.get_scope() != "snoozed" || mike.is_none() || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), "Snoozed lists Mike");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(mike.is_some_and(|r| r.snoozed == "next message"), "his row says until when: his next message");
+            shot(&out11, "sidebar-09-snoozed");
+            run_command(window, "list-needs-you");
+            // Mike writes again: the snooze ends.
+            let set = control("/__control/agent", &serde_json::json!({"session": "mike", "set": {"last_message": "Never mind, I picked one."}}));
+            check(set.is_ok(), "Mike writes a new message");
+            true
+        })),
+        ("woken", Box::new(|_, window, elapsed| {
+            let shown = sessions(window);
+            if !shown.contains(&"mike".to_owned()) || window.get_triage_snoozed() != 0 {
+                check(elapsed < Duration::from_secs(5), &format!("his next message wakes Mike: back in Needs you ({shown:?})"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(true, "a new message ends a snooze until the next message");
+            run_command(window, "list-all");
             true
         })),
     ];
     run_stages(stages);
+}
+
+/// Runs a command as its key or the switcher would.
+fn run_command(window: &crate::AppWindow, action: &str) {
+    if let Some(app) = crate::app() {
+        crate::commands::run(&app, window, action);
+    }
 }
 
 /// Whether an element with accessible id `id` is drawn with a size.
@@ -2808,6 +2893,8 @@ fn transcript_check(out: String) {
     let out_spoken = out.clone();
     let out2 = out.clone();
     let out3 = out.clone();
+    let out_wide = out.clone();
+    let out_wide_start = out.clone();
     let offset = Rc::new(Cell::new(0.0f32));
     let offset2 = offset.clone();
     let stages: Vec<Stage> = vec![
@@ -3035,6 +3122,45 @@ fn transcript_check(out: String) {
             let fold = at("live:fold:o-t1");
             check(at("o-a1").is_none() && fold.is_some_and(|f| Some(f) < tool) && tool < at("o-a2"),
                 &format!("settled, the text folds with the work as live folded it, the refused tool and then the answer stay: {ids:?}"));
+            // A table wider than the chat (eight columns).
+            let header = "| Agent | Host | Region | Backend | Model | Context used | Queue | Last note |";
+            let rule = "|---|---|---|---|---|---|---|---|";
+            let line = |i: usize| format!("| agent-{i} | build-host-{i}.example | europe-north1-a | claude-code | opus-five-five | 412K of 1M tokens | {i} waiting | finished the migration and wrote the report |");
+            let table = format!("Here is the fleet:\n\n{header}\n{rule}\n{}\n{}\n{}", line(1), line(2), line(3));
+            let wide = serde_json::json!({"session": "rachel", "turns": [
+                {"id": "w-u", "role": "user", "text": "Show the fleet"},
+                {"id": "w-a", "role": "assistant", "text": table},
+            ]});
+            check(control("/__control/turns", &wide).is_ok(), "the Host takes a reply with an eight-column table");
+            true
+        })),
+        ("wide table", Box::new(move |_, window, elapsed| {
+            use i_slint_backend_testing::ElementQuery;
+            let shown = rows(window).iter().any(|r| r.id == "w-a");
+            let find = |id: &str| {
+                let id = id.to_owned();
+                ElementQuery::from_root(window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0).find_first()
+            };
+            let scroll = find("table-scroll");
+            if !shown || scroll.is_none() || elapsed < Duration::from_millis(500) {
+                check(elapsed < Duration::from_secs(8), &format!("a table wider than the chat says it scrolls sideways (row shown {shown})"));
+                return elapsed >= Duration::from_secs(8);
+            }
+            let chat = find(&format!("chat:{}", app_now().active_id()));
+            if let (Some(chat), Some(scroll)) = (chat, scroll.as_ref()) {
+                let (c, t) = (rect(&chat), rect(scroll));
+                check(t.0 >= c.0 - 0.5 && t.0 + t.2 <= c.0 + c.2 + 0.5, &format!("the table stays inside the chat, its rest a scroll away: table {t:?}, chat {c:?}"));
+            }
+            check(scroll.as_ref().and_then(|e| e.accessible_label()).is_some_and(|l| l.starts_with("8 columns")), "it names its eight columns");
+            shot(&out_wide_start, "transcript-wide-table-start");
+            scroll.map(|e| e.invoke_accessible_default_action());
+            true
+        })),
+        ("wide table end", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            shot(&out_wide, "transcript-wide-table-end");
             true
         })),
     ];

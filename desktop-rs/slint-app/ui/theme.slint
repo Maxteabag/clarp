@@ -286,6 +286,9 @@ export component PaneFrame inherits Rectangle {
     // muted details, as the chat frame shows its agent.
     in property <string> info-name;
     in property <string> info;
+    // The colour of `info`, and its accessible id ("" for none).
+    in property <color> info-color: Palette.muted;
+    in property <string> info-id;
     // Room kept free on the right of the border for a button (the chat's
     // "⋯" menu), so the title ends before it.
     in property <length> right-room: 0px;
@@ -354,9 +357,11 @@ export component PaneFrame inherits Rectangle {
         height: 14px;
         width: Math.max(0px, root.width - 10px - root.right-room - 4px - self.x);
         text: root.info;
-        color: Palette.muted;
+        color: root.info-color;
         font-size: 11 * Look.unit;
         vertical-alignment: center;
         overflow: elide;
+        accessible-id: root.info-id;
+        accessible-label: root.info;
     }
 }

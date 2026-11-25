@@ -7,7 +7,11 @@
 //! finished below, and it brings the chat back to its end, where both go.
 //! Stop says its word beside its icon in the composer's one line. A draft
 //! that grows the composer to several lines leaves the window's scale and
-//! size as they were.
+//! size as they were. During a turn the strip above the composer lists
+//! each waiting message with Send now; a Send now the Host refuses says the
+//! Host's answer and the message waits on; Ctrl+Shift+Enter sends the
+//! first. The composer's frame shows the context meter, and warns near the
+//! account's limit.
 //! Needs the fake Host.
 
 use std::cell::Cell;
@@ -87,7 +91,7 @@ thread_local! {
 const LONG_DRAFT: &str = "sent by the button, a draft long enough to wrap the composer onto several lines: token bucket, leaky bucket, sliding window log, sliding window counter, clock skew, race conditions, failure modes, observability and testing, with an example in every section.";
 
 pub fn buttons_check(out: String) {
-    let (out1, out2, out3) = (out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
@@ -257,8 +261,74 @@ pub fn buttons_check(out: String) {
             }
             check(!drawn(&jump_id()), "and goes at the end");
             check(!drawn(&news_id()) && !view_news(), "and the news is read");
+            // A turn runs with two messages waiting behind it, and the Host
+            // knows the conversation's context.
+            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true,
+                "queued_turn_count": 2, "context_tokens": 21_400, "context_window": 1_000_000}}));
+            check(set.is_ok(), &format!("Rachel works with two messages waiting: {set:?}"));
+            true
+        })),
+        ("queue strip", Box::new(move |_, window, elapsed| {
+            if !drawn("queue-send:q1") || !drawn("queue-send:q2") || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), "during the turn the strip above the composer lists each waiting message with Send now");
+                return elapsed >= Duration::from_secs(5);
+            }
+            let pane = app_now().active_id();
+            check(drawn(&format!("queue-strip:{pane}")), "the strip is the open chat's");
+            check(label(&format!("composer-meter:{pane}")) == "context 21K/1M · 2%", &format!("the composer's frame shows the context meter: {:?}", label(&format!("composer-meter:{pane}"))));
+            check(!view().meter_warn, "2% of the context is no warning");
+            check_window_size_free(window, "with the queue strip shown");
+            shot(&out4, "buttons-04-queue-strip");
+            // The Host refuses this one: a turn still runs.
+            check(control("/__control/fail", &json!({"path": "/turn-queue/q1/send", "status": 409})).is_ok(), "the Host will refuse the next Send now");
+            check(press("queue-send:q1"), "Send now is pressed on the first waiting message");
+            true
+        })),
+        ("refused", Box::new(move |_, _, elapsed| {
+            let pane = app_now().active_id();
+            let refused = format!("queue-refused:{pane}");
+            if !drawn(&refused) || elapsed < Duration::from_millis(500) {
+                check(elapsed < Duration::from_secs(5), "a refused Send now says the Host's answer under the strip");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(label(&refused) == "agent is still working", &format!("in the Host's words: {:?}", label(&refused)));
+            check(drawn("queue-send:q1"), "and the message waits on, still listed after the queue reloaded");
+            shot(&out5, "buttons-05-send-refused");
+            // Near the account's limit and deep in the context: the meter warns.
+            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"context_tokens": 850_000,
+                "backend_quota": {"state": "near", "provider_id": "claude", "reason": "usage_limit", "window": "five_hour",
+                    "used_percentage": 91.0, "resets_at": null, "failover": "none"}}}));
+            check(set.is_ok(), "the Host says Claude is near its limit");
+            // By key now: Ctrl+Shift+Enter sends the first waiting message.
+            app_now().focus_composer();
+            headless::press_with(&[slint::platform::Key::Control, slint::platform::Key::Shift], slint::platform::Key::Return);
+            true
+        })),
+        ("sent now", Box::new(move |_, _, elapsed| {
+            let pane = app_now().active_id();
+            let sent = requests_posted("/turn-queue/q1/send") >= 2;
+            if !sent || drawn("queue-send:q1") || !view().meter_warn {
+                check(elapsed < Duration::from_secs(5), &format!("Ctrl+Shift+Enter sends the first waiting message now (sent {sent}) and the meter warns ({})", view().meter_warn));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(drawn("queue-send:q2"), "the other one still waits");
+            check(!drawn(&format!("queue-refused:{pane}")), "the refusal is answered by the send");
+            let meter = label(&format!("composer-meter:{pane}"));
+            check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
+            shot(&out6, "buttons-06-meter-near");
+            check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
             true
         })),
     ];
     run_stages(stages);
+}
+
+/// An element's accessible label ("" when not drawn).
+fn label(id: &str) -> String {
+    element(id).and_then(|e| e.accessible_label()).map(|l| l.to_string()).unwrap_or_default()
+}
+
+/// How many POSTs to `path` the Host has had (refused ones too).
+fn requests_posted(path: &str) -> usize {
+    posts(path).len()
 }
