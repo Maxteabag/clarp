@@ -672,17 +672,20 @@ Rules:
   (steered into the running turn, or read together with the turn's own message at its start)
   carries `read_into`, an object: `trace_id`, that turn's trace, and `turn`, its number on the
   Host. The trace is the id the live view gives the turn (`GET /live` `turn.turn_id`,
-  [Live items](live-items.md) §1.4) and the `trace_id` of the message the turn began for. It is
-  the trace and not a row id because that is how both halves name a turn: the live turn says
-  only its `turn_id`, and every `/log` row a turn writes carries it as `trace_id` (§9 of Live
-  items), so an app matches `read_into.trace_id` against either without another read. `turn`
-  is the Host's own count of the agent's turns; no other field of a row carries it, so match
-  by `trace_id`. The Host writes the row in the same write as the read that joined it, and
+  [Live items](live-items.md) §1.4), which is the `trace_id` of the message the turn began for
+  where that message has one. It is the trace and not a row id because that is how the live
+  turn names a turn: it says only its `turn_id`. Match `read_into.trace_id` against `GET /live`
+  `turn.turn_id`, which always works. Matching it against the `trace_id` of the turn's own
+  message row works only where that message has a trace: a message sent without one has
+  `trace_id` `""` on its row, while the turn's `turn_id` (and so `read_into.trace_id`) is
+  `turn-<id>`. `turn` is the Host's own count of the agent's turns; no other field of a row
+  carries it, so match by `trace_id`. The Host writes the row in the same write as the read that joined it, and
   `read_into` is on the row's first revision: a client that fetches `/log` on
   `transcript-updated` before the live `turn` op with `read_rows` arrives already knows the
   row belongs above the turn's working line. Absent on every other row: a message that started
-  its own turn, one that waits (it has no row yet), and a message a conversation fork answered
-  (the fork's turn is its own). Rows written before contract 189 carry it too where the Host's
+  its own turn, one that waits (it has no row yet), a message a conversation fork answered
+  (the fork's turn is its own), and a message read into a turn that a newer message's turn
+  then replaced (that turn's end has `status` `replaced`). Rows written before contract 189 carry it too where the Host's
   log holds the join. Place a row whose `read_into.trace_id` is the running turn's `turn_id`
   above that turn's working line, as `read_rows` would. The field is absent, never null, on a
   row that was not read into another turn, so a client tells "not read into" from "an older
