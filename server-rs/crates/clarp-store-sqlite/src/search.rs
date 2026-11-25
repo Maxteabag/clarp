@@ -52,6 +52,8 @@ const SIDE_FILES: [&str; 3] = ["-wal", "-shm", "-journal"];
 /// search walks its matches newest first and stops at a page's end: it never sorts every row
 /// that has a common word (4.4 s for "the" at 300 000 rows when it did, 25 Nov 2026).
 const SAME_MS: i64 = 1 << 10;
+/// How far past its millisecond a row is numbered when its millisecond is full: one second.
+const SPILL: i64 = SAME_MS * 1_000;
 
 /// What marks the start and the end of a match in a snippet as SQLite writes it. Taken out of
 /// every text before it is kept, so a text cannot forge a mark.
@@ -255,18 +257,28 @@ impl SearchIndex {
                     params![id, text],
                 )?;
             } else if !text.trim().is_empty() {
-                // The first number of its millisecond that no row has yet.
-                let first = row.ts_ms.clamp(0, i64::MAX / SAME_MS - 1) * SAME_MS;
-                let taken: Option<i64> = tx.query_row(
-                    "SELECT max(id) FROM hit WHERE id BETWEEN ?1 AND ?2",
-                    params![first, first + SAME_MS - 1],
-                    |found| found.get(0),
-                )?;
-                let id = taken.map_or(first, |taken| taken + 1);
-                if id >= first + SAME_MS {
-                    // A thousand rows of one millisecond: the rest of them are not kept.
-                    continue;
+                // The first number of its millisecond that no row has yet; where a thousand
+                // rows share it (a conversation brought whole, stamped with one time), the
+                // next free number within the second after it: such a row is ordered a
+                // little later than its time, and still kept.
+                let first = row.ts_ms.clamp(0, i64::MAX / SPILL - 1) * SAME_MS;
+                let mut id = None;
+                for reach in [SAME_MS, SPILL] {
+                    let taken: Option<i64> = tx.query_row(
+                        "SELECT max(id) FROM hit WHERE id BETWEEN ?1 AND ?2",
+                        params![first, first + reach - 1],
+                        |found| found.get(0),
+                    )?;
+                    let free = taken.map_or(first, |taken| taken + 1);
+                    if free < first + reach {
+                        id = Some(free);
+                        break;
+                    }
                 }
+                // A million rows within one second: the rest of them are not kept.
+                let Some(id) = id else {
+                    continue;
+                };
                 tx.execute(
                     "INSERT INTO hit(id, agent_id, row_id, role, ts_ms, revision) \
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1039,6 +1051,25 @@ mod tests {
                 took.as_secs_f64() * 1000.0
             );
         }
+    }
+
+    #[test]
+    fn rows_of_one_millisecond_are_all_kept_past_a_thousand() {
+        let (mut index, _scratch) = index();
+        let rows: Vec<Row> = (0..1_500)
+            .map(|n| row(&format!("same-{n}"), 5_000, n + 1, "brought whole"))
+            .collect();
+        index.apply("a1", &rows, &mark(1_500)).unwrap();
+        index
+            .apply("a1", &[row("later", 6_000, 2_000, "brought later")], &mark(2_000))
+            .unwrap();
+        let kept: i64 = index
+            .db
+            .query_row("SELECT count(*) FROM hit", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(kept, 1_501);
+        // The newest row is still found first.
+        assert_eq!(ids(&mut index, "brought", &["a1"])[0], "later");
     }
 
     #[test]

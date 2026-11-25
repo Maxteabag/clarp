@@ -20,7 +20,9 @@
 //! Who may read what is decided when a search is made, not when a row is kept: only agents in
 //! the fleet now, here and not moved away, and whose words the reader may read
 //! (`bound_privacy`) are searched. So a removed agent, a moved one or a bound agent withheld
-//! from the reader is never matched, counted or shown, also before its rows leave the index.
+//! from the reader is never matched, counted or shown. A removed or moved agent's rows leave
+//! the index when the indexer next looks it over: at the roster change that removal or move
+//! tells, or at the next start; until then they are kept and never searched.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
