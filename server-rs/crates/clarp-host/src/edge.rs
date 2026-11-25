@@ -1480,8 +1480,19 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                         let method = request.method().to_string();
                         let port = app.config.listen.port();
                         let written = path.clone();
+                        // The program a caller says it is tells pollers of one route apart.
+                        let agent = request
+                            .headers()
+                            .get(header::USER_AGENT)
+                            .and_then(|agent| agent.to_str().ok())
+                            .unwrap_or_default()
+                            .chars()
+                            .take(120)
+                            .collect::<String>();
                         let line = tokio::task::spawn_blocking(move || {
-                            crate::owner_token_log::route_line(seen, &method, &written, peer, port)
+                            crate::owner_token_log::route_line(
+                                seen, &method, &written, &agent, peer, port,
+                            )
                         });
                         if let Ok(Some(line)) = line.await {
                             eprintln!("{line}");

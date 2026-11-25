@@ -14,8 +14,15 @@
 //! The process of a request that is not a tool call is found by its connection: the socket this
 //! machine's kernel lists with the caller's address and port, and the process that holds it.
 //! Only a caller on this machine is looked for, and only the user's own processes can be read.
-//! That reads every process's open files, so a route's caller is looked for once a minute; a
-//! line between says so.
+//! That reads every process's open files.
+//!
+//! A caller that asks again and again (a poller) is written once in [`FOLDED_FOR`], with how
+//! many calls since its last line were folded into this one; a route's caller is told apart by
+//! its route and the program it says it is (`User-Agent`), a tool's by its tool, verb, parent
+//! and directory, and a route's process is looked for only when its line is written.
+//!
+//! Of the program, only its name is written, and a script's path after an interpreter: never an
+//! argument that could be a token (`env NAME=...`, `--header=Authorization: Bearer ...`).
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -58,42 +65,67 @@ pub(crate) fn route_line(
     seen: Seen,
     method: &str,
     path: &str,
+    agent: &str,
     peer: Option<SocketAddr>,
     host_port: u16,
 ) -> Option<String> {
     let head = head(seen)?;
     let route = format!("{method} {}", clean(path, 120));
-    // Finding a process reads every process's open files: it is done for a route once a
-    // minute, and a line between says so. Every call still has its line.
-    let process = if looked_up_lately(&route, std::time::Instant::now()) {
-        "process as named for this route within the minute".to_string()
-    } else {
-        peer.filter(|peer| peer.ip().is_loopback())
-            .and_then(|peer| process_of(Path::new("/proc"), peer, host_port))
-            .map_or_else(|| "process unknown".to_string(), |found| found.said())
-    };
-    Some(format!("{head} {route} ({process})"))
+    let folded = admitted(
+        &format!("{head}\0{route}\0{agent}"),
+        std::time::Instant::now(),
+    )?;
+    // Finding a process reads every process's open files: only for a line that is written.
+    let process = peer
+        .filter(|peer| peer.ip().is_loopback())
+        .and_then(|peer| process_of(Path::new("/proc"), peer, host_port))
+        .map_or_else(|| "process unknown".to_string(), |found| found.said());
+    Some(format!("{head} {route} ({process}){}", more(folded)))
 }
 
-/// How long a route's process, once looked for, is not looked for again.
-const LOOKED_UP_FOR: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long a caller, once written, is folded into a count rather than written again.
+pub(crate) const FOLDED_FOR: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Whether the process of a call to `route` was looked for within [`LOOKED_UP_FOR`]; where it
-/// was not, it is to be looked for now, and that is noted.
-fn looked_up_lately(route: &str, now: std::time::Instant) -> bool {
+/// How long a caller that was not heard from is remembered at all.
+const FORGOTTEN_AFTER: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Whether a call of the caller `key` is written now: with how many of its calls were folded
+/// since its last line; `None` where it was written within [`FOLDED_FOR`], and this call is
+/// counted to the next.
+fn admitted(key: &str, now: std::time::Instant) -> Option<u64> {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
-    static LOOKED: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    let mut looked = LOOKED
+    type Callers = HashMap<String, (std::time::Instant, u64)>;
+    static CALLERS: OnceLock<Mutex<Callers>> = OnceLock::new();
+    let mut callers = CALLERS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    looked.retain(|_, at| now.saturating_duration_since(*at) < LOOKED_UP_FOR);
-    if looked.contains_key(route) {
-        return true;
+    callers.retain(|_, (at, _)| now.saturating_duration_since(*at) < FORGOTTEN_AFTER);
+    match callers.get_mut(key) {
+        Some((at, folded)) if now.saturating_duration_since(*at) < FOLDED_FOR => {
+            *folded += 1;
+            None
+        }
+        Some((at, folded)) => {
+            let since = *folded;
+            *at = now;
+            *folded = 0;
+            Some(since)
+        }
+        None => {
+            callers.insert(key.to_string(), (now, 0));
+            Some(0)
+        }
     }
-    looked.insert(route.to_string(), now);
-    false
+}
+
+/// What a line says of the calls folded into it.
+fn more(folded: u64) -> String {
+    match folded {
+        0 => String::new(),
+        n => format!(" and {n} more since its last line"),
+    }
 }
 
 /// The line for a tool call, where it is one to write: the tool and its verb, and the process
@@ -109,13 +141,15 @@ pub(crate) fn tool_line(
         seen
     };
     let head = head(seen)?;
-    Some(format!(
+    let said = format!(
         "{head} tool {} {} (ppid {}, cwd {})",
         clean(&call.tool, 60),
         verb(&call.argv),
         call.ppid,
         clean(&call.cwd, 160)
-    ))
+    );
+    let folded = admitted(&said, std::time::Instant::now())?;
+    Some(format!("{said}{}", more(folded)))
 }
 
 fn head(seen: Seen) -> Option<&'static str> {
@@ -227,21 +261,53 @@ fn described(dir: &Path, pid: u32) -> Process {
     let cwd = std::fs::read_link(dir.join("cwd"))
         .map(|cwd| cwd.display().to_string())
         .unwrap_or_default();
-    // The program and its first argument (a script's name), never what follows: an argument
-    // may be a message, or a token.
     let cmdline = std::fs::read(dir.join("cmdline")).unwrap_or_default();
-    let program: Vec<String> = cmdline
-        .split(|b| *b == 0)
-        .filter(|part| !part.is_empty())
-        .take(2)
-        .map(|part| String::from_utf8_lossy(part).into_owned())
-        .collect();
     Process {
         pid,
         ppid,
         cwd,
-        program: program.join(" "),
+        program: program_of(&cmdline),
     }
+}
+
+/// What is written of a process's command line (`/proc/<pid>/cmdline`, its arguments each
+/// ended by a zero): the name of its program, and, after an interpreter, the path of the script
+/// it runs. Never another argument: an argument may be a message or a token (`env
+/// NAME=<token> prog`, `wget --header=Authorization: Bearer <token>`, `curl -H'...'`).
+pub(crate) fn program_of(cmdline: &[u8]) -> String {
+    let mut args = cmdline
+        .split(|b| *b == 0)
+        .filter(|part| !part.is_empty())
+        .map(String::from_utf8_lossy);
+    let Some(first) = args.next() else {
+        return String::new();
+    };
+    let name = first.rsplit('/').next().unwrap_or_default().to_string();
+    let interpreters = [
+        "python", "node", "bash", "sh", "dash", "zsh", "perl", "ruby", "deno", "bun",
+    ];
+    let interpreter = interpreters.iter().any(|known| {
+        name.strip_prefix(known)
+            .is_some_and(|rest| rest.bytes().all(|b| b.is_ascii_digit() || b == b'.'))
+    });
+    match args
+        .next()
+        .filter(|second| interpreter && script_path(second))
+    {
+        Some(script) => format!("{name} {script}"),
+        None => name,
+    }
+}
+
+/// Whether an argument after an interpreter is a script's path and nothing else: no `=`, no
+/// space, no leading `-`, and a `/` or a script's ending.
+fn script_path(word: &str) -> bool {
+    let ends = [".py", ".sh", ".js", ".mjs", ".ts", ".rb", ".pl"];
+    !word.is_empty()
+        && !word.starts_with('-')
+        && !word.contains('=')
+        && !word.chars().any(char::is_whitespace)
+        && (word.contains('/') || ends.iter().any(|end| word.ends_with(end)))
 }
 
 /// The inode of the socket in a table of the kernel's (`/proc/net/tcp` or `tcp6`) whose own
@@ -361,18 +427,71 @@ mod tests {
     }
 
     #[test]
-    fn a_routes_process_is_looked_for_once_a_minute() {
+    fn a_caller_is_written_once_in_a_while_with_the_calls_folded_since() {
         let start = std::time::Instant::now();
-        let route = format!("GET /test-route-{}", crate::ids::hex(6));
-        assert!(!looked_up_lately(&route, start));
-        assert!(looked_up_lately(
-            &route,
-            start + std::time::Duration::from_secs(59)
-        ));
-        assert!(!looked_up_lately(
-            &route,
-            start + std::time::Duration::from_secs(61)
-        ));
+        let key = format!("caller-{}", crate::ids::hex(6));
+        let at = |secs| start + std::time::Duration::from_secs(secs);
+        assert_eq!(admitted(&key, start), Some(0));
+        assert_eq!(admitted(&key, at(10)), None);
+        assert_eq!(admitted(&key, at(299)), None);
+        assert_eq!(admitted(&key, at(301)), Some(2));
+        assert_eq!(admitted(&key, at(302)), None);
+        // Another caller is its own.
+        assert_eq!(admitted(&format!("{key}-other"), at(302)), Some(0));
+        assert_eq!(more(0), "");
+        assert_eq!(more(2), " and 2 more since its last line");
+    }
+
+    #[test]
+    fn a_program_is_written_by_its_name_and_never_an_argument_that_may_be_a_token() {
+        let line = |args: &[&str]| {
+            let mut cmdline = Vec::new();
+            for arg in args {
+                cmdline.extend_from_slice(arg.as_bytes());
+                cmdline.push(0);
+            }
+            program_of(&cmdline)
+        };
+        let secret = "s3cr3t-token-value";
+        let setenv = format!("CLARP_HOST_TOKEN={secret}");
+        let bearer = format!("--header=Authorization: Bearer {secret}");
+        let glued = format!("-HAuthorization: Bearer {secret}");
+        // The three ways a caller carries a token in its first argument.
+        for (args, said) in [
+            (
+                vec!["/usr/bin/env", setenv.as_str(), "python3", "x.py"],
+                "env",
+            ),
+            (
+                vec!["wget", bearer.as_str(), "http://127.0.0.1:7690/x"],
+                "wget",
+            ),
+            (
+                vec!["/usr/bin/curl", glued.as_str(), "http://127.0.0.1:7690/x"],
+                "curl",
+            ),
+            // An interpreter's argument that is not a script's path is not written either.
+            (vec!["python3", secret], "python3"),
+            (vec!["python3", "-c", secret], "python3"),
+            (vec!["bash", setenv.as_str()], "bash"),
+        ] {
+            let written = line(&args);
+            assert_eq!(written, said, "{args:?}");
+            assert!(!written.contains(secret), "{written}");
+        }
+        // A script's path after an interpreter is written, and nothing after it.
+        assert_eq!(
+            line(&[
+                "/usr/bin/python3.14",
+                "/home/u/front/card-watch.py",
+                "--token",
+                secret
+            ]),
+            "python3.14 /home/u/front/card-watch.py"
+        );
+        assert_eq!(line(&["node", "watch.mjs", secret]), "node watch.mjs");
+        assert_eq!(line(&["shellcheck", "x.sh"]), "shellcheck");
+        assert_eq!(line(&[]), "");
     }
 
     #[test]
