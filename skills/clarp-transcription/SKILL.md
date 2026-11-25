@@ -1,6 +1,6 @@
 ---
 name: clarp-transcription
-description: Inspect, remove, test, select, or diagnose Clarp server transcription models and custom adapters. Use clarp-transcription-model-installation for managed model recommendations and installation.
+description: Inspect, remove, test, select, or diagnose Clarp server transcription models and custom adapters, and show or set the language and engines one agent is heard with. Use clarp-transcription-model-installation for managed model recommendations and installation.
 ---
 
 # Clarp Transcription
@@ -12,6 +12,23 @@ clarp-admin transcription list
 clarp-admin transcription use faster-whisper:small.en
 clarp-admin transcription test
 ```
+
+## How one agent is heard
+
+On the Rust Host (`clarp-host`), an agent's own hearing language and engines are
+shown and set with `clarp-admin transcription agent`, for yourself or, with
+`--session`, for another agent of the same Host:
+
+```bash
+clarp-admin transcription agent                       # show your own
+clarp-admin transcription agent --language no         # one code, or up to three: no,en
+clarp-admin transcription agent --session SESSION --engines elevenlabs:scribe_v2,google:chirp_3
+clarp-admin transcription agent --language default --engines default   # heard like every agent
+```
+
+Engines are tried in the order given; a set of languages needs Google Chirp or
+ElevenLabs Scribe. It holds from the next clip. The Python Host has no such
+command: there the owner sets it in the app's transcription settings.
 
 For managed model recommendations and downloads, use the
 `clarp-transcription-model-installation` skill.

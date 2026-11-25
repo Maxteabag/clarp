@@ -20,6 +20,7 @@
 pub(crate) mod call;
 mod download;
 pub(crate) mod guidance;
+pub(crate) mod hearing;
 pub(crate) mod install;
 pub(crate) mod inventory;
 mod managed;

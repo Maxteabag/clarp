@@ -23,6 +23,9 @@
 //! And an agent stops another's turn, or repairs it, with `clarp-admin stop` and `clarp-admin
 //! repair` (the skill `clarp-sessions`), known by its own turn.
 //!
+//! And an agent shows or sets how an agent is heard, its language and engines, with
+//! `clarp-admin transcription agent` (the skill `clarp-transcription`).
+//!
 //! And an agent leaves a note for its user with `clarp-admin tell-user` (the Python Host's PR
 //! 482): from its own running turn, known by the turn's token, also from a turn that answers
 //! another agent ([`crate::coordination::leave_note`]).
@@ -2517,6 +2520,9 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
             Err(why) => ToolAnswer::said(2, why),
         },
         Some((command, rest)) if command == "model" => model(app, call, rest).await,
+        Some((command, [what, rest @ ..])) if command == "transcription" && what == "agent" => {
+            crate::heard::hearing::agent(app, call, rest).await
+        }
         Some((command, rest)) if command == "request" => {
             request_tool::request(
                 app,

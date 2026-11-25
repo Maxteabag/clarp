@@ -181,6 +181,8 @@ mod stop_resume;
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]
 mod teams_runtime;
+#[path = "host/transcription_agent.rs"]
+mod transcription_agent;
 #[path = "host/transcription_errors.rs"]
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]

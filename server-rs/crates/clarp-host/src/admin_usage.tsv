@@ -37,7 +37,8 @@ skills source-add	--name --ref	usage: clarp-admin skills source-add [-h] [--name
 skills source-update		usage: clarp-admin skills source-update [-h] name
 skills install		usage: clarp-admin skills install [-h] skill_ids [skill_ids ...]
 skills remove		usage: clarp-admin skills remove [-h] skill_ids [skill_ids ...]
-transcription		usage: clarp-admin transcription [-h] {list,test,install,remove,use,import,adapters} ...
+transcription		usage: clarp-admin transcription [-h] {list,test,install,remove,use,import,adapters,agent} ...
+transcription agent	--session --language --engines	usage: clarp-admin transcription agent [-h] [--session SESSION] [--language LANGUAGE] [--engines ENGINES]
 transcription list		usage: clarp-admin transcription list [-h]
 transcription test		usage: clarp-admin transcription test [-h]
 transcription install		usage: clarp-admin transcription install [-h] model_id
