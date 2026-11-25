@@ -88,8 +88,9 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
-    /// The pointer is over the explorer's list: its rows keep their order
-    /// and change only in place until it leaves (`frozen_order`).
+    /// The pointer is over the explorer's list or the list has the keyboard:
+    /// its rows keep their order and change only in place until both have
+    /// left (`frozen_order`).
     pub list_frozen: std::cell::Cell<bool>,
     /// A live-preview selection (explorer cursor): the keyboard stays put.
     pub previewing: std::cell::Cell<bool>,
@@ -351,8 +352,9 @@ impl App {
         rows
     }
 
-    /// `rows` in the order `model` shows them while the pointer is over the
-    /// list, so nothing the reader is about to click moves; new chats go at
+    /// `rows` in the order `model` shows them while the list is held (the
+    /// pointer over it or J/K in it), so nothing the reader is about to
+    /// click or step to moves; new chats go at
     /// the end, a new sub-agent under its chat, and a removed one goes.
     fn frozen_order(&self, model: &VecModel<ChatRow>, rows: Vec<ChatRow>) -> Vec<ChatRow> {
         if !self.list_frozen.get() {
@@ -1048,17 +1050,18 @@ fn main() {
     window.on_filter_changed(|| {
         if let Some(app) = app() {
             // A search or scope the reader chose shows its own order, even
-            // with the pointer over the list.
+            // while the list is held.
             let frozen = app.list_frozen.replace(false);
             app.refresh(&[Change::Roster]);
             app.list_frozen.set(frozen);
         }
     });
-    // Over the list the order holds; leaving it, the list catches up at once.
-    window.on_list_pointer(|inside| {
+    // Under the pointer or the keyboard the order holds; once both have
+    // left, the list catches up in one update.
+    window.on_list_held(|held| {
         if let Some(app) = app() {
-            app.list_frozen.set(inside);
-            if !inside {
+            app.list_frozen.set(held);
+            if !held {
                 app.refresh(&[Change::Roster]);
             }
         }

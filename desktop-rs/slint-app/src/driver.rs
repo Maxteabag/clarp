@@ -2319,6 +2319,16 @@ fn sidebar_check(out: String) {
     let out5 = out.clone();
     let out6 = out.clone();
     let out7 = out.clone();
+    let out8 = out.clone();
+    // `session` gets activity newer than every chat in `order`.
+    fn news(app: &crate::App, order: &[String], session: &str, text: &str) {
+        let newest = order.iter().filter_map(|s| app.engine.borrow().roster().find(s).map(|a| a.last_activity)).max().unwrap_or(0);
+        let news = serde_json::json!({"session": session, "set": {"last_activity": newest + 1000, "last_message": text}});
+        check(control("/__control/agent", &news).is_ok(), &format!("{session} gets newer activity than the chat above it"));
+    }
+    fn previewing(window: &crate::AppWindow, session: &str, text: &str) -> bool {
+        window.get_chats().iter().any(|r| r.session == session && r.preview.contains(text))
+    }
     fn names(window: &crate::AppWindow) -> Vec<String> {
         window.get_chats().iter().map(|r| r.name.to_string()).collect()
     }
@@ -2627,29 +2637,28 @@ fn sidebar_check(out: String) {
             check(window.get_sidebar_focused() && !report().composer_focused, "live preview opens the chat under the cursor and leaves the keyboard in the explorer");
             true
         })),
-        ("pointer moves over the list", Box::new(|_, window, _| {
+        ("pointer moves over the list", Box::new(|app, window, _| {
             let names = names(window);
             let (Some(top), true) = (names.first(), names.len() == 2) else { return false };
             let Some(row) = explorer_row(top) else { return false };
+            // The pointer alone holds the list: the keyboard goes to the composer.
+            app.focus_composer();
             headless::pointer_move(row.0 + row.2 / 2.0, row.1 + row.3 / 2.0);
             FROZEN_ORDER.with(|o| *o.borrow_mut() = sessions(window));
             true
         })),
         ("pointer over the list", Box::new(|app, window, _| {
-            if !window.get_sidebar_pointer_in_list() {
+            if !window.get_sidebar_pointer_in_list() || window.get_sidebar_focused() {
                 return false;
             }
             check(app.list_frozen.get(), "the pointer over the list holds its order");
             let order = FROZEN_ORDER.with(|o| o.borrow().clone());
-            let newest = order.iter().filter_map(|s| app.engine.borrow().roster().find(s).map(|a| a.last_activity)).max().unwrap_or(0);
-            let news = serde_json::json!({"session": order[1], "set": {"last_activity": newest + 1000, "last_message": "Fresh news while you look"}});
-            check(control("/__control/agent", &news).is_ok(), "the lower chat gets newer activity than the top one");
+            news(app, &order, &order[1], "Fresh news while you look");
             true
         })),
         ("frozen", Box::new(move |_, window, elapsed| {
             let order = FROZEN_ORDER.with(|o| o.borrow().clone());
-            let fresh = window.get_chats().iter().any(|r| r.session == order[1].as_str() && r.preview.contains("Fresh news"));
-            if !fresh || elapsed < Duration::from_millis(300) {
+            if !previewing(window, &order[1], "Fresh news while you look") || elapsed < Duration::from_millis(300) {
                 return false;
             }
             check(sessions(window) == order, &format!("while the pointer is over the list no row moves: {:?}, was {order:?}", sessions(window)));
@@ -2668,6 +2677,50 @@ fn sidebar_check(out: String) {
             check(!app.list_frozen.get(), "the pointer leaving the list lets its order go");
             check(sessions(window) == [order[1].clone(), order[0].clone()], &format!("and the chat with news moves to the top in one update: {:?}", sessions(window)));
             shot(&out7, "sidebar-05-caught-up");
+            // Now the keyboard alone: J/K in the list, the pointer over the chat.
+            if let Some(app) = crate::app() {
+                crate::commands::run(&app, window, "focus-sidebar");
+            }
+            true
+        })),
+        ("keyboard in the list", Box::new(|app, window, _| {
+            if !window.get_sidebar_focused() || window.get_sidebar_pointer_in_list() {
+                return false;
+            }
+            check(app.list_frozen.get(), "the keyboard in the list holds its order too");
+            let order = sessions(window);
+            window.set_sidebar_cursor(order[0].clone().into());
+            FROZEN_ORDER.with(|o| *o.borrow_mut() = order.clone());
+            news(app, &order, &order[1], "News while you step through");
+            true
+        })),
+        ("frozen under the keyboard", Box::new(|_, window, elapsed| {
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            if !previewing(window, &order[1], "News while you step through") || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(sessions(window) == order, &format!("while the list has the keyboard no row moves: {:?}, was {order:?}", sessions(window)));
+            headless::press("j");
+            true
+        })),
+        ("j in the held list", Box::new(move |app, window, elapsed| {
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            if window.get_sidebar_cursor() != order[1].as_str() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(sessions(window) == order, "J steps to the next row as shown, and the list still holds");
+            shot(&out8, "sidebar-06-frozen-under-keyboard");
+            // The composer taking the keyboard counts as leaving the list.
+            app.focus_composer();
+            true
+        })),
+        ("caught up after the keyboard", Box::new(|app, window, elapsed| {
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            if window.get_sidebar_focused() || sessions(window).first() != Some(&order[1]) || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(!app.list_frozen.get(), "the composer taking the keyboard lets the order go");
+            check(sessions(window) == [order[1].clone(), order[0].clone()], &format!("and the list catches up in one update: {:?}", sessions(window)));
             true
         })),
     ];
