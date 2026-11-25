@@ -509,11 +509,13 @@ enum Ask {
         turn: TurnId,
         attempt: u32,
     },
-    /// From a turn's thread: no shim could be started for this attempt of the turn.
+    /// From a turn's thread: no shim could be started for this attempt of the turn. With
+    /// `opening_tries`, a call's opening gave up after that many tries.
     LaunchFailed {
         turn: TurnId,
         attempt: u32,
         reason: String,
+        opening_tries: Option<u32>,
     },
     /// From the fleet: the user changed something about the agent. This is the agent as it
     /// now is. Nobody is refused: `taken` is done when the thread has it.
@@ -4086,7 +4088,14 @@ impl Worker {
                 turn,
                 attempt,
                 reason,
-            } => (actor.launch_failed(turn, attempt, &reason, now)?, nobody()),
+                opening_tries,
+            } => match opening_tries {
+                Some(tries) => (
+                    actor.opening_gave_up(turn, attempt, tries, &reason, now)?,
+                    nobody(),
+                ),
+                None => (actor.launch_failed(turn, attempt, &reason, now)?, nobody()),
+            },
             Ask::Close(_) => return Ok(()),
         };
         // What follows from a command is done and published before its answer is given.
@@ -4496,7 +4505,8 @@ impl Worker {
                         // An agent whose folder is gone starts nothing, and is told so:
                         // started in it, the tool would fail with words that name only its
                         // program (issue 758). A call's opening keeps its own gated rule: it
-                        // tries again each second, and its gate holds what was claimed.
+                        // tries again a few times, each a growing pause apart, and its gate
+                        // holds what was claimed (issue 769).
                         if order.opening.is_none()
                             && let Some(why) = clarp_spool::folder_gone(&order.cwd)
                         {
@@ -4538,7 +4548,10 @@ impl Worker {
                         if let Some(opening) = order.opening.as_deref() {
                             let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;
+                            use clarp_kernel::launch_refused::{self, Next};
                             use clarp_kernel::rings::opening::Gate as Phase;
+                            // The tries that could not start a shim, this attempt.
+                            let mut refused = 0;
                             loop {
                                 if !opening_gate.ask(Phase::Claim, opening, attempt)
                                     || !opening_gate.ask(Phase::Parked, opening, attempt)
@@ -4572,7 +4585,22 @@ impl Worker {
                                             tell(&tx, turn, attempt, Told::Failed(reason));
                                             return;
                                         }
-                                        std::thread::sleep(Duration::from_secs(1));
+                                        refused += 1;
+                                        match launch_refused::after_opening_refused(refused) {
+                                            Next::Wait { ms } => {
+                                                std::thread::sleep(Duration::from_millis(
+                                                    u64::try_from(ms).unwrap_or(0),
+                                                ))
+                                            }
+                                            Next::End => {
+                                                let gave_up = Told::OpeningGaveUp {
+                                                    tries: refused,
+                                                    reason,
+                                                };
+                                                tell(&tx, turn, attempt, gave_up);
+                                                return;
+                                            }
+                                        }
                                     }
                                     Launched::Failed(_) => {
                                         opening_gate.failed(id, trace);
@@ -5732,6 +5760,13 @@ fn tell(tx: &mpsc::Sender<Ask>, turn: TurnId, attempt: u32, told: Told) {
             turn,
             attempt,
             reason,
+            opening_tries: None,
+        },
+        Told::OpeningGaveUp { tries, reason } => Ask::LaunchFailed {
+            turn,
+            attempt,
+            reason,
+            opening_tries: Some(tries),
         },
     };
     let _ = tx.send(ask);

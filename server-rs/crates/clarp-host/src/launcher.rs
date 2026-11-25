@@ -59,6 +59,9 @@ pub enum Told {
     Gone,
     /// No shim could be started for the turn.
     Failed(String),
+    /// No shim could be started for a call's opening, in this many tries each a growing pause
+    /// apart: the turn ends, and its caller is told why (issue 769).
+    OpeningGaveUp { tries: u32, reason: String },
 }
 
 impl Launcher {

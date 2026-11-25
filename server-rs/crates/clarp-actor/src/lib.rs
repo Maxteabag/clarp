@@ -4620,6 +4620,38 @@ impl Actor {
         self.ended_outside_the_spool(turn, command, now_ms)
     }
 
+    /// A call's opening whose shim could not be started in `tries` tries, each a growing pause
+    /// apart (issue 769): the turn ends, and the caller is told why in the conversation the
+    /// call shows. Nothing was given to the tool.
+    pub fn opening_gave_up(
+        &mut self,
+        turn: TurnId,
+        attempt: u32,
+        tries: u32,
+        reason: &str,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        if !self.follows(turn, attempt) {
+            return Ok(Outputs::default());
+        }
+        if self
+            .live
+            .as_ref()
+            .is_some_and(|live| live.turn == turn && live.opening)
+        {
+            self.never_run = Some(launch_refused::opening_notice(
+                tries,
+                reason,
+                failures::missing_folder(reason),
+            ));
+        }
+        let command = Command::StartFailed {
+            turn,
+            reason: reason.to_string(),
+        };
+        self.ended_outside_the_spool(turn, command, now_ms)
+    }
+
     /// Nothing answers at the shim of this attempt of the turn any more.
     pub fn shim_gone(
         &mut self,
@@ -6293,23 +6325,34 @@ impl Actor {
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();
                         let stopping = batch.agent().stopping().is_some();
-                        // Nothing was given to the tool: tried again a second later where it
-                        // is an opening, and otherwise as the Python Host tries a launch it
+                        // Nothing was given to the tool: a call's opening is tried again a
+                        // few times with growing pauses, and then its caller is told why
+                        // (issue 769); any other turn as the Python Host tries a launch it
                         // refused before anything was sent, or ended with its sender told
                         // (R121).
                         let mut said = None;
                         // The agent's folder went between the Host's look and the launch:
                         // the turn ends at once, as it would have before the launch. An
-                        // opening keeps its own rule.
-                        let folder = failures::missing_folder(&reason)
+                        // opening keeps its own rule: the folder may be back by its next try.
+                        let missing = failures::missing_folder(&reason);
+                        let folder = missing
                             .filter(|_| !live.opening)
                             .map(launch_refused::folder_missing_notice);
                         if !stopping && folder.is_some() {
                             said = folder;
                         } else if !stopping {
                             let after = if live.opening {
-                                AfterRefusal::Wait {
-                                    until_ms: t.saturating_add(1_000),
+                                match launch_refused::after_opening_refused(live.attempt) {
+                                    launch_refused::Next::Wait { ms } => AfterRefusal::Wait {
+                                        until_ms: t.saturating_add(ms),
+                                    },
+                                    launch_refused::Next::End => AfterRefusal::End {
+                                        notice: launch_refused::opening_notice(
+                                            live.attempt,
+                                            &reason,
+                                            missing,
+                                        ),
+                                    },
                                 }
                             } else {
                                 after_refusal(

@@ -39,6 +39,8 @@ mod backend_auth;
 mod body_text;
 #[path = "host/bounded_close.rs"]
 mod bounded_close;
+#[path = "host/call_opening.rs"]
+mod call_opening;
 #[path = "host/cartesia_language.rs"]
 mod cartesia_language;
 #[path = "host/chat_view.rs"]

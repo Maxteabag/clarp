@@ -97,6 +97,36 @@ pub fn folder_missing_notice(missing: &str) -> String {
     )
 }
 
+/// How often the opening of a call is tried when its agent's tool cannot be started, and the
+/// pause before each try after the first: one second, then twice the one before. A caller
+/// waits on it, so it gives up within seconds and says why, rather than trying every second
+/// for the whole call (issue 769).
+pub const OPENING_TRIES: u32 = 4;
+
+/// What follows the `attempt`th try of a call's opening that could not start its agent.
+pub fn after_opening_refused(attempt: u32) -> Next {
+    if attempt >= OPENING_TRIES {
+        Next::End
+    } else {
+        Next::Wait {
+            ms: wait_ms(attempt),
+        }
+    }
+}
+
+/// What the caller is told when the opening of the call could not start the agent: in the
+/// conversation the call shows. `missing`: the agent's folder that is gone, when that was why.
+pub fn opening_notice(tries: u32, error: &str, missing: Option<&str>) -> String {
+    let why = match missing {
+        Some(missing) => format!("{}.", crate::failures::folder_missing_sentence(missing)),
+        None => format!(
+            "It was tried {tries} times: {}.",
+            brief(error.trim_end_matches('.'))
+        ),
+    };
+    format!("The agent could not be started to open this call. {why} Speak to try again.")
+}
+
 /// The count of a turn's refusals (`recovery_backoff.Backoff`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Refusals {
@@ -154,6 +184,27 @@ impl Refusals {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_calls_opening_is_tried_four_times_with_growing_pauses_and_then_says_why() {
+        let tries: Vec<Next> = (1..=OPENING_TRIES).map(after_opening_refused).collect();
+        assert_eq!(
+            tries,
+            [
+                Next::Wait { ms: 1_000 },
+                Next::Wait { ms: 2_000 },
+                Next::Wait { ms: 4_000 },
+                Next::End
+            ]
+        );
+        assert_eq!(after_opening_refused(OPENING_TRIES + 3), Next::End);
+        let said = opening_notice(4, "no shim.", None);
+        assert!(said.starts_with("The agent could not be started to open this call."));
+        assert!(said.contains("tried 4 times: no shim."), "{said}");
+        let gone = opening_notice(4, "ignored", Some("/work/gone"));
+        assert!(gone.contains("/work/gone no longer exists"), "{gone}");
+        assert!(!gone.contains("ignored"), "{gone}");
+    }
 
     /// The turn's refusals, by kind: whether each ends the turn, and the words the notice then
     /// says (the last refusal's).
