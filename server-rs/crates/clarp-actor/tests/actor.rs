@@ -1166,6 +1166,61 @@ fn claude_returns(world: &mut World, turn: u64, call: &str, output: &str, failed
     world.says(turn, &whole.to_string());
 }
 
+/// The phase of each message the live turn shows, beside whether the conversation keeps its
+/// row as commentary: `(row, live phase, kept as commentary)`.
+fn phases(actor: &mut Actor, now: i64) -> Vec<(String, String, bool)> {
+    let shown = actor.shown_whole(now);
+    let rows = actor.tail_of(100, Which::chat(true)).unwrap().entries;
+    shown["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter(|item| item["kind"] == "message")
+        .map(|item| {
+            let row_id = item["row_id"].as_str().unwrap_or_default().to_string();
+            let kept = rows.iter().find(|row| row.entry.id() == row_id);
+            let kept = kept.unwrap_or_else(|| panic!("{row_id} is kept: {shown}"));
+            let phase = item["phase"].as_str().unwrap_or_default().to_string();
+            (row_id, phase, kept.commentary)
+        })
+        .collect()
+}
+
+#[test]
+fn words_written_with_their_own_call_are_said_along_the_way_in_the_conversation_too() {
+    let mut world = World::new("own-call");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    // It says something and calls a tool in the same message, the tool returns, and it answers.
+    claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
+    claude_returns(&mut world, 1, "t1", "a.txt", false);
+    claude_message(&mut world, 1, "b", "Done.", &[]);
+    world.hint(&mut actor);
+    let running = phases(&mut actor, world.tick());
+    let first = running.iter().find(|(row, ..)| row == "r-a");
+    let first = first.unwrap_or_else(|| panic!("the first words are shown: {running:?}"));
+    assert_eq!(first.1, "commentary", "{running:?}");
+    assert!(first.2, "the conversation keeps them as it shows them: {running:?}");
+
+    world.says(
+        1,
+        r#"{"type":"result","subtype":"success","is_error":false,"result":"Done."}"#,
+    );
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let ended = phases(&mut actor, world.tick());
+    assert_eq!(
+        ended,
+        [
+            ("r-a".to_string(), "commentary".to_string(), true),
+            ("r-b".to_string(), "final".to_string(), false),
+        ],
+        "the live turn and the conversation give each message one phase, the answer final"
+    );
+}
+
 #[test]
 fn a_message_of_the_agent_is_one_row_with_the_tools_it_calls() {
     let mut world = World::new("message-rows");

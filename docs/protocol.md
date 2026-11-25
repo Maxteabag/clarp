@@ -896,7 +896,10 @@ message is read into the running turn (steering: any message read into it, the u
 agent's or a relayed one, but not one the agent's conversation fork read), or when the turn
 ends. If work comes next (a tool call, or a plan the tool changes; one it tells again with the
 same steps, as Codex closes its plan after its last words, is no work), the words were said along
-the way (`phase` `commentary`) and do not enter as an answer. A plan counts as work from contract
+the way (`phase` `commentary`) and do not enter as an answer. Words whose own message called
+tools announced work: they never enter as an answer, and whatever comes next, other words
+included, makes them `commentary` in `/log` as the live turn shows them from when their tool
+began (issue 836; rows written before keep the phase they have). A plan counts as work from contract
 174 on: a Codex turn written before it whose words came before a plan and then more words has
 the first words as an answer too. Each message the turn answers keeps
 its answer, also one given before a follow-up was read into the turn; two replies with no work

@@ -190,7 +190,8 @@ pub struct ToolCall {
 
 /// Tool work came after a reply in the same turn: what the reply said was said along the way,
 /// not at the end. It is not a row: it belongs to the reply it names, which changed with it.
-/// (The tools a reply's own message calls do not make it this: only work that comes later.)
+/// A reply whose own message calls tools is made this by what comes after it, words included:
+/// it announced work, and was no answer (issue 836). One the turn ends with stays its answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Commentary {
     pub id: String,
