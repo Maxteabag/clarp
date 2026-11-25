@@ -112,8 +112,9 @@ without it the installed release runs. Nothing is built. `turn-timings report <r
    reach `service_manager` (Clarp issue 322). Tools print structure, counts and codes, never conversation text.
    A Host started by hand for a test (a disposable Host) gets a world of its own: its own `--data`, `--listen` port
    and token; `XDG_CONFIG_HOME` (or `CLARP_CONFIG_DIR`) pointed at an empty folder of its own, or it reads the
-   installed Host's `peers.json` and reaches the real peer Hosts and their agents (seen on 23 Nov 2026; issue 741
-   makes the Host refuse that by itself); no `--relay-config`, `--relay-also`, `--push-keys` or `--push-relay`; and
+   installed Host's settings, the account reset commands among them, and a test Host with an account pool could
+   spend a real banked reset (issue 780 makes the Host refuse that by itself; peers need `--peers FILE` since
+   issue 741, so a Host started without it has none); no `--relay-config`, `--relay-also`, `--push-keys` or `--push-relay`; and
    `--launcher direct`. Before its first case, `GET /peers` on it answers an empty list. It is not run at `nice 19`
    when its turns are timed: under load a Codex turn then took 127 s to start. Its Claude agents run with
    `CLAUDE_CONFIG_DIR` pointed at a folder of its own that holds only a link to the live `.credentials.json`, so
