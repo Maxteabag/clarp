@@ -595,9 +595,10 @@ fn an_idle_lane_that_never_lets_go_is_ended_with_its_tool_within_the_bound() {
     assert!(!is_ended(tool));
     let bound = std::time::Duration::from_millis(300);
     let started = std::time::Instant::now();
-    let place = stuck
-        .endpoint
-        .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, bound);
+    let place =
+        stuck
+            .endpoint
+            .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, false, bound);
     let waited = started.elapsed();
     // Asked what it does, asked to leave, waited for the bound, then ended with its tool: its
     // lock is free and a new lane may start, with no turn held on the lane's exit.
@@ -623,9 +624,10 @@ fn an_idle_lane_that_never_lets_go_is_ended_with_its_tool_within_the_bound() {
 
     // A group whose leader is no child of the lane is not its tool: only the lane goes.
     let elsewhere = StuckLane::start(&run, "b", saying(false), &beside.id().to_string());
-    let place = elsewhere
-        .endpoint
-        .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, bound);
+    let place =
+        elsewhere
+            .endpoint
+            .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, false, bound);
     assert_eq!(place.unwrap(), Place::Free);
     let exit = elsewhere
         .ended
@@ -650,9 +652,9 @@ fn a_lane_that_works_or_does_not_say_is_never_ended_however_slow_it_answers() {
         let lane = StuckLane::start(&run, agent, said, "tool");
         // It does not answer the retirement in time, as a lane loading a long conversation in
         // a turn may not: it is waited for, and the turn goes on without that lane's room.
-        let place = lane
-            .endpoint
-            .place_within(&run, (Some("u"), "new"), |_| false, ROOMY, bound);
+        let place =
+            lane.endpoint
+                .place_within(&run, (Some("u"), "new"), |_| false, ROOMY, false, bound);
         assert!(place.is_err(), "{agent}: {place:?}");
         assert_eq!(lane.asked(), ["inspect", "inspect", "retire"], "{agent}");
         assert!(

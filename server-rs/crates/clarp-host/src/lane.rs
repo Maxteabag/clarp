@@ -375,7 +375,7 @@ impl Endpoint {
         room: Room,
         needed: bool,
     ) -> io::Result<Place> {
-        self.place_within(run, (thread, digest), kept, room, LEAVE_WAIT)
+        self.place_within(run, (thread, digest), kept, room, needed, LEAVE_WAIT)
     }
 
     /// [`Self::place`], waiting at most `bound` for a lane that must make way to let go.
@@ -385,6 +385,7 @@ impl Endpoint {
         (thread, digest): (Option<&str>, &str),
         kept: impl FnOnce(&Status) -> bool,
         room: Room,
+        needed: bool,
         bound: Duration,
     ) -> io::Result<Place> {
         if let Ok(state) = self.inspect() {
@@ -392,8 +393,8 @@ impl Endpoint {
             if same_thread && state.options == digest && !kept(&state) {
                 return Ok(Place::Kept);
             }
-            // A lane that does not let go in time has been ended by its process id; the
-            // look at its owner lock below says whether it has gone.
+            // A lane that does not let go in time has been ended with its tool, where it may
+            // be; the look at its owner lock below says whether it has gone.
             if self.retire_within(bound).is_err() {
                 return if same_thread {
                     Ok(Place::Kept)
@@ -573,7 +574,13 @@ impl Endpoint {
         // it has no scope of its own (started outside systemd), its tool's group goes first,
         // while the lane is still that group leader's parent, then the lane. Its tool also ends
         // with the lane by itself: the lane starts it with a death signal (`tool-child`).
-        let how = match scope::of_process(pid) {
+        let found = scope::of_process(pid);
+        // The scope was read by the id: had the process ended meanwhile, the id might have
+        // named a process of another lane's scope. Its handle says whether it still lives.
+        if process.as_ref().is_some_and(ended) {
+            return self.released();
+        }
+        let how = match found {
             Some(unit) if scope::end(&unit) => {
                 format!("its scope {unit} is ended, its tool with it")
             }
@@ -920,6 +927,15 @@ fn handle_on(pid: u32) -> io::Result<Option<std::os::fd::OwnedFd>> {
         Err(error) if error == rustix::io::Errno::SRCH => Err(io::Error::from(error)),
         Err(_) => Ok(None),
     }
+}
+
+/// Whether the process a handle (`pidfd`) is on has ended: its handle is readable then.
+fn ended(process: &std::os::fd::OwnedFd) -> bool {
+    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+    use std::os::fd::AsFd;
+    let mut looked = [PollFd::new(process.as_fd(), PollFlags::POLLIN)];
+    let ready = poll(&mut looked, PollTimeout::ZERO);
+    ready.is_ok_and(|ready| ready > 0)
 }
 
 /// Ends with SIGKILL a lane's tool's process `group` (whose leader was checked to be the lane's
