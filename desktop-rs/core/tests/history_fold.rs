@@ -86,8 +86,10 @@ fn a_chat_opened_cold_folds_its_settled_turn_from_log() {
     assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")]);
     let failed = entry(fold, &format!("live:log:{FAILED_CALL}"));
     assert_eq!((failed.kind, failed.status.as_str()), (Kind::Tool, "failed"), "the failed tool stays in view");
-    assert_eq!(failed.secondary, "Pause execution for 60 seconds.", "with its explanation");
-    assert!(failed.lines.last().is_some_and(|l| l.contains("Blocked: standalone sleep 60")), "and its output: {:?}", failed.lines);
+    // Refused by the agent's runtime: why, in plain words, in place of the
+    // explanation of a call that never ran, and no output box with its tags.
+    assert!(failed.secondary.starts_with("Blocked: standalone sleep 60.") && !failed.secondary.contains("tool_use_error"), "with why it was refused: {:?}", failed.secondary);
+    assert!(failed.lines.is_empty(), "and no output box: {:?}", failed.lines);
     let fold_row = entry(fold, &format!("live:fold:{T1}"));
     assert_eq!(fold_row.kind, Kind::Fold);
     assert!(fold_row.expandable && !fold_row.expanded);
