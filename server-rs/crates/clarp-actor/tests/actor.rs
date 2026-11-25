@@ -497,10 +497,12 @@ fn what_waits_enters_the_conversation_when_its_turn_starts_whether_said_or_left_
     );
     let page = actor.after(before, 10).unwrap();
     let newer: Vec<&str> = page.entries.iter().map(|v| v.entry.id()).collect();
+    // The end of the turn before it comes first: a reader of what is newer is given the
+    // answer before the row that starts the next turn (issue 798).
     assert_eq!(
         newer,
-        vec!["u-2", "r-1-1"],
-        "the answer is told its end after the row that starts the next turn"
+        vec!["r-1-1", "u-2"],
+        "the answer is told its end before the row that starts the next turn"
     );
     world.says(2, "Two.");
     world.exits(2, Some(0), None);
@@ -7617,11 +7619,18 @@ fn a_message_that_waited_for_its_turn_is_later_than_the_answer_before_it() {
     let texts: Vec<&str> = rows.iter().map(|(text, _)| text.as_str()).collect();
     assert_eq!(texts, ["first", "ALPHA", "second", "BRAVO"]);
     for pair in rows.windows(2) {
-        assert!(pair[0].1 < pair[1].1, "a row is later than the one above it: {rows:?}");
+        assert!(
+            pair[0].1 < pair[1].1,
+            "a row is later than the one above it: {rows:?}"
+        );
     }
     let (answer, waited) = (rows[1].1, rows[2].1);
     assert_eq!(answer, at, "the answer keeps its time");
-    assert_eq!(waited, at + 1, "the message that waited comes a millisecond after it");
+    assert_eq!(
+        waited,
+        at + 1,
+        "the message that waited comes a millisecond after it"
+    );
     // What is newer than the first message, in the order of its revisions: the first answer
     // before the second message.
     let newer = shown(&actor.after_of(held, 100, Which::chat(true)).unwrap());
