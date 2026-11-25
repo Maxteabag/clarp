@@ -321,10 +321,14 @@ pub(crate) struct Flashes {
 
 pub(crate) type ByDevice = std::collections::BTreeMap<(String, String), Flashes>;
 
-/// The scroll flashes of a window, by device and the platform (client) that sent them.
-pub(crate) fn flashes_by_device(rows: &[Flash]) -> ByDevice {
+/// The scroll flashes of a window, by device and the platform (client) that sent them: those
+/// whose platform and build `counts` takes.
+pub(crate) fn flashes_by_device(rows: &[Flash], counts: fn(&str, &str) -> bool) -> ByDevice {
     let mut by = ByDevice::new();
-    for row in rows {
+    for row in rows
+        .iter()
+        .filter(|row| counts(&row.client, &row.client_build))
+    {
         let flashes = by
             .entry((row.device.clone(), row.client.clone()))
             .or_default();
@@ -354,13 +358,19 @@ pub(crate) fn flashes_by_device(rows: &[Flash]) -> ByDevice {
     by
 }
 
-/// The scroll flashes apps reported in the window, by device and platform.
-pub(crate) async fn flashes(app: &App, since: i64, now: i64) -> Result<ByDevice, String> {
+/// The scroll flashes apps reported in the window, by device and platform: those whose build
+/// platform and build `counts` takes.
+pub(crate) async fn flashes(
+    app: &App,
+    since: i64,
+    now: i64,
+    counts: fn(&str, &str) -> bool,
+) -> Result<ByDevice, String> {
     let rows = app
         .client_events
         .call(move |store| store.flashes(since, now).map_err(|why| why.to_string()))
         .await?;
-    Ok(flashes_by_device(&rows))
+    Ok(flashes_by_device(&rows, counts))
 }
 
 pub(crate) async fn record(
@@ -550,6 +560,7 @@ mod tests {
             Flash {
             device: format!("{client}-phone"),
             client: client.into(),
+            client_build: "1234".into(),
             received_at: at,
             detail: Some(
                 json!({"rule": rule, "events": kinds.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()})
@@ -557,11 +568,14 @@ mod tests {
             ),
         }
         };
-        let by = flashes_by_device(&[
-            row("ios", 10, "top_flip", &["insert"]),
-            row("desktop", 11, "jump_back", &["live"]),
-            row("ios", 20, "jump_back", &["reload", "height", "reload"]),
-        ]);
+        let by = flashes_by_device(
+            &[
+                row("ios", 10, "top_flip", &["insert"]),
+                row("desktop", 11, "jump_back", &["live"]),
+                row("ios", 20, "jump_back", &["reload", "height", "reload"]),
+            ],
+            |_, _| true,
+        );
         let ios = &by[&("ios-phone".to_owned(), "ios".to_owned())];
         assert_eq!(
             (ios.count, ios.first_at, ios.newest_at, ios.rule.as_str()),

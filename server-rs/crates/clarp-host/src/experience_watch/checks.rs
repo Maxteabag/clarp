@@ -257,6 +257,18 @@ const SCROLL_FLASH_KINDS: [&str; 4] = [
     "scroll_flash_web",
 ];
 
+/// Whether an app's scroll flash is counted: a phone app's (`ios`, `android`) only from a
+/// released build number, all digits and at least four of them (TestFlight and App Store builds,
+/// Android release builds). A debug or simulator build reports `1`, and jumps are made on purpose
+/// on one while it is worked on; a test build that names itself (`1112-synthetic`) is no
+/// released build either. A device whose only flashes came from such builds has no finding, so a
+/// finding it had clears on the next pass. The desktop and web apps report versions such as
+/// `0.1.0`, not build numbers: their flashes count as they come.
+pub(super) fn counted(client: &str, build: &str) -> bool {
+    !matches!(client, "ios" | "android")
+        || (build.len() >= 4 && build.bytes().all(|sign| sign.is_ascii_digit()))
+}
+
 /// How long a device's scroll-flash finding stays open after its newest flash.
 pub(super) const FLASH_OPEN_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -370,7 +382,8 @@ pub(super) async fn collect(app: &App, settings: &Settings, since: i64, now: i64
 
     // A device's flashes of the last 24 hours, whatever the pass's window: the finding stays
     // open until a day has passed without one.
-    match crate::client_events::flashes(app, now.saturating_sub(FLASH_OPEN_MS), now).await {
+    let since = now.saturating_sub(FLASH_OPEN_MS);
+    match crate::client_events::flashes(app, since, now, counted).await {
         Ok(by_device) => scroll_flashes(&mut seen, &by_device, &TimeZone::system()),
         Err(why) => {
             seen.unavailable_kinds.extend(SCROLL_FLASH_KINDS);
@@ -471,6 +484,63 @@ mod tests {
                 .all(|(_, notice)| matches!(notice, Notice::Clear(_)))
         );
         assert_eq!(cleared.len(), 2);
+    }
+
+    #[test]
+    fn a_phone_apps_flashes_open_a_finding_only_from_a_released_build() {
+        let row = |device: &str, client: &str, build: &str, at| {
+            clarp_store_sqlite::client_events::Flash {
+                device: device.into(),
+                client: client.into(),
+                client_build: build.into(),
+                received_at: at,
+                detail: Some(r#"{"rule":"jump_back","events":[{"kind":"reload"}]}"#.into()),
+            }
+        };
+        let rows = [
+            // A simulator's debug build, and an emulator's: jumps made on purpose.
+            row("sim", "ios", "1", 1_800_000_000_000),
+            row("emulator", "android", "1", 1_800_000_000_000),
+            // A test build that names itself, not a released build.
+            row("synthetic", "android", "1112-synthetic", 1_800_000_000_000),
+            // The desktop reports its version, and counts as before.
+            row("laptop", "desktop", "0.1.0", 1_800_000_000_000),
+            // Released builds: TestFlight and Android release.
+            row("iphone", "ios", "1342", 1_800_000_000_000),
+            row("pixel", "android", "20261125", 1_800_000_000_000),
+            // A device that ran both: only its released build's flash is counted.
+            row("ipad", "ios", "1", 1_800_000_000_000),
+            row("ipad", "ios", "1342", 1_800_000_600_000),
+        ];
+        let by = crate::client_events::flashes_by_device(&rows, counted);
+        let mut seen = Seen::default();
+        scroll_flashes(&mut seen, &by, &TimeZone::UTC);
+        let found: Vec<_> = seen.found.keys().cloned().collect();
+        let key = |kind: &str, device: &str| (kind.to_owned(), device.to_owned());
+        assert_eq!(
+            found,
+            [
+                key("scroll_flash_android", "pixel"),
+                key("scroll_flash_desktop", "laptop"),
+                key("scroll_flash_ios", "ipad"),
+                key("scroll_flash_ios", "iphone"),
+            ]
+        );
+        assert!(seen.found[&key("scroll_flash_ios", "ipad")].starts_with("1 chat-view"));
+        for build in ["1", "123", "", "1342a", "1112-synthetic"] {
+            assert!(
+                !counted("ios", build) && !counted("android", build),
+                "{build:?}"
+            );
+        }
+        for build in ["1000", "1342", "20261125"] {
+            assert!(
+                counted("ios", build) && counted("android", build),
+                "{build:?}"
+            );
+        }
+        // The desktop and web apps report versions, and their flashes count as before.
+        assert!(counted("desktop", "0.1.0") && counted("web", "1"));
     }
 
     #[test]

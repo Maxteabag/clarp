@@ -65,6 +65,8 @@ pub struct CrashCandidate {
 pub struct Flash {
     pub device: String,
     pub client: String,
+    /// The build of the app that reported it, as the app said it (`X-Clarp-Client`).
+    pub client_build: String,
     pub received_at: i64,
     pub detail: Option<String>,
 }
@@ -190,7 +192,7 @@ impl Store {
     /// The chat-view scroll flashes apps reported in the window, the oldest first.
     pub fn flashes(&self, since: i64, now: i64) -> rusqlite::Result<Vec<Flash>> {
         let mut select = self.connection.prepare_cached(
-            "SELECT device, client, received_at, detail FROM client_events
+            "SELECT device, client, client_build, received_at, detail FROM client_events
              WHERE received_at BETWEEN ?1 AND ?2 AND event = 'scroll_flash'
              ORDER BY received_at, id",
         )?;
@@ -198,8 +200,9 @@ impl Store {
             Ok(Flash {
                 device: row.get(0)?,
                 client: row.get(1)?,
-                received_at: row.get(2)?,
-                detail: row.get(3)?,
+                client_build: row.get(2)?,
+                received_at: row.get(3)?,
+                detail: row.get(4)?,
             })
         })?;
         rows.collect()

@@ -77,7 +77,13 @@ flashes of the last 24 hours, whatever the pass's window: the finding reads
 "N chat-view scroll flashes since HH:MM on <platform>; the newest at HH:MM:
 <rule>, with <cause kinds>.", new flashes update it, and its recipients hear of
 what changed at most once an hour while it stays open. It clears 24 hours
-after the device's newest flash. Its owner is `owners.<kind>`, else
+after the device's newest flash. A phone app's flashes (`ios`, `android`)
+count only from a released build number, all digits and at least four of them
+(TestFlight and App Store builds, Android release builds): a debug or simulator
+build reports `1`, where jumps are made on purpose, and a test build that names
+itself is no build number either. Such a device opens nothing, and a finding it
+had clears on the next pass. The desktop and web apps report versions, not build
+numbers, and their flashes count as before (`checks::counted`). Its owner is `owners.<kind>`, else
 `owners.scroll_flash`, else that platform's app-crash owner
 (`app_crash_<platform>`, else `app_crash`), and the front desk as for every
 finding.
