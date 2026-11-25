@@ -1400,11 +1400,11 @@ impl AgentLog for Commits {
     }
 }
 
-/// A Claude agent whose commits are counted, with a turn running and two messages waiting
-/// behind it (issue 831's run: a held message and one sent while the turn worked): the turn's
-/// tool calls a tool, the tool returns, it answers and its process exits, all in the spool and
-/// none of it read yet.
-fn a_turn_written_and_unread(name: &str) -> (World, Actor, Arc<AtomicU64>) {
+/// A Claude agent whose commits are counted, with a turn running and, where `waiting`, two
+/// messages waiting behind it (issue 831's run: a held message and one sent while the turn
+/// worked): the turn's tool calls a tool, the tool returns, it answers and its process exits,
+/// all in the spool and none of it read yet.
+fn a_turn_written_and_unread(name: &str, waiting: bool) -> (World, Actor, Arc<AtomicU64>) {
     let mut world = World::new(name);
     world.backend = Arc::new(Claude::new());
     let appends = Arc::new(AtomicU64::new(0));
@@ -1425,8 +1425,10 @@ fn a_turn_written_and_unread(name: &str) -> (World, Actor, Arc<AtomicU64>) {
     .unwrap();
     world.carry_out(&mut actor, out);
     world.send(&mut actor, "u-1", "go", Admission::Queue);
-    world.send(&mut actor, "u-2", "then this", Admission::Later);
-    world.send(&mut actor, "u-3", "and this", Admission::Queue);
+    if waiting {
+        world.send(&mut actor, "u-2", "then this", Admission::Later);
+        world.send(&mut actor, "u-3", "and this", Admission::Queue);
+    }
     claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
     claude_returns(&mut world, 1, "t1", "a.txt", false);
     claude_message(&mut world, 1, "c", "Done.", &[]);
@@ -1457,7 +1459,7 @@ fn rows_on_disk(world: &World) -> Vec<String> {
 #[test]
 fn a_spool_read_in_steps_shows_each_window_before_what_follows_it() {
     // One reading of the whole spool, as before: its commits, and where it leaves the chat.
-    let (mut whole, mut read_whole, counted) = a_turn_written_and_unread("steps-whole");
+    let (mut whole, mut read_whole, counted) = a_turn_written_and_unread("steps-whole", true);
     let before = counted.load(Ordering::SeqCst);
     let now = whole.tick();
     let out = read_whole.spool_changed(now).unwrap();
@@ -1468,7 +1470,7 @@ fn a_spool_read_in_steps_shows_each_window_before_what_follows_it() {
 
     // The same spool, a step at a time: what each step committed, and what was on disk and
     // launched when it stopped.
-    let (mut world, mut actor, counted) = a_turn_written_and_unread("steps");
+    let (mut world, mut actor, counted) = a_turn_written_and_unread("steps", true);
     let _ = actor.take_shown(world.now_ms);
     let mut steps: Vec<(u64, Stepped, Vec<String>, bool)> = Vec::new();
     loop {
@@ -1526,6 +1528,41 @@ fn a_spool_read_in_steps_shows_each_window_before_what_follows_it() {
     let stepped: u64 = steps.iter().map(|(commits, ..)| commits).sum();
     assert_eq!(stepped, whole_commits, "{steps:?}");
     assert_eq!(chat(&actor.tail(10).unwrap()), whole_chat);
+}
+
+/// A step after a written window that leaves no turn to follow says there is nothing more to
+/// read: the Host asks for no further step, and reads the spool no more (issue 831). With no
+/// message waiting, the turn's last window ends it, and the step after it is the last.
+#[test]
+fn the_step_after_a_turns_last_window_reads_nothing_more_when_no_turn_follows() {
+    let (mut world, mut actor, _) = a_turn_written_and_unread("steps-last", false);
+    let mut steps: Vec<Stepped> = Vec::new();
+    loop {
+        let now = world.tick();
+        let (out, stepped) = actor.spool_step(now).unwrap();
+        world.carry_out(&mut actor, out);
+        steps.push(stepped);
+        if stepped == Stepped::Done {
+            break;
+        }
+        assert!(steps.len() < 20, "the steps end: {steps:?}");
+    }
+    // Each window is written by one step and followed by one more; the last of those is the
+    // end of the reading, with no step that reads and finds nothing after it.
+    assert!(steps.len() >= 4, "more than one window: {steps:?}");
+    for pair in steps.chunks(2) {
+        assert_eq!(pair[0], Stepped::Wrote, "{steps:?}");
+    }
+    assert_eq!(steps.len() % 2, 0, "{steps:?}");
+    assert_eq!(steps[steps.len() - 1], Stepped::Done, "{steps:?}");
+    assert!(
+        steps[..steps.len() - 1]
+            .iter()
+            .all(|stepped| *stepped != Stepped::Done),
+        "{steps:?}"
+    );
+    assert_eq!(actor.status().last.unwrap().outcome, Outcome::Completed);
+    assert!(world.took == [1], "no other turn ran: {:?}", world.took);
 }
 
 /// The headlines of the status lines among live events, in order.

@@ -2212,7 +2212,11 @@ impl Worker {
             let (step, stepped) = actor.spool_step(now)?;
             out.absorb(step);
             match stepped {
-                clarp_actor::Stepped::Wrote => self.tell_shown(),
+                clarp_actor::Stepped::Wrote => {
+                    let thread = self.thread_name();
+                    let _held = crate::held::Held::new(&thread, "a window's showing");
+                    self.tell_shown();
+                }
                 clarp_actor::Stepped::More => return Ok((out, true)),
                 clarp_actor::Stepped::Done => return Ok((out, false)),
             }
@@ -3308,6 +3312,8 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
+        // How the journal names this thread when a part of this request holds it long.
+        let thread = self.thread_name();
         // The owner's message never waits behind a turn that is not a person's (issue 839):
         // another agent's, a trigger's, a goal's wake. Where no conversation fork answers it
         // beside that turn, it is said direct: the turn makes way at once and the owner's
@@ -3367,7 +3373,6 @@ impl Worker {
             // Read any input fence that reached the spool before this send, even if its
             // wakeup is still behind the send in the mailbox: to its end, each window shown
             // as soon as it is on disk (issue 831).
-            let thread = self.thread_name();
             let _held = crate::held::Held::new(&thread, "a send's reading of the spool first");
             loop {
                 let (read, more) = self.spool_step()?;
@@ -3503,7 +3508,6 @@ impl Worker {
                     let _ = answer.send(Err(Unavailable::new(why.into())));
                     return Ok(());
                 }
-                let thread = format!("the thread of agent {}", self.setup.record.session);
                 let held = crate::held::Held::new(&thread, "a send's commit");
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
@@ -4315,7 +4319,6 @@ impl Worker {
             Ask::Close(_) => return Ok(()),
         };
         // What follows from a command is done and published before its answer is given.
-        let thread = self.thread_name();
         let held = crate::held::Held::new(&thread, "what follows a request, and its publishing");
         self.after(out);
         drop(held);

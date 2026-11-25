@@ -5141,9 +5141,15 @@ impl Actor {
     pub fn spool_step(&mut self, now_ms: i64) -> Result<(Outputs, Stepped), ActorError> {
         let mut out = Outputs::default();
         if let Some(effects) = self.step_owes.take() {
+            let began = std::time::Instant::now();
             self.carry_out(effects, &mut out, now_ms)?;
             self.after_main(&mut out, now_ms)?;
-            return Ok((out, Stepped::More));
+            held(&self.profile.session, "what follows a window", began);
+            // A turn that is still followed, or the one the window started, may have more in its
+            // spool. One that ended, or whose process is gone, has nothing more to be read:
+            // what its process still prints after its end is read for it as it lingers.
+            let more = self.live.as_ref().is_some_and(|live| !live.over);
+            return Ok((out, if more { Stepped::More } else { Stepped::Done }));
         }
         let stepped = self.pump_as(&mut out, now_ms, Reading::Window)?;
         Ok((out, stepped))
@@ -6560,9 +6566,12 @@ impl Actor {
             };
             let turn = live.turn;
             let spool = self.profile.spool_path_of(turn, live.attempt);
+            let began = std::time::Instant::now();
             let read = SpoolReader::new(&spool)
                 .read_window(live.offset, u64::MAX, WINDOW)
                 .map_err(|error| io_error(&spool, error))?;
+            held(&self.profile.session, "a window's read", began);
+            let began = std::time::Instant::now();
             if read.records.is_empty() && read.damaged.is_empty() {
                 return Ok(Stepped::Done);
             }
@@ -7313,7 +7322,10 @@ impl Actor {
             if wrote {
                 batch.cursor(turn, read_until, now_ms);
             }
+            held(&self.profile.session, "a window's records", began);
+            let began = std::time::Instant::now();
             let committed = batch.commit()?;
+            held(&self.profile.session, "a window's commit", began);
             if let Some(at) = revealed_at {
                 let events = self
                     .shown
@@ -7377,6 +7389,22 @@ impl Actor {
                 return Ok(Stepped::Wrote);
             }
         }
+    }
+}
+
+/// How long one stage of a request may hold the agent's thread before the journal says which
+/// stage it was (issue 848), as the Host's own guards of a whole request say it.
+const SLOW_STAGE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Tells the journal that a stage of reading the agent's spool, begun then, held its thread
+/// long. Says nothing of one that did not.
+fn held(session: &str, what: &str, began: std::time::Instant) {
+    let held = began.elapsed();
+    if held >= SLOW_STAGE {
+        eprintln!(
+            "clarp-host: the thread of agent {session} was held {} ms by {what}",
+            held.as_millis()
+        );
     }
 }
 
