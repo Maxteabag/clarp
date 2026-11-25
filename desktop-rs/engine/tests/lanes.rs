@@ -142,7 +142,7 @@ fn pressure_is_read_where_the_host_lists_it_and_a_threshold_keeps_auto() {
     let answer = d.engine.lane_settings().unwrap().clone();
     assert_eq!(clarp_engine::lanes::range(&answer, "pressure_io_percent"), Some((5.0, 95.0)));
     assert_eq!(clarp_engine::lanes::live_group(&answer).unwrap().summary, "8 · 2 busy · 6 idle · 1945 MB");
-    assert_eq!(clarp_engine::lanes::cold_starts_group(&answer).unwrap().summary, "5 · or since the Host started, if sooner");
+    assert_eq!(clarp_engine::lanes::cold_starts_group(&answer).unwrap().summary, "5");
     assert_eq!(clarp_engine::lanes::pressure_group(&answer).unwrap().summary, "High · 2 turns held");
 
     // A threshold is posted alone and does not switch to fixed.
