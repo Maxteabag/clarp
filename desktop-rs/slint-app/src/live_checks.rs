@@ -967,6 +967,8 @@ pub fn live_check(out: String) {
             check(in_order(&order), &format!("a step begun after the message goes below it: {order:?}"));
             // Grouped: the work before the message folds above it, Working below it.
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            // Set on the engine directly: apply it now, no Host event will.
+            crate::pump();
             true
         })),
         ("anchor steered grouped", Box::new(move |_, _window, elapsed| {
@@ -1009,6 +1011,7 @@ pub fn live_check(out: String) {
             check(title(&before) == "1 tool" && title(&working) == "Worked for 14s · 1 tool", &format!("the worked time on the last work row: {:?} {:?}", title(&before), title(&working)));
             shot(&out24, "live-12d-anchor-steered-settled");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
+            crate::pump();
             // A stale live turn: GET /live kept the first turn running while
             // two newer prompts started turns of their own in /log.
             control("/__control/live-load", &json!({"session": "stale", "fixture": "live-real-stale-turn.json", "agent_id": "agent-stale"})).is_ok()
