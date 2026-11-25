@@ -11,10 +11,10 @@ First locate the failing endpoint and capture its actual authenticated JSON
 privately. A successful HTTP 200 does not prove the native DTO can decode it;
 this message alone does not prove missing user records or an outdated server.
 
-Build the repo's portable core with `scripts/test_core.sh`, then run:
+Build the clarp-ios repo's portable core with its `scripts/test_core.sh`, then run this skill's own decoder:
 
 ```bash
-python3 scripts/decode_core_payload.py /private/response.json \
+python3 skills/clarp-ios-crash-diagnostics/scripts/decode_core_payload.py /private/response.json \
   --repo /path/to/clarp-ios --type JanitorListResponse
 ```
 
@@ -71,8 +71,8 @@ not an empty window or evidence of recovery. Retain it and inspect the plan;
 avoid an automatic retry loop. Query latency is diagnostic-tool cost, not phone
 FPS. Apply the existing time/profile/privacy boundaries to the indexed query.
 
-Note that `ts_iso` is UTC while the crash filenames and `ls` timestamps are
-local. Mixing them up makes a crash look like it happened hours from the
+Note that `received_at` is epoch milliseconds (UTC) while the crash file names
+and `ls` timestamps are local. Mixing them up makes a crash look like it happened hours from the
 evidence that explains it.
 
 ## Count canonical timing events, not anomaly copies
@@ -94,11 +94,10 @@ controlled paired comparisons. Thresholded snapshot events are not FPS samples.
 
 ## Reading a crash payload
 
-Payloads were named `crash-<millis>.json` until commit `422b32f` renamed them
+Payloads were once named `crash-<millis>.json`; a later app change renamed them
 to `ios-diagnostic-*` and widened the endpoint to carry hangs, CPU exceptions,
-disk-write exceptions and slow launches as well as crashes. Both names exist on
-disk, and the server event is `iosDiagnosticReport` (it was `iosCrashReport`).
-Match on both when querying, or a recent crash will look like it never arrived.
+disk-write exceptions and slow launches as well as crashes. Both names can exist
+on disk; match on both when listing, or a recent crash will look like it never arrived.
 
 ```bash
 ls -lat ~/.local/share/clarp-host/data/crashes/ | head
@@ -158,7 +157,7 @@ need to show which subsystem was calling.
 
 A locally built dSYM will not match a CI build. `xtool dev build` produces its
 own UUID, so check with `--list-uuids` rather than assuming. dSYM archiving
-started with commit `3e5788e`; builds before that cannot be symbolicated at all,
+started partway through the app's history (in clarp-ios); builds before that cannot be symbolicated at all,
 and for those the best available answer is to disassemble the stripped binary
 from the `clarp-ipa` artifact at the crash offset.
 
