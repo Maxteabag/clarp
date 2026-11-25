@@ -110,12 +110,16 @@ pub fn names_a_goal_wake(queue_id: &str) -> bool {
     id.starts_with(crate::goals::WAKE_PREFIX)
 }
 
+/// What the Host files the note under that asks an agent to take up again a turn the owner's
+/// message cut short (issue 839): the Host's own business, never a message the user typed.
+pub const MADE_WAY: &str = "made-way";
+
 /// Whether the turns of an origin are left out of a chat that is read without automation.
 /// A janitor's are automated and stay: it works in a chat of its own.
 pub fn left_out_of_chats(origin: &str) -> bool {
     matches!(
         origin,
-        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | COMPACTION
+        "watcher" | "heartbeat" | "leader_tick" | "dreaming" | COMPACTION | MADE_WAY
     )
 }
 
@@ -124,7 +128,7 @@ pub fn left_out_of_chats(origin: &str) -> bool {
 pub fn silent_when_failed(origin: &str) -> bool {
     matches!(
         origin,
-        "heartbeat" | "leader_tick" | "dreaming" | "janitor" | "watcher"
+        "heartbeat" | "leader_tick" | "dreaming" | "janitor" | "watcher" | MADE_WAY
     )
 }
 

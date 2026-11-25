@@ -1216,7 +1216,10 @@ Rules:
   that waits. Behind it the Host leaves the agent a message of origin
   `made-way` (`u-made-way-<turn>`) that quotes the cut message and asks the
   agent to take that work up again and, where another agent sent it, to
-  answer that agent when it is done. It runs after what already waits, and a
+  answer that agent when it is done. That message is the Host's own: a chat
+  read without automation (`include_automated=0`) leaves it out, as a
+  heartbeat's, and where the cut turn was another agent's that the chat hides
+  (audience `agents`), the note's turn is the agents' too. It runs after what already waits, and a
   Stop holds it like other background work. A heartbeat, a leader's tick,
   dreaming or a watcher come again by themselves and get no such message.
   A turn that carries the user's own words (the user's turn, a front desk's

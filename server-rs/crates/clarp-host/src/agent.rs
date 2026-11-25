@@ -3294,7 +3294,7 @@ impl Worker {
                 ))
         {
             *admission = Admission::Direct;
-            made_way = goes.note;
+            made_way = goes.note.map(|note| (note, goes.coordination));
         }
         // A tool whose running turn takes another message on its input (Claude Code, agy-acp)
         // is offered the user's. A Codex turn takes steered words only on its lane, and only
@@ -4227,11 +4227,22 @@ impl Worker {
         self.after(out);
         // The note behind the owner's message that went first: work nobody sits waiting for,
         // which a Stop of the owner's holds like the rest.
-        if let Some(note) = made_way
+        if let Some((note, coordination)) = made_way
             && let Some(actor) = self.actor.as_mut()
         {
-            match actor.send(&note, Admission::Background, now) {
-                Ok((_, noted)) => self.after(noted),
+            // It carries the cut turn's coordination mark: its turn is the agents' exactly when
+            // the cut one was.
+            let marks = clarp_actor::Marks {
+                coordination,
+                ..clarp_actor::Marks::default()
+            };
+            match actor.send_marked(&note, Admission::Background, None, &marks, now) {
+                Ok(Ok((_, noted))) => self.after(noted),
+                Ok(Err(_)) => eprintln!(
+                    "clarp-host: agent {}: the note to take up a turn that made way was not \
+                     left: its trace belongs to another message",
+                    self.setup.record.session
+                ),
                 Err(error) => eprintln!(
                     "clarp-host: agent {}: the note to take up a turn that made way was not \
                      left: {error}",

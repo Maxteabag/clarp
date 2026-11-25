@@ -70,38 +70,44 @@ fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_
     wait_for("the owner's answer", || {
         host.turns(target).iter().any(answered)
     });
-    // The agent is told to take the cut work up again, after the owner's turn: in the
-    // conversation once its turn starts, in the queue until then.
+    // The agent is told to take the cut work up again, after the owner's turn.
     let cut_short = "was cut short because the owner wrote to you";
-    let note_text = || {
-        let queue = host.get(&format!("/turn-queue?session={target}"));
-        let queued = queue["items"].as_array().cloned().unwrap_or_default();
-        let turns = host.turns(target);
-        let found = |rows: &[Value]| {
-            rows.iter()
-                .map(text_of)
-                .find(|text| text.contains(cut_short))
-        };
-        found(&turns).or_else(|| found(&queued))
+    let log = |query: &str| -> Vec<Value> {
+        host.get(&format!("/log?session={target}&limit=200{query}"))["turns"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
     };
+    let is_note = |row: &Value| text_of(row).contains(cut_short);
     wait_for("the note to take the peer's message up again", || {
-        note_text().is_some()
+        log("&coordination=show").iter().any(is_note)
     });
-    let note = note_text().unwrap();
-    assert!(note.contains("Peer"), "{note}");
-    assert!(note.contains("work for the peer"), "{note}");
+    let all = log("&coordination=show");
+    let note = all.iter().find(|row| is_note(row)).unwrap();
+    let text = text_of(note);
+    assert!(text.contains("Peer"), "{text}");
+    assert!(text.contains("work for the peer"), "{text}");
     assert!(
-        note.contains("answer Peer (`clarp-admin reply` for a request"),
-        "the note names whom to answer: {note}"
+        text.contains(&format!(
+            "answer Peer ({peer}): `clarp-admin reply` for a request"
+        )),
+        "the note names whom to answer, with the session: {text}"
     );
-    let turns = host.turns(target);
-    let owner = turns.iter().position(answered).unwrap();
-    if let Some(noted) = turns
-        .iter()
-        .position(|row| text_of(row).contains(cut_short))
-    {
-        assert!(owner < noted, "{turns:#?}");
-    }
+    let owner = all.iter().position(answered).unwrap();
+    let noted = all.iter().position(is_note).unwrap();
+    assert!(owner < noted, "{all:#?}");
+    // The peer's turn was the agents' (hidden coordination): the note that takes it up again
+    // is too, and never reads as the owner's own words in his chat.
+    let peer_row = all.iter().find(|row| row["id"] == "u-from-peer").unwrap();
+    assert_eq!(peer_row["audience"], "agents", "{peer_row}");
+    assert_eq!(note["audience"], "agents", "{note}");
+    assert!(!log("&coordination=hide").iter().any(is_note));
+    // A chat read without automation leaves the note out whatever its audience.
+    assert!(
+        !log("&coordination=show&include_automated=0")
+            .iter()
+            .any(is_note)
+    );
 }
 
 #[test]

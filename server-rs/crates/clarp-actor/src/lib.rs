@@ -379,14 +379,16 @@ pub struct Sent {
 }
 
 /// A message of the owner's goes ahead of the agent's live turn
-/// ([`Actor::owner_goes_first`]): the note to leave behind it, where one is left.
+/// ([`Actor::owner_goes_first`]): the note to leave behind it, where one is left, and the
+/// coordination mark of the turn it cuts, which the note carries: work the user did not see
+/// is taken up again where the user does not see it either.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GoesFirst {
     pub note: Option<Message>,
+    pub coordination: Option<String>,
 }
 
-/// What the Host files the note under that takes up a turn the owner's message cut short.
-pub const MADE_WAY: &str = "made-way";
+pub use clarp_kernel::turn::MADE_WAY;
 
 /// What became of the turn a message was sent for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2218,7 +2220,10 @@ impl Actor {
             cut.name(),
             "heartbeat" | "leader_tick" | "dreaming" | "watcher"
         ) {
-            return Ok(Some(GoesFirst { note: None }));
+            return Ok(Some(GoesFirst {
+                note: None,
+                coordination: None,
+            }));
         }
         let message = self.message_at(live.message_seq())?;
         // Whom the cut turn answered: another agent, who learns nothing from a stopped turn
@@ -2233,6 +2238,17 @@ impl Actor {
             (Origin::Agent { .. }, None) => Some("that agent"),
             _ => None,
         };
+        // `prompt --to` names a session: it stands beside the name the agent knows them by.
+        let session = message
+            .sender
+            .as_ref()
+            .map(|sender| sender.session.trim())
+            .filter(|session| !session.is_empty() && Some(*session) != sender);
+        let whom = match (sender, session) {
+            (Some(name), Some(session)) => Some(format!("{name} ({session})")),
+            (Some(name), None) => Some(name.to_owned()),
+            (None, _) => None,
+        };
         let what = match sender {
             Some("that agent") => "another agent's message".to_owned(),
             Some(name) => format!("the message from {name}"),
@@ -2243,10 +2259,10 @@ impl Actor {
             }
             None => format!("the {} message", cut.name()),
         };
-        let answer = sender.map_or_else(String::new, |name| {
+        let answer = whom.map_or_else(String::new, |whom| {
             format!(
-                " When it is done, answer {name} (`clarp-admin reply` for a request, else \
-                 `clarp-admin prompt`), since your cut turn told them nothing."
+                " When it is done, answer {whom}: `clarp-admin reply` for a request, else \
+                 `clarp-admin prompt`, since your cut turn told them nothing."
             )
         });
         let said = clarp_kernel::python::first(message.text.trim(), 600);
@@ -2255,7 +2271,9 @@ impl Actor {
              owner's message went first. Take that work up again now: finish what you had \
              begun, or do it if you had not begun.{answer} It said: \u{ab}{said}\u{bb}"
         );
+        let coordination = self.mark(live.id().0)?;
         Ok(Some(GoesFirst {
+            coordination,
             note: Some(Message {
                 id: format!("u-made-way-{}", live.id().0),
                 text,
