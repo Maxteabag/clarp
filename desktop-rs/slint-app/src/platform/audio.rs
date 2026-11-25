@@ -89,7 +89,10 @@ thread_local! {
     static AUDIO: RefCell<Option<Audio>> = const { RefCell::new(None) };
 }
 
-/// Runs `act` on the audio, then hands its notices to the window.
+/// Runs `act` on the audio, then hands its notices to the window on the
+/// next turn of the event loop: `with` is called from inside a refresh
+/// (the key hints read the audio's state), and the window taking a notice
+/// in at once would refresh again inside it (#830).
 pub fn with<R>(act: impl FnOnce(&mut Audio) -> R) -> Option<R> {
     let (result, notices) = AUDIO.with(|audio| {
         let mut audio = audio.borrow_mut();
@@ -98,7 +101,7 @@ pub fn with<R>(act: impl FnOnce(&mut Audio) -> R) -> Option<R> {
         Some((result, std::mem::take(&mut audio.notices)))
     })?;
     if !notices.is_empty() {
-        crate::audio_notices(notices);
+        slint::Timer::single_shot(Duration::ZERO, move || crate::audio_notices(notices));
     }
     Some(result)
 }
