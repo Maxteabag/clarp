@@ -40,7 +40,7 @@ fn row(value: Value) -> Message {
 }
 
 fn options(expanded: &[&str], host_now_ms: i64) -> Options {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false, show_commentary: false, veil: false }
+    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), host_now_ms, fold_running: false, hide_settled: false, show_commentary: false, veil: false, whole_turn: false }
 }
 
 fn titles(presented: &Presented) -> Vec<String> {
@@ -894,14 +894,17 @@ fn the_working_line_goes_below_a_message_read_into_the_running_turn() {
     assert_eq!(shown_order(&before, &rows), ["u-go", "live:fold:tr-s", "u-steer"], "without read_rows, as before");
     let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &grouped);
     assert_eq!(read.read_rows, ["u-steer"]);
-    assert_eq!(shown_order(&read, &rows), ["u-go", "u-steer", "live:fold:tr-s"], "Working below the steered message");
-    // Each step in its row: what ran before the message stays above it,
-    // the step that still runs is the working line and goes below it.
+    // What ran before the message folds above it, Working goes below it
+    // (#843): the order the settled turn keeps.
+    assert_eq!(shown_order(&read, &rows), ["u-go", "live:fold:tr-s@u-steer", "u-steer", "live:fold:tr-s"], "Working below the steered message");
+    assert_eq!(titles(&read), ["2 tools", "Working"]);
+    // Each step in its row keeps the place its time gives it, running or
+    // not: both began before the message.
     let open = options(&[], 0);
     let before = present(&steered_turn(None), &rows, &open);
     assert_eq!(shown_order(&before, &rows), ["u-go", "live:cl:s1", "live:cl:s2", "u-steer"]);
     let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &open);
-    assert_eq!(shown_order(&read, &rows), ["u-go", "live:cl:s1", "u-steer", "live:cl:s2"]);
+    assert_eq!(shown_order(&read, &rows), ["u-go", "live:cl:s1", "live:cl:s2", "u-steer"]);
 }
 
 #[test]
@@ -913,5 +916,5 @@ fn a_message_that_waits_for_the_next_turn_stays_below_the_working_line() {
     let mut grouped = options(&[], 0);
     grouped.fold_running = true;
     let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &grouped);
-    assert_eq!(shown_order(&read, &rows), ["u-go", "u-steer", "live:fold:tr-s", "u-waits"]);
+    assert_eq!(shown_order(&read, &rows), ["u-go", "live:fold:tr-s@u-steer", "u-steer", "live:fold:tr-s", "u-waits"]);
 }

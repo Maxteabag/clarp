@@ -41,6 +41,7 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
         hide_settled: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::HIDE_WHEN_DONE,
         show_commentary: !conversation && engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
         veil: veils(engine, session),
+        whole_turn: conversation,
     };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
     let running = view.turn().is_some_and(|t| matches!(t.get("status").and_then(|s| s.as_str()), Some("running") | None));
@@ -199,6 +200,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         show_commentary: engine.chat_activity_mode(session) == clarp_core::presentation::ALWAYS_VISIBLE,
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
         veil: veils(engine, session),
+        whole_turn: conversation_view(engine, session, rows),
     };
     let mut folded = clarp_core::history_fold::present(rows, view, &options);
     if conversation_view(engine, session, rows) {

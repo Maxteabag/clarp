@@ -196,9 +196,11 @@ pub fn project(rows: &[Message], expanded: &HashSet<String>) -> Projection {
 }
 
 /// The turn a history fold or a live fold stands for, from its key
-/// (`live:fold:<turn>`, `live:handoff:<turn>`).
+/// (`live:fold:<turn>`, `live:handoff:<turn>`, or a part of its work that
+/// ran before a message it read, `live:fold:<turn>@<row>`).
 pub fn fold_turn(key: &str) -> &str {
-    key.strip_prefix("live:fold:").or_else(|| key.strip_prefix("live:handoff:")).unwrap_or_default()
+    let turn = key.strip_prefix("live:fold:").or_else(|| key.strip_prefix("live:handoff:")).unwrap_or_default();
+    turn.split(crate::live_present::PART).next().unwrap_or_default()
 }
 
 /// Whether an entry of a finished turn stays in the conversation view:
