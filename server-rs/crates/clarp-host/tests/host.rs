@@ -105,6 +105,8 @@ mod issue_278;
 mod issue_314;
 #[path = "host/janitor_attention.rs"]
 mod janitor_attention;
+#[path = "host/lane_settings.rs"]
+mod lane_settings;
 #[path = "host/language_set.rs"]
 mod language_set;
 #[path = "host/launch_directories.rs"]

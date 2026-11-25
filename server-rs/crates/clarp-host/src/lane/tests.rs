@@ -10,7 +10,8 @@ use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
 use super::{
-    Endpoint, Place, Room, Settings, Tool, make_room, make_way_within, once_more, replied,
+    Endpoint, Place, Room, Settings, Tool, held, lanes_in, make_room, make_way_within, once_more,
+    replied,
 };
 
 fn of(text: &str) -> Settings {
@@ -482,5 +483,43 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     make_way_within(&run, "other", std::time::Duration::from_secs(5));
     assert_eq!(leaving.asked(), ["retire"]);
     assert!(leaving.endpoint.released().unwrap());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[tokio::test]
+async fn what_the_lanes_hold_is_asked_of_all_at_once_within_one_deadline() {
+    let run = run_dir("held");
+    let mut weighed = status("t", "d", 5, true);
+    weighed["memory_bytes"] = json!(100 * MIB);
+    let _answers = FakeLane::start(&run, "a", weighed);
+    let _unweighed = FakeLane::start(&run, "b", status("t", "d", 5, false));
+    // Three lanes that take the connection and never answer.
+    let silent: Vec<UnixListener> = ["c", "d", "e"]
+        .iter()
+        .map(|agent| UnixListener::bind(Endpoint::of(Tool::Codex, &run, agent).socket()).unwrap())
+        .collect();
+    // And the socket of a lane that has left: nothing listens on it.
+    drop(UnixListener::bind(Endpoint::of(Tool::Claude, &run, "f").socket()).unwrap());
+    let lanes = tokio::task::spawn_blocking({
+        let run = run.clone();
+        move || lanes_in(&run)
+    })
+    .await
+    .unwrap();
+    assert_eq!(lanes.len(), 6);
+    let bound = std::time::Duration::from_millis(400);
+    let began = std::time::Instant::now();
+    let holding = held(lanes, tokio::time::Instant::now() + bound).await;
+    let took = began.elapsed();
+    assert!(
+        took >= bound && took < bound * 3,
+        "{took:?}: the silent lanes were asked at once"
+    );
+    assert_eq!(holding.unanswered, 3);
+    assert_eq!(holding.tools[0].lanes, 2);
+    assert_eq!(holding.tools[0].busy, 1);
+    assert_eq!(holding.tools[0].bytes, 100 * MIB + CODEX_LANE);
+    assert_eq!(holding.tools[1], super::Held::default());
+    drop(silent);
     std::fs::remove_dir_all(&run).unwrap();
 }

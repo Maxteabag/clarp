@@ -287,10 +287,10 @@ identity from `CLARP_PROVIDER_TURN_FILE` (`<run>/<agent>-turn.token`), which the
 lane rewrites at each turn. The apps do not yet advertise Codex steering
 (`supports_steer`); the Python Host steers Codex in its own way.
 
-## Claude chat turns on a kept process (Rust Host, not built into any release yet)
+## Claude chat turns on a kept process (Rust Host)
 
-On a Rust Host built with issue 761's Claude lane (branch `speed-loop/claude-driver` until it
-lands; check that `clarp-host` knows `claude_chat_lane` before you rely on it), a Claude agent's
+The owner switched the Claude lane on for both of his Rust Hosts on 25 Nov 2026. On a Rust Host
+with `claude_chat_lane = true`, a Claude agent's
 chat turns after the first can run on one kept `claude -p --input-format stream-json` per agent
 instead of a new `claude -p --resume` per message. It is off unless the owner sets it, and
 switching it on for the owner's agents is his decision. A top-level key of the Rust Host's own
@@ -310,6 +310,27 @@ model, effort, identity, MCP servers or account, an error or compaction, a termi
 start work that must outlive it with `clarp-background-jobs`. A lane is `<run>/<agent>-cll.sock`;
 its `inspect` shows the session, the claim, `claims` and `idle_ms`. Turning the key off is the
 rollback: the lane leaves before the agent's next turn.
+
+## Reading the lane settings (Rust Host, feature `lane_settings`)
+
+Only the owner changes the lane settings. Today he does that by editing the keys above in the Host's
+`config.toml`, or through `POST /lane-settings` with his own token. The apps do not show these
+settings yet. A "Kept processes" section in each Host's settings is coming to the iOS, Android and
+desktop apps. Do not change the settings for him, by the file or by the route, unless he asked you
+to. An agent may read them, on a Rust Host whose `GET /server-info` lists `lane_settings` in
+`features` (contract 178):
+
+```bash
+curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" "$CLARP_SERVER_URL/lane-settings"
+```
+
+It answers each tool's switch (`codex_chat_lane`, `claude_chat_lane`), `most`, `memory_mb`,
+`idle_minutes`, their `ranges`, and `held`: the lanes that run now, in total and per tool
+(`lanes`, `busy`, `memory_mb`), from each lane's own memory reading, with `unanswered` for lanes
+that did not answer within about two seconds. Reading it starts no lane.
+`POST /lane-settings` is refused to an agent's token (`403`) and to any request that carries a
+turn's `X-Clarp-Turn`. The shapes are in the Host's `docs/protocol.md`, "The owner's settings of
+lanes".
 
 ## Docker Container Administration
 

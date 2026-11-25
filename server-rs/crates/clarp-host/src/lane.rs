@@ -60,7 +60,7 @@ impl Tool {
     }
 
     /// The owner's switch that runs this tool's chat turns on lanes.
-    fn switch(self) -> &'static str {
+    pub(crate) fn switch(self) -> &'static str {
         match self {
             Self::Codex => "codex_chat_lane",
             Self::Claude => "claude_chat_lane",
@@ -72,6 +72,14 @@ impl Tool {
         match self {
             Self::Codex => "-cxg.sock",
             Self::Claude => "-cll.sock",
+        }
+    }
+
+    /// How the tool is named in what the Host answers its apps (`GET /lane-settings`).
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Claude => "claude",
         }
     }
 
@@ -96,14 +104,14 @@ impl Tool {
     }
 }
 
-const MIB: u64 = 1024 * 1024;
+pub(crate) const MIB: u64 = 1024 * 1024;
 
 /// The idle time is shared by every tool's lanes. It keeps the name it had when Codex had the
 /// only lane, so an installed config (and `install-host`, which carries it) behaves as before.
-const IDLE_MINUTES: &str = "codex_lane_idle_minutes";
+pub(crate) const IDLE_MINUTES: &str = "codex_lane_idle_minutes";
 /// The cap: the memory all lanes of this Host may hold together, in MiB (the lead's decision of
 /// 24 Nov 2026, issue 761).
-const MEMORY_MB: &str = "lane_memory_mb";
+pub(crate) const MEMORY_MB: &str = "lane_memory_mb";
 /// 2,200 MB unless the owner says: what he approved for the Codex lane (eight lanes at about
 /// 270 MB each), so switching on lanes of other tools never quietly raises what he agreed to.
 const MEMORY_MB_DEFAULT: u64 = 2_200;
@@ -111,7 +119,7 @@ const MEMORY_MB_DEFAULT: u64 = 2_200;
 /// beside the budget, with the meaning it had when it was the only one (the lead's decision of
 /// 25 Nov 2026). Idle Codex lanes measure 83-142 MiB of PSS, so the budget alone would keep
 /// 15-20 of them; the count keeps the eight the owner agreed to.
-const MOST: &str = "codex_lane_most";
+pub(crate) const MOST: &str = "codex_lane_most";
 
 /// The two limits all lanes of a Host are kept within, whatever their tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,11 +154,14 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub(crate) fn read() -> Self {
-        let path = crate::config::host_config_dir().join("config.toml");
-        Self::of(crate::owner::OwnerFile::new(Some(path)).read().as_ref())
+        Self::of(
+            crate::owner::OwnerFile::new(Some(config_path()))
+                .read()
+                .as_ref(),
+        )
     }
 
-    fn of(file: Option<&toml::Table>) -> Self {
+    pub(crate) fn of(file: Option<&toml::Table>) -> Self {
         let number = |key: &str, default: i64| {
             file.and_then(|file| file.get(key))
                 .and_then(toml::Value::as_integer)
@@ -190,6 +201,12 @@ impl Settings {
             .position(|each| *each == tool)
             .is_some_and(|at| self.chat[at])
     }
+}
+
+/// The Host's own `config.toml`, where the owner's settings of lanes are: what [`Settings::read`]
+/// reads and `POST /lane-settings` writes.
+pub(crate) fn config_path() -> PathBuf {
+    crate::config::host_config_dir().join("config.toml")
 }
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
@@ -324,6 +341,23 @@ impl Endpoint {
         replied(&mut BufReader::new(stream), self.tool)
     }
 
+    /// What the lane is, asked without blocking a thread: a connect that cannot be taken (the
+    /// lane's queue is full, or nothing listens) fails or waits as a future, so the one who asks
+    /// bounds the whole of it with a deadline.
+    async fn inspect_async(&self) -> io::Result<Status> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::UnixStream::connect(&self.socket).await?;
+        let mut request = serde_json::to_vec(&Lifecycle::Inspect).map_err(io::Error::other)?;
+        request.push(b'\n');
+        stream.write_all(&request).await?;
+        let mut answer = Vec::new();
+        tokio::io::BufReader::new(stream)
+            .take(MAX_STATE)
+            .read_until(b'\n', &mut answer)
+            .await?;
+        replied(&mut answer.as_slice(), self.tool)
+    }
+
     /// Losing a watcher says nothing about thread ownership. The agent must
     /// reconcile it with the lane lock/claim before choosing another launcher.
     pub(crate) fn watch<T: DeserializeOwned>(
@@ -452,32 +486,11 @@ pub(crate) fn once_more<T>(
 /// and counts. Read only when a lane is about to start. The Host reads no `/proc` here: each
 /// lane weighed itself, in its own process.
 fn make_room(run: &Path, own: &Endpoint, room: Room) {
-    let Ok(entries) = std::fs::read_dir(run) else {
-        return;
-    };
     let mut idle = Vec::new();
     let mut live = 1usize;
     let mut held = own.tool.typical_bytes();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path == own.socket {
-            continue;
-        }
-        let Some(lane) = Endpoint::found(path) else {
-            continue;
-        };
-        // Asked, not locked: taking another lane's owner lock, even for a moment, could make
-        // a lane of that agent that starts in that moment fail (review of 23 Nov 2026).
-        let Ok(state) = lane.inspect() else {
-            continue;
-        };
-        // A weight that is not there, or is nothing, is no reading: the lane counts at its
-        // estimate, never at 0, so the budget bounds the lanes even where `/proc` cannot be
-        // read (review of 25 Nov 2026).
-        let memory = state
-            .memory_bytes
-            .filter(|bytes| *bytes > 0)
-            .unwrap_or_else(|| lane.tool.typical_bytes());
+    for (lane, state) in answering(run, &own.socket) {
+        let memory = weight(&lane, &state);
         live += 1;
         held = held.saturating_add(memory);
         if state.claim.is_none() && state.available {
@@ -494,6 +507,104 @@ fn make_room(run: &Path, own: &Endpoint, room: Room) {
             held = held.saturating_sub(memory);
         }
     }
+}
+
+/// Every lane in the run folder but `skip` that answers what it is, with its answer. A socket
+/// nothing answers on (a lane that has left) is passed over.
+fn answering(run: &Path, skip: &Path) -> Vec<(Endpoint, Status)> {
+    lanes_in(run)
+        .into_iter()
+        .filter(|lane| lane.socket != skip)
+        // Asked, not locked: taking another lane's owner lock, even for a moment, could make
+        // a lane of that agent that starts in that moment fail (review of 23 Nov 2026).
+        .filter_map(|lane| {
+            let state = lane.inspect().ok()?;
+            Some((lane, state))
+        })
+        .collect()
+}
+
+/// The lanes whose sockets are in the run folder, by their names. Blocking.
+pub(crate) fn lanes_in(run: &Path) -> Vec<Endpoint> {
+    let Ok(entries) = std::fs::read_dir(run) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| Endpoint::found(entry.path()))
+        .collect()
+}
+
+/// What a lane counts at in the memory budget: what it weighed itself. A weight that is not
+/// there, or is nothing, is no reading: the lane counts at its tool's typical size, never at 0,
+/// so the budget bounds the lanes even where `/proc` cannot be read (review of 25 Nov 2026).
+fn weight(lane: &Endpoint, state: &Status) -> u64 {
+    state
+        .memory_bytes
+        .filter(|bytes| *bytes > 0)
+        .unwrap_or_else(|| lane.tool.typical_bytes())
+}
+
+/// What the lanes of one tool hold now.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Held {
+    /// Lanes that run, busy or idle.
+    pub lanes: usize,
+    /// Of them, those that hold a turn or work that may continue.
+    pub busy: usize,
+    /// What they hold together, counted as the memory budget counts them.
+    pub bytes: u64,
+}
+
+/// What this Host's lanes hold now, and how many of them did not answer in time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Holding {
+    /// Per tool, in the order of [`Tool::ALL`].
+    pub tools: [Held; Tool::ALL.len()],
+    /// Lanes that were asked and had not answered by the deadline: not counted in `tools`.
+    pub unanswered: usize,
+}
+
+/// How long `/lane-settings` waits for the lanes' answers, all of them together: they are asked at
+/// once, so one lane that hangs, or many, never holds a settings screen longer than this.
+pub(crate) const HELD_LOOK: Duration = Duration::from_secs(2);
+
+/// What the lanes of `lanes` hold now: each is asked its state, all at once and within
+/// `deadline`, and counts at what it weighed itself in its own process, as when room is made. No
+/// lane is started for it, and the Host reads no `/proc`. A lane nothing answers for (it has
+/// left) is not counted; one that has not answered by the deadline is counted as unanswered.
+pub(crate) async fn held(lanes: Vec<Endpoint>, deadline: tokio::time::Instant) -> Holding {
+    let mut asked = tokio::task::JoinSet::new();
+    for lane in lanes {
+        asked.spawn(async move {
+            let state = tokio::time::timeout_at(deadline, lane.inspect_async()).await;
+            (lane, state)
+        });
+    }
+    let mut holding = Holding::default();
+    while let Some(joined) = asked.join_next().await {
+        let Ok((lane, state)) = joined else {
+            continue;
+        };
+        let state = match state {
+            Ok(Ok(state)) => state,
+            Ok(Err(_)) => continue,
+            Err(_) => {
+                holding.unanswered += 1;
+                continue;
+            }
+        };
+        let Some(at) = Tool::ALL.iter().position(|tool| *tool == lane.tool) else {
+            continue;
+        };
+        let tool = &mut holding.tools[at];
+        tool.lanes += 1;
+        if state.claim.is_some() || !state.available {
+            tool.busy += 1;
+        }
+        tool.bytes = tool.bytes.saturating_add(weight(&lane, &state));
+    }
+    holding
 }
 
 #[derive(serde::Deserialize)]

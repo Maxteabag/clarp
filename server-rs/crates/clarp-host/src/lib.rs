@@ -67,6 +67,7 @@ pub mod kept_registry;
 pub mod label_checker;
 pub mod labels;
 mod lane;
+mod lane_settings;
 pub mod launch_directories;
 pub mod launcher;
 pub mod library;

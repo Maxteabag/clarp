@@ -53,6 +53,11 @@ codex_lane_most = 8           # live lanes this Host keeps, of every tool (the d
 lane_memory_mb = 2200         # what they may hold together, in MiB of PSS (the default)
 ```
 
+The owner changes them from his apps too (issue 779, feature `lane_settings`): `POST
+/lane-settings` writes the same keys into the same file, keeping the rest of it, and `GET
+/lane-settings` says them with what the lanes hold now (`docs/protocol.md`). An edit by hand works
+as before.
+
 - **One switch per tool.** `codex_chat_lane` and `claude_chat_lane`. The switches for Muse and
   OpenCode come with their drivers.
 - **The idle time and the count are shared by every tool's lanes.** They keep the names they

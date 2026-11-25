@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 177;
+pub const HOST_CONTRACT: u64 = 178;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -417,6 +417,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // a hard limit (`provider-limit`) is not told while a seat would take the turn, and a turn
     // that waits for an account shows the pool's reset.
     ("quota_pool", 176),
+    // The owner's settings of lanes from his apps: `GET /lane-settings` gives each tool's
+    // switch, the count and memory all lanes share, the idle time and what the lanes hold now
+    // (an agent's tools may read it too); `POST /lane-settings` changes them with the owner's
+    // token only, in the Host's `config.toml`, and every app is told
+    // (`lane-settings-updated`, issue 779).
+    ("lane_settings", 178),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -666,6 +672,14 @@ impl ApiError {
         }
     }
 
+    /// An error answered with this whole body; `error` says it in words, for a tool.
+    pub(crate) fn custom(status: StatusCode, error: impl Into<String>, body: Value) -> Self {
+        Self {
+            body: ErrorBody::Custom(Box::new(body)),
+            ..Self::new(status, error)
+        }
+    }
+
     /// The status this error is answered with.
     pub(crate) fn status(&self) -> StatusCode {
         self.status
@@ -776,6 +790,10 @@ pub fn router(app: App) -> Router {
         .route(
             "/coordination-settings",
             get(crate::hidden_coordination::get).post(crate::hidden_coordination::set),
+        )
+        .route(
+            "/lane-settings",
+            get(crate::lane_settings::get).post(crate::lane_settings::set),
         )
         .route("/agent-notes", post(crate::coordination::agent_note))
         .route("/orchestrator/route-delegation", post(route_delegation))
@@ -1173,7 +1191,8 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     // event. Job detail, cancellation and other app routes keep their own scope.
     if matches!(principal, Principal::Tools) {
         return !((method == Method::POST && path == "/calendar/request")
-            || (method == Method::GET && path == "/background-jobs"));
+            || (method == Method::GET && path == "/background-jobs")
+            || (method == Method::GET && path == "/lane-settings"));
     }
     let Principal::Device {
         scope: Scope::Limited,

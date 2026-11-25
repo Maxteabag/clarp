@@ -1058,6 +1058,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
 | `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only, and only to a Live-capable client: an iPhone's VoIP registration or an Android phone's push row declares `agent_live_v1`); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
+| `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `most`, `memory_mb`, `idle_minutes` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
@@ -1789,6 +1790,79 @@ sent nothing). It is sent once per turn and reason, however many clips of that r
   No retry and no notification.
 - Lines spoken outside a turn (announcements, notes) have no reply row and send nothing yet.
 - An older client shows `message` where it shows `tts-error` today (a status line).
+
+### The owner's settings of lanes: `/lane-settings` (feature `lane_settings`, Rust Host contract 178)
+
+A Rust Host can keep an agent's tool running between its chat turns (a lane: Codex's app-server,
+a kept Claude Code). The owner switches lanes on per tool and sets two limits that all lanes of
+the Host share. A full-scope device or the Host's own token reads and changes them; an agent's
+own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do neither.
+
+`GET /lane-settings` answers:
+
+```json
+{
+  "codex_chat_lane": true,
+  "claude_chat_lane": false,
+  "most": 8,
+  "memory_mb": 2200,
+  "idle_minutes": 15,
+  "ranges": {
+    "most": {"min": 1, "max": 32},
+    "memory_mb": {"min": 256, "max": 16384},
+    "idle_minutes": {"min": 1, "max": 240}
+  },
+  "held": {
+    "lanes": 2,
+    "memory_mb": 412,
+    "unanswered": 0,
+    "tools": {
+      "codex": {"lanes": 1, "busy": 0, "memory_mb": 140},
+      "claude": {"lanes": 1, "busy": 1, "memory_mb": 272}
+    }
+  }
+}
+```
+
+- `codex_chat_lane`, `claude_chat_lane`: whether that tool's chat turns run on lanes (off unless
+  set).
+- `most`: how many lanes the Host keeps, of every tool together. `memory_mb`: what they may hold
+  together, in MiB of proportional set size. A lane starts only when both allow it; the one idle
+  longest leaves first. `idle_minutes`: a lane with no turn leaves after this long.
+- These are the values the Host uses now (its defaults where the owner set none). A Host
+  configured by hand may hold a value outside `ranges`; show it as it is.
+- `held`: the lanes that run now, from each lane's own reading of its memory. `busy` counts those
+  that hold a turn. A lane that has not weighed itself yet counts at its tool's typical size, as
+  the budget counts it. The lanes are asked all at once, and the Host waits for them at most about
+  two seconds together. A lane that has not answered by then is left out of `lanes` and
+  `memory_mb` and counted in `unanswered`. Reading this never starts a lane.
+
+`POST /lane-settings` takes any of `codex_chat_lane`, `claude_chat_lane` (booleans), `most`,
+`memory_mb`, `idle_minutes` (whole numbers within `ranges`), and answers as `GET` does after the
+change. A key that is missing or `null` is left as it is. Other keys (`held`, `ranges`) are
+ignored. A value equal to the one the Host uses now is no change: it is not checked against its
+range and not written. So an app may send back what it read with one value changed, also where the
+owner set a value outside `ranges` by hand, and a default the owner never set is not written into
+the file. Every value that changes is checked before anything is written: one refusal changes
+nothing. Refusals have a `code`:
+
+- `400` `{"ok": false, "code": "out_of_range", "error": "most must be between 1 and 32", "setting": "most", "range": {"min": 1, "max": 32}}`;
+- `400` `wrong_type` (with `setting`, and `range` for a number);
+- `400` `nothing_to_change` (no known key named);
+- `400` `bad_json` (the body is not a JSON object);
+- `403` `{"error": "agents_may_not"}` for a request that names a turn (`X-Clarp-Turn`) or a peer
+  Host. An agent's own tools get `403` from their token's scope;
+- `409` `config_unreadable` when the Host's `config.toml` is not TOML, or holds a table under one
+  of these keys. It is not written over;
+- `500` `config_unwritable`.
+
+The settings are the top-level keys of the Host's own `config.toml` (`codex_chat_lane`,
+`claude_chat_lane`, `codex_lane_most`, `lane_memory_mb`, `codex_lane_idle_minutes`). A change is
+written into that file, with every other line, table and comment of it kept, and replaces the
+file in one rename. It takes effect at each tool's next turn: a lane switched off leaves before its
+agent's next turn, and a lower limit applies when the next lane starts. When something changed,
+every client is then sent `lane-settings-updated` with the new settings (without `held`). Read `GET /lane-settings` again
+on it. An older Host, or the Python Host, does not list `lane_settings` and answers `404`.
 
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 

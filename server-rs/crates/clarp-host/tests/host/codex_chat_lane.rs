@@ -353,7 +353,7 @@ for line in sys.stdin:
 
 /// A place whose Host runs Codex chat turns on lanes with `settings` added to the switch, and
 /// whose Codex is [`LANE_CODEX`]. Gives the place and the environment its Host starts with.
-fn lane_place(name: &str, settings: &str) -> (Place, Vec<(String, String)>) {
+pub(super) fn lane_place(name: &str, settings: &str) -> (Place, Vec<(String, String)>) {
     let place = Place::new(name);
     let codex = place.root.join("codex");
     program(&codex, LANE_CODEX);
@@ -385,12 +385,12 @@ fn start_lane_host(place: &Place, world: &[(String, String)]) -> Host {
     place.start_in("", &[], &world)
 }
 
-fn noted(place: &Place, name: &str) -> String {
+pub(super) fn noted(place: &Place, name: &str) -> String {
     std::fs::read_to_string(place.root.join(name)).unwrap_or_default()
 }
 
 /// A new Codex agent, and the socket its lane answers on.
-fn lane_agent(host: &Host, place: &Place, session: &str) -> std::path::PathBuf {
+pub(super) fn lane_agent(host: &Host, place: &Place, session: &str) -> std::path::PathBuf {
     let made = host.post(
         "/agents",
         json!({"name": session, "session": session, "backend": "codex"}),
@@ -418,13 +418,13 @@ fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
     serde_json::from_str(&line).ok()
 }
 
-fn lane_lives(socket: &std::path::Path) -> bool {
+pub(super) fn lane_lives(socket: &std::path::Path) -> bool {
     lane_said(socket, "inspect").is_some_and(|said| said["ok"] == true)
 }
 
 /// Asks every lane of a place to leave when the test ends, so none outlives it by its idle
 /// time. A lane that still runs a turn refuses, and its stand-in ends the turn within a minute.
-struct Lanes(std::path::PathBuf);
+pub(super) struct Lanes(pub(super) std::path::PathBuf);
 
 impl Drop for Lanes {
     fn drop(&mut self) {
@@ -449,7 +449,7 @@ fn answers(host: &Host, session: &str, text: &str) -> usize {
 }
 
 /// Sends `word` and waits for its answer and the end of its turn.
-fn asked(host: &Host, session: &str, word: &str) {
+pub(super) fn asked(host: &Host, session: &str, word: &str) {
     host.send(session, word, word);
     let answer = format!("said-{word}");
     wait_for(&answer, || answers(host, session, &answer) == 1);

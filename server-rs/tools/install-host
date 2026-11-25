@@ -754,10 +754,18 @@ if [ ! -s "$config/env" ]; then
     (umask 077; printf 'CLARP_HOST_TOKEN=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-48)" > "$config/env")
 fi
 token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env")"
+# The owner's apps change this file too (POST /lane-settings, issue 779): under a flock on its folder,
+# by a rename. The install holds the same lock from its read of the file to its own rename, so neither
+# loses the other's change, and a reader sees the old file or the new one, never a part of one. A
+# symbolic link is followed and kept, as the Host does.
+config_file="$(readlink -f "$own_config")"
+config_new="$(dirname "$config_file")/.$(basename "$config_file").new"
+exec 9<"$(dirname "$config_file")"
+flock 9
 # Keep the owner's public URL, web read origins, experience watcher settings and the agents named for
 # conversation forks (issue 718): an install must not turn a fork off. And the Hotseat switcher's banked-reset
 # settings ([agents] claude_reset_command, codex_reset_command, codex_reset_max_per_day, reset_tell).
-carried_config="$(python3 - "$own_config" <<'PYTHON'
+carried_config="$(python3 - "$config_file" <<'PYTHON'
 from datetime import date, time
 import json
 import re
@@ -821,7 +829,7 @@ PYTHON
 )"
 # And the owner's switches of lanes (issues 742 and 761): top-level keys, which the Host reads only
 # before any table, so they are written above [server].
-carried_top="$(python3 - "$own_config" <<'PYTHON'
+carried_top="$(python3 - "$config_file" <<'PYTHON'
 import sys
 import tomllib
 
@@ -846,7 +854,8 @@ for name, kind in (("codex_chat_lane", bool), ("claude_chat_lane", bool), ("code
 PYTHON
 )"
 # What the agents' Clarp tools read to find their Host: this one.
-(umask 077; cat > "$config/config.toml" <<EOF
+(umask 077; {
+cat <<EOF
 # Written by install-host. An agent on the Rust Host finds its Host here: a turn is told
 # where its Host is, and a worker an agent left running reads it from this file.
 ${carried_top:+$carried_top
@@ -857,13 +866,15 @@ port = $port
 auth_token = "$token"
 EOF
     if [ -n "$carried_config" ]; then
-        printf '%s\n' "$carried_config" >> "$config/config.toml"
+        printf '%s\n' "$carried_config"
     fi
     # Whether phones reach this Host through the connection relay: the Host reads it here.
     if [ "$relay_config" = "$own_config" ] && [ "$relay_switch" = on ]; then
-        printf '\n[network]\nrelay_enabled = true\n' >> "$config/config.toml"
+        printf '\n[network]\nrelay_enabled = true\n'
     fi
-)
+} > "$config_new")
+mv -f "$config_new" "$config_file"
+exec 9<&-
 
 cat > "$units/clarp-host.service" <<EOF
 # Written by server-rs/tools/install-host. The Rust Clarp Host, version $version.
