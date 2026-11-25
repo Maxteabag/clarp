@@ -335,6 +335,22 @@ impl OwnerFile {
         self.read_text()?.parse().ok()
     }
 
+    /// Why the file that is named cannot be used now: it is there and cannot be read, or what
+    /// it holds is no TOML. `None` where it reads, where none is named, and where it is not
+    /// there (no file is no settings). [`Self::read`] gives an empty table in either case;
+    /// this tells them apart.
+    pub(crate) fn unreadable(&self) -> Option<String> {
+        let path = self.path.as_ref()?;
+        match std::fs::read_to_string(path) {
+            Ok(text) => text
+                .parse::<Table>()
+                .err()
+                .map(|error| format!("{}: not TOML: {error}", path.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => Some(format!("{}: {error}", path.display())),
+        }
+    }
+
     fn read_text(&self) -> Option<String> {
         std::fs::read_to_string(self.path.as_ref()?).ok()
     }
@@ -381,6 +397,25 @@ impl OwnerFile {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_that_is_there_and_cannot_be_used_is_told_apart_from_none() {
+        let dir =
+            std::env::temp_dir().join(format!("clarp-owner-unreadable-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let named = |name: &str| OwnerFile::new(Some(dir.join(name)));
+        assert_eq!(OwnerFile::new(None).unreadable(), None, "none named");
+        assert_eq!(named("absent.toml").unreadable(), None, "not there");
+        std::fs::write(dir.join("good.toml"), "[tts]\nprovider = 'cartesia'\n").unwrap();
+        assert_eq!(named("good.toml").unreadable(), None, "it reads");
+        std::fs::write(dir.join("half.toml"), "[tts\nprovider = ").unwrap();
+        let half = named("half.toml").unreadable().unwrap();
+        assert!(half.contains("not TOML"), "{half}");
+        // A folder where the file should be cannot be read as one.
+        std::fs::create_dir_all(dir.join("folder.toml")).unwrap();
+        assert!(named("folder.toml").unreadable().is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     const FILE: &str = r#"
 # The Python Host's own file, as much of it as matters here.

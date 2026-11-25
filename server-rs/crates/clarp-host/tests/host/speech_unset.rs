@@ -85,4 +85,40 @@ fn on_a_host_with_no_speech_set_up_a_reply_is_not_spoken_and_not_reported_unspok
         "nor is the form's answer reported unspoken"
     );
     assert_eq!(ours("audio"), 0);
+
+    // Nor is a decision's answer, asked aloud.
+    let (status, card) = host.ask(
+        "POST",
+        "/decisions",
+        Some(&json!({ "session": session, "title": "Ship it", "question": "Ship today?" })),
+    );
+    assert_eq!(status, 201, "{card}");
+    let id = card["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let resolved = host.ask(
+        "POST",
+        &format!("/decisions/{id}/resolve"),
+        Some(&json!({ "choice": "accepted", "expected_revision": 1, "synthesize_audio": true })),
+    );
+    assert_eq!(resolved.0, 200, "{}", resolved.1);
+    wait_for("the answer to the decision", || {
+        host.turns(&session)
+            .iter()
+            .filter(|row| row["role"] == "assistant")
+            .count()
+            == 3
+            && host.state(&session) == "done"
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let events = heard.lock().unwrap().clone();
+    let told = |kind: &str| {
+        events
+            .iter()
+            .filter(|event| event["type"] == kind && event["session"] == session.as_str())
+            .count()
+    };
+    assert_eq!(told("tts-error"), 0, "nor is the decision's answer");
+    assert_eq!(told("audio"), 0);
 }

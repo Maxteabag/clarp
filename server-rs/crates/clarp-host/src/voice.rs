@@ -249,6 +249,9 @@ pub struct Mouth {
     /// What the apps were told of lines not spoken, and which turns spoke: in memory only,
     /// bounded and pruned at every write (`voice_profile::Outcomes`).
     outcomes: Mutex<voice_profile::Outcomes>,
+    /// Whether the journal was told that the owner's file could not be read for
+    /// [`Self::can_speak`], since it last could: told once, not at every send.
+    unreadable_told: std::sync::atomic::AtomicBool,
 }
 
 /// How long Cartesia's list of voices is good for.
@@ -305,11 +308,24 @@ impl Mouth {
     /// speak it, its speech off or no engine it would be spoken by set up
     /// ([`voice_profile::unspeakable`], issue 802). The owner's file, and where Google is named
     /// its adapters' folder, are read off the runtime's threads, as [`Self::google_refusal`]
-    /// is. A read that could not be made leaves the turn as it was asked for.
+    /// is. A read that could not be made leaves the turn as it was asked for: an owner's file
+    /// that is there and cannot be read or is no TOML says nothing of its keys, and is not
+    /// taken as one that names none. The journal is told once, until the file reads again.
     pub(crate) async fn can_speak(self: &Arc<Self>, record: &AgentRecord) -> bool {
+        use std::sync::atomic::Ordering;
         let mouth = Arc::clone(self);
         let record = record.clone();
         tokio::task::spawn_blocking(move || {
+            if let Some(why) = mouth.owner.unreadable() {
+                if !mouth.unreadable_told.swap(true, Ordering::AcqRel) {
+                    eprintln!(
+                        "clarp-host: the owner's file cannot be read ({why}): a turn is \
+                         answered aloud where its sender asks, until it can"
+                    );
+                }
+                return true;
+            }
+            mouth.unreadable_told.store(false, Ordering::Release);
             let owners = mouth.owners();
             !voice_profile::unspeakable(&mouth.speech_view(&owners), speaker(&record))
         })
@@ -723,6 +739,7 @@ impl Waiting {
             bindings_ready: Default::default(),
             binding_admission: Default::default(),
             owner: OwnerFile::new(works.config.speech_keys.clone()),
+            unreadable_told: std::sync::atomic::AtomicBool::new(false),
             newest: Mutex::new(newest_clip(&audio)),
             audio,
             language: works.config.speech_language.clone(),
