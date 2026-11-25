@@ -1996,7 +1996,7 @@ impl Worker {
         let mut wait = REOPEN_FIRST;
         let mut mailbox = Mailbox::default();
         // How the journal names this thread when one request holds it long.
-        let thread = format!("the thread of agent {}", self.setup.record.session);
+        let thread = self.thread_name();
         loop {
             if self.actor.is_none() {
                 let opened = {
@@ -2164,11 +2164,10 @@ impl Worker {
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
             // waits for.
-            if let Err(error) = self
-                .handle(ask)
-                .and_then(|()| self.check_goals())
-                .and_then(|()| self.advance_native_goal())
-            {
+            if let Err(error) = self.handle(ask).and_then(|()| {
+                let _held = crate::held::Held::new(&thread, "its goals after a request");
+                self.check_goals().and_then(|()| self.advance_native_goal())
+            }) {
                 eprintln!(
                     "clarp-host: agent {} failed and is opened again: {error}",
                     self.setup.record.session
@@ -2176,6 +2175,31 @@ impl Worker {
                 self.actor = None;
             }
             self.tell_shown();
+        }
+    }
+
+    /// How the journal names this thread when something holds it long.
+    fn thread_name(&self) -> String {
+        format!("the thread of agent {}", self.setup.record.session)
+    }
+
+    /// Reads one window of the live turn's spool: what it wrote to the log is shown as soon as
+    /// it is there, and what follows from it (the next turn it starts) is done after that.
+    /// Answers what is left to show, and whether the spool may hold more (issue 831).
+    fn spool_step(&mut self) -> Result<(Outputs, bool), ActorError> {
+        loop {
+            let now = self.now_ms();
+            let Some(actor) = self.actor.as_mut() else {
+                return Ok((Outputs::default(), false));
+            };
+            match actor.spool_step(now)? {
+                (wrote, clarp_actor::Stepped::Wrote) => {
+                    self.after(wrote);
+                    self.tell_shown();
+                }
+                (out, clarp_actor::Stepped::More) => return Ok((out, true)),
+                (out, clarp_actor::Stepped::Done) => return Ok((out, false)),
+            }
         }
     }
 
@@ -3327,8 +3351,10 @@ impl Worker {
             // Read any input fence that reached the spool before this send, even if its
             // wakeup is still behind the send in the mailbox: to its end, each window shown
             // as soon as it is on disk (issue 831).
-            while let Some(actor) = self.actor.as_mut() {
-                let (read, more) = actor.spool_step(now)?;
+            let thread = self.thread_name();
+            let _held = crate::held::Held::new(&thread, "a send's reading of the spool first");
+            loop {
+                let (read, more) = self.spool_step()?;
                 self.after(read);
                 self.tell_shown();
                 if !more {
@@ -3460,12 +3486,15 @@ impl Worker {
                     let _ = answer.send(Err(Unavailable::new(why.into())));
                     return Ok(());
                 }
+                let thread = format!("the thread of agent {}", self.setup.record.session);
+                let held = crate::held::Held::new(&thread, "a send's commit");
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
                     .map(|sent| match sent {
                         Ok((sent, out)) => (Ok(sent), out),
                         Err(taken) => (Err(taken), Outputs::default()),
                     });
+                drop(held);
                 if !matches!(&sent, Ok((Ok(sent), _)) if !sent.duplicate && sent.turn.is_some()) {
                     made_way = None;
                 }
@@ -4132,7 +4161,7 @@ impl Worker {
                 // One window of the spool at a time: what it wrote is shown when this ask is
                 // done, and the next window is read with another, behind what waits in the
                 // mailbox (issue 831).
-                let (out, more) = actor.spool_step(now)?;
+                let (out, more) = self.spool_step()?;
                 if more {
                     let _ = self.tx.send(Ask::SpoolChanged);
                 }
@@ -4240,7 +4269,10 @@ impl Worker {
             Ask::Close(_) => return Ok(()),
         };
         // What follows from a command is done and published before its answer is given.
+        let thread = self.thread_name();
+        let held = crate::held::Held::new(&thread, "what follows a request, and its publishing");
         self.after(out);
+        drop(held);
         // The note behind the owner's message that went first: work nobody sits waiting for,
         // which a Stop of the owner's holds like the rest.
         if let Some((note, coordination)) = made_way

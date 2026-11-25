@@ -157,6 +157,8 @@ mod pictures;
 mod plan_closed;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/publish_window.rs"]
+mod publish_window;
 #[path = "host/question_cards.rs"]
 mod question_cards;
 #[path = "host/queue_provenance.rs"]

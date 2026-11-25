@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::conversation::{Versioned, Which};
 use clarp_actor::{
-    Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, TRACE_TAKEN, TraceTaken,
-    TurnFate,
+    Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, Stepped, TRACE_TAKEN,
+    TraceTaken, TurnFate,
 };
 use clarp_backend::Backend;
 use clarp_backend::claude::Claude;
@@ -1400,8 +1400,10 @@ impl AgentLog for Commits {
     }
 }
 
-/// A Claude agent whose commits are counted, with a turn running: its tool calls a tool, the
-/// tool returns, it answers and its process exits, all in the spool and none of it read yet.
+/// A Claude agent whose commits are counted, with a turn running and two messages waiting
+/// behind it (issue 831's run: a held message and one sent while the turn worked): the turn's
+/// tool calls a tool, the tool returns, it answers and its process exits, all in the spool and
+/// none of it read yet.
 fn a_turn_written_and_unread(name: &str) -> (World, Actor, Arc<AtomicU64>) {
     let mut world = World::new(name);
     world.backend = Arc::new(Claude::new());
@@ -1423,6 +1425,8 @@ fn a_turn_written_and_unread(name: &str) -> (World, Actor, Arc<AtomicU64>) {
     .unwrap();
     world.carry_out(&mut actor, out);
     world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "then this", Admission::Later);
+    world.send(&mut actor, "u-3", "and this", Admission::Queue);
     claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
     claude_returns(&mut world, 1, "t1", "a.txt", false);
     claude_message(&mut world, 1, "c", "Done.", &[]);
@@ -1445,65 +1449,83 @@ fn rows_on_disk(world: &World) -> Vec<String> {
 }
 
 /// Issue 831: a turn's spool read in steps goes to the log one window at a time, each window
-/// in one commit, and a step ends once its window is on disk: what it wrote can be shown
-/// before the next window is read, so the turn's answer is not held back until a long reading
-/// is over. The turn is not told over before its answer is on disk, and the steps together
-/// make no more commits than one reading of the whole spool.
+/// in one commit, and a step stops once its window is on disk, for what it wrote to be shown
+/// before anything follows from it. The turn's answer and its end are on disk, and shown, before
+/// the turn of the message that waited starts: its message file and its launch come with the
+/// next step. The steps together make the commits one reading of the whole spool makes, and
+/// leave the same conversation.
 #[test]
-fn a_spool_read_in_steps_is_on_disk_a_window_at_a_time() {
+fn a_spool_read_in_steps_shows_each_window_before_what_follows_it() {
     // One reading of the whole spool, as before: its commits, and where it leaves the chat.
     let (mut whole, mut read_whole, counted) = a_turn_written_and_unread("steps-whole");
     let before = counted.load(Ordering::SeqCst);
-    whole.hint(&mut read_whole);
+    let now = whole.tick();
+    let out = read_whole.spool_changed(now).unwrap();
     let whole_commits = counted.load(Ordering::SeqCst) - before;
+    whole.carry_out(&mut read_whole, out);
     let whole_chat = chat(&read_whole.tail(10).unwrap());
-    assert_eq!(
-        read_whole.status().last.unwrap().outcome,
-        Outcome::Completed
-    );
-    assert!(whole_commits >= 2, "the turn moved on: {whole_commits}");
+    assert_eq!(whole.took, [1, 2], "the waiting message ran next");
 
-    // The same spool, a step at a time.
+    // The same spool, a step at a time: what each step committed, and what was on disk and
+    // launched when it stopped.
     let (mut world, mut actor, counted) = a_turn_written_and_unread("steps");
     let _ = actor.take_shown(world.now_ms);
-    let mut steps: Vec<(u64, bool, Vec<String>)> = Vec::new();
+    let mut steps: Vec<(u64, Stepped, Vec<String>, bool)> = Vec::new();
     loop {
         let before = counted.load(Ordering::SeqCst);
         let now = world.tick();
-        let (out, more) = actor.spool_step(now).unwrap();
-        world.carry_out(&mut actor, out);
+        let (out, stepped) = actor.spool_step(now).unwrap();
+        let commits = counted.load(Ordering::SeqCst) - before;
         let on_disk = rows_on_disk(&world);
         // What is told of the turn is what is on disk: it is not over before its answer is.
         let _ = actor.take_shown(now);
         if actor.status().last.is_some() {
             assert!(on_disk.contains(&"r-c".to_string()), "{on_disk:?}");
         }
-        steps.push((counted.load(Ordering::SeqCst) - before, more, on_disk));
-        if !more {
+        let launches = out
+            .actions
+            .iter()
+            .any(|action| matches!(action, Action::Launch(_)));
+        steps.push((commits, stepped, on_disk, launches));
+        world.carry_out(&mut actor, out);
+        if stepped == Stepped::Done {
             break;
         }
         assert!(steps.len() < 20, "the steps end: {steps:?}");
     }
-    assert!(steps.len() >= 2, "more than one window: {steps:?}");
-    let (first_commits, first_more, first_on_disk) = &steps[0];
-    assert_eq!(*first_commits, 1, "the first window is one commit");
-    assert!(*first_more, "the first step says there is more to read");
+    let wrote: Vec<_> = steps
+        .iter()
+        .filter(|(_, stepped, ..)| *stepped == Stepped::Wrote)
+        .collect();
+    assert!(wrote.len() >= 2, "more than one window: {steps:?}");
+    for (commits, ..) in &wrote {
+        assert_eq!(*commits, 1, "a window is one commit: {steps:?}");
+    }
+    let (_, _, first_on_disk, _) = &steps[0];
     assert!(
         !first_on_disk.contains(&"r-c".to_string()),
         "the answer is read after the first window is on disk: {first_on_disk:?}"
     );
-    for (commits, more, _) in &steps {
-        if *more {
-            assert_eq!(
-                *commits, 1,
-                "a step that ends at a window commits it once: {steps:?}"
-            );
-        }
-    }
+    // The step that wrote the answer stopped there. The message that waited entered the
+    // conversation in the same commit as the turn's end (issue 798), but its turn was not
+    // started: its message file and its launch come with the next step, after the answer and
+    // the end were shown.
+    let answered = steps
+        .iter()
+        .position(|(_, _, on_disk, _)| on_disk.contains(&"r-c".to_string()))
+        .unwrap();
+    let (_, stepped, on_disk, launches) = &steps[answered];
+    assert_eq!(*stepped, Stepped::Wrote, "{steps:?}");
+    assert!(on_disk.contains(&"u-2".to_string()), "{on_disk:?}");
+    assert!(!launches, "{steps:?}");
+    let (_, stepped, _, launches) = &steps[answered + 1];
+    assert_eq!(*stepped, Stepped::More, "{steps:?}");
+    assert!(launches, "{steps:?}");
+    assert_eq!(world.took, [1, 2]);
+
     let stepped: u64 = steps.iter().map(|(commits, ..)| commits).sum();
     assert_eq!(stepped, whole_commits, "{steps:?}");
     assert_eq!(chat(&actor.tail(10).unwrap()), whole_chat);
-    assert_eq!(actor.status().last.unwrap().outcome, Outcome::Completed);
 }
 
 /// The headlines of the status lines among live events, in order.

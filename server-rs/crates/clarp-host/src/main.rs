@@ -59,6 +59,103 @@ fn host_clock() -> Arc<dyn Clock + Send + Sync> {
     Arc::new(SystemClock)
 }
 
+/// The agents' logs as the Host keeps them. The integration tests can make each commit to them
+/// take a while, as a sync does on a disk under pressure (issue 831).
+fn slow_disk(engine: Arc<dyn LogEngine>) -> Arc<dyn LogEngine> {
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var("CLARP_TEST_APPEND_DELAY_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+    {
+        return Arc::new(SlowDisk {
+            inner: engine,
+            delay: std::time::Duration::from_millis(ms),
+        });
+    }
+    engine
+}
+
+/// Logs each of whose commits waits a while before it is made.
+#[cfg(debug_assertions)]
+struct SlowDisk {
+    inner: Arc<dyn LogEngine>,
+    delay: std::time::Duration,
+}
+
+#[cfg(debug_assertions)]
+impl LogEngine for SlowDisk {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn open(
+        &self,
+        agent_dir: &std::path::Path,
+        codecs: clarp_ports::codec::CodecSet,
+    ) -> Result<Box<dyn clarp_ports::log::AgentLog>, clarp_ports::log::LogError> {
+        Ok(Box::new(SlowLog {
+            inner: self.inner.open(agent_dir, codecs)?,
+            delay: self.delay,
+        }))
+    }
+}
+
+#[cfg(debug_assertions)]
+struct SlowLog {
+    inner: Box<dyn clarp_ports::log::AgentLog>,
+    delay: std::time::Duration,
+}
+
+#[cfg(debug_assertions)]
+impl clarp_ports::log::AgentLog for SlowLog {
+    fn append(
+        &mut self,
+        items: &[clarp_ports::log::NewItem],
+    ) -> Result<clarp_ports::log::Seq, clarp_ports::log::LogError> {
+        std::thread::sleep(self.delay);
+        self.inner.append(items)
+    }
+    fn last_seq(&self) -> Result<clarp_ports::log::Seq, clarp_ports::log::LogError> {
+        self.inner.last_seq()
+    }
+    fn read_after(
+        &self,
+        after: clarp_ports::log::Seq,
+        kinds: clarp_ports::log::Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.read_after(after, kinds, limit)
+    }
+    fn read_before(
+        &self,
+        before: clarp_ports::log::Seq,
+        kinds: clarp_ports::log::Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.read_before(before, kinds, limit)
+    }
+    fn find(
+        &self,
+        key: &str,
+    ) -> Result<Option<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.find(key)
+    }
+    fn with_key_prefix(
+        &self,
+        prefix: &str,
+        kinds: clarp_ports::log::Kinds,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.with_key_prefix(prefix, kinds)
+    }
+    fn read_tail(
+        &self,
+        kinds: clarp_ports::log::Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.read_tail(kinds, limit)
+    }
+}
+
 /// The integration tests start the real Host in a child process and advance its clock
 /// through a fixture file, so a minute of cache expiry takes no wall time.
 #[cfg(debug_assertions)]
@@ -86,6 +183,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::pressure::install(pressure.clone());
     let (engine, tables) = engines(&config.engine)
         .ok_or_else(|| format!("there is no engine named `{}`", config.engine))?;
+    let engine = slow_disk(engine);
     let codecs = clarp_codec::standard_set(&config.codec)
         .ok_or_else(|| format!("there is no codec named `{}`", config.codec))?;
     let launcher = Launcher::by_name(&config.launcher, config.shim.clone())

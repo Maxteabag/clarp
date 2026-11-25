@@ -892,6 +892,10 @@ pub struct Actor {
     /// The pool is to be told that nothing of the agent's turn runs any more, once what
     /// says so is in the log.
     stopped_for_pool: bool,
+    /// A step of a spool reading ([`Actor::spool_step`]) wrote its window and stopped there,
+    /// for it to be shown: what follows from that window is done by the next step, which the
+    /// caller takes at once.
+    step_owes: Option<Vec<Effect>>,
     /// The launch of the turn's attempt is held until an account serves it: those who watch
     /// are shown that the turn waits for one.
     held_for_an_account: bool,
@@ -1602,6 +1606,7 @@ impl Actor {
             listener_heartbeat: None,
             pool: None,
             stopped_for_pool: false,
+            step_owes: None,
             held_for_an_account: false,
             for_its_model: false,
             network: None,
@@ -5062,15 +5067,21 @@ impl Actor {
         Ok(out)
     }
 
-    /// The live turn's spool may have grown: reads one window of it, the records up to where
-    /// the turn moved on to something else, and writes them to the log in one commit. Answers
-    /// whether the turn's spool may hold more, to be read with another step once what this
-    /// one wrote has been shown: a long reading shows each part as soon as it is on disk, not
-    /// all of them once the last is (issue 831).
-    pub fn spool_step(&mut self, now_ms: i64) -> Result<(Outputs, bool), ActorError> {
+    /// The live turn's spool may have grown: a step of reading it. A step that reads writes
+    /// one window of it to the log in one commit, the records up to where the turn moved on to
+    /// something else, and stops there ([`Stepped::Wrote`]), for what it wrote to be shown at
+    /// once; the next step does what follows from that window (the next turn it starts) and
+    /// says whether the spool may hold more. A long reading so shows each window as soon as it
+    /// is on disk, and a turn's answer before the turn after it starts (issue 831).
+    pub fn spool_step(&mut self, now_ms: i64) -> Result<(Outputs, Stepped), ActorError> {
         let mut out = Outputs::default();
-        let more = self.pump_as(&mut out, now_ms, Reading::Window)?;
-        Ok((out, more))
+        if let Some(effects) = self.step_owes.take() {
+            self.carry_out(effects, &mut out, now_ms)?;
+            self.after_main(&mut out, now_ms)?;
+            return Ok((out, Stepped::More));
+        }
+        let stepped = self.pump_as(&mut out, now_ms, Reading::Window)?;
+        Ok((out, stepped))
     }
 
     fn carry_out(
@@ -6425,39 +6436,50 @@ impl Actor {
         self.pump_as(out, now_ms, Reading::All).map(|_| ())
     }
 
-    /// [`Actor::pump`], reading the live turn's spool as far as `reading` says. Answers whether
-    /// that spool may hold more than was read.
+    /// [`Actor::pump`], reading the live turn's spool as far as `reading` says.
     fn pump_as(
         &mut self,
         out: &mut Outputs,
         now_ms: i64,
         reading: Reading,
-    ) -> Result<bool, ActorError> {
+    ) -> Result<Stepped, ActorError> {
+        // What a step left to do is done before anything else is read.
+        if let Some(effects) = self.step_owes.take() {
+            self.carry_out(effects, out, now_ms)?;
+        }
         self.pump_lingering(out, now_ms)?;
         self.pump_fork(out, now_ms)?;
-        let more = self.pump_main(out, now_ms, reading)?;
+        let stepped = self.pump_main(out, now_ms, reading)?;
+        if stepped == Stepped::Wrote {
+            return Ok(stepped);
+        }
+        self.after_main(out, now_ms)?;
+        Ok(stepped)
+    }
+
+    /// What follows a reading of the live turn's spool.
+    fn after_main(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         // A turn that ended before its process may have its exit in what was read already.
         self.pump_lingering(out, now_ms)?;
         self.fork_reconcile(out, now_ms)?;
-        self.resume_deferred(out, now_ms)?;
-        Ok(more)
+        self.resume_deferred(out, now_ms)
     }
 
     /// Reads what is new in the live turn's spool and writes what it means to the log, one
     /// commit for each window: the records up to where the turn moved on to something else,
-    /// or [`WINDOW`] of them. Answers whether it stopped after a window with more to read.
+    /// or [`WINDOW`] of them. Reading one window, it stops once that window is written.
     fn pump_main(
         &mut self,
         out: &mut Outputs,
         now_ms: i64,
         reading: Reading,
-    ) -> Result<bool, ActorError> {
+    ) -> Result<Stepped, ActorError> {
         loop {
             // The turn is shown from before its first record is read, and its end after its
             // last one was.
             self.show_turn(now_ms);
             let Some(live) = self.live.as_ref().filter(|live| !live.over) else {
-                return Ok(false);
+                return Ok(Stepped::Done);
             };
             let turn = live.turn;
             let spool = self.profile.spool_path_of(turn, live.attempt);
@@ -6465,7 +6487,7 @@ impl Actor {
                 .read_window(live.offset, u64::MAX, WINDOW)
                 .map_err(|error| io_error(&spool, error))?;
             if read.records.is_empty() && read.damaged.is_empty() {
-                return Ok(false);
+                return Ok(Stepped::Done);
             }
             out.damaged_lines += read.damaged.len();
             // Once the terminal record is in this read, a takeover marker cannot arrive
@@ -6477,10 +6499,10 @@ impl Actor {
                 out.changed.conversation = true;
                 out.changed.status = true;
                 out.changed.queue = true;
-                return Ok(false);
+                return Ok(Stepped::Done);
             }
             let Some(live) = self.live.as_mut() else {
-                return Ok(false);
+                return Ok(Stepped::Done);
             };
 
             let model = live.launch_model.clone().unwrap_or_default();
@@ -7253,7 +7275,13 @@ impl Actor {
             } else if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
-            self.carry_out(committed.effects, out, now_ms)?;
+            // Reading one window, what follows from it waits for the next step: what the window
+            // wrote is shown first.
+            if reading == Reading::Window {
+                self.step_owes = Some(committed.effects);
+            } else {
+                self.carry_out(committed.effects, out, now_ms)?;
+            }
             // That nothing of the turn runs any more is in the log: the pool is told.
             if std::mem::take(&mut self.stopped_for_pool)
                 && let Some(pool) = &self.pool
@@ -7267,12 +7295,25 @@ impl Actor {
                 out.passed.push(self.status());
             }
             // One window is in the log: a step ends here, for what it wrote to be shown before
-            // the next window is read. A turn no longer followed has nothing more to read.
+            // anything follows from it.
             if reading == Reading::Window {
-                return Ok(self.live.as_ref().is_some_and(|live| !live.over));
+                return Ok(Stepped::Wrote);
             }
         }
     }
+}
+
+/// Where a step of a spool reading ([`Actor::spool_step`]) left it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stepped {
+    /// It wrote one window to the log and stopped there. Show what it wrote, and take the next
+    /// step at once, before anything else is asked of the actor: that step does what follows
+    /// from the window.
+    Wrote,
+    /// The spool may hold more: another step reads on. Something else may be asked first.
+    More,
+    /// Nothing more was there to read.
+    Done,
 }
 
 /// How far [`Actor::pump`] reads the live turn's spool.
