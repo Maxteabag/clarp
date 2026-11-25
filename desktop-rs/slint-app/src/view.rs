@@ -245,11 +245,13 @@ pub(crate) fn stamp(epoch_millis: i64) -> String {
 }
 
 /// A working agent's row shows its turn's running time where the last
-/// message's time stands (#354); idle, or from a Host that does not say when
-/// the turn started, the last message's time.
+/// message's time stands (#354), said as a running time ("working 15s") so
+/// it never reads as a message's stamp beside the others' clock times; idle,
+/// or from a Host that does not say when the turn started, the last
+/// message's time.
 pub(crate) fn row_stamp(busy: bool, turn_started_at: Option<i64>, last_activity: i64) -> String {
     match turn_started_at {
-        Some(started) if busy => clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started),
+        Some(started) if busy => format!("working {}", clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started)),
         _ => stamp(last_activity),
     }
 }

@@ -446,12 +446,21 @@ export component Sidebar inherits Rectangle {
             Chip { label: "All"; on: root.scope == "all"; clicked => { root.scope = "all"; root.filter-changed(); } }
             Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.scope = "unread"; root.filter-changed(); } }
         }
-        if !root.showing-archive && (!root.minimal || root.showing-pairs): ListSwitch {
-            glyph: root.showing-pairs ? "‹" : "↔";
-            label: root.showing-pairs ? "Back to chats" : "Agent conversations";
+        // Each label is its own row, not one row's text swapped: the swap
+        // could leave the longer label's tail drawn behind the shorter one.
+        if !root.showing-archive && !root.showing-pairs && !root.minimal: ListSwitch {
+            glyph: "↔";
+            label: "Agent conversations";
             count: root.rooms.length;
             unread: root.unread-rooms;
-            clicked => { root.showing-pairs = !root.showing-pairs; }
+            clicked => { root.showing-pairs = true; }
+        }
+        if !root.showing-archive && root.showing-pairs: ListSwitch {
+            glyph: "‹";
+            label: "Back to chats";
+            count: root.rooms.length;
+            unread: root.unread-rooms;
+            clicked => { root.showing-pairs = false; }
         }
         if root.roster-note != "": HorizontalLayout {
             padding-left: 10px;
@@ -511,11 +520,17 @@ export component Sidebar inherits Rectangle {
               horizontal-alignment: center;
           }
         }
-        if !root.showing-pairs && (!root.minimal || root.showing-archive): ListSwitch {
-            glyph: root.showing-archive ? "‹" : "≡";
-            label: root.showing-archive ? "Back to chats" : "Archived";
+        if !root.showing-pairs && !root.showing-archive && !root.minimal: ListSwitch {
+            glyph: "≡";
+            label: "Archived";
             count: root.archived.length;
-            clicked => { root.showing-archive = !root.showing-archive; }
+            clicked => { root.showing-archive = true; }
+        }
+        if !root.showing-pairs && root.showing-archive: ListSwitch {
+            glyph: "‹";
+            label: "Back to chats";
+            count: root.archived.length;
+            clicked => { root.showing-archive = false; }
         }
     }
     // Level with the panes' frames (their pane pads 2px).

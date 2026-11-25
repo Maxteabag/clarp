@@ -2,6 +2,7 @@
 //! the rows in view (a frame walks a screenful, not the fleet), and the
 //! keyboard's cursor stays in view as it moves: J down past the last row
 //! in view, a jump to the last agent and back to the first, K up again.
+//! The row that swaps to agent conversations says only its own label.
 //! Needs the fake Host with `--roster 180`.
 
 use std::cell::Cell;
@@ -12,7 +13,7 @@ use std::time::Duration;
 use slint::Model;
 use slint::platform::Key;
 
-use super::{Rect, Stage, check, explorer_row, rect, report, run_stages, shot, within};
+use super::{Rect, Stage, check, explorer_row, labelled, rect, report, run_stages, shot, within};
 use crate::headless;
 
 /// The explorer's list, as drawn.
@@ -76,6 +77,7 @@ fn in_view(name: &'static str, what: &'static str, next: impl Fn(&crate::AppWind
 }
 
 pub fn explorer_check(out: String) {
+    let out2 = out.clone();
     let pressed = Rc::new(Cell::new(0usize));
     let pressed2 = pressed.clone();
     // When the last J went (the stage's clock).
@@ -138,8 +140,27 @@ pub fn explorer_check(out: String) {
         })),
         in_view("j from the top", "J from the top", |_| headless::press("k")),
         in_view("k", "K", |_| {}),
-        ("shot", Box::new(move |_, _, _| {
+        ("shot", Box::new(move |_, window, _| {
             shot(&out, "explorer-long");
+            window.invoke_show_pairs(true);
+            true
+        })),
+        // The header row's label changes whole: no tail of the other label.
+        ("back header", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(labelled("Back to chats").is_some(), "agent conversations show a Back to chats row");
+            check(labelled("Agent conversations").is_none(), "and no Agent conversations label under it");
+            shot(&out2, "explorer-back-header");
+            window.invoke_show_pairs(false);
+            true
+        })),
+        ("chats header", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(labelled("Agent conversations").is_some() && labelled("Back to chats").is_none(), "back in the chats, the row says Agent conversations again");
             true
         })),
     ];
