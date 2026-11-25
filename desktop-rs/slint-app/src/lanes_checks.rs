@@ -203,7 +203,7 @@ pub fn kept_processes_check(out: String) {
             let expected = pairs(&[
                 ("Live processes", "8 · 2 busy · 6 idle · 1945 MB"),
                 ("    Claude", "8 · 2 busy · 6 idle"),
-                ("Cold starts, last hour", "5"),
+                ("Cold starts, last hour", "5 · or since the Host started, if sooner"),
                 ("    Claude", "3"),
                 ("    Codex", "2"),
                 ("Pressure", "High · 2 turns held"),

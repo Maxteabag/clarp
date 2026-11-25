@@ -221,7 +221,9 @@ pub fn live_group(answer: &Object) -> Option<Group> {
 }
 
 /// The turns that started their tool anew in the last hour
-/// (`cold_starts_last_hour`): the total and a line per tool with any.
+/// (`cold_starts_last_hour`): the total and a line per tool with any. The
+/// Host counts since it started, and the app cannot tell whether that was
+/// within the hour, so the summary says so.
 pub fn cold_starts_group(answer: &Object) -> Option<Group> {
     let cold = answer.get("cold_starts_last_hour")?.as_object()?;
     let total = whole(cold.get("total"))?;
@@ -234,7 +236,7 @@ pub fn cold_starts_group(answer: &Object) -> Option<Group> {
         .map(|(name, n)| (tool_name(&name), n.to_string()))
         .collect();
     lines.sort();
-    Some(Group { title: "Cold starts, last hour".to_owned(), summary: total.to_string(), lines })
+    Some(Group { title: "Cold starts, last hour".to_owned(), summary: format!("{total} · or since the Host started, if sooner"), lines })
 }
 
 fn percent(value: f64) -> String {
@@ -489,7 +491,7 @@ mod tests {
         assert_eq!(live.summary, "5 · 2 busy · 3 idle · 1945 MB");
         assert_eq!(live.lines, vec![("Claude".to_owned(), "5 · 2 busy · 3 idle".to_owned())]);
         let cold = cold_starts_group(&a).unwrap();
-        assert_eq!(cold.summary, "4");
+        assert_eq!(cold.summary, "4 · or since the Host started, if sooner");
         assert_eq!(cold.lines, vec![("Claude".to_owned(), "3".to_owned()), ("Scripted".to_owned(), "1".to_owned())]);
         let pressure = pressure_group(&a).unwrap();
         assert_eq!(pressure.summary, "High · 2 turns held");
