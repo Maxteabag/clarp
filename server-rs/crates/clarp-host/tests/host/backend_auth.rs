@@ -809,10 +809,16 @@ esac
         .0,
         202
     );
-    wait_for("Grok login to finish and publish its new status", || {
-        let reading = read();
-        reading["tasks"]["grok"]["status"] == "complete"
-            && row(&reading, "grok")["state"] == "valid"
+    // A read builds the status rows before it reads the sign-in tasks. Under load one read
+    // can pair a status probed while the login still ran (and kept for that login) with a
+    // task that ended just after: the end of the login makes the next read probe once more,
+    // as it should (issue 799). So the task's end is waited for first, then the status that
+    // follows it, and only then are the checks counted.
+    wait_for("Grok login to finish", || {
+        read()["tasks"]["grok"]["status"] == "complete"
+    });
+    wait_for("the status after the login to be published", || {
+        status()["state"] == "valid"
     });
     let before = checks();
     assert!(before > 1);
