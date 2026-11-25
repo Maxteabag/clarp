@@ -26,7 +26,7 @@
 //! An error from an actor means its log or its files could not be read or written. The actor is
 //! then in no known state: drop it and open it again. That is the same path as a restart.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -749,6 +749,12 @@ struct LiveTurn {
     for_account: bool,
     /// How many tools the attempt has begun, for what is shown of it beside a fork's turn.
     tool_count: u32,
+    /// The calls of the attempt counted in `tool_count`, by id.
+    counted: HashSet<String>,
+    /// How many of them were first seen already done (a file change Codex tells only when it is
+    /// over): no beginning of theirs was told, so the turn's count of its work missed them, and
+    /// its end adds them (issue 801).
+    came_done: u32,
     /// The turn is a call's (its opening, or a message spoken in a call): someone listens.
     in_call: bool,
     /// The attempt's tool said its account is out until then.
@@ -793,6 +799,7 @@ impl LiveTurn {
             cost: self.cost,
             cost_before: self.cost_before,
             notes: 0,
+            came_done: self.came_done,
         }
     }
 }
@@ -1308,6 +1315,8 @@ struct Facts {
     cost_before: Option<u64>,
     /// How many notes the turn left for its user.
     notes: u32,
+    /// How many of its calls came already done, and are counted only here ([`LiveTurn`]).
+    came_done: u32,
 }
 
 /// What the user's compaction whose turn ended in this batch did, in the same write: from the
@@ -1350,6 +1359,9 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
         end.reason = clarp_kernel::conversation::end_reason(&ended.outcome, model);
     }
     end.note_count = facts.notes;
+    // Every call the turn made is counted, as those who watched it were shown them: one that
+    // came already done was never told as the turn's activity (issue 801).
+    end.tool_count = end.tool_count.saturating_add(facts.came_done);
     end.trace_id = facts.trace_id;
     end.model = facts.model;
     end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
@@ -1721,6 +1733,8 @@ impl Actor {
                 attempt,
                 for_account: false,
                 tool_count: 0,
+                counted: HashSet::new(),
+                came_done: 0,
                 in_call,
                 out_until_ms: None,
                 answered: false,
@@ -5390,6 +5404,8 @@ impl Actor {
             attempt,
             for_account: false,
             tool_count: 0,
+            counted: HashSet::new(),
+            came_done: 0,
             in_call,
             out_until_ms: None,
             answered: false,
@@ -5566,6 +5582,8 @@ impl Actor {
             .begin_turn(&session, &conversation, &name, Some(began), audience, began);
         self.shown_turn = Some((turn, name.clone()));
         let stopped_at = self.recorder.agent().stopping_since_ms();
+        let mut counted_calls: HashSet<String> = HashSet::new();
+        let mut came_done: u32 = 0;
         while offset < until {
             let read = reader
                 .read_window(offset, until, WINDOW)
@@ -5610,6 +5628,12 @@ impl Actor {
                             }
                         }
                         Signal::Tool(call) => {
+                            // Counted as the turn first counted it ([`LiveTurn::came_done`]).
+                            if counted_calls.insert(call.id.clone())
+                                && call.status != ToolStatus::Running
+                            {
+                                came_done = came_done.saturating_add(1);
+                            }
                             let known = tools.iter().any(|tool: &LiveTool| tool.id == call.id);
                             if call.reply.is_none()
                                 && (call.status == ToolStatus::Running || !known)
@@ -5762,6 +5786,8 @@ impl Actor {
             attempt,
             for_account: false,
             tool_count: 0,
+            counted: counted_calls,
+            came_done,
             in_call,
             out_until_ms: None,
             answered: false,
@@ -6870,8 +6896,14 @@ impl Actor {
                             {
                                 follow(&mut batch, live.said.work(), turn, t)?;
                             }
-                            if !known && call.status == ToolStatus::Running {
+                            // Every call is counted once, when it is first seen, also one that
+                            // comes already done (a file change): as those who watch the turn
+                            // are shown it (issue 801).
+                            if live.counted.insert(call.id.clone()) {
                                 live.tool_count = live.tool_count.saturating_add(1);
+                                if call.status != ToolStatus::Running {
+                                    live.came_done = live.came_done.saturating_add(1);
+                                }
                             }
                             follow_tool(&mut live.tools, &mut live.calls, &call);
                             Entry::Tool(call)

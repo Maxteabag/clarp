@@ -51,6 +51,8 @@ mod chat_view;
 mod claude_chat_lane;
 #[path = "host/codex_chat_lane.rs"]
 mod codex_chat_lane;
+#[path = "host/codex_counts.rs"]
+mod codex_counts;
 #[path = "host/codex_own_provider.rs"]
 mod codex_own_provider;
 #[path = "host/compaction_outcome.rs"]
