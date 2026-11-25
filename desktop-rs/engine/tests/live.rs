@@ -181,12 +181,24 @@ fn asked_for(host: &Host, skip: usize, sessions: &[&str]) -> bool {
     events_queries(host).iter().skip(skip).any(|q| q.get("live").and_then(Value::as_str) == Some(wanted.as_str()))
 }
 
+/// Agents of the fake Host by these names, listed in the roster before the
+/// test opens them: a selected chat the roster does not list is replaced by
+/// its first agent when a snapshot arrives, which would move the selection.
+fn add_agents(host: &Host, d: &mut Driver, names: &[&str]) {
+    for name in names {
+        host.control("/__control/add-agent", json!({"session": name, "persona": name}));
+    }
+    let names: Vec<String> = names.iter().map(|s| (*s).to_owned()).collect();
+    d.until("the roster lists the test agents", |e| names.iter().all(|n| e.roster().find(n).is_some()));
+}
+
 #[test]
 fn every_shown_pane_and_the_selected_chat_stay_live_and_only_the_rest_is_capped() {
     let host = Host::start("live-panes");
     host.control("/__control/live", json!({"on": true}));
     let mut d = Driver::new(&host.base);
     d.connect();
+    add_agents(&host, &mut d, &["p1", "p2", "p3", "p4", "b1", "b2", "b3", "b4", "b5", "b6"]);
     // Four panes shown, then a fifth to browse in.
     d.engine.select("p1");
     for session in ["p2", "p3", "p4", "b1"] {
@@ -218,6 +230,7 @@ fn after_a_reconnect_the_selected_chat_and_the_ones_opened_last_stay_live() {
     host.control("/__control/live", json!({"on": true}));
     let mut d = Driver::new(&host.base);
     d.connect();
+    add_agents(&host, &mut d, &["c1", "c2", "c3", "c4", "c5", "c6"]);
     for session in ["c1", "c2", "c3", "c4", "c5", "c6", "c2"] {
         d.engine.select(session);
     }
