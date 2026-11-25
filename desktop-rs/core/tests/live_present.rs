@@ -836,3 +836,17 @@ fn the_work_row_counts_folded_calls_and_says_its_time() {
     let p = present(&view(untimed, vec![failed("oc:f1", "f1", 1), answer]), &[], &options(&[], 0));
     assert!(p.entries.iter().all(|e| e.kind != Kind::Fold), "{:?}", titles(&p));
 }
+
+#[test]
+fn a_refused_tool_says_why_in_one_quiet_line_without_the_tags() {
+    let mut view = turn_full(after(13));
+    let refused = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 14, "ops": [
+        {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 2, "item": {"status": "failed", "tool": {"output": {
+            "tail": ["<tool_use_error>Blocked: standalone sleep 60.", "Use a loop instead.</tool_use_error>"], "total_lines": 2, "exit_code": 1}}}},
+    ]});
+    view.apply_event(refused.as_object().unwrap());
+    let tool = present(&view, &[], &options(&[], 1759480005000)).entries.last().unwrap().clone();
+    assert_eq!(tool.secondary, "Blocked: standalone sleep 60. Use a loop instead.");
+    assert!(tool.lines.is_empty() && !tool.expandable && !tool.explaining, "no output box: {:?}", tool.lines);
+    assert_eq!(clarp_core::live_present::refusal("plain output"), None);
+}

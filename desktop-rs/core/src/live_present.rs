@@ -682,6 +682,15 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
         entry.secondary = tool.get("command").and_then(Value::as_str).filter(|c| *c != label).unwrap_or_default().to_owned();
     }
     let tail: Vec<String> = output.and_then(|o| o.get("tail")).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+    // A tool the agent's runtime refused: its reason is one quiet line
+    // under the title, in plain words; the output box stays folded.
+    if let Some(reason) = refusal(&tail.join("\n")) {
+        entry.secondary = reason;
+        entry.explaining = false;
+        entry.reserve_secondary = false;
+        entry.expandable = false;
+        return;
+    }
     let total = output.and_then(|o| int(o, "total_lines")).unwrap_or(tail.len() as i64).max(tail.len() as i64) as usize;
     let preview: Vec<String> = diff.map(|d| text(d, "preview").lines().map(str::to_owned).collect()).unwrap_or_default();
     entry.expandable = !tail.is_empty() || !preview.is_empty();
@@ -702,6 +711,15 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
             entry.more = format!("+{} lines", total - entry.lines.len());
         }
     }
+}
+
+/// The reason a tool was refused, when `output` is the refusal the agent's
+/// runtime writes in its tool result (`<tool_use_error>reason</tool_use_error>`):
+/// the words inside, without the tags, on one line.
+pub fn refusal(output: &str) -> Option<String> {
+    let rest = output.trim().strip_prefix("<tool_use_error>")?;
+    let inner = rest.trim_end().strip_suffix("</tool_use_error>").unwrap_or(rest);
+    Some(inner.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
 fn explore_entry(group: &str, members: &[&Object], options: &Options) -> Entry {

@@ -531,8 +531,10 @@ pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {
     } else if let Some(input) = tool.get("input") {
         detail.push(input.as_str().map_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default(), str::to_owned));
     }
-    if !text("result").is_empty() {
-        detail.push(text("result"));
+    // A refused tool's result reads as its reason, without the tags.
+    let result = text("result");
+    if !result.is_empty() {
+        detail.push(clarp_core::live_present::refusal(&result).unwrap_or(result));
     }
     ToolRow {
         name: first(&["name", "action"], "Tool").into(),

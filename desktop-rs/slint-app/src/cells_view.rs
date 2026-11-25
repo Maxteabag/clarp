@@ -35,6 +35,8 @@ pub fn display_cell(cell: &Value) -> DisplayCell {
                 .iter()
                 .map(|line| {
                     let (label, value) = (text(line, "label"), text(line, "text"));
+                    // A refused tool's line reads as its reason, without the tags.
+                    let value = clarp_core::live_present::refusal(&value).unwrap_or(value);
                     CellLine { kind: text(line, "kind").into(), text: if label.is_empty() { value } else { format!("{label}  {value}") }.into() }
                 })
                 .collect()

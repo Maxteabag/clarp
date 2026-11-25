@@ -2,7 +2,9 @@
 //! do. Send shows only with something to send and sends it, as Enter does;
 //! Stop shows while the agent works and stops it, as Ctrl+. does; scrolled
 //! up from the end a jump-to-latest button floats over the chat (no row
-//! moves when it comes) and brings the chat back to its end, where it goes.
+//! moves when it comes), a dot on it when a message arrives below while
+//! the reader is up, and it brings the chat back to its end, where both go.
+//! Stop says its word beside its icon in the composer's one line.
 //! Needs the fake Host.
 
 use std::cell::Cell;
@@ -43,10 +45,27 @@ fn jump_id() -> String {
     format!("jump-latest:{}", app_now().active_id())
 }
 
+fn news_id() -> String {
+    format!("jump-news:{}", app_now().active_id())
+}
+
+/// Whether the open pane says there is news below.
+fn view_news() -> bool {
+    app_now().active_view().is_some_and(|v| v.news)
+}
+
+/// `count` turns, alternately the user's and the agent's.
+fn long_chat(count: usize) -> Vec<serde_json::Value> {
+    (0..count)
+        .map(|i| json!({"id": format!("long-{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" },
+            "text": format!("Line {i}: a note long enough to fill some of the chat's height on its own.")}))
+        .collect()
+}
+
 pub fn buttons_check(out: String) {
     let (out1, out2, out3) = (out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
-    let (end1, end2) = (box_at_end.clone(), box_at_end);
+    let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, elapsed| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
@@ -84,6 +103,11 @@ pub fn buttons_check(out: String) {
                 check(elapsed < Duration::from_secs(5), "while the agent works the composer shows Stop");
                 return elapsed >= Duration::from_secs(5);
             }
+            // It says Stop in words, in the composer's one line.
+            let stop = element("composer-stop").map(|e| e.size()).unwrap_or_default();
+            let editor = element("composer-editor").map(|e| e.size()).unwrap_or_default();
+            check(stop.width >= stop.height * 2.0, &format!("Stop shows its word beside the icon: {}x{}", stop.width, stop.height));
+            check(stop.height <= editor.height + 0.5, &format!("and keeps the composer one line high: Stop {} tall, the line {}", stop.height, editor.height));
             shot(&out2, "buttons-02-stop");
             check(press("composer-stop"), "Stop is pressed");
             true
@@ -98,11 +122,7 @@ pub fn buttons_check(out: String) {
             let set = control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "idle", "busy": false}}));
             check(set.is_ok(), "Rachel is idle again");
             // A long chat to scroll in.
-            let turns: Vec<_> = (0..40)
-                .map(|i| json!({"id": format!("long-{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" },
-                    "text": format!("Line {i}: a note long enough to fill some of the chat's height on its own.")}))
-                .collect();
-            check(control("/__control/turns", &json!({"session": "rachel", "turns": turns})).is_ok(), "the Host holds a long chat");
+            check(control("/__control/turns", &json!({"session": "rachel", "turns": long_chat(40)})).is_ok(), "the Host holds a long chat");
             headless::press(slint::platform::Key::F5);
             true
         })),
@@ -130,6 +150,19 @@ pub fn buttons_check(out: String) {
             }
             check(drawn(&jump_id()), "scrolled up, a jump-to-latest button shows");
             check(chat() == end2.get(), &format!("it floats: the chat keeps its place and size: {:?} then {:?}", end2.get(), chat()));
+            check(!drawn(&news_id()), "with nothing new below, it shows no news dot");
+            // A new message arrives below while the reader is up.
+            check(control("/__control/turns", &json!({"session": "rachel", "turns": long_chat(41)})).is_ok(), "the Host adds a message");
+            true
+        })),
+        ("news", Box::new(move |app, _, elapsed| {
+            let arrived = app.engine.borrow().conversation("rachel").is_some_and(|c| c.index_of("long-40").is_some());
+            if !arrived || !drawn(&news_id()) {
+                check(elapsed < Duration::from_secs(5), &format!("a message arriving while scrolled up puts a dot on the jump button (arrived {arrived})"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(!report().at_end, "the reader stays where they were");
+            check(chat() == end3.get(), "the dot moves no row: the chat keeps its place and size");
             shot(&out3, "buttons-03-jump");
             check(press(&jump_id()), "the jump button is pressed");
             true
@@ -143,6 +176,7 @@ pub fn buttons_check(out: String) {
                 return false;
             }
             check(!drawn(&jump_id()), "and goes at the end");
+            check(!drawn(&news_id()) && !view_news(), "and the news is read");
             true
         })),
     ];
