@@ -1205,6 +1205,10 @@ pub fn refresh_keys(app: &App, window: &AppWindow) {
     window.set_error_dismiss_key(shown(&["dismiss-error", "escape"]).into());
     window.set_save_warning_dismiss_key(shown(&["dismiss-layout-warning", "escape"]).into());
     window.set_save_warning_keep_key(shown(&["keep-layout"]).into());
+    // The composer's Stop and jump-to-latest buttons name their keys.
+    let keys = window.global::<crate::ComposerKeys>();
+    keys.set_stop(shown(&["stop-agent"]).into());
+    keys.set_latest(shown(&["jump-latest"]).into());
 }
 
 pub fn keymap_export(app: &App, window: &AppWindow) {

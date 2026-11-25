@@ -1,5 +1,5 @@
 import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight, ChromeText } from "theme.slint";
-import { Composer, Attachment, MentionRow } from "composer.slint";
+import { Composer, Attachment, MentionRow, TipButton, ComposerKeys } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
@@ -530,6 +530,29 @@ export component Pane inherits Rectangle {
             }
             menu-touch := TouchArea { mouse-cursor: pointer; clicked => { ChatMenu.opened(root.pane.id); } }
           }
+          // Scrolled up from the end: a button back to the latest, as
+          // Ctrl+End. It floats over the chat's corner and moves no row.
+          if root.pane.session != "" && !transcript.at-end && root.pane.messages.length > 0: Rectangle {
+            x: parent.width - Frame.side - self.width - 14px;
+            y: parent.height - Frame.bottom - self.height - 10px;
+            width: 34px;
+            height: 34px;
+            border-radius: 17px;
+            background: Palette.raised;
+            border-width: 1px;
+            border-color: Palette.border;
+            drop-shadow-blur: 6px;
+            drop-shadow-color: #00000050;
+            TipButton {
+                x: 1px;
+                y: 1px;
+                icon: @image-url("icons/latest.svg");
+                label: "Jump to latest";
+                tip: ComposerKeys.latest == "" ? "Latest" : "Latest · " + ComposerKeys.latest;
+                accessible-id: "jump-latest:" + root.pane.id;
+                clicked => { transcript.scroll-to-latest(); }
+            }
+          }
           if ChatMenu.open == root.pane.id: Rectangle {
             x: parent.width - self.width - 10px;
             y: 16px;
@@ -661,6 +684,20 @@ export component Pane inherits Rectangle {
                 padding-bottom: 7px;
                 alignment: start;
                 TypingIndicator { reduced-motion: ProfileBridge.reduced-motion; }
+            }
+            // The composer folded away holds no Stop: the working row does,
+            // floating at its right end (the row keeps its height).
+            if composer-box.folded && root.pane.busy && root.pane.session != "": TipButton {
+                x: parent.width - self.width - 8px;
+                y: (parent.height - self.height) / 2;
+                width: 24px;
+                height: 24px;
+                icon: @image-url("icons/stop.svg");
+                label: "Stop";
+                tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
+                tint: Palette.danger;
+                accessible-id: "working-stop:" + root.pane.id;
+                clicked => { root.stop(); }
             }
         }
         // Pair rooms are the Host's read-only projection: no composer.
