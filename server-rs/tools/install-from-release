@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Installs a Clarp Host (the Host in Rust) for the user who runs this, on Linux, from the newest
+# published build: no repository, no compiler.
+#
+#   curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash
+#   curl -fsSL .../install-from-release | bash -s -- --name "Studio" --listen 127.0.0.1:7690
+#
+# It downloads the assets of the rolling pre-release "host-builds" (.github/workflows/host-release.yml)
+# for this machine's architecture, checks them against the release's SHA256SUMS, unpacks the Host,
+# the skills and the installer of that one commit, and runs install-host from them with --start.
+# Every option given to it is passed on to install-host, whose comment lists them; run again, it
+# updates the Host in place and keeps what the installation was told before.
+#
+# It needs Linux with a systemd user session (the Host runs as a systemd user unit), curl and
+# python3. It never asks for a password and never uses sudo: what it cannot do as its user, it says,
+# and stops.
+#
+# CLARP_RELEASE names another release to install from (default: host-builds), CLARP_RELEASE_REPO
+# another repository (default: Maxteabag/clarp).
+
+# Everything is in one function, called on the last line: piped into bash, the whole script is
+# read before any of it runs, so nothing it starts can read the rest of it as its input.
+main() {
+    set -euo pipefail
+    local repo="${CLARP_RELEASE_REPO:-Maxteabag/clarp}"
+    local release="${CLARP_RELEASE:-host-builds}"
+    local base="https://github.com/$repo/releases/download/$release"
+    say() { printf 'install-from-release: %s\n' "$*" >&2; }
+
+    case "$(uname -s)" in
+        Linux) ;;
+        Darwin) say "The Clarp Host does not install on macOS yet; it runs on Linux with systemd."; exit 1 ;;
+        *) say "The Clarp Host installs on Linux with systemd only, and this is $(uname -s)."; exit 1 ;;
+    esac
+    local arch
+    case "$(uname -m)" in
+        x86_64|amd64) arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *) say "There is no build of the Clarp Host for $(uname -m); there are builds for x86_64 and aarch64."; exit 1 ;;
+    esac
+    if [ "$(id -u)" = 0 ]; then
+        say "Run this as the user the Host is to run as, not as root: the Host runs its agents as that user."
+        exit 1
+    fi
+    local missing=() tool
+    for tool in curl tar gzip sha256sum python3 systemctl; do
+        command -v "$tool" > /dev/null 2>&1 || missing+=("$tool")
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        say "This machine lacks ${missing[*]}, which the install needs. Install them with the system's package manager and run this again."
+        exit 1
+    fi
+    if ! systemctl --user show-environment > /dev/null 2>&1; then
+        say "There is no systemd user session here (systemctl --user does not answer), and the Host runs as a systemd user unit. Run this in a login session of the user the Host is for: ssh in as that user, or log in at the machine."
+        exit 1
+    fi
+
+    # Unpacked in the user's cache, not in /tmp: install-host checks that the binaries can run, and
+    # /tmp is often mounted noexec.
+    local work cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+    mkdir -p "$cache"
+    work="$(mktemp -d "$cache/clarp-host-install.XXXXXX")"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$work'" EXIT
+    mkdir -p "$work/download" "$work/dist" "$work/repo"
+
+    local assets=("clarp-host-$arch-linux.tar.gz" clarp-skills.tar.gz clarp-host-tools.tar.gz) asset
+    say "downloading the newest Host for linux $arch from $base"
+    for asset in SHA256SUMS "${assets[@]}"; do
+        if ! curl -fsSL --retry 3 --retry-delay 2 -o "$work/download/$asset" "$base/$asset"; then
+            say "could not download $base/$asset"
+            exit 1
+        fi
+    done
+    # Each of the files must be named in the sums, and match them. A release that is being replaced
+    # while this ran fails here, and the next try finds it whole.
+    local sums="$work/download/sums-wanted"
+    : > "$sums"
+    for asset in "${assets[@]}"; do
+        if ! grep -E "^[0-9a-f]{64}  \\*?$asset\$" "$work/download/SHA256SUMS" >> "$sums"; then
+            say "the release's SHA256SUMS does not name $asset; it may be being replaced: try again in a few minutes"
+            exit 1
+        fi
+    done
+    if ! (cd "$work/download" && sha256sum --quiet -c "$sums"); then
+        say "the downloaded files do not match the release's SHA256SUMS; it may be being replaced: try again in a few minutes"
+        exit 1
+    fi
+
+    tar -xzf "$work/download/clarp-host-$arch-linux.tar.gz" --no-same-owner -C "$work/dist"
+    tar -xzf "$work/download/clarp-skills.tar.gz" --no-same-owner -C "$work/repo"
+    tar -xzf "$work/download/clarp-host-tools.tar.gz" --no-same-owner -C "$work/repo"
+    say "verified; installing the Host built from $(cut -c1-12 "$work/dist/COMMIT")"
+
+    # A Host the user installs should not stop when they log out: lingering keeps their user
+    # manager, and the Host with it, running. Most systems let a user turn it on for themselves;
+    # where one asks for a password, it is left as it is and said.
+    if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" != yes ]; then
+        if ! loginctl enable-linger --no-ask-password "$(id -un)" > /dev/null 2>&1; then
+            say "note: the Host stops when $(id -un) logs out, because this system does not let a user keep their services running by themselves. An administrator keeps it running with: loginctl enable-linger $(id -un)"
+        fi
+    fi
+
+    local status=0
+    bash "$work/repo/server-rs/tools/install-host" --from "$work/dist" --skills-from "$work/repo/skills" --start "$@" < /dev/null || status=$?
+    return "$status"
+}
+
+main "$@"

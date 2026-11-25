@@ -18,6 +18,22 @@ Never hand-edit the active generated release. Use `clarp-admin paths` to find
 the platform-native release, configuration, database, cache, log, service, and
 toolchain paths.
 
+## Install a Host on a new machine
+
+On Linux with systemd (x86_64 or aarch64), as the user the Host is to run as,
+in that user's login session:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash
+```
+
+It installs the newest `host-builds` pre-release (built from main), checks its
+`SHA256SUMS`, and starts the Host as the `clarp-host.service` user unit on
+`127.0.0.1:7690`. Options after `bash -s --` go to `server-rs/tools/install-host`;
+running it again updates in place. It needs `curl`, `python3` and a systemd
+user session, never uses sudo, and refuses root and macOS. Never run it on a
+machine whose Host someone else owns or deploys.
+
 ## What the user is experiencing
 
 On a Rust Host, `clarp-admin experience --open` lists outstanding findings.

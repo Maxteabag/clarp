@@ -63,7 +63,19 @@ was removed from the repository; git history keeps it.
 
 ## Install
 
-The Host is built on a build machine and installed from the binaries:
+On Linux with systemd, as the user the Host is to run as:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash
+```
+
+It downloads the newest published build of the Host (the `host-builds` pre-release, built from
+main for x86_64 and aarch64), checks it against its `SHA256SUMS`, and installs and starts it as a
+systemd user unit with the skills of the same commit. It needs a systemd user session, `curl` and
+`python3`, and never uses sudo. Options after `bash -s --` go to `install-host` (for example
+`| bash -s -- --name Studio`); run it again to update. macOS is not supported yet.
+
+From a checkout, with binaries built on a build machine:
 
 ```bash
 server-rs/tools/build release        # builds clarp-host and clarp-shim into server-rs/dist
