@@ -1115,7 +1115,7 @@ fn lanes_started_moments_ago_count_at_their_typical_size_until_they_have_grown()
         .unwrap();
     assert_eq!(place, Place::Free);
     // A lane that has not weighed itself at all counts at its typical size however old it is.
-    let run2 = run_dir("unweighed");
+    let run2 = run_dir("unweighed-young");
     let _unweighed = aged(FakeLane::start(&run2, "u", status("t", "d", 0, true)));
     let chat2 = Endpoint::of(Tool::Codex, &run2, "chat");
     let tight = Settings::of(None).room_with(Some(machine(2_400)));
