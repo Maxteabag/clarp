@@ -33,10 +33,8 @@ fn an_old_message_is_found_by_its_words_and_a_removed_chat_never_again() {
     let place = Place::new("message-search");
     let host = place.start();
     let info = host.get("/server-info");
-    assert!(
-        info["features"].to_string().contains("message_search"),
-        "{info}"
-    );
+    let features = info["capabilities"]["features"].as_array().unwrap();
+    assert!(features.contains(&json!("message_search")), "{info}");
     let ada = host.new_agent("Ada");
     let ben = host.new_agent("Ben");
     host.send(&ada, "Shall we meet in Oslo on Friday?", "s-1");

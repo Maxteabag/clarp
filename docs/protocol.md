@@ -1150,7 +1150,7 @@ client then searches only what it has loaded.
 - `session`: only that agent's conversation (its session or its id). An agent the Host does not
   have finds nothing.
 - `limit`: hits per page, 20 by default, at most 100.
-- `before`: the `next_before` of the page before. A cursor the Host never gave is refused, 400.
+- `before`: the `next_before` of the page before, an opaque string. A cursor that is not one is refused, 400.
 
 ```json
 {
@@ -1166,7 +1166,7 @@ client then searches only what it has loaded.
                 {"text": " on Friday?", "match": false}]
     }
   ],
-  "next_before": "1764064923000.41",
+  "next_before": "1807402480000000",
   "partial": false
 }
 ```

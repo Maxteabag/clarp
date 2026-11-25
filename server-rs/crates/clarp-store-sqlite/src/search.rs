@@ -32,9 +32,8 @@ CREATE TABLE IF NOT EXISTS hit (
     revision INTEGER NOT NULL,
     UNIQUE (agent_id, row_id)
 ) STRICT;
-CREATE INDEX IF NOT EXISTS hit_time ON hit(ts_ms, id);
 CREATE VIRTUAL TABLE IF NOT EXISTS words USING fts5(
-    text, tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3'
+    text, tokenize = 'unicode61 remove_diacritics 2'
 );
 CREATE TABLE IF NOT EXISTS agent (
     agent_id TEXT PRIMARY KEY,
@@ -47,6 +46,12 @@ CREATE TABLE IF NOT EXISTS agent (
 
 /// SQLite's own files of the index, beside the index's file: what is thrown away with it.
 const SIDE_FILES: [&str; 3] = ["-wal", "-shm", "-journal"];
+
+/// A row's id is its time and a number for rows of the same millisecond: `ts_ms * SAME_MS + n`.
+/// So the full-text table, whose rows it numbers, holds them in the order of their time, and a
+/// search walks its matches newest first and stops at a page's end: it never sorts every row
+/// that has a common word (4.4 s for "the" at 300 000 rows when it did, 25 Nov 2026).
+const SAME_MS: i64 = 1 << 10;
 
 /// What marks the start and the end of a match in a snippet as SQLite writes it. Taken out of
 /// every text before it is kept, so a text cannot forge a mark.
@@ -250,10 +255,23 @@ impl SearchIndex {
                     params![id, text],
                 )?;
             } else if !text.trim().is_empty() {
+                // The first number of its millisecond that no row has yet.
+                let first = row.ts_ms.clamp(0, i64::MAX / SAME_MS - 1) * SAME_MS;
+                let taken: Option<i64> = tx.query_row(
+                    "SELECT max(id) FROM hit WHERE id BETWEEN ?1 AND ?2",
+                    params![first, first + SAME_MS - 1],
+                    |found| found.get(0),
+                )?;
+                let id = taken.map_or(first, |taken| taken + 1);
+                if id >= first + SAME_MS {
+                    // A thousand rows of one millisecond: the rest of them are not kept.
+                    continue;
+                }
                 tx.execute(
-                    "INSERT INTO hit(agent_id, row_id, role, ts_ms, revision) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO hit(id, agent_id, row_id, role, ts_ms, revision) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
+                        id,
                         agent_id,
                         row.row_id,
                         row.role,
@@ -261,7 +279,6 @@ impl SearchIndex {
                         signed(row.revision)
                     ],
                 )?;
-                let id = tx.last_insert_rowid();
                 tx.execute(
                     "INSERT INTO words(rowid, text) VALUES (?1, ?2)",
                     params![id, text],
@@ -331,20 +348,18 @@ impl SearchReader {
             let mut statement = tx.prepare(
                 "SELECT h.id, h.agent_id, h.row_id, h.role, h.ts_ms, h.revision, \
                  snippet(words, 0, char(1), char(2), '…', ?2) \
-                 FROM words JOIN hit h ON h.id = words.rowid \
-                 WHERE words MATCH ?1 AND h.agent_id IN (SELECT value FROM json_each(?6)) \
-                 AND (?3 IS NULL OR h.ts_ms < ?3 OR (h.ts_ms = ?3 AND h.id < ?4)) \
-                 ORDER BY h.ts_ms DESC, h.id DESC LIMIT ?5",
+                 FROM words CROSS JOIN hit h ON h.id = words.rowid \
+                 WHERE words MATCH ?1 AND words.rowid < ?3 \
+                 AND h.agent_id IN (SELECT value FROM json_each(?4)) \
+                 ORDER BY words.rowid DESC LIMIT ?5",
             )?;
-            let (before_ts, before_id) = before.unzip();
             let rows = statement.query_map(
                 params![
                     query,
                     SNIPPET_WORDS,
-                    before_ts,
-                    before_id,
-                    i64::try_from(limit + 1).unwrap_or(i64::MAX),
+                    before.unwrap_or(i64::MAX),
                     agents,
+                    i64::try_from(limit + 1).unwrap_or(i64::MAX),
                 ],
                 |row| {
                     Ok((
@@ -375,7 +390,7 @@ impl SearchReader {
         let more = hits.len() > limit;
         hits.truncate(limit);
         let next = more
-            .then(|| hits.last().map(|(id, hit)| format!("{}.{id}", hit.ts_ms)))
+            .then(|| hits.last().map(|(id, _)| id.to_string()))
             .flatten();
         Ok(Found {
             hits: hits.into_iter().map(|(_, hit)| hit).collect(),
@@ -451,14 +466,13 @@ pub fn fts_query(words: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
-/// The cursor of a page: the time and the id of the last hit on the page before it.
-fn cursor(text: &str) -> Result<(i64, i64), SearchError> {
-    let unknown = || SearchError::Asked("unknown search cursor".to_string());
-    let (ts, id) = text.split_once('.').ok_or_else(unknown)?;
-    Ok((
-        ts.parse().map_err(|_| unknown())?,
-        id.parse().map_err(|_| unknown())?,
-    ))
+/// The cursor of a page: the id of the last hit on the page before it.
+fn cursor(text: &str) -> Result<i64, SearchError> {
+    text.trim()
+        .parse()
+        .ok()
+        .filter(|id: &i64| *id > 0)
+        .ok_or_else(|| SearchError::Asked("unknown search cursor".to_string()))
 }
 
 /// A snippet as SQLite marks it, in parts: what matched and what stands between.
@@ -977,14 +991,14 @@ mod tests {
             .map(|agent| format!("agent-{agent:04}"))
             .collect();
         let reader = SearchReader::open(&path).unwrap().unwrap();
-        let time = |words: &str| {
+        let time = |words: &str, all: &[String]| {
             let mut found = 0;
             let started = std::time::Instant::now();
             for _ in 0..5 {
                 found = reader
                     .search(Asked {
                         words,
-                        agents: &all,
+                        agents: all,
                         limit: 20,
                         before: None,
                     })
@@ -1009,9 +1023,19 @@ mod tests {
         );
         println!("backfill at one page per {PACE_MS} ms: {:.0} s", paced_s);
         for words in ["the", "og", "zanzibarquest", "the og", "ka"] {
-            let (took, found) = time(words);
+            let (took, found) = time(words, &all);
             println!(
                 "search {words:?}: {:.1} ms, {found} hits",
+                took.as_secs_f64() * 1000.0
+            );
+        }
+        // The worst case: a common word in the one chat whose rows are the oldest of all, so
+        // every newer match is walked past.
+        let oldest = vec!["agent-0000".to_string()];
+        for words in ["the", "zanzibarquest"] {
+            let (took, found) = time(words, &oldest);
+            println!(
+                "search {words:?} in the oldest chat alone: {:.1} ms, {found} hits",
                 took.as_secs_f64() * 1000.0
             );
         }
