@@ -355,3 +355,68 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
         "exec never met a held session"
     );
 }
+
+/// Issue 849. A changed login makes the Muse lane refuse the next turn and leave. That turn has a
+/// lane start under the new login and take the session, as a turn no lane holds does, and runs on
+/// it, instead of running on exec: one start, and no turn without a lane.
+#[test]
+fn a_muse_turn_refused_for_a_changed_login_runs_on_a_lane_under_the_new_one() {
+    let place = Place::new("muse-seat-switch");
+    let _lanes = Lanes(place.root.clone());
+    let muse = place.root.join("muse");
+    program(&muse, MUSE);
+    let config = place.root.join("config");
+    std::fs::create_dir_all(config.join("clarp-host")).unwrap();
+    std::fs::create_dir_all(config.join("muse")).unwrap();
+    std::fs::write(
+        config.join("clarp-host/config.toml"),
+        "muse_chat_lane = true\ncodex_lane_idle_minutes = 15\n",
+    )
+    .unwrap();
+    let login = |email: &str| {
+        let said = json!({"providers": {"meta": {"user_email": email, "token": "t"}}});
+        std::fs::write(config.join("muse/auth.json"), said.to_string()).unwrap();
+    };
+    login("one@example.org");
+    let world = [
+        ("CLARP_MUSE_PROGRAM", muse.to_str().unwrap()),
+        ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+    ];
+    let host = place.start_in("the-owners-token", &[], &world);
+    let made = host.post(
+        "/agents",
+        json!({"name": "Muse", "session": "muser", "backend": "muse"}),
+    );
+    assert_eq!(made["session"], "muser", "{made}");
+    // The first turn runs on exec, which names the session; the lane takes it after.
+    host.send("muser", "ask-one", "one");
+    answered(&host, "muser", "exec-ask-one");
+    wait_for("the lane to take the session", || {
+        noted(&place, "resumed").lines().count() == 1
+    });
+    host.send("muser", "ask-two", "two");
+    answered(&host, "muser", "lane-ask-two");
+    assert_eq!(launched(&place), [("exec", 1), ("serve", 1)]);
+    let cold = || {
+        host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["muse"]
+            .as_u64()
+            .unwrap_or(0)
+    };
+    let before = cold();
+
+    // Another account: the lane refuses the next turn and leaves, and a lane on the new login
+    // takes the session and runs it.
+    login("two@example.org");
+    host.send("muser", "ask-three", "three");
+    answered(&host, "muser", "lane-ask-three");
+    assert_eq!(answers(&host, "muser", "exec-ask-three"), 0);
+    assert_eq!(launched(&place), [("exec", 1), ("serve", 2)]);
+    assert_eq!(noted(&place, "resumed").lines().count(), 2);
+    assert_eq!(noted(&place, "turns"), "ask-two\nask-three\n");
+    assert_eq!(
+        noted(&place, "refused"),
+        "",
+        "exec never met a held session"
+    );
+    assert_eq!(cold(), before, "no turn started without a lane");
+}

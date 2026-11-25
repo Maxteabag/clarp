@@ -16,6 +16,10 @@
 //! - before any exec of the session, a lane that holds it leaves, waited for within
 //!   [`LEAVE_WAIT`]; one that does not let go in time fails the attempt in words, since exec
 //!   could not have the session anyway. A lane that runs a turn is never ended for it.
+//!
+//! A turn the lane refused because the login changed (it leaves, and nothing of the turn reached
+//! Muse) has a lane start under the login there now and take the session, as a turn no lane holds
+//! does, once, and runs on it (issue 849).
 
 use clarp_actor::{Action, ShimOrder};
 use clarp_kernel::turn::TurnId;
@@ -218,23 +222,22 @@ impl Worker {
                     .as_deref()
                     .is_some_and(|session| lane.ready(&profile, session, order.model.as_deref()))
             };
-            let mut is_ready = ready(&lane);
             // No lane holds the session: the turn before this one ran on exec and its process
             // is gone, so the lane takes the session now, started first where none runs. A
             // session that is not there yet, or one a process still holds, is refused, and the
             // turn runs on exec as before.
-            if !is_ready
-                && let (Some(launcher), Some(session)) = (&launcher, order.named_session.as_deref())
-            {
+            let begin = || {
+                let (Some(launcher), Some(session)) = (&launcher, order.named_session.as_deref())
+                else {
+                    return false;
+                };
                 match lane.warm(launcher, &profile, session) {
                     Ok(child) => reap(child),
                     Err(error) => eprintln!("clarp-host: the Muse lane did not start: {error}"),
                 }
-                if lane.take().is_ok() {
-                    is_ready = ready(&lane);
-                }
-            }
-            if !is_ready {
+                lane.take().is_ok() && ready(&lane)
+            };
+            if !(ready(&lane) || begin()) {
                 let _ = tx.send(Ask::MuseMissed(order));
                 return;
             }
@@ -247,10 +250,34 @@ impl Worker {
                 );
                 return;
             }
-            let submitted = lane.submit(&order, token);
+            let mut submitted = lane.submit(&order, token.clone());
+            let reached = || order.spool.try_exists().unwrap_or(true);
+            // Refused because the login changed, with nothing of the attempt reaching Muse: the
+            // lane is on its way out. Once it has gone, a lane starts under the login there now and
+            // takes the session, as for a turn no lane holds, and the attempt is offered to it;
+            // once, never again (issue 849).
+            if let Err(error) = &submitted
+                && error.kind() == std::io::ErrorKind::PermissionDenied
+                && launcher.is_some()
+                && !reached()
+            {
+                let until = std::time::Instant::now() + LEAVE_WAIT;
+                if lane.endpoint().let_go_within(until, true).unwrap_or(false) && begin() {
+                    if !launch_permitted(&tx, turn, attempt) {
+                        tell(
+                            &tx,
+                            turn,
+                            attempt,
+                            Told::Failed("the actor no longer admits this attempt".into()),
+                        );
+                        return;
+                    }
+                    submitted = lane.submit(&order, token);
+                }
+            }
             // The lane makes the spool before anything reaches Muse: with no spool, nothing did,
             // and the attempt runs on exec instead of waiting for another lane.
-            if order.spool.try_exists().unwrap_or(true) {
+            if reached() {
                 launcher::follow(&order.socket, &|out| tell(&tx, turn, attempt, out));
             } else {
                 if let Err(error) = submitted {

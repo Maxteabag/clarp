@@ -4,13 +4,17 @@
 //! none is, starts its Claude Code as the lane and runs on that (issue 833): a queued turn, and
 //! an idle agent's first, start one process and keep it. A turn for which no lane may start
 //! (no place, or one nobody waits on under the machine's pressure) runs in a process of its
-//! own, and a lane may be started once that process is gone.
+//! own, and a lane may be started once that process is gone. A turn the lane refused because
+//! the login changed (a seat switch: the lane leaves, and nothing of the turn reached Claude Code)
+//! starts the lane anew under the current login the same way, once, and runs on it (issue 849).
 
 use std::path::PathBuf;
 use std::sync::mpsc;
 
 use clarp_actor::ShimOrder;
 use clarp_kernel::turn::{COMPACTION, TurnId};
+
+use clarp_shim::claude_lane::Snapshot;
 
 use crate::lane::claude::{self, Fit, Lane, Mcp};
 
@@ -43,6 +47,28 @@ pub(super) struct Start {
 struct AsLane {
     start: Start,
     launcher: std::sync::Arc<crate::launcher::Launcher>,
+}
+
+impl AsLane {
+    /// Starts the turn's Claude Code as the lane, with what the turn would start it with
+    /// (`order`), within the limits and the reserve, under the login there now: the lane reads
+    /// it as it starts. The lane, once it is there and free; `None`: none started (no place, or
+    /// the start failed), and the turn runs in a process of its own.
+    fn begin(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
+        let start = &self.start;
+        match start
+            .lane
+            .start(&self.launcher, &start.run, order, fit, mcp, &start.login)
+        {
+            Ok(Some(child)) => reap(Some(child)),
+            Ok(None) => return None,
+            Err(error) => {
+                eprintln!("claudeLaneStartFail: {error}");
+                return None;
+            }
+        }
+        start.lane.warm(fit)
+    }
 }
 
 impl Start {
@@ -149,61 +175,72 @@ impl Worker {
                 let held = claude::held(&hold);
                 let state = match lane.warm(&fit) {
                     Some(state) => Some(state),
-                    // None there: the turn's own Claude Code starts as the lane, with what the
-                    // turn would start it with, within the limits and the reserve.
-                    None => as_lane.and_then(|as_lane| {
-                        let AsLane { start, launcher } = as_lane;
-                        match start.lane.start(
-                            &launcher,
-                            &start.run,
-                            &lane_order,
-                            &fit,
-                            &mcp,
-                            &start.login,
-                        ) {
-                            Ok(Some(child)) => reap(Some(child)),
-                            Ok(None) => return None,
-                            Err(error) => {
-                                eprintln!("claudeLaneStartFail: {error}");
-                                return None;
-                            }
-                        }
-                        lane.warm(&fit)
-                    }),
+                    // None there: the turn's own Claude Code starts as the lane.
+                    None => as_lane
+                        .as_ref()
+                        .and_then(|as_lane| as_lane.begin(&lane_order, &fit, &mcp)),
                 };
                 let Some(state) = state else {
                     drop(held);
                     return missed(order);
                 };
-                if state.claims == 0 {
-                    let (answer, marked) = mpsc::sync_channel(1);
-                    let boundary = Ask::Boundary {
-                        turn,
-                        attempt,
-                        answer,
-                    };
-                    let mark = if tx.send(WorkerAsk::ClaudeLane(boundary)).is_ok() {
-                        marked
-                            .recv()
-                            .unwrap_or_else(|_| Err("the agent has closed".into()))
-                    } else {
-                        Err("the agent has closed".into())
-                    };
-                    if let Err(why) = mark {
-                        let why = format!("could not record provider turn boundary: {why}");
-                        return tell(&tx, turn, attempt, Told::Failed(why));
+                // The attempt offered to a lane that is there: `None` once the turn has been told
+                // what became of it.
+                let offer = |state: Snapshot| {
+                    if state.claims == 0 {
+                        let (answer, marked) = mpsc::sync_channel(1);
+                        let boundary = Ask::Boundary {
+                            turn,
+                            attempt,
+                            answer,
+                        };
+                        let mark = if tx.send(WorkerAsk::ClaudeLane(boundary)).is_ok() {
+                            marked
+                                .recv()
+                                .unwrap_or_else(|_| Err("the agent has closed".into()))
+                        } else {
+                            Err("the agent has closed".into())
+                        };
+                        if let Err(why) = mark {
+                            let why = format!("could not record provider turn boundary: {why}");
+                            tell(&tx, turn, attempt, Told::Failed(why));
+                            return None;
+                        }
+                    }
+                    if !launch_permitted(&tx, turn, attempt) {
+                        return None;
+                    }
+                    Some(lane.submit(&lane_order, token.clone()))
+                };
+                let Some(mut submitted) = offer(state) else {
+                    return;
+                };
+                let reached = || order.spool.try_exists().unwrap_or(true);
+                // Refused because the login changed (a seat switch), with nothing of the attempt
+                // reaching Claude Code: the lane is on its way out. Once it has gone, the turn
+                // starts its Claude Code as the lane under the login there now, still within the
+                // hold, and runs on it; once, never again for this attempt.
+                if let (Err(error), Some(as_lane)) = (&submitted, &as_lane)
+                    && error.kind() == std::io::ErrorKind::PermissionDenied
+                    && !reached()
+                {
+                    let until = std::time::Instant::now() + crate::lane::LEAVE_WAIT;
+                    if lane.endpoint().let_go_within(until, true).unwrap_or(false)
+                        && let Some(state) = as_lane.begin(&lane_order, &fit, &mcp)
+                    {
+                        let Some(again) = offer(state) else {
+                            return;
+                        };
+                        submitted = again;
                     }
                 }
-                if !launch_permitted(&tx, turn, attempt) {
-                    return;
-                }
-                let submitted = lane.submit(&lane_order, token);
                 drop(held);
                 match submitted {
-                    // Nothing of the attempt reached Claude Code (no spool): the login changed,
-                    // or the lane left between the look and the offer. It runs in a process
-                    // of its own, and the lane is started again after it.
-                    Err(_) if !order.spool.try_exists().unwrap_or(true) => missed(order),
+                    // Nothing of the attempt reached Claude Code (no spool): the lane left
+                    // between the look and the offer, or no lane could start under the new
+                    // login. It runs in a process of its own, and the lane is started again
+                    // after it.
+                    Err(_) if !reached() => missed(order),
                     _ => launcher::follow(&order.socket, &|told| tell(&tx, turn, attempt, told)),
                 }
             });

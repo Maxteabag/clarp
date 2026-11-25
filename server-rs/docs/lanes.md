@@ -212,7 +212,7 @@ of them is not done.
     leave, and the other process must not go ahead.
   - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
     (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
-    `once_more` after a changed login) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
+    `once_more` after a changed login, a Claude or Muse turn refused for one) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
     lock.
     - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
       it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
@@ -353,6 +353,18 @@ session.
   that is there (the one queued behind an exec turn, whose lane could not take the session while
   that next turn was already live) has the lane take it first, starting the lane where none
   runs, and runs on it; one the lane cannot take runs on exec as before.
+- **A turn refused for a changed login starts the lane under the new one** (issue 849). A seat
+  switch makes every lane refuse its agent's next claim (`lane-login-changed`) and leave, with
+  nothing of the turn reaching the tool. That turn used to run per turn, so one switch cost a
+  cold start per live lane at once (one Host saw 9 Claude cold starts in the 11 minutes after a
+  switch, against none in the hour before), each reading about 1.2 GB. Now the refused turn waits
+  for the lane to let go (within `LEAVE_WAIT`) and then does what a turn with no lane there does:
+  a Claude turn starts its own Claude Code as the lane, still within the lane's start hold, and a
+  Muse turn has a new lane take the session. The new lane reads the login there now as it starts.
+  It is tried once for the attempt, never again; where the start gets no place, fails, or no lane
+  may start for the turn (one nobody waits on under pressure), the turn runs per turn as before.
+  Codex already did so: its chat turns and goals offer a refused attempt to a new lane once
+  (`once_more`), started within the same limits.
 - **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
   Muse lane take its session, waits for that before its first output: the lane's start, or the
   session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the
@@ -554,8 +566,9 @@ wrote the change: the Host's own login watcher (`.credentials.json`) ends the la
 and the lane itself refuses its next claim (`lane-login-changed`) when the account
 `.claude.json` names (or, for a key login, its key) or the login in `.credentials.json` (its
 refresh token) is another than at its start. A refreshed access token is no change, though the
-Host's watcher, which reads the whole file, may end an idle lane for one; the next turn then runs
-per turn and a lane starts after it. It also leaves after a turn that ended in an
+Host's watcher, which reads the whole file, may end an idle lane for one; the next turn then
+starts the lane, as any turn with no lane there does. A turn the lane refused for its login starts
+the lane anew under the new login and runs on it (issue 849). It also leaves after a turn that ended in an
 error (a usage limit among them: the pool takes it as today); after a compaction (a Host
 `/compact` runs per turn after the lane left, and any `compact_boundary` the lane sees ends it
 after its attempt); when Claude Code answers with no turn of the Host's running; and before a

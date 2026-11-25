@@ -201,6 +201,10 @@ impl Lane {
         }
     }
 
+    pub(crate) fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
     /// Holds this agent's lane starts and ends for a terminal or a move.
     pub(crate) fn hold(&self) -> Arc<Mutex<()>> {
         STARTS

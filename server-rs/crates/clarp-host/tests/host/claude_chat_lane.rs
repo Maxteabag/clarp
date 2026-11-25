@@ -273,21 +273,15 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
     );
 
     // Another login, written to the credentials file alone: the lane on the old one serves
-    // no more turns. A lane on the new login resumes the conversation: started as the next turn
-    // where the old one has left, or once that turn's own process is gone where it refused it.
+    // no more turns. The next turn, which it refused, starts a lane on the new login that
+    // resumes the conversation, and runs on it (issue 849).
     credentials("r2");
     asked(&host, "kept", "ask-login");
-    wait_for("a lane on the new login", || {
-        noted(&place, "launches").lines().last() == Some("--resume turn=absent")
-            && lane_said(&socket, "inspect").is_some_and(|said| said["state"]["available"] == true)
-    });
-    let launches = noted(&place, "launches");
-    assert!(
-        launches == "--session-id turn=absent\n--resume turn=absent\n"
-            || launches == "--session-id turn=absent\n--resume turn=set\n--resume turn=absent\n",
-        "{launches}"
+    assert_eq!(
+        noted(&place, "launches"),
+        "--session-id turn=absent\n--resume turn=absent\n"
     );
-    let before = launches.lines().count();
+    let before = 2;
 
     // Turned off: the lane leaves before the next turn, which runs in a process of its own on
     // the same conversation.
@@ -366,4 +360,133 @@ fn turns_queued_back_to_back_run_on_one_process_started_as_the_first() {
         .as_u64()
         .unwrap_or(0);
     assert_eq!(cold_after, cold_before);
+}
+
+/// A Claude agent with a lane on the first login, its first turn answered on it.
+/// Its fields are dropped in order: the Host stops, its lanes are asked to leave, and only then
+/// is the place looked at for what was left running.
+struct Switched {
+    host: Host,
+    _lanes: Lanes,
+    place: Place,
+    credentials: std::path::PathBuf,
+    config: std::path::PathBuf,
+}
+
+impl Switched {
+    fn new(name: &str) -> Self {
+        let place = Place::new(name);
+        let lanes = Lanes(place.root.clone());
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let config = place.root.join("config");
+        std::fs::create_dir_all(config.join("clarp-host")).unwrap();
+        std::fs::write(
+            config.join("clarp-host/config.toml"),
+            "claude_chat_lane = true\ncodex_lane_idle_minutes = 15\n",
+        )
+        .unwrap();
+        let home = place.root.join("home");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let switched = Self {
+            credentials: home.join(".claude/.credentials.json"),
+            config: config.join("clarp-host/config.toml"),
+            host: place.start_in(
+                "",
+                &[],
+                &[
+                    ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+                    ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+                    ("HOME", home.to_str().unwrap()),
+                ],
+            ),
+            place,
+            _lanes: lanes,
+        };
+        switched.login("r1");
+        let made = switched.host.post(
+            "/agents",
+            json!({"name": "Seat", "session": "seat", "backend": "claude"}),
+        );
+        assert_eq!(made["session"], "seat", "{made}");
+        asked(&switched.host, "seat", "ask-one");
+        assert_eq!(
+            noted(&switched.place, "launches"),
+            "--session-id turn=absent\n"
+        );
+        switched
+    }
+
+    /// Claude Code's credentials of another account: a seat switch.
+    fn login(&self, refresh: &str) {
+        let said = json!({"claudeAiOauth": {"refreshToken": refresh, "accessToken": "a"}});
+        std::fs::write(&self.credentials, said.to_string()).unwrap();
+    }
+
+    fn cold(&self) -> u64 {
+        self.host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["claude"]
+            .as_u64()
+            .unwrap_or(0)
+    }
+}
+
+/// Issue 849. A seat switch made every lane refuse its agent's next turn and leave, and each
+/// such turn then ran in a process of its own: one cold start per lane at once. The refused turn
+/// now starts its Claude Code as the lane under the new login, as a turn with no lane there does,
+/// and runs on it: one process start, resuming the conversation, and no cold start.
+#[test]
+fn a_turn_refused_for_a_changed_login_starts_the_lane_under_the_new_one() {
+    let switched = Switched::new("claude-seat-switch");
+    let (place, host) = (&switched.place, &switched.host);
+    let cold = switched.cold();
+    switched.login("r2");
+    asked(host, "seat", "ask-two");
+    assert_eq!(
+        noted(place, "launches"),
+        "--session-id turn=absent\n--resume turn=absent\n",
+        "one start, the lane's, resuming the conversation"
+    );
+    assert_eq!(
+        noted(place, "exits").lines().count(),
+        1,
+        "the old lane left"
+    );
+    assert_eq!(noted(place, "turns"), "ask-one\nask-two\n");
+    // Both turns ran on a lane: neither found its identity in its environment.
+    assert!(
+        noted(place, "tokens")
+            .lines()
+            .all(|line| line.split(' ').nth(1) == Some("absent")),
+        "{}",
+        noted(place, "tokens")
+    );
+    assert_eq!(switched.cold(), cold, "no turn started without a lane");
+    // The new lane serves the turns after it.
+    asked(host, "seat", "ask-three");
+    assert_eq!(noted(place, "launches").lines().count(), 2);
+}
+
+/// Issue 849. Where no lane may start under the new login (no place within the limits), the
+/// refused turn runs in a process of its own, as before: tried once, never again.
+#[test]
+fn a_turn_refused_for_a_changed_login_with_no_place_for_a_lane_runs_on_its_own() {
+    let switched = Switched::new("claude-seat-switch-full");
+    let (place, host) = (&switched.place, &switched.host);
+    // Too little memory for any lane: none may start now, the one running keeps on.
+    std::fs::write(
+        &switched.config,
+        "claude_chat_lane = true\ncodex_lane_idle_minutes = 15\nlane_limits = \"fixed\"\n\
+         lane_memory_mb = 1\n",
+    )
+    .unwrap();
+    let cold = switched.cold();
+    switched.login("r2");
+    asked(host, "seat", "ask-two");
+    assert_eq!(
+        noted(place, "launches"),
+        "--session-id turn=absent\n--resume turn=set\n",
+        "the turn ran in a process of its own, and no lane started"
+    );
+    assert_eq!(noted(place, "turns"), "ask-one\nask-two\n");
+    assert_eq!(switched.cold(), cold + 1);
 }
