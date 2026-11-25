@@ -589,3 +589,40 @@ fn a_live_message_never_shows_a_hidden_block_or_half_a_tag() {
         );
     }
 }
+
+/// What an agent writes with a `<` that is not a tag (`i<n`, `a<b`) shows as it streams: only
+/// the start of a tag the Host hides waits (issue 824).
+#[test]
+fn a_live_message_with_a_less_than_sign_keeps_streaming() {
+    let mut hub = Hub::new("e1", "a1", "s1");
+    let shown = |hub: &mut Hub, now: i64| {
+        let (snapshot, _) = hub.snapshot(now).unwrap();
+        snapshot["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "code")
+            .map(|item| item["text"].as_str().unwrap_or("").to_string())
+            .unwrap_or_default()
+    };
+    hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    let steps = [
+        ("for (i = 0; i<n", "for (i = 0; i<n"),
+        ("for (i = 0; i<n; i++) done", "for (i = 0; i<n; i++) done"),
+        (
+            "for (i = 0; i<n; i++) done. If a<b and more",
+            "for (i = 0; i<n; i++) done. If a<b and more",
+        ),
+    ];
+    for (at, (written, expected)) in steps.iter().enumerate() {
+        let at = i64::try_from(at).unwrap();
+        hub.message_text(
+            "code",
+            written,
+            (Some("final"), Some("r-code")),
+            Some("t-1"),
+            20 + at * 10,
+        );
+        assert_eq!(shown(&mut hub, 25 + at * 10), *expected, "after {written:?}");
+    }
+}

@@ -50,7 +50,6 @@ macro_rules! patterns {
 patterns! {
     HIDDEN_BLOCK = r"(?is)<oai-mem-citation\b[^>]*>.*?</oai-mem-citation>|<environment_context\b[^>]*>.*?</environment_context>";
     HIDDEN_OPEN_TAIL = r"(?is)<(?:oai-mem-citation|environment_context)\b[^>]*>.*$";
-    TAG_BEING_WRITTEN = r"<(?:/?[A-Za-z][\w:-]*(?:\s[^<>]*)?|/)?$";
     SPEAK_TAG = r"(?i)</?speak\b[^>]*>";
     VOX_TAG = r"(?i)</?vox\b[^>]*>";
     SSML = r"(?i)</?(?:break|speed|volume|emotion)\b[^>]*/?>";
@@ -104,13 +103,56 @@ pub fn strip_hidden_blocks(text: &str) -> String {
 /// The text of a message still being written, as its row will show it: the hidden blocks taken
 /// out ([`strip_hidden_blocks`], one still arriving too), and a tag at its end that is not whole
 /// yet held back until it is, so that neither a hidden block nor half a tag is ever shown live
-/// (issue 824). A `<` followed by a space or a digit is text, and stays.
+/// (issue 824). Only the start of a tag the Host hides or strips is held, and only for a short
+/// tail: `i<n` or `a<b` in what an agent writes is text, and shows as it comes.
 pub fn growing_display(text: &str) -> String {
     let shown = strip_hidden_blocks(text);
-    match TAG_BEING_WRITTEN.find(&shown) {
-        Some(tag) => shown[..tag.start()].to_string(),
+    match tag_being_written(&shown) {
+        Some(at) => shown[..at].to_string(),
         None => shown,
     }
+}
+
+/// The tags the Host hides from what is shown, or takes out of it.
+const TAGS_KEPT_FROM_VIEW: [&str; 9] = [
+    "speak",
+    "vox",
+    "team",
+    "break",
+    "speed",
+    "volume",
+    "emotion",
+    "oai-mem-citation",
+    "environment_context",
+];
+
+/// The longest tail of a text held back as a tag being written.
+const HELD_TAIL_MOST: usize = 80;
+
+/// Where a tag at the end of a text begins that is not whole yet and is one of
+/// [`TAGS_KEPT_FROM_VIEW`]: `<` or `</` and the start of such a tag's name, or its whole name and
+/// then attributes on the same line. `None` for anything else, a `<` that is text among them.
+fn tag_being_written(text: &str) -> Option<usize> {
+    let at = text.rfind('<')?;
+    let tail = &text[at..];
+    if tail.len() > HELD_TAIL_MOST || tail.contains(['>', '\n']) {
+        return None;
+    }
+    let rest = &tail[1..];
+    let rest = rest.strip_prefix('/').unwrap_or(rest);
+    let end = rest
+        .find(|sign: char| sign.is_whitespace() || sign == '/')
+        .unwrap_or(rest.len());
+    let name = rest[..end].to_ascii_lowercase();
+    let whole_name_then_more = end < rest.len();
+    let known = TAGS_KEPT_FROM_VIEW.iter().any(|tag| {
+        if whole_name_then_more {
+            *tag == name
+        } else {
+            tag.starts_with(name.as_str())
+        }
+    });
+    known.then_some(at)
 }
 
 /// Hides team messages from users, including an open tail in a streaming reply.
@@ -508,9 +550,22 @@ mod tests {
             growing_display("Done <oai-mem-citation>n</oai-mem-citation>."),
             "Done ."
         );
-        // A `<` that is text, not a tag, stays.
+        // A `<` that is text, not a tag, stays, and so does what follows it.
         assert_eq!(growing_display("x < 5"), "x < 5");
         assert_eq!(growing_display("a <3"), "a <3");
+        assert_eq!(
+            growing_display("for (i = 0; i<n; i++) done"),
+            "for (i = 0; i<n; i++) done"
+        );
+        assert_eq!(growing_display("if a<b and more"), "if a<b and more");
+        assert_eq!(growing_display("a<b"), "a", "it could still become <break");
+        assert_eq!(growing_display("HashMap<K"), "HashMap<K");
+        assert_eq!(growing_display("<speak\nlater"), "<speak\nlater");
+        assert_eq!(growing_display("Now <break/"), "Now ");
+        assert_eq!(growing_display("Now <vox"), "Now ");
+        // A tail too long to be a tag being written is shown.
+        let long = format!("<speak {}", "a".repeat(100));
+        assert_eq!(growing_display(&long), long);
     }
 
     #[test]
