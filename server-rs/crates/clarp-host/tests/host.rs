@@ -23581,7 +23581,8 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
         ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
     ];
-    let host = place.start_in("", &["--speech-keys", owners.to_str().unwrap()], &world);
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let host = place.start_in("", &args, &world);
     // What the tool was last started with as who the agent is, and what it was last handed:
     // the user's words, and what the Host says after them.
     let last = || -> (String, String, String) {
@@ -23811,7 +23812,7 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
 
     // All of it is the Host's to keep: a Host that was killed tells the same.
     host.kill();
-    let host = place.start_in("", &[], &world);
+    let host = place.start_in("", &args, &world);
     assert_eq!(host.get("/voice-humanness"), after);
     assert_eq!(
         host.get("/personalities/settings"),
