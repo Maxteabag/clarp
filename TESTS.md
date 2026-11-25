@@ -3,31 +3,21 @@
 ## How to run
 
 Tests run once, at the end of a piece of work, before it is installed on the
-owner's Hosts: `make test-critical`, `make test-guards` and the test files for
-the code that changed. Nothing runs per push or per pull request (see AGENTS.md,
-"Tests run once, at the end of a piece of work"); do not run the full suite locally. The critical list
-(`tests/critical.txt`) holds only what can brick the Host or lose data: state
-database schema and migrations, boot and route wiring, authentication and
-device scope, turn dispatch/queue/stop, update and installer, transcript
-import. No workflow runs it automatically; start the Tests workflow by hand ("Run workflow") when wanted.
-To run only a fix's own tests on GitHub, start the same workflow on the candidate
-branch with `paths` set to the test files (space separated); nothing else runs.
+owner's Hosts (see AGENTS.md, "Tests run once, at the end of a piece of work").
+Nothing runs per push or per pull request.
 
-| Layer | Command | Where it runs | Time |
-|---|---|---|---|
-| Critical (end-of-work pass) | `make test-critical` | serial, in-process | ~1 min |
-| Structural guards (end-of-work pass) | `make test-guards` | serial, in-process | ~3 min |
-| Python unit + integration (1,500 tests) | `make py` | in-process, every core, 60 s per-test timeout | ~30 s |
-| JavaScript unit (250 tests) | `make js` | vitest, in-process | ~15 s |
-| Container install, restart, backup | `make docker-test` | throwaway Docker node | minutes |
-| Codex writer-lock + AGY timeout (no auth) | `make isolated-codex` | `--network=none` fake app-server | ~30 s |
-| Browser suite (Playwright) | `make e2e` | Chromium on the host against a throwaway Docker node | minutes |
+| Layer | Command | Where it runs |
+|---|---|---|
+| Rust Host final pass | `server-rs/tools/final-pass` (run by `train-pass.sh`) | the build machine |
+| Rust Host build and tests | `server-rs/tools/build test` | the build machine |
+| Contract rows | `server-rs/tools/tests/test_rust_contract.py` | anywhere |
+| Web app (JavaScript) | `npm test` | vitest, in-process |
+| Desktop client | the Desktop checks workflow, started by hand | GitHub Actions |
 
-The in-process suites never touch the host: each test owns a temp database,
-config, cache, and port, `systemctl`/`launchctl` are shimmed, and a conftest
-guard refuses any socket that is not loopback. Playwright has no default
-server; `make e2e` starts one in Docker with the auth token `test` and the
-built-in roster, and `CLARP_BASE_URL` must be set explicitly otherwise.
+The Python Host and its suites (`make test-critical`, `make test-guards`,
+`make py`, `make e2e`, `make docker-test`) were removed with it in November 2026.
+The inventory below is kept as the record of past bugs; its Python-layer test
+names refer to that removed code.
 
 For each bug we hit during development, this lists the symptom, where the bug
 actually lived (the **layer**), and what test would catch it now. This becomes

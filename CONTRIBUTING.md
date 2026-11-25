@@ -31,8 +31,9 @@ web app hot-reloads with `npm run dev`, which proxies API calls to a Host
   `static/lib/protocol.js`. Change them together.
 - **Endpoints**: add the route to `docs/protocol.md` if a client is meant to
   call it, and a row to `docs/compatibility.md` when the Host contract moves.
-- **The web app bundle** (`static/app/`) is committed. Run `npm run build` and
-  include the result when you change anything under `web/src` or `static/lib`.
+- **The web app bundle** (`static/app/`) is built, not committed. After a change
+  under `web/src` or `static/lib`, run `npm run build` and have the release owner
+  place `static/` on the Rust Hosts (`~/.local/share/clarp-host/static`).
 - **Compatibility is deliberate.** The Host and the native clients release
   independently: the external core contract is additive, unknown response
   fields are ignored, and optional features use capabilities. Breaking
