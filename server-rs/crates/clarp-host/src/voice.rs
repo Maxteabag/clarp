@@ -303,10 +303,18 @@ impl Mouth {
 
     /// Whether this agent's turns can be answered aloud: not where nothing on this Host could
     /// speak it, its speech off or no engine it would be spoken by set up
-    /// ([`voice_profile::unspeakable`], issue 802).
-    pub(crate) fn can_speak(&self, record: &AgentRecord) -> bool {
-        let owners = self.owners();
-        !voice_profile::unspeakable(&self.speech_view(&owners), speaker(record))
+    /// ([`voice_profile::unspeakable`], issue 802). The owner's file, and where Google is named
+    /// its adapters' folder, are read off the runtime's threads, as [`Self::google_refusal`]
+    /// is. A read that could not be made leaves the turn as it was asked for.
+    pub(crate) async fn can_speak(self: &Arc<Self>, record: &AgentRecord) -> bool {
+        let mouth = Arc::clone(self);
+        let record = record.clone();
+        tokio::task::spawn_blocking(move || {
+            let owners = mouth.owners();
+            !voice_profile::unspeakable(&mouth.speech_view(&owners), speaker(&record))
+        })
+        .await
+        .unwrap_or(true)
     }
 
     /// Whether an engine that speaks has its key.

@@ -1262,10 +1262,12 @@ async fn submit(
     // Answered aloud only where something on this Host could speak the form's agent, as a
     // send is (issue 802). Read before answers sent again are compared, so that they are held
     // to the same rule as the first time.
-    let speakable = fleet
-        .holder(artifact_id, true)
-        .is_none_or(|member| app.mouth.can_speak(&member.record));
-    sent.synthesize_audio = sent.synthesize_audio.map(|asked| asked && speakable);
+    let holder = fleet.holder(artifact_id, true).map(|member| member.record.clone());
+    if sent.synthesize_audio == Some(true)
+        && let Some(record) = holder
+    {
+        sent.synthesize_audio = Some(app.mouth.can_speak(&record).await);
+    }
     // An id is used once on the whole Host: it is looked for before the form is.
     let before = fleet.0.iter().find_map(|(_, view)| {
         let (form, before) = view.books.artifacts.submission(&sent.submission_id)?;

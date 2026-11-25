@@ -3553,8 +3553,8 @@ async fn send_as(
     // call. And never where nothing on this Host could speak the agent: such a turn is not
     // framed as spoken, and its reply is not reported as not spoken (issue 802); the agent's
     // profile says once that speech is not set up.
-    let speak =
-        request.synthesize_audio.unwrap_or(spoken_unasked) && app.mouth.can_speak(&member.record);
+    let speak = request.synthesize_audio.unwrap_or(spoken_unasked)
+        && app.mouth.can_speak(&member.record).await;
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
@@ -4188,7 +4188,10 @@ async fn reword(
         ));
     }
     // Not aloud where nothing on this Host could speak the agent (issue 802).
-    let speak = speak.map(|asked| asked && app.mouth.can_speak(&member.record));
+    let speak = match speak {
+        Some(true) => Some(app.mouth.can_speak(&member.record).await),
+        asked => asked,
+    };
     match member
         .agent
         .reword(waiting.turn, text.to_string(), speak)
@@ -4237,7 +4240,10 @@ async fn send_by_hand(
         return Err(not_waiting());
     };
     // Not aloud where nothing on this Host could speak the agent (issue 802).
-    let speak = speak.map(|asked| asked && app.mouth.can_speak(&member.record));
+    let speak = match speak {
+        Some(true) => Some(app.mouth.can_speak(&member.record).await),
+        asked => asked,
+    };
     match member
         .agent
         .send_now(waiting.turn, "user".to_string(), speak)
