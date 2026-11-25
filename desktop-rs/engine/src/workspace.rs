@@ -87,6 +87,7 @@ impl Engine {
             .filter_map(|pane| pane.get("session").and_then(serde_json::Value::as_str).map(str::to_owned))
             .filter(|session| !session.is_empty())
             .collect();
+        self.live_shown(&sessions);
         for session in sessions {
             if !self.conversations.contains_key(&session) {
                 self.open_log(&session);

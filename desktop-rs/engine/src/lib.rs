@@ -1637,8 +1637,7 @@ impl Engine {
             self.chat_view_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
-            let open: Vec<String> = self.conversations.keys().cloned().collect();
-            for session in open {
+            for session in self.live_reopen_order() {
                 self.live_chat_opened(&session);
             }
             self.sse.start();

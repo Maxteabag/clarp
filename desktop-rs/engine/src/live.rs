@@ -9,6 +9,13 @@ use serde_json::Value;
 
 use crate::{Change, Engine};
 
+/// Chats kept on the stream besides the selected one and those shown in a
+/// pane: the ones opened last. A chat further back is let go, so the Host
+/// does not count it as open on the owner's device (`docs/lanes.md`).
+const MAX_OTHERS: usize = 3;
+/// How many chats the order they were opened in is remembered for.
+const OPENED_REMEMBERED: usize = 64;
+
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
@@ -20,6 +27,12 @@ pub(crate) struct Live {
     pub enabled: bool,
     /// Per session: its view (created when the chat opens).
     pub views: std::collections::HashMap<String, LiveView>,
+    /// The chats in the order they were opened, the last at the back. Kept
+    /// when the stream starts anew, so the chats are opened again in it.
+    pub opened: std::collections::VecDeque<String>,
+    /// A peer's engine: the chats the primary shows from this Host in its
+    /// panes, never let go while shown. The primary reads its own panes.
+    pub shown: std::collections::HashSet<String>,
     /// The `live=` value the event stream was last opened with.
     pub subscribed: Option<String>,
     /// The stream dropped since it last connected: events were missed.
@@ -159,7 +172,9 @@ impl Engine {
 
     /// The Host or its token changed: nothing live is known any more.
     pub(crate) fn reset_live(&mut self) {
-        self.live = Live::default();
+        let opened = std::mem::take(&mut self.live.opened);
+        let shown = std::mem::take(&mut self.live.shown);
+        self.live = Live { opened, shown, ..Live::default() };
         self.sse.set_query(Vec::new());
     }
 
@@ -175,7 +190,80 @@ impl Engine {
         if fresh || (view.lseq().is_none() && !view.awaiting_snapshot()) {
             self.request_live(session);
         }
+        self.live.opened.retain(|s| s != session);
+        self.live.opened.push_back(session.to_owned());
+        while self.live.opened.len() > OPENED_REMEMBERED {
+            self.live.opened.pop_front();
+        }
+        self.let_go_of_old_chats();
         self.sync_live_subscription(true);
+    }
+
+    /// Lets go of the live views of chats that are neither selected nor
+    /// shown in a pane, but the few opened last.
+    fn let_go_of_old_chats(&mut self) {
+        let shown = self.shown_here();
+        let opened_at = |session: &str| self.live.opened.iter().position(|s| s == session).map_or(0, |at| at + 1);
+        let mut others: Vec<(usize, String)> = self
+            .live
+            .views
+            .keys()
+            .filter(|s| **s != self.selected && !shown.contains(*s))
+            .map(|s| (opened_at(s), s.clone()))
+            .collect();
+        if others.len() <= MAX_OTHERS {
+            return;
+        }
+        others.sort_unstable();
+        let gone = others.len() - MAX_OTHERS;
+        for (_, session) in others.into_iter().take(gone) {
+            self.live.views.remove(&session);
+            self.live.heard.remove(&session);
+            self.live.joining.remove(&session);
+        }
+    }
+
+    /// The chats this engine's Host has shown in a pane: the primary's own
+    /// panes, as they are now; for a peer's engine, what the primary told it.
+    fn shown_here(&self) -> std::collections::HashSet<String> {
+        if self.peer {
+            return self.live.shown.clone();
+        }
+        self.panes
+            .tree
+            .view_layout()
+            .iter()
+            .filter(|pane| pane.get("shown").and_then(Value::as_bool) == Some(true))
+            .filter_map(|pane| pane.get("session").and_then(Value::as_str))
+            .filter(|session| clarp_core::all_hosts::split(session).is_none())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Tells each peer's engine which of its Host's chats the panes show.
+    pub(crate) fn live_shown(&mut self, shown: &[String]) {
+        let mut peers: std::collections::HashMap<String, std::collections::HashSet<String>> = std::collections::HashMap::new();
+        for (server_id, local) in shown.iter().filter_map(|s| clarp_core::all_hosts::split(s)) {
+            peers.entry(server_id.to_owned()).or_default().insert(local.to_owned());
+        }
+        for peer in &mut self.peers.list {
+            peer.engine.live.shown = peers.remove(&peer.server_id).unwrap_or_default();
+        }
+    }
+
+    /// The chats to open again when the stream starts anew: the oldest
+    /// first and the selected one last, so the order they were opened in
+    /// decides which are kept, never the order they are stored in.
+    pub(crate) fn live_reopen_order(&self) -> Vec<String> {
+        let shown = self.shown_here();
+        let opened_at = |session: &str| self.live.opened.iter().position(|s| s == session).map_or(0, |at| at + 1);
+        let mut open: Vec<(bool, bool, usize, &String)> = self
+            .conversations
+            .keys()
+            .map(|s| (*s == self.selected, shown.contains(s), opened_at(s), s))
+            .collect();
+        open.sort_unstable();
+        open.into_iter().map(|(.., s)| s.clone()).collect()
     }
 
     fn request_live(&mut self, session: &str) {
@@ -190,8 +278,9 @@ impl Engine {
         self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
     }
 
-    /// The open and cached chats, as `/events?live=` names them; `live=`
-    /// alone (status ops only) before any chat opened.
+    /// The selected chat, the shown ones and the few opened last, as
+    /// `/events?live=` names them; `live=` alone (status ops only) before
+    /// any chat opened.
     fn live_sessions(&self) -> String {
         let mut sessions: Vec<&str> = self.live.views.keys().map(String::as_str).collect();
         sessions.sort_unstable();
