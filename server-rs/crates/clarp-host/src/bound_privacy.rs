@@ -391,9 +391,10 @@ pub enum Class {
     Words(Names),
     /// A stream of events: every event of a withheld agent is blanked.
     Stream,
-    /// The owner's own surfaces (files, terminals, recordings, sound, sockets): refused to
-    /// every other reader while one agent's words are withheld from it.
-    OwnerOnly,
+    /// Surfaces whose answer cannot be blanked (files, terminals, recordings, sound, sockets):
+    /// given where the read names only agents the reader may read (by what [`Names`] says), and
+    /// otherwise refused while one agent's words are withheld from the reader.
+    OwnerOnly(Names),
 }
 
 /// What else names the agent a route of words is about.
@@ -407,16 +408,22 @@ pub enum Names {
     Artifact(usize),
     /// The query's `plan_id`: the agent whose goal it is.
     Plan,
+    /// The path's segment at this place is a clip's number: the agent whose speech it is.
+    Clip(usize),
+    /// The path's segment at this place is a gallery asset's id: the chat it was shown in.
+    Media(usize),
+    /// Nothing: the route cannot say whose words it serves.
+    Nobody,
 }
 
 use Class::{NoWords, OwnerOnly, Stream, Words};
-use Names::{Artifact, Plan, Query, Segment};
+use Names::{Artifact, Clip, Media, Nobody, Plan, Query, Segment};
 
 /// Every route a `GET` reaches, by the path it is declared with, and what it answers.
 pub const CLASSES: &[(&str, Class)] = &[
     ("/", NoWords),
-    ("/agent-file", OwnerOnly),
-    ("/agent-files", OwnerOnly),
+    ("/agent-file", OwnerOnly(Query)),
+    ("/agent-files", OwnerOnly(Query)),
     ("/agent-goal", Words(Query)),
     ("/agent-heartbeat/status", Words(Query)),
     ("/agent-helper-state", NoWords),
@@ -428,15 +435,14 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/agent-transit", Words(Query)),
     ("/agents/archived", Words(Query)),
     ("/agents/snapshot", Words(Query)),
-    ("/agents/{id}", Words(Segment(1))),
     ("/artifact-catalogs/clarp.form/1", NoWords),
     ("/artifact-catalogs/clarp.form/2", NoWords),
     ("/artifacts", Words(Query)),
     ("/artifacts/{*rest}", Words(Artifact(1))),
     ("/attention", Words(Query)),
     ("/attention/inbox", Words(Query)),
-    ("/audio/", OwnerOnly),
-    ("/audio/{*name}", OwnerOnly),
+    ("/audio/", OwnerOnly(Nobody)),
+    ("/audio/{*name}", OwnerOnly(Nobody)),
     ("/automation-settings", NoWords),
     ("/avatar-settings", NoWords),
     ("/avatars/{agent}", NoWords),
@@ -444,27 +450,26 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/backend-usage", NoWords),
     ("/background-jobs", Words(Query)),
     ("/background-jobs/{job_id}", Words(Query)),
-    ("/broken", Words(Query)),
     ("/calls", Words(Query)),
     ("/calls/ring", Words(Query)),
     ("/calls/ring/device", Words(Query)),
-    ("/calls/ring/live", OwnerOnly),
+    ("/calls/ring/live", OwnerOnly(Nobody)),
     ("/calls/ring/settings", NoWords),
     ("/cartesia-voice-preview", NoWords),
     ("/cartesia-voices", NoWords),
     ("/client-log", NoWords),
     ("/clips/message", Words(Query)),
     ("/clips/recoverable", Words(Query)),
-    ("/clips/{clip}/complete.mp3", OwnerOnly),
-    ("/clips/{clip}/stream", OwnerOnly),
+    ("/clips/{clip}/complete.mp3", OwnerOnly(Clip(1))),
+    ("/clips/{clip}/stream", OwnerOnly(Clip(1))),
     ("/controller-actions", Words(Query)),
     ("/controller-actions/audit", Words(Query)),
-    ("/controller-narration", Words(Query)),
+    ("/controller-narration", NoWords),
     ("/coordination-settings", NoWords),
     ("/devices/push-tokens", NoWords),
     ("/diagnostics/health", NoWords),
     ("/diagnostics/settings", NoWords),
-    ("/dirs", OwnerOnly),
+    ("/dirs", OwnerOnly(Nobody)),
     ("/events", Stream),
     ("/favorite-paths", NoWords),
     ("/goal-ledger", Words(Plan)),
@@ -485,6 +490,7 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/janitors/{session}", Words(Segment(1))),
     ("/janitors/{session}/{action}", Words(Segment(1))),
     ("/judgments/settings", NoWords),
+    ("/lane-settings", NoWords),
     ("/launch-directories", NoWords),
     ("/live", Words(Query)),
     ("/location", NoWords),
@@ -492,9 +498,9 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/managed-skills", NoWords),
     ("/manifest.json", NoWords),
     ("/media", Words(Query)),
-    ("/media/", OwnerOnly),
+    ("/media/", OwnerOnly(Nobody)),
     ("/media/deleted", Words(Query)),
-    ("/media/{*asset_id}", OwnerOnly),
+    ("/media/{*asset_id}", OwnerOnly(Media(1))),
     ("/message-tool-details", Words(Query)),
     ("/network/relay", NoWords),
     ("/notification-avatars/{agent}", NoWords),
@@ -503,13 +509,13 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/oracle/delegations", Words(Query)),
     ("/oracle/handoff", Words(Query)),
     ("/oracle/status", Words(Query)),
-    ("/oracle/v2", OwnerOnly),
+    ("/oracle/v2", OwnerOnly(Nobody)),
     ("/oracle/voice-provider", NoWords),
     ("/orchestrator/decisions", Words(Query)),
     ("/orchestrator/settings", NoWords),
     ("/paired-devices", NoWords),
     ("/pairing/identity", NoWords),
-    ("/past-sessions", OwnerOnly),
+    ("/past-sessions", OwnerOnly(Nobody)),
     ("/peers", NoWords),
     ("/peers/snapshot", Words(Query)),
     ("/persona-avatars/{id}", NoWords),
@@ -519,12 +525,12 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/podcast-history/sources", Words(Query)),
     ("/remote-action", NoWords),
     ("/server-info", NoWords),
-    ("/server-terminal", OwnerOnly),
+    ("/server-terminal", OwnerOnly(Nobody)),
     ("/server-update", NoWords),
     ("/static/", NoWords),
     ("/static/{*path}", NoWords),
     ("/status", Words(Query)),
-    ("/stt/stream", OwnerOnly),
+    ("/stt/stream", OwnerOnly(Query)),
     ("/styles.css", NoWords),
     ("/sw.js", NoWords),
     ("/task-plan", Words(Query)),
@@ -532,11 +538,10 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/task-plans", Words(Query)),
     ("/teams", Words(Query)),
     ("/teams/{id}/messages", Words(Query)),
-    ("/terminal", OwnerOnly),
-    ("/terminal/{*named}", OwnerOnly),
+    ("/terminal/{*named}", OwnerOnly(Segment(1))),
     ("/tool-explanations/settings", NoWords),
     ("/tool-explanations/stats", NoWords),
-    ("/transcription-audio", OwnerOnly),
+    ("/transcription-audio", OwnerOnly(Nobody)),
     ("/transcription-capabilities", NoWords),
     ("/transcription-guidance", NoWords),
     ("/transcription-providers", NoWords),
@@ -589,14 +594,19 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
     };
     match class {
         NoWords => next.run(request).await,
-        OwnerOnly => owner_only(),
+        OwnerOnly(names) => {
+            if named(&app, &request, names, &withheld).await == About::Readable {
+                return next.run(request).await;
+            }
+            owner_only()
+        }
         Stream => {
             let response = next.run(request).await;
             let (parts, body) = response.into_parts();
             Response::from_parts(parts, sse_filtered(body, Arc::new(withheld)))
         }
         Words(names) => {
-            let about = named(&app, &request, names, &withheld);
+            let about = named(&app, &request, names, &withheld).await;
             if let About::Withheld(persona) = &about {
                 return refused(persona);
             }
@@ -628,10 +638,10 @@ fn owner_only() -> Response {
 
 /// Which agents a request names: one whose words are withheld from the reader, by its name,
 /// before any other.
-fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> About {
+async fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> About {
     let query = request.uri().query().unwrap_or("");
     let mut asked: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
-        .filter(|(key, _)| key == "session" || key == "agent_id")
+        .filter(|(key, _)| names != Nobody && (key == "session" || key == "agent_id"))
         .map(|(_, value)| value.trim().to_string())
         .collect();
     let segments: Vec<String> = request
@@ -642,7 +652,21 @@ fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> Abo
         .map(decoded)
         .collect();
     match names {
-        Query => {}
+        Query | Nobody => {}
+        Clip(at) => {
+            let clip = segments.get(at).and_then(|clip| clip.parse::<u64>().ok());
+            let speaker = clip.and_then(|clip| crate::voice::speaker_of(&app.fleet.directory(), clip));
+            asked.push(speaker.unwrap_or_else(|| UNKNOWN.to_string()));
+        }
+        Media(at) => {
+            let asset = segments.get(at).cloned().unwrap_or_default();
+            let shown_in = app
+                .gallery
+                .ask(move |store| store.content(&asset).map(|(image, _)| image.asset.session))
+                .await
+                .ok();
+            asked.push(shown_in.unwrap_or_else(|| UNKNOWN.to_string()));
+        }
         Segment(at) => asked.extend(segments.get(at).cloned()),
         Artifact(at) => {
             let maker = segments
@@ -658,6 +682,9 @@ fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> Abo
         }
     }
     asked.retain(|agent| !agent.is_empty());
+    if asked.iter().any(|agent| agent == UNKNOWN) {
+        return About::Nobody;
+    }
     let directory = app.fleet.directory();
     let withheld = asked
         .iter()
@@ -675,6 +702,9 @@ fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> Abo
         None => About::Readable,
     }
 }
+
+/// What a clip or an asset no agent can be found for names: nobody the reader may read.
+const UNKNOWN: &str = "\0unknown";
 
 /// A segment of a path as it reads, its escapes undone.
 fn decoded(segment: &str) -> String {
@@ -1133,7 +1163,9 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(&path).unwrap();
-            let mut rest = text.as_str();
+            // The routes a test builds for itself are no routes of the Host.
+            let text = text.split("#[cfg(test)]").next().unwrap_or_default();
+            let mut rest = text;
             while let Some(at) = rest.find(".route(") {
                 rest = &rest[at + ".route(".len()..];
                 // The call's arguments, to its closing parenthesis.
