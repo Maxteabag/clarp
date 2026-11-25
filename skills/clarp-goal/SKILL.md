@@ -199,11 +199,16 @@ Documents are limited to 64 KiB each: reference managed files/assets for large
 logs, media and build evidence. Database persistence survives process/Host
 restarts; it is not replication, backups or recovery after losing the Host disk.
 
-Keep a checkpoint's progress and next_work short, a few KB: the Host keeps each
-checkpoint whole in the goal's history (its last 200 entries), and every goal
-tick reads that history. Records of work done, long notes and evidence belong in
-documents, which are read only on demand. Checkpoints of about 95 KB each once
-grew one goal to 8 MB.
+Keep a checkpoint's progress and next_work short, a few KB: the goal's
+`checkpoint` keeps them whole, and they go with every read of the plan, every
+artifact list that shows it, and every goal tick. Records of work done, long
+notes and evidence belong in documents, which are read only on demand. The
+goal's history (its last 200 entries) keeps of each checkpoint only the first
+280 characters of each text, with `progress_bytes`/`next_work_bytes` and
+`progress_sha256`/`next_work_sha256` beside them; read the whole current texts
+from `goal.checkpoint`, and earlier ones from your documents. Checkpoints of
+about 95 KB each once grew one goal's history to 6.5 MB, before it kept
+excerpts.
 
 For an existing Clarp background job, include its generation-specific
 `job_handle` in the dependency continuation, alongside the unique key and timeout.

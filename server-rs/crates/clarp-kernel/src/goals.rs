@@ -40,6 +40,12 @@ pub const MAX_PLAN_ITEMS: usize = 500;
 /// How much of its history a goal carries along. Older entries are counted, not carried:
 /// the log has them all.
 pub const GOAL_HISTORY_LIMIT: usize = 200;
+/// How much of a checkpoint's progress and next work an entry of its goal's history keeps, in
+/// characters. The goal keeps its current texts once, in `checkpoint`; an entry keeps an
+/// excerpt with the text's size and digest. On 25 Nov 2026 one goal's history was 6.5 MB: 200
+/// entries, each a whole copy of about 90 KB of progress and next work, sent with every plan
+/// and artifact list that showed the goal.
+pub const HISTORY_EXCERPT: usize = 280;
 const ITEM_STATUSES: [&str; 7] = [
     "pending",
     "in_progress",
@@ -197,10 +203,22 @@ impl Goal {
         self.fields.get(field).map(text).unwrap_or_default()
     }
 
-    /// The goal as it is read: one document.
+    /// The goal as it is read: one document. Its history's checkpoints keep excerpts, also
+    /// the entries written whole before that was so.
     pub fn document(&self) -> Value {
         let mut whole = self.fields.clone();
-        whole.insert("history".to_string(), json!(self.history));
+        let history: Vec<Value> = self
+            .history
+            .iter()
+            .map(|entry| {
+                let mut entry = entry.clone();
+                if let Some(detail) = entry.get_mut("detail") {
+                    excerpted(detail);
+                }
+                entry
+            })
+            .collect();
+        whole.insert("history".to_string(), json!(history));
         whole.insert("continuation".to_string(), json!(self.continuation));
         if self.history_offset > 0 {
             whole.insert("history_offset".to_string(), json!(self.history_offset));
@@ -568,6 +586,38 @@ fn check_revision(
             refuse("plan changed; reload before editing")
         }
         _ => Ok(()),
+    }
+}
+
+/// A checkpoint's texts as its history entry keeps them: a text longer than
+/// [`HISTORY_EXCERPT`] characters becomes its first characters and `…`, beside its whole size
+/// in UTF-8 bytes (`<name>_bytes`) and the hex SHA-256 of its UTF-8 bytes (`<name>_sha256`), both
+/// of the text without the blanks around it as the checkpoint keeps it, by which a client tells
+/// whether it is the text the goal's checkpoint holds. Shorter texts and
+/// other entries stay as they are.
+pub fn excerpted(detail: &mut Value) {
+    let Some(fields) = detail.as_object_mut() else {
+        return;
+    };
+    for name in ["progress", "next_work"] {
+        let Some(Value::String(said)) = fields.get(name) else {
+            continue;
+        };
+        // An excerpt already: its size and digest are the whole text's, kept as they are.
+        if fields.contains_key(&format!("{name}_sha256")) {
+            continue;
+        }
+        // Measured as the checkpoint keeps it: without the blanks around it.
+        let text = said.trim();
+        if text.chars().count() <= HISTORY_EXCERPT {
+            continue;
+        }
+        let (bytes, digest) = (text.len(), sha256_hex(text));
+        let mut excerpt: String = text.chars().take(HISTORY_EXCERPT).collect();
+        excerpt.push('…');
+        fields.insert(name.to_string(), json!(excerpt));
+        fields.insert(format!("{name}_bytes"), json!(bytes));
+        fields.insert(format!("{name}_sha256"), json!(digest));
     }
 }
 
@@ -2275,6 +2325,8 @@ impl GoalBook {
                 fields.insert("documents".to_string(), json!(names));
             }
         }
+        // A checkpoint's texts are the goal's once, in `checkpoint`; its entry keeps excerpts.
+        excerpted(&mut data);
         remember(&mut plan, &mut goal, action, revision + 1, data, now);
         plan.goal = Some(goal);
         plan.revision += 1;
@@ -2630,6 +2682,78 @@ mod tests {
             read["ledger"]["event_count"],
             json!(GOAL_HISTORY_LIMIT + 21)
         );
+    }
+
+    #[test]
+    fn a_checkpoints_history_entry_keeps_an_excerpt_and_the_goal_its_whole_texts() {
+        let mut ids = counter();
+        let mut book = GoalBook::new();
+        let plan_id = a_goal(&mut book, &mut ids);
+        let progress = "Ærlig fremgang. ".repeat(500);
+        let next_work = "Then this. ".repeat(400);
+        let checkpoint = json!({ "progress": progress, "next_work": next_work });
+        let change = book
+            .act(
+                &plan_id,
+                0,
+                "checkpoint",
+                &checkpoint,
+                &mut world(2_000, &mut ids),
+            )
+            .unwrap();
+        keep(&mut book, &change, 2_000);
+        let goal = book.plan(&plan_id).unwrap().goal.as_ref().unwrap();
+        // The goal keeps its current texts once, whole.
+        assert_eq!(
+            goal.fields["checkpoint"]["progress"],
+            json!(progress.trim())
+        );
+        // What is stored of the entry is the excerpt, its size and its digest.
+        let entry = &goal.history.last().unwrap()["detail"];
+        for (name, text) in [
+            ("progress", progress.trim()),
+            ("next_work", next_work.trim()),
+        ] {
+            let kept = entry[name].as_str().unwrap();
+            assert_eq!(kept.chars().count(), HISTORY_EXCERPT + 1, "{name}");
+            assert!(kept.ends_with('…') && text.starts_with(kept.trim_end_matches('…')));
+            assert_eq!(entry[format!("{name}_bytes")], json!(text.len()));
+            let digest: String = Sha256::digest(text.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            assert_eq!(entry[format!("{name}_sha256")], json!(digest));
+        }
+        // The plan as it is read says the same, and is small.
+        let read = book.get(&plan_id, 9_000).unwrap();
+        let shown = &read["goal"]["history"].as_array().unwrap().last().unwrap()["detail"];
+        assert_eq!(shown, entry);
+        assert!(read.to_string().len() < progress.len() + next_work.len() + 4_000);
+    }
+
+    #[test]
+    fn an_entry_written_whole_before_is_read_as_an_excerpt_and_a_short_one_as_it_is() {
+        let long = "x".repeat(HISTORY_EXCERPT + 1);
+        let goal = Goal {
+            history: vec![
+                json!({ "kind": "checkpoint", "detail": { "progress": long, "next_work": "Short" } }),
+                json!({ "kind": "created", "detail": { "outcome": "y".repeat(1_000) } }),
+            ],
+            ..Goal::default()
+        };
+        let read = goal.document();
+        let first = &read["history"][0]["detail"];
+        assert_eq!(
+            first["progress"].as_str().unwrap().chars().count(),
+            HISTORY_EXCERPT + 1
+        );
+        assert_eq!(first["progress_bytes"], json!(HISTORY_EXCERPT + 1));
+        assert_eq!(first["next_work"], json!("Short"));
+        assert!(first.get("next_work_bytes").is_none());
+        // Only a checkpoint's two texts are cut.
+        assert_eq!(read["history"][1], goal.history[1]);
+        // What is stored is not changed by reading it.
+        assert_eq!(goal.history[0]["detail"]["progress"], json!(long));
     }
 
     #[test]

@@ -2330,6 +2330,18 @@ every action field are exactly `flat-v1`'s.
   itself, which is as large as its rows, like any list response. A plan that
   reaches the projection without its stored goal text gets `digest_pending`.
 
+### A checkpoint in a goal's history (Rust Host, issue 805)
+
+`goal.checkpoint` (`GET /task-plans`, `GET /task-plan`, plan artifacts) holds the owner's current
+`progress` and `next_work` whole. An entry of `goal.history` of kind `checkpoint` keeps of each
+text longer than 280 characters only its first 280 characters followed by `…`, with
+`progress_bytes` / `next_work_bytes` (its whole size in UTF-8 bytes) and `progress_sha256` /
+`next_work_sha256` (the hex SHA-256 of its UTF-8 bytes) beside it, both of the text without the
+blanks around it, as `goal.checkpoint` keeps it; an entry's text equals the current checkpoint's
+when the digests match. Shorter texts are kept as they are. Entries written
+whole before this are read the same way. Read the whole of an earlier text from the goal's
+documents, not from its history.
+
 ### Goal keeper, paused steps and waivers (feature `goal_updater`, Host contract 96)
 
 The Goal keeper Janitor (built-in, paused until enabled) keeps durable goals
