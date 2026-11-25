@@ -8,9 +8,9 @@
 #
 # A failing check blocks the install. A pass that runs over its budget blocks it too, and names the test binary that
 # was running when the budget ran out, to be moved to the post-release job. The release build and the install are outside the budget: they are the
-# build, not checks. The conformance run, the planted rules, the whole Rust suite and the Python Host's critical tests
-# and guards run after the release, as a job someone starts by hand that the install never waits for; what they find
-# ships as a follow-up.
+# build, not checks. The conformance run, the planted rules and the whole Rust suite run after the release, as a job
+# someone starts by hand that the install never waits for; what they find ships as a follow-up. (The Python Host and
+# its gates are retired, 25 Nov 2026.)
 #
 #   server-rs/tools/final-pass
 #
