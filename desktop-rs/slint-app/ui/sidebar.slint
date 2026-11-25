@@ -454,14 +454,19 @@ export component Sidebar inherits Rectangle {
         if !root.showing-archive && !root.showing-pairs && !root.minimal: ListSwitch {
             glyph: "↔";
             label: "Agent conversations";
-            count: root.rooms.length;
+            // What it counts is the rooms behind it, not the chats below:
+            // none shows no number (a 0 above a list of chats read as one).
+            count: root.rooms.length > 0 ? "\{root.rooms.length}" : "";
+            accessible-role: button;
+            accessible-id: "list-rooms";
+            accessible-label: root.rooms.length > 0 ? "Agent conversations, " + root.rooms.length : "Agent conversations, none yet";
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = true; }
         }
         if !root.showing-archive && root.showing-pairs: ListSwitch {
             glyph: "‹";
             label: "Back to chats";
-            count: root.rooms.length;
+            count: "";
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = false; }
         }

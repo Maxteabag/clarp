@@ -434,12 +434,23 @@ export component AppWindow inherits Window {
     callback switcher-dismissed();
     callback switcher-adjusted(int, int);
     public function show-switcher() { switcher.open(); }
+    // The switcher's field takes the keyboard again, its words kept.
+    public function focus-switcher() { switcher.focus-field(); }
     public function set-switcher-query(text: string) { switcher.set-query(text); }
 
     changed search-focused => { root.focus-moved(); }
     changed sidebar-focused => { root.focus-moved(); }
 
+    // Placed (x and y set), so nothing inside sets the window's minimum or
+    // maximum size: only the user and the window system size the window.
+    // A limit from inside (a dialog's, the explorer's, the current chat's
+    // rows) changes with what shows, and each change had the window system
+    // asked for a new size in logical pixels it converts at its own scale,
+    // not the reader's (1.15): the window shrank to about 87% when a chat
+    // was opened or a message sent.
     keys := FocusScope {
+        x: 0;
+        y: 0;
         width: root.width;
         height: root.height;
         focus-on-click: false;

@@ -63,6 +63,8 @@ pub struct PaneState {
     seek_request: i32,
     seek_index: i32,
     seek_down: bool,
+    /// Bumped when the reader stops the chat's turn (`stop_session`).
+    stopped: i32,
     /// Message search's mark (chat, row id) and its reveal request.
     marked: (String, String),
     reveal_request: i32,
@@ -122,6 +124,7 @@ impl PaneState {
             seek_request: 0,
             seek_index: 0,
             seek_down: false,
+            stopped: 0,
             marked: (String::new(), String::new()),
             reveal_request: 0,
             reveal_index: 0,
@@ -434,6 +437,24 @@ impl App {
     pub fn to_latest(&self) {
         self.bump(|p| p.to_latest += 1);
     }
+
+    /// The reader stops `session`'s turn (Stop, Ctrl+., a stalled turn's
+    /// Stop). Every chat showing it hears so: what the stop settles (the
+    /// partial answer, the line saying it was stopped) never moves the
+    /// reader, who stays at the end if they were there (#846).
+    pub fn stop_session(&self, session: &str) {
+        self.engine.borrow_mut().stop_session(session);
+        if session.is_empty() {
+            return;
+        }
+        let mut panes = self.pane_state.borrow_mut();
+        for (index, pane) in panes.iter_mut().enumerate().filter(|(_, p)| p.session == session) {
+            pane.stopped += 1;
+            let view = self.pane_view(pane);
+            pane.view = view.clone();
+            self.panes.set_row_data(index, view);
+        }
+    }
     /// Scrolls the active transcript by `delta` px (down for positive).
     pub fn scroll_by(&self, delta: f32) {
         self.bump(|p| {
@@ -630,6 +651,7 @@ impl App {
         view.seek_request = pane.seek_request;
         view.seek_index = pane.seek_index;
         view.seek_down = pane.seek_down;
+        view.stopped = pane.stopped;
         view.marked = if pane.marked.0 == pane.session { pane.marked.1.clone() } else { String::new() }.into();
         view.reveal_request = pane.reveal_request;
         view.reveal_index = pane.reveal_index;

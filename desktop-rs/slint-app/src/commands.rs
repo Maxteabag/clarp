@@ -124,11 +124,23 @@ thread_local! {
 /// The window is in front again (or a key arrived) and nothing in it has
 /// the keyboard: the region that last had it gets it back.
 pub fn regain_keyboard(app: &App, window: &AppWindow) {
-    // A dialog, the switcher and the other surfaces keep their own.
-    if window.get_surface() != "chats" || app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
+    // A dialog keeps its own.
+    if !app.overlay.borrow().is_empty() {
         return;
     }
-    if i_slint_core::window::WindowInner::from_pub(window.window()).focus_item.borrow().upgrade().is_some() {
+    // What has the keyboard must be shown: a key for something hidden (the
+    // chats' composer behind Updates) goes nowhere, not even to the
+    // window's own keys (Ctrl+F did nothing in Updates, #846).
+    if i_slint_core::window::WindowInner::from_pub(window.window()).focus_item.borrow().upgrade().is_some_and(|item| item.is_visible()) {
+        return;
+    }
+    if app.switcher.borrow().open {
+        eprintln!("clarp-slint: keyboard: nothing shown had the keyboard; giving it back to the switcher");
+        window.invoke_focus_switcher();
+        return;
+    }
+    if surface_takes_keyboard(window) {
+        eprintln!("clarp-slint: keyboard: nothing shown had the keyboard; giving it back to {}", window.get_surface());
         return;
     }
     let region = LAST_REGION.with(std::cell::Cell::get);
@@ -517,7 +529,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             // working agent stops from the conversation (or Ctrl+.). Not in
             // vim mode, where Escape is pressed out of habit (Space x stops).
             if context != "composer" && !vim_on(app) && matches!(state.as_str(), "thinking" | "tool" | "compacting") {
-                app.engine.borrow_mut().stop();
+                app.stop_session(&selected);
             } else if context == "search" {
                 focus_sidebar(app, window);
             } else {
@@ -707,7 +719,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             layout_changed = true;
         }
         "jump-latest" => app.to_latest(),
-        "stop-agent" => app.engine.borrow_mut().stop(),
+        "stop-agent" => app.stop_session(&selected),
         "silence" => {
             crate::platform::audio::with(crate::platform::audio::Audio::silence);
         }
@@ -1012,12 +1024,28 @@ pub fn close_switcher(app: &App, window: &AppWindow, restore: Option<bool>) {
         restore.unwrap_or(state.restore_composer)
     };
     window.set_switcher_open(false);
-    if restore {
-        app.focus_composer();
-    } else {
-        app.focus_transcript();
+    // Over Updates, Teams or Settings the keyboard goes back to that page:
+    // the chats' composer is hidden there, and a key for it goes nowhere.
+    if !surface_takes_keyboard(window) {
+        if restore {
+            app.focus_composer();
+        } else {
+            app.focus_transcript();
+        }
     }
     show_hints(app, window);
+}
+
+/// Gives the keyboard to the page showing in place of the chats (Updates,
+/// Teams, Settings); false while the chats show.
+fn surface_takes_keyboard(window: &AppWindow) -> bool {
+    match window.get_surface().as_str() {
+        "updates" => window.invoke_focus_updates(),
+        "teams" => window.invoke_focus_teams(),
+        "settings" => window.invoke_focus_settings(),
+        _ => return false,
+    }
+    true
 }
 
 /// + or - on a setting in the switcher: it steps, and the switcher stays
@@ -1180,11 +1208,8 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
         return;
     }
     // ---- updates and teams
-    match window.get_surface().as_str() {
-        "updates" => window.invoke_focus_updates(),
-        "teams" => window.invoke_focus_teams(),
-        "settings" => window.invoke_focus_settings(),
-        _ => app.focus_composer(),
+    if !surface_takes_keyboard(window) {
+        app.focus_composer();
     }
     show_hints(app, window);
 }

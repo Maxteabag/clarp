@@ -617,10 +617,18 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
         if let Some(title) = work_title(running, worked_ms, calls).filter(|_| has_work) {
             let key = key.to_owned();
             let open = options.expanded.contains(&key) && !folded.is_empty() && !(settled && options.hide_settled);
+            let started_at_ms = folded.iter().filter_map(|i| entries[*i].started_at_ms).min();
+            // While it runs the row says for how long, as the explorer's
+            // "working 15s" does, from the turn's start by the Host's clock.
+            let meta = match (running, int(turn, "started_at_ms").or(started_at_ms)) {
+                (true, Some(started)) if options.host_now_ms > 0 => crate::time_format::turn_elapsed(options.host_now_ms - started),
+                _ => String::new(),
+            };
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
                 rev: folded.iter().map(|i| entries[*i].rev).sum(),
-                started_at_ms: folded.iter().filter_map(|i| entries[*i].started_at_ms).min(),
+                started_at_ms,
+                meta,
                 key,
                 kind: Kind::Fold,
                 status: if settled { text(turn, "status").to_owned() } else if running { "running".to_owned() } else { "completed".to_owned() },

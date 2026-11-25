@@ -40,6 +40,25 @@ export component Switcher inherits Rectangle {
     public function open() {
         search.text = "";
         search.focus();
+        root.claim-ticks = 10;
+    }
+    public function focus-field() {
+        search.focus();
+    }
+    // Opened by a key, the field has the keyboard for what is typed next,
+    // also when something hidden took it back in the same moment (a chat's
+    // composer asked for it a frame later): for a few frames after opening
+    // it takes the keyboard again if it lost it (#846).
+    property <int> claim-ticks;
+    Timer {
+        interval: 16ms;
+        running: root.claim-ticks > 0;
+        triggered => {
+            if (root.visible && !search.has-focus) {
+                search.focus();
+            }
+            root.claim-ticks -= 1;
+        }
     }
     // Words carried over from another mode (Ctrl+K's to Ctrl+F's).
     public function set-query(text: string) {

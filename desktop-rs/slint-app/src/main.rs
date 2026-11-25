@@ -844,7 +844,7 @@ fn main() {
                 commands::run(&app, &window, "stop-agent");
                 commands::show_hints(&app, &window);
             } else {
-                app.engine.borrow_mut().stop_session(&session);
+                app.stop_session(&session);
             }
         }
     });

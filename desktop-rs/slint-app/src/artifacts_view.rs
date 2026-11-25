@@ -1366,7 +1366,7 @@ pub fn toggle_live(app: &App, key: &str) {
     // own stop, as its key and stalled line stop it.
     if let Some(boxed) = key.strip_prefix(clarp_core::chat_view::STOP_PREFIX) {
         if let Some(session) = app.session_showing(boxed) {
-            app.engine.borrow_mut().stop_session(&session);
+            app.stop_session(&session);
             app.refresh(&[Change::Live(session)]);
         }
         return;

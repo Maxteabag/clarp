@@ -18,7 +18,7 @@ use std::time::Duration;
 use serde_json::json;
 use slint::Model;
 
-use super::{Stage, app_now, check, control, rows, run_stages, sends, shot, view};
+use super::{Stage, app_now, check, check_window_size_free, control, rows, run_stages, sends, shot, view};
 use crate::headless;
 
 /// Where the drawn element `id` is: (top, bottom).
@@ -50,7 +50,7 @@ fn cache_root() -> std::path::PathBuf {
 
 pub fn message_search_check(out: String) {
     use slint::platform::Key;
-    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out);
     let stages: Vec<Stage> = vec![
         ("live", Box::new(|app, _, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
@@ -80,6 +80,7 @@ pub fn message_search_check(out: String) {
             if app.engine.borrow().roster().find("dana").is_none() {
                 return false;
             }
+            check_window_size_free(window, "before another chat opens");
             window.invoke_chat_chosen("mike".into());
             true
         })),
@@ -88,6 +89,7 @@ pub fn message_search_check(out: String) {
             if !loaded {
                 return false;
             }
+            check_window_size_free(window, "with Mike's long chat open");
             window.invoke_chat_chosen("rachel".into());
             true
         })),
@@ -214,6 +216,91 @@ pub fn message_search_check(out: String) {
             check(messages == 0, "nothing matches");
             check(window.get_switcher_empty() == crate::search_view::EMPTY, &format!("it says what it searched: {:?}", window.get_switcher_empty()));
             shot(&out4, "message-search-04-no-match");
+            headless::press(Key::Escape);
+            true
+        })),
+        // Ctrl+F from Updates, after the switcher was opened and closed
+        // there (#846): it opens message search, and what is typed next
+        // goes into its field.
+        ("updates", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "2");
+            true
+        })),
+        ("updates switcher", Box::new(|_, window, elapsed| {
+            if window.get_surface() != "updates" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("updates switcher closed", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("ctrl f in updates", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        ("search over updates", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_open() && window.get_switcher_placeholder() == "Search messages in every chat", "Ctrl+F opens message search over Updates, after the switcher closed there");
+            if !window.get_switcher_open() {
+                return true;
+            }
+            headless::type_text("pelican");
+            true
+        })),
+        ("typed over updates", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "pelican" && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_query() == "pelican", &format!("what is typed after Ctrl+F goes into its field: {:?}", window.get_switcher_query()));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("back to the chats", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_surface() == "updates", "Escape leaves Updates showing");
+            headless::press_with(&[Key::Control], "1");
+            true
+        })),
+        ("ctrl f in the chats", Box::new(|_, window, elapsed| {
+            if window.get_surface() != "chats" || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        ("search over the chats", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_open(), "back in the chats Ctrl+F opens message search");
+            if !window.get_switcher_open() {
+                return true;
+            }
+            headless::type_text("walrus");
+            true
+        })),
+        ("typed over the chats", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "walrus" && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_query() == "walrus", &format!("and what is typed goes into its field: {:?}", window.get_switcher_query()));
+            shot(&out5, "message-search-05-ctrl-f-after-updates");
             headless::press(Key::Escape);
             true
         })),

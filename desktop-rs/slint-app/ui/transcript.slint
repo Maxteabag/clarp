@@ -1487,7 +1487,12 @@ export component Transcript inherits FocusScope {
         let last = root.rows.length - 1;
         if (root.rows[last].author == "user") {
             // A message of the user's own: the end, as always.
+            root.stop-held = false;
             root.disarm();
+            return;
+        }
+        // The reader stopped this turn: its settling rows are not news.
+        if (root.stop-held) {
             return;
         }
         if (root.is-reply(last) && (root.reply-id == "" || last != root.reply-index)) {
@@ -1526,6 +1531,7 @@ export component Transcript inherits FocusScope {
     function rows-counted() {
         let same-chat = root.reply-count > 0 && root.rows.length > 0 && root.rows[0].id == root.reply-first;
         if (!same-chat) {
+            root.stop-held = false;
             root.disarm();
         } else if (root.follow && Look.follow && (root.rows.length > root.reply-count || root.tail != root.reply-tail)) {
             root.arm();
@@ -1537,6 +1543,28 @@ export component Transcript inherits FocusScope {
     function disarm() {
         root.reply-id = "";
         root.reply-drawn = false;
+    }
+    // The reader stopped the turn (Stop, Ctrl+.): their own act, so it
+    // never stops following. The partial answer settling into the chat
+    // (a new row in the live one's place) and the line that says it was
+    // stopped would arm the reply again and pull the view up to its
+    // start; held until the stopped turn is over and the next begins, a
+    // reader at the end stays there, the stop line in view.
+    in property <bool> busy;
+    property <bool> stop-held;
+    property <bool> stop-over;
+    public function reader-stopped() {
+        root.disarm();
+        root.stop-held = true;
+        root.stop-over = !root.busy;
+    }
+    changed busy => {
+        if (!root.busy) {
+            root.stop-over = root.stop-held;
+        } else if (root.stop-over) {
+            root.stop-held = false;
+            root.stop-over = false;
+        }
     }
     // A reply shorter than the view is followed to its end, rows that
     // come after it too: the stop is for a reply about a view tall or more
