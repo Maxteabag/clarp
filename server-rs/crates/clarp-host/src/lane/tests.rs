@@ -1305,3 +1305,48 @@ fn a_start_after_a_lane_left_is_tried_once_more_once_its_owner_let_go() {
     drop(held);
     std::fs::remove_dir_all(&run).unwrap();
 }
+
+/// Issue 860. A lane on its way out (its socket gone, its owner lock still held while it ends its
+/// tool) is waited for by a start, within the bound, rather than looked at once and given up on:
+/// the start goes ahead once the lock is let go. One whose lock is not let go within the bound
+/// still refuses the start.
+#[test]
+fn a_start_waits_for_a_lane_on_its_way_out_to_let_go() {
+    let run = run_dir("on-its-way-out");
+    let lane = Endpoint::of(Tool::Claude, &run, "a");
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.lock().unwrap();
+    let late = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        drop(owner);
+    });
+    let began = std::time::Instant::now();
+    let place = lane.place_within(
+        &run,
+        (Some("t"), "d"),
+        |_| false,
+        ROOMY,
+        false,
+        std::time::Duration::from_secs(5),
+    );
+    late.join().unwrap();
+    assert_eq!(place.unwrap(), Place::Free);
+    assert!(began.elapsed() >= std::time::Duration::from_millis(300));
+    // Held past the bound by a process no lane is (this test's own): not ended, and refused.
+    let held = File::create(owner_lock(lane.socket())).unwrap();
+    held.lock().unwrap();
+    let refused = lane.place_within(
+        &run,
+        (Some("t"), "d"),
+        |_| false,
+        ROOMY,
+        false,
+        std::time::Duration::from_millis(200),
+    );
+    assert_eq!(
+        refused.unwrap_err().to_string(),
+        "the Claude lane owner has not disconnected"
+    );
+    drop(held);
+    std::fs::remove_dir_all(&run).unwrap();
+}

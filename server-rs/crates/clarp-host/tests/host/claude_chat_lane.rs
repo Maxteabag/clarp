@@ -92,6 +92,11 @@ while True:
     else:
         answer("said-" + word, [uid])
         note("answered", word)
+if (root / "slow-exit").exists():
+    # Ends a while after its input closed, as Claude Code can: the lane holds its owner lock
+    # until it is gone.
+    import time
+    time.sleep(10)
 note("exits", session)
 "#;
 
@@ -489,4 +494,51 @@ fn a_turn_refused_for_a_changed_login_with_no_place_for_a_lane_runs_on_its_own()
     );
     assert_eq!(noted(place, "turns"), "ask-one\nask-two\n");
     assert_eq!(switched.cold(), cold + 1);
+}
+
+/// Issue 860. A lane on its way out (retired, idle, or refused for its login) stops answering
+/// before it ends its Claude Code, and holds its owner lock until that is gone, up to seconds
+/// later. A turn that came then started its Claude Code as the lane, found the old owner there,
+/// and ran cold. It now waits for the old lane to let go, within the bound, and starts the lane.
+#[test]
+fn a_turn_that_meets_a_lane_on_its_way_out_waits_for_it_and_starts_the_lane() {
+    let switched = Switched::new("claude-lane-on-its-way-out");
+    let (place, host) = (&switched.place, &switched.host);
+    let id = host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|agent| agent["session"] == "seat")
+        .unwrap()["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let socket = place.root.join("run").join(format!("{id}-cll.sock"));
+    let cold = switched.cold();
+    // The lane leaves, and its Claude Code takes its time to end: the lane holds its owner lock
+    // for it (until its own limit ends it, seconds later).
+    std::fs::write(place.root.join("slow-exit"), "").unwrap();
+    let mut retire = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    writeln!(retire, "{}", json!({"op": "retire"})).unwrap();
+    wait_for("the lane to stop answering", || {
+        lane_said(&socket, "inspect").is_none()
+    });
+    let owner = socket.with_extension("lock");
+    let held = std::fs::File::open(&owner).unwrap();
+    assert!(
+        held.try_lock_shared().is_err(),
+        "the lane on its way out still holds its owner lock"
+    );
+    drop(held);
+    // A turn now: it waits for the old lane to let go, starts its Claude Code as the lane, and
+    // runs on it.
+    asked(host, "seat", "ask-two");
+    assert_eq!(
+        noted(place, "launches"),
+        "--session-id turn=absent\n--resume turn=absent\n",
+        "one start, the lane's, resuming the conversation"
+    );
+    assert_eq!(noted(place, "turns"), "ask-one\nask-two\n");
+    assert_eq!(switched.cold(), cold, "no turn started without a lane");
+    drop(retire);
 }

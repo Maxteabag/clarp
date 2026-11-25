@@ -175,7 +175,7 @@ of them is not done.
     leave, and the other process must not go ahead.
   - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
     (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
-    `once_more` after a changed login, a Claude or Muse turn refused for one) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
+    `once_more` after a changed login, a Claude or Muse turn refused for one, a start that meets a lane on its way out) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
     lock.
     - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
       it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
@@ -333,6 +333,13 @@ session.
   Codex already did so: its chat turns and goals offer a refused attempt to a new lane once
   (`once_more`), started within the same limits. OpenCode does so for a refused claim and for a
   lane that differs from the turn's by the login alone (issue 857, in "OpenCode's lane").
+- **A start waits for a lane on its way out** (issue 860). A lane that leaves (retired, idle, or
+  refused for its login) stops answering first and lets go of its owner lock only once its tool
+  has ended, up to seconds later (Claude Code's `EXIT_LIMIT` is 2 s before its group is ended).
+  Every lane start's `place`, of every tool, waits for such a lane, nobody on its socket and its
+  owner lock held, within `LEAVE_WAIT`, and ends it once the bound has passed, as a retirement
+  does; it no longer looks once and gives up. One seat switch's turn came in that moment, through
+  the start of a turn with no lane there, which has no second try, and ran cold.
 - **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
   Muse lane take its session, waits for that before its first output: the lane's start, or the
   session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the

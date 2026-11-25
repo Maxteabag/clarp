@@ -631,23 +631,34 @@ impl Endpoint {
         needed: bool,
         bound: Duration,
     ) -> io::Result<Place> {
-        if let Ok(state) = self.inspect() {
-            let same_thread = state.thread == thread.unwrap_or_default();
-            if same_thread && state.options == digest && !kept(&state) {
-                return Ok(Place::Kept);
+        match self.inspect() {
+            Ok(state) => {
+                let same_thread = state.thread == thread.unwrap_or_default();
+                if same_thread && state.options == digest && !kept(&state) {
+                    return Ok(Place::Kept);
+                }
+                // A lane that does not let go in time has been ended with its tool, where it may
+                // be; the look at its owner lock below says whether it has gone.
+                if self.retire_within(bound).is_err() {
+                    return if same_thread {
+                        Ok(Place::Kept)
+                    } else {
+                        Err(io::Error::other(format!(
+                            "the {} lane owns another thread",
+                            self.tool.name()
+                        )))
+                    };
+                }
             }
-            // A lane that does not let go in time has been ended with its tool, where it may
-            // be; the look at its owner lock below says whether it has gone.
-            if self.retire_within(bound).is_err() {
-                return if same_thread {
-                    Ok(Place::Kept)
-                } else {
-                    Err(io::Error::other(format!(
-                        "the {} lane owns another thread",
-                        self.tool.name()
-                    )))
-                };
+            // Nobody listens on its socket, and its owner lock is still held: a lane on its way
+            // out (retired, idle, or refused for its login), which stops answering before it
+            // ends its tool and lets go of the lock seconds later. It is waited for within the
+            // bound, and ended once the bound has passed, as a retirement does; never looked at
+            // once and given up on (issue 860: a turn's start met one and ran cold).
+            Err(error) if gone(&error) && !self.released()? => {
+                self.let_go_within(Instant::now() + bound, true)?;
             }
+            Err(_) => {}
         }
         if !self.released()? {
             return Err(io::Error::other(format!(
