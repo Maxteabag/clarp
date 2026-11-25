@@ -635,9 +635,57 @@ struct Control {
     /// A connection is taken only by whoever holds `connections`.
     listener: Option<OwnedFd>,
     connections: Mutex<Vec<Arc<Connection>>>,
+    /// Requests taken from a connection whose answer has not been written yet.
+    answering: AtomicUsize,
 }
 
+/// A request taken from a connection and not yet answered: counted from its whole line until
+/// its answer was written, or could not be, so the shim does not end in between.
+struct Answering<'a>(&'a AtomicUsize);
+
+impl<'a> Answering<'a> {
+    fn of(count: &'a AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(count)
+    }
+}
+
+impl Drop for Answering<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How long a shim whose tool has ended waits for the requests that reached it to be answered.
+const LAST_ANSWERS: Duration = Duration::from_secs(2);
+
 impl Control {
+    /// Waits, at most `bound`, until every request that reached the shim has its answer: no
+    /// connection waits in the listener, none has a request begun or waiting, and none is being
+    /// answered. Asked once the socket is gone, so no new connection comes; a request that
+    /// reached the shim while its tool ended (the input that let the tool exit, a hook of its
+    /// last moment) would otherwise be closed without its line, and whoever asked could not tell
+    /// what became of it (issue #778). Looked at again and again because it has no one event to
+    /// wait for, and bounded so a client that never finishes its line never holds the shim.
+    fn answer_the_last(&self, bound: Duration) {
+        let until = Instant::now() + bound;
+        loop {
+            let connections = lock(&self.connections);
+            let waiting = self
+                .listener
+                .as_ref()
+                .is_some_and(|listener| waits(listener.as_fd(), false));
+            let answered = !waiting
+                && self.answering.load(Ordering::SeqCst) == 0
+                && connections.iter().all(|connection| connection.idle());
+            drop(connections);
+            if answered || Instant::now() >= until {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     fn handle(
         self: &Arc<Self>,
         request: Request,
@@ -1067,6 +1115,9 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
             None if ended => taken.len(),
             None => continue,
         };
+        // Counted before the line leaves `pending`, so the shim never sees it neither waiting
+        // nor being answered.
+        let _answering = Answering::of(&control.answering);
         let mut line: Vec<u8> = taken.drain(..end).collect();
         if !taken.is_empty() {
             taken.remove(0);
@@ -1371,6 +1422,7 @@ fn run(args: Args) -> Result<u8, String> {
             .and_then(|()| listener.as_fd().try_clone_to_owned())
             .ok(),
         connections: Mutex::default(),
+        answering: AtomicUsize::new(0),
     });
     if signals_blocked {
         let control = control.clone();
@@ -1417,6 +1469,9 @@ fn run(args: Args) -> Result<u8, String> {
     // neither pipe. It is let go now, while the group's number is still the tool's: once the
     // shim is gone nothing would ever let it go.
     control.let_go("let go when the tool ended");
+    // The socket is gone, so no request comes after these; the tool is not reaped yet, so its
+    // number names nothing else while they are answered.
+    control.answer_the_last(LAST_ANSWERS);
     child
         .wait()
         .map_err(|e| format!("reaping {}: {e}", args.program))?;
@@ -1590,6 +1645,7 @@ mod tests {
             hold_changed: Condvar::new(),
             listener: Some(listener.as_fd().try_clone_to_owned().unwrap()),
             connections: Mutex::default(),
+            answering: AtomicUsize::new(0),
         });
         Rig {
             control,

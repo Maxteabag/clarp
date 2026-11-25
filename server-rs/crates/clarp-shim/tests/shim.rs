@@ -82,13 +82,29 @@ fn records(spool: &Path) -> Vec<Record> {
 }
 
 fn ask(socket: &Path, request: &Request) -> Reply {
-    let mut stream = UnixStream::connect(socket).unwrap();
+    ask_in("", socket, request)
+}
+
+/// One request and its reply. A reply that does not come names the request and the `case` it
+/// was asked in, so a failure points at its step.
+fn ask_in(case: &str, socket: &Path, request: &Request) -> Reply {
+    let mut stream = UnixStream::connect(socket)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} could not connect: {error}"));
     let mut line = serde_json::to_string(request).unwrap();
     line.push('\n');
-    stream.write_all(line.as_bytes()).unwrap();
+    stream
+        .write_all(line.as_bytes())
+        .unwrap_or_else(|error| panic!("{case}: {request:?} could not be sent: {error}"));
     let mut reply = String::new();
-    BufReader::new(stream).read_line(&mut reply).unwrap();
-    serde_json::from_str(&reply).unwrap()
+    BufReader::new(stream)
+        .read_line(&mut reply)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} got no reply: {error}"));
+    assert!(
+        !reply.is_empty(),
+        "{case}: {request:?} got no reply: the shim closed the connection"
+    );
+    serde_json::from_str(&reply)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} got {reply:?}: {error}"))
 }
 
 fn outs(records: &[Record]) -> Vec<&str> {
@@ -1676,6 +1692,33 @@ time.sleep(300)'"#;
     ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
+/// The input that lets the tool end is answered, though the shim ends with the tool at once:
+/// the shim answers every request that reached it before it ends (issue #778). Asked many
+/// times, as the race it closes was seen once in many runs.
+#[test]
+fn the_input_that_ends_the_tool_is_answered_before_the_shim_ends() {
+    for round in 0..20 {
+        let name = format!("last-input-{round}");
+        let marker = dir_of(&name).join("ready");
+        let script = format!(
+            ": > '{}'; read line; printf 'read:%s\\n' \"$line\"",
+            marker.display()
+        );
+        let mut running = start(&name, &script);
+        wait_for("the tool to wait for input", || marker.exists());
+        let reply = ask_in(
+            &name,
+            &running.socket,
+            &Request::Stdin {
+                data: "the last line\n".to_string(),
+            },
+        );
+        assert!(reply.ok, "{name}: {reply:?}");
+        ends(&mut running.shim);
+        std::fs::remove_dir_all(&running.dir).unwrap();
+    }
+}
+
 #[test]
 fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
     const NEXT: u64 = 42;
@@ -1705,13 +1748,18 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         let mut fence = spool_len(&running.spool);
         if case != "unheld" {
             let ms = if case == "expired" { 500 } else { 2_000 };
-            let held = hold(&running.socket, ms).held.unwrap();
+            let held = ask_in(case, &running.socket, &Request::Hold { ms })
+                .held
+                .unwrap();
             fence = held.spool;
             if case == "partial" {
                 assert_eq!(held.partial_out, 7);
             }
             if case == "released" {
-                assert_eq!(release(&running.socket).let_go, Some(true));
+                assert_eq!(
+                    ask_in(case, &running.socket, &Request::Release).let_go,
+                    Some(true)
+                );
             }
             if case == "expired" {
                 wait_for("the shim to auto-release the held tool", || {
@@ -1722,7 +1770,8 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             }
             if case == "late-hook" {
                 assert!(
-                    ask(
+                    ask_in(
+                        case,
                         &running.socket,
                         &Request::Hook {
                             name: "late".to_string(),
@@ -1734,7 +1783,8 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             }
         }
 
-        let reply = ask(
+        let reply = ask_in(
+            case,
             &running.socket,
             &Request::ConsumeHold {
                 fence,
@@ -1744,9 +1794,10 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         assert_eq!(reply.killed, Some(case == "current"), "{case}: {reply:?}");
         if case != "current" {
             // A refusal leaves the existing tool able to take input.
-            release(&running.socket);
+            ask_in(case, &running.socket, &Request::Release);
             assert!(
-                ask(
+                ask_in(
+                    case,
                     &running.socket,
                     &Request::Stdin {
                         data: "still here\n".to_string()
