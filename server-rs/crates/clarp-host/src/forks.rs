@@ -427,6 +427,7 @@ mod tests {
             commentary: false,
             coordination: None,
             session: None,
+            read_into: None,
         }
     }
 

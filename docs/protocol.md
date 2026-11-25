@@ -519,7 +519,8 @@ Response:
       "sender_agent_id": null, "sender_name": null, "sender_session": null,
       "reply_to_agent_id": null, "reply_to_name": null, "reply_to_session": null,
       "automation_kind": null,
-      "audience": "user | agents"
+      "audience": "user | agents",
+      "read_into": { "trace_id": "…", "turn": 41 }
     }
   ],
   "latest_revision": 812,
@@ -666,6 +667,27 @@ Rules:
   turn's own message, before the first row written after the turn began. A message steered into
   a running turn is in `read_rows`, so the working line goes below it; a message that waits for
   the next turn is not, so the working line stays above it.
+- **A message read into another turn says so on its own row (feature `read_into`, Rust Host
+  contract 189, issue 845).** A user row whose message was read into a turn other than its own
+  (steered into the running turn, or read together with the turn's own message at its start)
+  carries `read_into`, an object: `trace_id`, that turn's trace, and `turn`, its number on the
+  Host. The trace is the id the live view gives the turn (`GET /live` `turn.turn_id`,
+  [Live items](live-items.md) §1.4) and the `trace_id` of the message the turn began for. It is
+  the trace and not a row id because that is how both halves name a turn: the live turn says
+  only its `turn_id`, and every `/log` row a turn writes carries it as `trace_id` (§9 of Live
+  items), so an app matches `read_into.trace_id` against either without another read. `turn`
+  is the Host's own count of the agent's turns; no other field of a row carries it, so match
+  by `trace_id`. The Host writes the row in the same write as the read that joined it, and
+  `read_into` is on the row's first revision: a client that fetches `/log` on
+  `transcript-updated` before the live `turn` op with `read_rows` arrives already knows the
+  row belongs above the turn's working line. Absent on every other row: a message that started
+  its own turn, one that waits (it has no row yet), and a message a conversation fork answered
+  (the fork's turn is its own). Rows written before contract 189 carry it too where the Host's
+  log holds the join. Place a row whose `read_into.trace_id` is the running turn's `turn_id`
+  above that turn's working line, as `read_rows` would. The field is absent, never null, on a
+  row that was not read into another turn, so a client tells "not read into" from "an older
+  Host" by the feature `read_into` in `/server-info`, not by the rows; without the feature,
+  place the row by `read_rows` as before.
 - **A message that waits enters the conversation where its turn starts (feature
   `waited_send_order`, Host contract 115).** A user row is written when the
   message reaches the agent: at once for a send that starts a turn or is steered into one; for
@@ -1326,6 +1348,12 @@ Response `200`:
 
 `dispatch` names the backend that took the turn (`claude`, `codex`, …);
 `queued` is true when the turn waits behind a running one.
+
+`queued: true` means the message has no turn of its own yet. It may still join the running
+turn: a steer, or a message read together with the turn's own at its start. The live turn's
+`read_rows` (Rust Host contract 185), `queue-updated` (`queue_started`) and the message's own
+`/log` row's `read_into` (Rust Host contract 189, feature `read_into`) tell that later; the answer to the send never
+changes.
 
 A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which
 answers the same way) replayed with the same `client_msg_id` answers what the first

@@ -224,6 +224,11 @@ messages read together with the turn's own at its start. Absent while none was r
 with the longer list follows each read, and the turn keeps the list as it goes on and ends. It
 holds the newest 20; where older ones were left out, `read_rows_more` is `true`.
 
+The rows themselves say it too (Rust Host contract 189, feature `read_into`): a `/log`
+message row read into a turn other than its own carries `read_into`, `{trace_id, turn}`, whose
+`trace_id` is that turn's `turn_id`, from the row's first revision, so a client that reads `/log` before this op arrives places the
+row above the working line already ([the protocol](protocol.md#2-load-a-chat-get-log)).
+
 **Where the working line goes:** after the last row in `read_rows`. Where `read_rows` is absent,
 as before: after the turn's own message (the user row whose trace is the turn's `turn_id`),
 before the first row written after the turn began. A message that waits for the next turn is in

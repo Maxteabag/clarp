@@ -822,6 +822,21 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
                 read.iter().any(|row| row == &json!(format!("u-{follow}"))),
                 "{mode}: {live}"
             );
+            // And the follow-up's own row says so, without the live turn (issue 845): the
+            // running turn's id, which its own message's row has as its trace. The message the
+            // turn began for names no turn.
+            let rows = host.turns(session);
+            let row = |id: &str| rows.iter().find(|row| row["id"] == id).cloned();
+            let turn_id = live["turn"]["turn_id"].clone();
+            let own = row("u-first").unwrap();
+            assert_eq!(own["trace_id"], turn_id, "{mode}: {own}");
+            assert!(own.get("read_into").is_none(), "{mode}: {own}");
+            let steered = row(&format!("u-{follow}")).unwrap();
+            assert_eq!(
+                steered["read_into"]["trace_id"], turn_id,
+                "{mode}: {steered}"
+            );
+            assert!(steered["read_into"]["turn"].is_u64(), "{mode}: {steered}");
         }
         std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
         collect_answer(&host, session, last);

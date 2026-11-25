@@ -43,6 +43,9 @@ pub(super) struct TurnAnchors {
     /// The rows of the messages read into the turn as it ran, oldest first: steered into it,
     /// or read with its own at its start.
     pub(super) read_rows: Vec<String>,
+    /// The turn's id as the live view names it: the trace of the message it began for. A
+    /// message read into the turn carries it as `read_into` (issue 845).
+    pub(super) turn_id: Option<String>,
 }
 
 impl TurnAnchors {
@@ -164,6 +167,12 @@ impl Walk {
         let Some(entry) = Entry::from_item(item).map_err(|why| corrupt(item, why))? else {
             return Ok(());
         };
+        if let Entry::Message(message) = &entry
+            && self.decided.turn_id.is_none()
+        {
+            self.decided.turn_id =
+                Some(crate::shown_name(message.trace_id.as_deref(), &message.id));
+        }
         let id = entry.id();
         if clarp_kernel::artifacts::forms::is_answer_row(id) || !self.seen.insert(id.to_owned()) {
             return Ok(());
@@ -980,5 +989,133 @@ mod tests {
     fn recorder_entry(recorder: &Recorder, id: &str) -> Entry {
         let item = recorder.log().find(id).unwrap().unwrap();
         Entry::from_item(&item).unwrap().unwrap()
+    }
+
+    /// The turn each message row says it was read into, as a reader of everything and a
+    /// reader of the chat are given them now.
+    fn read_into(recorder: &Recorder) -> Vec<(String, Option<(String, u64)>)> {
+        let mut read = Vec::new();
+        for which in [super::super::Which::All, Which::chat(true)] {
+            let page = tail(recorder.log(), &[], span(recorder), 100, which).unwrap();
+            let rows: Vec<_> = page
+                .entries
+                .iter()
+                .filter(|row| matches!(row.entry, Entry::Message(_)))
+                .map(|row| {
+                    let into = row.read_into.as_ref();
+                    let into = into.map(|into| (into.trace_id.clone(), into.turn));
+                    (row.entry.id().to_owned(), into)
+                })
+                .collect();
+            if !read.is_empty() {
+                assert_eq!(read, rows, "every reader is given the same link");
+            }
+            read = rows;
+        }
+        read
+    }
+
+    #[test]
+    fn a_message_steered_into_the_turn_names_it_from_its_first_revision() {
+        // Issue 845: the row alone tells a steer from a message that waits.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        say(&mut recorder, turn, "r-look", &["t-1"], &[]);
+        let before = recorder.conversation_seq() * REVISION_STEP;
+        read_in(&mut recorder, turn, "u-more");
+        // In the write that read it: the turn's id as the live view names it (no trace here).
+        let ask = ("u-ask".to_owned(), None);
+        let more = ("u-more".to_owned(), Some(("turn-ask".to_owned(), turn.0)));
+        assert_eq!(read_into(&recorder), [ask.clone(), more.clone()]);
+        // A delta that brings the row brings the link with it.
+        let (given, _) = {
+            let page = after(
+                recorder.log(),
+                before,
+                &[],
+                span(&recorder),
+                100,
+                Which::chat(true),
+            )
+            .unwrap();
+            (page.entries, page.latest_revision)
+        };
+        let row = given.iter().find(|row| row.entry.id() == "u-more").unwrap();
+        let into = row.read_into.as_ref().unwrap();
+        assert_eq!((into.trace_id.as_str(), into.turn), ("turn-ask", turn.0));
+        // A message that waits and then starts a turn of its own names none.
+        let next = accept(&mut recorder, "u-next", 350);
+        end(&mut recorder, turn, "r-look");
+        recorder
+            .handle(Command::TurnStarted { turn: next }, 410)
+            .unwrap();
+        assert_eq!(
+            read_into(&recorder),
+            [ask, more, ("u-next".to_owned(), None)]
+        );
+    }
+
+    #[test]
+    fn messages_read_with_the_turns_own_at_its_start_name_the_turn_by_its_trace() {
+        let mut recorder = open();
+        let running = start(&mut recorder);
+        let traced = |recorder: &mut Recorder, id: &str, trace: &str, now| {
+            let message = Message {
+                id: id.into(),
+                text: id.into(),
+                origin: Origin::User,
+                trace_id: Some(trace.into()),
+                ..Message::default()
+            };
+            recorder
+                .accept_message(
+                    Incoming {
+                        key: Some(message.id.clone()),
+                        body: serde_json::to_vec(&message).unwrap(),
+                        origin: Origin::User,
+                        admission: Admission::Queue,
+                        coordination: None,
+                        user_word: false,
+                    },
+                    now,
+                )
+                .unwrap()
+                .turn
+                .unwrap()
+        };
+        let first = traced(&mut recorder, "u-first", "tr-first", 200);
+        let second = traced(&mut recorder, "u-second", "tr-second", 210);
+        say(&mut recorder, running, "r-done", &[], &[]);
+        end(&mut recorder, running, "r-done");
+        // The turn of the first starts and takes the second into its prompt, as the actor
+        // gathers it: reserved and read in the same write.
+        let mut batch = recorder.batch();
+        let join = Join {
+            into: first,
+            uuid: "together-second".into(),
+            recovery: None,
+            together: true,
+        };
+        batch
+            .command(Command::Join { turn: second, join }, 420)
+            .unwrap();
+        batch
+            .command(Command::JoinRead { turn: second }, 420)
+            .unwrap();
+        batch.commit().unwrap();
+        recorder
+            .handle(Command::TurnStarted { turn: first }, 430)
+            .unwrap();
+        assert_eq!(
+            read_into(&recorder),
+            [
+                ("u-ask".to_owned(), None),
+                ("u-first".to_owned(), None),
+                (
+                    "u-second".to_owned(),
+                    Some(("tr-first".to_owned(), first.0))
+                ),
+            ]
+        );
     }
 }

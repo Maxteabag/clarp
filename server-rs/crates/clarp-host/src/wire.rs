@@ -1693,6 +1693,11 @@ pub fn row(version: &Versioned) -> Value {
                 None => json!(markup::strip_hidden_blocks(&message.text)),
             };
             row["trace_id"] = json!(message.trace_id.clone().unwrap_or_default());
+            // Read into a turn other than its own: that turn's trace (its `turn_id`) and number
+            // (feature `read_into`). Absent on a message that began its own turn.
+            if let Some(into) = &version.read_into {
+                row["read_into"] = json!({"trace_id": into.trace_id, "turn": into.turn});
+            }
             row["origin"] = json!(message.origin.name());
             if let Some(sender) = &message.sender {
                 row["sender_agent_id"] = json!(sender.agent_id);

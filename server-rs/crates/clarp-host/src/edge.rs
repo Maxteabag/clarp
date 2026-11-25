@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 188;
+pub const HOST_CONTRACT: u64 = 189;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -460,6 +460,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `"quota"` (the only usage limit), in `live_activity`, `agent-activity` and `agent-state`'s
     // `detail` (issue 834).
     ("waits_for", 188),
+    // A message's `/log` row read into a turn other than its own carries `read_into`, that
+    // turn's trace (its `turn_id`) and number, from its first revision: the row alone tells a
+    // message read into the running turn from one that waits (issue 845).
+    ("read_into", 189),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

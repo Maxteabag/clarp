@@ -271,6 +271,19 @@ pub struct Versioned {
     /// The session of the agent's tool its turn ran in, where the Host knows it: the agent's
     /// own, or its conversation fork's (issue 718). Filled by the actor that reads the page.
     pub session: Option<String>,
+    /// A message read into a turn other than its own (steered into it as it ran, or read with
+    /// its own message at its start): that turn. Found from what the join wrote with the row,
+    /// so the row never stands without it (issue 845).
+    pub read_into: Option<ReadInto>,
+}
+
+/// The turn a message was read into, other than its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadInto {
+    /// The turn's id as the live view names it (`turn_id`): the trace of its own message.
+    pub trace_id: String,
+    /// The turn's number.
+    pub turn: u64,
 }
 
 impl Versioned {
@@ -288,6 +301,7 @@ impl Versioned {
             commentary: false,
             coordination: None,
             session: None,
+            read_into: None,
         }
     }
 }
@@ -912,6 +926,20 @@ impl<'a> Reader<'a> {
         };
         let mut newest = item.seq;
         row.coordination = self.hidden(item, &row.entry)?;
+        // A message read into another turn names that turn: written with the read, so it is
+        // there from the row's first revision on.
+        if matches!(row.entry, Entry::Message(_))
+            && let Some(into) = read_into_turn(self.log, item)?
+        {
+            row.read_into = self
+                .anchors(into)?
+                .turn_id
+                .clone()
+                .map(|trace_id| ReadInto {
+                    trace_id,
+                    turn: into,
+                });
+        }
         let split = if let Some(turn) = row.turn_number {
             let audience = self.mark(turn)?;
             if matches!(audience, TurnAudience::User { restamped: true })
