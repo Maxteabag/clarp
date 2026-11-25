@@ -92,7 +92,6 @@ struct SqliteLog {
 /// How long an append may take before the journal says what its commit did (issue 848).
 const SLOW_APPEND: Duration = Duration::from_secs(2);
 
-
 struct Stored {
     seq: i64,
     turn: Option<i64>,
