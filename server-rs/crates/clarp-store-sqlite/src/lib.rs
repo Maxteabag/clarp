@@ -92,59 +92,6 @@ struct SqliteLog {
 /// How long an append may take before the journal says what its commit did (issue 848).
 const SLOW_APPEND: Duration = Duration::from_secs(2);
 
-/// What the index of a log's WAL says of it: how many pages it holds and how many of them a
-/// checkpoint has copied back into the database file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WalIndex {
-    pages: u32,
-    page_size: u32,
-    copied_back: u32,
-}
-
-/// Reads the header of the WAL's index, the `-shm` file beside the log, as SQLite lays it out
-/// (its WAL-mode file format: `mxFrame` at byte 16, `szPage` at 14, the checkpoint's
-/// `nBackfill` at 96, in the machine's own byte order). Read without SQLite's locks: it says
-/// how things stood, for the journal, and nothing is decided by it.
-fn wal_index(log_file: &Path) -> Option<WalIndex> {
-    use std::io::Read;
-    let mut shm = log_file.as_os_str().to_owned();
-    shm.push("-shm");
-    let mut header = [0u8; 100];
-    std::fs::File::open(PathBuf::from(shm))
-        .and_then(|mut file| file.read_exact(&mut header))
-        .ok()?;
-    let u32_at = |at: usize| {
-        u32::from_ne_bytes([header[at], header[at + 1], header[at + 2], header[at + 3]])
-    };
-    let page_size = match u16::from_ne_bytes([header[14], header[15]]) {
-        1 => 65_536,
-        size => u32::from(size),
-    };
-    Some(WalIndex {
-        pages: u32_at(16),
-        page_size,
-        copied_back: u32_at(96),
-    })
-}
-
-/// Whether a checkpoint ran inside the commit after which the WAL's index stood so. A commit
-/// adds pages to the WAL that nothing has copied back yet: all of them copied back right after
-/// it means a checkpoint ran inside it, on the committing thread.
-fn checkpoint_said(index: Option<WalIndex>) -> String {
-    match index {
-        Some(index) if index.pages > 0 && index.copied_back >= index.pages => format!(
-            "a checkpoint ran inside it: all {} pages of the WAL ({} bytes each) were copied back \
-             into the database",
-            index.pages, index.page_size
-        ),
-        Some(index) => format!(
-            "no checkpoint finished inside it: {} of the WAL's {} pages ({} bytes each) were \
-             copied back",
-            index.copied_back, index.pages, index.page_size
-        ),
-        None => "the WAL's index could not be read".to_string(),
-    }
-}
 
 struct Stored {
     seq: i64,
@@ -237,17 +184,18 @@ impl AgentLog for SqliteLog {
         }
         let committing = Instant::now();
         transaction.commit().map_err(storage)?;
-        // A commit that took long says whether a checkpoint ran inside it; a quick one says
-        // nothing and reads nothing more.
+        // A commit that took long says how long, and reads nothing more. It never opens the
+        // WAL's index (the -shm file) itself: closing any descriptor of a file drops every POSIX
+        // lock this process holds on it, SQLite's own included, and another connection then
+        // truncates the index under this one's mapping (SIGBUS in walIndexAppend, 25 Nov).
         let took = began.elapsed();
         if took >= SLOW_APPEND {
             eprintln!(
-                "clarp-host: an append of {} items to {} took {} ms, its commit {} ms; {}",
+                "clarp-host: an append of {} items to {} took {} ms, its commit {} ms",
                 items.len(),
                 self.file.display(),
                 took.as_millis(),
                 committing.elapsed().as_millis(),
-                checkpoint_said(wal_index(&self.file))
             );
         }
         Ok(seq as Seq)
@@ -501,43 +449,4 @@ fn apply_writes(conn: &Connection, writes: &[Write]) -> Result<(), StoreError> {
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    /// The WAL's index is read where SQLite keeps it: a commit adds pages nothing has copied back
-    /// yet, and a checkpoint copies all of them back, which is what a slow commit is judged by.
-    #[test]
-    fn the_wal_index_says_how_many_pages_a_checkpoint_copied_back() {
-        let dir = std::env::temp_dir().join(format!("clarp-wal-index-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut log = SqliteEngine::new()
-            .open(&dir, clarp_codec::standard_set("none").unwrap())
-            .unwrap();
-        log.append(&[NewItem::new(100, 1, b"one".to_vec())])
-            .unwrap();
-        let file = dir.join(LOG_FILE);
-        let written = wal_index(&file).unwrap();
-        assert!(written.pages > 0, "{written:?}");
-        assert!(written.copied_back < written.pages, "{written:?}");
-        assert!(written.page_size.is_power_of_two(), "{written:?}");
-        assert!(checkpoint_said(Some(written)).starts_with("no checkpoint finished inside it"));
-
-        let other = Connection::open(&file).unwrap();
-        other
-            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(()))
-            .unwrap();
-        let checkpointed = wal_index(&file).unwrap();
-        assert_eq!(
-            checkpointed.copied_back, checkpointed.pages,
-            "{checkpointed:?}"
-        );
-        assert!(checkpoint_said(Some(checkpointed)).starts_with("a checkpoint ran inside it"));
-        assert_eq!(checkpoint_said(None), "the WAL's index could not be read");
-        drop(log);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 }
