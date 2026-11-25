@@ -110,6 +110,8 @@ pub struct AgentRow {
     pub unread: bool,
     pub parent_agent_id: String,
     pub agent_role: String,
+    /// The chat was a helper's (`helper_chat`, Host contract 177).
+    pub helper_chat: bool,
     pub helper_state: String,
     pub child_count: i32,
     pub running_children: i32,
@@ -120,6 +122,14 @@ pub struct AgentRow {
     pub host: String,
     /// "Moved to <Host>" for an agent that moved (Host contract 125).
     pub moved: String,
+}
+
+impl AgentRow {
+    /// A helper's chat: its role is `helper`, or the Host says the chat was
+    /// a helper's (`helper_chat`, contract 177).
+    pub fn is_helpers_chat(&self) -> bool {
+        self.agent_role == "helper" || self.helper_chat
+    }
 }
 
 pub type Op = ListOp<AgentRow, Role, Signal>;
@@ -220,6 +230,7 @@ impl Roster {
             unread: agent.unread,
             parent_agent_id: agent.parent_agent_id.clone(),
             agent_role: agent.role.clone(),
+            helper_chat: agent.helper_chat,
             helper_state: agent.helper_state.clone(),
             child_count: agent.child_count,
             running_children: if live { self.running_children(agent) } else { 0 },
