@@ -10,6 +10,12 @@
 //! most kept processes, and what the machine has free. In auto the two
 //! fixed limits stay listed, marked as the fixed limits: setting either
 //! switches the Host to fixed.
+//!
+//! Where the Host also offers `turn_pressure_admission` (contract 186): the
+//! three pressure thresholds as settings, and below them what loads the
+//! machine in three groups (live processes, cold starts in the last hour,
+//! pressure with the turns held), each with a line per tool or reading. The
+//! most kept in auto bounds nothing there and is not listed.
 
 use clarp_engine::lanes;
 use serde_json::Value;
@@ -32,12 +38,6 @@ fn switch(app: &App, slot: usize) -> Option<lanes::LaneSwitch> {
     app.engine.borrow().lane_settings().and_then(|answer| lanes::switches(answer).into_iter().nth(slot))
 }
 
-/// "codex" → "Codex".
-fn tool_name(tool: &str) -> String {
-    let mut chars = tool.chars();
-    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
-}
-
 fn number(app: &App, key: &str) -> f64 {
     app.engine.borrow().lane_settings().and_then(|answer| lanes::number(answer, key)).unwrap_or(0.0)
 }
@@ -49,6 +49,11 @@ fn range(app: &App, key: &str) -> Option<(f64, f64)> {
 /// The Host offers auto limits and has said how they are set.
 fn auto_offered(app: &App) -> bool {
     offered(app) && app.engine.borrow().lane_auto_limits_offered()
+}
+
+/// The Host says what loads its machine and holds turns while it is under pressure.
+fn pressure_offered(app: &App) -> bool {
+    offered(app) && app.engine.borrow().lane_pressure_offered()
 }
 
 /// The Host's limits follow its free memory now.
@@ -77,7 +82,7 @@ fn tool_switch(slot: usize) -> Setting {
             }
         },
     )
-    .label_from(move |app| switch(app, slot).map_or_else(String::new, |s| format!("{} kept between messages", tool_name(&s.tool))))
+    .label_from(move |app| switch(app, slot).map_or_else(String::new, |s| format!("{} kept between messages", lanes::tool_name(&s.tool))))
     .when(move |app| offered(app) && switch(app, slot).is_some())
 }
 
@@ -126,16 +131,16 @@ fn limits_choice() -> Setting {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn auto_limit(id: &'static str, label: &'static str, description: &'static str, aliases: &'static [&'static str], key: &'static str, fallback: (f64, f64), unit: &'static str) -> Setting {
+/// A whole number the Host keeps, stepped by one within its range.
+fn host_number(id: &'static str, label: &'static str, description: &'static str, aliases: &'static [&'static str], key: &'static str, fallback: (f64, f64), unit: &'static str) -> Setting {
     Setting::number(e(id, label, "host", description, aliases), SECTION, move |app| number(app, key), move |app, _, value| set_number(app, key, value), fallback.0, fallback.1, 1.0, unit)
         .range_from(move |app| range(app, key))
-        .when(in_auto)
 }
 
 pub(super) fn register() -> Vec<Setting> {
     let mut all: Vec<Setting> = (0..SLOTS.len()).map(tool_switch).collect();
     all.push(limits_choice());
-    all.push(auto_limit(
+    all.push(host_number(
         "kept-reserve",
         "Memory kept free",
         "In auto, how much of the machine's memory the connected Host keeps free: a process is kept only while this much stays free.",
@@ -143,8 +148,9 @@ pub(super) fn register() -> Vec<Setting> {
         "reserve_percent",
         (5.0, 50.0),
         "%",
-    ));
-    all.push(auto_limit(
+    )
+    .when(in_auto));
+    all.push(host_number(
         "kept-ceiling",
         "Most kept in auto",
         "In auto, how many kept processes the connected Host holds at most, however much memory is free.",
@@ -152,7 +158,39 @@ pub(super) fn register() -> Vec<Setting> {
         "ceiling",
         (1.0, 64.0),
         "",
-    ));
+    )
+    // Where the Host holds turns for pressure the ceiling bounds nothing.
+    .when(|app| in_auto(app) && !app.engine.borrow().lane_pressure_offered()));
+    all.push(host_number(
+        "kept-pressure-cpu",
+        "CPU pressure that holds turns",
+        "When the connected Host's own work has waited for the CPU this share of the last minute, turns nobody waits on wait until it calms.",
+        &["pressure", "cpu", "cpu pressure", "load", "hold turns", "admission", "kept processes"],
+        lanes::PRESSURE_NUMBERS[0],
+        (5.0, 95.0),
+        "%",
+    )
+    .when(pressure_offered));
+    all.push(host_number(
+        "kept-pressure-io",
+        "IO pressure that holds turns",
+        "When the machine has waited for its disks this share of the last minute, turns nobody waits on wait until it calms.",
+        &["pressure", "io", "disk", "io pressure", "load", "hold turns", "admission", "kept processes"],
+        lanes::PRESSURE_NUMBERS[1],
+        (5.0, 95.0),
+        "%",
+    )
+    .when(pressure_offered));
+    all.push(host_number(
+        "kept-pressure-memory",
+        "Memory pressure that holds turns",
+        "When the machine has stalled for memory this share of the last ten seconds, turns nobody waits on wait until it calms.",
+        &["pressure", "memory", "memory pressure", "ram", "swap", "hold turns", "admission", "kept processes"],
+        lanes::PRESSURE_NUMBERS[2],
+        (5.0, 95.0),
+        "%",
+    )
+    .when(pressure_offered));
     all.push(limit(
         "kept-most",
         "Most kept processes",
@@ -200,7 +238,14 @@ pub fn information(app: &App) -> Vec<(String, String)> {
         let free = engine.lane_settings().map(lanes::free_line).filter(|line| !line.is_empty());
         out.push(("Free memory".to_owned(), free.unwrap_or_else(|| "The Host has not said what its machine has free".to_owned())));
     }
-    out.push(("Now".to_owned(), now));
+    let groups = if engine.lane_pressure_offered() { engine.lane_settings().map(groups).unwrap_or_default() } else { Vec::new() };
+    if groups.is_empty() {
+        out.push(("Now".to_owned(), now));
+    }
+    for group in groups {
+        out.push((group.title, group.summary));
+        out.extend(group.lines.into_iter().map(|(label, detail)| (format!("{TOOL_INDENT}{label}"), detail)));
+    }
     if auto {
         out.push(("Fixed limits".to_owned(), "Most kept processes and Memory they may hold apply when the limits are fixed; setting either switches the Host to fixed.".to_owned()));
     }
@@ -211,11 +256,11 @@ pub fn information(app: &App) -> Vec<(String, String)> {
     out
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn a_tools_name_starts_with_a_capital() {
-        assert_eq!(super::tool_name("codex"), "Codex");
-        assert_eq!(super::tool_name(""), "");
-    }
+/// A line under a group starts so, to read as part of it.
+pub const TOOL_INDENT: &str = "    ";
+
+/// What loads the connected Host's machine, the groups it says: live
+/// processes, cold starts in the last hour, and pressure.
+fn groups(answer: &serde_json::Map<String, Value>) -> Vec<lanes::Group> {
+    [lanes::live_group(answer), lanes::cold_starts_group(answer), lanes::pressure_group(answer)].into_iter().flatten().collect()
 }

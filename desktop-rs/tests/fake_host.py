@@ -227,6 +227,28 @@ LANE_AUTO_RANGES = {"reserve_percent": {"min": 5, "max": 50}, "ceiling": {"min":
 lanes_auto = {"on": False,
               "settings": {"limits": "auto", "reserve_percent": 20, "ceiling": 24},
               "free": {"available_mb": 15800, "reserve_mb": 6200, "room_mb": 9600}}
+# Turns held while the machine is under pressure (feature
+# turn_pressure_admission, Rust Host contract 186): off until
+# /__control/lane-settings sends "pressure": true. Then the answer carries the
+# three thresholds and their ranges, and what loads the machine (`status`:
+# pressure, held_for_pressure, live, cold_starts_last_hour), which the event
+# never carries.
+LANE_PRESSURE_RANGES = {"pressure_cpu_percent": {"min": 5, "max": 95}, "pressure_io_percent": {"min": 5, "max": 95},
+                        "pressure_memory_percent": {"min": 5, "max": 95}}
+lanes_pressure = {"on": False,
+                  "settings": {"pressure_cpu_percent": 60, "pressure_io_percent": 30, "pressure_memory_percent": 10},
+                  "status": {"pressure": {"cpu_source": "host-cgroup",
+                                          "cpu": {"some": {"avg10": 70.2, "avg60": 64.5}, "full": None},
+                                          "io": {"some": {"avg10": 3.1, "avg60": 4.0}, "full": {"avg10": 1.0, "avg60": 0.8}},
+                                          "memory": {"some": {"avg10": 0.0, "avg60": 0.0}, "full": {"avg10": 0.0, "avg60": 0.0}},
+                                          "high": True,
+                                          "thresholds": {"cpu_some_avg60": 60, "io_some_avg60": 30, "memory_full_avg10": 10}},
+                             "held_for_pressure": 2,
+                             "live": {"lanes": 8, "busy": 2, "idle": 6,
+                                      "tools": {"codex": {"lanes": 0, "busy": 0, "idle": 0},
+                                                "claude": {"lanes": 8, "busy": 2, "idle": 6},
+                                                "muse": {"lanes": 0, "busy": 0, "idle": 0}}},
+                             "cold_starts_last_hour": {"total": 5, "tools": {"claude": 3, "codex": 2}}}}
 # Moving an agent to another backend (feature agent_backend_transit, Rust
 # Host contract 158): off until /__control/transit turns it on. `respond`
 # answers the next POST /agent-transit instead ({status, body}); `fail`
@@ -908,6 +930,8 @@ def lane_settings_now():
     now = copy.deepcopy(lanes["settings"])
     if lanes_auto["on"]:
         now.update(copy.deepcopy(lanes_auto["settings"]))
+    if lanes_pressure["on"]:
+        now.update(copy.deepcopy(lanes_pressure["settings"]))
     return now
 
 
@@ -916,6 +940,14 @@ def lane_settings_answer():
     if lanes_auto["on"]:
         answer["ranges"].update(copy.deepcopy(LANE_AUTO_RANGES))
         answer["held"].update(copy.deepcopy(lanes_auto["free"]))
+    if lanes_pressure["on"]:
+        answer["ranges"].update(copy.deepcopy(LANE_PRESSURE_RANGES))
+        answer.update(copy.deepcopy(lanes_pressure["status"]))
+        if isinstance(answer.get("pressure"), dict):
+            limits = lanes_pressure["settings"]
+            answer["pressure"]["thresholds"] = {"cpu_some_avg60": limits["pressure_cpu_percent"],
+                                                "io_some_avg60": limits["pressure_io_percent"],
+                                                "memory_full_avg10": limits["pressure_memory_percent"]}
     return answer
 
 
@@ -924,7 +956,8 @@ def lane_settings_change(body):
     if not isinstance(body, dict):
         return 400, {"ok": False, "code": "bad_json", "error": "the body must be a JSON object"}
     settings = lane_settings_now()
-    ranges = {**LANE_RANGES, **(LANE_AUTO_RANGES if lanes_auto["on"] else {})}
+    ranges = {**LANE_RANGES, **(LANE_AUTO_RANGES if lanes_auto["on"] else {}),
+              **(LANE_PRESSURE_RANGES if lanes_pressure["on"] else {})}
     known = [k for k in body if k in settings and body[k] is not None]
     if not known:
         return 400, {"ok": False, "code": "nothing_to_change", "error": "name a setting to change"}
@@ -952,7 +985,8 @@ def lane_settings_change(body):
         changes["limits"] = "fixed"
     if changes:
         for key, value in changes.items():
-            (lanes["settings"] if key in lanes["settings"] else lanes_auto["settings"])[key] = value
+            owner = next(group for group in (lanes["settings"], lanes_auto["settings"], lanes_pressure["settings"]) if key in group)
+            owner[key] = value
         broadcast({"type": "lane-settings-updated", **lane_settings_now()})
     return 200, lane_settings_answer()
 
@@ -1556,6 +1590,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("lane_settings")
                 if lanes_auto["on"]:
                     features.append("lane_auto_limits")
+                if lanes_pressure["on"]:
+                    features.append("turn_pressure_admission")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -2191,6 +2227,11 @@ class Handler(BaseHTTPRequestHandler):
                 lanes["held"] = body["held"]
             if "settings" in body:
                 lanes["settings"].update(body["settings"])
+            # "pressure" turns turn_pressure_admission on or off, "pressure_status"
+            # sets what loads the machine (top-level keys of the answer).
+            lanes_pressure["on"] = bool(body.get("pressure", lanes_pressure["on"]))
+            if "pressure_status" in body:
+                lanes_pressure["status"].update(body["pressure_status"])
             return self.reply(200, {"ok": True})
         if url.path == "/lane-settings":
             if not lanes["on"]:

@@ -8,7 +8,12 @@
 //! (contract 180): Limits shows Auto with the memory kept free, the most in
 //! auto and what the machine has free, the fixed limits say they are fixed;
 //! switching Limits posts it and hides the auto rows, and stepping a fixed
-//! limit in auto posts it alone and shows Fixed.
+//! limit in auto posts it alone and shows Fixed. Last the Host offers
+//! `turn_pressure_admission` (contract 186): the three pressure thresholds
+//! are listed and the most kept in auto is not; below them Live processes,
+//! Cold starts, last hour and Pressure, each with a line per tool or
+//! reading. Stepping the CPU threshold posts it alone and keeps auto, and
+//! the event reads the pressure again.
 
 use std::time::Duration;
 
@@ -25,13 +30,29 @@ fn by_id(window: &crate::AppWindow, id: &str) -> Option<crate::SettingRow> {
     window.get_setting_rows().iter().find(|r| r.id == id)
 }
 
+/// The information rows from `label` on, as (label, detail), `n` of them.
+fn info_from(window: &crate::AppWindow, label: &str, n: usize) -> Vec<(String, String)> {
+    window
+        .get_setting_rows()
+        .iter()
+        .filter(|r| r.kind == "info")
+        .skip_while(|r| r.label != label)
+        .take(n)
+        .map(|r| (r.label.to_string(), r.detail.to_string()))
+        .collect()
+}
+
+fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+    expected.iter().map(|(l, d)| ((*l).to_owned(), (*d).to_owned())).collect()
+}
+
 fn change(id: &str, delta: i32) {
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
     crate::settings_view::change(&app, &window, id, delta);
 }
 
 pub fn kept_processes_check(out: String) {
-    let (out1, out2, out3) = (out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("without the feature", Box::new(|app, window, _| {
             if !app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty()) {
@@ -57,6 +78,7 @@ pub fn kept_processes_check(out: String) {
             let now = row(window, "Now").map(|r| r.detail.to_string()).unwrap_or_default();
             check(now == "8 kept · 1945 MB · claude 8 (2 busy) · codex 0", &format!("what the lanes hold now: {now:?}"));
             check(row(window, "When").is_some_and(|r| r.detail.contains("next message")), "says when a change takes effect");
+            check(row(window, "Live processes").is_none() && by_id(window, "kept-pressure-cpu").is_none(), "no pressure without turn_pressure_admission");
             shot(&out1, "kept-processes-01");
             change("kept-most", 1);
             true
@@ -151,7 +173,7 @@ pub fn kept_processes_check(out: String) {
             change("kept-most", 1);
             true
         })),
-        ("a fixed limit switches to fixed", Box::new(|_, window, elapsed| {
+        ("a fixed limit switches to fixed", Box::new(|app, window, elapsed| {
             let posted = posts("/lane-settings");
             let done = by_id(window, "kept-most").is_some_and(|r| r.detail == "10") && by_id(window, "kept-limits").is_some_and(|r| r.detail == "Fixed");
             if !done && elapsed < Duration::from_secs(5) {
@@ -159,6 +181,64 @@ pub fn kept_processes_check(out: String) {
             }
             check(posted.last().is_some_and(|p| p["body"] == json!({"most": 10})), &format!("most posted alone: {:?}", posted.last()));
             check(done, "most 10, and the Host switched to fixed");
+            let held = json!({"lanes": 8, "memory_mb": 1945, "unanswered": 0, "tools": {"claude": {"lanes": 8, "busy": 2, "memory_mb": 1945}}});
+            let on = json!({"pressure": true, "held": held, "auto_settings": {"limits": "auto"}});
+            check(control("/__control/lane-settings", &on).is_ok(), "the Host turns turn_pressure_admission on");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("pressure shown", Box::new(move |_, window, elapsed| {
+            let shown = by_id(window, "kept-pressure-cpu").is_some() && row(window, "Pressure").is_some();
+            if !shown && elapsed < Duration::from_secs(8) {
+                return false;
+            }
+            let detail = |id: &str| by_id(window, id).map(|r| r.detail.to_string());
+            check(detail("kept-pressure-cpu").as_deref() == Some("60%"), &format!("CPU threshold 60%: {:?}", detail("kept-pressure-cpu")));
+            check(detail("kept-pressure-io").as_deref() == Some("30%"), &format!("IO threshold 30%: {:?}", detail("kept-pressure-io")));
+            check(detail("kept-pressure-memory").as_deref() == Some("10%"), &format!("memory threshold 10%: {:?}", detail("kept-pressure-memory")));
+            check(by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto") && by_id(window, "kept-reserve").is_some(), "auto, with the memory kept free");
+            check(by_id(window, "kept-ceiling").is_none(), "no most kept in auto: it bounds nothing");
+            check(row(window, "Now").is_none(), "the live processes say what Now said");
+            let groups = info_from(window, "Live processes", 9);
+            let expected = pairs(&[
+                ("Live processes", "8 · 2 busy · 6 idle · 1945 MB"),
+                ("    Claude", "8 · 2 busy · 6 idle"),
+                ("Cold starts, last hour", "5"),
+                ("    Claude", "3"),
+                ("    Codex", "2"),
+                ("Pressure", "High · 2 turns held"),
+                ("    CPU, the Host's own", "64.5% waiting, last minute · holds at 60%"),
+                ("    IO", "4% waiting, last minute · holds at 30%"),
+                ("    Memory", "0% stalled, last 10 seconds · holds at 10%"),
+            ]);
+            check(groups == expected, &format!("live processes, cold starts and pressure: {groups:?}"));
+            shot(&out4, "kept-processes-04-pressure");
+            change("kept-pressure-cpu", 1);
+            true
+        })),
+        ("threshold changed", Box::new(|_, window, elapsed| {
+            let posted = posts("/lane-settings");
+            let shown = by_id(window, "kept-pressure-cpu").is_some_and(|r| r.detail == "61%");
+            let read = row(window, "    CPU, the Host's own").is_some_and(|r| r.detail.ends_with("holds at 61%"));
+            if (!shown || !read) && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(posted.last().is_some_and(|p| p["body"] == json!({"pressure_cpu_percent": 61})), &format!("the CPU threshold posted alone: {:?}", posted.last()));
+            check(shown && read, "61%, and the Host weighs CPU at 61%");
+            check(by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto"), "a threshold does not switch to fixed");
+            let calm = json!({"pressure_status": {"held_for_pressure": 0, "pressure": {"cpu_source": "system", "cpu": null, "io": null, "memory": null, "high": false}}});
+            check(control("/__control/lane-settings", &calm).is_ok(), "the machine calms");
+            check(control("/__control/event", &json!({"type": "lane-settings-updated", "pressure_cpu_percent": 61})).is_ok(), "the settings event");
+            true
+        })),
+        ("calm", Box::new(|_, window, elapsed| {
+            let calm = row(window, "Pressure").is_some_and(|r| r.detail == "Calm · no turns held");
+            if !calm && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(calm, "the event reads the pressure again: calm, no turns held");
+            let cpu = row(window, "    CPU, whole machine").map(|r| r.detail.to_string());
+            check(cpu.as_deref() == Some("not read on this machine · holds at 61%"), &format!("a reading the Host has not: {cpu:?}"));
             true
         })),
     ];

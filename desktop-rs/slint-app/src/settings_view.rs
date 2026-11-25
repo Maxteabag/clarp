@@ -2,7 +2,9 @@
 //! changing a row does. Preferences go to the Slint app's settings under
 //! the Qt controller's keys.
 
+use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use serde_json::Value;
 use slint::{Model, ModelRc, VecModel};
@@ -188,6 +190,34 @@ pub fn open(app: &App, window: &AppWindow) {
     app.engine.borrow_mut().load_lane_settings();
     show(app, window);
     window.invoke_focus_settings();
+    watch_pressure();
+}
+
+thread_local! {
+    static PRESSURE_READ: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+/// How often the page reads again what loads the Host's machine while it is
+/// open: the event never carries it.
+const PRESSURE_EVERY: Duration = Duration::from_secs(15);
+
+/// While the page is open on a Host that says what loads its machine
+/// (`turn_pressure_admission`), reads it again now and then; stops once the
+/// page is left.
+fn watch_pressure() {
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, PRESSURE_EVERY, || {
+        let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
+        if window.get_surface() != "settings" {
+            PRESSURE_READ.with(|t| t.borrow_mut().take());
+            return;
+        }
+        if app.engine.borrow().lane_pressure_offered() {
+            app.engine.borrow_mut().load_lane_settings();
+            crate::pump_now(&app);
+        }
+    });
+    PRESSURE_READ.with(|t| *t.borrow_mut() = Some(timer));
 }
 
 /// The search typed (`/` from the list).

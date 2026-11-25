@@ -13,6 +13,15 @@
 //! (`available_mb`, `reserve_mb`, `room_mb`, each null where the Host cannot
 //! read its memory). In auto, `most` and `memory_mb` are the fixed limits:
 //! the Host switches to fixed when either is set.
+//!
+//! Where the Host also lists `turn_pressure_admission` (Rust Host contract
+//! 186) the answer carries what loads the machine, read anew each time (the
+//! event never carries it): `live` (the processes that live now, per tool),
+//! `cold_starts_last_hour` (turns that started their tool anew), `pressure`
+//! (the kernel's CPU, IO and memory pressure, whether it is high, and the
+//! thresholds) and `held_for_pressure` (turns waiting for the machine to
+//! calm). The three thresholds are limits like the others; setting one does
+//! not switch to fixed. `ceiling` bounds nothing there and is not shown.
 
 use clarp_core::json::Object;
 use serde_json::Value;
@@ -36,6 +45,11 @@ pub const AUTO_NUMBERS: [&str; 2] = ["reserve_percent", "ceiling"];
 /// The numbers that are the fixed limits: setting one switches the Host to fixed.
 pub const FIXED_NUMBERS: [&str; 2] = ["most", "memory_mb"];
 
+/// The feature in `/server-info` for turns held while the machine is under pressure.
+pub const PRESSURE_FEATURE: &str = "turn_pressure_admission";
+/// The pressure thresholds, in percent, in the order they are shown.
+pub const PRESSURE_NUMBERS: [&str; 3] = ["pressure_cpu_percent", "pressure_io_percent", "pressure_memory_percent"];
+
 const READ: &str = "lane-settings";
 /// A change's tag: `lane-settings-write:<n>`, the n-th change.
 const WRITE: &str = "lane-settings-write:";
@@ -46,6 +60,8 @@ pub(crate) struct Lanes {
     pub feature: bool,
     /// `lane_auto_limits` was in it too.
     pub auto: bool,
+    /// `turn_pressure_admission` was in it too.
+    pub pressure: bool,
     /// The Host's last answer (settings, ranges and what is held).
     pub answer: Option<Object>,
     /// Why the last change or read did not go through, as the Host said it.
@@ -148,6 +164,127 @@ pub fn held_line(answer: &Object) -> String {
     parts.join(" · ")
 }
 
+/// One group of what loads the machine: a title, its summary, and a line per
+/// tool or reading under it ("Claude", "3 · 1 busy · 2 idle").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    pub title: String,
+    pub summary: String,
+    pub lines: Vec<(String, String)>,
+}
+
+/// "codex" → "Codex".
+pub fn tool_name(tool: &str) -> String {
+    let mut chars = tool.chars();
+    chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}
+
+fn whole(value: Option<&Value>) -> Option<i64> {
+    value.and_then(Value::as_f64).map(|n| n.round() as i64)
+}
+
+fn live_text(object: &Object) -> Option<String> {
+    let lanes = whole(object.get("lanes"))?;
+    let busy = whole(object.get("busy")).unwrap_or(0);
+    let idle = whole(object.get("idle")).unwrap_or((lanes - busy).max(0));
+    Some(format!("{lanes} · {busy} busy · {idle} idle"))
+}
+
+/// The processes that live now (`live`): the total with how many are busy and
+/// idle, what they hold together where `held` says it, and a line per tool
+/// with any. None where the Host does not say.
+pub fn live_group(answer: &Object) -> Option<Group> {
+    let live = answer.get("live")?.as_object()?;
+    let mut summary = live_text(live)?;
+    let held = answer.get("held").and_then(Value::as_object);
+    if let Some(mb) = held.and_then(|h| whole(h.get("memory_mb"))) {
+        summary.push_str(&format!(" · {mb} MB"));
+    }
+    if let Some(n) = held.and_then(|h| whole(h.get("unanswered"))).filter(|n| *n > 0) {
+        summary.push_str(&format!(" · {n} did not answer in time"));
+    }
+    let mut lines = Vec::new();
+    if let Some(tools) = live.get("tools").and_then(Value::as_object) {
+        let mut names: Vec<&String> = tools.keys().collect();
+        names.sort();
+        for name in names {
+            let Some(tool) = tools[name].as_object() else { continue };
+            if whole(tool.get("lanes")).unwrap_or(0) == 0 {
+                continue;
+            }
+            if let Some(text) = live_text(tool) {
+                lines.push((tool_name(name), text));
+            }
+        }
+    }
+    Some(Group { title: "Live processes".to_owned(), summary, lines })
+}
+
+/// The turns that started their tool anew in the last hour
+/// (`cold_starts_last_hour`): the total and a line per tool with any.
+pub fn cold_starts_group(answer: &Object) -> Option<Group> {
+    let cold = answer.get("cold_starts_last_hour")?.as_object()?;
+    let total = whole(cold.get("total"))?;
+    let mut lines: Vec<(String, String)> = cold
+        .get("tools")
+        .and_then(Value::as_object)
+        .map(|tools| tools.iter().filter_map(|(name, n)| whole(Some(n)).filter(|n| *n > 0).map(|n| (name.clone(), n))).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, n)| (tool_name(&name), n.to_string()))
+        .collect();
+    lines.sort();
+    Some(Group { title: "Cold starts, last hour".to_owned(), summary: total.to_string(), lines })
+}
+
+fn percent(value: f64) -> String {
+    let rounded = (value * 10.0).round() / 10.0;
+    if rounded.fract() == 0.0 { format!("{rounded:.0}%") } else { format!("{rounded:.1}%") }
+}
+
+/// One reading the Host weighs ("12% waiting, last minute · holds at 60%"),
+/// or that it is not read.
+fn reading(pressure: &Object, kind: &str, line: &str, window: &str, threshold: Option<f64>, over: &str) -> String {
+    let value = pressure.get(kind).and_then(|k| k.get(line)).and_then(|l| l.get(window)).and_then(Value::as_f64);
+    let mut text = match value {
+        Some(v) => format!("{} {over}", percent(v)),
+        None => "not read on this machine".to_owned(),
+    };
+    if let Some(t) = threshold {
+        text.push_str(&format!(" · holds at {}", percent(t)));
+    }
+    text
+}
+
+/// The machine's pressure (`pressure`, `held_for_pressure`): high or calm with
+/// how many turns are held now, then CPU, IO and memory as the Host weighs
+/// them, each with its threshold.
+pub fn pressure_group(answer: &Object) -> Option<Group> {
+    let pressure = answer.get("pressure")?.as_object()?;
+    let held = whole(answer.get("held_for_pressure")).unwrap_or(0);
+    let state = if pressure.get("high").and_then(Value::as_bool).unwrap_or(false) { "High" } else { "Calm" };
+    let turns = match held {
+        0 => "no turns held".to_owned(),
+        1 => "1 turn held".to_owned(),
+        n => format!("{n} turns held"),
+    };
+    // The threshold the Host weighs now, else the limit it was set to.
+    let thresholds = pressure.get("thresholds");
+    let threshold = |key: &str, limit: &str| thresholds.and_then(|t| t.get(key)).and_then(Value::as_f64).or_else(|| number(answer, limit));
+    let cpu = match pressure.get("cpu_source").and_then(Value::as_str) {
+        Some("host-cgroup") => "CPU, the Host's own",
+        Some("system") => "CPU, whole machine",
+        _ => "CPU",
+    };
+    let last_minute = "waiting, last minute";
+    let lines = vec![
+        (cpu.to_owned(), reading(pressure, "cpu", "some", "avg60", threshold("cpu_some_avg60", PRESSURE_NUMBERS[0]), last_minute)),
+        ("IO".to_owned(), reading(pressure, "io", "some", "avg60", threshold("io_some_avg60", PRESSURE_NUMBERS[1]), last_minute)),
+        ("Memory".to_owned(), reading(pressure, "memory", "full", "avg10", threshold("memory_full_avg10", PRESSURE_NUMBERS[2]), "stalled, last 10 seconds")),
+    ];
+    Some(Group { title: "Pressure".to_owned(), summary: format!("{state} · {turns}"), lines })
+}
+
 impl Engine {
     /// The connected Host lets the owner set its lanes.
     pub fn lane_settings_offered(&self) -> bool {
@@ -157,6 +294,12 @@ impl Engine {
     /// The connected Host's limits may follow its free memory (`lane_auto_limits`).
     pub fn lane_auto_limits_offered(&self) -> bool {
         self.lanes.feature && self.lanes.auto
+    }
+
+    /// The connected Host holds turns while its machine is under pressure
+    /// (`turn_pressure_admission`) and says what loads it.
+    pub fn lane_pressure_offered(&self) -> bool {
+        self.lanes.feature && self.lanes.pressure
     }
 
     /// The Host's last answer, once it gave one.
@@ -203,11 +346,12 @@ impl Engine {
     pub(crate) fn lanes_server_info(&mut self, info: &Object) {
         let features = info.get("capabilities").and_then(|c| c.get("features")).and_then(Value::as_array);
         let lists = |name: &str| features.is_some_and(|features| features.iter().any(|f| f.as_str() == Some(name)));
-        let (has, auto) = (lists(FEATURE), lists(AUTO_FEATURE));
-        if has != self.lanes.feature || auto != self.lanes.auto {
+        let (has, auto, pressure) = (lists(FEATURE), lists(AUTO_FEATURE), lists(PRESSURE_FEATURE));
+        if has != self.lanes.feature || auto != self.lanes.auto || pressure != self.lanes.pressure {
             self.lanes = Default::default();
             self.lanes.feature = has;
             self.lanes.auto = auto;
+            self.lanes.pressure = pressure;
             self.changes.push(Change::HostStatus);
         }
         self.load_lane_settings();
@@ -324,6 +468,37 @@ mod tests {
         let line = free_line(&a);
         assert_eq!(line, "The Host cannot read its machine's memory, so it keeps the fixed limits");
         assert!(!line.contains("null"));
+    }
+
+    #[test]
+    fn what_loads_the_machine_is_read_tolerantly() {
+        let mut a = answer();
+        assert_eq!(live_group(&a), None);
+        assert_eq!(cold_starts_group(&a), None);
+        assert_eq!(pressure_group(&a), None);
+        a.insert("live".into(), json!({"lanes": 5, "busy": 2, "idle": 3, "tools": {"codex": {"lanes": 0, "busy": 0, "idle": 0}, "claude": {"lanes": 5, "busy": 2, "idle": 3}}}));
+        a.insert("cold_starts_last_hour".into(), json!({"total": 4, "tools": {"scripted": 1, "claude": 3, "codex": 0}}));
+        a.insert("held_for_pressure".into(), json!(2));
+        a.insert(
+            "pressure".into(),
+            json!({"cpu_source": "host-cgroup", "cpu": {"some": {"avg10": 70.0, "avg60": 64.25}, "full": null},
+                   "io": {"some": {"avg10": 3.0, "avg60": 4.0}, "full": {"avg10": 1.0, "avg60": 1.0}}, "memory": null, "high": true,
+                   "thresholds": {"cpu_some_avg60": 60, "io_some_avg60": 30, "memory_full_avg10": 10}}),
+        );
+        let live = live_group(&a).unwrap();
+        assert_eq!(live.summary, "5 · 2 busy · 3 idle · 1945 MB");
+        assert_eq!(live.lines, vec![("Claude".to_owned(), "5 · 2 busy · 3 idle".to_owned())]);
+        let cold = cold_starts_group(&a).unwrap();
+        assert_eq!(cold.summary, "4");
+        assert_eq!(cold.lines, vec![("Claude".to_owned(), "3".to_owned()), ("Scripted".to_owned(), "1".to_owned())]);
+        let pressure = pressure_group(&a).unwrap();
+        assert_eq!(pressure.summary, "High · 2 turns held");
+        assert_eq!(pressure.lines[0], ("CPU, the Host's own".to_owned(), "64.3% waiting, last minute · holds at 60%".to_owned()));
+        assert_eq!(pressure.lines[1].1, "4% waiting, last minute · holds at 30%");
+        assert_eq!(pressure.lines[2].1, "not read on this machine · holds at 10%");
+        a["pressure"]["high"] = json!(false);
+        a["held_for_pressure"] = Value::Null;
+        assert_eq!(pressure_group(&a).unwrap().summary, "Calm · no turns held");
     }
 
     #[test]
