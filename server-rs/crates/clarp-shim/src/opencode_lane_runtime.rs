@@ -11,7 +11,6 @@
 //! unread when the turn ends, by its idle or a Stop, are taken out of the session again: the
 //! Host runs them as a turn of their own.
 
-use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -280,9 +279,30 @@ struct Turn {
     follow: Follow,
     /// A Stop asked for its end: the idle that follows ends it as stopped.
     stopping: bool,
-    /// The steered words posted to the session: the message the lane named them, then the id
-    /// the Host steered them under.
-    steered: BTreeMap<String, String>,
+    /// The steered words posted to the session, in the order they were posted: the message the
+    /// lane named them, then the id the Host steered them under.
+    steered: Vec<(String, String)>,
+}
+
+/// Whether an answer to the user message `parent` took the steered message `message` in.
+/// OpenCode reads every user message stored since its last answer together and names the last of
+/// them as the answer's parent (issue 862), so an answer takes in each message up to and including
+/// its parent. The lane's message ids and OpenCode's are of one ascending form (`MessageIds`): a
+/// message was stored at or before `parent` when its id sorts at or before it.
+fn taken_in(message: &str, parent: &str) -> bool {
+    parent.starts_with("msg_") && message <= parent
+}
+
+/// Whether an answer of a session's message `list` took in any of `messages` ([`taken_in`]).
+fn any_taken_in(list: &Value, messages: &[(String, String)]) -> bool {
+    list.as_array().into_iter().flatten().any(|message| {
+        message["info"]["role"] == "assistant"
+            && message["info"]["parentID"].as_str().is_some_and(|parent| {
+                messages
+                    .iter()
+                    .any(|(steered, _)| taken_in(steered, parent))
+            })
+    })
 }
 
 impl Turn {
@@ -615,7 +635,7 @@ impl Lane {
             spool,
             follow: Follow::new(&self.thread),
             stopping: false,
-            steered: BTreeMap::new(),
+            steered: Vec::new(),
         });
         // A turn the lane lost (its Stop's grace ran out on the Host's side) may still run.
         if self.session_busy {
@@ -683,7 +703,7 @@ impl Lane {
         // Kept even when the answer did not come back: OpenCode may have stored the words, and
         // their reading, or their removal at the turn's end, is then still told.
         if let Some(turn) = self.turn.as_mut() {
-            turn.steered.insert(message, id.to_owned());
+            turn.steered.push((message, id.to_owned()));
         }
         result
             .map(|_| ())
@@ -701,21 +721,17 @@ impl Lane {
     }
 
     /// Whether OpenCode answered any of these messages already, by the session's last messages:
-    /// an answer names the message it answers (`parentID`). Unknown is no.
+    /// an answer names the last message it took in (`parentID`), which is this one or one
+    /// stored after it ([`taken_in`]). Unknown is no.
     fn answered(&self, messages: &[(String, String)]) -> bool {
         let path = format!(
             "/session/{}/message?limit=50",
             crate::opencode_http::component(&self.thread)
         );
-        let Ok(list) = self.serve.client.get(&path, 10) else {
-            return false;
-        };
-        list.as_array().into_iter().flatten().any(|message| {
-            message["info"]["role"] == "assistant"
-                && messages
-                    .iter()
-                    .any(|(steered, _)| message["info"]["parentID"] == steered.as_str())
-        })
+        self.serve
+            .client
+            .get(&path, 10)
+            .is_ok_and(|list| any_taken_in(&list, messages))
     }
 
     /// At the idle that ends the turn: the steered words OpenCode stored and has not read are
@@ -777,20 +793,25 @@ impl Lane {
         let Some(turn) = self.turn.as_mut() else {
             return;
         };
-        // Steered words are read when an answer that names their message starts: written, and
-        // durable, before anything of that answer.
+        // Steered words are read when an answer that took them in starts: its parent, the last
+        // message it took in, is theirs or stored after theirs. Each is written in the order they
+        // were posted, and durable, before anything of that answer.
         let info = &props["info"];
         if event["type"] == "message.updated"
             && info["sessionID"].as_str() == Some(&self.thread)
             && info["role"] == "assistant"
-            && let Some(id) = info["parentID"]
-                .as_str()
-                .and_then(|parent| turn.steered.get(parent))
-                .cloned()
-            && let Err(error) = turn.spool.steer_read(&id, super::now_ms())
+            && let Some(parent) = info["parentID"].as_str()
         {
-            self.end(Some(1), None, Some(&error.to_string()));
-            return;
+            let now = super::now_ms();
+            let read = turn
+                .steered
+                .iter()
+                .filter(|(message, _)| taken_in(message, parent))
+                .try_for_each(|(_, id)| turn.spool.steer_read(id, now));
+            if let Err(error) = read {
+                self.end(Some(1), None, Some(&error.to_string()));
+                return;
+            }
         }
         let mut lines = Vec::new();
         let seen = turn.follow.see(&self.serve.client, event, &mut |line| {
@@ -877,7 +898,48 @@ impl Lane {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::MessageIds;
+    use super::{MessageIds, any_taken_in, taken_in};
+    use serde_json::json;
+
+    #[test]
+    fn an_answer_takes_in_every_message_up_to_its_parent() {
+        let mut ids = MessageIds::default();
+        let (first, second) = (
+            ids.next(1_795_619_200_256).unwrap(),
+            ids.next(1_795_619_200_300).unwrap(),
+        );
+        // OpenCode read both together and named the last as the answer's parent (issue 862).
+        assert!(taken_in(&first, &second));
+        assert!(taken_in(&second, &second));
+        // An answer to what came before them took neither in, and a message posted after an
+        // answer's parent was not taken in by it.
+        let prompt = "msg_2133e9c00001OpenCodeNamed1";
+        assert!(!taken_in(&first, prompt));
+        let later = ids.next(1_795_619_200_400).unwrap();
+        assert!(!taken_in(&later, &second));
+        assert!(!taken_in(&first, ""));
+    }
+
+    #[test]
+    fn at_the_idle_a_message_answered_with_a_later_one_counts_as_answered() {
+        let mut ids = MessageIds::default();
+        let (unread, later, after) = (
+            ids.next(1_795_619_200_256).unwrap(),
+            ids.next(1_795_619_200_300).unwrap(),
+            ids.next(1_795_619_200_400).unwrap(),
+        );
+        let answer = |parent: &str| json!({"info": {"role": "assistant", "parentID": parent}});
+        let asked = |message: &str| json!({"info": {"role": "user", "id": message}});
+        // OpenCode answered the unread message together with a later one: the answer names the
+        // later one (issue 862).
+        let list = json!([asked(&unread), asked(&later), answer(&later)]);
+        assert!(any_taken_in(&list, &[(unread.clone(), "u".into())]));
+        // An answer before it, or a user message alone, is no answer to it.
+        let list = json!([answer("msg_2133e9c00001OpenCodeNamed1"), asked(&after)]);
+        assert!(!any_taken_in(&list, &[(unread.clone(), "u".into())]));
+        let list = json!([answer(&unread)]);
+        assert!(!any_taken_in(&list, &[(after, "a".into())]));
+    }
 
     #[test]
     fn the_lanes_messages_are_named_in_opencodes_ascending_form() {

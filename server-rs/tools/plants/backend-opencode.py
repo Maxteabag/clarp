@@ -209,5 +209,11 @@ rules(LANE_SHIM, 'lane_host', [
 ])
 PLANTS.append(('clarp-backend/src/opencode.rs', 'lane_host', "a step's words wait for the next step, after words read between them",
                '                self.usage(p);\n                self.flush(out);\n', '                self.usage(p);\n'))
+# Steers OpenCode reads together (issue 862).
+RUNS['lane_shim'] = ['test', '-p', 'clarp-shim', '--bin', 'clarp-shim', 'opencode_lane_runtime']
+PLANTS.append((LANE_SHIM, 'lane_host', 'only the message an answer names is read, not those stored before it',
+               '    parent.starts_with("msg_") && message <= parent', '    parent.starts_with("msg_") && message == parent'))
+PLANTS.append((LANE_SHIM, 'lane_shim', 'a message stored after an answer\'s parent counts as answered',
+               '    parent.starts_with("msg_") && message <= parent', '    parent.starts_with("msg_")'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
