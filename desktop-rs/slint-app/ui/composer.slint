@@ -25,12 +25,21 @@ export global MentionBridge {
     callback dismiss(string);
 }
 
+// A message waiting behind the running turn (the queue strip): the
+// Host's item id, its first line, and whether a turn already reads it.
+export struct WaitingTurn {
+    id: string,
+    text: string,
+    reading: bool,
+}
+
 // The keys the composer's buttons name in their tips, as the user bound
 // them (commands.rs refresh_keys).
 export global ComposerKeys {
     in property <string> stop: "Ctrl+.";
     in property <string> send: "Enter";
     in property <string> latest: "Ctrl+End";
+    in property <string> send-now: "Ctrl+Shift+Enter";
 }
 
 export component TipButton inherits Rectangle {
@@ -180,6 +189,9 @@ export component Composer inherits FocusScope {
     in property <[Attachment]> attachments;
     in property <int> queued;
     in property <bool> queue-paused;
+    // The queue strip above the composer lists the waiting messages: the
+    // count line then stays away.
+    in property <bool> strip-shown;
     in property <string> quota-notice;
     in property <string> stop-notice;
     in property <string> starting;
@@ -279,7 +291,7 @@ export component Composer inherits FocusScope {
         // The count waits the grace period after a rise (view.rs
         // queued_shown) and fades in. A paused queue's messages wait until
         // sent: its dialog sends one now (the queue stays paused until empty).
-        if root.queued > 0: RevealText {
+        if root.queued > 0 && !root.strip-shown: RevealText {
             text: root.queued + (root.queued == 1 ? " message queued" : " messages queued")
                 + (root.queue-paused ? "  ·  paused  ·  click to send one now" : "  ·  Ctrl+Enter queues next");
             color: Palette.muted;
@@ -392,6 +404,117 @@ export component Composer inherits FocusScope {
                 clicked => { root.submit(false); }
             }
         }
+        }
+    }
+}
+
+// The messages waiting behind the running turn, above the composer: each
+// with Send now (`POST /turn-queue/<id>/send`), which hands it to the agent
+// now instead of after the turn; Ctrl+Shift+Enter sends the first. A Send
+// now the Host refuses (a turn still runs) says the Host's answer here; the
+// message waits on. Shown while it has items, folded composer or not.
+export component QueueStrip inherits Rectangle {
+    in property <[WaitingTurn]> items;
+    // The Host's count: more than the strip lists shows as "+N more".
+    in property <int> count;
+    in property <bool> busy;
+    in property <bool> paused;
+    in property <string> refused;
+    in property <string> pane-id;
+    callback send-now(string);
+    callback manage();
+    background: Palette.window;
+    accessible-role: list;
+    accessible-id: "queue-strip:" + root.pane-id;
+    accessible-label: root.count == 1 ? "1 message waiting" : root.count + " messages waiting";
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 10px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        spacing: 2px;
+        HorizontalLayout {
+            height: 18px;
+            spacing: 8px;
+            Text {
+                text: (root.count == 1 ? "1 message waiting" : root.count + " messages waiting")
+                    + (root.paused && !root.busy ? "  ·  queue paused: Send now runs one"
+                        : root.busy ? "  ·  Send now hands it to the agent during this turn" : "");
+                color: Palette.muted;
+                font-size: 11 * Look.unit;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            Rectangle {
+                width: manage-text.preferred-width;
+                accessible-role: button;
+                accessible-id: "queue-manage:" + root.pane-id;
+                accessible-label: "Manage waiting messages";
+                accessible-action-default => { root.manage(); }
+                manage-text := Text {
+                    text: root.count > root.items.length ? "+" + (root.count - root.items.length) + " more · Manage" : "Manage";
+                    color: manage-touch.has-hover ? Palette.accent : Palette.link;
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                }
+                manage-touch := TouchArea { mouse-cursor: pointer; clicked => { root.manage(); } }
+            }
+        }
+        for item[index] in root.items: Rectangle {
+            height: 26px;
+            border-radius: 3px;
+            background: Palette.raised;
+            accessible-role: list-item;
+            accessible-id: "queue-item:" + item.id;
+            accessible-label: item.text;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 2px;
+                spacing: 8px;
+                Text {
+                    text: "⏵";
+                    color: Palette.faint;
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: item.text;
+                    color: Palette.text;
+                    font-size: 12 * Look.unit;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    vertical-alignment: center;
+                }
+                if item.reading: Text {
+                    text: "being read";
+                    color: Palette.muted;
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                }
+                if !item.reading: TipButton {
+                    y: 2px;
+                    width: self.captioned-width;
+                    height: 22px;
+                    icon: @image-url("icons/send.svg");
+                    caption: "Send now";
+                    label: "Send now: " + item.text;
+                    tip: index == 0 && ComposerKeys.send-now != "" ? "Send now · " + ComposerKeys.send-now : "Send now";
+                    tint: Palette.accent;
+                    accessible-id: "queue-send:" + item.id;
+                    clicked => { root.send-now(item.id); }
+                }
+            }
+        }
+        if root.refused != "": Text {
+            text: "Not sent yet: " + root.refused + ". It waits for this turn to end.";
+            color: Palette.warning;
+            font-size: 11 * Look.unit;
+            wrap: word-wrap;
+            accessible-role: text;
+            accessible-id: "queue-refused:" + root.pane-id;
+            accessible-label: root.refused;
         }
     }
 }

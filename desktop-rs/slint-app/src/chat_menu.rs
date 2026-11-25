@@ -61,6 +61,15 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     menu.set_view_choices(choices(&clarp_core::chat_view::MENU, own));
     menu.set_view_label(SharedString::from(view_label(&engine, session)));
     menu.set_activity_shown(!(offered && engine.chat_view_conversation(session)));
+    // Snooze, kept on this device (triage.rs).
+    let snooze = engine.roster().rows().iter().find(|r| r.session == session).and_then(|row| crate::triage::snooze_of(&engine, row));
+    menu.set_snooze_label(snooze.as_ref().map_or_else(|| "Off".to_owned(), |s| format!("Until {}", crate::triage::label(s))).into());
+    let snooze_choices: Vec<(&str, &str)> = if snooze.is_some() {
+        vec![("wake", "Wake now"), ("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
+    } else {
+        vec![("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
+    };
+    menu.set_snooze_choices(choices(&snooze_choices, ""));
 }
 
 /// The words for the chat's view: its own choice, or "Follow Settings ·
@@ -101,6 +110,11 @@ pub fn close(window: &AppWindow) {
 /// activity) or once its Host has it (messages between agents).
 pub fn pick(app: &App, window: &AppWindow, submenu: &str, value: &str) {
     let session = app.session_of(&window.global::<ChatMenu>().get_open());
+    if submenu == "snooze" {
+        close(window);
+        crate::triage::set(app, &session, value);
+        return;
+    }
     if !session.is_empty() {
         match submenu {
             "activity" => set_activity(&mut app.engine.borrow_mut(), &session, value),

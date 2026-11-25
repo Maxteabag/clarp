@@ -1,0 +1,156 @@
+//! The open chat's waiting messages above its composer (the queue strip),
+//! each with Send now, and the composer frame's context and quota meter.
+//!
+//! The strip lists the open chat's queue (`GET /turn-queue`): whenever the
+//! chat has waiting messages this loads it, and the engine follows it on
+//! `queue-updated`. Send now is `POST /turn-queue/<id>/send`; a refusal
+//! (a turn still runs, 409) shows the Host's answer under the strip.
+
+use std::cell::RefCell;
+
+use clarp_core::json;
+use clarp_engine::Engine;
+use serde_json::Value;
+
+use crate::{App, WaitingTurn};
+
+/// The most waiting messages the strip lists; the rest are "+N more".
+pub const SHOWN: usize = 3;
+
+thread_local! {
+    /// The chat and count the strip last loaded the queue for.
+    static FOLLOWED: RefCell<(String, i32)> = RefCell::new((String::new(), 0));
+}
+
+fn item_id(item: &Value) -> String {
+    let id = item.get("queue_id").and_then(Value::as_str).unwrap_or_default();
+    if id.is_empty() { item.get("id").and_then(Value::as_str).unwrap_or_default().to_owned() } else { id.to_owned() }
+}
+
+/// `session`'s waiting messages as the strip lists them, once its queue
+/// is the loaded one (else none: the composer's count line stands in).
+pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
+    engine
+        .turn_queue(session)
+        .iter()
+        .filter(|item| !item_id(item).is_empty())
+        .take(SHOWN)
+        .map(|item| {
+            let text = item.as_object().map(|o| json::string(o, "text")).unwrap_or_default();
+            WaitingTurn {
+                id: item_id(item).into(),
+                text: text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().into(),
+                reading: item.get("status").and_then(Value::as_str) == Some("started"),
+            }
+        })
+        .collect()
+}
+
+/// The first message of `session`'s that Send now can still hand over.
+pub fn first_waiting(engine: &Engine, session: &str) -> Option<String> {
+    waiting(engine, session).into_iter().find(|w| !w.reading).map(|w| w.id.to_string())
+}
+
+/// Loads the open chat's queue while it has waiting messages, again when
+/// their count changes. The queue dialog, while open, keeps the chat it
+/// shows.
+pub fn follow(app: &App) {
+    if app.overlay.borrow().as_str() == crate::agent_dialogs_view::QUEUE {
+        return;
+    }
+    let (session, count, loaded) = {
+        let Ok(engine) = app.engine.try_borrow() else { return };
+        let session = engine.selected_session().to_owned();
+        let count = engine.queue_count(&session);
+        (session, count, engine.turn_queue_session().to_owned())
+    };
+    if session.is_empty() || session.starts_with("pair:") || count == 0 {
+        FOLLOWED.with(|f| *f.borrow_mut() = (String::new(), 0));
+        return;
+    }
+    let key = (session.clone(), count);
+    if loaded == session && FOLLOWED.with(|f| *f.borrow() == key) {
+        return;
+    }
+    FOLLOWED.with(|f| *f.borrow_mut() = key);
+    if let Ok(mut engine) = app.engine.try_borrow_mut() {
+        engine.load_turn_queue(&session);
+    }
+}
+
+/// Sends the open chat's first waiting message now (the strip's first
+/// Send now, by key). False when nothing waits that it could send.
+pub fn send_first(app: &App) -> bool {
+    let (session, first) = {
+        let engine = app.engine.borrow();
+        let session = engine.selected_session().to_owned();
+        let first = first_waiting(&engine, &session);
+        (session, first)
+    };
+    let Some(id) = first.filter(|_| !session.is_empty()) else { return false };
+    app.engine.borrow_mut().send_queued_turn(&id);
+    true
+}
+
+/// Tokens as the meter says them: 950, 21K, 1.2M, 1M.
+fn tokens(count: i64) -> String {
+    let count = count.max(0);
+    let short = |value: f64, unit: &str| {
+        let rounded = (value * 10.0).round() / 10.0;
+        if rounded >= 10.0 || rounded.fract() == 0.0 { format!("{}{unit}", rounded.round() as i64) } else { format!("{rounded:.1}{unit}") }
+    };
+    if count >= 1_000_000 {
+        short(count as f64 / 1_000_000.0, "M")
+    } else if count >= 1_000 {
+        short(count as f64 / 1_000.0, "K")
+    } else {
+        count.to_string()
+    }
+}
+
+/// The meter's words and whether they warn: the account's limit first
+/// when near or used up, then the context ("context 21K/1M · 2%"),
+/// which warns from 80% (compaction is close). "" when neither is known.
+pub fn meter_text(context_tokens: Option<i64>, context_window: i64, quota: Option<(String, bool)>) -> (String, bool) {
+    let mut parts = Vec::new();
+    let mut warn = false;
+    if let Some((text, _)) = quota {
+        parts.push(text);
+        warn = true;
+    }
+    match context_tokens {
+        // Unknown usage (null) shows nothing, never "0" (#403).
+        None => {}
+        Some(used) if context_window > 0 => {
+            let fraction = used as f64 / context_window as f64;
+            warn |= fraction >= 0.8;
+            parts.push(format!("context {}/{} · {}%", tokens(used), tokens(context_window), (fraction * 100.0).round().clamp(0.0, 100.0) as i64));
+        }
+        Some(used) => parts.push(format!("context {}", tokens(used))),
+    }
+    (parts.join("  ·  "), warn)
+}
+
+/// The composer meter for `session`'s agent.
+pub fn meter(engine: &Engine, session: &str) -> (String, bool) {
+    let Some(agent) = engine.roster().find(session) else { return (String::new(), false) };
+    meter_text(agent.context_tokens, agent.context_window, agent.quota_meter(chrono::Utc::now()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_meter_says_context_and_a_limit_and_hides_when_unknown() {
+        assert_eq!(meter_text(None, 1_000_000, None), (String::new(), false));
+        assert_eq!(meter_text(Some(21_400), 1_000_000, None), ("context 21K/1M · 2%".to_owned(), false));
+        assert_eq!(meter_text(Some(170_000), 200_000, None), ("context 170K/200K · 85%".to_owned(), true));
+        assert_eq!(meter_text(Some(950), 0, None), ("context 950".to_owned(), false));
+        assert_eq!(
+            meter_text(Some(1_250_000), 2_000_000, Some(("Claude 86% used".to_owned(), false))),
+            ("Claude 86% used  ·  context 1.3M/2M · 63%".to_owned(), true)
+        );
+        assert_eq!(meter_text(None, 0, Some(("Codex limit reached".to_owned(), true))), ("Codex limit reached".to_owned(), true));
+    }
+}

@@ -228,8 +228,20 @@ fn the_turn_queue_loads_and_follows_its_actions() {
     d.engine.update_queued_turn("q1", "  sooner  ");
     d.until("edited", |e| e.turn_queue("rachel").first().is_some_and(|i| i["text"] == "sooner"));
     assert_eq!(host.requests("PUT", "/turn-queue/q1")[0]["body"], json!({"text": "sooner"}));
+    // Refused while a turn still runs: the Host's words stay through the
+    // reload the refusal brings, and the message waits on.
+    host.control("/__control/fail", json!({"path": "/turn-queue/q1/send", "status": 409}));
+    d.engine.send_queued_turn("q1");
+    d.until("refused", |e| !e.turn_queue_refusal("rachel").is_empty());
+    assert_eq!(d.engine.turn_queue_refusal("rachel"), "agent is still working");
+    d.settle(Duration::from_millis(300));
+    assert_eq!(d.engine.turn_queue_refusal("rachel"), "agent is still working", "a reload keeps the refusal");
+    assert_eq!(d.engine.turn_queue("rachel").len(), 2);
+    assert!(d.engine.turn_queue_error().is_empty(), "a refusal is not an error");
+    assert!(d.engine.turn_queue_refusal("mike").is_empty());
     d.engine.send_queued_turn("q1");
     d.until("sent", |e| e.turn_queue("rachel").len() == 1);
+    assert!(d.engine.turn_queue_refusal("rachel").is_empty(), "the next Send now answers it");
     assert_eq!(d.engine.turn_queue("rachel")[0]["queue_id"], "q2");
     d.engine.delete_queued_turn("q2");
     d.until("deleted", |e| e.turn_queue("rachel").is_empty() && !e.turn_queue_loading());

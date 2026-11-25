@@ -733,6 +733,14 @@ impl App {
         view.quota_notice = engine.quota_notice(session).into();
         view.queue_paused = engine.queue_paused(session);
         view.stop_notice = engine.stop_notice(session).into();
+        // The queue strip: the loaded queue's waiting messages, while the
+        // Host still counts some (a stale list never outlives its count).
+        let waiting = if view.queued > 0 || engine.queue_count(session) > 0 { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
+        view.waiting = ModelRc::new(VecModel::from(waiting));
+        view.waiting_refused = engine.turn_queue_refusal(session).into();
+        let (meter, warn) = crate::queue_strip::meter(engine, session);
+        view.meter = meter.into();
+        view.meter_warn = warn;
     }
 
     /// The open chat's working indicator for a stalled turn (#249), "" when
@@ -1325,7 +1333,7 @@ impl App {
             if conversation {
                 self.messages(pane);
             }
-            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) if *s == session));
+            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) | Change::Queue(s) if *s == session));
             if composer || everything {
                 let engine = self.engine.borrow();
                 let mut view = pane.view.clone();

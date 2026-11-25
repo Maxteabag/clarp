@@ -22,6 +22,8 @@ mod live_view;
 mod launch;
 mod pair;
 mod panes;
+mod queue_strip;
+mod triage;
 mod perf;
 mod motion;
 mod scroll_book;
@@ -229,8 +231,24 @@ impl App {
         laps.lap("sidebar rebuild");
         let selected = engine.selected_session();
         let tree_active = sidebar.tree_active();
-        let visible: Vec<&clarp_core::roster::AgentRow> =
-            sidebar.visible(&trees, &filters).into_iter().filter_map(|session| rows.iter().find(|r| r.session == session)).collect();
+        // Triage (Working, Needs you, Done, Snoozed): the top chats where
+        // they stand, sub-agents left to their parents.
+        let scope = window.get_scope().to_string();
+        let pending = triage::pending(engine);
+        let snoozes: std::collections::HashMap<String, String> = rows
+            .iter()
+            .filter_map(|row| triage::snooze_of(engine, row).map(|s| (row.session.clone(), triage::label(&s))))
+            .collect();
+        let visible: Vec<&clarp_core::roster::AgentRow> = sidebar
+            .visible(&trees, &filters)
+            .into_iter()
+            .filter_map(|session| rows.iter().find(|r| r.session == session))
+            .filter(|row| triage::in_scope(&scope, row, &pending, snoozes.contains_key(&row.session)))
+            .collect();
+        let (working, needs, snoozed) = triage::counts(engine);
+        window.set_triage_working(working);
+        window.set_triage_needs(needs);
+        window.set_triage_snoozed(snoozed);
         laps.lap("visible");
         // Sub-agents fold under their chat unless it is unfolded; the open
         // chat's own ancestors stay open so it is always in the list.
@@ -287,6 +305,7 @@ impl App {
                     chat.letters = ModelRc::new(VecModel::from(letters));
                 }
                 chat.folded = !unfolded.contains(&row.session);
+                chat.snoozed = snoozes.get(&row.session).cloned().unwrap_or_default().into();
                 if let Some(line) = sidebar.footers(&row.session).first().filter(|_| !chat.folded) {
                     chat.done_parent = line.parent_agent_id.clone().into();
                     chat.done_count = line.count as i32;
@@ -438,6 +457,7 @@ impl App {
         }
         whole.lap("list");
         self.refresh_panes(&window, changes);
+        queue_strip::follow(self);
         whole.lap("panes");
         // A chat opens ready to type into, unless the reader is scrolling.
         if changes.contains(&Change::Selection) && !self.active_report().transcript_focused && !self.previewing.get() {

@@ -790,7 +790,6 @@ impl Engine {
             self.launch.favorite_paths.clear();
             self.changes.push(Change::Launch);
         }
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
-        self.queue_failure(tag, &detail)
+        self.queue_failure(tag, message, status)
     }
 }

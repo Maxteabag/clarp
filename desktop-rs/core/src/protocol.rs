@@ -36,6 +36,9 @@ pub struct Agent {
     pub team_ids: Vec<Value>,
     /// Empty unless the Host says this agent's provider cannot serve a turn.
     pub backend_quota: Object,
+    /// The Host's `near` row (contract 167): the account is close to its
+    /// limit and no other seat would take the turn. Empty otherwise.
+    pub quota_near: Object,
     pub latest_state_timestamp: i64,
     /// When the running turn started (epoch ms, the Host's clock), from the
     /// snapshot's `turn_started_at`. None while idle, and on a Host too old
@@ -137,6 +140,7 @@ impl Default for Agent {
             mcp_servers: Vec::new(),
             team_ids: Vec::new(),
             backend_quota: Object::new(),
+            quota_near: Object::new(),
             latest_state_timestamp: 0,
             turn_started_at: None,
             stalled_since: None,
@@ -215,6 +219,7 @@ impl Agent {
             schedules: json::array(object, "schedules"),
             mcp_servers: json::array(object, "mcp_servers"),
             team_ids: json::array(object, "team_ids"),
+            quota_near: if quota.get("state").and_then(Value::as_str) == Some("near") { quota.clone() } else { Object::new() },
             backend_quota: if quota.get("state").and_then(Value::as_str) == Some("exhausted") {
                 quota
             } else {
@@ -304,7 +309,10 @@ impl Agent {
                 "schedules" => self.schedules = new.schedules.clone(),
                 "mcp_servers" => self.mcp_servers = new.mcp_servers.clone(),
                 "team_ids" => self.team_ids = new.team_ids.clone(),
-                "backend_quota" => self.backend_quota = new.backend_quota.clone(),
+                "backend_quota" => {
+                    self.backend_quota = new.backend_quota.clone();
+                    self.quota_near = new.quota_near.clone();
+                }
                 "latest_state_ts" => self.latest_state_timestamp = new.latest_state_timestamp,
                 "turn_started_at" => self.turn_started_at = new.turn_started_at,
                 "stalled_since" => self.stalled_since = new.stalled_since,
@@ -388,26 +396,14 @@ impl Agent {
         }
         let quota = &self.backend_quota;
         let provider = json::string(quota, "provider_id");
-        let name = match provider.as_str() {
-            "codex" => "Codex",
-            "claude" => "Claude",
-            "agy" => "Antigravity",
-            "" => "This backend",
-            other => other,
-        };
+        let name = provider_name(&provider);
         let credits = json::string(quota, "reason") == "credits_depleted";
         let mut text = if credits {
             format!("{name} workspace is out of credits")
         } else {
             format!("{name} is out of quota")
         };
-        if let Some(reset) = parse_iso_date(&json::string(quota, "resets_at")).filter(|r| *r > now) {
-            let seconds = (reset - now).num_seconds();
-            let wait = if seconds >= 86_400 {
-                format!("{}d {}h", seconds / 86_400, (seconds % 86_400) / 3_600)
-            } else {
-                format!("{}h {}m", seconds / 3_600, (seconds % 3_600) / 60)
-            };
+        if let Some(wait) = reset_wait(quota, now) {
             text += if credits { "  ·  included usage resets in " } else { "  ·  resets in " };
             text += &wait;
         }
@@ -420,6 +416,60 @@ impl Agent {
         }
         text
     }
+}
+
+impl Agent {
+    /// The composer meter's account part: the tool's limit when it is
+    /// near ("Claude 86% · resets in 2h 5m") or used up ("Claude limit
+    /// reached · resets in 2h 5m"), and whether it is used up. None while
+    /// the account has room or the Host does not say.
+    pub fn quota_meter(&self, now: DateTime<Utc>) -> Option<(String, bool)> {
+        let (quota, exhausted) = if !self.backend_quota.is_empty() {
+            (&self.backend_quota, true)
+        } else if !self.quota_near.is_empty() {
+            (&self.quota_near, false)
+        } else {
+            return None;
+        };
+        let name = provider_name(&json::string(quota, "provider_id"));
+        let used = quota.get("used_percentage").and_then(Value::as_f64);
+        let mut text = if exhausted {
+            if json::string(quota, "reason") == "credits_depleted" { format!("{name} out of credits") } else { format!("{name} limit reached") }
+        } else {
+            match used {
+                Some(used) => format!("{name} {}% used", used.floor().clamp(0.0, 99.0) as i64),
+                None => format!("{name} near its limit"),
+            }
+        };
+        if let Some(wait) = reset_wait(quota, now) {
+            text += " · resets in ";
+            text += &wait;
+        }
+        Some((text, exhausted))
+    }
+}
+
+/// A provider id as the user knows it.
+fn provider_name(provider: &str) -> &str {
+    match provider {
+        "codex" => "Codex",
+        "claude" => "Claude",
+        "agy" => "Antigravity",
+        "" => "This backend",
+        other => other,
+    }
+}
+
+/// How long until the quota row's `resets_at` ("5d 5h", "2h 5m"), or None
+/// when it gave none or it has passed.
+fn reset_wait(quota: &Object, now: DateTime<Utc>) -> Option<String> {
+    let reset = parse_iso_date(&json::string(quota, "resets_at")).filter(|r| *r > now)?;
+    let seconds = (reset - now).num_seconds();
+    Some(if seconds >= 86_400 {
+        format!("{}d {}h", seconds / 86_400, (seconds % 86_400) / 3_600)
+    } else {
+        format!("{}h {}m", seconds / 3_600, (seconds % 3_600) / 60)
+    })
 }
 
 /// Qt::ISODate: an offset or `Z` when present, otherwise local time.

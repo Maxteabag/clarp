@@ -34,6 +34,11 @@ export struct MessageBlock {
     text: string,
     level: int,
     rows: [TableRow],
+    // A table's columns: the characters each needs (view.rs
+    // `table_columns`), so the table keeps its text whole and scrolls
+    // sideways when the chat is narrower; `table-chars` is their sum.
+    columns: [int],
+    table-chars: int,
 }
 
 export struct ToolRow {
@@ -664,30 +669,132 @@ export component Block inherits VerticalLayout {
             link-clicked(url) => { root.link-clicked(url); }
         }
     }
-    if root.block.kind == "table": Rectangle {
-        border-width: 1px;
-        border-color: Palette.border;
+    // A table keeps its text whole: each column is at least as wide as its
+    // text needs (to a cap, past which a cell wraps), and the columns share
+    // what room is left. Wider than the chat, it scrolls sideways inside
+    // its block: a sideways wheel or Shift+wheel, its bar's drag, or a
+    // click on "→ N columns" (to its end and back), and a fade on the
+    // edge says more is there. A plain wheel still scrolls the chat.
+    if root.block.kind == "table": table-box := Rectangle {
+        property <length> char: root.body-size * 0.55;
+        property <length> pad: 12px;
+        property <int> count: root.block.columns.length;
+        property <length> natural: root.block.table-chars * self.char + self.count * self.pad + 2px;
+        property <bool> wide: self.natural > self.width + 0.5px;
+        property <length> span: Math.max(0px, self.natural - self.width);
+        property <length> offset: 0px;
+        changed span => { self.offset = Math.min(self.offset, self.span); }
+        // The chat sets its width; it asks for its natural one.
+        min-width: 0px;
+        preferred-width: self.natural;
+        accessible-role: AccessibleRole.table;
+        accessible-label: self.count + " columns";
         VerticalLayout {
-            for table-row in root.block.rows: HorizontalLayout {
-                spacing: 0px;
-                for cell in table-row.cells: Rectangle {
-                    // Equal columns, so every row lines up: content never
-                    // decides a column's width.
-                    horizontal-stretch: 1;
-                    preferred-width: 0px;
-                    min-width: 0px;
-                    border-width: 1px;
-                    border-color: Palette.rule;
-                    background: table-row.header ? Palette.raised : transparent;
-                    VerticalLayout {
-                        padding: 6px;
-                        StyledText {
-                            text: cell;
-                            default-color: table-row.header ? Palette.chrome-text : root.body-color;
-                            default-font-size: root.body-size * 0.95;
-                            default-font-family: Palette.body-family;
-                            link-color: Palette.link;
-                            link-clicked(url) => { root.link-clicked(url); }
+            spacing: 3px;
+            table-view := Rectangle {
+                height: table-grid.preferred-height;
+                min-width: 0px;
+                clip: true;
+                border-width: 1px;
+                border-color: Palette.border;
+                // Only a sideways scroll is the table's: the chat keeps the
+                // plain wheel. Under the cells, so their links still click.
+                if table-box.wide: TouchArea {
+                    scroll-event(event) => {
+                        let along = event.delta-x != 0px ? event.delta-x : event.modifiers.shift ? event.delta-y : 0px;
+                        if (along == 0px) { return reject; }
+                        table-box.offset = Math.clamp(table-box.offset - along, 0px, table-box.span);
+                        accept
+                    }
+                }
+                table-grid := VerticalLayout {
+                    x: -table-box.offset;
+                    width: Math.max(table-view.width, table-box.natural);
+                    for table-row in root.block.rows: HorizontalLayout {
+                        spacing: 0px;
+                        for cell[column] in table-row.cells: Rectangle {
+                            // Each column at least its text's width; what
+                            // is left is shared by that width, so rows
+                            // line up and no cell is cut.
+                            property <int> want: column < root.block.columns.length ? root.block.columns[column] : 4;
+                            horizontal-stretch: self.want;
+                            min-width: self.want * table-box.char + table-box.pad;
+                            preferred-width: self.min-width;
+                            border-width: 1px;
+                            border-color: Palette.rule;
+                            background: table-row.header ? Palette.raised : transparent;
+                            VerticalLayout {
+                                padding: 6px;
+                                StyledText {
+                                    text: cell;
+                                    default-color: table-row.header ? Palette.chrome-text : root.body-color;
+                                    default-font-size: root.body-size * 0.95;
+                                    default-font-family: Palette.body-family;
+                                    link-color: Palette.link;
+                                    link-clicked(url) => { root.link-clicked(url); }
+                                }
+                            }
+                        }
+                    }
+                }
+                // More to the right (or left): that edge fades.
+                if table-box.wide && table-box.offset < table-box.span - 0.5px: Rectangle {
+                    x: parent.width - self.width;
+                    width: 28px;
+                    background: @linear-gradient(90deg, Palette.window.with-alpha(0) 0%, Palette.window.with-alpha(0.9) 100%);
+                }
+                if table-box.wide && table-box.offset > 0.5px: Rectangle {
+                    x: 0;
+                    width: 28px;
+                    background: @linear-gradient(90deg, Palette.window.with-alpha(0.9) 0%, Palette.window.with-alpha(0) 100%);
+                }
+            }
+            if table-box.wide: Rectangle {
+                height: 14px;
+                min-width: 0px;
+                accessible-role: AccessibleRole.button;
+                accessible-id: "table-scroll";
+                accessible-label: table-box.count + " columns, scroll sideways";
+                accessible-action-default => { table-box.offset = table-box.offset < table-box.span / 2 ? table-box.span : 0px; }
+                hint := Text {
+                    x: 0;
+                    height: parent.height;
+                    text: table-box.offset < table-box.span / 2 ? "→ " + table-box.count + " columns" : "← back to the start";
+                    color: hint-touch.has-hover ? Palette.accent : Palette.muted;
+                    font-size: ChatText.detail;
+                    vertical-alignment: center;
+                    hint-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { table-box.offset = table-box.offset < table-box.span / 2 ? table-box.span : 0px; }
+                    }
+                }
+                // The bar: where the view is in the table, draggable.
+                track := Rectangle {
+                    x: hint.preferred-width + 8px;
+                    width: Math.max(0px, parent.width - self.x);
+                    y: (parent.height - self.height) / 2;
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Palette.rule;
+                    thumb := Rectangle {
+                        x: table-box.span > 0px ? (track.width - self.width) * (table-box.offset / table-box.span) : 0px;
+                        width: Math.min(track.width, Math.max(24px, track.width * (table-view.width / table-box.natural)));
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: drag.has-hover || drag.pressed ? Palette.muted : Palette.faint;
+                    }
+                    drag := TouchArea {
+                        y: -5px;
+                        height: 14px;
+                        mouse-cursor: ew-resize;
+                        property <length> start;
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) { self.start = table-box.offset; }
+                        }
+                        moved => {
+                            if (self.pressed && track.width > thumb.width) {
+                                table-box.offset = Math.clamp(self.start + (self.mouse-x - self.pressed-x) * (table-box.span / (track.width - thumb.width)), 0px, table-box.span);
+                            }
                         }
                     }
                 }
