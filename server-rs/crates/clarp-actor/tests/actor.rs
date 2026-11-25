@@ -7598,6 +7598,11 @@ fn a_message_that_waited_for_its_turn_is_later_than_the_answer_before_it() {
     world.shims.remove(&1);
     let out = actor.spool_changed(at).unwrap();
     world.carry_out(&mut actor, out);
+    // Those who watch are told the second turn began where its message stands, a millisecond
+    // after the answer: a working line placed by time is below the message.
+    let watched = actor.shown_whole(world.tick());
+    let began = watched["turn"]["started_at_ms"].as_i64().unwrap_or_default();
+    assert!(began > at, "the turn is told it began after the answer: {watched}");
     world.says(2, "BRAVO");
     world.exits(2, Some(0), None);
     world.hint(&mut actor);

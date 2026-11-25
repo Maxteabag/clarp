@@ -5202,13 +5202,25 @@ impl Worker {
         if stall_changed {
             self.publish_view();
         }
-        let tell_read = changed.conversation && !joined_reads.is_empty();
+        // A turn that began with its message's row (a send that waited for it): the row and
+        // the start committed together (issue 798).
+        let began_with_row = changed.conversation
+            && self.actor.as_ref().is_some_and(|actor| {
+                let now = actor.status().live.map(|live| live.turn);
+                let was = self
+                    .told
+                    .as_ref()
+                    .and_then(|told| told.live.as_ref())
+                    .map(|was| was.turn);
+                now.is_some() && now != was
+            });
+        let tell_read = changed.conversation && (!joined_reads.is_empty() || began_with_row);
         if changed.conversation {
             self.update_previews();
         }
         if tell_read {
-            // The read and the row committed together. Tell clients to read the row
-            // before telling them to remove its queue item.
+            // The read, or the start, and the row committed together. Tell clients to read the
+            // row before telling them to remove its queue item, or that the turn works.
             self.tell_transcript();
         }
         let job_events = self
