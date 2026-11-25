@@ -39,7 +39,7 @@ use clarp_spool::{Entry, MAX_OUTPUT_CHUNK, Record, ShimEvent, SpoolWriter};
 use serde_json::{Value, json};
 
 use crate::lane_login::Login;
-use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive, name_tool};
+use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive};
 use crate::lane_socket::{Socket, TurnAsk, write};
 
 /// How long a Stop that named no time gives Claude Code to answer its interrupt.
@@ -170,11 +170,6 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
             command.current_dir(cwd);
         }
         let mut child = command.spawn()?;
-        // Claude Code leads a group of its own: named in the owner lock, so a lane that hangs on
-        // its way out is ended with it.
-        if let Err(error) = name_tool(&lock, child.id()) {
-            eprintln!("clarp-shim: the lane could not name its tool in its owner lock: {error}");
-        }
         let stdin = child.stdin.take();
         if let Some(stdout) = child.stdout.take() {
             let relay = send.clone();

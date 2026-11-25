@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::codex_lane_turns::Slot;
 use crate::lane_login::Login;
-use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive, name_tool};
+use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive};
 use crate::lane_socket::{Socket, TurnAsk, write};
 
 const RPC_LIMIT: Duration = Duration::from_secs(12);
@@ -108,11 +108,6 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     let _listener = Socket::control(path, send.clone(), Input::control)?;
     let login = Login::read(&mut options, account)?;
     let (server, frames) = AppServer::spawn(Command::new(program).args(["app-server", "--stdio"]))?;
-    // Codex leads a group of its own: named in the owner lock, so a lane that hangs on its way
-    // out is ended with it.
-    if let Err(error) = name_tool(&lock, server.pid()) {
-        eprintln!("clarp-shim: the lane could not name its tool in its owner lock: {error}");
-    }
     let relay = send.clone();
     std::thread::Builder::new()
         .name("codex-lane-frames".into())

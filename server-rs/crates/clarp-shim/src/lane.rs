@@ -8,9 +8,8 @@
 //! - it is started by the Host with options in which the keys of [`key`] are the lane's own, and
 //!   taken out before the tool sees them;
 //! - its process holds its owner lock ([`owner_lock`]) until its tool has been reaped, so a lane
-//!   that has left is known by the lock being free, not by a reply, and writes its own id and
-//!   its tool's process group into it ([`owner_pid`], [`owner_group`]), so one that hangs on its
-//!   way out is ended, with its tool, by those ids alone;
+//!   that has left is known by the lock being free, not by a reply, and writes its own id into
+//!   it ([`owner_pid`]), so one that hangs on its way out is ended by that id alone;
 //! - it answers [`Lifecycle::Inspect`] with a [`Status`] at any time, and leaves on
 //!   [`Lifecycle::Retire`] only while it holds no claim;
 //! - it refuses a claim with [`LOGIN_CHANGED`] once the tool's login changed, and leaves;
@@ -56,9 +55,8 @@ pub fn thread_lock(dir: &Path, thread: &str) -> PathBuf {
 }
 
 /// The lock a lane's process holds for as long as it, and its tool, live. Once it holds it, the
-/// process writes its own id into it, and the process group of its tool once it has started it
-/// (`<pid> <group>`), so a lane that does not let go when asked can be ended, with its tool, by
-/// those ids alone (issue #772).
+/// process writes its own id into it, so a lane that does not let go when asked can be ended by
+/// that id alone (issue #772).
 pub fn owner_lock(socket: &Path) -> PathBuf {
     socket.with_extension("lock")
 }
@@ -66,20 +64,11 @@ pub fn owner_lock(socket: &Path) -> PathBuf {
 /// The id of the process that wrote itself into a lane's owner lock, if one did. It names the
 /// lane's process only while the lock is held: the reader looks at the lock as well.
 pub fn owner_pid(socket: &Path) -> Option<u32> {
-    owner_ids(socket).0
-}
-
-/// The process group of the tool the lane started, as the lane wrote it into its owner lock
-/// beside its own id. It is the group its tool leads; the reader checks that its leader is
-/// still the lane's child before it signals it.
-pub fn owner_group(socket: &Path) -> Option<u32> {
-    owner_ids(socket).1
-}
-
-fn owner_ids(socket: &Path) -> (Option<u32>, Option<u32>) {
-    let text = std::fs::read_to_string(owner_lock(socket)).unwrap_or_default();
-    let mut ids = text.split_whitespace().map(|id| id.parse().ok());
-    (ids.next().flatten(), ids.next().flatten())
+    std::fs::read_to_string(owner_lock(socket))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// The attempt a lane runs: the actor's turn and attempt, where its spool is written, and the

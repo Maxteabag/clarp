@@ -22,6 +22,7 @@
 
 pub(crate) mod claude;
 pub(crate) mod codex;
+mod scope;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -29,7 +30,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_group, owner_lock, owner_pid};
+use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_lock, owner_pid};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -503,10 +504,10 @@ impl Endpoint {
     }
 
     /// Waits until `until` for a lane on its way out to let go of its owner lock. One that has
-    /// not by then is ended by the ids it wrote into the lock once it held it (never by a name
-    /// or a pattern): its tool's process group, where its leader is still the lane's child, and
-    /// then its own process. Said once in the Host's log, and given a moment to be gone.
-    /// `true`: the lock is free.
+    /// not by then is ended with its tool by its own systemd scope ([`scope`]), found from the
+    /// process id it wrote into the lock once it held it, or by that id alone where it has no
+    /// scope of its own; never by a name or a pattern. Said once in the Host's log, and given a
+    /// moment to be gone. `true`: the lock is free.
     pub(crate) fn let_go_within(&self, until: Instant) -> io::Result<bool> {
         if self.released_by(until)? {
             return Ok(true);
@@ -516,8 +517,8 @@ impl Endpoint {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // Read while the lock is held, so the ids are those the holding lane wrote.
-        let (pid, group) = (owner_pid(&self.socket), owner_group(&self.socket));
+        // Read while the lock is held, so the id is that of the process holding it.
+        let pid = owner_pid(&self.socket);
         if self.released()? {
             return Ok(true);
         }
@@ -529,21 +530,27 @@ impl Endpoint {
             );
             return Ok(false);
         };
-        // Its tool first, while the lane is still its parent: a tool that hangs may not read
-        // the end of its input, and once the lane's lock is gone it would write the
-        // conversation beside the lane or turn that comes next.
-        let group = group.filter(|group| may_signal(*group) && leads_for(*group, pid));
-        if let Some(group) = group {
-            signal(group, true);
-        }
-        signal(pid, false);
-        let tool = group.map_or_else(
-            || "; its tool leads no group of its own any more".to_owned(),
-            |group| format!(" with its tool's process group {group}"),
-        );
+        // Its own scope ends the lane and its tool together, whatever their process groups: a
+        // tool that hangs may not read the end of its input, and with only the lane's process
+        // gone it would write the conversation beside the lane or turn that comes next. The
+        // scope is read from the lane's process while it holds the lock, so it is that lane's.
+        // A lane with no scope of its own (started outside systemd) is ended by its id.
+        let scope = scope::of_process(pid);
+        let how = match &scope {
+            Some(unit) if scope::end(unit) => {
+                format!("its scope {unit} is ended, its tool with it")
+            }
+            Some(unit) => {
+                signal(pid);
+                format!("its scope {unit} could not be ended, so its process {pid} is")
+            }
+            None => {
+                signal(pid);
+                format!("it runs in no scope of its own, so its process {pid} is ended")
+            }
+        };
         eprintln!(
-            "clarp-host: the {} lane {name} did not let go in time; its process {pid} is \
-             ended{tool}",
+            "clarp-host: the {} lane {name} did not let go in time; {how}",
             self.tool.name()
         );
         self.released_by(Instant::now() + ENDED_WAIT)
@@ -830,48 +837,23 @@ fn leaving(error: &io::Error) -> bool {
     )
 }
 
-/// Whether an id a lane wrote into its owner lock may be signalled: never one that would reach
-/// more than one process or group by itself (0, 1), nor this Host's own process or group.
-fn may_signal(id: u32) -> bool {
-    id > 1
-        && id != std::process::id()
-        && i32::try_from(id).is_ok_and(|raw| raw != nix::unistd::getpgrp().as_raw())
+/// Whether the id a lane wrote into its owner lock may be signalled: never one that would reach
+/// more than one process by itself (0, 1), nor this Host.
+fn may_signal(pid: u32) -> bool {
+    pid > 1 && pid != std::process::id() && i32::try_from(pid).is_ok()
 }
 
-/// Whether `group` is a process group whose leader is still a child of the lane's process
-/// `lane`: the tool the lane started and has not reaped. A leader not yet reaped keeps its id,
-/// so it names that tool and nothing else; a group whose leader the lane reaped is left alone,
-/// as its id may since name another process.
-fn leads_for(group: u32, lane: u32) -> bool {
-    let Ok(stat) = std::fs::read_to_string(format!("/proc/{group}/stat")) else {
-        return false;
-    };
-    // The fields after the command's closing parenthesis: state, parent, group.
-    let Some((_, after)) = stat.rsplit_once(')') else {
-        return false;
-    };
-    let mut fields = after.split_whitespace().skip(1);
-    let parent = fields.next().and_then(|field| field.parse::<u32>().ok());
-    let led = fields.next().and_then(|field| field.parse::<u32>().ok());
-    parent == Some(lane) && led == Some(group)
-}
-
-/// Ends with SIGKILL the lane's process `id`, or its tool's process group `id`, after it was
-/// asked to leave and given its time. Signalled only while the lane holds its owner lock: the
-/// lane wrote both ids there after it took the lock, the lock is let go when the lane's process
-/// ends, and no child of it inherits the lock, so the lane's id names that process; its tool's
-/// group is checked by [`leads_for`] first.
-fn signal(id: u32, group: bool) {
-    let Ok(raw) = i32::try_from(id) else {
-        return;
-    };
-    let target = nix::unistd::Pid::from_raw(raw);
-    let kill = nix::sys::signal::Signal::SIGKILL;
-    let _ = if group {
-        nix::sys::signal::killpg(target, kill)
-    } else {
-        nix::sys::signal::kill(target, kill)
-    };
+/// Ends the process `pid` of a lane that holds its owner lock and did not let go, with SIGKILL:
+/// it was asked to leave and given its time. The id is safe to signal while the lock is held:
+/// the lane wrote it there after it took the lock, the lock is let go when that process ends,
+/// and no child of it inherits the lock.
+fn signal(pid: u32) {
+    if let Ok(raw) = i32::try_from(pid) {
+        let _ = nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(raw),
+            nix::sys::signal::Signal::SIGKILL,
+        );
+    }
 }
 
 #[cfg(test)]
