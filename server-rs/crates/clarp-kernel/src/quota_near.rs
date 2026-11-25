@@ -18,10 +18,11 @@
 //! (`state: exhausted`), by its own rule.
 //!
 //! A warning that another account would take the turn from is noise, so the row warns only
-//! where no other seat of the tool would take it ([`failover`]). Where the Host cannot know,
-//! it warns and says that it could not know (`failover: unknown`): a warning that a switch
-//! then makes needless costs a glance, and a limit reached without one stops the agent's
-//! work, which is what the warning is for.
+//! where no other seat of the tool would take it ([`failover`]). A warning is for a pool near
+//! its end, never for one seat while others may have room (the owner's rule, 25 Nov 2026), so
+//! where the Host cannot know, it gives none ([`row`]); where it switches the seats itself and
+//! its reading of them is old, it reads them first ([`needs_reading`]). A used-up account is
+//! never hidden for not knowing ([`used_up_row`]).
 //!
 //! An account that is used up is judged by the same rule ([`used_up_failover`]), with a seat
 //! taking the turn where it has any room left rather than where it is below its share: the
@@ -211,6 +212,43 @@ pub fn used_up_failover(
     }
 }
 
+/// Whether the Host is to read a tool's seats before it can say whether another seat would take
+/// a turn: it switches them itself (`--accounts select`, with the owner's selector for the tool
+/// or the switcher's automatic lane), and its reading of them is old, failed or not there.
+pub fn needs_reading(accounts: Accounts, provider: &str, selector: bool, desk: &Value) -> bool {
+    accounts == Accounts::Select
+        && (selector || switches(provider, desk))
+        && !left_out(provider, desk)
+        && fresh_read(provider, desk).is_none()
+}
+
+/// Whether the owner's tool that lists the seats leaves this tool out: nothing of it was ever
+/// read, while a reading of another tool is fresh. Such a tool has no pool this Host can see:
+/// its one account is its whole pool.
+fn left_out(provider: &str, desk: &Value) -> bool {
+    let reads = desk["providers"].as_array().into_iter().flatten();
+    let mut others = reads.clone().filter(|read| read["provider"] != provider);
+    let never = reads
+        .clone()
+        .find(|read| read["provider"] == provider)
+        .is_none_or(|read| read["read_state"] == "never");
+    never
+        && others.any(|read| {
+            let other = read["provider"].as_str().unwrap_or("");
+            fresh_read(other, desk).is_some()
+        })
+}
+
+/// Whether the switcher of the seats is on and moves this tool's seats by itself.
+fn switches(provider: &str, desk: &Value) -> bool {
+    desk["switcher"]["enabled"] == true
+        && desk["switcher"]["lanes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|lane| lane["provider"] == provider && lane["mode"] == "automatic")
+}
+
 /// Whether the switcher is asked about a tool's turns at all, and the reading it is asked on:
 /// the tool's reading of the seats where it is fresh, read well and holds accounts. Else what
 /// is known without it: none where nobody switches the tool's seats or no account was read;
@@ -226,13 +264,12 @@ fn gate<'a>(
         Accounts::Follow => return Err(Failover::Unknown),
         Accounts::Select => {}
     }
-    let switcher = desk["switcher"]["enabled"] == true
-        && desk["switcher"]["lanes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|lane| lane["provider"] == provider && lane["mode"] == "automatic");
-    if !selector && !switcher {
+    if !selector && !switches(provider, desk) {
+        return Err(Failover::None);
+    }
+    // A tool the owner's tool does not list has no pool this Host switches: its one account is
+    // its whole pool, and none other would take the turn.
+    if left_out(provider, desk) {
         return Err(Failover::None);
     }
     let read = fresh_read(provider, desk).ok_or(Failover::Unknown)?;
@@ -555,10 +592,27 @@ pub fn limit_event(event: Value, failover: Failover, regains_at: Option<i64>) ->
     Some(event)
 }
 
+/// A `provider-limit` warning of a tool's account (a window near its limit), given whether another
+/// seat of the tool would take the turn from an account near its limit ([`failover`], the rule
+/// of the agents' near rows): a warning is for a pool near its end, so it is told only where no
+/// seat would, with `failover: "none"`; not where one would, nor where that cannot be known
+/// (`None`).
+pub fn warning_event(event: Value, near: Failover) -> Option<Value> {
+    if near != Failover::None {
+        return None;
+    }
+    let mut event = event;
+    event["failover"] = json!(near.word());
+    Some(event)
+}
+
 /// What an agent's row says of a tool near its limit, given whether another seat would take
-/// the turn: null where one would.
+/// the turn: null where one would, and where that cannot be known.
 pub fn row(near: &Value, failover: Failover) -> Value {
-    if failover == Failover::Spare {
+    // A warning is for a pool near its end, never for one seat while others may have room: where
+    // it cannot be known whether another seat would take the turn, nothing is said (a used-up
+    // account stands all the same, [`used_up_row`]).
+    if matches!(failover, Failover::Spare | Failover::Unknown) {
         return Value::Null;
     }
     let mut row = near.clone();
@@ -835,9 +889,9 @@ mod tests {
         .unwrap();
         assert!(row(&near, Failover::Spare).is_null());
         assert_eq!(row(&near, Failover::None)["failover"], "none");
-        let unknown = row(&near, Failover::Unknown);
-        assert_eq!(unknown["failover"], "unknown");
-        assert_eq!(unknown["used_percentage"], 84.0);
+        // Not known whether another seat would take it: no warning.
+        assert!(row(&near, Failover::Unknown).is_null());
+        assert_eq!(row(&near, Failover::None)["used_percentage"], 84.0);
         // A reset the tool gave with parts of a second or another offset is written in UTC to
         // the second.
         let odd = window(
@@ -1325,5 +1379,66 @@ mod tests {
         let desk = judged_by(served(json!([])), json!([a, b]));
         assert_eq!(seat_in_use("claude", &desk).as_deref(), Some("tag-b"));
         assert_eq!(seat_in_use("codex", &desk), None);
+    }
+
+    #[test]
+    fn the_host_reads_the_seats_first_where_it_switches_them_and_its_reading_is_old() {
+        let fresh = served(json!([timed(
+            "work",
+            true,
+            "ok",
+            &[("5h", 0.85, NOW + HOUR)]
+        )]));
+        let mut old = fresh.clone();
+        old["providers"][0]["stale"] = json!(true);
+        assert!(!needs_reading(Accounts::Select, "claude", true, &fresh));
+        assert!(needs_reading(Accounts::Select, "claude", true, &old));
+        assert!(needs_reading(Accounts::Select, "claude", true, &json!({})));
+        // Only where this Host switches the seats: by the selector, or by the automatic lane.
+        assert!(needs_reading(Accounts::Select, "claude", false, &old));
+        let mut no_lane = old.clone();
+        no_lane["switcher"]["enabled"] = json!(false);
+        assert!(!needs_reading(Accounts::Select, "claude", false, &no_lane));
+        assert!(!needs_reading(Accounts::Follow, "claude", true, &old));
+        assert!(!needs_reading(Accounts::None, "claude", true, &old));
+    }
+
+    #[test]
+    fn a_warning_is_told_only_where_no_seat_would_take_the_turn() {
+        let warning =
+            json!({ "type": "provider-limit", "kind": "warning", "provider_id": "codex" });
+        assert!(warning_event(warning.clone(), Failover::Spare).is_none());
+        assert!(warning_event(warning.clone(), Failover::Unknown).is_none());
+        let told = warning_event(warning, Failover::None).unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"]),
+            (&json!("warning"), &json!("none"))
+        );
+    }
+
+    #[test]
+    fn a_tool_with_no_pool_this_host_switches_is_one_account_and_its_whole_pool() {
+        let in_use = seat(true, "ok", &[("5h", Some(0.85), false)]);
+        let desk = desk(true, "automatic", read(json!([in_use])));
+        // Antigravity: no selector and no lane, so no pool: none would take the turn, and the
+        // near row is said.
+        let of = |provider: &str, selector: bool, desk: &Value| {
+            failover(Accounts::Select, provider, "", selector, desk)
+        };
+        assert_eq!(of("agy", false, &desk), Failover::None);
+        assert!(!needs_reading(Accounts::Select, "agy", false, &desk));
+        // A tool with the owner's selector that the seat tool does not list, while it lists
+        // Claude: one account, its whole pool, and nothing to read again for it.
+        let mut listed = desk.clone();
+        listed["providers"].as_array_mut().unwrap().push(
+            json!({ "provider": "codex", "read_state": "never", "stale": true, "accounts": [] }),
+        );
+        assert_eq!(of("codex", true, &listed), Failover::None);
+        assert!(!needs_reading(Accounts::Select, "codex", true, &listed));
+        // Where nothing is fresh at all, it cannot be known: no near, and the seats are read.
+        let mut none_fresh = listed.clone();
+        none_fresh["providers"][0]["stale"] = json!(true);
+        assert_eq!(of("codex", true, &none_fresh), Failover::Unknown);
+        assert!(needs_reading(Accounts::Select, "codex", true, &none_fresh));
     }
 }

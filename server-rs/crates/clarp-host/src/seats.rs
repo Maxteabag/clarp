@@ -586,6 +586,11 @@ pub async fn judged(app: &App) -> serde_json::Value {
 
 /// Reads the seats again now, whenever the last reading was, beside whoever asked: a seat
 /// whose reset has passed is seen with room only in a reading made after it.
+pub async fn read_now(app: &App) {
+    app.seats.read(app, true).await;
+}
+
+/// Reads the seats again now, as [`read_now`], beside whoever asked.
 pub fn read_again(app: &App) {
     let reader = app.clone();
     tokio::spawn(async move {

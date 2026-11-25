@@ -272,9 +272,15 @@ Rules:
   reading shows no other seat below those shares for the model the agent runs,
   its own or the tool's default), `"unknown"` that it cannot know (`--accounts
   follow`, where another Host switches, or a seats reading that is old, failed,
-  missing or does not say enough). A Host that cannot know warns: a warning a
-  switch then makes needless costs a glance, a limit reached without one stops
-  the agent. The Host looks again every five minutes, a second after a named
+  missing or does not say enough). A Rust Host gives no `near` where it cannot
+  know (no new number; before this, it warned with `failover: "unknown"`): a
+  warning is for a pool near its end, never for one seat while others may have
+  room. Where it switches the seats itself and its reading of them is old or
+  missing when a row would turn `near` or `exhausted`, it reads them itself, at
+  most once a minute for the tool, and judges again when the reading is in (the
+  apps are told by `agent-roster` as below); so `near` carries `failover:
+  "none"` only. `exhausted` still stands with `failover: "unknown"` where it
+  cannot know: a used-up account is never hidden. The Host looks again every five minutes, a second after a named
   window resets, and after each seats reading or switch made from the desk or
   its switcher (a switch by the owner's selector is seen at the next turn end or
   look), and sends `agent-roster` with `kind: "backend-quota"` when the warning
@@ -305,9 +311,14 @@ Rules:
   says `exhausted` as before with `failover: "none"`. One beside another Host
   (`--accounts follow`) cannot know the other's seats: `failover: "unknown"`, the
   row stands. One with the owner's selector and no automatic lane reads the seats
-  only when an app asks for a reading, or when a seat a row waits on regains room;
-  ten minutes after a reading it is old, and the row says `exhausted` with
-  `failover: "unknown"` until the next.
+  when an app asks for a reading, when a seat a row waits on regains room, and,
+  where its reading is old (ten minutes after it was made), when a row would turn
+  `near` or `exhausted`; until that reading is in, the row says `exhausted` with
+  `failover: "unknown"`, or no `near`. A tool with no pool this Host switches is
+  one account and its whole pool, so its `failover` is `none` and `near` shows:
+  a tool with neither the selector nor the automatic lane (Antigravity), one the
+  owner's seat tool leaves out of its list while it lists another, and every
+  tool on a Host without a seat tool.
   `GET /backend-usage` then gives each tool whose seats were read a `pool`
   beside its `windows` (`providers.<tool>.pool`): `{"seats" (in all),
   "with_room" (seats with room for a turn of no model in particular, as the
@@ -1049,7 +1060,7 @@ Event types and payloads:
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error`, and with the speech_outcome feature `reason`, `provider`, `trace_id` | A reply was not spoken; tell the user instead of playing silence. With speech_outcome: once per turn and reason, `trace_id` names the turn whose reply it is (write the line under that reply), `reason` is an open set (below). |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
-| `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. From Rust Host contract 176 (feature `quota_pool`) a `hard_limit` is not sent while another seat of the tool's pool would take the turn (the Host moves to it), and when sent it carries `failover` (`none` or `unknown`) and `pool_regains_at` (ISO, UTC to the second: when the first seat of the pool regains room, where none has; else null). `resets_at` stays the window's own. A `hard_limit` not sent for that reason is held and sent, with those fields, if the pool then has no seat for the turn while the limit lasts and the tool is still on the seat it is of; a switch away from that seat lets it go. Warnings (also while the agent's near row is null), `recovered` and `unknown` are sent as before. |
+| `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. From Rust Host contract 176 (feature `quota_pool`) a `hard_limit` is not sent while another seat of the tool's pool would take the turn (the Host moves to it), and when sent it carries `failover` (`none` or `unknown`) and `pool_regains_at` (ISO, UTC to the second: when the first seat of the pool regains room, where none has; else null). `resets_at` stays the window's own. A `hard_limit` not sent for that reason is held and sent, with those fields, if the pool then has no seat for the turn while the limit lasts and the tool is still on the seat it is of; a switch away from that seat lets it go. A `warning` follows the rule of the agents' `near` rows (no new number): it is sent, with `failover: "none"`, only where no other seat of the pool would take the turn from an account near its limit; while one would, or where that cannot be known (a seats reading that is old, failed or missing, `--accounts follow`), it is held, and sent once it is known that none would while the tool is still on that seat and the window has not reset; a switch away from that seat lets it go, and it is never sent on not knowing. `recovered` and `unknown` are sent as before. |
 | `artifact-updated` | `session`, `agent_id`, `artifact_id` | An artifact was published or resolved; refetch `/artifacts/<id>`. Extension surface. |
 | `media-changed` | `session`, `agent_id`, `asset_id`, `change` ∈ created, deleted, favorite; `favorite` (only with change favorite); `at` (ms) | A chat's gallery changed (feature `media_manage`): re-read or patch `GET /media`; on `deleted` drop cached bytes of the image. Extension surface. |
 | `attention-updated` | `attention_count` | The number of items awaiting the user changed. Extension surface. |

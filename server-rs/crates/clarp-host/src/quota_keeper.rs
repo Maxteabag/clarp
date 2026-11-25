@@ -77,10 +77,6 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[
     crate::kept::Kind::book(WINDOWS, crate::kept::Key::Plain, crate::kept::json),
 ];
 
-/// Why a receipt of a window of the account in use was not delivered, where another seat of the
-/// tool's pool would take the turn.
-const POOL_TAKES_IT: &str = "Another seat of the pool has room; the Host moves to it";
-
 /// The kinds of thing the keeper leaves with the fleet.
 const WINDOWS: &str = "quota-keeper-window";
 const RECEIPTS: &str = "quota-keeper-receipt";
@@ -360,6 +356,12 @@ async fn pass(app: &App) {
     } else {
         std::collections::BTreeSet::new()
     };
+    // Whether another seat of each tool's pool would take a turn, judged now, by the rule of
+    // the agents' rows.
+    let mut verdicts = BTreeMap::new();
+    for tool in quota::SWITCHED {
+        verdicts.insert(tool.to_string(), crate::quota::verdicts(app, tool).await);
+    }
     let pool_of = |tool: &str| app.pools.iter().find(|pool| pool.tool() == tool).cloned();
     let selector = |tool: &str| pool_of(tool).is_some_and(|pool| pool.has_selector());
     let looked = app.janitors.with_kept(app, |book, world, at| {
@@ -452,18 +454,24 @@ async fn pass(app: &App) {
                 payload["recovery"] = recovery;
             }
             let switcher_tells = switched && quota::SWITCHED.contains(&notice.provider.as_str());
-            // A window of the account in use runs low while another seat of the tool's pool
-            // would take the turn: the Host moves to it, and the owner is not told (the rule of
-            // the agents' rows, `quota::Desk::pool_takes_turn`).
-            let pool_takes = !switcher_tells && app.limits.pool_takes_turn(provider, now);
-            let suppressed = switcher_tells || pool_takes;
+            // The rule of the agents' rows (`crate::quota::Verdicts`): a window of the account in
+            // use that runs low is told only where no other seat of the tool's pool would take
+            // the turn, and not where that cannot be known (a warning must not cry wolf); one
+            // with nothing left, unless another seat would take it, as a used-up account is
+            // never hidden.
+            // Only on a Host that switches the seats itself: beside another, that Host tells the
+            // owner, and this one keeps the receipt as not delivered, below.
+            let pool_cancels = (!switcher_tells && selects)
+                .then(|| crate::quota::pool_cancels(&verdicts, provider, notice.spent))
+                .flatten();
+            let suppressed = switcher_tells || pool_cancels.is_some();
             // Where the switcher tells, or the pool takes the turn, the receipt is cancelled as
             // it is kept; any other waits to be delivered (or marked, beside another Host),
             // below.
             let delivery = if switcher_tells {
                 Some(json!({ "cancelled": quota::SWITCHER_TELLS }))
             } else {
-                pool_takes.then(|| json!({ "cancelled": POOL_TAKES_IT }))
+                pool_cancels.map(|why| json!({ "cancelled": why }))
             };
             order += 1;
             let receipt = Receipt {

@@ -139,14 +139,10 @@ say(type="result", subtype="success", is_error=False, session_id="stand-in", res
     host.kill();
 
     // A Host beside another that switches the accounts (`--accounts follow`): whether another
-    // seat would take the turn is not this Host's to know, and the row says so.
+    // seat would take the turn is not this Host's to know, and a warning that cannot be known
+    // to hold is not given.
     let host = place.start_in("", &["--accounts", "follow"], &world);
-    let said = quota_of(&host, &clara);
-    assert_eq!(
-        (&said["state"], &said["failover"]),
-        (&json!("near"), &json!("unknown")),
-        "{said}"
-    );
+    assert_eq!(quota_of(&host, &clara), Value::Null);
 }
 
 /// On a Host that switches the seats itself (`--accounts select`, the owner's selector and a
@@ -275,33 +271,22 @@ say(type="result", subtype="success", is_error=False, session_id="stand-in", res
         all.iter().filter(again).count()
     };
 
-    // The account is near; the seats were never read: whether another would take the turn is
-    // not known, and both rows warn and say so.
+    // The account is near, and the seats were never read: the Host reads them itself, and
+    // until then warns of nothing. The spare seat takes Sonnet's turns, so Sam's row says
+    // nothing; it is closed to Opus, so Ada's row warns, knowing that no seat would take her
+    // turn.
     host.send(&ada, "one", "u-1");
-    wait_for("the row to warn", || !quota_of(&ada).is_null());
-    for session in [&ada, &sam] {
-        let said = quota_of(session);
-        assert_eq!(
-            (&said["state"], &said["window"], &said["failover"]),
-            (&json!("near"), &json!("five_hour"), &json!("unknown")),
-            "{said}"
-        );
-    }
-    wait_for("the apps to be told of the warning", || told_again() == 1);
-
-    // The seats are read: the spare seat takes Sonnet's turns, so Sam's row says nothing; it
-    // is closed to Opus, so Ada's row warns, knowing that no seat would take her turn.
-    host.get("/hotseat/desk?refresh=1");
+    wait_for("the Host to read the seats and warn", || {
+        quota_of(&ada)["failover"] == "none"
+    });
     let status = host.get("/hotseat/status");
     assert_eq!(status["providers"][0]["read_state"], "ok", "{status}");
     assert_eq!(quota_of(&sam), Value::Null);
     let said = quota_of(&ada);
     assert_eq!(
-        (&said["state"], &said["used_percentage"], &said["failover"]),
-        (&json!("near"), &json!(84.0), &json!("none")),
+        (&said["state"], &said["window"], &said["used_percentage"]),
+        (&json!("near"), &json!("five_hour"), &json!(84.0)),
         "{said}"
     );
-    wait_for("the apps to be told the seats changed it", || {
-        told_again() == 2
-    });
+    wait_for("the apps to be told of the warning", || told_again() >= 1);
 }

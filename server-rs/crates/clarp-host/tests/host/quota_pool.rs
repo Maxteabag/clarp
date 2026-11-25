@@ -7,10 +7,14 @@ use super::*;
 /// A Host that switches the Claude seats itself (`--accounts select`, the owner's selector and
 /// a tool that knows the seats), whose seat in use, `work`, is used up until four hours from
 /// now, beside a seat `spare` that the tool says as `spare` (its usage), and an agent on Claude
-/// whose last turn found its account used up. The seats are not read yet.
-fn used_up_beside(name: &str, spare: Value) -> (Place, Host, String) {
+/// whose last turn found its account used up. The seats are not read yet, or, where
+/// `read_fails`, cannot be: the tool fails to list them.
+fn used_up_beside(name: &str, spare: Value, read_fails: bool) -> (Place, Host, String) {
     let place = Place::new(name);
     let tool = seat_tool(&place);
+    if read_fails {
+        std::fs::write(place.root.join("list.exit"), "1").unwrap();
+    }
     let seconds = now_ms() / 1000;
     let work = json!({
         "status": "rejected", "limited": true, "used_5h": 1.0, "reset_5h": seconds + 4 * 3_600,
@@ -71,6 +75,7 @@ fn used_up_beside(name: &str, spare: Value) -> (Place, Host, String) {
         },
     });
     std::fs::write(own.join("windows.json"), said.to_string()).unwrap();
+    std::fs::write(own.join("fails"), "").unwrap();
     let claude = place.root.join("claude-says-its-windows");
     let script = r#"#!/usr/bin/env python3
 import json, pathlib, sys
@@ -80,7 +85,12 @@ def say(**line):
     print(json.dumps(line), flush=True)
 say(type="system", subtype="init", session_id="stand-in", model="stand-in")
 say(type="rate_limit_event", session_id="stand-in", rate_limit_info=json.loads((own / "windows.json").read_text()))
-sys.exit(1)
+if (own / "fails").exists():
+    sys.exit(1)
+message = {"id": "msg_1", "role": "assistant", "model": "stand-in", "content": [{"type": "text", "text": "on it"}]}
+say(type="assistant", session_id="stand-in", message=message)
+say(type="result", subtype="success", is_error=False, session_id="stand-in", result="on it", num_turns=1,
+    usage={"input_tokens": 12, "output_tokens": 3})
 "#;
     program(&claude, script);
     let world = [
@@ -99,8 +109,10 @@ sys.exit(1)
     let made = host.post("/agents", json!({ "name": "Ada", "backend": "claude" }));
     let ada = made["session"].as_str().unwrap().to_string();
     host.send(&ada, "one", "u-1");
-    wait_for("the row to say that the account is used up", || {
-        !quota_of(&host, &ada).is_null()
+    // The turn is over once what Claude Code said of its windows is kept. The row is not
+    // waited for: the Host may read the seats as soon as it says the account is used up.
+    wait_for("Claude Code's word to be kept", || {
+        host.get("/backend-usage")["providers"]["claude"]["windows"][0]["used_percentage"] == 100.0
     });
     (place, host, ada)
 }
@@ -129,28 +141,17 @@ fn a_used_up_account_is_said_only_where_no_seat_of_the_pool_would_take_the_turn(
         "status": "allowed", "limited": false, "used_5h": 0.2, "reset_5h": seconds + 3_600,
         "used_7d": 0.3, "reset_7d": seconds + 96 * 3_600, "scoped": [],
     });
-    let (_place, host, ada) = used_up_beside("pool-room", room);
+    let (_place, host, ada, heard) = host_listening("pool-room", room);
     assert_eq!(
         host.get("/server-info")["contract"]["features"]["quota_pool"],
         176
     );
-    // The seats were never read: a reading that says nothing of now hides nothing, and the
-    // usage screen has no pool to show.
-    let said = quota_of(&host, &ada);
-    assert_eq!(
-        (&said["state"], &said["failover"], &said["resets_at"]),
-        (&json!("exhausted"), &json!("unknown"), &json!(work_resets)),
-        "{said}"
-    );
-    assert!(host.get("/backend-usage")["providers"]["claude"]["pool"].is_null());
-    let heard = host.listen();
-
-    // The seats are read: the spare seat would take Ada's turn, so her row says nothing, and
-    // the apps are told to read it again.
-    host.get("/hotseat/desk?refresh=1");
-    let status = host.get("/hotseat/status");
-    assert_eq!(status["providers"][0]["read_state"], "ok", "{status}");
-    assert_eq!(quota_of(&host, &ada), Value::Null);
+    // The seats were never read: the row asks the Host to read them, and the spare seat
+    // would take Ada's turn, so her row says nothing, and the apps are told to read it again.
+    wait_for("the Host to read the seats and clear the row", || {
+        quota_of(&host, &ada).is_null()
+            && host.get("/hotseat/status")["providers"][0]["read_state"] == "ok"
+    });
     wait_for("the apps to be told the pool takes the turn", || {
         told_again(&heard) >= 1
     });
@@ -190,11 +191,11 @@ fn a_used_up_account_is_said_only_where_no_seat_of_the_pool_would_take_the_turn(
         "status": "rejected", "limited": true, "used_5h": 1.0, "reset_5h": seconds + 3_600,
         "used_7d": 0.3, "reset_7d": seconds + 96 * 3_600, "scoped": [],
     });
-    let (_place, host, ada) = used_up_beside("pool-out", out);
-    host.get("/hotseat/desk?refresh=1");
-    wait_for("the row to name the pool's reset", || {
-        quota_of(&host, &ada)["failover"] == "none"
-    });
+    let (_place, host, ada) = used_up_beside("pool-out", out, false);
+    wait_for(
+        "the Host to read the seats and name the pool's reset",
+        || quota_of(&host, &ada)["failover"] == "none",
+    );
     let said = quota_of(&host, &ada);
     assert_eq!(
         (
@@ -229,4 +230,56 @@ fn a_used_up_account_is_said_only_where_no_seat_of_the_pool_would_take_the_turn(
     );
     // No seat has room: none to move to.
     assert_eq!(pool["next_alias"], Value::Null, "{pool}");
+}
+
+/// The Host made, and listened to, before the turn that uses its account up, so that what the
+/// apps are told of it is heard.
+fn host_listening(name: &str, spare: Value) -> (Place, Host, String, Arc<Mutex<Vec<Value>>>) {
+    let (place, host, ada) = used_up_beside(name, spare, false);
+    let heard = host.listen();
+    (place, host, ada, heard)
+}
+
+#[test]
+fn where_the_seats_cannot_be_read_no_warning_is_given_and_a_used_up_account_stands() {
+    let seconds = now_ms() / 1000;
+    let work_resets = clarp_kernel::quota::moment((seconds + 4 * 3_600) * 1000);
+    let room = json!({
+        "status": "allowed", "limited": false, "used_5h": 0.2, "reset_5h": seconds + 3_600,
+        "used_7d": 0.3, "reset_7d": seconds + 96 * 3_600, "scoped": [],
+    });
+    let (place, host, ada) = used_up_beside("pool-unread", room, true);
+    // The Host tries to read the seats, and the tool fails: whether another seat would take the
+    // turn is not known, and a used-up account is never hidden.
+    wait_for("the Host to try to read the seats", || {
+        // An app reads the agents' rows, as the apps do: what has the Host read the seats.
+        quota_of(&host, &ada);
+        std::fs::read_to_string(place.root.join("seat-tool.asked"))
+            .is_ok_and(|asked| asked.lines().any(|line| line.starts_with("list")))
+    });
+    let said = quota_of(&host, &ada);
+    assert_eq!(
+        (&said["state"], &said["failover"], &said["resets_at"]),
+        (&json!("exhausted"), &json!("unknown"), &json!(work_resets)),
+        "{said}"
+    );
+    assert!(host.get("/backend-usage")["providers"]["claude"]["pool"].is_null());
+    // A turn completes at 84% of the five hours: the account is near its limit, but whether
+    // the pool is cannot be told, so no warning is given.
+    let own = place.root.join("claude-own");
+    std::fs::remove_file(own.join("fails")).unwrap();
+    let window = |part: f64, resets: i64| json!({ "utilization": part, "resetsAt": resets, "status": "allowed" });
+    let said = json!({
+        "status": "allowed", "rateLimitType": "five_hour", "resetsAt": seconds + 4 * 3_600,
+        "unifiedWindows": {
+            "five_hour": window(0.84, seconds + 4 * 3_600),
+            "seven_day": window(0.4, seconds + 96 * 3_600),
+        },
+    });
+    std::fs::write(own.join("windows.json"), said.to_string()).unwrap();
+    host.send(&ada, "two", "u-2");
+    wait_for("the turn's word to be kept", || {
+        host.get("/backend-usage")["providers"]["claude"]["windows"][0]["used_percentage"] == 84.0
+    });
+    assert_eq!(quota_of(&host, &ada), Value::Null);
 }

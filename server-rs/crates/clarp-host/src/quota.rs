@@ -70,6 +70,9 @@ const KEY: &str = "key";
 const TAIL: u64 = 1024 * 1024;
 /// What is said of where a record was seen.
 pub const SEEN_IN: &str = "rollout/token_count";
+/// How often at most the seats are read for a tool whose reading is old, where its rows ask
+/// whether another seat would take a turn.
+const READ_ASKED_EVERY_MS: i64 = 60_000;
 /// How often it is looked whether an account is still used up.
 const LOOKED_EVERY: Duration = Duration::from_secs(300);
 /// The tool whose records are read.
@@ -154,6 +157,10 @@ pub struct Desk {
     /// The moment a seat regained room that the seats were last read again for: once for each,
     /// since a reading that still does not show it would otherwise ask for another at once.
     read_for: std::sync::Mutex<Option<i64>>,
+    /// When the seats were last read because a tool's reading was old where a row asked whether
+    /// another seat would take its turn ([`ask_reading`]), and how many such reads in a row left
+    /// it old: one read for every tool, once a minute at most, and less often while they fail.
+    read_asked: std::sync::Mutex<(Option<i64>, u32)>,
     woken: tokio::sync::Notify,
     /// Whether another seat would take the turns of a tool that is near a limit or used up, by
     /// the tool and the model an agent runs on it, as the apps were last told it
@@ -175,7 +182,11 @@ pub struct Desk {
 /// is judged again ([`watch`]).
 #[derive(Debug, Clone)]
 struct Pooled {
+    /// From a used-up account (`quota_near::used_up_failover`): what a hard limit is told by.
     failover: clarp_kernel::quota_near::Failover,
+    /// From an account near a limit (`quota_near::failover`, the rule of the near rows): what a
+    /// warning is told by.
+    near: clarp_kernel::quota_near::Failover,
     regains: Option<i64>,
     until_ms: i64,
     /// The seat the tool was on when it was judged (`quota_near::seat_in_use`): a hard limit
@@ -813,18 +824,38 @@ impl Desk {
     fn pooled(&self, tool: &str, event: Value, now_ms: i64) -> Option<Value> {
         let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
         let holds = pooled.get(tool).filter(|pooled| now_ms < pooled.until_ms);
-        let (failover, regains, seat) = holds.map_or(
-            (clarp_kernel::quota_near::Failover::Unknown, None, None),
-            |pooled| (pooled.failover, pooled.regains, pooled.seat.clone()),
-        );
+        let unknown = clarp_kernel::quota_near::Failover::Unknown;
+        let (failover, near, regains) = holds.map_or((unknown, unknown, None), |pooled| {
+            (pooled.failover, pooled.near, pooled.regains)
+        });
+        // The seat a limit is of is the one the tool is on, as last judged, also where that
+        // judgement no longer holds: a switch judges again at once ([`look_again`]), so the last
+        // seat judged is the seat in use. A limit held while the reading is old is then still of
+        // a seat, and told once it is known that no seat would take the turn.
+        let seat = pooled.get(tool).and_then(|pooled| pooled.seat.clone());
         drop(pooled);
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
         let kind = event["kind"].as_str().unwrap_or("").to_string();
-        let told = clarp_kernel::quota_near::limit_event(event.clone(), failover, regains);
+        let warning = event["type"] == "provider-limit" && kind == "warning";
+        let told = if warning {
+            clarp_kernel::quota_near::warning_event(event.clone(), near)
+        } else {
+            clarp_kernel::quota_near::limit_event(event.clone(), failover, regains)
+        };
         match (kind.as_str(), &told) {
             // Not told now: kept, to be told if the pool cannot take the turn after all.
             ("hard_limit", None) => {
                 held.insert(tool.to_string(), Held { event, seat });
+            }
+            // A warning not told, as another seat would take the turn or that cannot be known:
+            // kept the same way, unless a hard limit of the tool is held, which says more.
+            ("warning", None) => {
+                let hard = held
+                    .get(tool)
+                    .is_some_and(|held| held.event["kind"] == "hard_limit");
+                if !hard {
+                    held.insert(tool.to_string(), Held { event, seat });
+                }
             }
             // Told, or over: nothing is held for it any more.
             ("hard_limit" | "recovered" | "unknown", _) => {
@@ -845,12 +876,21 @@ impl Desk {
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
         let of = held.get(tool)?;
         // The tool left the seat the limit is of: a switch took the turn, as the pool was to,
-        // and the limit is no longer the tool's to tell. Let go of it.
-        if of.seat.is_none() || of.seat != pooled.seat {
+        // and the limit is no longer the tool's to tell. Let go of it. (A Host that reads no
+        // seats has none before or after: the same.)
+        if of.seat != pooled.seat {
             held.remove(tool);
             return None;
         }
-        if pooled.failover == clarp_kernel::quota_near::Failover::Spare {
+        // A hard limit is told once no other seat would take the turn, or that is not known (a
+        // used-up account is never hidden); a warning only once it is known that none would.
+        let warning = of.event["kind"] == "warning";
+        let ready = if warning {
+            pooled.near == clarp_kernel::quota_near::Failover::None
+        } else {
+            pooled.failover != clarp_kernel::quota_near::Failover::Spare
+        };
+        if !ready {
             return None;
         }
         let event = held.remove(tool)?.event;
@@ -858,17 +898,11 @@ impl Desk {
         if resets.is_some_and(|resets| resets <= now_ms) {
             return None;
         }
-        clarp_kernel::quota_near::limit_event(event, pooled.failover, pooled.regains)
-    }
-
-    /// Whether another seat of the tool's pool would take a turn on its default model from the
-    /// account in use, by the judgement that holds now ([`look_again`]): what a notice of the
-    /// account in use alone is not told for.
-    pub(crate) fn pool_takes_turn(&self, tool: &str, now_ms: i64) -> bool {
-        let pooled = self.pooled.lock().unwrap_or_else(PoisonError::into_inner);
-        pooled.get(tool).is_some_and(|pooled| {
-            now_ms < pooled.until_ms && pooled.failover == clarp_kernel::quota_near::Failover::Spare
-        })
+        if warning {
+            clarp_kernel::quota_near::warning_event(event, pooled.near)
+        } else {
+            clarp_kernel::quota_near::limit_event(event, pooled.failover, pooled.regains)
+        }
     }
 
     /// When a turn of a tool that waits for an account shows that usage is there again, given
@@ -910,6 +944,33 @@ impl Desk {
 
     /// Whether the seats are to be read again for the moment a seat regained room: once for
     /// each such moment.
+    /// Whether the seats may be read for a tool whose reading is old: once a minute at most,
+    /// however often its rows ask.
+    fn may_read(&self, now_ms: i64) -> bool {
+        let mut asked = self
+            .read_asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (last, failed) = *asked;
+        // Once a minute, twice as long after each read that left the reading old, to sixteen
+        // minutes: a tool that keeps failing is not run every minute while a row is near.
+        let every = READ_ASKED_EVERY_MS << failed.min(4);
+        let due = last.is_none_or(|at| now_ms - at >= every);
+        if due {
+            asked.0 = Some(now_ms);
+        }
+        due
+    }
+
+    /// A read of the seats asked for an old reading ended: whether the reading is fresh now.
+    fn read_done(&self, fresh: bool) {
+        let mut asked = self
+            .read_asked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        asked.1 = if fresh { 0 } else { asked.1.saturating_add(1) };
+    }
+
     fn read_once_for(&self, at: i64) -> bool {
         let mut read_for = self.read_for.lock().unwrap_or_else(PoisonError::into_inner);
         let first = *read_for != Some(at);
@@ -1028,13 +1089,153 @@ pub async fn rows(app: &crate::edge::App) -> Rows {
         let model = crate::models::default_for(app, tool).await;
         defaults.insert(tool.clone(), model.unwrap_or_default());
     }
-    let selectors = app.pools.iter().filter(|pool| pool.has_selector());
-    Rows {
+    // A selector switches a pool this Host can judge only where it has the tool that lists the
+    // seats; without one, each tool is one account, its whole pool.
+    let told = app.seats.told();
+    let selectors = app.pools.iter().filter(|pool| told && pool.has_selector());
+    let rows = Rows {
         looked,
         accounts: app.config.accounts,
         selectors: selectors.map(|pool| pool.tool()).collect(),
         desk,
         defaults,
+    };
+    let asking = rows.looked.near.keys().chain(rows.looked.used_up.keys());
+    for tool in asking {
+        ask_reading(app, &rows, tool);
+    }
+    rows
+}
+
+/// Reads the seats beside whoever asked, for a tool whose reading was old, and keeps whether the
+/// reading of it is fresh after: a tool that keeps failing is read less often ([`Desk::may_read`]).
+fn read_for(app: &crate::edge::App, tool: &str) {
+    let app = app.clone();
+    let tool = tool.to_string();
+    tokio::spawn(async move {
+        crate::seats::read_now(&app).await;
+        let desk = crate::seats::judged(&app).await;
+        let fresh = clarp_kernel::quota_near::fresh_until(&tool, &desk).is_some();
+        app.limits.read_done(fresh);
+    });
+}
+
+/// Why a receipt of the Quota keeper is not delivered on a Host that switches the seats itself
+/// (`quota_keeper`), by the rule of the agents' rows: of a tool with a pool only (`verdicts`
+/// holds those), where another seat would take the turn, or, of a window that runs low, where
+/// that cannot be known. `None`: it is told. A tool the Host keeps no pool of (Antigravity) is
+/// told as before.
+pub(crate) fn pool_cancels(
+    verdicts: &BTreeMap<String, Vec<Verdicts>>,
+    provider: &str,
+    spent: bool,
+) -> Option<&'static str> {
+    use clarp_kernel::quota_near::Failover;
+    // Of each model the tool runs for an agent: told where the turn of any of them would find
+    // no other seat.
+    let all = verdicts.get(provider).filter(|all| !all.is_empty())?;
+    if all.iter().any(|verdict| verdict.tells(spent)) {
+        return None;
+    }
+    let judged = |verdict: &Verdicts| if spent { verdict.used_up } else { verdict.near };
+    Some(
+        if all.iter().all(|verdict| judged(verdict) == Failover::Spare) {
+            POOL_TAKES_IT
+        } else {
+            POOL_NOT_KNOWN
+        },
+    )
+}
+
+/// Why a receipt is not delivered where another seat of the tool's pool would take the turn.
+pub(crate) const POOL_TAKES_IT: &str =
+    "Another seat of the pool would take the turn; the Host moves to it";
+/// Why a receipt that a window runs low is not delivered where whether another seat would take
+/// the turn cannot be told: a warning is for a pool near its end.
+pub(crate) const POOL_NOT_KNOWN: &str = "Whether another seat of the pool would take the turn could not be told; no warning is given on that";
+
+/// Whether another seat of a tool's pool would take a turn of one model, judged now as the
+/// agents' rows judge it: from an account near a limit, and from one used up.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Verdicts {
+    pub near: clarp_kernel::quota_near::Failover,
+    pub used_up: clarp_kernel::quota_near::Failover,
+}
+
+impl Verdicts {
+    /// Whether a notice of the account in use is told, as a row would say it: one that the
+    /// window runs low only where no other seat would take the turn (a warning that cannot be
+    /// known to hold is not given); one that nothing is left, unless another seat would take
+    /// it.
+    pub fn tells(self, spent: bool) -> bool {
+        use clarp_kernel::quota_near::Failover;
+        if spent {
+            self.used_up != Failover::Spare
+        } else {
+            self.near == Failover::None
+        }
+    }
+}
+
+/// Whether another seat of a tool's pool would take a turn, for each model the tool runs for an
+/// agent (its own, else the tool's default), judged now on the desk as it is kept; where the
+/// reading is old, the seats are read too ([`ask_reading`]), for the next look.
+pub(crate) async fn verdicts(app: &crate::edge::App, tool: &str) -> Vec<Verdicts> {
+    let desk = crate::seats::judged(app).await;
+    let default = crate::models::default_for(app, tool)
+        .await
+        .unwrap_or_default();
+    // The models the tool runs for its agents: each one's own, else the tool's default.
+    let directory = app.fleet.directory();
+    let agents = directory.members.iter().chain(&directory.janitors);
+    let mut models: std::collections::BTreeSet<String> = agents
+        .filter(|member| member.record.archived_at_ms.is_none() && member.record.backend == tool)
+        .map(|member| {
+            let own = &member.record.model;
+            if own.is_empty() {
+                default.clone()
+            } else {
+                own.clone()
+            }
+        })
+        .collect();
+    if models.is_empty() {
+        models.insert(default);
+    }
+    let accounts = app.config.accounts;
+    // As the agents' rows: a selector counts only where the Host can read the seats.
+    let selector = app.seats.told()
+        && app
+            .pools
+            .iter()
+            .any(|pool| pool.tool() == tool && pool.has_selector());
+    let old = clarp_kernel::quota_near::needs_reading(accounts, tool, selector, &desk);
+    if old && app.seats.told() && app.limits.may_read(app.clock.now_ms()) {
+        read_for(app, tool);
+    }
+    models
+        .iter()
+        .map(|model| Verdicts {
+            near: clarp_kernel::quota_near::failover(accounts, tool, model, selector, &desk),
+            used_up: clarp_kernel::quota_near::used_up_failover(
+                accounts, tool, model, selector, &desk,
+            )
+            .0,
+        })
+        .collect()
+}
+
+/// A tool's account is near a limit or used up, and whether another seat would take the turn
+/// cannot be said, as the reading of the seats is old or not there: the seats are read now,
+/// beside whoever asked, once a minute at most for the tool, and when the reading is in, the
+/// rows are judged again and the apps told where that changes them ([`look_again`]). Until
+/// then a near row says nothing and a used-up one stands (`failover: unknown`).
+fn ask_reading(app: &crate::edge::App, rows: &Rows, tool: &str) {
+    let selector = rows.selectors.contains(tool);
+    let old = clarp_kernel::quota_near::needs_reading(rows.accounts, tool, selector, &rows.desk);
+    // A Host told no tool that knows the seats has nothing to read them with.
+    if old && app.seats.told() && app.limits.may_read(app.clock.now_ms()) {
+        read_for(app, tool);
     }
 }
 
@@ -1146,10 +1347,12 @@ fn judge(
 ) -> Pooled {
     let (failover, regains) =
         clarp_kernel::quota_near::used_up_failover(accounts, tool, model, selector, desk);
+    let near = clarp_kernel::quota_near::failover(accounts, tool, model, selector, desk);
     let most = now + i64::try_from(LOOKED_EVERY.as_millis()).unwrap_or(i64::MAX);
     let fresh = clarp_kernel::quota_near::fresh_until(tool, desk);
     Pooled {
         failover,
+        near,
         regains,
         until_ms: fresh.map_or(most, |fresh| fresh.min(most)),
         seat: clarp_kernel::quota_near::seat_in_use(tool, desk),
@@ -1165,6 +1368,8 @@ fn judge(
 pub fn watch(app: &crate::edge::App) {
     let app = app.clone();
     tokio::spawn(async move {
+        // Once at the start: what the tools' limits are told by is judged from the first.
+        look_again(&app).await;
         loop {
             let wait = app.limits.next_look(app.clock.now_ms());
             tokio::select! {
@@ -1475,6 +1680,7 @@ mod tests {
         let judged = |failover, regains, until_ms| {
             let pooled = Pooled {
                 failover,
+                near: failover,
                 regains,
                 until_ms,
                 seat: Some("a".to_string()),
@@ -1513,6 +1719,7 @@ mod tests {
         let desk = Desk::default();
         let pooled = |failover, regains, seat: &str| Pooled {
             failover,
+            near: failover,
             regains,
             until_ms: 1_000,
             seat: Some(seat.to_string()),
@@ -1642,6 +1849,169 @@ mod tests {
         assert_eq!(pooled.failover, Failover::None, "{pooled:?}");
         assert!(desk.release(CLAUDE, &pooled, at).is_none());
         assert!(desk.release(CLAUDE, &judged(&stayed), at).is_none());
+    }
+
+    #[test]
+    fn a_warning_is_told_through_the_seats_only_where_the_pool_is_near_its_end() {
+        use clarp_kernel::quota_near::Failover;
+        use clarp_kernel::recovery::Accounts;
+        use clarp_kernel::seats::Seats;
+        // The seats as the owner's tool lists them, read and kept as a Host keeps them, and the
+        // desk judged by as the Host makes it (`seats::judged`).
+        let at = 1_899_999_000_000;
+        let usage = |five: f64| {
+            json!({ "status": "allowed", "limited": false, "used_5h": five,
+                "reset_5h": 1_900_007_200, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+        };
+        let list = |a: f64, b: f64| {
+            json!({ "accounts": [
+                { "alias": "a", "is_active": true, "usage": usage(a) },
+                { "alias": "b", "is_active": false, "usage": usage(b) },
+            ]})
+        };
+        let read = |a: f64, b: f64| {
+            let mut seats = Seats::with_salt("a-salt");
+            seats.read(CLAUDE, &list(a, b), at);
+            seats
+        };
+        let judged = |seats: &Seats, now: i64| {
+            let desk = seats.judged(true, now);
+            judge(Accounts::Select, (CLAUDE, ""), true, &desk, now)
+        };
+        let warning = json!({ "type": "provider-limit", "kind": "warning", "provider_id": "claude",
+            "resets_at": quota::moment(1_900_007_200_000) });
+        let desk = Desk::default();
+        let set = |pooled: Pooled| {
+            desk.pooled
+                .lock()
+                .unwrap()
+                .insert(CLAUDE.to_string(), pooled);
+        };
+
+        // Seat a at 85% of its five hours, b with room: another seat would take the turn, so the
+        // warning is not told, and is held as a's.
+        let roomy = read(0.85, 0.1);
+        let pooled = judged(&roomy, at);
+        assert_eq!(pooled.near, Failover::Spare, "{pooled:?}");
+        set(pooled);
+        assert!(desk.pooled(CLAUDE, warning.clone(), at).is_none());
+        assert!(desk.release(CLAUDE, &judged(&roomy, at), at).is_none());
+        // b comes near its end too, and the tool is still on a: the pool is near its end, and the
+        // warning is told, with failover none.
+        let near_end = judged(&read(0.85, 0.9), at);
+        assert_eq!(near_end.near, Failover::None, "{near_end:?}");
+        let told = desk.release(CLAUDE, &near_end, at).unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"]),
+            (&json!("warning"), &json!("none"))
+        );
+        // A warning while that is known: told at once.
+        set(judged(&read(0.85, 0.9), at));
+        let told = desk.pooled(CLAUDE, warning.clone(), at).unwrap();
+        assert_eq!(told["failover"], "none");
+
+        // The reading of the seats is old: whether another seat would take the turn is not known,
+        // and no warning is given, now or while that stays so.
+        let old = judged(&read(0.85, 0.9), at + 2 * 3_600_000);
+        assert_eq!(old.near, Failover::Unknown, "{old:?}");
+        set(old.clone());
+        assert!(desk.pooled(CLAUDE, warning, at + 2 * 3_600_000).is_none());
+        assert!(desk.release(CLAUDE, &old, at + 2 * 3_600_000).is_none());
+    }
+
+    #[test]
+    fn the_keeper_judges_only_the_tools_with_a_pool_by_it() {
+        use clarp_kernel::quota_near::Failover;
+        let verdict = |near, used_up| Verdicts { near, used_up };
+        let one = |tool: &str, near, used_up| -> BTreeMap<String, Vec<Verdicts>> {
+            [(tool.to_string(), vec![verdict(near, used_up)])].into()
+        };
+        // A tool the Host keeps no pool of: told, runs low or spent.
+        for spent in [false, true] {
+            let any = one(CLAUDE, Failover::Spare, Failover::Spare);
+            assert_eq!(pool_cancels(&any, "agy", spent), None);
+        }
+        // Not known: a warning is not given; a spent window is.
+        let unknown = one(CLAUDE, Failover::Unknown, Failover::Unknown);
+        assert_eq!(pool_cancels(&unknown, CLAUDE, false), Some(POOL_NOT_KNOWN));
+        assert_eq!(pool_cancels(&unknown, CLAUDE, true), None);
+        // Another seat would take the turn: neither.
+        let spare = one(CODEX, Failover::Spare, Failover::Spare);
+        assert_eq!(pool_cancels(&spare, CODEX, false), Some(POOL_TAKES_IT));
+        assert_eq!(pool_cancels(&spare, CODEX, true), Some(POOL_TAKES_IT));
+        // No seat would: both are told.
+        let none = one(CODEX, Failover::None, Failover::None);
+        assert_eq!(pool_cancels(&none, CODEX, false), None);
+        assert_eq!(pool_cancels(&none, CODEX, true), None);
+        // Each agent's model: told where the turn of any one of them would find no seat; where
+        // one would move and another's cannot be told, what is known is that it is not known.
+        let both = |first, second| -> BTreeMap<String, Vec<Verdicts>> {
+            let all = vec![verdict(first, first), verdict(second, second)];
+            [(CLAUDE.to_string(), all)].into()
+        };
+        let one_left = both(Failover::Spare, Failover::None);
+        assert_eq!(pool_cancels(&one_left, CLAUDE, false), None);
+        let mixed = both(Failover::Spare, Failover::Unknown);
+        assert_eq!(pool_cancels(&mixed, CLAUDE, false), Some(POOL_NOT_KNOWN));
+        assert_eq!(
+            pool_cancels(&both(Failover::Spare, Failover::Spare), CLAUDE, false),
+            Some(POOL_TAKES_IT)
+        );
+    }
+
+    #[test]
+    fn the_seats_are_read_for_an_old_reading_once_a_minute_and_less_often_while_it_stays_old() {
+        let desk = Desk::default();
+        let minute = 60_000;
+        assert!(desk.may_read(0));
+        // One read for every tool: a second ask in the same minute reads nothing.
+        assert!(!desk.may_read(minute - 1));
+        assert!(desk.may_read(minute));
+        // Reads that leave the reading old: two minutes, then four, to sixteen at most.
+        desk.read_done(false);
+        assert!(!desk.may_read(2 * minute + minute - 1));
+        assert!(desk.may_read(3 * minute));
+        desk.read_done(false);
+        assert!(!desk.may_read(3 * minute + 4 * minute - 1));
+        assert!(desk.may_read(7 * minute));
+        for _ in 0..10 {
+            desk.read_done(false);
+        }
+        assert!(!desk.may_read(7 * minute + 16 * minute - 1));
+        assert!(desk.may_read(23 * minute));
+        // A read that makes it fresh: once a minute again.
+        desk.read_done(true);
+        assert!(desk.may_read(24 * minute));
+    }
+
+    #[test]
+    fn a_warning_that_comes_while_the_judgement_is_old_is_of_the_seat_last_judged() {
+        use clarp_kernel::quota_near::Failover;
+        let desk = Desk::default();
+        let pooled = |near, until_ms| Pooled {
+            failover: near,
+            near,
+            regains: None,
+            until_ms,
+            seat: Some("a".to_string()),
+        };
+        // Judged on seat a; that judgement no longer holds when the warning comes.
+        desk.pooled
+            .lock()
+            .unwrap()
+            .insert(CODEX.to_string(), pooled(Failover::None, 1_000));
+        let warning = json!({ "type": "provider-limit", "kind": "warning", "provider_id": "codex",
+            "resets_at": quota::moment(9_000_000) });
+        // Not known now: not told, held as a's.
+        assert!(desk.pooled(CODEX, warning, 2_000).is_none());
+        // The seats are read again, the tool still on a, and no seat would take the turn: told.
+        let told = desk
+            .release(CODEX, &pooled(Failover::None, 9_000), 3_000)
+            .unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"]),
+            (&json!("warning"), &json!("none"))
+        );
     }
 
     #[test]
