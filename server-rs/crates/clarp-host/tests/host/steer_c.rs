@@ -105,28 +105,34 @@ if mode == "answered":
     returned("tool-answered")
     answer("joined-answered", first, uid)
     raise SystemExit(0)
-if mode == "answered-separate":
+if mode in ("answered-separate", "answered-restart"):
     # The first message is answered, and the answer's result comes after the follow-up was
     # written but before it is read: the follow-up is a turn of its own in the same process.
-    say("assistant", message={"id": "msg_first_separate", "role": "assistant",
-        "content": [{"type": "text", "text": "first-separate"}]})
+    # In the second the Host is started again between the follow-up's read and its first tool.
+    tag = mode.removeprefix("answered-")
+    say("assistant", message={"id": "msg_first_" + tag, "role": "assistant",
+        "content": [{"type": "text", "text": "first-" + tag}]})
     say("stream_event", event={"type": "message_stop"})
-    (root / "answered-first-separate").touch()
+    (root / ("answered-first-" + tag)).touch()
     uid, follow = prompt()
     (root / ("received-" + follow)).write_text(uid)
-    say("result", subtype="success", is_error=False, result="first-separate",
+    say("result", subtype="success", is_error=False, result="first-" + tag,
         user_message_uuids=[first])
     echo(uid)
-    start("tool-separate", "Bash")
-    carried("tool-separate", "Bash", "msg_separate_call")
-    (root / "tool-answered-separate").touch()
-    release("release-answered-separate")
-    returned("tool-separate")
-    answer("second-separate", uid)
+    if tag == "restart":
+        (root / "echoed-restart").touch()
+        release("go-restart")
+    start("tool-" + tag, "Bash")
+    carried("tool-" + tag, "Bash", "msg_" + tag + "_call")
+    (root / ("tool-answered-" + tag)).touch()
+    release("release-answered-" + tag)
+    returned("tool-" + tag)
+    answer("second-" + tag, uid)
     raise SystemExit(0)
-if mode == "narrated":
+if mode in ("narrated", "narrated-restart"):
     # Words that announce a call, then the call: the follow-up is read when the call returns,
-    # and more work follows for it.
+    # and more work follows for it. In the second the Host is started again between the
+    # follow-up's read and the next call.
     say("assistant", message={"id": "msg_narration", "role": "assistant", "content": [
         {"type": "text", "text": "narrated-before"},
         {"type": "tool_use", "id": "tool-narrated-1", "name": "Bash", "input": {}}]})
@@ -135,6 +141,9 @@ if mode == "narrated":
     (root / ("received-" + follow)).write_text(uid)
     returned("tool-narrated-1")
     echo(uid)
+    if mode == "narrated-restart":
+        (root / "echoed-narrated").touch()
+        release("go-narrated")
     start("tool-narrated-2", "Bash")
     carried("tool-narrated-2", "Bash", "msg_narrated_call")
     (root / "tool-narrated").touch()
@@ -765,7 +774,10 @@ fn a_claude_follow_up_can_join_while_no_tool_call_is_open() {
 fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it() {
     // The answer, the follow-up, the file that says the follow-up's tool runs, and what the
     // turn says last. In the second the answer ends with a result before the follow-up is
-    // read, so the follow-up is a turn of its own in the same process.
+    // read, so the follow-up is a turn of its own in the same process. The third is the second
+    // with the Host started again between that read and the follow-up's first tool (issue
+    // 743): the Host that follows the turn from its spool closes the answer as the one that
+    // read the follow-up did.
     for (mode, answer, tool, last) in [
         (
             "answered",
@@ -779,12 +791,18 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
             "tool-answered-separate",
             "second-separate",
         ),
+        (
+            "answered-restart",
+            "first-restart",
+            "tool-answered-restart",
+            "second-restart",
+        ),
     ] {
         let place = Place::new(mode);
         let claude = place.root.join("claude");
         program(&claude, CLAUDE);
         let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
-        let host = place.start_in("", &[], &world);
+        let mut host = place.start_in("", &[], &world);
         let session = "answered";
         host.post(
             "/agents",
@@ -797,6 +815,18 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
         });
         let follow = format!("add-{mode}");
         assert_eq!(host.send(session, &follow, &follow)["queued"], true);
+        if mode == "answered-restart" {
+            // The read of the follow-up is in the log, and the Host goes down before the tool
+            // it asks for begins. The turn's process goes on; the next Host takes it up.
+            let row_id = format!("u-{follow}");
+            wait_for("the follow-up read into the turn's process", || {
+                place.root.join("echoed-restart").exists()
+                    && host.turns(session).iter().any(|row| row["id"] == row_id)
+            });
+            host.kill();
+            host = place.start_in("", &[], &world);
+            std::fs::write(place.root.join("go-restart"), "").unwrap();
+        }
         wait_for("the follow-up read, and the tool it asked for", || {
             place.root.join(tool).exists()
         });
@@ -854,45 +884,63 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
 
 #[test]
 fn words_that_announce_a_call_are_said_along_the_way_also_when_a_message_is_steered_in() {
-    let place = Place::new("narrated");
-    let claude = place.root.join("claude");
-    program(&claude, CLAUDE);
-    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
-    let host = place.start_in("", &[], &world);
-    let session = "narrated";
-    host.post(
-        "/agents",
-        json!({"name":session,"session":session,"backend":"claude"}),
-    );
-    host.send(session, "case-narrated", "first");
-    wait_for("the words and their call", || {
-        place.root.join("narrated-first").exists()
-    });
-    wait_for("the call in the live projection", || {
-        host.state(session) == "tool"
-    });
-    assert_eq!(
-        host.send(session, "add-narrated", "add-narrated")["queued"],
-        true
-    );
-    wait_for("the follow-up read, and the next call", || {
-        place.root.join("tool-narrated").exists()
-    });
-    // Those who watch the turn see the same: the next call makes the words narration.
-    wait_for("the words said along the way, live", || {
-        live_phase_of(&host, session, "narrated-before").as_deref() == Some("commentary")
-    });
-    std::fs::write(place.root.join("release-narrated"), "").unwrap();
-    collect_answer(&host, session, "joined-narrated");
-    // What announced the first call was said along the way: the work after it makes it so,
-    // whatever was read in between.
-    wait_for("the turn's answer in the conversation", || {
-        view_of(&host, session, "joined-narrated") == Some(json!("conversation"))
-    });
-    assert_eq!(
-        stored_phase_of(&host, session, "narrated-before").as_deref(),
-        Some("commentary")
-    );
+    // In the second the Host is started again between the follow-up's read and the next call:
+    // the Host that follows the turn from its spool still has the words as said along the way,
+    // as the one that read the follow-up had them, and the next call makes them so.
+    for mode in ["narrated", "narrated-restart"] {
+        let place = Place::new(mode);
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+        let mut host = place.start_in("", &[], &world);
+        let session = "narrated";
+        host.post(
+            "/agents",
+            json!({"name":session,"session":session,"backend":"claude"}),
+        );
+        host.send(session, &format!("case-{mode}"), "first");
+        wait_for("the words and their call", || {
+            place.root.join("narrated-first").exists()
+        });
+        wait_for("the call in the live projection", || {
+            host.state(session) == "tool"
+        });
+        let follow = format!("add-{mode}");
+        assert_eq!(host.send(session, &follow, &follow)["queued"], true);
+        if mode == "narrated-restart" {
+            // The read of the follow-up is in the log, and the Host goes down before the next
+            // call begins. The turn's process goes on; the next Host takes it up.
+            let row_id = format!("u-{follow}");
+            wait_for("the follow-up read into the turn's process", || {
+                place.root.join("echoed-narrated").exists()
+                    && host.turns(session).iter().any(|row| row["id"] == row_id)
+            });
+            host.kill();
+            host = place.start_in("", &[], &world);
+            std::fs::write(place.root.join("go-narrated"), "").unwrap();
+        }
+        wait_for("the follow-up read, and the next call", || {
+            place.root.join("tool-narrated").exists()
+        });
+        // Those who watch the turn see the same: the next call makes the words narration.
+        wait_for("the words said along the way, live", || {
+            live_phase_of(&host, session, "narrated-before").as_deref() == Some("commentary")
+        });
+        std::fs::write(place.root.join("release-narrated"), "").unwrap();
+        collect_answer(&host, session, "joined-narrated");
+        // What announced the first call was said along the way: the work after it makes it
+        // so, whatever was read in between, and whether or not the Host was started again
+        // before that work. (The reply that carries the next call is written once its message
+        // is whole, after the call returns: what is kept says so from then on.)
+        wait_for("the turn's answer in the conversation", || {
+            view_of(&host, session, "joined-narrated") == Some(json!("conversation"))
+        });
+        assert_eq!(
+            stored_phase_of(&host, session, "narrated-before").as_deref(),
+            Some("commentary"),
+            "{mode}"
+        );
+    }
 }
 
 /// The row with this text as the conversation keeps it: its view, if it is there at all.

@@ -67,11 +67,13 @@ use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolReader};
 pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
+use said::{Shown, Unfollowed};
 
 pub mod conversation;
 pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
+mod said;
 mod steering;
 pub mod takeover;
 pub mod teams;
@@ -685,14 +687,8 @@ struct LiveTurn {
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
-    /// The replies of this turn that said something and that no tool work has followed yet,
-    /// oldest first. Tool work that comes makes them commentary.
-    said: Vec<String>,
-    /// The newest of `said` carried tool calls: it announced work, and is no answer.
-    said_worked: bool,
-    /// The steps of the plan the tool last told in this turn. A plan told again unchanged (Codex
-    /// closes its list so when the task is complete, after its last words) is no work.
-    plan: Option<serde_json::Value>,
+    /// What the turn has said that the work after it decides on, and the plan it last told.
+    said: Unfollowed,
     /// What the turn's replies mark for the ear is said aloud.
     speak: bool,
     /// The tool was told how to speak: at the turn's launch, or with a message read into it.
@@ -1439,11 +1435,11 @@ fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), A
 /// Writes that tool work followed these replies: what they said was said along the way.
 fn follow(
     batch: &mut Batch<'_>,
-    said: &mut Vec<String>,
+    said: Vec<String>,
     turn: TurnId,
     ts_ms: i64,
 ) -> Result<(), ActorError> {
-    for reply in said.drain(..) {
+    for reply in said {
         let part = Entry::Commentary(Commentary::of(&reply, turn.0));
         batch.item(written(&part, ts_ms)?);
     }
@@ -1481,6 +1477,20 @@ fn cut_off(
 /// answer to a heartbeat that says no more than that nothing is to be done is kept as one
 /// line that says so, and so is that word alone in any other turn
 /// ([`clarp_kernel::heartbeat::kept`]).
+/// The words a reply keeps, and whether it is a leader's tick that found nothing to do: such a
+/// tick says so in words of the Host's.
+fn kept_words(text: String, origin: &Origin) -> (String, bool) {
+    let (text, idle) = if origin.name() == clarp_kernel::teams::runtime::LEADER_TICK {
+        match clarp_kernel::teams::runtime::leader_reply(&text) {
+            Some(text) => (text, false),
+            None => (clarp_kernel::teams::runtime::NOTHING_TO_DO.into(), true),
+        }
+    } else {
+        (text, false)
+    };
+    (kept(text, origin), idle)
+}
+
 fn kept(text: String, origin: &Origin) -> String {
     if !text.contains(clarp_kernel::heartbeat::OK) {
         return text;
@@ -1724,9 +1734,7 @@ impl Actor {
                 turn,
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
-                said: Vec::new(),
-                said_worked: false,
-                plan: None,
+                said: Unfollowed::default(),
                 speak: message.speak,
                 told_speech: message.speak,
                 interpreter: actor
@@ -5287,7 +5295,7 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         let in_call = opening.is_some() || message.call.is_some();
-        let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
+        let said = Unfollowed::from_log(unfollowed(self.recorder.log(), turn)?);
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt(
                 self.backend.steers(),
@@ -5305,8 +5313,6 @@ impl Actor {
             turn,
             last_row,
             said,
-            said_worked,
-            plan: None,
             speak,
             told_speech: speak,
             client_id,
@@ -5485,6 +5491,12 @@ impl Actor {
         };
         let mut steering = steering::State::for_prompt(self.backend.steers(), uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
+        // What the turn said is followed by the rules the live turn followed it by: a plan
+        // already told is not new after the restart, and an answer a message read into the
+        // turn closed stays closed, also for those who watch.
+        let mut said = Unfollowed::default();
+        // What promoting answers sends while the replay runs is for nobody, as what it shows.
+        let mut unsent = Vec::new();
         let mut offset = 0;
         let mut last_output_ms = None;
         // Those who watch are shown the turn as it stands: its items are made again from the
@@ -5525,6 +5537,22 @@ impl Actor {
                         }
                         Signal::Reply(reply) => {
                             drafts.retain(|draft| draft.id != reply.id);
+                            let origin = steering
+                                .separate
+                                .as_ref()
+                                .map_or_else(|| message.origin.clone(), |one| one.reply_origin());
+                            let (text, _) = kept_words(reply.text, &origin);
+                            // What its tools made said along the way is in the log already.
+                            let _ = said.reply(
+                                &reply.id,
+                                !text.trim().is_empty(),
+                                !reply.tools.is_empty(),
+                                Shown {
+                                    hub: &mut self.shown,
+                                    now: record.t,
+                                    events: &mut unsent,
+                                },
+                            );
                             if let Some(separate) = steering.separate.as_mut() {
                                 separate.closes = reply.id;
                             } else {
@@ -5532,6 +5560,12 @@ impl Actor {
                             }
                         }
                         Signal::Tool(call) => {
+                            let known = tools.iter().any(|tool: &LiveTool| tool.id == call.id);
+                            if call.reply.is_none()
+                                && (call.status == ToolStatus::Running || !known)
+                            {
+                                let _ = said.work();
+                            }
                             follow_tool(&mut tools, &mut calls, &call);
                             // A use that is a part of a reply is no row: that reply is. A row
                             // was first written at the time of the record that first told it.
@@ -5559,6 +5593,9 @@ impl Actor {
                         Signal::TurnCost { micros } => per_turn_cost = Some(micros),
                         Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
+                            if let clarp_kernel::live::Glimpse::Plan { steps, .. } = &glimpse {
+                                let _ = said.plan(steps);
+                            }
                             let _ = self.shown.show(&glimpse, Some(&name), record.t);
                         }
                         _ => {}
@@ -5576,21 +5613,26 @@ impl Actor {
                         cost,
                         ..Facts::default()
                     };
-                    steering.replay(
+                    let separate_before = steering.separate.is_some();
+                    let read = steering.replay(
                         &event,
                         self.recorder.agent(),
                         self.recorder.log(),
                         facts,
                         &last_row,
                     )?;
+                    if read {
+                        let own_turn = !separate_before && steering.separate.is_some();
+                        let shown = Shown {
+                            hub: &mut self.shown,
+                            now: record.t,
+                            events: &mut unsent,
+                        };
+                        said.read(own_turn, shown);
+                    }
                 }
             }
             offset = read.next_offset;
-        }
-        // What the conversation has decided were answers in this turn so far, those who watch
-        // it are shown as answers again: a Host that started again takes none of them back.
-        for answer in conversation::answers_of(self.recorder.log(), turn.0)? {
-            let _ = self.shown.close_answer(&answer, now_ms);
         }
         // One write to the log, so that every revision from here on is above every revision the
         // actor before this one gave to something it showed and did not store.
@@ -5623,7 +5665,8 @@ impl Actor {
         // asked.
         let told_speech = launched || steering.joined_told;
         let input_skipped = steering.input_skipped;
-        let (said, said_worked) = unfollowed(self.recorder.log(), turn)?;
+        // What the turn said is where the replay left it, by the rules the live turn applies.
+        let said = said.or_log(|| unfollowed(self.recorder.log(), turn))?;
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),
@@ -5641,8 +5684,6 @@ impl Actor {
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             last_row,
             said,
-            said_worked,
-            plan: None,
             speak,
             told_speech,
             model,
@@ -6633,15 +6674,12 @@ impl Actor {
                             continue;
                         }
                         Signal::Glimpse(glimpse) => {
-                            // A plan the tool changes (Codex's `update_plan`) is work, though
-                            // no row of the conversation says so: what was said before it
-                            // was said along the way. One told again with the same steps is
-                            // no new work: Codex closes its plan so after its last words.
+                            // A plan the tool changes is work: what was said before it was said
+                            // along the way.
                             if let clarp_kernel::live::Glimpse::Plan { steps, .. } = &glimpse
-                                && live.plan.as_ref() != Some(steps)
+                                && let Some(followed) = live.said.plan(steps)
                             {
-                                live.plan = Some(steps.clone());
-                                follow(&mut batch, &mut live.said, turn, t)?;
+                                follow(&mut batch, followed, turn, t)?;
                             }
                             // Of the turn that is shown, and of no other: what a turn that
                             // is over still says is not given to the one after it.
@@ -6720,42 +6758,26 @@ impl Actor {
                                 live.speak
                             };
                             let has_teams = self.teams.is_some();
-                            if reply.origin.name() == clarp_kernel::teams::runtime::LEADER_TICK {
-                                if let Some(text) =
-                                    clarp_kernel::teams::runtime::leader_reply(&reply.text)
-                                {
-                                    reply.text = text;
-                                } else {
-                                    reply.text = clarp_kernel::teams::runtime::NOTHING_TO_DO.into();
-                                    if has_teams {
-                                        teams::record_noop(&mut batch, &reply.id, t)?;
-                                    }
-                                }
+                            let (text, idle) =
+                                kept_words(std::mem::take(&mut reply.text), &reply.origin);
+                            reply.text = text;
+                            if idle && has_teams {
+                                teams::record_noop(&mut batch, &reply.id, t)?;
                             }
-                            reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
                             if has_teams {
                                 teams::capture(&mut batch, &reply, t)?;
                             }
-                            // The tools it calls are work after what the turn said before.
-                            if !reply.tools.is_empty() {
-                                follow(&mut batch, &mut live.said, turn, t)?;
-                            } else if !reply.text.trim().is_empty() {
-                                // Words after words: those before were an answer, and stay
-                                // one whatever work follows these. The conversation view
-                                // only grows. Words whose own message called tools were
-                                // said along the way, and are no answer.
-                                if live.said_worked {
-                                    live.said.clear();
-                                }
-                                for answer in live.said.drain(..) {
-                                    let events = self.shown.close_answer(&answer, t);
-                                    self.shown_events.extend(events);
-                                }
-                            }
-                            if !reply.text.trim().is_empty() {
-                                live.said.push(reply.id.clone());
-                                live.said_worked = !reply.tools.is_empty();
-                            }
+                            let followed = live.said.reply(
+                                &reply.id,
+                                !reply.text.trim().is_empty(),
+                                !reply.tools.is_empty(),
+                                Shown {
+                                    hub: &mut self.shown,
+                                    now: t,
+                                    events: &mut self.shown_events,
+                                },
+                            );
+                            follow(&mut batch, followed, turn, t)?;
                             // What the reply marks for the ear waits to be spoken from the
                             // moment the reply is in the conversation.
                             if speak {
@@ -6780,7 +6802,7 @@ impl Actor {
                             if call.reply.is_none()
                                 && (call.status == ToolStatus::Running || !known)
                             {
-                                follow(&mut batch, &mut live.said, turn, t)?;
+                                follow(&mut batch, live.said.work(), turn, t)?;
                             }
                             if !known && call.status == ToolStatus::Running {
                                 live.tool_count = live.tool_count.saturating_add(1);
@@ -6839,20 +6861,15 @@ impl Actor {
                         }
                         out.changed.status = true;
                     }
-                    // A message read into the turn closes what the turn said before it: an answer
-                    // given there answered what came before, and the work that follows is for the
-                    // new message. Tool work must never make it commentary, which the conversation
-                    // does not show: a reply the user was shown stays shown. That holds where the
-                    // tool had already ended its answer (the message begins a turn of its own), and
-                    // where its newest words carried no call. Words that announced a call are said
-                    // along the way, and the work after them still makes them so.
-                    let separate_now = !separate_before && live.steering.separate.is_some();
-                    if out.joined_reads.len() > read_before && (separate_now || !live.said_worked) {
-                        live.said.clear();
-                        live.said_worked = false;
-                        // Those who watch the turn are shown them as answers too.
-                        let events = self.shown.close_answers(t);
-                        self.shown_events.extend(events);
+                    // A message read into the turn closes what the turn said before it.
+                    if out.joined_reads.len() > read_before {
+                        let own_turn = !separate_before && live.steering.separate.is_some();
+                        let shown = Shown {
+                            hub: &mut self.shown,
+                            now: t,
+                            events: &mut self.shown_events,
+                        };
+                        live.said.read(own_turn, shown);
                     }
                 }
                 // The turn ends for the user at its tool's own end line, while the process goes

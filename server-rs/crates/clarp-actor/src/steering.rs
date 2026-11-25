@@ -49,6 +49,8 @@ pub(super) struct State {
     lane_open: bool,
     /// How the Codex turn ended, which is how the words read into it ended.
     codex_end: Option<&'static str>,
+    /// The messages whose reading the replay of the spool has met: each was read once.
+    replayed_reads: Vec<TurnId>,
 }
 
 pub(super) struct Sharing {
@@ -192,6 +194,9 @@ impl State {
         None
     }
 
+    /// Follows a line of the spool that the actor before this one read already, to be where it
+    /// was. Returns whether the tool read a message into the turn there, as the live turn saw it:
+    /// once for each message.
     pub(super) fn replay(
         &mut self,
         event: &Value,
@@ -199,7 +204,7 @@ impl State {
         log: &dyn clarp_ports::log::AgentLog,
         facts: Facts,
         closes: &str,
-    ) -> Result<(), ActorError> {
+    ) -> Result<bool, ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
                 let follow = agent
@@ -221,6 +226,14 @@ impl State {
                     }
                     _ => {}
                 }
+                let Some((&turn, _)) = follow else {
+                    return Ok(false);
+                };
+                let first = !self.replayed_reads.contains(&turn);
+                if first {
+                    self.replayed_reads.push(turn);
+                }
+                return Ok(first);
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
                 if self
@@ -235,7 +248,7 @@ impl State {
             }
             _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 
     pub(super) fn observe(

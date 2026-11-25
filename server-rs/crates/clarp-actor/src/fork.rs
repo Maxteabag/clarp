@@ -665,7 +665,7 @@ impl Actor {
                             reply.backend_session = Some(session.clone());
                             reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
                             if !reply.tools.is_empty() {
-                                follow(&mut batch, &mut asked.open, turn, t)?;
+                                follow(&mut batch, std::mem::take(&mut asked.open), turn, t)?;
                             } else if !reply.text.trim().is_empty() {
                                 // Words after words: those before were an answer, as in the
                                 // agent's own turn, and those who watch are shown so. Words
@@ -709,7 +709,7 @@ impl Actor {
                             if call.reply.is_none()
                                 && (call.status == ToolStatus::Running || !known)
                             {
-                                follow(&mut batch, &mut asked.open, turn, t)?;
+                                follow(&mut batch, std::mem::take(&mut asked.open), turn, t)?;
                             }
                             if call.status == ToolStatus::Running && !known {
                                 let summary = summarize(&call.name, &call.input).summary;

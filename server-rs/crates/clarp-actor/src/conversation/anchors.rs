@@ -47,14 +47,6 @@ impl TurnAnchors {
         self.anchors.iter().find(|anchor| anchor.id == id)
     }
 
-    /// The ids of its anchors, oldest first.
-    pub(super) fn ids(&self) -> Vec<String> {
-        self.anchors
-            .iter()
-            .map(|anchor| anchor.id.clone())
-            .collect()
-    }
-
     pub(super) fn settled(&self) -> Option<&Anchor> {
         self.settled.and_then(|at| self.anchors.get(at))
     }
