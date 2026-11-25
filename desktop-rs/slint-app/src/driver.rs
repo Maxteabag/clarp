@@ -2806,6 +2806,38 @@ fn transcript_check(out: String) {
             }
             check(rows[0].id == "long-0", "the next page reaches the first message");
             check(app.engine.borrow().conversation("long").is_some_and(|c| !c.has_more()), "and there is nothing older to load");
+            // A settled turn whose first row holds text and a tool call, as
+            // a Host with turn summaries sends it.
+            let at = |s: u32| format!("2026-11-25T10:00:{s:02}Z");
+            let turn = serde_json::json!({"session": "rachel", "turns": [
+                {"id": "o-u1", "role": "user", "text": "Run it", "origin": "user", "trace_id": "o-t1", "timestamp": at(0)},
+                {"id": "o-a1", "role": "assistant", "text": "PRELUDE: running it now.", "phase": "final", "trace_id": "o-t1", "timestamp": at(1),
+                 "tools": [{"name": "Bash", "summary": "sleep 60", "status": "failed", "id": "o-c1", "command": "sleep 60", "result": "<tool_use_error>Blocked.</tool_use_error>"}]},
+                {"id": "o-a2", "role": "assistant", "text": "FINALE: it was blocked.", "phase": "final", "trace_id": "o-t1", "timestamp": at(6),
+                 "turn": {"turn_id": "o-t1", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 7_000, "worked_ms": 6_000, "tool_count": 1}},
+                {"id": "o-u2", "role": "user", "text": "Say hi", "origin": "user", "trace_id": "o-t2", "timestamp": at(30)},
+                {"id": "o-a3", "role": "assistant", "text": "Hi!", "phase": "final", "trace_id": "o-t2", "timestamp": at(31)},
+            ]});
+            check(control("/__control/turns", &turn).is_ok(), "the Host takes a settled turn with text and a tool in one row");
+            check(control("/__control/turn-summary", &serde_json::json!({"on": true})).is_ok(), "the Host sends turn summaries");
+            app.engine.borrow_mut().select("rachel");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("text before its tool", Box::new(|app, window, elapsed| {
+            let ids: Vec<String> = rows(window).iter().map(|r| r.id.to_string()).collect();
+            let at = |id: &str| ids.iter().position(|i| i == id);
+            let tool = ids.iter().position(|i| i.contains("o-c1"));
+            let ready = app.engine.borrow().log_turn_summary() && at("o-a3").is_some() && tool.is_some();
+            if !ready {
+                check(elapsed < Duration::from_secs(8), &format!("the settled turn is drawn with its tool row: {ids:?}"));
+                return elapsed >= Duration::from_secs(8);
+            }
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(at("o-a1").is_some_and(|a| Some(a) < tool) && tool < at("o-a2"),
+                &format!("settled, a row's text reads above its tool, then the answer, as live drew it: {ids:?}"));
             true
         })),
     ];

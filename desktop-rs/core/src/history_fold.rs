@@ -333,7 +333,8 @@ fn turn(
     let mut reasoning: Vec<&Object> = retired.iter().flat_map(|(_, items)| items.iter().copied()).filter(|i| i.get("kind").and_then(Value::as_str) == Some("reasoning")).collect();
     let ordinal = |i: &Object| i.get("ordinal").and_then(Value::as_i64).unwrap_or(0);
 
-    // The turn's items in order: its commentary and tools, the answer last.
+    // The turn's items in the order they were written: each row's text,
+    // then its tool calls.
     let mut items: Vec<Object> = Vec::new();
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
@@ -362,7 +363,12 @@ fn turn(
     for (index, row) in members.iter().enumerate() {
         let has_text = !row.display_text.trim().is_empty();
         let is_answer = has_text && final_text(index, row);
-        if has_text && !is_answer {
+        // In a row the text came first and its tool calls after it: the
+        // text goes before them, the answer too, as the live turn drew it.
+        if is_answer {
+            flush(&mut items, &mut reasoning, None);
+            message(&mut items, row, "final");
+        } else if has_text {
             message(&mut items, row, "commentary");
         }
         for (value, cell) in calls(row) {
@@ -385,10 +391,6 @@ fn turn(
                     items.push(item);
                 }
             }
-        }
-        if is_answer {
-            flush(&mut items, &mut reasoning, None);
-            message(&mut items, row, "final");
         }
     }
     flush(&mut items, &mut reasoning, None);

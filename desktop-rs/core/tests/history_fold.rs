@@ -529,3 +529,31 @@ fn a_note_to_the_user_never_folds_away() {
     assert!(!folded.hidden_rows.contains("note-a-tell-1"), "the note stays: {:?}", sorted(&folded.hidden_rows));
     assert_eq!(read(&folded.folds[0]), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")], "the fold is as without the note");
 }
+
+/// A row's text was written before its tool calls: settled, the turn reads
+/// text, then tool, as the live turn drew it, whatever the row's phase.
+#[test]
+fn a_rows_text_reads_before_its_tool_calls_settled_as_live() {
+    for phase in [None, Some("commentary"), Some("final")] {
+        let mut first = of_turn(tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "failed"), "t1", phase);
+        first["text"] = json!("PRELUDE");
+        let rows = turn(&[
+            prompt("u1", "2026-10-03T10:00:00Z", "t1"),
+            first,
+            summed(of_turn(text_row("a2", "2026-10-03T10:00:06Z", "FINALE"), "t1", Some("final")), "t1", "completed", 6_000, 1),
+            prompt("u2", "2026-10-03T10:00:30Z", "t2"),
+        ]);
+        for expanded in [&[][..], &["live:fold:t1"][..]] {
+            for show_commentary in [false, true] {
+                let folded = present(&rows, None, &Options { show_commentary, ..options(expanded) });
+                let read = read(&folded.folds[0]);
+                let text = read.iter().position(|p| p == "row a1");
+                let tool = read.iter().position(|p| p.ends_with("make build")).unwrap_or_else(|| panic!("{phase:?}: the failed tool shows: {read:?}"));
+                if let Some(text) = text {
+                    assert!(text < tool, "{phase:?} {expanded:?} {show_commentary}: the text above its tool: {read:?}");
+                }
+                assert_eq!(read.last().map(String::as_str), Some("row a2"), "{read:?}");
+            }
+        }
+    }
+}
