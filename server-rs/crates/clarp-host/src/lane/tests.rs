@@ -1133,3 +1133,19 @@ fn the_reserve_is_kept_between_five_and_fifty_percent_however_it_was_written() {
     assert_eq!(of("lane_reserve_percent = 2\n").reserve_percent, 5);
     assert_eq!(of("lane_reserve_percent = 30\n").reserve_percent, 30);
 }
+
+#[test]
+fn no_two_tests_share_a_run_folder() {
+    // Tests run in parallel in one process, and `run_dir` empties its folder first: two tests that
+    // name the same folder remove each other's lanes under load (issue 814).
+    let source = include_str!("tests.rs");
+    let mut names: Vec<&str> = source
+        .split("run_dir(\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    let all = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), all, "a run folder is named twice: {names:?}");
+}
