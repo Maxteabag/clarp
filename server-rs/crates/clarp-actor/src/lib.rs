@@ -324,6 +324,53 @@ pub struct Outputs {
     pub damaged_lines: usize,
 }
 
+impl Outputs {
+    /// Takes in what a later step decided, after what this one did: one whole to carry out
+    /// and to tell of.
+    pub fn absorb(&mut self, later: Outputs) {
+        let Outputs {
+            actions,
+            changed,
+            joined_reads,
+            carried,
+            passed,
+            damaged_lines,
+        } = later;
+        self.actions.extend(actions);
+        self.changed.absorb(changed);
+        self.joined_reads.extend(joined_reads);
+        self.carried.extend(carried);
+        self.passed.extend(passed);
+        self.damaged_lines += damaged_lines;
+    }
+}
+
+impl Changed {
+    /// What changed in this step or in a later one.
+    pub fn absorb(&mut self, later: Changed) {
+        let Changed {
+            conversation,
+            status,
+            queue,
+            stop_released_waiting,
+            jobs,
+            goals,
+            artifacts,
+            media,
+            speech,
+        } = later;
+        self.conversation |= conversation;
+        self.status |= status;
+        self.queue |= queue;
+        self.stop_released_waiting |= stop_released_waiting;
+        self.jobs |= jobs;
+        self.goals |= goals;
+        self.artifacts |= artifacts;
+        self.media |= media;
+        self.speech |= speech;
+    }
+}
+
 /// A committed timeline entry for live delivery. Its payload comes from
 /// the canonical job book at publication, as in the reference watcher.
 pub struct JobEvent {
@@ -7306,9 +7353,11 @@ impl Actor {
 /// Where a step of a spool reading ([`Actor::spool_step`]) left it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stepped {
-    /// It wrote one window to the log and stopped there. Show what it wrote, and take the next
-    /// step at once, before anything else is asked of the actor: that step does what follows
-    /// from the window.
+    /// It wrote one window to the log and stopped there. What the turn's live view shows of it
+    /// can be sent now ([`Actor::take_shown`]). Take the next step at once, before anything
+    /// else is asked of the actor: that step does what follows from the window. Until then the
+    /// agent's [`Actor::status`] may name a next turn the actor has not taken up: tell it, with
+    /// these outputs, after that step.
     Wrote,
     /// The spool may hold more: another step reads on. Something else may be asked first.
     More,

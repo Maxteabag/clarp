@@ -2183,22 +2183,24 @@ impl Worker {
         format!("the thread of agent {}", self.setup.record.session)
     }
 
-    /// Reads one window of the live turn's spool: what it wrote to the log is shown as soon as
-    /// it is there, and what follows from it (the next turn it starts) is done after that.
-    /// Answers what is left to show, and whether the spool may hold more (issue 831).
+    /// Reads one window of the live turn's spool: what the turn's live view shows of it (its
+    /// rows, the turn's end) is sent as soon as it is in the log, and what follows from it (the
+    /// next turn it starts) is done after that. Answers what is left to do and to tell of the
+    /// window, the agent's state with the rest, once that next turn is what the actor follows,
+    /// and whether the spool may hold more (issue 831).
     fn spool_step(&mut self) -> Result<(Outputs, bool), ActorError> {
+        let mut out = Outputs::default();
         loop {
             let now = self.now_ms();
             let Some(actor) = self.actor.as_mut() else {
-                return Ok((Outputs::default(), false));
+                return Ok((out, false));
             };
-            match actor.spool_step(now)? {
-                (wrote, clarp_actor::Stepped::Wrote) => {
-                    self.after(wrote);
-                    self.tell_shown();
-                }
-                (out, clarp_actor::Stepped::More) => return Ok((out, true)),
-                (out, clarp_actor::Stepped::Done) => return Ok((out, false)),
+            let (step, stepped) = actor.spool_step(now)?;
+            out.absorb(step);
+            match stepped {
+                clarp_actor::Stepped::Wrote => self.tell_shown(),
+                clarp_actor::Stepped::More => return Ok((out, true)),
+                clarp_actor::Stepped::Done => return Ok((out, false)),
             }
         }
     }

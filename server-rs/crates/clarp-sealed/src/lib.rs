@@ -196,6 +196,8 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_SIGN_IN_MOST_MS", "switch"),
     ("CLARP_SIGN_IN_TIMEOUT_MS", "switch"),
     ("CLARP_TEST_CLOCK_OFFSET_FILE", "switch"),
+    // Each commit to an agent's log waits this long, as on a disk under pressure (issue 831).
+    ("CLARP_TEST_APPEND_DELAY_MS", "switch"),
     ("OPENCODE_PERMISSION", "switch"),
     ("LC_ALL", "switch"),
     ("TERM", "switch"),
