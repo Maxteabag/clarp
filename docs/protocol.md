@@ -592,9 +592,10 @@ Rules:
   `ended_from_outside` (`agent-state` `detail.reason`), and its reason is "The turn's process
   was ended from outside (SIGTERM)", naming the signal, in place of what the tool wrote as it
   was ended (Claude Code's "claude reported an error", an OpenCode turn's `interrupted`). Only a
-  failure that says nothing more than that the process went is replaced; one the Host handles
-  itself (`usage_limit`, `auth`, `connection`, …) keeps its kind, so its account switch or retry
-  still happens. It is never tried again, and it is not counted against the agent's backend. A
+  failure that says nothing more than that the process went is replaced, also a `connection` or
+  `timeout` (what a killed tool prints as its pipes close): a kill is not retried as a network
+  that dropped. One about the account (`usage_limit`, `auth`, …) keeps its kind, so its account
+  switch still happens. It is never tried again, and it is not counted against the agent's backend. A
   Stop through the Host still ends the turn as `interrupted`. A turn on a kept lane (the chat
   lanes, the Codex goal lane) is not covered yet (issue 850).
 - **A conversation too long for its model is a failure of its own (Rust Host contract 166,

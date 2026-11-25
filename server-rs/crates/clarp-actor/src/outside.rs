@@ -3,10 +3,11 @@
 //! The Host stops a turn through its shim's socket, never by a signal, so a signal that reached
 //! the shim came from outside (an operator's `kill`, a service manager), and the shim's spool
 //! says which. What the tool writes as it is ended says nothing of that: an error with no
-//! words, a bad exit, an interruption. Such an end is told as ended from outside. A failure
-//! the Host has handling of its own for (a usage limit, a sign-in, a dropped connection) wins
-//! over it, so the account switch or the retry still happens. A completed attempt, and one
-//! the Host was asked to stop, end as they did.
+//! words, a bad exit, an interruption, a pipe or stream that closed under it, a wait that ran
+//! out. Such an end is told as ended from outside, and not tried again as a network that
+//! dropped. A failure about the account (a usage limit, a sign-in) wins over it, so the
+//! account switch still happens. A completed attempt, and one the Host was asked to stop, end
+//! as they did.
 
 use clarp_kernel::failures;
 use clarp_kernel::turn::RunOutcome;
@@ -59,13 +60,31 @@ mod tests {
     }
 
     #[test]
+    fn a_pipe_or_stream_that_closed_under_a_killed_tool_is_no_network_to_retry() {
+        // What a killed tool prints as its pipes go, and a wait that ran out: they follow the
+        // signal, and are told as ended from outside, not tried again.
+        for (said, kind) in [
+            ("write EPIPE", failures::CONNECTION),
+            (
+                "stream disconnected before completion",
+                failures::CONNECTION,
+            ),
+            ("API Error: Connection error.", failures::CONNECTION),
+            ("connection closed", failures::CONNECTION),
+            ("Turn timed out", failures::TIMEOUT),
+        ] {
+            assert_eq!(failures::classify_error(said), kind, "{said}");
+            assert_eq!(settled(failed(said), Some("SIGTERM"), false), outside());
+        }
+    }
+
+    #[test]
     fn a_failure_with_handling_of_its_own_wins_over_the_outside_signal() {
         // The race: the signal came, and the tool's last word was a usage limit or a sign-in
         // that ran out. The turn keeps that kind, so it waits for another account.
         for (said, kind) in [
             ("Claude AI usage limit reached", failures::USAGE_LIMIT),
             ("Not logged in · Please run /login", failures::AUTH),
-            ("API Error: Connection error.", failures::CONNECTION),
         ] {
             assert_eq!(failures::classify_error(said), kind, "{said}");
             assert_eq!(settled(failed(said), Some("SIGTERM"), false), failed(said));
