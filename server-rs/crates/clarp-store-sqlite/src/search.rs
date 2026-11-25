@@ -1061,7 +1061,11 @@ mod tests {
             .collect();
         index.apply("a1", &rows, &mark(1_500)).unwrap();
         index
-            .apply("a1", &[row("later", 6_000, 2_000, "brought later")], &mark(2_000))
+            .apply(
+                "a1",
+                &[row("later", 6_000, 2_000, "brought later")],
+                &mark(2_000),
+            )
             .unwrap();
         let kept: i64 = index
             .db
