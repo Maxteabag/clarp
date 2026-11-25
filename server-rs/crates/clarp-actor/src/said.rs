@@ -66,16 +66,17 @@ impl Unfollowed {
         shown: Option<Shown<'_>>,
     ) -> Vec<String> {
         // The tools it calls are work after what the turn said before.
-        let followed = if calls {
+        let followed = if calls || (words && self.worked) {
+            // Words after words whose own message called tools: those announced work and were
+            // said along the way, in the conversation as for those who watch the turn, who were
+            // shown them so from when their tool began (issue 836). None of them was an answer:
+            // words that call tools are the newest of what the turn said until other words or
+            // work come.
             self.work()
         } else {
             if words {
                 // Words after words: those before were an answer, and stay one whatever work
-                // follows these. The conversation view only grows. Words whose own message
-                // called tools were said along the way, and are no answer.
-                if self.worked {
-                    self.replies.clear();
-                }
+                // follows these. The conversation view only grows.
                 let answers = std::mem::take(&mut self.replies);
                 if let Some(shown) = shown {
                     for answer in &answers {

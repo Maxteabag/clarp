@@ -539,8 +539,10 @@ history alone:
   Codex, OpenCode and AGY from the prompt the rows answer, else by time from
   the Host's turn record. Rows no known turn wrote keep `trace_id: ""`.
 - Assistant text rows carry `phase`: `commentary` when tool work follows it in
-  the same turn, else `final` (Codex reports its own phase). Other rows have
-  `phase: null`.
+  the same turn, else `final` (Codex reports its own phase). Text whose own
+  message calls tools is `commentary` once anything follows it, other words
+  too, as the live turn shows it from when its tool began (issue 836); the turn
+  ending on it leaves it `final`. Other rows have `phase: null`.
 - Once the turn has ended, its last row carries `turn`, shaped like
   `GET /live`'s: `{turn_id, status: completed|failed|interrupted,
   started_at_ms, ended_at_ms, worked_ms, tool_count}`, plus `note_count` when the
