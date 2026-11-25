@@ -531,6 +531,10 @@ fn a_turn_carries_the_rows_read_into_it() {
     assert_eq!(again["turn"]["read_rows"], json!(kept));
     let _ = hub.read_rows(&["u-r25".to_string()], 74);
     let (newer, _) = hub.snapshot(75).unwrap();
-    let last = newer["turn"]["read_rows"].as_array().unwrap().last().cloned();
+    let last = newer["turn"]["read_rows"]
+        .as_array()
+        .unwrap()
+        .last()
+        .cloned();
     assert_eq!(last, Some(json!("u-r25")));
 }
