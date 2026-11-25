@@ -14,6 +14,8 @@ pub struct TreeInput {
     pub session: String,
     pub agent_id: String,
     pub agent_role: String,
+    /// The chat was a helper's (`helper_chat`, Host contract 177).
+    pub helper_chat: bool,
     pub parent_agent_id: String,
     pub helper_state: String,
     /// The agent is at work now (busy: thinking, in a tool or compacting).
@@ -139,7 +141,7 @@ impl Sidebar {
     }
 }
 
-/// Helpers (`role == "helper"` whose parent is listed) nest under their parent
+/// Helpers (`role == "helper"` or `helper_chat`, whose parent is listed) nest under their parent
 /// with the team walk; finished ones sort after running siblings and collapse
 /// into one line on the nearest visible row above them unless expanded.
 pub fn build_tree(rows: &[TreeInput], tree_active: bool, expanded: &HashSet<String>) -> Tree {
@@ -147,7 +149,7 @@ pub fn build_tree(rows: &[TreeInput], tree_active: bool, expanded: &HashSet<Stri
     let mut nodes = Vec::with_capacity(rows.len());
     let mut finished = Vec::with_capacity(rows.len());
     for row in rows {
-        let helper = row.agent_role == "helper";
+        let helper = row.is_helpers_chat();
         let parent = if helper { row.parent_agent_id.clone() } else { String::new() };
         let done = helper && !parent.is_empty() && helper_finished(&row.helper_state, row.working);
         nodes.push(TreeNode {
@@ -229,12 +231,21 @@ pub fn build_tree(rows: &[TreeInput], tree_active: bool, expanded: &HashSet<Stri
     tree
 }
 
+impl TreeInput {
+    /// A helper's chat: its role is `helper`, or the Host says the chat was
+    /// a helper's (`helper_chat`).
+    pub fn is_helpers_chat(&self) -> bool {
+        self.agent_role == "helper" || self.helper_chat
+    }
+}
+
 impl From<&AgentRow> for TreeInput {
     fn from(row: &AgentRow) -> Self {
         Self {
             session: row.session.clone(),
             agent_id: row.agent_id.clone(),
             agent_role: row.agent_role.clone(),
+            helper_chat: row.helper_chat,
             parent_agent_id: row.parent_agent_id.clone(),
             helper_state: row.helper_state.clone(),
             working: row.busy,

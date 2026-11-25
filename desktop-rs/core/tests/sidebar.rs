@@ -120,6 +120,26 @@ fn sidebar_nests_helpers_and_collapses_finished_ones() {
     assert_eq!(v.sidebar.footers("parent")[0].count, 1);
 }
 
+/// A chat that was a helper's (`helper_chat`, Host contract 177) nests and
+/// folds as a helper's even when its role is no longer `helper`.
+#[test]
+fn a_chat_that_was_a_helpers_nests_under_its_parent() {
+    let mut v = View::new();
+    let mut moved = roster_row("moved", "moved-id", 900);
+    moved["role"] = json!("agent");
+    moved["helper_chat"] = json!(true);
+    moved["parent_agent_id"] = json!("p");
+    moved["helper_state"] = json!("running");
+    let mut plain = roster_row("plain", "plain-id", 800);
+    plain["parent_agent_id"] = json!("p");
+    v.snapshot(json!([moved, plain, roster_row("parent", "p", 500)]));
+    assert_eq!(v.sessions(), ["plain", "parent", "moved"]);
+    assert_eq!(v.sidebar.depth("moved"), 1, "nested under its parent");
+    assert_eq!(v.sidebar.depth("plain"), 0, "an agent with a parent but no helper's chat stays at the top");
+    let row = v.roster.rows().iter().find(|r| r.session == "moved").cloned().unwrap();
+    assert!(row.helper_chat && row.is_helpers_chat());
+}
+
 #[test]
 fn sidebar_order_survives_filter_round_trips() {
     let mut v = View::new();

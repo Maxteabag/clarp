@@ -95,6 +95,9 @@ pub struct Agent {
     /// The Host lets this agent answer the user from a conversation fork
     /// while its own turn works (`conversation_fork`, contract 153).
     pub conversation_fork: bool,
+    /// The chat was a helper's (`helper_chat`, Host contract 177): it
+    /// stays one after a move changed its role. False from an older Host.
+    pub helper_chat: bool,
     /// The `server_id` of the Host this agent moved to (`moved.to.id`), or
     /// empty: a merged list leaves the row out when that Host is in it.
     pub moved_to: String,
@@ -165,6 +168,7 @@ impl Default for Agent {
             coordination_override: String::new(),
             chat_view: String::new(),
             conversation_fork: false,
+            helper_chat: false,
             moved_to: String::new(),
             moved_to_host: String::new(),
             host: String::new(),
@@ -244,6 +248,7 @@ impl Agent {
             coordination_override: object.get("coordination_override").and_then(Value::as_str).unwrap_or_default().to_owned(),
             chat_view: s("chat_view").trim().to_ascii_lowercase(),
             conversation_fork: b("conversation_fork"),
+            helper_chat: b("helper_chat"),
             moved_to: object
                 .get("moved")
                 .and_then(|m| m.get("to"))
@@ -266,7 +271,13 @@ impl Agent {
     }
 
     pub fn is_helper(&self) -> bool {
-        self.role == "helper" && !self.parent_agent_id.is_empty()
+        self.is_helpers_chat() && !self.parent_agent_id.is_empty()
+    }
+
+    /// A helper's chat: its role is `helper`, or the Host says the chat was
+    /// a helper's (`helper_chat`, contract 177), parent or not.
+    pub fn is_helpers_chat(&self) -> bool {
+        self.role == "helper" || self.helper_chat
     }
 
     /// A finished helper collapses into its parent's "N helpers done" line:

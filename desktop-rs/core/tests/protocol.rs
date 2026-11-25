@@ -140,6 +140,17 @@ fn agent_row_parses_background_and_helper_fields_safely() {
     assert!(!Agent::from_json(&obj(json!({"role": "helper"}))).is_helper());
 }
 
+/// `helper_chat` (Host contract 177): a chat that was a helper's stays one
+/// after its role changed; an older Host leaves it false.
+#[test]
+fn a_chat_that_was_a_helpers_is_a_helper_whatever_its_role() {
+    let moved = Agent::from_json(&obj(json!({"session": "m", "role": "agent", "helper_chat": true, "parent_agent_id": "p"})));
+    assert!(moved.helper_chat && moved.is_helpers_chat() && moved.is_helper());
+    assert!(!Agent::from_json(&obj(json!({"session": "o", "parent_agent_id": "p"}))).is_helper(), "no helper_chat, role agent: not a helper");
+    assert!(!Agent::from_json(&obj(json!({"session": "n", "helper_chat": true}))).is_helper(), "still needs a parent to nest");
+    assert!(!Agent::from_json(&obj(json!({"session": "w", "helper_chat": "yes"}))).helper_chat, "only a boolean counts");
+}
+
 #[test]
 fn clip_source_precedence_matches_contract() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../contract/fixtures/audio/clip-precedence.json");

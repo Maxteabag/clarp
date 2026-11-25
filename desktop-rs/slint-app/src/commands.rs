@@ -597,7 +597,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 engine
                     .roster()
                     .find(&cursor)
-                    .filter(|a| a.role == "helper")
+                    .filter(|a| a.is_helpers_chat())
                     .and_then(|a| engine.roster().find_by_agent_id(&a.parent_agent_id))
                     .map(|p| p.session.clone())
             };

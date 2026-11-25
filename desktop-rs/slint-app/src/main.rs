@@ -203,14 +203,7 @@ impl App {
         laps.lap("roster rows");
         let trees: Vec<TreeInput> = rows
             .iter()
-            .map(|r| TreeInput {
-                session: r.session.clone(),
-                agent_id: r.agent_id.clone(),
-                agent_role: r.agent_role.clone(),
-                parent_agent_id: r.parent_agent_id.clone(),
-                helper_state: r.helper_state.clone(),
-                working: r.busy,
-            })
+            .map(TreeInput::from)
             .collect();
         let filters: Vec<FilterInput> = rows
             .iter()
@@ -237,7 +230,7 @@ impl App {
         // Sub-agents fold under their chat unless it is unfolded; the open
         // chat's own ancestors stay open so it is always in the list.
         let parent_of = |row: &clarp_core::roster::AgentRow| -> Option<&clarp_core::roster::AgentRow> {
-            if row.agent_role != "helper" || row.parent_agent_id.is_empty() {
+            if !row.is_helpers_chat() || row.parent_agent_id.is_empty() {
                 return None;
             }
             rows.iter().find(|r| r.agent_id == row.parent_agent_id && r.session != row.session)
@@ -515,7 +508,7 @@ impl App {
         perf::reached(|s| &mut s.snapshot, "roster");
         let listed: std::collections::HashMap<String, bool> =
             self.chats.iter().map(|c| (c.session.to_string(), c.portrait.size().width > 0)).collect();
-        if agents.iter().filter(|a| a.role != "helper").all(|a| listed.contains_key(&a.session)) {
+        if agents.iter().filter(|a| !a.is_helpers_chat()).all(|a| listed.contains_key(&a.session)) {
             perf::reached(|s| &mut s.explorer_complete, "explorer complete");
         }
         let with_portrait = |a: &&clarp_core::protocol::Agent| {
