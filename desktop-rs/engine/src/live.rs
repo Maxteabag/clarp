@@ -370,7 +370,11 @@ impl Engine {
         }
         let Some(session) = tag.strip_prefix("live:") else { return false };
         if let Some(view) = self.live.views.get_mut(session) {
-            view.apply_snapshot(object);
+            let effects = view.apply_snapshot(object);
+            if effects.contains(&FETCH_LIVE) {
+                self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
+            }
+            let Some(view) = self.live.views.get_mut(session) else { return true };
             view.observe_clock(object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0), now_ms());
             // An idle, empty snapshot is what a silent Host answers too.
             let state = view.activity().get("state").and_then(Value::as_str).unwrap_or("idle");
