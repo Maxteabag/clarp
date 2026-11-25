@@ -53,6 +53,10 @@ user selecting that mode. Public Funnel is not configured by Clarp.
 - `clarp-admin` subcommands are the automation and recovery authority.
 - `clarp-tui` is the friendly setup/configuration/doctor interface and invokes
   those same service functions.
-- `setup.sh --non-interactive` remains stable for automation.
+- A Host is installed on Linux with
+  `curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash`,
+  which runs `server-rs/tools/install-from-release`: it installs the newest
+  `host-builds` release without asking anything, so it serves automation too.
+  Options after `bash -s --` go to `server-rs/tools/install-host`.
 - The iOS app owns QR scanning, Keychain credentials, local iPhone speech, and
   per-Computer presentation.
