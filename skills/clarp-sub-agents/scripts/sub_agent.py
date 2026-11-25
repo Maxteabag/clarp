@@ -430,7 +430,7 @@ def start(a: argparse.Namespace) -> int:
     log = DIR / f"{a.name}.log"
     passthrough = [f"--setenv={k}={os.environ[k]}" for k in
                    ("PATH", "HOME", "CLARP_SHARE_DIR", "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR",
-                    "CLAUDE_PWA_CONFIG", "CLAUDE_PWA_DB") if os.environ.get(k)]
+                    "CLAUDE_PWA_CONFIG", "CLAUDE_PWA_DB", "CLARP_SUB_AGENT_DIR") if os.environ.get(k)]
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect",
                     "-p", f"WorkingDirectory={workdir}",
                     "-p", f"StandardOutput=file:{log}", "-p", f"StandardError=append:{log}",
