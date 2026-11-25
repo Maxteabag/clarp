@@ -6,9 +6,8 @@
 //! One exception (issue 857): a turn whose lane is there and free, but was started under another
 //! login alone (a seat switch, a refreshed token: `auth.json` changed and nothing else), or that
 //! the lane refused because its login changed, starts the new lane itself in place of its own
-//! server's start, which costs the same, and runs on it. Once; with no place for a lane, a start
-//! that fails, or a turn nobody waits on under the machine's pressure, it runs on its own server
-//! as before.
+//! server's start, which costs the same, and runs on it. Once; with no place for a lane, or a
+//! start that fails, it runs on its own server as before.
 
 use std::path::PathBuf;
 
@@ -75,14 +74,11 @@ impl Worker {
             return Some(order);
         };
         let lane = self.opencode_lane_of();
-        // A lane may be started for this turn: not for one nobody waits on while the machine is
-        // under pressure (issue 186).
-        let may_start = self.may_start_lane();
         // The lane there differs from the one this turn needs by the login alone: the turn
         // starts the new one itself. Any other difference runs it on its own server, with the
         // lane started beside it, so a turn of other options never ends a lane the next needs.
         let ready = lane.ready(&start.digest, &words.session);
-        let renew = !ready && may_start && lane.another_login(&start.digest, &words.session);
+        let renew = !ready && lane.another_login(&start.digest, &words.session);
         if !(ready || renew) {
             return Some(order);
         }
@@ -145,7 +141,6 @@ impl Worker {
             // and is offered to it; once, never again.
             if let Err(error) = &result
                 && LoginChanged::is(error)
-                && may_start
                 && !reached()
             {
                 let until = std::time::Instant::now() + LEAVE_WAIT;

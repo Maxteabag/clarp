@@ -484,8 +484,8 @@ serve would be one point of failure for every such agent.
   lane in place of its own serve's start, which costs the same (about 1.3 to 1.6 s), and runs on
   it. A claim the lane refused for its login (`lane-login-changed`, a change between the turn's
   digest and the lane's claim) takes the same path once the lane has let go. Once per attempt;
-  with no place for the lane, a start that fails, or a turn nobody waits on under the machine's
-  pressure, the turn runs on its own serve and the lane starts beside it, as before. Any other
+  with no place for the lane (the lanes' memory reserve), or a start that fails, the turn runs on
+  its own serve and the lane starts beside it, as before. Any other
   difference (the configuration, the program, the environment) keeps the own serve and the lane
   beside it, so a turn started otherwise never replaces the lane itself. A turn with no lane
   there at all (the first, or after the lane's idle time) runs on its own serve as before.
