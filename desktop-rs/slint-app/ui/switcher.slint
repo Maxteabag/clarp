@@ -122,7 +122,6 @@ export component Switcher inherits Rectangle {
                         height: root.row-height;
                         border-radius: 3px;
                         background: index == root.current ? Palette.control : touch.has-hover ? Palette.hover : transparent;
-                        touch := TouchArea { clicked => { root.chosen(index); } }
                         HorizontalLayout {
                             padding-left: 12px;
                             padding-right: 12px;
@@ -187,6 +186,9 @@ export component Switcher inherits Rectangle {
                                 vertical-alignment: center;
                             }
                         }
+                        // Over the row's content, so a click anywhere on it (a message
+                        // row's styled snippet included) chooses the row.
+                        touch := TouchArea { clicked => { root.chosen(index); } }
                     }
                 }
                 if root.note != "": Text {

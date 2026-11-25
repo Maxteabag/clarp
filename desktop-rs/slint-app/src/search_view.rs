@@ -35,6 +35,8 @@ pub const HINT_FROM: usize = 3;
 pub const LOAD_MORE: &str = "search-load-more";
 /// What the Hosts' search says when nothing matches.
 pub const HOST_EMPTY: &str = "No message in any chat has these words";
+/// Before a word is typed: what the search does, not an empty result.
+pub const HOST_PROMPT: &str = "Type words to search every chat";
 /// What it says while the Hosts are asked.
 pub const SEARCHING: &str = "Searching every chat…";
 /// The Hosts are asked this long after the last key typed.
@@ -192,7 +194,7 @@ pub fn found(engine: &mut Engine, query: &str) -> Found {
     let results = engine.host_search_results();
     let words = query.trim();
     if words.is_empty() {
-        return Found { items: Vec::new(), note: String::new(), empty: HOST_EMPTY };
+        return Found { items: Vec::new(), note: String::new(), empty: HOST_PROMPT };
     }
     let answered = results.query == words && results.answered;
     // The primary cannot search but a paired Host can: its chats are
