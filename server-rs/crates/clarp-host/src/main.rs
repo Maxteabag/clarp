@@ -472,6 +472,12 @@ async fn serve(config: Config) -> Result<(), String> {
     if app.config.peers.is_none() {
         eprintln!("clarp-host: started without --peers: this Host has no peers");
     }
+    if app.config.config_dir.is_none() {
+        eprintln!(
+            "clarp-host: started without --config: every owner's setting is its default, and \
+             no account reset command runs"
+        );
+    }
     if let Some(why) = app.turns.unkept() {
         app.fleet.unkept(clarp_host::turn_identity::KIND, why);
     } else if !app.turns.has_key() {
@@ -620,6 +626,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    clarp_host::config::name_config_dir(config.config_dir.clone());
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

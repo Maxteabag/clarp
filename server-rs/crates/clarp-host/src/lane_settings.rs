@@ -151,7 +151,15 @@ pub(crate) async fn set(
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     let wanted = asked(&body)?;
-    let path = lane::config_path();
+    let Some(path) = lane::config_path() else {
+        return Err(refused(
+            StatusCode::CONFLICT,
+            "config_unwritable",
+            "this Host was started without --config: it keeps no settings; nothing was changed"
+                .into(),
+            Value::Null,
+        ));
+    };
     let written = tokio::task::spawn_blocking(move || write(&path, &wanted))
         .await
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "lane settings unkept"))?;

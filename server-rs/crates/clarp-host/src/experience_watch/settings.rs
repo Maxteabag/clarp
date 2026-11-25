@@ -29,8 +29,8 @@ pub(super) struct Settings {
 
 impl Settings {
     pub(super) fn read() -> Self {
-        let path = crate::config::host_config_dir().join("config.toml");
-        let file = crate::owner::OwnerFile::new(Some(path));
+        let path = crate::config::host_config_file();
+        let file = crate::owner::OwnerFile::new(path);
         let table = file.read();
         let section = table
             .as_ref()

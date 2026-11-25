@@ -85,10 +85,12 @@ pub(crate) fn told_sessions(file: &toml::Table) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The owner's settings, from the folder `--config` named. A Host named none has no reset
+/// command: one started by hand for a test never spends a banked reset of the owner's real
+/// accounts (issue 780).
 fn host_file() -> toml::Table {
-    let path = crate::config::host_config_dir().join("config.toml");
-    std::fs::read_to_string(path)
-        .ok()
+    crate::config::host_config_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| text.parse::<toml::Table>().ok())
         .unwrap_or_default()
 }

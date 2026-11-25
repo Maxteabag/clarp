@@ -29,8 +29,8 @@ use crate::coordination::Made;
 use crate::edge::{self, ApiError, App};
 
 /// This setting also applies when periodic finding notices are disabled.
-pub(crate) fn stalled_after_ms(path: &std::path::Path) -> i64 {
-    crate::owner::OwnerFile::new(Some(path.to_owned()))
+pub(crate) fn stalled_after_ms(path: Option<std::path::PathBuf>) -> i64 {
+    crate::owner::OwnerFile::new(path)
         .read()
         .as_ref()
         .and_then(|table| table.get("experience_watch"))

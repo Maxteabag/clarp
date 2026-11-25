@@ -55,6 +55,8 @@ mod compaction_outcome;
 mod contacts;
 #[path = "host/controller_actions.rs"]
 mod controller_actions;
+#[path = "host/config_named.rs"]
+mod config_named;
 #[path = "host/conversation_fork.rs"]
 mod conversation_fork;
 #[path = "host/coordination.rs"]
@@ -406,6 +408,17 @@ impl Place {
         let mut command = sealed_command_on(runner, &self.root, named, host);
         for name in without {
             command.env_remove(name);
+        }
+        // A test that gives its Host a configuration home of its own (XDG_CONFIG_HOME) names
+        // that home's folder, as the installer names the installed one; a test that gives none
+        // names none, and its Host reads no owner's settings.
+        let named = world
+            .iter()
+            .find(|(name, _)| *name == "XDG_CONFIG_HOME")
+            .filter(|_| !more.contains(&"--config"))
+            .map(|(_, home)| PathBuf::from(*home).join("clarp-host"));
+        if let Some(folder) = &named {
+            command.arg("--config").arg(folder);
         }
         let mut process = command
             .args(["--data", self.root.join("data").to_str().unwrap()])

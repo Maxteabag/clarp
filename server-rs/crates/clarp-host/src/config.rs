@@ -147,6 +147,12 @@ pub struct Config {
     /// once read the installed Host's file by itself and listed the agents of the real peer
     /// Hosts (23 Nov 2026, issue 741): a Host knows peers only where it is told the file.
     pub peers: Option<PathBuf>,
+    /// The folder of the installed Host's configuration (`--config`, which the installer
+    /// names): its `config.toml`, read for the owner's settings and written by the apps'
+    /// settings. `None`: it reads none, every such setting is its default, and no account
+    /// reset command ever runs. A Host started by hand for a test once read the installed
+    /// Host's folder by itself (issue 780).
+    pub config_dir: Option<PathBuf>,
     /// The directory that holds the pictures this Host ships for its agents (`avatars/` in
     /// it). `None`: it ships none, and its agents are shown without a face.
     pub static_dir: Option<PathBuf>,
@@ -223,7 +229,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
-[--push-keys FILE] [--peers FILE]
+[--push-keys FILE] [--peers FILE] [--config DIR]
 [--static DIR] [--relay-config FILE] [--relay-also FILE ...]
 The administrator's token is read from CLARP_HOST_TOKEN. Additional administrator tokens can
 be listed in CLARP_HOST_TOKEN_ALIASES, separated by commas. The tools use the primary token
@@ -232,6 +238,8 @@ over the network is looked up in the file --speech-keys names, then in ELEVEN_AP
 pushed to a phone as an incoming call only where --push-keys names the file that has the owner's
 key at the push service ([apns] key_path, key_id, team_id). The Hosts this one is paired with
 are read from and written to the file --peers names; a Host started without it has no peers.
+The owner's settings are read from config.toml in the folder --config names; a Host started
+without it takes every such setting's default and runs no account reset command.
 CLARP_HEARTBEATS_DISABLED=1 turns the heartbeat of every agent off.";
 
 /// The home of whoever runs this Host.
@@ -239,13 +247,31 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
-/// This Rust Host's configuration directory, separate from the Python Host's.
-pub(crate) fn host_config_dir() -> PathBuf {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .unwrap_or_else(|| home().join(".config"))
-        .join("clarp-host")
+/// The owner's settings file in the configuration folder.
+pub(crate) const CONFIG_FILE: &str = "config.toml";
+
+/// The folder `--config` named, fixed once at the start of the process, before anything reads
+/// it, and never changed after: what the environment's `XDG_CONFIG_HOME` was to this Host
+/// before issue 780, and as global. It is kept here rather than handed down because the
+/// readers sit deep in the lanes and workers, which are given no `Config`.
+static NAMED_CONFIG: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+
+/// Fixes the configuration folder of this process. Only `main` calls it, once; a later call
+/// changes nothing. A process that never calls it (a unit test) has none.
+pub fn name_config_dir(dir: Option<PathBuf>) {
+    let _ = NAMED_CONFIG.set(dir);
+}
+
+/// This Rust Host's configuration folder, as `--config` named it: the one place every reader
+/// and writer of the owner's settings finds it. `None`: none was named, and nothing of the
+/// installed Host's folder is read or written.
+pub(crate) fn host_config_dir() -> Option<PathBuf> {
+    NAMED_CONFIG.get().cloned().flatten()
+}
+
+/// The owner's settings file in that folder, when there is one.
+pub(crate) fn host_config_file() -> Option<PathBuf> {
+    host_config_dir().map(|dir| dir.join(CONFIG_FILE))
 }
 
 /// A path as a person types it on a phone, as a path on this machine: `~` is the home of
@@ -482,6 +508,7 @@ impl Config {
         let mut speech_keys = None;
         let mut push_keys = None;
         let mut peers = None;
+        let mut config_dir: Option<PathBuf> = None;
         let mut static_dir = None;
         let mut relay_config = None;
         let mut relay_also = Vec::new();
@@ -602,6 +629,7 @@ impl Config {
                 "--speech-keys" => speech_keys = Some(PathBuf::from(value("a file")?)),
                 "--push-keys" => push_keys = Some(PathBuf::from(value("a file")?)),
                 "--peers" => peers = Some(PathBuf::from(value("a file")?)),
+                "--config" => config_dir = Some(PathBuf::from(value("a directory")?)),
                 "--static" => static_dir = Some(PathBuf::from(value("a directory")?)),
                 "--relay-config" => relay_config = Some(PathBuf::from(value("a file")?)),
                 "--relay-also" => relay_also.push(PathBuf::from(value("a file")?)),
@@ -708,9 +736,11 @@ impl Config {
                     .map(str::to_owned)
                     .collect(),
             ),
-            web_read_origins: crate::cross_origin::read_config(
-                &host_config_dir().join("config.toml"),
-            ),
+            web_read_origins: config_dir
+                .as_ref()
+                .map_or_else(std::collections::BTreeSet::new, |dir| {
+                    crate::cross_origin::read_config(&dir.join(CONFIG_FILE))
+                }),
             name,
             default_cwd,
             keep_spools,
@@ -741,7 +771,7 @@ impl Config {
             network_down_file,
             jobs_checked_every_ms,
             stalled_turn_ms: crate::experience_watch::stalled_after_ms(
-                &host_config_dir().join("config.toml"),
+                config_dir.as_ref().map(|dir| dir.join(CONFIG_FILE)),
             ),
             schedules_checked_every_ms,
             heartbeats_checked_every_ms,
@@ -771,6 +801,7 @@ impl Config {
             speech_keys,
             push_keys,
             peers,
+            config_dir,
             static_dir,
             transcription_engine,
             scribe_endpoint,
@@ -819,6 +850,20 @@ mod tests {
             Some(PathBuf::from("/fixture/peers.json"))
         );
         assert!(parse(&["--peers"]).is_err());
+    }
+
+    #[test]
+    fn a_host_reads_the_owners_settings_only_from_the_folder_it_is_named() {
+        assert_eq!(parse(&[]).unwrap().config_dir, None);
+        assert_eq!(
+            parse(&["--config", "/fixture/clarp-host"])
+                .unwrap()
+                .config_dir,
+            Some(PathBuf::from("/fixture/clarp-host"))
+        );
+        assert!(parse(&["--config"]).is_err());
+        // A process that names none (as a unit test does) reads no folder.
+        assert_eq!(host_config_file(), None);
     }
 
     #[test]

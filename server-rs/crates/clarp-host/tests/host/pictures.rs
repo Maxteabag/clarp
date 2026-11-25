@@ -115,6 +115,9 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     // The installed Host is named the file of its peers: it reads none by itself (issue 741).
     let peers = home.join(".config/clarp-host/peers.json");
     assert!(install(&[]).contains(&format!(" --peers \"{}\"", peers.display())));
+    // And the folder of its settings: it reads no other (issue 780).
+    let folder = home.join(".config/clarp-host");
+    assert!(install(&[]).contains(&format!(" --config \"{}\"", folder.display())));
     assert!(install(&["--contact-pictures", "on"]).contains(" --contact-pictures"));
     assert!(told("contact-pictures=on"));
     assert!(

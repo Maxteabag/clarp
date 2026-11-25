@@ -2418,14 +2418,16 @@ fn paths(data: &Path) -> ToolAnswer {
             .map(std::path::PathBuf::from)
     };
     let share = share_dir();
-    let config = crate::config::host_config_dir();
-    let service = config
-        .with_file_name("systemd")
-        .join("user/clarp-host.service");
+    // Where the installer puts the unit. Only a path to show: nothing is read from it.
+    let service = from_env("XDG_CONFIG_HOME")
+        .filter(|path| path.is_absolute())
+        .unwrap_or_else(|| home().join(".config"))
+        .join("systemd/user/clarp-host.service");
     shown(&json!({
         "platform": std::env::consts::OS,
         "share": share,
-        "config": config.join("config.toml"),
+        // The settings file of the folder this Host was named (`--config`); none, null.
+        "config": crate::config::host_config_file(),
         "database": data.join("fleet.db"),
         "cache": from_env("CLARP_CACHE_DIR").unwrap_or_else(|| share.join("cache")),
         "logs": from_env("CLAUDE_PWA_LOG_DIR").unwrap_or_else(|| share.join("logs")),

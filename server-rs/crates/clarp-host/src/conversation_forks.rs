@@ -14,8 +14,8 @@ pub(crate) struct Named(Option<toml::Value>);
 
 impl Named {
     pub(crate) fn read() -> Self {
-        let path = crate::config::host_config_dir().join("config.toml");
-        let table = crate::owner::OwnerFile::new(Some(path)).read();
+        let path = crate::config::host_config_file();
+        let table = crate::owner::OwnerFile::new(path).read();
         Self(table.and_then(|mut table| table.remove("conversation_forks")))
     }
 

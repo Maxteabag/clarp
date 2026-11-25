@@ -147,8 +147,8 @@ fn address(app: &App, parsed: &Parsed) -> Result<String, &'static str> {
     } else if let Some(explicit) = parsed.option("--url").filter(|url| !url.trim().is_empty()) {
         explicit.to_owned()
     } else {
-        let own = crate::config::host_config_dir().join("config.toml");
-        [Some(own), app.config.speech_keys.clone()]
+        let own = crate::config::host_config_file();
+        [own, app.config.speech_keys.clone()]
             .into_iter()
             .find_map(|file| {
                 OwnerFile::new(file)

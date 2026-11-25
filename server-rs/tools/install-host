@@ -907,9 +907,10 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-# The Hosts this one is paired with are read only from the file --peers names: a Host started
-# without it has none (issue 741).
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed --peers "$config/peers.json"
+# The Hosts this one is paired with are read only from the file --peers names, and the owner's
+# settings only from the folder --config names: a Host started without them has no peers, the
+# default of every setting, and no account reset command (issues 741 and 780).
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed --peers "$config/peers.json" --config "$config"
 Restart=on-failure
 RestartSec=2
 

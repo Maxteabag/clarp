@@ -154,11 +154,7 @@ pub(crate) struct Settings {
 
 impl Settings {
     pub(crate) fn read() -> Self {
-        Self::of(
-            crate::owner::OwnerFile::new(Some(config_path()))
-                .read()
-                .as_ref(),
-        )
+        Self::of(crate::owner::OwnerFile::new(config_path()).read().as_ref())
     }
 
     pub(crate) fn of(file: Option<&toml::Table>) -> Self {
@@ -204,9 +200,10 @@ impl Settings {
 }
 
 /// The Host's own `config.toml`, where the owner's settings of lanes are: what [`Settings::read`]
-/// reads and `POST /lane-settings` writes.
-pub(crate) fn config_path() -> PathBuf {
-    crate::config::host_config_dir().join("config.toml")
+/// reads and `POST /lane-settings` writes. `None` on a Host named no folder (`--config`): its
+/// lanes take their defaults, and nothing is written (issue 780).
+pub(crate) fn config_path() -> Option<PathBuf> {
+    crate::config::host_config_file()
 }
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
