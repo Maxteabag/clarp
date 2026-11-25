@@ -367,9 +367,15 @@ if [ -n "$goal" ]; then
   for attempt in 1 2 3; do
     body=$(goal_check "$goal" body "$job_id" "$handle" "$log" "$due" 2>&1) || { error=$body; break; }
     rev=$(printf '%s\n' "$body" | head -n 1)
-    # The body goes on standard input ("-"): as one argument, a goal whose stored texts
-    # passed 128 KiB could never be launched for (issue 768).
-    error=$(printf '%s\n' "$body" | tail -n +2 | "${GOAL[@]}" checkpoint "$goal" "$rev" - 2>&1 >/dev/null) && { error=""; break; }
+    data=$(printf '%s\n' "$body" | tail -n +2)
+    # One argument holds at most 128 KiB, so a larger body goes on standard input ("-",
+    # issue 768). A smaller one stays an argument: a clarp-goal from before "-" existed reads
+    # it as the JSON text "-", and refuses it.
+    if [ "$(printf '%s' "$data" | wc -c)" -lt $((100 * 1024)) ]; then
+      error=$("${GOAL[@]}" checkpoint "$goal" "$rev" "$data" 2>&1 >/dev/null) && { error=""; break; }
+    else
+      error=$(printf '%s\n' "$data" | "${GOAL[@]}" checkpoint "$goal" "$rev" - 2>&1 >/dev/null) && { error=""; break; }
+    fi
     case $error in *"plan changed"*) sleep "$attempt";; *) break;; esac
   done
   [ -z "$error" ] || not_started "the goal dependency was not stored: $error"

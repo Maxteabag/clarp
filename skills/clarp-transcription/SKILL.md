@@ -17,7 +17,9 @@ clarp-admin transcription test
 
 On the Rust Host (`clarp-host`), an agent's own hearing language and engines are
 shown and set with `clarp-admin transcription agent`, for yourself or, with
-`--session`, for another agent of the same Host:
+`--session`, for another agent of the same Host. Change another agent's hearing
+only when the owner asks for it: a wrong language garbles what he says to that
+agent, and nothing tells him why.
 
 ```bash
 clarp-admin transcription agent                       # show your own
