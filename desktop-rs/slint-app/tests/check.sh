@@ -132,6 +132,8 @@ CLARP_EXPLORER_FAILURE_OUT="$out" CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY 
 done
 # The app's whole log beside the shots, to read when a stage times out.
 cp "$scratch/run.log" "$out/app.log"
+# What the fake Host was asked, and when.
+cp "$scratch/host.log" "$out/host.log" 2>/dev/null
 # artifact-open: what the third-party web saw, and what Chrome rendered.
 [ -f "$scratch/third-party.log" ] && cp "$scratch/third-party.log" "$scratch"/browser.log.page*.dom "$out/" 2>/dev/null
 grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"

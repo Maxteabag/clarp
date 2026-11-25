@@ -86,6 +86,11 @@ pub fn quiet_chat_check(out: String) {
         })),
         ("working", Box::new(move |app, _window, elapsed| {
             if lseq() != Some(16) || elapsed < Duration::from_millis(600) {
+                if elapsed > Duration::from_millis(14_800) {
+                    let engine = app.engine.borrow();
+                    let view = engine.live_view("rachel");
+                    println!("diag lseq {:?} awaiting {:?} epoch {:?} live_items {} active {}", lseq(), view.map(|v| v.awaiting_snapshot()), view.and_then(|v| v.epoch().map(str::to_owned)), engine.live_items(), engine.live_active("rachel"));
+                }
                 return false;
             }
             let fold = live_row(FOLD).unwrap_or_default();
