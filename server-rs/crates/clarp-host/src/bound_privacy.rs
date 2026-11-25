@@ -548,7 +548,15 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/tts/providers", NoWords),
     ("/turn-queue", Words(Query)),
     ("/viz", NoWords),
+    ("/vocab/assignments", OwnerOnly(Nobody)),
     ("/vocab/budgets", NoWords),
+    ("/vocab/packs", OwnerOnly(Nobody)),
+    ("/vocab/preview", OwnerOnly(Nobody)),
+    ("/vocab/profile", OwnerOnly(Nobody)),
+    ("/vocab/profiles", OwnerOnly(Nobody)),
+    ("/vocab/run", OwnerOnly(Nobody)),
+    ("/vocab/runs", OwnerOnly(Nobody)),
+    ("/vocab/terms", OwnerOnly(Nobody)),
     ("/voice-catalog", NoWords),
     ("/voice-events", Words(Query)),
     ("/voice-events/utterances", Words(Query)),
@@ -569,8 +577,8 @@ pub fn class_of(route: &str) -> Option<Class> {
 /// does whatever reaches a route that answers no words, and every other method than a read
 /// (what an agent writes is no other agent's words; the tools ask [`reader_of_call`]). A read
 /// by anyone else is refused where it names an agent whose words are withheld from it, and is
-/// answered with every object of such an agent blanked. A route without a class is treated
-/// as one of words.
+/// answered with every object of such an agent blanked. A route without a class is one only
+/// the owner reads while anything is withheld from the reader.
 pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
     if request.method() != axum::http::Method::GET && request.method() != axum::http::Method::HEAD {
         return next.run(request).await;
@@ -580,7 +588,9 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
         .get::<MatchedPath>()
         .map(|path| path.as_str().to_string())
         .unwrap_or_default();
-    let class = class_of(&route).unwrap_or(Words(Query));
+    // A route without a class is refused to every reader but the owner while an agent is
+    // withheld from it: what it answers is not known here.
+    let class = class_of(&route).unwrap_or(OwnerOnly(Nobody));
     if class == NoWords {
         return next.run(request).await;
     }
@@ -589,6 +599,17 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
         Ok(reader) => reader,
         Err(refused) => return refused.into_response(),
     };
+    if reader == Reader::Owner {
+        return next.run(request).await;
+    }
+    // A stream is judged frame by frame, against the fleet as it is when each event is sent:
+    // an agent bound after it opened is withheld from then on, and a reader the owner stops
+    // reads no more.
+    if class == Stream {
+        let response = next.run(request).await;
+        let (parts, body) = response.into_parts();
+        return Response::from_parts(parts, sse_filtered(body, app.clone(), reader));
+    }
     let Some(withheld) = Withheld::of(&app, &reader) else {
         return next.run(request).await;
     };
@@ -602,11 +623,7 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
             }
             owner_only()
         }
-        Stream => {
-            let response = next.run(request).await;
-            let (parts, body) = response.into_parts();
-            Response::from_parts(parts, sse_filtered(body, Arc::new(withheld)))
-        }
+        Stream => next.run(request).await,
         Words(names) => {
             let about = named(&app, &uri, names, &withheld).await;
             if let About::Withheld(persona) = &about {
@@ -751,29 +768,34 @@ async fn blanked(response: Response, withheld: &Withheld, readable: bool) -> Res
     Response::from_parts(parts, Body::from(value.to_string()))
 }
 
-/// A stream of events with every event of a withheld agent blanked, frame by frame.
-fn sse_filtered(body: Body, withheld: Arc<Withheld>) -> Body {
+/// A stream of events with every event of an agent withheld from `reader` blanked, frame by
+/// frame, each judged against the fleet as it is then.
+fn sse_filtered(body: Body, app: App, reader: Reader) -> Body {
     let inner = body.into_data_stream();
+    let judged = move |frame: &[u8]| match Withheld::of(&app, &reader) {
+        Some(withheld) => withheld.frame(frame),
+        None => frame.to_vec(),
+    };
     let frames = futures_util::stream::unfold(
-        (inner, Vec::<u8>::new(), withheld, false),
-        |(mut inner, mut held, withheld, done)| async move {
+        (inner, Vec::<u8>::new(), judged, false),
+        |(mut inner, mut held, judged, done)| async move {
             if done {
                 return None;
             }
             loop {
                 if let Some(end) = held.windows(2).position(|pair| pair == b"\n\n") {
                     let frame: Vec<u8> = held.drain(..end + 2).collect();
-                    let out = Bytes::from(withheld.frame(&frame));
-                    return Some((Ok(out), (inner, held, withheld, false)));
+                    let out = Bytes::from(judged(&frame));
+                    return Some((Ok(out), (inner, held, judged, false)));
                 }
                 match inner.next().await {
                     Some(Ok(chunk)) => held.extend_from_slice(&chunk),
-                    Some(Err(why)) => return Some((Err(why), (inner, held, withheld, true))),
+                    Some(Err(why)) => return Some((Err(why), (inner, held, judged, true))),
                     None if held.is_empty() => return None,
                     None => {
                         let rest = std::mem::take(&mut held);
-                        let out = Bytes::from(withheld.frame(&rest));
-                        return Some((Ok(out), (inner, held, withheld, true)));
+                        let out = Bytes::from(judged(&rest));
+                        return Some((Ok(out), (inner, held, judged, true)));
                     }
                 }
             }
@@ -1452,18 +1474,35 @@ mod tests {
                         break;
                     }
                 }
-                let arguments = &rest[..end];
-                let Some(open) = arguments.find('"') else {
+                let arguments = rest[..end].trim_start();
+                let file = path.display().to_string();
+                let Some((named, handler)) = arguments.split_once(',') else {
                     continue;
                 };
-                let Some(close) = arguments[open + 1..].find('"') else {
+                if !(handler.contains("get(") || handler.contains("any(")) {
                     continue;
-                };
-                let route = &arguments[open + 1..open + 1 + close];
-                let handler = &arguments[open + 1 + close..];
-                if route.starts_with('/') && (handler.contains("get(") || handler.contains("any("))
-                {
-                    found.push((route.to_string(), path.display().to_string()));
+                }
+                let named = named.trim();
+                if let Some(route) = named.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+                    if route.starts_with('/') {
+                        found.push((route.to_string(), file));
+                    }
+                    continue;
+                }
+                // A path in a variable: the paths of the loop that gives it, else the
+                // variable itself, which no class names, so the test says where it is.
+                let name = named.trim_start_matches('&');
+                let before = &text[..text.len() - rest.len()];
+                let looped = before.rfind(&format!("for {name} in [")).map(|at| {
+                    let list = &before[at..];
+                    let list = &list[list.find('[').map_or(0, |open| open + 1)..];
+                    let list = &list[..list.find(']').unwrap_or(list.len())];
+                    let quoted = list.split('"').skip(1).step_by(2);
+                    quoted.map(str::to_string).collect::<Vec<_>>()
+                });
+                match looped.filter(|paths| !paths.is_empty()) {
+                    Some(paths) => found.extend(paths.into_iter().map(|p| (p, file.clone()))),
+                    None => found.push((format!("<the path in {name}>"), file)),
                 }
             }
         }
