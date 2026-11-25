@@ -105,6 +105,31 @@ fn a_gap_asks_for_the_snapshot_once_and_ignores_events_until_it_lands() {
 }
 
 #[test]
+fn events_during_an_outstanding_fetch_apply_above_the_snapshot_once_it_lands() {
+    // Opening a chat asks for its snapshot; the Host answers it from before
+    // events 1 and 2, which arrive first and are the last it sends (#847).
+    let mut view = LiveView::new();
+    view.expect_snapshot();
+    let event = |lseq: i64, state: &str| json!({"type": "live", "conv": "c", "epoch": "e", "lseq": lseq,
+        "ops": [{"op": "status", "conv": "c", "activity": {"state": state}}]});
+    for (lseq, state) in [(1, "thinking"), (2, "responding")] {
+        assert!(view.apply_event(event(lseq, state).as_object().unwrap()).is_empty());
+    }
+    assert_eq!(view.lseq(), None, "not applied before the snapshot");
+    let snapshot = json!({"epoch": "e", "lseq": 1, "activity": {"state": "thinking"}, "turn": null, "items": []});
+    assert!(view.apply_snapshot(snapshot.as_object().unwrap()).is_empty());
+    assert_eq!(view.lseq(), Some(2), "the event above the snapshot applies, the one in it does not");
+    assert_eq!(view.activity()["state"], "responding");
+
+    // One that leaves a gap above the snapshot asks for another.
+    view.expect_snapshot();
+    view.apply_event(event(5, "idle").as_object().unwrap());
+    let snapshot = json!({"epoch": "e", "lseq": 3, "activity": {"state": "idle"}, "turn": null, "items": []});
+    assert_eq!(view.apply_snapshot(snapshot.as_object().unwrap()), [FETCH_LIVE]);
+    assert!(view.awaiting_snapshot());
+}
+
+#[test]
 fn nothing_held_asks_for_the_snapshot_first() {
     let mut view = LiveView::new();
     let event = json!({"type": "live", "conv": "c", "epoch": "e", "lseq": 7, "ops": [{"op": "status", "conv": "c", "activity": {"state": "thinking"}}]});

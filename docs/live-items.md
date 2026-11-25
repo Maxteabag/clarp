@@ -333,8 +333,9 @@ Apply rules (the reference reducer implements exactly these):
 2. **Order.** `lseq <= held` → duplicate, ignore. `lseq == held + 1` → apply all
    ops in order, then hold `lseq`. `lseq > held + 1` → gap: fetch `GET /live`.
    With nothing held yet (just opened), fetch `GET /live` first and apply events
-   with `lseq` above the snapshot's. While a fetch is outstanding, ignore events
-   and do not ask again.
+   with `lseq` above the snapshot's. While a fetch is outstanding, do not apply events
+   and do not ask again; keep them and, once it lands, apply those above the
+   snapshot's `lseq` (it may have been taken before they happened).
 3. **Item revision.** An op whose `rev` is not the held item's `rev + 1` (or not 1
    for an unknown item, except `upsert` which may create with any rev) means you
    missed something: fetch `GET /live`.

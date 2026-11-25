@@ -119,6 +119,10 @@ pub struct LiveView {
     main_turn: Option<Object>,
     items: HashMap<String, Object>,
     awaiting_snapshot: bool,
+    /// Events that came while a `GET /live` was outstanding: those above
+    /// the snapshot's lseq apply once it lands. The snapshot may have been
+    /// taken before they happened, and nothing else may follow them.
+    held_back: Vec<Object>,
     tool_explanations: Option<Object>,
     /// Host clock minus this machine's, from the last `server_now_ms`.
     clock_offset_ms: i64,
@@ -132,6 +136,9 @@ pub struct LiveView {
 
 /// How many replaced turns a view keeps.
 const RETIRED_TURNS: usize = 32;
+/// How many events a view keeps while a snapshot is outstanding; past
+/// that the oldest go, and the gap they leave asks for a snapshot again.
+const HELD_BACK: usize = 512;
 
 impl Default for LiveView {
     fn default() -> Self {
@@ -143,6 +150,7 @@ impl Default for LiveView {
             main_turn: None,
             items: HashMap::new(),
             awaiting_snapshot: false,
+            held_back: Vec::new(),
             tool_explanations: None,
             clock_offset_ms: 0,
             generation: 0,
@@ -172,7 +180,7 @@ impl LiveView {
     pub fn main_turn(&self) -> Option<&Object> {
         self.main_turn.as_ref()
     }
-    /// A `GET /live` is outstanding: events are ignored until it lands.
+    /// A `GET /live` is outstanding: events wait until it lands.
     pub fn awaiting_snapshot(&self) -> bool {
         self.awaiting_snapshot
     }
@@ -261,10 +269,13 @@ impl LiveView {
     /// The fetch failed: the next event may ask again.
     pub fn snapshot_failed(&mut self) {
         self.awaiting_snapshot = false;
+        self.held_back.clear();
     }
 
-    /// Replaces the state with a `GET /live` answer and holds its lseq.
-    pub fn apply_snapshot(&mut self, snapshot: &Object) {
+    /// Replaces the state with a `GET /live` answer and holds its lseq,
+    /// then applies the events that came while it was outstanding and are
+    /// newer than it; returns the effects those ask for ([`FETCH_LIVE`]).
+    pub fn apply_snapshot(&mut self, snapshot: &Object) -> Vec<&'static str> {
         self.epoch = snapshot.get("epoch").and_then(Value::as_str).map(str::to_owned);
         self.lseq = snapshot.get("lseq").and_then(Value::as_i64);
         self.activity = snapshot.get("activity").and_then(Value::as_object).cloned().unwrap_or_else(idle);
@@ -295,6 +306,12 @@ impl LiveView {
         }
         self.awaiting_snapshot = false;
         self.generation += 1;
+        let mut effects = Vec::new();
+        for event in std::mem::take(&mut self.held_back) {
+            // One that leaves a gap asks again; the rest wait for that one.
+            effects.extend(self.apply_event(&event));
+        }
+        effects
     }
 
     /// Applies one `live` event by §3's rules; returns the effects the
@@ -302,6 +319,10 @@ impl LiveView {
     /// at all.
     pub fn apply_event(&mut self, event: &Object) -> Vec<&'static str> {
         if self.awaiting_snapshot {
+            if self.held_back.len() >= HELD_BACK {
+                self.held_back.remove(0);
+            }
+            self.held_back.push(event.clone());
             return Vec::new();
         }
         let lseq = event.get("lseq").and_then(Value::as_i64).unwrap_or(0);
