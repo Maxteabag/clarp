@@ -611,7 +611,7 @@ impl Hub {
         }
         // The turn that never settled ends first, and decides its newest words as its end does.
         if running.is_some() {
-            self.end(("interrupted", None), now, &mut out);
+            self.end(("interrupted", None), None, now, &mut out);
         }
         self.pending = None;
         self.last_words = None;
@@ -690,11 +690,31 @@ impl Hub {
     /// with it. A turn that failed says why (`error`: reason, message, the provider's words).
     pub fn end_turn(&mut self, status: &str, error: Option<&Value>, now: i64) -> Vec<Value> {
         let mut out = Vec::new();
-        self.end((status, error), now, &mut out);
+        self.end((status, error), None, now, &mut out);
         out
     }
 
-    fn end(&mut self, how: (&str, Option<&Value>), now: i64, out: &mut Vec<Value>) {
+    /// The turn ended, and its conversation kept this many tool calls: the turn says that
+    /// count, whatever it counted of the calls it was shown begin (issue 801).
+    pub fn end_turn_kept(
+        &mut self,
+        status: &str,
+        error: Option<&Value>,
+        kept_tools: Option<u64>,
+        now: i64,
+    ) -> Vec<Value> {
+        let mut out = Vec::new();
+        self.end((status, error), kept_tools, now, &mut out);
+        out
+    }
+
+    fn end(
+        &mut self,
+        how: (&str, Option<&Value>),
+        kept_tools: Option<u64>,
+        now: i64,
+        out: &mut Vec<Value>,
+    ) {
         let (status, error) = how;
         if !self.open(None) {
             return;
@@ -728,6 +748,9 @@ impl Hub {
         turn.insert("status".to_string(), json!(status));
         turn.insert("ended_at_ms".to_string(), json!(now));
         turn.insert("worked_ms".to_string(), json!(now - started));
+        if let Some(kept) = kept_tools {
+            turn.insert("tool_count".to_string(), json!(kept));
+        }
         if let Some(error) = error.filter(|error| status == "failed" && truthy(error)) {
             turn.insert("error".to_string(), error.clone());
         }

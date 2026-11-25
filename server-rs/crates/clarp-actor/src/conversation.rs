@@ -772,6 +772,10 @@ impl<'a> Reader<'a> {
             if let Some(anchor) = self.anchors(turn)?.of(row.entry.id()) {
                 row.session_rows = Some(anchor.session_rows);
                 row.revision = row.revision.max(anchor.entered * REVISION_STEP);
+                // The answer of its turn is said at the end, also where work came after it (a
+                // turn stopped as its tool ran): as those who watched the turn were shown it,
+                // and as the conversation view holds it (issue 801).
+                row.commentary = false;
             }
         }
         // A goal's check-in that was sent again for the apps (`resend`) is, in a chat, as new

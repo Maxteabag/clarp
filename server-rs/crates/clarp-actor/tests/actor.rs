@@ -7705,3 +7705,55 @@ fn a_message_that_waited_for_its_turn_is_later_than_the_answer_before_it() {
     let texts: Vec<&str> = newer.iter().map(|(text, _)| text.as_str()).collect();
     assert_eq!(texts, ["ALPHA", "second", "BRAVO"], "{newer:?}");
 }
+
+/// Issue 801: a Stop while the agent works, with a call running and words being written. What
+/// those who watched the turn were shown is what the conversation keeps: every message and
+/// call they saw is a row, an answer they were shown is the conversation's answer (said at the
+/// end, also with work before it), and the turn's count of calls is the one it kept.
+#[test]
+fn what_a_stopped_turn_showed_is_what_its_conversation_keeps() {
+    let mut world = World::new("stop-shown");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "run it", Admission::Queue);
+    world.says(1, r#"{"say": "I will run it."}"#);
+    world.says(1, r#"{"tool": "Bash", "id": "t-1"}"#);
+    world.says(1, r#"{"say": "Still waiting for it"}"#);
+    world.hint(&mut actor);
+    let (_, out) = actor.stop("peter", world.tick()).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(1, None, Some(15));
+    world.hint(&mut actor);
+
+    let shown = actor.shown_whole(world.tick());
+    let items = shown["items"].as_array().cloned().unwrap_or_default();
+    let rows = actor.tail_of(100, Which::chat(true)).unwrap().entries;
+    let stored = |id: &str| rows.iter().find(|row| row.entry.id() == id);
+    let messages: Vec<&Value> = items.iter().filter(|item| item["kind"] == "message").collect();
+    assert_eq!(messages.len(), 2, "{shown}");
+    for item in &messages {
+        let row_id = item["row_id"].as_str().unwrap_or_default();
+        let row = stored(row_id).unwrap_or_else(|| panic!("{row_id} is kept: {shown}"));
+        // Shown as an answer exactly where the conversation keeps it as one.
+        let answer = item["phase"] == "final";
+        assert_eq!(answer, !row.commentary, "{row_id}: {shown}");
+        assert_eq!(answer, row.session_rows.is_some(), "{row_id}: {shown}");
+    }
+    assert_eq!(messages[1]["phase"], "final", "the words the Stop cut off end the turn: {shown}");
+    let calls: Vec<&Value> = items.iter().filter(|item| item["kind"] == "tool").collect();
+    assert_eq!(calls.len(), 1, "{shown}");
+    for item in &calls {
+        let call_id = item["tool"]["call_id"].as_str().unwrap_or_default();
+        assert!(stored(call_id).is_some(), "{call_id} is kept: {shown}");
+        assert_eq!(item["status"], "interrupted", "{shown}");
+    }
+    let end = rows
+        .iter()
+        .find_map(|row| row.turn.clone())
+        .expect("the turn ended");
+    assert_eq!(end.status, "interrupted");
+    assert_eq!(
+        shown["turn"]["tool_count"],
+        json!(end.tool_count),
+        "the turn counts the calls it kept: {shown}"
+    );
+}

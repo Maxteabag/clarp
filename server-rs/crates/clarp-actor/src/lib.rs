@@ -1823,8 +1823,6 @@ impl Actor {
         }
     }
 
-    /// How a turn that no longer holds the agent ended, in the words of those who watch:
-    /// `completed`, `failed` with what went wrong, or `interrupted`.
     /// The rows of the messages read into a running turn (issue 808). A native goal's turn
     /// has no message of its own and reads none: its walk would read the log back to its start.
     fn read_rows(&self, turn: TurnId, origin: &Origin) -> Vec<String> {
@@ -1835,6 +1833,22 @@ impl Actor {
             .unwrap_or_default()
     }
 
+    /// How many tool calls the conversation kept of a turn that ended: what its end says.
+    fn kept_tools(&self, turn: TurnId) -> Option<u64> {
+        let stored = self
+            .recorder
+            .log()
+            .find(&format!("t-{}", turn.0))
+            .ok()
+            .flatten()?;
+        match Entry::from_item(&stored).ok().flatten()? {
+            Entry::TurnEnd(end) => Some(u64::from(end.tool_count)),
+            _ => None,
+        }
+    }
+
+    /// How a turn that no longer holds the agent ended, in the words of those who watch:
+    /// `completed`, `failed` with what went wrong, or `interrupted`.
     fn ended_as(&self, turn: TurnId) -> (&'static str, Option<serde_json::Value>) {
         let last = self.recorder.agent().last();
         let Some(settled) = last.filter(|settled| settled.id == turn) else {
@@ -1892,7 +1906,8 @@ impl Actor {
         if shown != held.map(|(turn, _)| turn) {
             if let Some(turn) = shown {
                 let (status, error) = self.ended_as(turn);
-                let events = self.shown.end_turn(status, error.as_ref(), now_ms);
+                let kept = self.kept_tools(turn);
+                let events = self.shown.end_turn_kept(status, error.as_ref(), kept, now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = None;
             }
