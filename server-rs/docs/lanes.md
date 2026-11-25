@@ -132,6 +132,16 @@ of them is not done.
     locks because a tool may refuse a second process at once instead of waiting: Muse fails
     `muse exec` on a session that a `muse serve` holds. A lane that still runs a turn refuses to
     leave, and the other process must not go ahead.
+  - **No turn waits on a lane's exit without a bound** (issue #772). Every retirement (a turn's
+    `place`, an exec turn making way, a terminal, `once_more` after a changed login) waits at
+    most 15 s (`LEAVE_WAIT`) for the lane's owner lock. A lane answers a retirement only once
+    it has gone, so no answer within the bound is a lane on its way out, never a refusal. One
+    that has not let go by then is ended with SIGKILL by its own process id, which the lane
+    wrote into its owner lock once it held it, and only by that id; this is said once in the
+    Host's log. The turn then goes on without it: a new lane, or its own process. The id is
+    read and used only while the lock is held, and the lock is let go when that process ends,
+    so it names the lane's process and no other. The lane's tool, in a process group of its
+    own, is not signalled: what holds the conversation's lock is the lane's process.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails
@@ -154,9 +164,8 @@ of them is not done.
     - Status forks are a Clarp skill, not a route of this Host.
     - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
       retired and waited for until its tool has exited, and the terminal then opens as before
-      (the lead's decision of 25 Nov 2026). The wait is bounded at 15 s: a lane whose tool hangs
-      on its way out is said once in the Host's log, and the terminal opens beside it rather
-      than holding the request and the agent's lease. While a turn runs, the terminal opens as
+      (the lead's decision of 25 Nov 2026). The wait is bounded as every retirement is (below),
+      so the terminal never holds the request and the agent's lease on a lane's exit. While a turn runs, the terminal opens as
       before, with no refusal; that two-writer case is older than lanes and is issue #770.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an

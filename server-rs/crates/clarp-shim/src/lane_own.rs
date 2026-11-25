@@ -107,7 +107,8 @@ pub(super) fn lock_exclusive(path: &Path) -> io::Result<File> {
 }
 
 /// The lane's owner lock, held by its process until its tool has been reaped: the Host knows a
-/// lane has left by this lock being free. Its socket's parent is made first.
+/// lane has left by this lock being free. Its socket's parent is made first, and the process's
+/// id is written into it.
 pub(super) fn hold_owner(socket: &Path) -> io::Result<File> {
     if let Some(parent) = socket.parent() {
         fs::create_dir_all(parent)?;
@@ -120,6 +121,10 @@ pub(super) fn hold_owner(socket: &Path) -> io::Result<File> {
         .mode(0o600)
         .open(owner_lock(socket))?;
     lock.try_lock().map_err(io::Error::other)?;
+    // Its own id, written once the lock is held: the Host ends a lane that does not let go
+    // when asked by this id and no other (issue #772).
+    lock.set_len(0)?;
+    (&lock).write_all(format!("{}\n", std::process::id()).as_bytes())?;
     Ok(lock)
 }
 

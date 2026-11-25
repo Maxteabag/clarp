@@ -466,6 +466,91 @@ fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
     std::fs::remove_dir_all(&run).unwrap();
 }
 
+/// A lane whose process never lets go when asked (its tool hangs on its way out): it answers
+/// `inspect`, takes `retire` and never answers it, and holds its owner lock for as long as
+/// `process` lives, whose id it wrote into the lock as a lane's process does.
+struct StuckLane {
+    endpoint: Endpoint,
+    asked: Arc<Mutex<Vec<String>>>,
+    ended: std::sync::mpsc::Receiver<std::process::ExitStatus>,
+}
+
+impl StuckLane {
+    fn start(run: &Path, agent: &str, status: Value, mut process: std::process::Child) -> Self {
+        let endpoint = Endpoint::of(Tool::Codex, run, agent);
+        let listener = UnixListener::bind(endpoint.socket()).unwrap();
+        let mut owner = File::create(owner_lock(endpoint.socket())).unwrap();
+        owner.try_lock().unwrap();
+        writeln!(owner, "{}", process.id()).unwrap();
+        let (tell, ended) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let exit = process.wait().unwrap();
+            drop(owner);
+            let _ = tell.send(exit);
+        });
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        std::thread::spawn(move || {
+            let mut unanswered = Vec::new();
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut line = String::new();
+                BufReader::new(&stream).read_line(&mut line).unwrap();
+                let request: Value = serde_json::from_str(&line).unwrap();
+                let op = request["op"].as_str().unwrap().to_owned();
+                seen.lock().unwrap().push(op.clone());
+                if op == "retire" {
+                    unanswered.push(stream);
+                    continue;
+                }
+                let frame = format!("{}\n", json!({"ok": true, "state": status}));
+                let _ = stream.write_all(frame.as_bytes());
+            }
+        });
+        Self {
+            endpoint,
+            asked,
+            ended,
+        }
+    }
+}
+
+#[test]
+fn a_turn_goes_on_within_the_bound_and_ends_only_the_process_of_a_lane_that_never_lets_go() {
+    use std::os::unix::process::ExitStatusExt;
+    let run = run_dir("stuck");
+    let sleeper = || {
+        std::process::Command::new("sleep")
+            .arg("600")
+            .spawn()
+            .unwrap()
+    };
+    let mut beside = sleeper();
+    let stuck = StuckLane::start(&run, "a", status("t", "old", 50, false), sleeper());
+    let bound = std::time::Duration::from_millis(300);
+    let started = std::time::Instant::now();
+    let place = stuck
+        .endpoint
+        .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, bound);
+    let waited = started.elapsed();
+    // Asked to leave, waited for the bound, then ended by its own id: its lock is free and a
+    // new lane may start, with no turn held on the lane's exit.
+    assert_eq!(place.unwrap(), Place::Free);
+    assert_eq!(stuck.asked.lock().unwrap().clone(), ["inspect", "retire"]);
+    assert!(waited >= bound, "{waited:?}");
+    assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
+    let exit = stuck
+        .ended
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(exit.signal(), Some(nix::libc::SIGKILL));
+    // Only the lane's own process: one beside it is untouched.
+    assert!(beside.try_wait().unwrap().is_none());
+    beside.kill().unwrap();
+    beside.wait().unwrap();
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
 #[test]
 fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     let run = run_dir("hangs");
