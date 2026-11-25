@@ -199,12 +199,6 @@ agent-row-field-added:conversation_fork  agent rows in the snapshot, archived ro
 # added as `reason` on the `turn` of a row in a successful GET /log response.
 log-turn-field-added:reason  the Host's sentence of why a turn that did not complete ended
 
-# Issue 811, Rust Host contract 184 (feature stop_receipt_text). The retired Python
-# reference says a Stop only in its fields. Match only text added as `text` on a successful
-# POST /stop answer, and as `stop_text` on an agent's activity in the snapshot and on an
-# event's data or its detail (conform.intended_stop_text).
-stop-receipt-text  a Stop told in one sentence for people
-
 # A Claude turn whose account ran out fails on the tool's own words, not on the fixed
 # "Claude usage limit reached" (docs/differences.md, "A Claude turn whose account ran out"). The
 # fake's reset is in 2100, beyond the eight days a turn waits for: no time is told.

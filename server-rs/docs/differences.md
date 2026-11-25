@@ -787,8 +787,6 @@ A Stop is told in one sentence for people on the Rust Host (contract 184, featur
 agent's activity (snapshot and `agent-activity`) while the Stop is its latest state and in the
 `detail` of the Stop's `agent-state` event. The retired Python reference says a Stop only in its
 fields (`queue_paused`, `goals_paused`, `stop_actor`), which the apps showed as they were.
-`conformance/intended.txt` registers the sentence's addition as text in those places
-(`stop-receipt-text`, `conform.intended_stop_text`).
 
 Conversation forks (issue 718, contract 153, feature `conversation_fork`) are available
 on the Rust Host only, for the agents its owner names in `[conversation_forks] agents` of the
