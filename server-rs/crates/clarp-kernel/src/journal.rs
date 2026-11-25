@@ -13,7 +13,7 @@
 pub mod team_transit;
 mod turn_sessions;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
@@ -301,18 +301,41 @@ pub fn mixed_turn(turn: u64, at: i64) -> NewItem {
 /// share its millisecond with the row before it, or come before it, is given that row's time
 /// and one millisecond more. A client orders rows by time, and one that keeps the order rows
 /// came in on a tie would otherwise draw a message that waited for its turn above the answer
-/// before it, which ended in the same millisecond (issue 798). A call written again keeps the
-/// time it was first written at, and a row brought from another Host keeps its own: both are
-/// where they first stood. `newest`: the time of the newest row already in the log. Answers
-/// the time of the newest row once these are written.
-fn later_rows(items: &mut [NewItem], mut newest: i64) -> i64 {
+/// before it, which ended in the same millisecond (issue 798). A call that is a row by itself
+/// and is written again (when it ends) keeps the time of its first writing, as the log holds
+/// it: it stands where it first stood. Its first writing is moved like any row. A row brought
+/// from another Host keeps its own time. `newest`: the time of the newest row already in the
+/// log. Answers the time of the newest row once these are written.
+fn later_rows(
+    items: &mut [NewItem],
+    mut newest: i64,
+    log: &dyn AgentLog,
+) -> Result<i64, JournalError> {
+    // The calls written in this batch, by key, with the time their first writing was given.
+    let mut calls: HashMap<String, i64> = HashMap::new();
     for item in items.iter_mut().filter(|item| kind::ROWS.has(item.kind)) {
-        if !matches!(item.kind, kind::TOOL | kind::IMPORTED) {
-            item.ts_ms = item.ts_ms.max(newest.saturating_add(1));
+        let again = match (item.kind, item.key.as_deref()) {
+            (kind::TOOL, Some(key)) => match calls.get(key) {
+                Some(first) => Some(*first),
+                None => log.find(key)?.map(|stored| stored.ts_ms),
+            },
+            _ => None,
+        };
+        match again {
+            Some(first) => item.ts_ms = first,
+            None if item.kind != kind::IMPORTED => {
+                item.ts_ms = item.ts_ms.max(newest.saturating_add(1));
+            }
+            None => {}
+        }
+        if item.kind == kind::TOOL
+            && let Some(key) = &item.key
+        {
+            calls.entry(key.clone()).or_insert(item.ts_ms);
         }
         newest = newest.max(item.ts_ms);
     }
-    newest
+    Ok(newest)
 }
 
 /// The key of the item that says which message a trace belongs to ([`kind::TRACE`]).
@@ -1065,7 +1088,8 @@ impl Batch<'_> {
         if self.items.is_empty() {
             return Ok(Committed::default());
         }
-        self.recorder.row_ts = later_rows(&mut self.items, self.recorder.row_ts);
+        self.recorder.row_ts =
+            later_rows(&mut self.items, self.recorder.row_ts, self.recorder.log.as_ref())?;
         let last_seq = self.recorder.log.append(&self.items)?;
         // The items are durable. From here the state follows them.
         let first_seq = last_seq + 1 - self.items.len() as Seq;
@@ -1137,6 +1161,50 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
+    }
+
+    /// Issue 798: Codex's two messages in one millisecond, then its command. The second message
+    /// is moved a millisecond after the first; the command's call, a row by itself written at
+    /// that same millisecond, is moved after it too, and keeps that time when it is written
+    /// again as it ends, whatever time it comes with then.
+    #[test]
+    fn a_call_written_first_is_later_than_the_row_above_it_and_keeps_that_time_when_it_ends() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let row = |kind: u16, key: &str, at: i64| NewItem::new(kind, at, Vec::new()).keyed(key);
+        let mut batch = recorder.batch();
+        batch.item(row(kind::REPLY, "r-1", 100));
+        batch.item(row(kind::REPLY, "r-2", 100));
+        batch.item(row(kind::TOOL, "c-1", 100));
+        batch.commit().unwrap();
+        // It ends in a later write, told with the time it was first seen.
+        let mut batch = recorder.batch();
+        batch.item(row(kind::TOOL, "c-1", 100));
+        batch.item(row(kind::REPLY, "r-3", 100));
+        batch.commit().unwrap();
+        // One that begins and ends in one write.
+        let mut batch = recorder.batch();
+        batch.item(row(kind::TOOL, "c-2", 100));
+        batch.item(row(kind::TOOL, "c-2", 100));
+        batch.commit().unwrap();
+        let times: Vec<(String, i64)> = recorder
+            .log()
+            .read_after(0, kind::ROWS, 10)
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.key.unwrap_or_default(), item.ts_ms))
+            .collect();
+        let expected = [
+            ("r-1", 100),
+            ("r-2", 101),
+            ("c-1", 102),
+            ("c-1", 102),
+            ("r-3", 103),
+            ("c-2", 104),
+            ("c-2", 104),
+        ]
+        .map(|(key, at)| (key.to_string(), at));
+        assert_eq!(times, expected);
     }
 
     #[test]
