@@ -521,3 +521,76 @@ fn whom_the_agent_works_with_follows_the_snapshot_and_its_states() {
     h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "idle", "ts": 4_000}))));
     assert_eq!(h.roster.find("sam").unwrap().working_audience, "", "the turn ending ends it");
 }
+
+/// #841: an `agent-roster` event's `fields` (feature `roster_fields`) patch
+/// the one row in place; every field the event does not name keeps its
+/// value, and the row equals what a fresh snapshot would make of it.
+#[test]
+fn a_roster_events_fields_patch_one_row_as_a_snapshot_would() {
+    let parent = roster_row("parent", "p", 300, json!({"latest_state": "background", "busy": true, "status_text": "1 helper working",
+        "child_count": 1, "running_children": 1, "background_jobs": {"count": 2, "sub_agents": 1}, "model": "opus", "muted": false}));
+    let worker = helper_row("worker", "p", "running", 200);
+    let mut h = Harness::new();
+    h.snapshot(json!([parent.clone(), worker.clone()]));
+    h.clear();
+
+    let helper_fields = obj(json!({"helper_state": "reported", "archived_at": null, "a_field_not_read_here": 1}));
+    let maker_fields = obj(json!({"latest_state": "idle", "status_text": null, "child_count": 1, "running_children": 0,
+                                   "background_jobs": {"count": 2, "sub_agents": 0}}));
+    h.with(|r| assert_eq!(r.patch_row("worker", &helper_fields), RowChange::Applied));
+    h.with(|r| assert_eq!(r.patch_row("parent", &maker_fields), RowChange::Applied));
+    assert_eq!(h.count(|op| matches!(op, ListOp::Insert { .. } | ListOp::Remove { .. } | ListOp::Move { .. })), 0, "rows change in place");
+    assert_eq!(h.row("worker").helper_state, "reported");
+    let p = h.row("parent").clone();
+    assert_eq!((p.state.as_str(), p.status_text.as_str(), p.busy), ("idle", "", false));
+    assert_eq!(p.running_children, 0, "the maker counts no working helper");
+    assert_eq!(h.roster.find("parent").unwrap().model, "opus", "a field the event does not name keeps its value");
+
+    // The same change read as a whole list makes the same rows.
+    let mut fresh = Harness::new();
+    let mut parent_after = parent;
+    let mut worker_after = worker;
+    for (k, v) in maker_fields { parent_after[k] = v; }
+    parent_after["busy"] = json!(false);
+    worker_after["helper_state"] = json!("reported");
+    fresh.snapshot(json!([parent_after, worker_after]));
+    assert_eq!(fresh.row("parent"), h.row("parent"));
+    assert_eq!(fresh.row("worker"), h.row("worker"));
+}
+
+#[test]
+fn a_patch_for_a_row_not_held_or_put_away_asks_for_a_read() {
+    let mut h = Harness::new();
+    h.snapshot(json!([roster_row("sam", "s", 10, json!({}))]));
+    h.clear();
+    h.with(|r| assert_eq!(r.patch_row("nobody", &obj(json!({"muted": true}))), RowChange::NotHeld));
+    h.with(|r| assert_eq!(r.patch_row("sam", &obj(json!({"helper_state": "done", "archived_at": 1_700_000_000_000i64}))), RowChange::Moved));
+    assert!(h.ops.is_empty(), "nothing changed: the list is read");
+    assert_eq!(h.roster.find("sam").unwrap().helper_state, "", "the row is left as it was");
+
+    let mut put_away = Roster::archived();
+    put_away.apply_snapshot(&obj(json!({"agents": [roster_row("old", "o", 10, json!({"archived_at": 5}))]})));
+    assert_eq!(put_away.patch_row("old", &obj(json!({"muted": true}))), RowChange::Applied, "a row put away is patched where it is");
+    assert_eq!(put_away.patch_row("old", &obj(json!({"archived_at": null}))), RowChange::Moved, "taken back, it belongs to the list");
+}
+
+/// #841: `GET /agents/{session}` (feature `agent_row`) replaces one row in
+/// its place, keeping what the list holds newer, as a snapshot does.
+#[test]
+fn a_read_row_replaces_its_row_in_place_and_keeps_what_is_newer() {
+    let mut h = Harness::new();
+    h.snapshot(json!([roster_row("a", "a1", 30, json!({})), agent("b1", "b", 20, 100, "idle")]));
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "b", "kind": "thinking", "ts": 500, "status_text": "on it"}))));
+    h.with(|r| r.apply_notification_event(&obj(json!({"session": "b"}))));
+    h.clear();
+    let row = obj(json!({"agent_id": "b1", "session": "b", "persona": "Bea", "avatar_symbol": "star",
+                         "last_activity": 20, "latest_state_ts": 100, "latest_state": "idle"}));
+    h.with(|r| assert_eq!(r.replace_row(&row), RowChange::Applied));
+    assert_eq!(h.count(|op| matches!(op, ListOp::Insert { .. } | ListOp::Remove { .. } | ListOp::Move { .. })), 0);
+    let b = h.row("b").clone();
+    assert_eq!((b.name.as_str(), b.avatar_symbol.as_str()), ("Bea", "star"), "the row's own fields are the Host's");
+    assert_eq!((b.state.as_str(), b.status_text.as_str()), ("thinking", "on it"), "a later state event is kept");
+    assert!(b.unread, "the unread mark is this desktop's");
+    assert_eq!(h.first(), "a", "the row keeps its place");
+    h.with(|r| assert_eq!(r.replace_row(&obj(json!({"agent_id": "z", "session": "z"}))), RowChange::NotHeld));
+}

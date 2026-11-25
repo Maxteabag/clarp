@@ -270,6 +270,93 @@ impl Agent {
         }
     }
 
+    /// Takes the row's `fields` an `agent-roster` event carries (feature
+    /// `roster_fields`): each named field is set as [`Agent::from_json`]
+    /// reads it from a snapshot row, and every field the event does not name
+    /// keeps its value. The session is the row's key and never changes; a
+    /// field this desktop does not read is passed over.
+    pub fn patch(&mut self, fields: &Object) {
+        let new = Self::from_json(fields);
+        for key in fields.keys() {
+            match key.as_str() {
+                "agent_id" => self.agent_id = new.agent_id.clone(),
+                "persona" => self.persona = new.persona.clone(),
+                "backend" => self.backend = new.backend.clone(),
+                "cwd" => self.working_directory = new.working_directory.clone(),
+                "model" => self.model = new.model.clone(),
+                "effort" => self.effort = new.effort.clone(),
+                "avatar_url" => self.avatar_url = new.avatar_url.clone(),
+                "avatar_symbol" => self.avatar_symbol = new.avatar_symbol.clone(),
+                "status_text" => self.status_text = new.status_text.clone(),
+                "last_message" => self.last_message = new.last_message.clone(),
+                "last_completed_message" => self.last_completed_message = new.last_completed_message.clone(),
+                "conversation_id" => self.conversation_id = new.conversation_id.clone(),
+                "voice_id" => self.voice_id = new.voice_id.clone(),
+                "parent_agent_id" => self.parent_agent_id = new.parent_agent_id.clone(),
+                "role" => self.role = new.role.clone(),
+                "helper_state" => self.helper_state = new.helper_state.clone(),
+                "background_jobs" => {
+                    self.background_job_count = new.background_job_count;
+                    self.background_sub_agent_count = new.background_sub_agent_count;
+                }
+                "child_count" => self.child_count = new.child_count,
+                "running_children" => self.running_children = new.running_children,
+                "schedules" => self.schedules = new.schedules.clone(),
+                "mcp_servers" => self.mcp_servers = new.mcp_servers.clone(),
+                "team_ids" => self.team_ids = new.team_ids.clone(),
+                "backend_quota" => self.backend_quota = new.backend_quota.clone(),
+                "latest_state_ts" => self.latest_state_timestamp = new.latest_state_timestamp,
+                "turn_started_at" => self.turn_started_at = new.turn_started_at,
+                "stalled_since" => self.stalled_since = new.stalled_since,
+                "stalled_action" => self.stalled_action = new.stalled_action.clone(),
+                "working_audience" => self.working_audience = new.working_audience.clone(),
+                "working_with" => self.working_with = new.working_with.clone(),
+                "last_activity" => self.last_activity = new.last_activity,
+                "head_revision" => self.head_revision = new.head_revision,
+                "context_tokens" => self.context_tokens = new.context_tokens,
+                "context_window" => self.context_window = new.context_window,
+                "queue_revision" => self.queue_revision = new.queue_revision,
+                "queued_turn_count" => self.queued_turn_count = new.queued_turn_count,
+                "queue_paused" => self.queue_paused = new.queue_paused,
+                "alive" => self.alive = new.alive,
+                "focused" => self.focused = new.focused,
+                "muted" => self.muted = new.muted,
+                "heartbeat_enabled" => self.heartbeat_enabled = new.heartbeat_enabled,
+                "dreaming_enabled" => self.dreaming_enabled = new.dreaming_enabled,
+                "archived_at" => self.archived = new.archived,
+                "is_janitor" => self.janitor = new.janitor,
+                "coordination_visibility" => self.coordination_visibility = new.coordination_visibility.clone(),
+                "coordination_override" => self.coordination_override = new.coordination_override.clone(),
+                "chat_view" => self.chat_view = new.chat_view.clone(),
+                "conversation_fork" => self.conversation_fork = new.conversation_fork,
+                "helper_chat" => self.helper_chat = new.helper_chat,
+                "moved" => {
+                    self.moved_to = new.moved_to.clone();
+                    self.moved_to_host = new.moved_to_host.clone();
+                }
+                "transit" => self.transit = new.transit.clone(),
+                _ => {}
+            }
+        }
+        if fields.contains_key("quiet") || fields.contains_key("is_janitor") {
+            self.quiet = json::boolean(fields, "quiet") || self.janitor;
+        }
+        // Busy as the row says it: its own flag, or a state that works.
+        if fields.contains_key("latest_state") || fields.contains_key("busy") {
+            if fields.contains_key("latest_state") {
+                self.latest_state = new.latest_state.clone();
+            }
+            self.busy = json::boolean(fields, "busy") || is_busy_state(&self.latest_state);
+            if !self.busy {
+                self.turn_started_at = None;
+                self.stalled_since = None;
+                self.stalled_action = None;
+                self.working_audience.clear();
+                self.working_with.clear();
+            }
+        }
+    }
+
     pub fn is_helper(&self) -> bool {
         self.is_helpers_chat() && !self.parent_agent_id.is_empty()
     }

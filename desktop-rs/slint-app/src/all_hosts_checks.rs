@@ -6,7 +6,9 @@
 //! its Host. A row that moved to the primary (by server id) is left out, one
 //! that moved to a Host never paired stays. Opening a peer's chat reads it
 //! from the peer; sending, stopping, live updates and a decision go to the
-//! peer and never to the primary. A peer that cannot be reached keeps its
+//! peer and never to the primary. A peer that offers `roster_fields` mutes
+//! its Nova by event alone: the merged row changes, the peer's agent list
+//! is not read (issue 841). A peer that cannot be reached keeps its
 //! rows with a quiet "Peer Host unreachable" line, and turning the setting
 //! off leaves only the primary's chats.
 
@@ -75,6 +77,8 @@ pub fn all_hosts_check(out: String) {
     let (out_open, out_gone) = (out.clone(), out.clone());
     let primary_posts_before = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let posts_before = primary_posts_before.clone();
+    let peer_snapshots = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let peer_snapshots2 = peer_snapshots.clone();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, _| {
             let loaded = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -84,6 +88,8 @@ pub fn all_hosts_check(out: String) {
             check(!app.engine.borrow().all_hosts(), "the setting is off by default");
             check(sessions(app) == ["rachel", "mike"], &format!("off, the list is the primary's alone: {:?}", sessions(app)));
             check(drawn(window).iter().all(|(_, host)| host.is_empty()), "paired with one Host, no row names its Host");
+            // The peer patches its rows from its events (issue 841).
+            check(peer_control("/__control/roster-rows", &json!({"fields": true, "row": true})).is_ok(), "the peer offers roster_fields and agent_row");
             check(app.engine.borrow().host_badges_setting(), "\"Show the Host on each chat\" is on by default");
             let primary = app.engine.borrow().base_url().to_owned();
             app.engine
@@ -128,9 +134,19 @@ pub fn all_hosts_check(out: String) {
             check(peer_requests("GET", "/agents/snapshot").iter().all(|r| r["authorization"] == "Bearer probe-token"), "the peer is read with its own token");
             check(posts("/select").iter().all(|p| !p["body"]["session"].as_str().unwrap_or("").starts_with('@')), "the primary is never asked about a peer's chat");
             shot(&out, "all-hosts-01-merged");
+            peer_snapshots.set(peer_requests("GET", "/agents/snapshot").len());
+            check(peer_control("/__control/roster-event", &json!({"session": "nova", "kind": "mute-changed", "set": {"muted": true}})).is_ok(), "the peer mutes Nova");
             posts_before.set(posts("/send").len());
             app.engine.borrow_mut().select(NOVA);
             crate::pump_now(&app_now());
+            true
+        })),
+        ("peer row", Box::new(move |app, _, _| {
+            if !app.engine.borrow().roster().find(NOVA).is_some_and(|a| a.muted) {
+                return false;
+            }
+            let read = peer_requests("GET", "/agents/snapshot").len() - peer_snapshots2.get();
+            check(read == 0, &format!("the peer's Nova is muted in the merged list from its event alone: {read} snapshot reads"));
             true
         })),
         ("open", Box::new(move |app, _, _| {

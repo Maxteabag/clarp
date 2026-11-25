@@ -185,6 +185,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from live_projection import LiveView  # noqa: E402
 
 live_features = False
+# One agent's change in its roster event (feature roster_fields, Rust Host
+# contract 182) and the read of one row, GET /agents/<session> (agent_row,
+# 183): off until /__control/roster-rows turns them on.
+roster_rows = {"fields": False, "row": False}
+# The kinds whose events carry `fields`, and those an app reads one row for.
+ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit")
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
@@ -1004,6 +1010,57 @@ def broadcast(event):
             subscriber.put(payload)
 
 
+def roster_event(body):
+    """Changes an agent's row as `set` says, and its maker's as `parent.set`,
+    then sends the change's agent-roster event: with roster_fields on and a
+    carried kind, its `fields` (and the maker's in `parent`) as the rows
+    have them now; otherwise only {type, kind, session}."""
+    session, kind = body.get("session", ""), body.get("kind", "updated")
+    parent = body.get("parent") or {}
+    event = {"type": "agent-roster", "kind": kind, "session": session}
+    with state_lock:
+        rows = {a["session"]: a for a in agents}
+        if session in rows:
+            rows[session].update(body.get("set", {}))
+        if parent.get("session") in rows:
+            rows[parent["session"]].update(parent.get("set", {}))
+        if roster_rows["fields"] and kind in ROSTER_CARRIED and session in rows and body.get("set"):
+            row = rows[session]
+            event["agent_id"] = row["agent_id"]
+            event["fields"] = {key: copy.deepcopy(row.get(key)) for key in body["set"]}
+            if kind == "chat_view":
+                event["chat_view"] = row.get("chat_view")
+            if parent.get("session") in rows:
+                maker = rows[parent["session"]]
+                event["parent"] = {"session": maker["session"], "agent_id": maker["agent_id"],
+                                   "fields": {key: copy.deepcopy(maker.get(key)) for key in parent.get("set", {})}}
+    broadcast(event)
+
+
+def roster_burst_event(i, tag):
+    """The `i`th roster event of a busy stretch, in turn: Mike's helper state
+    with Rachel's counts, Rachel muted or not, Mike's chat view, then two
+    kinds an app reads one row for (Mike's portrait, Rachel's stale work).
+    The texts carry `tag`, so the last event of each kind leaves a known
+    value."""
+    step = i % 5
+    if step == 0:
+        running = (i // 5) % 2 == 0
+        return {"session": "mike", "kind": "helper-state",
+                "set": {"helper_state": "running" if running else "reported", "archived_at": None},
+                "parent": {"session": "rachel", "set": {"latest_state": "background" if running else "idle",
+                                                         "status_text": f"{tag} {i}", "child_count": 1,
+                                                         "running_children": 1 if running else 0,
+                                                         "background_jobs": {"count": 0, "sub_agents": 1 if running else 0}}}}
+    if step == 1:
+        return {"session": "rachel", "kind": "mute-changed", "set": {"muted": (i // 5) % 2 == 0}}
+    if step == 2:
+        return {"session": "mike", "kind": "chat_view", "set": {"chat_view": "session" if (i // 5) % 2 == 0 else "conversation"}}
+    if step == 3:
+        return {"session": "mike", "kind": "portrait-selected", "set": {"avatar_symbol": f"{tag}-{i}"}}
+    return {"session": "rachel", "kind": "stale-work", "set": {"status_text": f"{tag} stale {i}"}}
+
+
 def broadcast_live(session, event):
     """A `live` event: no SSE id (never replayed), only to the streams that
     asked for this session or for every one."""
@@ -1592,6 +1649,10 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("chat_view")
             if chat_view["fork"]:
                 features.append("conversation_fork")
+            if roster_rows["fields"]:
+                features.append("roster_fields")
+            if roster_rows["row"]:
+                features.append("agent_row")
             if lanes["on"]:
                 features.append("lane_settings")
                 if lanes_auto["on"]:
@@ -1618,6 +1679,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, {"agents": agents, "personas": personas,
                                         "tool_explanations": tool_explanation_settings,
                                         "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
+        if url.path.startswith("/agents/") and roster_rows["row"] and url.path.count("/") == 2:
+            # One agent's row, exactly as the snapshot has it.
+            session = unquote(url.path[len("/agents/"):])
+            with state_lock:
+                row = next((a for a in agents if a["session"] == session), None)
+                if row is None:
+                    return self.reply(404, {"error": "agent_not_found", "message": f"No agent session: {session}"})
+                return self.reply(200, copy.deepcopy(row))
         if url.path == "/teams":
             with state_lock:
                 return self.reply(200, {"teams": teams})
@@ -2164,6 +2233,28 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 agents.extend(pending_agents)
                 pending_agents = []
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/roster-rows":
+            # Test control: the roster_fields and agent_row features (read
+            # at the next /server-info).
+            roster_rows["fields"] = bool(body.get("fields", True))
+            roster_rows["row"] = bool(body.get("row", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/roster-event":
+            # Test control: one agent's change ({session, kind, set, parent:
+            # {session, set}}), then its agent-roster event as the Host sends it.
+            roster_event(body)
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/roster-burst":
+            # Test control: a busy stretch, `count` events `interval_ms` apart
+            # (roster_burst_event says which), sent from a thread.
+            count, interval = int(body.get("count", 60)), float(body.get("interval_ms", 100)) / 1000
+            tag = str(body.get("tag", "burst"))
+            def burst():
+                for i in range(count):
+                    roster_event(roster_burst_event(i, tag))
+                    time.sleep(interval)
+            threading.Thread(target=burst, daemon=True).start()
             return self.reply(200, {"ok": True})
         if url.path == "/__control/agent":
             # Test control: change an agent's fields, then announce it.

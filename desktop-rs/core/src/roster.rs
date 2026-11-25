@@ -71,6 +71,18 @@ pub enum Signal {
     CountChanged,
 }
 
+/// What patching or replacing one row did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowChange {
+    /// The row holds the change (or already held it).
+    Applied,
+    /// The list has no row of that session.
+    NotHeld,
+    /// The row was put away or taken back: it belongs to the other list,
+    /// and the lists' counts changed. Nothing was changed here.
+    Moved,
+}
+
 /// One roster row exactly as views see it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AgentRow {
@@ -344,38 +356,7 @@ impl Roster {
             if self.outgoing_ranks.get(&agent.session).is_some_and(|(_, at)| agent.last_activity > *at) {
                 self.outgoing_ranks.remove(&agent.session);
             }
-            if let Some(old) = self.find(&agent.session) {
-                agent.unread = old.unread;
-                agent.last_activity = agent.last_activity.max(old.last_activity);
-                if !agent.conversation_id.is_empty()
-                    && agent.conversation_id == old.conversation_id
-                    && agent.head_revision < old.head_revision
-                {
-                    agent.head_revision = old.head_revision;
-                    agent.last_message = old.last_message.clone();
-                    agent.last_completed_message = old.last_completed_message.clone();
-                }
-                if agent.latest_state_timestamp < old.latest_state_timestamp {
-                    agent.latest_state_timestamp = old.latest_state_timestamp;
-                    agent.latest_state = old.latest_state.clone();
-                    agent.status_text = old.status_text.clone();
-                    agent.busy = old.busy;
-                    agent.turn_started_at = old.turn_started_at;
-                }
-                if agent.queue_revision < old.queue_revision {
-                    agent.queue_revision = old.queue_revision;
-                    agent.queued_turn_count = old.queued_turn_count;
-                    agent.queue_paused = old.queue_paused;
-                }
-            }
-            if let Some(pending) = self.pending_queue_events.remove(&agent.session) {
-                let revision = json::integer(&pending, "queue_revision");
-                if revision >= agent.queue_revision {
-                    agent.queue_revision = revision;
-                    agent.queued_turn_count = json::integer(&pending, "queue_depth") as i32;
-                    agent.queue_paused = json::boolean(&pending, "queue_paused");
-                }
-            }
+            self.keep_newer(&mut agent);
             next.push(agent);
         }
 
@@ -420,6 +401,84 @@ impl Roster {
         if structure_changed {
             self.ops.push(Op::Signal(Signal::CountChanged));
         }
+    }
+
+    /// What the list holds newer than a row the Host made earlier: this
+    /// desktop's unread mark, a later activity, revision, state or queue
+    /// an event already brought.
+    fn keep_newer(&mut self, agent: &mut Agent) {
+        if let Some(old) = self.find(&agent.session) {
+            agent.unread = old.unread;
+            agent.last_activity = agent.last_activity.max(old.last_activity);
+            if !agent.conversation_id.is_empty()
+                && agent.conversation_id == old.conversation_id
+                && agent.head_revision < old.head_revision
+            {
+                agent.head_revision = old.head_revision;
+                agent.last_message = old.last_message.clone();
+                agent.last_completed_message = old.last_completed_message.clone();
+            }
+            if agent.latest_state_timestamp < old.latest_state_timestamp {
+                agent.latest_state_timestamp = old.latest_state_timestamp;
+                agent.latest_state = old.latest_state.clone();
+                agent.status_text = old.status_text.clone();
+                agent.busy = old.busy;
+                agent.turn_started_at = old.turn_started_at;
+            }
+            if agent.queue_revision < old.queue_revision {
+                agent.queue_revision = old.queue_revision;
+                agent.queued_turn_count = old.queued_turn_count;
+                agent.queue_paused = old.queue_paused;
+            }
+        }
+        if let Some(pending) = self.pending_queue_events.remove(&agent.session) {
+            let revision = json::integer(&pending, "queue_revision");
+            if revision >= agent.queue_revision {
+                agent.queue_revision = revision;
+                agent.queued_turn_count = json::integer(&pending, "queue_depth") as i32;
+                agent.queue_paused = json::boolean(&pending, "queue_paused");
+            }
+        }
+    }
+
+    /// Patches one row with the `fields` of an `agent-roster` event
+    /// (feature `roster_fields`): those fields change, every other one
+    /// keeps its value, and the row keeps its place.
+    pub fn patch_row(&mut self, session: &str, fields: &Object) -> RowChange {
+        let Some(row) = self.index_of_session(session) else { return RowChange::NotHeld };
+        let mut agent = self.agents[row].clone();
+        agent.patch(fields);
+        if !self.stall_feature {
+            agent.stalled_since = None;
+            agent.stalled_action = None;
+        }
+        self.put_row(row, agent)
+    }
+
+    /// Replaces one row with the Host's own (`GET /agents/{session}`,
+    /// feature `agent_row`), as a snapshot would, in its place.
+    pub fn replace_row(&mut self, object: &Object) -> RowChange {
+        let mut agent = Agent::from_json(object);
+        let Some(row) = self.index_of_session(&agent.session).filter(|_| !agent.session.is_empty()) else { return RowChange::NotHeld };
+        self.turn_clock |= object.contains_key("turn_started_at");
+        if !self.stall_feature {
+            agent.stalled_since = None;
+            agent.stalled_action = None;
+        }
+        self.keep_newer(&mut agent);
+        self.put_row(row, agent)
+    }
+
+    fn put_row(&mut self, row: usize, agent: Agent) -> RowChange {
+        if agent.archived != self.archived_only {
+            return RowChange::Moved;
+        }
+        if self.agents[row] != agent {
+            self.agents[row] = agent;
+            self.notify_row(row, &ALL_ROLES);
+            self.recount_helpers();
+        }
+        RowChange::Applied
     }
 
     pub fn apply_state_event(&mut self, event: &Object) {
