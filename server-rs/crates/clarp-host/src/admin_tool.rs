@@ -140,10 +140,57 @@ pub(crate) async fn prompt(
                 _ => {}
             }
         }
+        // The timer runs outside any turn. What an agent bound to a provider of its own
+        // schedules is its words: it goes out under its name, so an agent that may not read
+        // it is given that it came and not what it says, and another Host is refused it
+        // (`bound_privacy`).
+        let bound_sender = if from.is_none() {
+            match crate::turn_identity::presented(app, token).await {
+                Ok(Some(own)) if own.record.bound() => Some(own.record.session.clone()),
+                Ok(_) => None,
+                Err(why) => {
+                    return ToolAnswer::said(
+                        4,
+                        format!("clarp-admin prompt: {}; nothing was sent", why.message()),
+                    );
+                }
+            }
+        } else {
+            None
+        };
+        let stamped;
+        let parsed = match bound_sender {
+            Some(session) => {
+                // Its own arguments, an `--origin` left out (it is no automation's), and itself
+                // as the sender.
+                let mut sent: Vec<String> = Vec::with_capacity(args.len() + 2);
+                let mut skip = false;
+                for arg in args {
+                    if std::mem::take(&mut skip) {
+                        continue;
+                    }
+                    if arg == "--origin" {
+                        skip = true;
+                        continue;
+                    }
+                    if arg.starts_with("--origin=") {
+                        continue;
+                    }
+                    sent.push(arg.clone());
+                }
+                sent.extend(["--from".to_string(), session]);
+                stamped = match parse(&sent, &valued, &[PROMPT_TIMER], &[]) {
+                    Ok(parsed) => parsed,
+                    Err(why) => return usage(&why),
+                };
+                &stamped
+            }
+            None => &parsed,
+        };
         // The delayed prompt is sent by this Host's own tool, which finds the Host by the file
-        // its installer wrote: the timer runs outside any turn.
+        // its installer wrote.
         let executable = share_dir().join("tools/clarp-admin");
-        return schedule_prompt(&parsed, &executable, app.clock.now_ms(), async |args| {
+        return schedule_prompt(parsed, &executable, app.clock.now_ms(), async |args| {
             if !tokio::fs::metadata(&executable)
                 .await
                 .is_ok_and(|file| file.is_file())

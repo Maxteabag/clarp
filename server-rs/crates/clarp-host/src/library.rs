@@ -1652,7 +1652,14 @@ pub(crate) async fn decide(
     let done = ask_agent(member, want).await?;
     if action == "resolve" {
         // A card that asked whether an agent may read a bound agent: a yes lets it in.
-        crate::bound_privacy::answered(app, &done.artifact, on_behalf.as_deref()).await;
+        crate::bound_privacy::answered(
+            app,
+            &decision_id,
+            &done.artifact,
+            done.changed,
+            on_behalf.as_deref(),
+        )
+        .await;
     }
     Ok(if action == "withdraw" {
         json!({ "artifact": done.artifact, "changed": done.changed })
