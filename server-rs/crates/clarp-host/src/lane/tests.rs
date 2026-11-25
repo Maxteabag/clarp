@@ -315,16 +315,26 @@ fn an_attempt_that_reached_nothing_is_offered_once_more() {
     let spool = run.join("spool");
     let login = || Err::<u8, _>(std::io::Error::other(LoginChanged("login".into())));
     // No spool: nothing reached the tool, and the lane that left is not waited on forever.
-    assert_eq!(once_more(login(), &spool, &lane, || Ok(2)).unwrap(), 2);
     assert_eq!(
-        once_more(Err(std::io::Error::other("gone")), &spool, &lane, || Ok(2)).unwrap(),
+        once_more(login(), &spool, &lane, false, || Ok(2)).unwrap(),
+        2
+    );
+    assert_eq!(
+        once_more(
+            Err(std::io::Error::other("gone")),
+            &spool,
+            &lane,
+            false,
+            || Ok(2)
+        )
+        .unwrap(),
         2
     );
     // A spool: the tool may have it, and it is never offered again.
     std::fs::write(&spool, "").unwrap();
-    let kept = once_more(login(), &spool, &lane, || panic!("offered twice"));
+    let kept = once_more(login(), &spool, &lane, false, || panic!("offered twice"));
     assert!(LoginChanged::is(&kept.unwrap_err()));
-    assert_eq!(once_more(Ok(1), &spool, &lane, || Ok(2)).unwrap(), 1);
+    assert_eq!(once_more(Ok(1), &spool, &lane, false, || Ok(2)).unwrap(), 1);
     std::fs::remove_dir_all(&run).unwrap();
 }
 
@@ -542,6 +552,18 @@ struct StuckLane {
 
 impl StuckLane {
     fn start(run: &Path, agent: &str, status: Value, group: &str) -> Self {
+        Self::start_leaving(run, agent, status, group, None)
+    }
+
+    /// The same for a lane that, once asked to leave, stays in its loop for `leaves` and then
+    /// begins leaving (its socket goes) and hangs there, holding its lock.
+    fn start_leaving(
+        run: &Path,
+        agent: &str,
+        status: Value,
+        group: &str,
+        leaves: Option<std::time::Duration>,
+    ) -> Self {
         let endpoint = Endpoint::of(Tool::Codex, run, agent);
         let listener = UnixListener::bind(endpoint.socket()).unwrap();
         let ready = run.join(format!("{agent}.ready"));
@@ -568,6 +590,7 @@ impl StuckLane {
         std::thread::spawn(move || {
             let _ = tell.send(process.wait().unwrap());
         });
+        let socket = endpoint.socket().to_owned();
         let asked = Arc::new(Mutex::new(Vec::new()));
         let seen = asked.clone();
         std::thread::spawn(move || {
@@ -580,6 +603,13 @@ impl StuckLane {
                 let op = request["op"].as_str().unwrap().to_owned();
                 seen.lock().unwrap().push(op.clone());
                 if op == "retire" {
+                    if let Some(after) = leaves {
+                        let socket = socket.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(after);
+                            let _ = std::fs::remove_file(socket);
+                        });
+                    }
                     unanswered.push(stream);
                     continue;
                 }
@@ -1485,6 +1515,249 @@ fn a_start_that_meets_a_lane_starting_keeps_it_once_its_socket_answers() {
         "nothing but a look was asked of it"
     );
     assert!(!lane.released().unwrap(), "it was never ended");
-    lane.retire().unwrap();
+    assert!(lane.retire_within(super::LEAVE_WAIT).unwrap());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Sends a lane one request and keeps the connection, unanswered, as the Host's ask to leave is.
+fn ask_to_leave(lane: &Endpoint) -> std::os::unix::net::UnixStream {
+    let mut stream = std::os::unix::net::UnixStream::connect(lane.socket()).unwrap();
+    writeln!(stream, "{}", json!({"op": "retire"})).unwrap();
+    stream
+}
+
+/// Waits for a lane's socket to go, which is when it begins leaving.
+fn began_leaving(lane: &Endpoint) -> std::time::Instant {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while lane.socket().exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the lane never began leaving"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    std::time::Instant::now()
+}
+
+/// Issue 861 (1), and the ending's clock. An idle lane that holds the turn's conversation is
+/// retired as a turn's must be: the turn waits while the lane is still busy in its loop, and
+/// from when its socket goes gives it EXIT_LIMIT and a second (TURN_LEAVE_WAIT) before what is
+/// left of it is ended; nothing is ended before that. A lane that runs work refuses at once, is
+/// never ended, and the turn queues.
+#[test]
+fn a_turns_retirement_ends_an_idle_lane_only_three_seconds_after_it_began_leaving() {
+    let run = run_dir("turn-retire");
+    // Busy in its loop for a second after the ask, then leaving, and hung there.
+    let lane = StuckLane::start_leaving(
+        &run,
+        "a",
+        saying(false),
+        "tool",
+        Some(std::time::Duration::from_secs(1)),
+    );
+    let endpoint = lane.endpoint.clone();
+    let asked = std::time::Instant::now();
+    let retiring = std::thread::spawn(move || endpoint.retire_for_a_turn());
+    let left = began_leaving(&lane.endpoint);
+    assert!(left - asked >= std::time::Duration::from_millis(900));
+    // EXIT_LIMIT and a second from when its socket went: nothing is ended before.
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    assert!(
+        lane.ended.try_recv().is_err(),
+        "ended before EXIT_LIMIT and a second after it began leaving"
+    );
+    assert!(
+        retiring.join().unwrap().unwrap(),
+        "what was left of it was ended"
+    );
+    let ended_after = left.elapsed();
+    let exit = lane
+        .ended
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&exit),
+        Some(nix::libc::SIGKILL)
+    );
+    assert!(ended_after >= super::TURN_LEAVE_WAIT, "{ended_after:?}");
+    assert!(
+        ended_after < std::time::Duration::from_secs(8),
+        "{ended_after:?}"
+    );
+    // A lane that runs work refuses to leave: an error, so the turn queues, and nothing ended.
+    let busy = FakeLane::start(&run, "busy", status("t", "d", 0, true));
+    let began = std::time::Instant::now();
+    assert!(busy.endpoint.retire_for_a_turn().is_err());
+    assert!(began.elapsed() < std::time::Duration::from_secs(3));
+    assert_eq!(busy.asked(), ["inspect", "retire"]);
+    assert!(!busy.endpoint.released().unwrap(), "it was not ended");
+    // One that works and is slow to answer is not ended either, however long it takes.
+    let working = StuckLane::start(&run, "working", saying(true), "tool");
+    let slow = working.endpoint.retire_for_a_turn_within(
+        std::time::Duration::from_millis(500),
+        super::TURN_LEAVE_WAIT,
+    );
+    assert!(slow.is_err());
+    assert!(
+        working
+            .ended
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .is_err()
+    );
+    for (id, group) in [(working.group, true), (working.pid, false)] {
+        let target = nix::unistd::Pid::from_raw(i32::try_from(id).unwrap());
+        if group {
+            let _ = nix::sys::signal::killpg(target, nix::sys::signal::Signal::SIGKILL);
+        } else {
+            let _ = nix::sys::signal::kill(target, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 861 (2). A chat turn whose Codex lane refused it for its login waits at most
+/// TURN_LEAVE_WAIT for that lane to let go, ends nothing, and gets the refusal back so it runs
+/// in a process of its own; the lane is left to leave on its own.
+#[test]
+fn a_refused_chat_turn_waits_three_seconds_and_runs_on_its_own_ending_nothing() {
+    let run = run_dir("refused-chat");
+    let lane = Endpoint::of(Tool::Codex, &run, "a");
+    let spool = run.join("spool");
+    // The refusing lane on its way out: its socket gone, its lock held.
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.lock().unwrap();
+    let again = std::cell::Cell::new(false);
+    let began = std::time::Instant::now();
+    let refused = std::io::Error::other(super::LoginChanged("login".into()));
+    let result = once_more(Err::<u8, _>(refused), &spool, &lane, true, || {
+        again.set(true);
+        Ok(2)
+    });
+    let waited = began.elapsed();
+    assert!(
+        LoginChanged::is(&result.unwrap_err()),
+        "the refusal comes back"
+    );
+    assert!(
+        !again.get(),
+        "no second offer to a lane that has not let go"
+    );
+    assert!(
+        waited >= std::time::Duration::from_millis(2500)
+            && waited < std::time::Duration::from_secs(5),
+        "{waited:?}"
+    );
+    assert!(!lane.released().unwrap(), "nothing was ended");
+    drop(owner);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 861 (3). A turn's start that must retire an idle lane started otherwise: one that holds
+/// the turn's conversation (the same thread) is retired as a turn's must be, and ended only
+/// TURN_LEAVE_WAIT after its socket went, never run beside; one of another thread holds the turn
+/// at most TURN_LEAVE_WAIT, and its retirement carries on without the turn.
+#[test]
+fn a_starts_retirement_of_a_lane_started_otherwise_follows_whose_conversation_it_holds() {
+    let run = run_dir("place-retire");
+    // The same thread: it begins leaving at once and hangs.
+    let same = StuckLane::start_leaving(
+        &run,
+        "a",
+        saying(false),
+        "tool",
+        Some(std::time::Duration::ZERO),
+    );
+    let began = std::time::Instant::now();
+    let place = same.endpoint.place_within(
+        &run,
+        (Some("t"), "new"),
+        |_| false,
+        ROOMY,
+        false,
+        super::LEAVE_WAIT,
+    );
+    let waited = began.elapsed();
+    assert_eq!(
+        place.unwrap(),
+        Place::Free,
+        "never beside it: it was ended first"
+    );
+    assert!(
+        waited >= std::time::Duration::from_millis(2900),
+        "{waited:?}"
+    );
+    assert!(waited < std::time::Duration::from_secs(8), "{waited:?}");
+    same.ended
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    // Another thread: it never leaves; the turn goes on after about TURN_LEAVE_WAIT, and the
+    // lane is not ended on the turn's time.
+    let other = StuckLane::start(&run, "b", saying(false), "tool");
+    let began = std::time::Instant::now();
+    let place = other.endpoint.place_within(
+        &run,
+        (Some("u"), "new"),
+        |_| false,
+        ROOMY,
+        false,
+        super::LEAVE_WAIT,
+    );
+    let waited = began.elapsed();
+    assert!(place.is_err(), "{place:?}");
+    assert!(
+        waited >= std::time::Duration::from_millis(2900)
+            && waited < std::time::Duration::from_secs(5),
+        "{waited:?}"
+    );
+    assert!(
+        other.ended.try_recv().is_err(),
+        "not ended on the turn's time"
+    );
+    for (id, group) in [(other.group, true), (other.pid, false)] {
+        let target = nix::unistd::Pid::from_raw(i32::try_from(id).unwrap());
+        if group {
+            let _ = nix::sys::signal::killpg(target, nix::sys::signal::Signal::SIGKILL);
+        } else {
+            let _ = nix::sys::signal::kill(target, nix::sys::signal::Signal::SIGKILL);
+        }
+    }
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 861 (4). A lane that hangs while leaving, which a turn gave up on, is ended in the
+/// background once LEAVE_WAIT has passed, only while its socket still does not answer and its
+/// lock is still held; the next start then finds room for a fresh lane. A lane whose socket
+/// answers is never ended.
+#[test]
+fn a_lane_hung_while_leaving_is_ended_in_the_background_and_one_that_answers_never() {
+    let run = run_dir("hung-end");
+    let hung = StuckLane::start_leaving(
+        &run,
+        "a",
+        saying(false),
+        "tool",
+        Some(std::time::Duration::ZERO),
+    );
+    let _asked = ask_to_leave(&hung.endpoint);
+    began_leaving(&hung.endpoint);
+    // LEAVE_WAIT has passed (the clock given is now).
+    assert!(hung.endpoint.end_if_hung_at(std::time::Instant::now()));
+    hung.ended
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let next = hung.endpoint.place_within(
+        &run,
+        (Some("t"), "old"),
+        |_| false,
+        ROOMY,
+        false,
+        super::LEAVE_WAIT,
+    );
+    assert_eq!(next.unwrap(), Place::Free, "a fresh lane may start");
+    // A lane whose socket answers (one that was starting, or never left) is never ended.
+    let answers = FakeLane::start(&run, "b", status("t", "d", 50, false));
+    assert!(!answers.endpoint.end_if_hung_at(std::time::Instant::now()));
+    assert!(!answers.endpoint.released().unwrap(), "it was not ended");
+    assert_eq!(answers.asked(), ["inspect"]);
     std::fs::remove_dir_all(&run).unwrap();
 }

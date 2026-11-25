@@ -13,9 +13,10 @@
 //!   the agent's thread lets the lane take the session only while no turn runs, no terminal is
 //!   open and the agent is not moving, and holds every launch of the agent until the take has
 //!   answered ([`Ask::MuseTaken`]): a turn never starts exec while the lane is taking the session;
-//! - before any exec of the session, a lane that holds it leaves, waited for within
-//!   [`LEAVE_WAIT`]; one that does not let go in time fails the attempt in words, since exec
-//!   could not have the session anyway. A lane that runs a turn is never ended for it.
+//! - before any exec of the session, a lane that holds it leaves, retired as a turn's must be:
+//!   [`TURN_LEAVE_WAIT`] from when it is seen leaving, then what is left of it is ended (before
+//!   that, at most [`LEAVE_WAIT`]); one that still holds the session fails the attempt in words,
+//!   since exec could not have the session anyway. A lane that runs a turn is never ended for it.
 //!
 //! A turn the lane refused because the login changed (it leaves, and nothing of the turn reached
 //! Muse) has a lane start under the login there now and take the session, as a turn no lane holds
@@ -51,8 +52,9 @@ pub(super) struct Beside {
 }
 
 impl Beside {
-    /// Before exec starts: a lane that holds the session leaves, within [`LEAVE_WAIT`]. An error
-    /// says why exec cannot have the session.
+    /// Before exec starts: a lane that holds the session leaves, retired as a turn's must be
+    /// ([`crate::lane::Endpoint::retire_for_a_turn`], issue 861). An error says why exec cannot
+    /// have the session.
     pub(super) fn make_way(&self) -> Result<(), String> {
         let holds = self
             .lane
@@ -61,12 +63,9 @@ impl Beside {
         if !holds {
             return Ok(());
         }
-        match self.lane.endpoint().retire_within(LEAVE_WAIT) {
+        match self.lane.endpoint().retire_for_a_turn() {
             Ok(true) => Ok(()),
-            Ok(false) => Err(format!(
-                "the agent's Muse lane did not let go of its session within {} s",
-                LEAVE_WAIT.as_secs()
-            )),
+            Ok(false) => Err("the agent's Muse lane did not let go of its session".to_owned()),
             Err(error) => Err(format!(
                 "the agent's Muse lane holds its session and did not leave: {error}"
             )),

@@ -306,11 +306,6 @@ impl Lane {
         self.endpoint.watch(&Request::Watch, observe)
     }
 
-    /// Ask an idle lane to leave, and wait until it has.
-    pub(crate) fn retire(&self) -> io::Result<()> {
-        self.endpoint.retire()
-    }
-
     pub(crate) fn released(&self) -> io::Result<bool> {
         self.endpoint.released()
     }

@@ -263,10 +263,6 @@ impl Lane {
             token,
         })
     }
-
-    pub(crate) fn retire(&self) -> io::Result<()> {
-        self.endpoint.retire()
-    }
 }
 
 /// What a lane is started with, and the digest of all of it that a running lane cannot change:

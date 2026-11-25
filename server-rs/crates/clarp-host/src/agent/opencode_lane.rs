@@ -216,7 +216,7 @@ impl Beside {
     /// Before the turn starts: a lane that holds `session` lets it go.
     pub(super) fn make_way(&self, session: &str) {
         if !session.is_empty() && self.lane.holds(session) {
-            let _ = self.lane.retire();
+            let _ = self.lane.endpoint().retire_for_a_turn();
         }
     }
 

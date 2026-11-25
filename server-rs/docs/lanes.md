@@ -174,9 +174,9 @@ of them is not done.
     `muse exec` on a session that a `muse serve` holds. A lane that still runs a turn refuses to
     leave, and the other process must not go ahead.
   - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
-    (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
-    `once_more` after a changed login) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
-    lock.
+    (issue #772). Every retirement waits at most 15 s (`LEAVE_WAIT`), and one a turn stands
+    behind at most `TURN_LEAVE_WAIT` after the lane began leaving (issue 861, below), for the
+    lane's owner lock.
     - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
       it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
       that works, or does not say (an older shim), or is slow to answer, is asked to leave and
@@ -347,8 +347,30 @@ session.
   about 1.5 s while it starts its server first): `place`'s wait ends as soon as the socket
   answers, and the lane is then used, or retired if it was started otherwise, as any lane that
   answers. No lane is ended from that wait. One that has not let go or answered by the bound is
-  left; the turn runs in a process of its own at once, and the lane starts for the next turn. `LEAVE_WAIT` stays for retirements (a lane asked
-  to leave, a terminal, a move) and for waits no turn stands behind.
+  left; the turn runs in a process of its own at once, and the lane starts for the next turn.
+  `LEAVE_WAIT` stays for retirements no turn stands behind (a move, a login change, a lane
+  started after a turn of its own).
+- **Every wait a turn stands behind, and the one-writer rule** (issue 861). No turn runs beside
+  a lane that still holds its conversation; within that, no turn waits more than about 3 s for
+  a lane on its way out, and a turn ends a lane only when it said it was idle.
+  - **A turn's retirement** (the lane a turn of its own process makes way for, before it starts:
+    Codex's, the kept Claude Code's, Muse's that holds the session, OpenCode's that holds it; a
+    terminal's; and `place`'s retirement of an idle lane started otherwise that holds the turn's
+    conversation) waits while the lane is still in its loop, at most `LEAVE_WAIT` from the ask,
+    and from when its socket goes, which every lane removes first, `TURN_LEAVE_WAIT` (its own
+    2 s `EXIT_LIMIT` and a second). Only then is what is left of an idle lane ended, so no end
+    lands inside its own clean exit or flush. A lane that runs work refuses, is never ended,
+    and the turn queues.
+  - **`place`'s retirement of an idle lane of another thread** carries on beside the turn, within
+    `LEAVE_WAIT`; the turn waits for it at most `TURN_LEAVE_WAIT`, then runs on its own.
+  - **Codex's `once_more`** for a chat turn refused for its login waits at most
+    `TURN_LEAVE_WAIT` and ends nothing; a lane that has not let go by then is left to leave on its
+    own, and the turn runs in a process of its own. A goal's attempt, which no process of its own
+    can run, waits as a retirement does.
+  - **A lane that hangs while leaving**, which a turn gave up on without ending it, is ended in
+    the background once `LEAVE_WAIT` has passed since it was seen leaving, only if its socket
+    still does not answer and its lock is still held; a lane that answers by then (one that was
+    starting) is never ended. No turn waits on it, and the next turn finds room for a fresh lane.
 - **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
   Muse lane take its session, waits for that before its first output: the lane's start, or the
   session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the

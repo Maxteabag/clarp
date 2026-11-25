@@ -342,7 +342,10 @@ impl Worker {
                 let first = lane.submit((*order).clone(), submission.clone(), token.clone());
                 // Nothing of the attempt reached Codex (no spool): the same attempt goes to a
                 // new lane, once.
-                crate::lane::once_more(first, &spool, lane.endpoint(), || {
+                // A chat turn waits at most TURN_LEAVE_WAIT for a lane refused for its login and
+                // ends nothing; a goal's attempt, which no process of its own can run, waits as a
+                // retirement does (issue 861).
+                crate::lane::once_more(first, &spool, lane.endpoint(), !needed, || {
                     start()?;
                     if !launch_permitted(&tx, turn, attempt) {
                         return Err(std::io::Error::other("the actor stopped this attempt"));
@@ -350,10 +353,11 @@ impl Worker {
                     lane.submit(*order, submission, token)
                 })
             })();
-            // No place for an optional lane, and nothing of the attempt reached a lane: the
-            // agent's thread runs it in a process of its own.
+            // No place for an optional lane, or one refused for its login that had not let go
+            // within TURN_LEAVE_WAIT, and nothing of the attempt reached a lane: the agent's
+            // thread runs it in a process of its own.
             if let (Err(error), Some(order)) = (&result, back)
-                && crate::lane::NoPlace::is(error)
+                && (crate::lane::NoPlace::is(error) || crate::lane::LoginChanged::is(error))
                 && !spool.try_exists().unwrap_or(true)
             {
                 let _ = tx.send(Ask::CodexLaneFull(order));

@@ -323,11 +323,6 @@ impl Lane {
         })
     }
 
-    /// Ask an idle lane to leave, and wait until it has.
-    pub(crate) fn retire(&self) -> io::Result<()> {
-        self.endpoint.retire()
-    }
-
     /// The same, waiting at most `bound` for Claude Code to exit. False: it had not let go yet.
     pub(crate) fn retire_within(&self, bound: std::time::Duration) -> io::Result<bool> {
         self.endpoint.retire_within(bound)

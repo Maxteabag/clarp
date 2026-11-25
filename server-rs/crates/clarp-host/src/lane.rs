@@ -418,11 +418,13 @@ const ENDED_WAIT: Duration = Duration::from_secs(2);
 const RELEASE_LOOK: Duration = Duration::from_millis(100);
 
 fn make_way_within(run: &Path, agent_id: &str, bound: Duration) -> bool {
-    // Every tool's lane is asked, also after one refused.
+    // Every tool's lane is asked, also after one refused. Each is retired as a turn's would be
+    // (issue 861): from when it is seen leaving, TURN_LEAVE_WAIT before what is left of an idle
+    // lane is ended; before that, at most `bound`.
     let mut made_way = true;
     for tool in Tool::ALL {
         made_way &= Endpoint::of(tool, run, agent_id)
-            .retire_within(bound)
+            .retire_for_a_turn_within(bound, TURN_LEAVE_WAIT.min(bound))
             .is_ok();
     }
     made_way
@@ -648,7 +650,13 @@ impl Endpoint {
         // start, until its lock is let go, or its socket answers, and then looked at as any
         // lane that answers. It is never ended from here (issue 860).
         if matches!(&look, Err(error) if gone(error)) && !self.released()? {
-            look = self.answers_or_lets_go(Instant::now() + TURN_LEAVE_WAIT.min(bound), look);
+            let seen = Instant::now();
+            look = self.answers_or_lets_go(seen + TURN_LEAVE_WAIT.min(bound), look);
+            // Neither let go nor answered: the turn goes on without it, and a lane that hangs
+            // while leaving is ended in the background, no turn waiting on it (issue 861).
+            if matches!(&look, Err(error) if gone(error)) && !self.released()? {
+                self.end_if_hung_later(seen);
+            }
         }
         if let Ok(state) = look {
             let same_thread = state.thread == thread.unwrap_or_default();
@@ -656,8 +664,16 @@ impl Endpoint {
                 return Ok(Place::Kept);
             }
             // A lane that does not let go in time has been ended with its tool, where it may
-            // be; the look at its owner lock below says whether it has gone.
-            if self.retire_within(bound).is_err() {
+            // be; the look at its owner lock below says whether it has gone. One that holds this
+            // turn's conversation is retired as a turn's must be, never run beside (one writer);
+            // one of another thread is retired while the turn waits at most TURN_LEAVE_WAIT,
+            // and carries on without it (issue 861).
+            let retired = if same_thread {
+                self.retire_for_a_turn_within(bound, TURN_LEAVE_WAIT.min(bound))
+            } else {
+                self.retire_beside(bound, TURN_LEAVE_WAIT.min(bound))
+            };
+            if retired.is_err() {
                 return if same_thread {
                     Ok(Place::Kept)
                 } else {
@@ -756,21 +772,6 @@ impl Endpoint {
             if !observe(state) {
                 return Ok(());
             }
-        }
-    }
-
-    /// Ask an idle lane to leave, and wait until it has, for at most [`LEAVE_WAIT`]: its owner
-    /// lock is let go only after its tool has been reaped. A lane that still runs work refuses;
-    /// one that has not let go by the bound is an error too, whether it was ended or not
-    /// ([`Self::retire_within`]).
-    pub(crate) fn retire(&self) -> io::Result<()> {
-        if self.retire_within(LEAVE_WAIT)? {
-            Ok(())
-        } else {
-            Err(io::Error::other(format!(
-                "the {} lane did not let go",
-                self.tool.name()
-            )))
         }
     }
 
@@ -926,7 +927,169 @@ impl Endpoint {
     /// that it has gone, and never ends it: what a turn waits for (with [`TURN_LEAVE_WAIT`])
     /// before it starts the lane in its place. `true`: the lock is free.
     pub(crate) fn gone_within(&self, bound: Duration) -> io::Result<bool> {
-        self.released_by(Instant::now() + bound)
+        let seen = Instant::now();
+        let gone = self.released_by(seen + bound)?;
+        if !gone {
+            self.end_if_hung_later(seen);
+        }
+        Ok(gone)
+    }
+
+    /// The end of a lane that hangs while leaving, which a turn gave up on without ending it
+    /// (issue 861): once [`LEAVE_WAIT`] has passed since it was seen leaving, it is ended, on a
+    /// thread of its own that no turn waits on, only if its socket still does not answer and its
+    /// owner lock is still held. A lane that answers by then (one that was starting) is never
+    /// ended. One such watch per lane at a time.
+    pub(crate) fn end_if_hung_later(&self, seen: Instant) {
+        static WATCHED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+            std::sync::LazyLock::new(Default::default);
+        let watched = |socket: &Path, add: bool| {
+            let mut set = WATCHED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if add {
+                set.insert(socket.to_owned())
+            } else {
+                set.remove(socket)
+            }
+        };
+        if !watched(&self.socket, true) {
+            return;
+        }
+        let lane = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("lane-hung-end".into())
+            .spawn(move || {
+                lane.end_if_hung_at(seen + LEAVE_WAIT);
+                watched(&lane.socket, false);
+            });
+        if spawned.is_err() {
+            watched(&self.socket, false);
+        }
+    }
+
+    /// What [`Self::end_if_hung_later`] does at `at`: `true` when it ended the lane.
+    fn end_if_hung_at(&self, at: Instant) -> bool {
+        if self.released_by(at).unwrap_or(true) {
+            return false;
+        }
+        let silent = matches!(self.inspect(), Err(error) if gone(&error));
+        if !silent || self.released().unwrap_or(true) {
+            return false;
+        }
+        eprintln!(
+            "clarp-host: the {} lane hung while leaving for {} s; it is ended",
+            self.tool.name(),
+            LEAVE_WAIT.as_secs()
+        );
+        self.let_go_within(Instant::now(), true).unwrap_or(false)
+    }
+
+    /// Retires a lane of another thread, within `bound`, on a thread of its own: the caller waits
+    /// at most `wait` for its answer, and goes on without it after that, while the retirement
+    /// carries on. An error when it refused, or had not let go by then.
+    fn retire_beside(&self, bound: Duration, wait: Duration) -> io::Result<bool> {
+        let (sender, answer) = std::sync::mpsc::channel();
+        let lane = self.clone();
+        std::thread::Builder::new()
+            .name("lane-retire-beside".into())
+            .spawn(move || {
+                let _ = sender.send(lane.retire_within(bound));
+            })?;
+        match answer.recv_timeout(wait) {
+            Ok(retired) => retired,
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("the {} lane is still leaving", self.tool.name()),
+            )),
+        }
+    }
+
+    /// The retirement a turn stands behind: the agent's lane must let go of the conversation
+    /// before the turn may write it (one writer), so a lane that refuses because it runs work
+    /// is an error and the turn queues, as for [`Self::retire_within`]. The turn's time is
+    /// counted from when the lane is seen to begin leaving, its socket gone, which every lane
+    /// removes first: [`TURN_LEAVE_WAIT`] from then (the 2 s its own clock gives its tool, and
+    /// a second), after which an idle lane is ended with what is left of it, so no end lands
+    /// inside its own clean exit or flush. Before it begins leaving (still in its loop), the
+    /// wait is capped by [`LEAVE_WAIT`] from the ask, as a retirement's (issue 861).
+    pub(crate) fn retire_for_a_turn(&self) -> io::Result<bool> {
+        self.retire_for_a_turn_within(LEAVE_WAIT, TURN_LEAVE_WAIT)
+    }
+
+    /// [`Self::retire_for_a_turn`] with the cap before leaving and the wait after it given.
+    fn retire_for_a_turn_within(&self, cap: Duration, after_leaving: Duration) -> io::Result<bool> {
+        if self.released()? {
+            return Ok(true);
+        }
+        let capped = Instant::now() + cap;
+        let mut asked = self
+            .connect(&Lifecycle::Inspect, cap)
+            .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool));
+        // Nobody on its socket with its lock held: on its way out, seen now, or starting.
+        if matches!(&asked, Err(error) if gone(error)) {
+            asked = self.answers_or_lets_go(Instant::now() + after_leaving, asked);
+            if matches!(&asked, Err(error) if gone(error)) {
+                return if self.released()? {
+                    Ok(true)
+                } else {
+                    self.let_go_within(Instant::now(), true)
+                };
+            }
+        }
+        let idle = match asked {
+            Ok(state) => state.working == Some(false) && state.claim.is_none(),
+            Err(error) => return Err(error),
+        };
+        // The answer to the ask to leave comes once the lane has gone (Claude's) or at once:
+        // read beside the wait, which watches the lane itself.
+        let (sender, answer) = std::sync::mpsc::channel();
+        let lane = self.clone();
+        let left = capped.saturating_duration_since(Instant::now());
+        let _ = std::thread::Builder::new()
+            .name("lane-retire".into())
+            .spawn(move || {
+                let retired = lane
+                    .connect(&Lifecycle::Retire, left)
+                    .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), lane.tool));
+                let _ = sender.send(retired);
+            });
+        let mut seen_leaving = None;
+        // Whether the lane took the ask (answered it, or went away from it), as
+        // retire_within reads it.
+        let mut took = false;
+        loop {
+            if self.released()? {
+                return Ok(true);
+            }
+            match answer.try_recv() {
+                Ok(Ok(_)) => took = true,
+                Ok(Err(error)) if gone(&error) => took = true,
+                Ok(Err(error)) if idle && unanswered(&error) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(_) => {}
+            }
+            let now = Instant::now();
+            if seen_leaving.is_none() && !self.socket.exists() {
+                seen_leaving = Some(now);
+            }
+            let deadline = seen_leaving.map_or(capped, |seen| seen + after_leaving);
+            if now >= deadline {
+                // A lane that works, or did not say, is never ended: one that took the ask is
+                // left as it is; one that did not answer it did not leave.
+                if !idle {
+                    if took {
+                        return self.let_go_within(now, false);
+                    }
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("the {} lane did not leave", self.tool.name()),
+                    ));
+                }
+                return self.let_go_within(now, true);
+            }
+            std::thread::sleep(deadline.saturating_duration_since(now).min(RELEASE_LOOK));
+        }
     }
 
     /// A retirement response only acknowledges the request. The process
@@ -996,19 +1159,30 @@ pub(crate) fn start_once_more<T>(
 /// it reached the tool (its `spool` is not there): the login changed and the lane left, or an
 /// idle lane left between the look and the offer (its own idle time, another agent's room). A
 /// lane that refused for its login is on its way out and is waited for; any other may still be
-/// there, and is looked at again by `again` rather than waited for. The wait is bounded as a
-/// retirement's is: one that does not let go in time is ended by its process id, and `again`
-/// finds out whether it has gone.
+/// there, and is looked at again by `again` rather than waited for.
+/// - A chat turn (`turn`) waits at most [`TURN_LEAVE_WAIT`] and ends nothing: a lane that has
+///   not let go by then is left to leave on its own (and ended in the background should it
+///   hang), and the refusal comes back, so the turn runs in a process of its own (issue 861).
+/// - Anything else (a goal's attempt, which no process of its own can run) waits as a
+///   retirement does: one that does not let go in time is ended by its process id, and `again`
+///   finds out whether it has gone.
 pub(crate) fn once_more<T>(
     first: io::Result<T>,
     spool: &Path,
     lane: &Endpoint,
+    turn: bool,
     again: impl FnOnce() -> io::Result<T>,
 ) -> io::Result<T> {
     match first {
         Err(error) if !spool.try_exists().unwrap_or(true) => {
             if LoginChanged::is(&error) {
-                lane.let_go_within(Instant::now() + LEAVE_WAIT, true)?;
+                if turn {
+                    if !lane.gone_within(TURN_LEAVE_WAIT)? {
+                        return Err(error);
+                    }
+                } else {
+                    lane.let_go_within(Instant::now() + LEAVE_WAIT, true)?;
+                }
             }
             again()
         }

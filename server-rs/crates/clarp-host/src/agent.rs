@@ -4765,11 +4765,13 @@ impl Worker {
                             tell(&tx, turn, attempt, Told::Failed(why));
                             return;
                         }
-                        let _ = lane.retire();
+                        // Retired as a turn's must be (issue 861): this turn will write the
+                        // conversation, so it never runs beside a lane that holds it.
+                        let _ = lane.endpoint().retire_for_a_turn();
                         let claude_held = claude_kept.as_ref().map(|kept| kept.hold());
                         let claude_guard = claude_held.as_deref().map(crate::lane::claude::held);
                         if let Some(kept) = &claude_kept {
-                            let _ = kept.retire();
+                            let _ = kept.endpoint().retire_for_a_turn();
                         }
                         // A Muse lane that holds the session lets go first, within its bound; the
                         // lane for the next turn starts beside this one, which does not wait for it.
