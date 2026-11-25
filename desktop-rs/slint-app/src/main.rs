@@ -6,7 +6,10 @@
 //! Slint's software renderer (for checks), and `--e2e-out DIR` drives it like
 //! a person would, saving a screenshot per stage (see `driver.rs`).
 //! `--pair URL CODE` pairs with a Host and exits (see `pair.rs`).
+//! `--agent-terminal SESSION --host URL` is an agent's terminal on its Host,
+//! run in the system terminal without a window (see `agent_terminal.rs`).
 
+mod agent_terminal;
 mod catalogue;
 mod chat_menu;
 mod commands;
@@ -640,6 +643,11 @@ fn main() {
     // Pairing over SSH: no window, no display.
     if let Some(parsed) = pair::arguments(&args) {
         std::process::exit(pair::run(parsed, settings()));
+    }
+    // An agent's terminal on its Host, in the system terminal: no window.
+    let terminal_settings = settings();
+    if let Some(parsed) = agent_terminal::arguments(&args, &terminal_settings) {
+        std::process::exit(agent_terminal::run(parsed, terminal_settings));
     }
     let e2e_out = args.iter().position(|a| a == "--e2e-out").and_then(|i| args.get(i + 1)).cloned();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();

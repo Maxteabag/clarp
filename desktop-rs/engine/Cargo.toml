@@ -16,3 +16,5 @@ pulldown-cmark = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 serde_json = "1"
+# The agent terminal test drives clarp-net's terminal on pipes.
+tokio = { version = "1", features = ["rt-multi-thread", "time", "io-util", "sync", "macros"] }

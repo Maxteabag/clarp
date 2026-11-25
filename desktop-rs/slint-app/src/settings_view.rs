@@ -92,7 +92,7 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
                 info("Command palette", &key("switcher")),
                 info("Settings", &key("settings")),
                 info("Navigate settings", "↑↓ / Tab · Home / End · / search · Delete default"),
-                info("Open native CLI", &key("agent-terminal")),
+                info("Open agent terminal", &key("agent-terminal")),
                 info("Start idle contact", &key("new-contact")),
                 info("Show / hide sidebar", &key("sidebar")),
                 info("Move between panes", "Ctrl+Alt+Arrow"),

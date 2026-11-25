@@ -140,7 +140,11 @@ pub(super) fn profile_check(out: String) {
             }
             check(urls.last().is_some_and(|u| u.starts_with("file:///")), &format!("Open files opens the agent's folder: {urls:?}"));
             let error = app.engine.borrow().error().to_owned();
-            check(error.contains("share the local filesystem") && recorded("CLARP_TEST_TERMINAL_LOG").is_empty(), &format!("the terminal needs a shared filesystem: {error}"));
+            let terminal = recorded("CLARP_TEST_TERMINAL_LOG").last().cloned().unwrap_or_default();
+            check(
+                error.is_empty() && terminal.contains(r#""--agent-terminal","rachel","--host""#),
+                &format!("the terminal opens the Host's terminal for the chat: {terminal} {error}"),
+            );
             app.engine.borrow_mut().clear_error();
             window.global::<ProfileBridge>().invoke_voice();
             true

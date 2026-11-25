@@ -386,7 +386,7 @@ pub(super) fn launch_check(out: String) {
 /// `--check agent-dialogs --out DIR`: F2 renames the chat's contact,
 /// Assign (Ctrl+K) assigns one (choosing, a refused name, automatic with
 /// Ctrl+Shift+A), the queue dialog edits, sends and deletes queued turns,
-/// Ctrl+Alt+R retries a failed message, Ctrl+Alt+T opens the agent's CLI
+/// Ctrl+Alt+R retries a failed message, Ctrl+Alt+T opens the agent's terminal on its Host
 /// (recorded by `CLARP_TEST_TERMINAL_LOG`) and Ctrl+Shift+R releases an agent.
 pub(super) fn agent_dialogs_check(out: String) {
     use slint::platform::Key;
@@ -679,9 +679,10 @@ pub(super) fn agent_dialogs_check(out: String) {
             let directory = std::fs::canonicalize(&terminal_log).ok().and_then(|p| p.parent().map(|d| d.join("project"))).unwrap_or_default();
             check(
                 recorded["program"] == "xdg-terminal-exec" && recorded["directory"] == directory.to_string_lossy().as_ref(),
-                &format!("Ctrl+Alt+T opens the agent's CLI in its folder: {recorded}"),
+                &format!("Ctrl+Alt+T opens the agent's terminal in its folder: {recorded}"),
             );
-            check(recorded["arguments"].as_array().is_some_and(|a| a.iter().any(|v| v == "native-1")), "resuming its conversation");
+            let bridge = recorded["arguments"].as_array().map(|a| a.iter().skip_while(|v| *v != "--").skip(2).cloned().collect::<Vec<_>>()).unwrap_or_default();
+            check(bridge.first().is_some_and(|v| v == "--agent-terminal") && bridge.get(1).is_some_and(|v| v == "rachel"), &format!("through the Host's terminal: {bridge:?}"));
             check(app.engine.borrow().error().is_empty(), &format!("without an error: {:?}", app.engine.borrow().error()));
             app.engine.borrow_mut().select("mike");
             crate::pump();

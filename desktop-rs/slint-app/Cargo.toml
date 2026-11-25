@@ -11,7 +11,8 @@ path = "src/main.rs"
 [dependencies]
 clarp-core = { path = "../core" }
 clarp-net = { path = "../net" }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+# io-std, signal and sync: the agent terminal (`--agent-terminal`).
+tokio = { version = "1", features = ["rt-multi-thread", "time", "io-std", "io-util", "signal", "sync"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
 rodio = "0.22"

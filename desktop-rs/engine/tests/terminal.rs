@@ -1,4 +1,4 @@
-//! The agent's native CLI in the default terminal, recorded through
+//! The agent's terminal in the default terminal, recorded through
 //! `CLARP_TEST_TERMINAL_LOG` instead of started. The only test in this
 //! binary: it sets the process environment before any other thread reads it.
 
@@ -10,7 +10,7 @@ use common::{Driver, Host};
 use serde_json::json;
 
 #[test]
-fn the_native_cli_opens_in_the_agents_folder_only_on_a_shared_filesystem() {
+fn the_terminal_opens_this_desktop_as_the_bridge_to_the_hosts_terminal() {
     let host = Host::start("terminal");
     let bin = host.dir.join("bin");
     let workspace = host.dir.join("project with spaces");
@@ -18,12 +18,10 @@ fn the_native_cli_opens_in_the_agents_folder_only_on_a_shared_filesystem() {
     std::fs::create_dir_all(&workspace).unwrap();
     // The path the engine sees (macOS's temporary folder is a symlink).
     let workspace = workspace.canonicalize().unwrap();
-    for program in ["claude", "xdg-terminal-exec"] {
-        let path = bin.join(program);
-        // Never run: the launcher only records the command.
-        std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    let path = bin.join("xdg-terminal-exec");
+    // Never run: the launcher only records the command.
+    std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     let log = host.dir.join("terminal.jsonl");
     // SAFETY: the only test in this binary, before the engine starts threads.
     unsafe {
@@ -35,25 +33,35 @@ fn the_native_cli_opens_in_the_agents_folder_only_on_a_shared_filesystem() {
     let mut d = Driver::new(&host.base);
     d.connect();
     d.until("rachel's folder", |e| e.roster().find("rachel").is_some_and(|a| a.working_directory == workspace.to_str().unwrap()));
+    let bridge = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+    let recorded = || -> Vec<serde_json::Value> {
+        std::fs::read_to_string(&log).unwrap_or_default().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+    };
 
-    d.engine.open_agent_terminal("rachel");
-    assert_eq!(d.engine.error(), "The native CLI requires this desktop and Host to share the local filesystem");
-    assert!(!log.exists());
-    d.engine.clear_error();
-
-    d.engine.set_shared_filesystem(true);
-    d.engine.open_agent_terminal("mike");
-    assert_eq!(d.engine.error(), "codex is not installed on this desktop");
-    d.engine.clear_error();
+    // Without a shared filesystem too: the Host runs the CLI, so nothing of
+    // the agent's needs to be on this desktop.
     d.engine.open_agent_terminal("rachel");
     assert!(d.engine.error().is_empty(), "{:?}", d.engine.error());
-    let recorded: serde_json::Value = serde_json::from_str(std::fs::read_to_string(&log).unwrap().trim()).unwrap();
     let directory = workspace.to_str().unwrap();
-    assert_eq!(recorded["program"], "xdg-terminal-exec");
-    assert_eq!(recorded["directory"], directory);
+    let opened = recorded();
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0]["program"], "xdg-terminal-exec");
+    assert_eq!(opened[0]["directory"], directory);
     assert_eq!(
-        recorded["arguments"],
-        json!([format!("--dir={directory}"), "--title=Rachel — claude", "--", "env", "-u", "CLARP_TOKEN", "CLAUDE_PWA_SESSION=rachel",
-               bin.join("claude").to_str().unwrap(), "--resume", "native-1"])
+        opened[0]["arguments"],
+        json!([format!("--dir={directory}"), "--title=Rachel — claude", "--", bridge, "--agent-terminal", "rachel", "--host", host.base])
     );
+
+    // A backend whose CLI is not on this desktop opens all the same, in the
+    // home folder when its folder is not here.
+    d.engine.open_agent_terminal("mike");
+    assert!(d.engine.error().is_empty(), "{:?}", d.engine.error());
+    let opened = recorded();
+    assert_eq!(opened.len(), 2);
+    assert_eq!(opened[1]["arguments"].as_array().unwrap()[3..].to_vec(), [json!(bridge), json!("--agent-terminal"), json!("mike"), json!("--host"), json!(host.base)]);
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+    assert_eq!(opened[1]["directory"], home);
+
+    d.engine.open_agent_terminal("nobody");
+    assert_eq!(recorded().len(), 2, "no terminal for a chat the Host does not list");
 }

@@ -26,7 +26,7 @@ cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
-# The native CLI and terminal launcher an agent terminal needs; never run,
+# The terminal launcher an agent terminal needs (and a CLI); never run,
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
 mkdir -p "$scratch/bin"
 for program in claude xdg-terminal-exec; do printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/$program"; chmod +x "$scratch/bin/$program"; done

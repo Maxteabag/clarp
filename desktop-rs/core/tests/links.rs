@@ -1,28 +1,17 @@
-use clarp_core::links::{local_report_path, native_terminal_launch, terminal_command};
-use clarp_core::protocol::Agent;
-
-fn agent(backend: &str, conversation: &str) -> Agent {
-    Agent { backend: backend.into(), conversation_id: conversation.into(), ..Agent::default() }
-}
+use clarp_core::links::{agent_terminal_command, local_report_path, terminal_command};
 
 #[test]
-fn each_backend_resumes_its_native_conversation() {
-    for (backend, program, flag) in [("claude", "claude", "--resume"), ("codex", "codex", "resume"), ("agy", "agy", "--conversation"), ("grok", "grok", "--resume"), ("muse", "muse", "resume")] {
-        let (found, arguments) = native_terminal_launch(&agent(backend, "native-session;literal")).unwrap();
-        assert_eq!((found.as_str(), arguments), (program, vec![flag.to_owned(), "native-session;literal".to_owned()]));
-    }
-    assert!(native_terminal_launch(&agent("claude", "")).unwrap_err().contains("Send a chat message first"));
-    assert!(native_terminal_launch(&agent("claude", "-rf")).is_err(), "never an option-like id");
-    assert!(native_terminal_launch(&agent("opencode", "x")).unwrap_err().contains("does not have a supported"));
-}
-
-#[test]
-fn the_terminal_runs_the_cli_without_the_host_token() {
-    let (launcher, arguments) = terminal_command(true, "agent", "Agent — codex", "/work/project with spaces", "/bin/codex", &["resume".into(), "id".into()]);
+fn the_terminal_runs_this_desktop_as_the_bridge_to_the_hosts_terminal() {
+    let command = agent_terminal_command("/opt/clarp/clarp-slint", "rachel", "https://host.example");
+    assert_eq!(command, ["/opt/clarp/clarp-slint", "--agent-terminal", "rachel", "--host", "https://host.example"]);
+    let (launcher, arguments) = terminal_command(true, "Rachel — claude", "/work/project with spaces", &command);
     assert_eq!(launcher, "xdg-terminal-exec");
-    assert_eq!(arguments, ["--dir=/work/project with spaces", "--title=Agent — codex", "--", "env", "-u", "CLARP_TOKEN", "CLAUDE_PWA_SESSION=agent", "/bin/codex", "resume", "id"]);
-    let (fallback, arguments) = terminal_command(false, "agent", "t", "/w", "/bin/codex", &[]);
-    assert_eq!((fallback.as_str(), &arguments[..2]), ("x-terminal-emulator", &["-e".to_owned(), "env".to_owned()][..]));
+    assert_eq!(
+        arguments,
+        ["--dir=/work/project with spaces", "--title=Rachel — claude", "--", "/opt/clarp/clarp-slint", "--agent-terminal", "rachel", "--host", "https://host.example"]
+    );
+    let (fallback, arguments) = terminal_command(false, "t", "/w", &command);
+    assert_eq!((fallback.as_str(), &arguments[..2]), ("x-terminal-emulator", &["-e".to_owned(), "/opt/clarp/clarp-slint".to_owned()][..]));
 }
 
 #[test]
