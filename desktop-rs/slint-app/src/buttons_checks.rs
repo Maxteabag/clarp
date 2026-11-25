@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use super::{Stage, app_now, check, control, posts, report, run_stages, sends, shot};
+use super::{Stage, app_now, check, check_window_size_free, control, posts, report, run_stages, sends, shot};
 use crate::headless;
 
 fn element(id: &str) -> Option<i_slint_backend_testing::ElementHandle> {
@@ -100,13 +100,14 @@ pub fn buttons_check(out: String) {
             check(press("composer-send"), "Send is pressed");
             true
         })),
-        ("sent", Box::new(|_, _, elapsed| {
+        ("sent", Box::new(|_, window, elapsed| {
             let sent = sends().iter().any(|s| s["body"]["text"].as_str().is_some_and(|t| t.contains("sent by the button")));
             if !sent {
                 check(elapsed < Duration::from_secs(5), "Send sends the text, as Enter does");
                 return elapsed >= Duration::from_secs(5);
             }
             check(app_now().active_draft().is_empty(), "and empties the composer");
+            check_window_size_free(window, "after a send");
             let set = control("/__control/stop", &json!({"respond": {"ok": true, "terminated": 1}}))
                 .and_then(|()| control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true}})));
             check(set.is_ok(), &format!("Rachel works: {set:?}"));

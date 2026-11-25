@@ -128,6 +128,21 @@ fn hide_when_done_shows_the_work_row_only_while_the_turn_runs() {
     assert_eq!(titles(&settled), ["Ran npm test", "", "Stopped npm test"], "the reply and what failed or stopped; the commentary went with the row");
 }
 
+/// While the turn runs its work row says for how long, as the explorer's
+/// "working 15s" does (#846); settled, the title holds the worked time.
+#[test]
+fn the_running_work_row_shows_how_long_the_turn_has_run() {
+    let mut opts = options(&[], 1759480008200);
+    opts.fold_running = true;
+    let running = present(&turn_full(after(17)), &[], &opts);
+    assert_eq!(running.entries[0].kind, Kind::Fold);
+    assert_eq!(running.entries[0].meta, "8s", "8.2 s since the turn began by the Host's clock");
+    opts.host_now_ms = 1759480075000;
+    assert_eq!(present(&turn_full(after(17)), &[], &opts).entries[0].meta, "1m 15s", "it ticks with the clock");
+    let settled = present(&turn_full(after(23)), &[], &opts);
+    assert!(settled.entries.iter().filter(|e| e.kind == Kind::Fold).all(|e| e.meta.is_empty()), "a settled row has no running time");
+}
+
 #[test]
 fn the_work_row_says_worked_time_and_tools_in_the_spec_s_words() {
     let title = |running, worked, calls| work_title(running, worked, calls);

@@ -14,6 +14,8 @@ use slint::{ComponentHandle, Model};
 use super::{Stage, app_now, check, control, posts, requests, rows, run_stages, shot};
 
 thread_local! {
+    /// The running work row's time as first seen.
+    static WORKING_FOR: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The profile's artifacts request before the menu's Artifacts.
     static ARTIFACTS_BEFORE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
 }
@@ -92,8 +94,22 @@ pub fn quiet_chat_check(out: String) {
             check(fold.live.shimmer == "accent", &format!("it shimmers while the turn runs: {:?}", fold.live.shimmer));
             check(!titles().iter().any(|t| t.starts_with("Running") || t.starts_with("Thought") || t.starts_with("Explored")), &format!("its tools and thinking fold into it: {:?}", titles()));
             check(live_row("live:cl:msg_01:1").is_none(), "the commentary folds into it too, as a working detail");
+            // How long the turn has run, as the explorer's "working 15s" (#846).
+            let meta = fold.live.meta.to_string();
+            let timed = meta.ends_with('s') && meta.starts_with(|c: char| c.is_ascii_digit());
+            check(timed, &format!("the work row says how long the turn has run: {meta:?}"));
+            WORKING_FOR.with(|w| *w.borrow_mut() = meta);
             app_now().focus_transcript();
             shot(&out1, "quiet-01-working");
+            true
+        })),
+        ("working ticks", Box::new(|app, _window, elapsed| {
+            let meta = live_row(FOLD).map(|r| r.live.meta.to_string()).unwrap_or_default();
+            let first = WORKING_FOR.with(|w| w.borrow().clone());
+            if meta == first && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            check(meta != first, &format!("and the time ticks by itself: {first:?} then {meta:?}"));
             crate::artifacts_view::toggle_live(app, FOLD);
             true
         })),

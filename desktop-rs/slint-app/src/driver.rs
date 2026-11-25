@@ -147,6 +147,23 @@ fn check(ok: bool, what: &str) {
     }
 }
 
+/// Checks that the window asks for no size of its own (#846): Slint makes
+/// the root's layout limits the window's minimum and maximum, and a limit
+/// that changes (with the chat shown, a send) has the window system resize
+/// the window, at its own scale rather than the reader's. None, and only
+/// the user and the window system size it. The headless window is never
+/// resized, so its size alone would prove nothing.
+pub(crate) fn check_window_size_free(window: &crate::AppWindow, when: &str) {
+    use i_slint_core::item_tree::ItemTreeRc;
+    use i_slint_core::layout::Orientation;
+    let component = i_slint_core::window::WindowInner::from_pub(window.window()).component();
+    let component = ItemTreeRc::borrow_pin(&component);
+    let h = component.as_ref().layout_info(Orientation::Horizontal);
+    let v = component.as_ref().layout_info(Orientation::Vertical);
+    let free = h.min <= 0.0 && v.min <= 0.0 && h.max >= 1.0e6 && v.max >= 1.0e6;
+    check(free, &format!("{when}: the window sets no minimum or maximum size of its own (width {}..{}, height {}..{})", h.min, h.max, v.min, v.max));
+}
+
 fn finish() {
     row_overlap_checks::watch_verdict();
     println!("{}", if exit_code() == 0 { "E2E_PASS" } else { "E2E_FAIL" });
@@ -2340,6 +2357,13 @@ fn sidebar_check(out: String) {
             if app.engine.borrow().conversation("rachel").is_none_or(|c| c.rows().is_empty()) || names(window).len() != 2 {
                 return false;
             }
+            // The agent-to-agent rooms' row counts the rooms, never a 0
+            // above the chats (#846).
+            let rooms = {
+                use i_slint_backend_testing::ElementQuery;
+                ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().is_some_and(|a| a == "list-rooms")).find_first().and_then(|e| e.accessible_label()).map(|l| l.to_string()).unwrap_or_default()
+            };
+            check(window.get_rooms().row_count() > 0 || rooms == "Agent conversations, none yet", &format!("with no agent conversations their row shows no 0: {rooms:?}"));
             // Mike's turn started 65 s ago by the Host's clock.
             let started = chrono::Utc::now().timestamp_millis() - 65_000;
             let busy = serde_json::json!({"session": "mike", "set": {"busy": true, "latest_state": "thinking", "status_text": "Thinking", "turn_started_at": started}});
