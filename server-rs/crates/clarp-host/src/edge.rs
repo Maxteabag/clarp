@@ -4422,10 +4422,20 @@ async fn events(
             .map(str::to_string)
             .collect()
     });
-    // A chat watched live is a chat open on one of the owner's devices: its agent's lanes are
-    // his while the connection lasts (the owner's rule of 25 Nov 2026).
+    // A chat watched live by one of the owner's apps is a chat open on his device: its agent's
+    // lanes are his while the connection lasts (the owner's rule of 25 Nov 2026). Only a paired
+    // device or the Host's own token, which the app on the Host's machine presents, counts;
+    // an agent's tool token never makes a chat his.
+    let owners = matches!(
+        principal,
+        Principal::Device { .. } | Principal::Administrator
+    );
     let watched = wanted.map(|wanted| {
-        let marks = ViewMarks::start(&app, &wanted);
+        let marks = if owners {
+            ViewMarks::start(&app, &wanted)
+        } else {
+            ViewMarks(None)
+        };
         (wanted, app.hub.watch(), marks)
     });
     // First what the client missed, then the word to look at everything: whatever happened

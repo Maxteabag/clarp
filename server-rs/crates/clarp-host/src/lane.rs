@@ -394,7 +394,7 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        if make_room(run, self, room) || needed {
+        if make_room(run, self, room, needed) || needed {
             Ok(Place::Free)
         } else {
             Ok(Place::Full)
@@ -561,7 +561,11 @@ pub(crate) fn once_more<T>(
 /// talking with leave first, longest idle first, then idle lanes of his, longest idle first. A
 /// lane for an agent of his may send any idle lane away; a lane of the agents' own may send
 /// away only idle lanes of the agents' own, so it never takes an owner's place.
-fn make_room(run: &Path, own: &Endpoint, room: Room) -> bool {
+///
+/// What may leave is reckoned first. A lane that is not `needed` sends nothing away unless what
+/// may leave is enough for both limits: a start that will not happen ends no lane. A `needed`
+/// lane starts whatever the answer, so it sends away what it may, toward the limits.
+fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
     let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
     let mut idle = Vec::new();
     let mut live = 1usize;
@@ -579,6 +583,18 @@ fn make_room(run: &Path, own: &Endpoint, room: Room) -> bool {
     }
     idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
     let fits = |live: usize, held: u64| live <= room.most && held <= room.budget;
+    // What the lanes would be once those that may leave had, in order, until both limits hold.
+    let (mut would_live, mut would_hold) = (live, held);
+    for (_, _, memory, _) in &idle {
+        if fits(would_live, would_hold) {
+            break;
+        }
+        would_live -= 1;
+        would_hold = would_hold.saturating_sub(*memory);
+    }
+    if !fits(would_live, would_hold) && !needed {
+        return false;
+    }
     for (_, _, memory, lane) in idle {
         if fits(live, held) {
             break;

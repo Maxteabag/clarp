@@ -4288,14 +4288,15 @@ impl Worker {
 
     /// Carries out an action that neither a terminal nor the account pool holds back.
     fn carry_out_now(&mut self, action: Action) {
-        // A turn the owner sent makes this agent's lanes his for a while: they keep their place
-        // ahead of the agents' own (the owner's rule of 25 Nov 2026).
+        // A turn the owner sent, by himself or through the Oracle, makes this agent's lanes his
+        // for a while: they keep their place ahead of the agents' own (the owner's rule of
+        // 25 Nov 2026). The while counts again from the turn's end.
         if matches!(action, Action::Launch(_))
             && self
                 .actor
                 .as_ref()
                 .and_then(|actor| actor.status().live)
-                .is_some_and(|live| live.origin.is_user())
+                .is_some_and(|live| live.origin.is_user_send())
         {
             crate::lane::mark_owners_turn(&self.setup.profile.run_dir, &self.setup.record.agent_id);
         }
@@ -5137,6 +5138,11 @@ impl Worker {
             if let Some(last) = ended {
                 c.turn(now, "settled", &self.setup.record.agent_id, last.id.0);
             }
+        }
+        // A turn of the owner's that ended starts his while again, so a long turn's lane stays
+        // his after it.
+        if ended.is_some_and(|last| last.origin.is_user_send()) {
+            crate::lane::mark_owners_turn(&self.setup.profile.run_dir, &self.setup.record.agent_id);
         }
         if let Some(last) = ended
             && matches!(

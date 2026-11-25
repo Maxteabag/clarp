@@ -217,7 +217,7 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
     std::fs::write(run.join("d-turn.token"), "not a lane").unwrap();
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // Three live lanes and the new one, for a count of three: the longest idle leaves.
-    make_room(&run, &own, counted(3));
+    make_room(&run, &own, counted(3), false);
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -328,7 +328,7 @@ fn the_budget_counts_what_each_lane_weighed_and_the_new_one_at_its_typical_size(
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // 3 x 100 weighed and 270 for the new lane: over 500, so the longest idle leaves and 470
     // fits; the busy one counts and stays.
-    make_room(&run, &own, in_bytes(500 * MIB));
+    make_room(&run, &own, in_bytes(500 * MIB), false);
     assert_eq!(longer.asked(), ["inspect", "retire"]);
     assert_eq!(shorter.asked(), ["inspect"]);
     assert_eq!(busy.asked(), ["inspect"]);
@@ -351,7 +351,7 @@ fn lanes_that_could_not_weigh_themselves_count_at_their_estimate_and_stay_bounde
     let own = Endpoint::of(Tool::Codex, &run, "new");
     // The default budget: each counts at 270 MiB, the new one too, so eight fit, and the three
     // idle the longest (a0, a1, a2) leave.
-    make_room(&run, &own, in_bytes(Settings::of(None).budget));
+    make_room(&run, &own, in_bytes(Settings::of(None).budget), false);
     let left: Vec<usize> = lanes
         .iter()
         .enumerate()
@@ -376,12 +376,12 @@ fn the_default_budget_keeps_eight_codex_lanes_and_a_ninth_sends_the_longest_idle
         .map(|n| FakeLane::start(&run, &format!("a{n}"), weighed(100 - n)))
         .collect();
     let eighth = Endpoint::of(Tool::Codex, &run, "eighth");
-    make_room(&run, &eighth, budget);
+    make_room(&run, &eighth, budget, false);
     assert!(seven.iter().all(|lane| lane.asked() == ["inspect"]));
     // With eight running, a ninth sends the one idle the longest away, and only it.
     let running = FakeLane::start(&run, "eighth", weighed(1));
     let ninth = Endpoint::of(Tool::Codex, &run, "ninth");
-    make_room(&run, &ninth, budget);
+    make_room(&run, &ninth, budget, false);
     assert_eq!(seven[0].asked(), ["inspect", "inspect", "retire"]);
     assert!(
         seven[1..]
@@ -406,7 +406,7 @@ fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
         })
         .collect();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    make_room(&run, &own, Settings::of(None).room());
+    make_room(&run, &own, Settings::of(None).room(), false);
     let left = |lanes: &[FakeLane]| -> Vec<usize> {
         lanes
             .iter()
@@ -434,6 +434,7 @@ fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
             most: 8,
             budget: 600 * MIB,
         },
+        false,
     );
     assert_eq!(left(&more), [0, 1, 2, 3]);
     std::fs::remove_dir_all(&run).unwrap();
@@ -454,7 +455,7 @@ fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
         })
         .collect();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    make_room(&run, &own, Settings::of(None).room());
+    make_room(&run, &own, Settings::of(None).room(), false);
     let left: Vec<usize> = lanes
         .iter()
         .enumerate()
@@ -568,6 +569,37 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
     assert_eq!(place, Place::Free);
     assert_eq!(lanes[7].asked(), ["inspect", "retire"]);
     assert!(lanes[..7].iter().all(|lane| lane.asked() == ["inspect"]));
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_start_that_cannot_be_made_room_for_sends_nothing_away_unless_it_is_needed() {
+    // Nine lanes, one past the count of eight because a goal's lane started anyway: eight busy
+    // and one idle. The idle one leaving would still leave nine of eight, so a chat lane does
+    // not start, and it ends nothing.
+    let run = run_dir("over");
+    let mut lanes: Vec<FakeLane> = (0..8u64)
+        .map(|n| FakeLane::start(&run, &format!("b{n}"), status("t", "d", 0, true)))
+        .collect();
+    lanes.push(FakeLane::start(
+        &run,
+        "idle",
+        status("t", "d", 60_000, false),
+    ));
+    let room = Settings::of(None).room();
+    let chat = Endpoint::of(Tool::Codex, &run, "chat");
+    let place = chat
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    assert!(retired(&lanes).is_empty());
+    // A goal's lane starts whatever the answer: it sends the idle one away, toward the limits.
+    let goal = Endpoint::of(Tool::Codex, &run, "goal");
+    let place = goal
+        .place(&run, Some("t"), "d", |_| false, room, true)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(retired(&lanes), [8]);
     std::fs::remove_dir_all(&run).unwrap();
 }
 
