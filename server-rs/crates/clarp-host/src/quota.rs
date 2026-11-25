@@ -1985,6 +1985,57 @@ mod tests {
     }
 
     #[test]
+    fn a_warning_held_while_the_reading_is_old_is_told_after_the_next_read_through_the_seats() {
+        use clarp_kernel::quota_near::Failover;
+        use clarp_kernel::recovery::Accounts;
+        use clarp_kernel::seats::Seats;
+        // The seats as the owner's tool lists them, read and kept as a Host keeps them, and the
+        // desk judged by as the Host makes it (`seats::judged`): a at 85% of its five hours, the
+        // seat in use; b at 90%, no room to spare.
+        let at = 1_899_999_000_000;
+        let usage = |five: f64| {
+            json!({ "status": "allowed", "limited": false, "used_5h": five,
+                "reset_5h": 1_900_007_200, "used_7d": 0.2, "reset_7d": 1_900_400_000, "scoped": [] })
+        };
+        let list = json!({ "accounts": [
+            { "alias": "a", "is_active": true, "usage": usage(0.85) },
+            { "alias": "b", "is_active": false, "usage": usage(0.9) },
+        ]});
+        let read_at = |when: i64| {
+            let mut seats = Seats::with_salt("a-salt");
+            seats.read(CLAUDE, &list, when);
+            seats
+        };
+        let judged = |seats: &Seats, now: i64| {
+            let desk = seats.judged(true, now);
+            judge(Accounts::Select, (CLAUDE, ""), true, &desk, now)
+        };
+        let warning = json!({ "type": "provider-limit", "kind": "warning", "provider_id": "claude",
+            "resets_at": quota::moment(1_900_007_200_000) });
+        let desk = Desk::default();
+        // Judged on a; then twenty minutes pass with no reading: the judgement no longer holds.
+        let first = judged(&read_at(at), at);
+        assert!(first.seat.is_some(), "{first:?}");
+        desk.pooled
+            .lock()
+            .unwrap()
+            .insert(CLAUDE.to_string(), first);
+        let later = at + 20 * 60_000;
+        // The warning comes now: not known whether another seat would take the turn, so it is
+        // not told, and it is held as a's.
+        assert!(desk.pooled(CLAUDE, warning, later).is_none());
+        // The seats are read again, the tool still on a, and no seat has room to spare: told,
+        // with failover none.
+        let again = judged(&read_at(later), later);
+        assert_eq!(again.near, Failover::None, "{again:?}");
+        let told = desk.release(CLAUDE, &again, later).unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"]),
+            (&json!("warning"), &json!("none"))
+        );
+    }
+
+    #[test]
     fn a_warning_that_comes_while_the_judgement_is_old_is_of_the_seat_last_judged() {
         use clarp_kernel::quota_near::Failover;
         let desk = Desk::default();
