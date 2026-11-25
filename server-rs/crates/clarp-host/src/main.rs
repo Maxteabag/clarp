@@ -179,7 +179,12 @@ async fn serve(config: Config) -> Result<(), String> {
     let clock = host_clock();
     // Turns nobody waits on wait while the machine is under pressure; the lanes ask it too.
     let pressure =
-        clarp_host::pressure::Gate::new(Some(config.pressure_dir.clone()), clock.clone());
+        // The Host's own CPU is its cgroup's only where its turns run in scopes of their own.
+        clarp_host::pressure::Gate::new(
+            Some(config.pressure_dir.clone()),
+            clock.clone(),
+            config.launcher == "systemd",
+        );
     clarp_host::pressure::install(pressure.clone());
     let (engine, tables) = engines(&config.engine)
         .ok_or_else(|| format!("there is no engine named `{}`", config.engine))?;

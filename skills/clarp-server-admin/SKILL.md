@@ -318,7 +318,8 @@ switching it on for the owner's agents is his decision. A top-level key of the R
 (`codex_lane_idle_minutes`) and the limits are shared by every lane. The limits follow the
 machine's free memory unless fixed (`lane_limits = "auto"`, the default): a lane starts while
 `MemAvailable`, less the new lane, stays above `lane_reserve_percent` (20) of the memory, however
-many lanes run (from Rust Host contract 186 auto has no count; `lane_ceiling` is read and bounds
+many lanes run (from Rust Host contract 186 auto has no count; `lane_ceiling` is read, never
+written, and bounds
 nothing), and idle lanes leave on memory pressure. Setting the count or the budget
 from an app switches the Host to fixed with that value (feature `lane_auto_limits`,
 Rust Host contract 180; the apps read and set these through `/lane-settings`). While the machine
@@ -334,7 +335,9 @@ work; io and memory are the machine's. `GET /lane-settings` shows `pressure` (wh
 `cpu_source`, `high`, the thresholds),
 `held_for_pressure`, `live` (the lanes that live, idle and busy, per tool) and
 `cold_starts_last_hour` (turns that started a tool anew, per tool): look there first when helpers
-seem slow to start or the machine is loaded. With `lane_limits = "fixed"`,
+seem slow to start or the machine is loaded. A held turn shows "Waiting for the machine (io 45%)"
+as its headline while it waits. A Host outside systemd (not `--launcher systemd`) reads the
+machine's CPU figure, not its own cgroup's. With `lane_limits = "fixed"`,
 the count of lanes (`codex_lane_most`, 8) and the memory budget (`lane_memory_mb`, 2,200 MB)
 bound them instead:
 

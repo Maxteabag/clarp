@@ -460,3 +460,151 @@ fn a_busy_machine_with_a_calm_host_holds_no_work() {
     assert_eq!(settings["pressure"]["cpu_source"], "system", "{settings}");
     assert_eq!(settings["pressure"]["high"], true, "{settings}");
 }
+
+/// The agent's row in the snapshot: what the apps draw of it.
+fn row(host: &Host, session: &str) -> Value {
+    host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session)
+        .cloned()
+        .unwrap()
+}
+
+/// What the agent's row says it does now, in the headline and in the activity's summary.
+fn shown(host: &Host, session: &str) -> (String, String, String) {
+    let row = row(host, session);
+    let text = |value: &Value| value.as_str().unwrap_or_default().to_owned();
+    (
+        text(&row["live_activity"]["headline"]),
+        text(&row["live_activity"]["state"]),
+        text(&row["activity"]["summary"]),
+    )
+}
+
+#[test]
+fn a_held_turn_says_it_waits_for_the_machine_and_stops_saying_it_when_let_go() {
+    let place = Place::new("pressure-words");
+    let host = place.start_with("", KEEP);
+    let (session, spools) = agent(&place, &host, "Helper");
+    let events = host.listen();
+    pressure(&place, 45.4);
+    send_as(&host, &session, "a scheduled chore", "s1", "schedule");
+    // Held: limited, with the reading that is high, as a turn that waits for the network.
+    let words = "Waiting for the machine (io 45%)";
+    wait_for("the held turn's words", || {
+        shown(&host, &session).0 == words
+    });
+    let (_, state, summary) = shown(&host, &session);
+    assert_eq!((state.as_str(), summary.as_str()), ("limited", words));
+    assert_eq!(row(&host, &session)["activity"]["state"], "limited");
+    wait_for("the agent-state that says it waits", || {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-state"
+                && event["session"] == session
+                && event["detail"]["account_recovery"] == "waiting"
+                && event["detail"]["message"] == words
+        })
+    });
+    assert!(!started(&spools));
+    // The words follow the reading at the gate's next look.
+    pressure(&place, 52.0);
+    wait_for("the new reading in the words", || {
+        shown(&host, &session).0 == "Waiting for the machine (io 52%)"
+    });
+    // Calm: the turn starts, and no longer says it waits.
+    pressure(&place, 5.0);
+    wait_for("the turn to start", || started(&spools));
+    wait_for("the turn to end", || host.state(&session) == "done");
+    let (headline, _, summary) = shown(&host, &session);
+    assert!(
+        !headline.starts_with("Waiting for the machine")
+            && !summary.starts_with("Waiting for the machine"),
+        "{headline} / {summary}"
+    );
+    assert_eq!(held(&host), 0);
+}
+
+#[test]
+fn a_turn_let_go_at_the_bound_or_stopped_no_longer_says_it_waits() {
+    let place = Place::new("pressure-words-end");
+    let offset = place.root.join("clock-offset");
+    std::fs::write(&offset, "0").unwrap();
+    let host = place.start_in(
+        "",
+        KEEP,
+        &[("CLARP_TEST_CLOCK_OFFSET_FILE", offset.to_str().unwrap())],
+    );
+    let (bound, bound_spools) = agent(&place, &host, "Bound");
+    let (stopped, stopped_spools) = agent(&place, &host, "Stopped");
+    pressure(&place, 90.0);
+    let words = "Waiting for the machine (io 90%)";
+    send_as(&host, &bound, "a goal's wake", "w1", "automation");
+    send_as(&host, &stopped, "another agent's ask", "a1", "agent");
+    // Another agent's message is a turn among agents: its headline is "Working with another
+    // agent" while the owner hides that work (the default), and its activity says the words.
+    wait_for("both held, with words", || {
+        held(&host) == 2
+            && shown(&host, &bound).0 == words
+            && shown(&host, &stopped).2 == words
+            && shown(&host, &stopped).1 == "limited"
+    });
+    // A Stop ends the held turn at once, and its words with it.
+    host.post("/stop", json!({ "session": stopped }));
+    wait_for("the stopped turn to end", || {
+        host.state(&stopped) == "interrupted"
+    });
+    assert!(
+        !shown(&host, &stopped)
+            .2
+            .starts_with("Waiting for the machine")
+    );
+    assert!(!started(&stopped_spools));
+    // Ten minutes on: the other goes, under pressure still, and says no more that it waits.
+    std::fs::write(&offset, (10 * 60_000 + 1_000).to_string()).unwrap();
+    wait_for("the turn to start at the bound", || started(&bound_spools));
+    wait_for("the turn to end", || host.state(&bound) == "done");
+    let (headline, _, summary) = shown(&host, &bound);
+    assert!(
+        !headline.starts_with("Waiting for the machine")
+            && !summary.starts_with("Waiting for the machine"),
+        "{headline} / {summary}"
+    );
+    assert_eq!(held(&host), 0);
+}
+
+#[test]
+fn an_owners_turn_never_says_it_waits_for_the_machine() {
+    let place = Place::new("pressure-words-owner");
+    let host = place.start_with("", KEEP);
+    let (session, spools) = agent(&place, &host, "Owners");
+    let events = host.listen();
+    pressure(&place, 80.0);
+    host.send(&session, "my own words", "u1");
+    wait_for("the owner's turn", || started(&spools));
+    wait_for("its end", || host.state(&session) == "done");
+    let said = events.lock().unwrap().clone();
+    assert!(
+        !said
+            .iter()
+            .any(|event| event.to_string().contains("Waiting for the machine")),
+        "an owner's turn said it waited"
+    );
+}
+
+#[test]
+fn removing_an_agent_with_a_held_turn_lets_the_gate_forget_it() {
+    let place = Place::new("pressure-close");
+    let host = place.start_with("", KEEP);
+    let (session, _) = agent(&place, &host, "Gone");
+    pressure(&place, 70.0);
+    send_as(&host, &session, "a scheduled chore", "s1", "schedule");
+    wait_for("the turn to wait", || held(&host) == 1);
+    let (status, reply) = host.ask("DELETE", &format!("/agents/{session}"), None);
+    assert_eq!(status, 200, "{reply}");
+    // Gone at once, not at the gate's next look.
+    wait_within("the gate to forget it", Duration::from_secs(3), || {
+        held(&host) == 0
+    });
+}

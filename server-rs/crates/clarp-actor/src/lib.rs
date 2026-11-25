@@ -653,6 +653,9 @@ pub struct LiveStatus {
     pub failed_attempts: u32,
     /// It waits for the network, which a check found gone.
     pub waits_for_the_network: bool,
+    /// Its launch is held while the machine is under pressure (the Host's gate of new work):
+    /// what it says it waits for, as "Waiting for the machine (io 45%)".
+    pub waits_for_the_machine: Option<String>,
     /// It failed on its connection while the machine had a network, and is tried again at
     /// this time.
     pub network_retry_at_ms: Option<i64>,
@@ -946,6 +949,9 @@ pub struct Actor {
     /// The launch of the turn's attempt is held until an account serves it: those who watch
     /// are shown that the turn waits for one.
     held_for_an_account: bool,
+    /// The launch of the turn's attempt is held while the machine is under pressure: what those
+    /// who watch are shown it waits for.
+    held_for_the_machine: Option<String>,
     /// The turn waits for an account that serves its model, while the rest of the pool works.
     for_its_model: bool,
     /// What this Host found of the network for the turn that waits for it.
@@ -1655,6 +1661,7 @@ impl Actor {
             stopped_for_pool: false,
             step_owes: None,
             held_for_an_account: false,
+            held_for_the_machine: None,
             for_its_model: false,
             network: None,
             refused: None,
@@ -2023,7 +2030,13 @@ impl Actor {
             // A turn whose network is gone waits as one that waits for an account does, and
             // says what it waits for.
             let offline = self.network_gone();
+            // A launch held for the machine's pressure, before its tool started.
+            let machine = self
+                .held_for_the_machine
+                .clone()
+                .filter(|_| matches!(self.recorder.agent().live(), Some(Turn::Starting(_))));
             let waits = offline
+                || machine.is_some()
                 || self.held_for_an_account
                 || matches!(
                     self.recorder.agent().live(),
@@ -2040,7 +2053,9 @@ impl Actor {
                 Some(Turn::Parked(parked)) => resets_of(parked),
                 _ => None,
             };
-            let said = if offline {
+            let said = if let Some(machine) = machine {
+                machine
+            } else if offline {
                 failures::NETWORK_WAIT.to_string()
             } else {
                 failures::with_reset(plan.as_deref().unwrap_or(ACCOUNT_WAIT), resets)
@@ -2475,6 +2490,7 @@ impl Actor {
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempt.saturating_sub(1),
                 waits_for_the_network: false,
+                waits_for_the_machine: self.held_for_the_machine.clone(),
                 network_retry_at_ms: None,
             }),
             Some(Turn::Running(turn)) => Some(LiveStatus {
@@ -2497,6 +2513,7 @@ impl Actor {
                 waits_for_its_model: None,
                 failed_attempts: turn.attempt.saturating_sub(1),
                 waits_for_the_network: false,
+                waits_for_the_machine: None,
                 network_retry_at_ms: None,
             }),
             // Between two attempts no tool works: the turn is as busy as one that thinks.
@@ -2523,6 +2540,7 @@ impl Actor {
                 waits_for_its_model: self.model_waited_for(),
                 failed_attempts: turn.attempts,
                 waits_for_the_network: self.network_gone(),
+                waits_for_the_machine: None,
                 network_retry_at_ms: self.network_of(turn).and_then(|watch| match watch.next {
                     NetworkStep::Retry(at) => Some(at),
                     _ => None,
@@ -5999,6 +6017,7 @@ impl Actor {
     /// The live turn is over, in the log: its files have done their work.
     fn forget_live(&mut self) {
         self.for_its_model = false;
+        self.held_for_the_machine = None;
         if let Some(live) = self.live.take() {
             // What the turn's end says is kept for the agent's row.
             if let Ok(Some(end)) = self.turn_end(live.turn.0) {
@@ -6282,6 +6301,17 @@ impl Actor {
 
     /// The launch of the turn's attempt is held until an account serves it, or is no
     /// longer: those who watch the turn are shown that it waits for an account.
+    /// The launch of the live turn's attempt is held while the machine is under pressure, and
+    /// says so in these words (`None`: it is held no more). Those who watch are shown it as a
+    /// turn that waits for the network is: it keeps its place and makes no progress.
+    pub fn held_for_the_machine(&mut self, words: Option<String>, now_ms: i64) {
+        if self.held_for_the_machine == words {
+            return;
+        }
+        self.held_for_the_machine = words;
+        self.show_turn(now_ms);
+    }
+
     pub fn held_for_an_account(&mut self, held: bool, now_ms: i64) {
         self.held_for_an_account = held;
         if !held {

@@ -52,7 +52,7 @@ muse_chat_lane = true         # Muse chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
 lane_limits = "auto"          # the limits follow the free memory (the default), or "fixed"
 lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes (the default)
-lane_ceiling = 24             # read and told, and bounds nothing: auto has no count
+lane_ceiling = 24             # read and told, never written, and bounds nothing: auto has no count
 codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool (the default)
 lane_memory_mb = 2200         # fixed: what they may hold together, in MiB of PSS (the default)
 pressure_cpu_percent = 60     # the machine is under pressure from cpu some avg60 (the default) ...
@@ -112,13 +112,29 @@ as before.
 - **Whose CPU pressure counts.** io and memory are the machine's (`/proc/pressure/io`,
   `memory`): every process stalls on them. The CPU figure is the Host's own cgroup's (the
   `cpu.pressure` of the cgroup `/proc/self/cgroup` names in its `0::` line), and the machine's
-  `/proc/pressure/cpu` only where that cannot be read. The agents' turns run in scopes of their
+  `/proc/pressure/cpu` where that cannot be read. The agents' turns run in scopes of their
   own, outside it: measured on the owner's EliteBook at 09:33 on 25 Nov 2026 (load 39, renders
   in turns), cpu `some` avg10 was 76% for the machine, 77% for `app.slice`, 15% for the Host's
   cgroup and 0.06% for the owner's own session. The machine's figure measures the agents' work
   and would hold new work for hours. `/lane-settings` says which was read
   (`pressure.cpu_source`: `"host-cgroup"` or `"system"`). A test's Host reads `host-cpu` and
   `cpu` in its own pressure folder.
+- **A Host outside systemd reads the machine's CPU.** Its own cgroup is a Host-only one only
+  where it runs as its own service and starts its turns in scopes of their own (`--launcher
+  systemd`, as `install-host` installs it). Started from a terminal its cgroup is that terminal's
+  session, shared with everything started there; in a container `0::/` is the container's root;
+  and with `--launcher direct` its turns run inside its cgroup. There the cgroup's figure would
+  measure the agents' work as the machine's does, so the Host reads `/proc/pressure/cpu`
+  (`cpu_source` `"system"`), and a render in a turn can hold new work for as long as it runs.
+- **A held turn says so.** While it waits, the turn shows "Waiting for the machine (io 45%)" as a
+  turn that waits for the network shows its words (`docs/protocol.md`): `limited`, naming the
+  reading that is high (the highest of several, as a whole percent). The gate tells each waiting
+  turn new words when its next look changes the shown percent, and nothing otherwise; the words
+  go when the turn starts or is stopped, and an agent removed while it waits leaves the gate at
+  once.
+- **A turn that would run on a warm lane waits too.** A warm lane saves only the start; what the
+  gate guards against is the turn's own work (its builds, its reads, a compaction), which a turn
+  does on a lane as in a process of its own.
 - **The gate is for new work.** Pressure holds turns that have not started; it does not slow or
   stop work that already runs. A turn that is running when the pressure rises goes on as it is,
   with everything it starts: one helper's checksum of 52 GB inside a running turn made the

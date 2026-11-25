@@ -579,6 +579,13 @@ enum Ask {
         turn: TurnId,
         attempt: u32,
     },
+    /// From the gate of the machine's pressure: what the attempt that waits for it says it
+    /// waits for changed ("Waiting for the machine (io 45%)").
+    PressureWords {
+        turn: TurnId,
+        attempt: u32,
+        words: String,
+    },
     /// From the explainer of the use of tools: fields to put on an item of what is shown.
     Explained {
         item: String,
@@ -673,6 +680,7 @@ impl Ask {
             Self::AccountEnd => "AccountEnd",
             Self::AccountHeld => "AccountHeld",
             Self::PressureGo { .. } => "PressureGo",
+            Self::PressureWords { .. } => "PressureWords",
             Self::Explained { .. } => "Explained",
             Self::Close(..) => "Close",
         }
@@ -2158,6 +2166,12 @@ impl Worker {
                 if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
                     pool.disowned(&self.setup.record.agent_id);
                 }
+                // Nor does the gate of the machine's pressure keep its waiting turn.
+                if let Some(order) = self.pressure_held.take() {
+                    self.setup
+                        .pressure
+                        .forget(&self.setup.record.agent_id, order.turn.0);
+                }
                 self.actor = None;
                 drop(closed);
                 return;
@@ -3417,6 +3431,7 @@ impl Worker {
                     if let Some(order) = self.pressure_held.take() {
                         let agent = &self.setup.record.agent_id;
                         self.setup.pressure.forget(agent, order.turn.0);
+                        actor.held_for_the_machine(None, now);
                     }
                 }
                 self.after(out);
@@ -4224,11 +4239,16 @@ impl Worker {
             Ask::AccountEnd => (actor.end_waiting(now)?, nobody()),
             Ask::PressureGo { turn, attempt } => match self.pressure_held.take() {
                 // The launch that waited for the machine is carried out now, past the gate,
-                // and through the account pool as any launch.
+                // and through the account pool as any launch. It waits for the machine no more.
                 Some(order) if order.turn == turn && order.attempt == attempt => {
                     self.pressure_passed = Some((turn, attempt));
+                    actor.held_for_the_machine(None, now);
                     let out = Outputs {
                         actions: vec![Action::Launch(order)],
+                        changed: Changed {
+                            status: true,
+                            ..Changed::default()
+                        },
                         ..Outputs::default()
                     };
                     (out, nobody())
@@ -4239,6 +4259,30 @@ impl Worker {
                     return Ok(());
                 }
             },
+            // What the held attempt waits for changed: the reading it names. Told as a change
+            // of its state.
+            Ask::PressureWords {
+                turn,
+                attempt,
+                words,
+            } => {
+                let waits = self
+                    .pressure_held
+                    .as_ref()
+                    .is_some_and(|order| order.turn == turn && order.attempt == attempt);
+                if !waits {
+                    return Ok(());
+                }
+                actor.held_for_the_machine(Some(words), now);
+                let out = Outputs {
+                    changed: Changed {
+                        status: true,
+                        ..Changed::default()
+                    },
+                    ..Outputs::default()
+                };
+                (out, nobody())
+            }
             Ask::AccountHeld => {
                 actor.held_for_its_model();
                 let out = Outputs {
@@ -4527,8 +4571,13 @@ impl Worker {
     /// Whether this launch waits at the gate of the machine's pressure, and is given to it if
     /// so. Only the live turn's, of an origin that is not the owner's word (his own, or the
     /// Oracle's with it) nor relayed from a turn of his for one hop: a helper's, a janitor's,
-    /// another agent's message, a goal's wake, a trigger. Never a call's opening, an attempt the gate let pass already, nor a turn a
-    /// message of the owner's waits behind.
+    /// another agent's message, a goal's wake, a trigger. Never a call's opening, an attempt
+    /// the gate let pass already, nor a turn a message of the owner's waits behind.
+    ///
+    /// A turn that would run on a warm lane waits too: the lane saves only its start, and what
+    /// the gate guards against is the turn's own work (its builds, its reads, a compaction), which
+    /// it does on a lane as in a process of its own. While it waits it says so ("Waiting for the
+    /// machine (io 45%)"), as a turn that waits for the network does.
     fn waits_for_pressure(&mut self, order: &ShimOrder) -> bool {
         if order.opening.is_some() || self.pressure_passed == Some((order.turn, order.attempt)) {
             return false;
@@ -4548,14 +4597,35 @@ impl Worker {
         let go = Box::new(move || {
             let _ = tx.send(Ask::PressureGo { turn, attempt });
         });
+        let tx = self.tx.clone();
+        let say = Box::new(move |words: &str| {
+            let words = words.to_owned();
+            let _ = tx.send(Ask::PressureWords {
+                turn,
+                attempt,
+                words,
+            });
+        });
         let held = self
             .setup
             .pressure
-            .hold(&self.setup.record.agent_id, turn.0, go);
-        if !held {
+            .hold(&self.setup.record.agent_id, turn.0, go, say);
+        if held {
+            let words = self.setup.pressure.words();
+            self.waits_for_the_machine(Some(words));
+        } else {
             self.pressure_passed = Some((turn, attempt));
         }
         held
+    }
+
+    /// What the live turn shows it waits for while its launch is held for the machine's
+    /// pressure; `None` once it is held no more. Told with the change it is part of.
+    fn waits_for_the_machine(&mut self, words: Option<String>) {
+        let now = self.now_ms();
+        if let Some(actor) = self.actor.as_mut() {
+            actor.held_for_the_machine(words, now);
+        }
     }
 
     /// Whether the live turn may start a lane that does not run yet: the owner's turns (his own,
@@ -4604,6 +4674,7 @@ impl Worker {
         self.setup
             .pressure
             .forget(&self.setup.record.agent_id, order.turn.0);
+        self.waits_for_the_machine(None);
         if owner_waits {
             self.pressure_passed = Some((order.turn, order.attempt));
             self.carry_out(Action::Launch(order));
@@ -4652,6 +4723,7 @@ impl Worker {
                 self.setup
                     .pressure
                     .forget(&self.setup.record.agent_id, turn.0);
+                self.waits_for_the_machine(None);
                 tell(&self.tx, turn, attempt, Told::Gone);
                 return;
             }
@@ -6065,6 +6137,10 @@ fn told_state(status: &Status) -> ToldState {
         // It waits for the network, or the network was found there and the turn reconnects:
         // the apps are told each as the check finds it.
         _ if live.is_some_and(|live| live.waits_for_the_network) => "the network".to_string(),
+        // It waits for the machine: told again when the reading it names changes.
+        _ if live.is_some_and(|live| live.waits_for_the_machine.is_some()) => live
+            .and_then(|live| live.waits_for_the_machine.clone())
+            .unwrap_or_default(),
         _ if live.is_some_and(|live| live.network_retry_at_ms.is_some()) => {
             "a reconnect".to_string()
         }
@@ -6108,7 +6184,10 @@ fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
 /// Account waits, network waits and questions to the user leave an otherwise live chat
 /// eligible.
 fn working_for_badge(live: &clarp_actor::LiveStatus) -> bool {
-    live.activity != Activity::Waiting && !waits_for_an_account(live) && !live.waits_for_the_network
+    live.activity != Activity::Waiting
+        && !waits_for_an_account(live)
+        && !live.waits_for_the_network
+        && live.waits_for_the_machine.is_none()
 }
 
 /// Helpers belong to their root chat, so an archived ancestor rules out the helper too.
@@ -6374,6 +6453,7 @@ fn refuse_for(
                 | Ask::AccountEnd
                 | Ask::AccountHeld
                 | Ask::PressureGo { .. }
+                | Ask::PressureWords { .. }
                 | Ask::Explained { .. },
             ) => {}
             // Who the agent is can be changed while it cannot be opened.

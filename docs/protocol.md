@@ -1095,6 +1095,16 @@ the network", and `live_activity` `limited` with that `headline`. Show the words
 read `limited` alone as a usage limit. No contract number goes with it (see
 [compatibility](compatibility.md)).
 
+A turn whose start is held while the machine is under pressure (a Rust Host with
+`turn_pressure_admission`: a turn nobody waits on, issue 834) is shown the same way, in its own
+words: `agent-activity` `state` `limited` with `summary` "Waiting for the machine (io 45%)",
+`agent-state` `detail.account_recovery` `"waiting"` with `detail.message` the same words, and
+`live_activity` `limited` with that `headline`. The words name the reading that is high (`cpu`,
+`io` or `memory`, the highest of several, as a whole percent) and follow it while the turn waits:
+the apps are told again when the shown percent changes. They are gone once the turn starts (the
+machine is calm again, ten minutes have passed, or the owner's message let it go) or is stopped.
+Show the words as sent. No contract number goes with it.
+
 A turn that waits for an account on a Rust Host from contract 176 (feature `quota_pool`) shows the
 reset of the tool's pool, not only of the account that ran out: while another seat of the pool
 would take the turn (the Host is moving to it), its words carry no reset ("Waiting for a claude
@@ -2134,7 +2144,9 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
     machine's memory. In auto, a machine whose memory cannot be read keeps the fixed limits.
   - `POST` takes `limits` (`"auto"` or `"fixed"`, else `400` `wrong_type`), `reserve_percent` and
     `ceiling` as it takes the other limits. They are the top-level keys `lane_limits`,
-    `lane_reserve_percent` and `lane_ceiling` of the Host's `config.toml`.
+    `lane_reserve_percent` and `lane_ceiling` of the Host's `config.toml`. From contract 186
+    `ceiling` is no longer written by a `POST` or carried by `install-host`; one in the file is
+    still read and told.
   - Show the auto settings, and what is free, only where the Host lists the feature.
 - From Rust Host contract 186 (feature `turn_pressure_admission`) the Host holds the turns nobody
   waits on while the machine is under pressure, read from the kernel's `/proc/pressure`:

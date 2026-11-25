@@ -54,6 +54,7 @@ impl Drop for Fake {
 /// A gate on `dir` with the default thresholds, ticked by hand.
 fn gate(dir: Option<PathBuf>, clock: Arc<Hand>) -> Arc<Gate> {
     Arc::new(Gate {
+        host_cpu: dir.as_ref().map(|dir| dir.join("host-cpu")),
         dir,
         clock,
         thresholds: || Thresholds::DEFAULT,
@@ -61,6 +62,11 @@ fn gate(dir: Option<PathBuf>, clock: Arc<Hand>) -> Arc<Gate> {
         state: Mutex::default(),
         cold: Mutex::default(),
     })
+}
+
+/// A way to tell a waiting turn new words that tells nobody.
+fn quiet() -> Box<dyn Fn(&str) + Send> {
+    Box::new(|_| {})
 }
 
 /// A way to let a turn go that counts how often it was let go into `count`, and in which order
@@ -112,14 +118,14 @@ fn a_pressure_file_is_read_as_the_kernel_writes_it() {
 #[test]
 fn a_machine_without_pressure_files_is_never_under_pressure() {
     let missing = std::env::temp_dir().join(format!("pressure-none-{}", std::process::id()));
-    let reading = Reading::read(&missing);
+    let reading = Reading::read(&missing, None);
     assert_eq!(reading, Reading::default());
     assert!(!Thresholds::DEFAULT.high_after(false, &reading));
     let clock = Arc::new(Hand::default());
     for dir in [None, Some(missing)] {
         let gate = gate(dir, clock.clone());
         assert!(!gate.high());
-        assert!(!gate.hold("a", 1, Box::new(|| {})));
+        assert!(!gate.hold("a", 1, Box::new(|| {}), quiet()));
         assert_eq!(gate.waiting(), 0);
     }
 }
@@ -181,10 +187,10 @@ fn turns_wait_under_pressure_and_go_one_at_a_time_when_it_falls() {
     let gate = gate(Some(fake.0.clone()), clock.clone());
     let (count, order) = (Arc::default(), Arc::default());
     // Calm, with nothing waiting: a turn starts at once.
-    assert!(!gate.hold("a", 1, counted(&count, &order, 1)));
+    assert!(!gate.hold("a", 1, counted(&count, &order, 1), quiet()));
     fake.set(0.0, 45.0, 0.0);
-    assert!(gate.hold("a", 2, counted(&count, &order, 2)));
-    assert!(gate.hold("b", 3, counted(&count, &order, 3)));
+    assert!(gate.hold("a", 2, counted(&count, &order, 2), quiet()));
+    assert!(gate.hold("b", 3, counted(&count, &order, 3), quiet()));
     assert_eq!(gate.waiting(), 2);
     // Under pressure, a look lets nothing go.
     assert_eq!(gate.tick(), Some(EVERY));
@@ -194,13 +200,13 @@ fn turns_wait_under_pressure_and_go_one_at_a_time_when_it_falls() {
     assert_eq!(gate.tick(), Some(BETWEEN));
     assert_eq!(*order.lock().unwrap(), [2]);
     // A turn that comes while others still wait waits behind them, calm or not.
-    assert!(gate.hold("c", 4, counted(&count, &order, 4)));
+    assert!(gate.hold("c", 4, counted(&count, &order, 4), quiet()));
     assert_eq!(gate.tick(), Some(BETWEEN));
     assert_eq!(gate.tick(), Some(BETWEEN));
     assert_eq!(*order.lock().unwrap(), [2, 3, 4]);
     // Nothing waits: the ticking ends, and the pressure is not read on a timer.
     assert_eq!(gate.tick(), None);
-    assert!(!gate.hold("d", 5, counted(&count, &order, 5)));
+    assert!(!gate.hold("d", 5, counted(&count, &order, 5), quiet()));
     assert_eq!(count.load(Ordering::SeqCst), 3);
 }
 
@@ -211,9 +217,9 @@ fn a_turn_goes_at_the_bound_however_high_the_pressure() {
     let clock = Arc::new(Hand::default());
     let gate = gate(Some(fake.0.clone()), clock.clone());
     let (count, order) = (Arc::default(), Arc::default());
-    assert!(gate.hold("a", 1, counted(&count, &order, 1)));
+    assert!(gate.hold("a", 1, counted(&count, &order, 1), quiet()));
     clock.0.store(60_000, Ordering::SeqCst);
-    assert!(gate.hold("b", 2, counted(&count, &order, 2)));
+    assert!(gate.hold("b", 2, counted(&count, &order, 2), quiet()));
     let bound = i64::try_from(BOUND.as_millis()).unwrap();
     clock.0.store(bound - 1, Ordering::SeqCst);
     assert_eq!(gate.tick(), Some(EVERY));
@@ -234,8 +240,8 @@ fn a_turn_that_is_forgotten_is_never_let_go() {
     fake.set(0.0, 40.0, 0.0);
     let gate = gate(Some(fake.0.clone()), Arc::new(Hand::default()));
     let (count, order) = (Arc::default(), Arc::default());
-    assert!(gate.hold("a", 1, counted(&count, &order, 1)));
-    assert!(gate.hold("b", 1, counted(&count, &order, 11)));
+    assert!(gate.hold("a", 1, counted(&count, &order, 1), quiet()));
+    assert!(gate.hold("b", 1, counted(&count, &order, 11), quiet()));
     gate.forget("a", 1);
     assert_eq!(gate.waiting(), 1);
     fake.set(0.0, 0.0, 0.0);
@@ -307,7 +313,7 @@ fn the_cpu_figure_is_the_hosts_own_cgroup_where_it_can_be_read() {
     assert_eq!(look.reading.cpu_source, CpuSource::HostCgroup);
     assert_eq!(look.reading.cpu.unwrap().some.avg60, 5.0);
     let (count, order) = (Arc::default(), Arc::default());
-    assert!(!gate.hold("a", 1, counted(&count, &order, 1)));
+    assert!(!gate.hold("a", 1, counted(&count, &order, 1), quiet()));
     // Where the Host's cgroup cannot be read, the machine's figure counts.
     std::fs::remove_file(fake.0.join("host-cpu")).unwrap();
     let look = gate.look();
@@ -336,4 +342,70 @@ fn the_hosts_cgroup_is_found_from_its_v2_line() {
         PathBuf::from("/sys/fs/cgroup/cpu.pressure")
     );
     assert_eq!(cgroup_cpu_of("1:name=systemd:/x\n"), None);
+}
+
+#[test]
+fn a_waiting_turn_says_what_is_high_and_is_told_when_the_shown_percent_changes() {
+    let fake = Fake::new("words");
+    fake.set(0.0, 45.4, 0.0);
+    let gate = gate(Some(fake.0.clone()), Arc::new(Hand::default()));
+    let said: Arc<Mutex<Vec<String>>> = Arc::default();
+    let heard = said.clone();
+    let say: Box<dyn Fn(&str) + Send> = Box::new(move |words: &str| {
+        heard.lock().unwrap().push(words.to_owned());
+    });
+    let (count, order) = (Arc::default(), Arc::default());
+    assert!(gate.hold("a", 1, counted(&count, &order, 1), say));
+    assert_eq!(gate.words(), "Waiting for the machine (io 45%)");
+    // The first look tells it; the same shown percent again tells nothing.
+    assert_eq!(gate.tick(), Some(EVERY));
+    fake.set(0.0, 45.2, 0.0);
+    assert_eq!(gate.tick(), Some(EVERY));
+    assert_eq!(*said.lock().unwrap(), ["Waiting for the machine (io 45%)"]);
+    // Another percent, or another figure that is higher, is told.
+    fake.set(0.0, 52.0, 0.0);
+    assert_eq!(gate.tick(), Some(EVERY));
+    fake.set(91.0, 52.0, 0.0);
+    assert_eq!(gate.tick(), Some(EVERY));
+    assert_eq!(
+        *said.lock().unwrap(),
+        [
+            "Waiting for the machine (io 45%)",
+            "Waiting for the machine (io 52%)",
+            "Waiting for the machine (cpu 91%)",
+        ]
+    );
+    // In the band where it stays high below every threshold, the figure nearest its own.
+    fake.set(50.0, 26.0, 0.0);
+    assert!(gate.high());
+    assert_eq!(gate.words(), "Waiting for the machine (io 26%)");
+    // Calm: the turn goes, with nothing more said.
+    fake.set(0.0, 0.0, 0.0);
+    assert_eq!(gate.tick(), Some(BETWEEN));
+    assert_eq!(said.lock().unwrap().len(), 3);
+}
+
+#[test]
+fn the_hosts_own_cpu_is_read_only_where_its_turns_run_apart_from_it() {
+    let proc = Path::new(PROC_PRESSURE);
+    // Started from a terminal, in a container, or with the direct launcher: the machine's.
+    assert_eq!(host_cpu_of(proc, false), None);
+    // A test's own folder names its own file, whatever the launcher.
+    let dir = Path::new("/srv/fake-pressure");
+    assert_eq!(
+        host_cpu_of(dir, false),
+        Some(PathBuf::from("/srv/fake-pressure/host-cpu"))
+    );
+    // A gate with no file of the Host's own reads the machine's, and says so.
+    let fake = Fake::new("apart");
+    fake.set(90.0, 0.0, 0.0);
+    let gate = Gate::new(
+        Some(PathBuf::from(PROC_PRESSURE)),
+        Arc::new(Hand::default()),
+        false,
+    );
+    assert_eq!(gate.host_cpu, None);
+    let reading = Reading::read(&fake.0, None);
+    assert_eq!(reading.cpu_source, CpuSource::System);
+    assert_eq!(reading.cpu.unwrap().some.avg60, 90.0);
 }

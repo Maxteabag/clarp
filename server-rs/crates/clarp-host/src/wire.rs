@@ -326,11 +326,15 @@ fn waiting_for_network(live: &LiveStatus) -> Option<String> {
         .then(|| failures::NETWORK_WAIT.to_string())
 }
 
-/// What a live turn that waits for an account, or for the network, says it waits for: when
-/// it waits for one. The apps show both alike: the turn keeps its place, and makes no
-/// progress until what it waits for is there.
+/// What a live turn that waits for an account, for the network, or for the machine (its launch
+/// held while the machine is under pressure) says it waits for: when it waits for one. The apps
+/// show them alike: the turn keeps its place, and makes no progress until what it waits for is
+/// there.
 fn waiting_for(live: &LiveStatus, backend: &str) -> Option<String> {
-    waiting_for_network(live).or_else(|| waiting_for_account(live, backend))
+    live.waits_for_the_machine
+        .clone()
+        .or_else(|| waiting_for_network(live))
+        .or_else(|| waiting_for_account(live, backend))
 }
 
 /// What a live turn that waits for an account says it waits for: when it waits for one.
@@ -2470,6 +2474,7 @@ mod tests {
                 waits_for_its_model: None,
                 failed_attempts: 0,
                 waits_for_the_network: false,
+                waits_for_the_machine: None,
                 network_retry_at_ms: None,
             }),
             last: last.map(|outcome| Settled {

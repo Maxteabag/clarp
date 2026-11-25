@@ -100,9 +100,16 @@ pub(crate) enum CpuSource {
     /// The Host's own cgroup (`cpu.pressure` of the cgroup `/proc/self/cgroup` names): the
     /// Host's own threads waiting for a processor. What runs in the agents' turns, in scopes of
     /// their own, is not in it: a render in a turn keeps the machine's figure high for hours,
-    /// and holding new work for it would hold everything behind work nobody can stop.
+    /// and holding new work for it would hold everything behind work nobody can stop. Read only
+    /// where the Host runs as a service of its own and starts its turns in scopes of their own
+    /// (`--launcher systemd`, as `install-host` installs it).
     HostCgroup,
-    /// The machine's (`/proc/pressure/cpu`), where the Host's cgroup cannot be read.
+    /// The machine's (`/proc/pressure/cpu`). Where the Host runs outside systemd (started from a
+    /// terminal, in a container, `--launcher direct`), its cgroup is no Host-only one: it is the
+    /// terminal's session, shared with everything started there, or the container's root, and
+    /// with the direct launcher its turns run inside it. Its figure would measure the agents'
+    /// own work, so the machine's is read, as it is where the cgroup cannot be read (no cgroup
+    /// v2 line, or no `cpu.pressure`). `cpu_source` in `GET /lane-settings` says which.
     #[default]
     System,
 }
@@ -141,9 +148,13 @@ pub(crate) fn cgroup_cpu_of(text: &str) -> Option<PathBuf> {
 }
 
 /// Where the Host's own CPU pressure is read, beside the folder `dir`: on a machine
-/// (`/proc/pressure`), its own cgroup's file; in a folder a test names, that folder's `host-cpu`.
-fn host_cpu_of(dir: &Path) -> Option<PathBuf> {
+/// (`/proc/pressure`), its own cgroup's file where its turns run apart from it (`turns_apart`,
+/// [`CpuSource::HostCgroup`]), else nowhere; in a folder a test names, that folder's `host-cpu`.
+fn host_cpu_of(dir: &Path, turns_apart: bool) -> Option<PathBuf> {
     if dir == Path::new(PROC_PRESSURE) {
+        if !turns_apart {
+            return None;
+        }
         cgroup_cpu_of(&std::fs::read_to_string("/proc/self/cgroup").ok()?)
     } else {
         Some(dir.join("host-cpu"))
@@ -153,8 +164,9 @@ fn host_cpu_of(dir: &Path) -> Option<PathBuf> {
 impl Reading {
     /// The files of the folder `dir` (`/proc/pressure` on a machine): io and memory as the
     /// machine has them, since every process stalls on those; the CPU as the Host's own cgroup
-    /// has it, or the machine's where that cannot be read. File reads, no process started.
-    pub(crate) fn read(dir: &Path) -> Self {
+    /// has it in `host_cpu`, or the machine's where there is none or it cannot be read. File
+    /// reads, no process started.
+    pub(crate) fn read(dir: &Path, host_cpu: Option<&Path>) -> Self {
         let file = |path: &Path| {
             std::fs::read_to_string(path)
                 .ok()
@@ -162,7 +174,7 @@ impl Reading {
                 .and_then(Resource::of)
         };
         let one = |name: &str| file(&dir.join(name));
-        let (cpu, cpu_source) = match host_cpu_of(dir).as_deref().and_then(file) {
+        let (cpu, cpu_source) = match host_cpu.and_then(file) {
             Some(own) => (Some(own), CpuSource::HostCgroup),
             None => (one("cpu"), CpuSource::System),
         };
@@ -242,6 +254,8 @@ struct Waiting {
     turn: u64,
     since_ms: i64,
     go: Box<dyn FnOnce() + Send>,
+    /// How it is told new words for what it waits for.
+    say: Box<dyn Fn(&str) + Send>,
 }
 
 #[derive(Default)]
@@ -250,6 +264,10 @@ struct State {
     waiting: VecDeque<Waiting>,
     /// The thread that reads the pressure while a turn waits runs.
     ticking: bool,
+    /// What a waiting turn says it waits for, from the last reading ([`Look::words`]).
+    words: Option<String>,
+    /// The words the waiting turns were last told: told again only when they change.
+    told: Option<String>,
 }
 
 /// What the gate saw at one look.
@@ -266,6 +284,9 @@ pub(crate) struct Look {
 pub struct Gate {
     /// Where the pressure files are. `None`: nowhere, and the machine is never under pressure.
     dir: Option<PathBuf>,
+    /// Where the Host's own CPU pressure is read ([`CpuSource::HostCgroup`]). `None`: the
+    /// machine's is.
+    host_cpu: Option<PathBuf>,
     clock: Arc<dyn Clock + Send + Sync>,
     thresholds: fn() -> Thresholds,
     /// Whether a turn that waits starts the thread that lets it go ([`Gate::tick`]). A unit
@@ -278,10 +299,17 @@ pub struct Gate {
 
 impl Gate {
     /// The gate of a Host whose pressure files are in `dir`, the owner's thresholds read anew
-    /// at each look.
-    pub fn new(dir: Option<PathBuf>, clock: Arc<dyn Clock + Send + Sync>) -> Arc<Self> {
+    /// at each look. `turns_apart`: its turns run in scopes of their own, apart from the Host's
+    /// cgroup (`--launcher systemd`), whose CPU figure is then the Host's own.
+    pub fn new(
+        dir: Option<PathBuf>,
+        clock: Arc<dyn Clock + Send + Sync>,
+        turns_apart: bool,
+    ) -> Arc<Self> {
+        let host_cpu = dir.as_deref().and_then(|dir| host_cpu_of(dir, turns_apart));
         Arc::new(Self {
             dir,
+            host_cpu,
             clock,
             thresholds: || crate::lane::Settings::read().pressure,
             ticks_itself: true,
@@ -292,7 +320,7 @@ impl Gate {
 
     /// A gate that never holds anything: no pressure is read.
     fn off() -> Arc<Self> {
-        Self::new(None, Arc::new(clarp_ports::clock::SystemClock))
+        Self::new(None, Arc::new(clarp_ports::clock::SystemClock), false)
     }
 
     fn state(&self) -> std::sync::MutexGuard<'_, State> {
@@ -301,15 +329,21 @@ impl Gate {
 
     /// Reads the pressure and decides whether the machine is under it.
     fn looked(&self, state: &mut State) -> Look {
-        let reading = self.dir.as_deref().map(Reading::read).unwrap_or_default();
+        let reading = self
+            .dir
+            .as_deref()
+            .map(|dir| Reading::read(dir, self.host_cpu.as_deref()))
+            .unwrap_or_default();
         let thresholds = (self.thresholds)();
         state.high = thresholds.high_after(state.high, &reading);
-        Look {
+        let look = Look {
             reading,
             high: state.high,
             thresholds,
             waiting: state.waiting.len(),
-        }
+        };
+        state.words = look.words();
+        look
     }
 
     /// The pressure read now, as the apps are told it.
@@ -324,12 +358,14 @@ impl Gate {
 
     /// A turn of `agent` nobody waits on is about to start: whether it waits instead, because
     /// the machine is under pressure, or other turns wait already and go first. One that waits
-    /// is let go by `go`, once.
+    /// is let go by `go`, once, and told by `say` when the words of what it waits for change
+    /// ([`Self::words`] says them now).
     pub(crate) fn hold(
         self: &Arc<Self>,
         agent: &str,
         turn: u64,
         go: Box<dyn FnOnce() + Send>,
+        say: Box<dyn Fn(&str) + Send>,
     ) -> bool {
         let mut state = self.state();
         let look = self.looked(&mut state);
@@ -341,6 +377,7 @@ impl Gate {
             turn,
             since_ms: self.clock.now_ms(),
             go,
+            say,
         });
         if self.ticks_itself && !state.ticking {
             let gate = Arc::clone(self);
@@ -402,6 +439,16 @@ impl Gate {
         }
     }
 
+    /// What a waiting turn says it waits for, from the last reading: "Waiting for the machine
+    /// (io 45%)". A turn that waits behind others while the machine is calm again says it
+    /// waits for the machine all the same, with no figure.
+    pub(crate) fn words(&self) -> String {
+        self.state()
+            .words
+            .clone()
+            .unwrap_or_else(|| "Waiting for the machine".to_owned())
+    }
+
     /// A turn that waits was stopped or went another way: it no longer waits.
     pub(crate) fn forget(&self, agent: &str, turn: u64) {
         self.state()
@@ -426,6 +473,16 @@ impl Gate {
                 return None;
             }
             let look = self.looked(&mut state);
+            // The words follow the reading: every turn that waits is told when what it shows
+            // changes, and not otherwise.
+            if let Some(words) = state.words.clone()
+                && state.told.as_ref() != Some(&words)
+            {
+                for waiting in &state.waiting {
+                    (waiting.say)(&words);
+                }
+                state.told = Some(words);
+            }
             let now = self.clock.now_ms();
             let bound = i64::try_from(BOUND.as_millis()).unwrap_or(i64::MAX);
             let first = if look.high {
@@ -445,6 +502,33 @@ impl Gate {
             }
             None => Some(EVERY),
         }
+    }
+}
+
+impl Look {
+    /// What a turn held by the gate says it waits for, while the machine is under pressure:
+    /// "Waiting for the machine (io 45%)", naming the figure that is high (the highest of
+    /// several, as a whole percent). Within the band where the gate stays high below every
+    /// threshold, the figure nearest its own threshold. `None` while calm.
+    pub(crate) fn words(&self) -> Option<String> {
+        if !self.high {
+            return None;
+        }
+        let named = ["cpu", "io", "memory"]
+            .into_iter()
+            .zip(self.reading.figures())
+            .zip(self.thresholds.each());
+        let over = named
+            .clone()
+            .filter(|((_, figure), threshold)| figure >= threshold)
+            .map(|((name, figure), _)| (name, figure))
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        let (name, figure) = over.or_else(|| {
+            named
+                .max_by(|((_, a), at), ((_, b), bt)| (a / at).total_cmp(&(b / bt)))
+                .map(|((name, figure), _)| (name, figure))
+        })?;
+        Some(format!("Waiting for the machine ({name} {figure:.0}%)"))
     }
 }
 

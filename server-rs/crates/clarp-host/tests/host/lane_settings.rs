@@ -198,3 +198,36 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
     assert!(!text.contains("codex_lane_idle_minutes"), "{text}");
 }
+
+/// Issue 834. `lane_ceiling` bounds nothing since contract 186: a file that carries one (the live
+/// Hosts' config had `lane_ceiling = 64`) still reads, and no POST writes it, nor a change of it.
+#[test]
+fn a_ceiling_in_the_file_still_reads_and_no_post_writes_one() {
+    let (place, world) = lane_place("lane-ceiling", "");
+    let file = place.root.join("config/clarp-host/config.toml");
+    let old = "lane_ceiling = 64\n[server]\nkind = \"clarp-host\"\n";
+    std::fs::write(&file, old).unwrap();
+    let token = "the-owners-token";
+    let world: Vec<(&str, &str)> = world
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect();
+    let host = place.start_in(token, &[], &world);
+    let read = host.get("/lane-settings");
+    assert_eq!(read["ceiling"], 64, "{read}");
+    assert_eq!(read["limits"], "fixed", "{read}");
+    // A ceiling sent alone changes nothing, and is no error.
+    let sent = host.post("/lane-settings", json!({"ceiling": 10}));
+    assert_eq!(sent["ceiling"], 64, "{sent}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), old);
+    // Sent with a change, only the change is written.
+    let sent = host.post(
+        "/lane-settings",
+        json!({"ceiling": 10, "reserve_percent": 25}),
+    );
+    assert_eq!(sent["reserve_percent"], 25, "{sent}");
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("lane_ceiling = 64\n"), "{text}");
+    assert!(text.contains("lane_reserve_percent = 25\n"), "{text}");
+    assert_eq!(text.matches("lane_ceiling").count(), 1, "{text}");
+}
