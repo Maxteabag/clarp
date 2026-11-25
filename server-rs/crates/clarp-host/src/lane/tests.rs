@@ -49,7 +49,7 @@ fn in_bytes(budget: u64) -> Room {
 #[test]
 fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_owner_says() {
     let default = Settings {
-        chat: [false, false],
+        chat: [false, false, false],
         idle_ms: 15 * 60_000,
         most: 8,
         budget: 2_200 * MIB,
@@ -61,13 +61,14 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
     assert_eq!(of(""), default);
     assert!(!default.chat(Tool::Codex));
     assert!(!default.chat(Tool::Claude));
+    assert!(!default.chat(Tool::Muse));
     let set = of(
         "codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\nlane_memory_mb = 3000\n",
     );
     assert_eq!(
         set,
         Settings {
-            chat: [true, false],
+            chat: [true, false, false],
             idle_ms: 120_000,
             most: 3,
             budget: 3_000 * MIB,
@@ -75,6 +76,9 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
         }
     );
     assert!(set.chat(Tool::Codex));
+    // Each tool has its own switch.
+    let muse = of("muse_chat_lane = true\n");
+    assert!(muse.chat(Tool::Muse) && !muse.chat(Tool::Codex));
     // Where the machine's memory cannot be read, auto keeps the fixed limits.
     assert_eq!(
         set.room_with(None),
@@ -116,6 +120,14 @@ fn every_tool_with_a_lane_has_its_own_switch_and_socket_name() {
     // Two tools' lanes of one agent never share a socket.
     let names: std::collections::BTreeSet<_> = Tool::ALL.map(Tool::suffix).into_iter().collect();
     assert_eq!(names.len(), Tool::ALL.len());
+    assert_eq!(Tool::of("muse"), Some(Tool::Muse));
+    let run = Path::new("/run/clarp");
+    let muse = Endpoint::of(Tool::Muse, run, "a1");
+    assert_eq!(muse.socket(), Path::new("/run/clarp/a1-mus.sock"));
+    assert_eq!(
+        Endpoint::found(PathBuf::from("/run/clarp/a1-mus.sock")),
+        Some(muse)
+    );
 }
 
 #[test]
@@ -782,6 +794,12 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
     // A chat turn's lane is optional: it is not started, and nothing is asked to leave.
     let chat = Endpoint::of(Tool::Codex, &run, "chat");
     let place = chat
+        .place(&run, Some("t"), "d", |_| false, defaults, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    // Nor is a Muse lane, whose start is always optional (issue 762).
+    let muse = Endpoint::of(Tool::Muse, &run, "muse");
+    let place = muse
         .place(&run, Some("t"), "d", |_| false, defaults, false)
         .unwrap();
     assert_eq!(place, Place::Full);

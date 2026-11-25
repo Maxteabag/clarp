@@ -355,14 +355,15 @@ fn prompted(tokens_in: u64, tokens_out: u64) -> Value {
 }
 
 #[test]
-fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_as_words_in_codex() {
+fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_as_words_in_codex_and_muse()
+ {
     for (id, steers) in [
         ("claude", Steers::Stdin),
         ("agy-acp", Steers::Stdin),
         ("codex", Steers::Words),
         ("agy", Steers::No),
         ("grok", Steers::No),
-        ("muse", Steers::No),
+        ("muse", Steers::Words),
         ("opencode", Steers::No),
         ("deepseek", Steers::No),
         ("scripted", Steers::No),

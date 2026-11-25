@@ -534,6 +534,27 @@ mod tests {
     }
 
     #[test]
+    fn the_muse_switch_is_read_asked_and_written_as_the_other_tools_are() {
+        // Issue 762: Muse's lane is switched from the same screen, by the same key rules.
+        let wanted = asked(br#"{"muse_chat_lane": true}"#).unwrap();
+        let text = changed(FILE, &change_of(FILE, &wanted).unwrap()).unwrap();
+        let read: toml::Table = text.parse().unwrap();
+        let settings = Settings::of(Some(&read));
+        assert!(settings.chat(Tool::Muse) && settings.chat(Tool::Codex));
+        assert!(!settings.chat(Tool::Claude));
+        assert!(text.find("muse_chat_lane = true").unwrap() < text.find("[server]").unwrap());
+        let answer = told(&settings, &Holding::default());
+        assert_eq!(answer["muse_chat_lane"], true);
+        assert_eq!(
+            answer["held"]["tools"]["muse"],
+            json!({"lanes": 0, "busy": 0, "memory_mb": 0})
+        );
+        let error = asked(br#"{"muse_chat_lane": "on"}"#).unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(error.message(), "muse_chat_lane must be true or false");
+    }
+
+    #[test]
     fn a_file_that_is_no_toml_or_holds_a_table_under_the_key_is_not_written_over() {
         assert!(matches!(
             changed(
@@ -705,6 +726,7 @@ mod tests {
                     bytes: 300 * MIB,
                 },
                 lane::Held::default(),
+                lane::Held::default(),
             ],
             unanswered: 1,
         };
@@ -719,6 +741,7 @@ mod tests {
             json!({
                 "codex_chat_lane": false,
                 "claude_chat_lane": true,
+                "muse_chat_lane": false,
                 "limits": "auto",
                 "most": 5,
                 "memory_mb": 2200,
@@ -739,6 +762,7 @@ mod tests {
                     "tools": {
                         "codex": {"lanes": 2, "busy": 1, "memory_mb": 300},
                         "claude": {"lanes": 0, "busy": 0, "memory_mb": 0},
+                        "muse": {"lanes": 0, "busy": 0, "memory_mb": 0},
                     },
                     "available_mb": 3000,
                     "reserve_mb": 2000,

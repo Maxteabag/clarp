@@ -39,6 +39,15 @@ impl Backend for Adapter {
         true
     }
 
+    /// A Muse turn on the agent's lane takes steered words (`turn/steer`); its spool says so with
+    /// `steer.open`, which exec never prints, so an exec turn is never steered (issue 762).
+    fn steers(&self) -> crate::Steers {
+        match self.tool {
+            Tool::Muse => crate::Steers::Words,
+            Tool::Grok => crate::Steers::No,
+        }
+    }
+
     fn efforts(&self) -> &'static [&'static str] {
         match self.tool {
             Tool::Grok => &["low", "medium", "high"],
@@ -287,6 +296,15 @@ impl Stream {
     }
 
     fn muse(&mut self, e: &Value, t: i64, out: &mut Vec<Signal>) {
+        // The Muse lane's word that the answer is whole while Muse's reminder agents still hold
+        // the turn (issue 762): the turn is over for the user, as at Grok's end line.
+        if e["type"] == "turn.answered" {
+            self.flush(Vec::new(), out);
+            if self.outcome.is_none() && self.calls.is_empty() {
+                out.push(Signal::Answered);
+            }
+            return;
+        }
         let p = &e["payload"];
         match word(&e["payload_type"]) {
             "run.lifecycle.started" => out.push(Signal::Moved(Activity::Thinking)),

@@ -35,6 +35,7 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     let read = host.get("/lane-settings");
     assert_eq!(read["codex_chat_lane"], false, "{read}");
     assert_eq!(read["claude_chat_lane"], false, "{read}");
+    assert_eq!(read["muse_chat_lane"], false, "{read}");
     assert_eq!(read["most"], 6, "{read}");
     assert_eq!(read["memory_mb"], 2200, "{read}");
     assert_eq!(read["idle_minutes"], 15, "{read}");
@@ -101,6 +102,11 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
             json!({"claude_chat_lane": 1}),
             "wrong_type",
             "claude_chat_lane must be true or false",
+        ),
+        (
+            json!({"muse_chat_lane": "on"}),
+            "wrong_type",
+            "muse_chat_lane must be true or false",
         ),
     ] {
         let (status, answer) = host.ask("POST", "/lane-settings", Some(&body));
@@ -171,6 +177,7 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert_eq!(codex["busy"], 0, "{read}");
     assert!(codex["memory_mb"].as_u64().unwrap() > 0, "{read}");
     assert_eq!(read["held"]["tools"]["claude"]["lanes"], 0, "{read}");
+    assert_eq!(read["held"]["tools"]["muse"]["lanes"], 0, "{read}");
 
     // A key the file did not have is added where the Host reads it.
     let changed = host.post("/lane-settings", json!({"memory_mb": 3000}));
