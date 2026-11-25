@@ -630,7 +630,7 @@ def prepare_debug(workspace, profile):
 def build_space(floor, debug=False, outcome=None):
     """Prepare this checkout's target and yield whether the build may run. The caller puts the
     command's exit code in `outcome` (a dict, under 'code'): only a 0 marks the build good."""
-    if floor is None:  # repo-gates does not produce a Cargo target
+    if floor is None:  # a job without a Cargo target (fmt)
         yield True
         return
     cwd = Path.cwd()

@@ -6,8 +6,8 @@
 #     server-rs/tools/gated-trees COMMIT-THE-VERDICT-WAS-GIVEN-FOR COMMIT-IT-IS-TO-STAND-FOR
 #
 # Prints each tree or file with its id in both; ends 0 only when all are the same. What it does
-# not cover runs again on the new commit itself: the repository's own gates (tools/repo-gates)
-# and the release that is installed, whose version is the commit.
+# not cover runs again on the new commit itself: the final pass and the release that is
+# installed, whose version is the commit.
 set -u
 if [ "$#" -ne 2 ]; then
   echo "usage: gated-trees GATED-COMMIT NEW-COMMIT" >&2

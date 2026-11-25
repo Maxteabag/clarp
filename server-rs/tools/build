@@ -4,7 +4,7 @@
 # fleet-load <private-remote-dir> <move|empty|full> runs one time-bounded slice.
 # Set CLARP_BUILD_FIRST=1 for a single priority step: for a train's pass and release only, which an
 # install waits for. A helper's build waits its turn in the queue, however long it is. For a whole landing, use
-# tools/build lease ./landing-driver; its build and repo-gates commands inherit the reservation.
+# tools/build lease ./landing-driver; its build commands inherit the reservation.
 # If the driver's machine disappears, its lease can last until SSH detects the disconnect (about two hours).
 # To release the reservation sooner, end the keeper PID shown by build status on the build machine.
 #
