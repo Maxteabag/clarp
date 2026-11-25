@@ -248,6 +248,32 @@ pub(crate) enum Place {
     Kept,
     /// No lane runs now, room has been made, and a new one may start.
     Free,
+    /// No place is free within both limits, and the lane is not one a turn needs: it does not
+    /// start, and the turn runs in a process of its own (issue 786).
+    Full,
+}
+
+/// A lane that would start past both limits and that no turn needs: none is started (issue 786).
+#[derive(Debug)]
+pub(crate) struct NoPlace;
+
+impl std::fmt::Display for NoPlace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("no lane place is free: every lane runs work")
+    }
+}
+
+impl std::error::Error for NoPlace {}
+
+impl NoPlace {
+    /// Whether `error` is this refusal, as a lane's start returns it.
+    pub(crate) fn is(error: &io::Error) -> bool {
+        error.get_ref().is_some_and(|inner| inner.is::<NoPlace>())
+    }
+
+    pub(crate) fn error() -> io::Error {
+        io::Error::other(NoPlace)
+    }
 }
 
 /// An agent's lane of one tool, as the Host reaches it: its control socket in the run folder.
@@ -292,7 +318,9 @@ impl Endpoint {
     /// Decides whether the lane that runs is used for `thread` with options of `digest`: one
     /// started otherwise (another thread, other options, or what `kept` says the tool keeps from
     /// an earlier turn) is retired while idle; one that still runs work is used as it is, for
-    /// its own thread. Before a new lane starts, room is made for it within `room`.
+    /// its own thread. Before a new lane starts, room is made for it within `room`. Where every
+    /// place runs work, a lane that is `needed` (a native goal's) still starts and counts; any
+    /// other is not started (`Place::Full`), so the limits hold (issue 786).
     pub(crate) fn place(
         &self,
         run: &Path,
@@ -300,6 +328,7 @@ impl Endpoint {
         digest: &str,
         kept: impl FnOnce(&Status) -> bool,
         room: Room,
+        needed: bool,
     ) -> io::Result<Place> {
         if let Ok(state) = self.inspect() {
             let same_thread = state.thread == thread.unwrap_or_default();
@@ -324,8 +353,11 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        make_room(run, self, room);
-        Ok(Place::Free)
+        if make_room(run, self, room) || needed {
+            Ok(Place::Free)
+        } else {
+            Ok(Place::Full)
+        }
     }
 
     pub(crate) fn inspect(&self) -> io::Result<Status> {
@@ -481,8 +513,9 @@ pub(crate) fn once_more<T>(
 /// to start at its typical size. The idle lanes that held no turn the longest are asked to leave
 /// first, until both limits hold. A lane that runs a turn, or whose work may continue, refuses
 /// and counts. Read only when a lane is about to start. The Host reads no `/proc` here: each
-/// lane weighed itself, in its own process.
-fn make_room(run: &Path, own: &Endpoint, room: Room) {
+/// lane weighed itself, in its own process. Answers whether both limits hold with the new lane
+/// counted: `false` when the lanes that are left all run work.
+fn make_room(run: &Path, own: &Endpoint, room: Room) -> bool {
     let mut idle = Vec::new();
     let mut live = 1usize;
     let mut held = own.tool.typical_bytes();
@@ -495,8 +528,9 @@ fn make_room(run: &Path, own: &Endpoint, room: Room) {
         }
     }
     idle.sort_by_key(|(idle_ms, _, _)| std::cmp::Reverse(*idle_ms));
+    let fits = |live: usize, held: u64| live <= room.most && held <= room.budget;
     for (_, memory, lane) in idle {
-        if live <= room.most && held <= room.budget {
+        if fits(live, held) {
             break;
         }
         if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
@@ -504,6 +538,7 @@ fn make_room(run: &Path, own: &Endpoint, room: Room) {
             held = held.saturating_sub(memory);
         }
     }
+    fits(live, held)
 }
 
 /// Every lane in the run folder but `skip` that answers what it is, with its answer. A socket

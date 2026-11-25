@@ -292,6 +292,11 @@ impl Worker {
         };
         let (turn, attempt, socket) = (order.turn, order.attempt, order.socket.clone());
         let spool = order.spool.clone();
+        // A native goal needs its lane, so that one is started even past both limits and counts.
+        // A chat turn's lane is optional: with every place running work, the turn runs in a
+        // process of its own instead (issue 786).
+        let needed = private || self.native.owns();
+        let back = (!needed).then(|| order.clone());
         let wanted = match &submission {
             Submission::Prompt { model, effort } => Some((model.clone(), effort.clone())),
             _ => None,
@@ -309,7 +314,14 @@ impl Worker {
         self.setup.runtime.spawn_blocking(move || {
             let start = || {
                 let asked = wanted.as_ref().map(|(model, effort)| (model, effort));
-                reap(lane.start(&launcher, &profile, &login, thread.as_deref(), asked)?);
+                reap(lane.start(
+                    &launcher,
+                    &profile,
+                    &login,
+                    thread.as_deref(),
+                    asked,
+                    needed,
+                )?);
                 Ok::<(), std::io::Error>(())
             };
             let result = (|| {
@@ -336,6 +348,15 @@ impl Worker {
                     lane.submit(*order, submission, token)
                 })
             })();
+            // No place for an optional lane, and nothing of the attempt reached a lane: the
+            // agent's thread runs it in a process of its own.
+            if let (Err(error), Some(order)) = (&result, back)
+                && crate::lane::NoPlace::is(error)
+                && !spool.try_exists().unwrap_or(true)
+            {
+                let _ = tx.send(Ask::CodexLaneFull(order));
+                return;
+            }
             // An absent reply cannot prove that Codex did not take the attempt.
             // The supervisor creates the spool before handing the request over.
             let pending = spool.try_exists().unwrap_or(true)
