@@ -874,7 +874,12 @@ impl Desk {
     /// held, or its window has begun anew since.
     fn release(&self, tool: &str, pooled: &Pooled, now_ms: i64) -> Option<Value> {
         let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
-        let of = held.get(tool)?;
+        let of = held.get_mut(tool)?;
+        // A limit held before any seat was judged (none known when it came) is of the first seat
+        // judged after: the tool was on it then too, as a switch is judged at once.
+        if of.seat.is_none() {
+            of.seat.clone_from(&pooled.seat);
+        }
         // The tool left the seat the limit is of: a switch took the turn, as the pool was to,
         // and the limit is no longer the tool's to tell. Let go of it. (A Host that reads no
         // seats has none before or after: the same.)
@@ -2029,6 +2034,37 @@ mod tests {
         let again = judged(&read_at(later), later);
         assert_eq!(again.near, Failover::None, "{again:?}");
         let told = desk.release(CLAUDE, &again, later).unwrap();
+        assert_eq!(
+            (&told["kind"], &told["failover"]),
+            (&json!("warning"), &json!("none"))
+        );
+    }
+
+    #[test]
+    fn a_limit_held_before_any_seat_was_judged_is_of_the_first_seat_judged() {
+        use clarp_kernel::quota_near::Failover;
+        let desk = Desk::default();
+        let warning = json!({ "type": "provider-limit", "kind": "warning", "provider_id": "codex",
+            "resets_at": quota::moment(9_000_000) });
+        // Nothing judged yet: held, of no seat.
+        assert!(desk.pooled(CODEX, warning, 0).is_none());
+        let pooled = |near, seat: &str| Pooled {
+            failover: near,
+            near,
+            regains: None,
+            until_ms: 9_000,
+            seat: Some(seat.to_string()),
+        };
+        // The first judgement: on a, and another seat would take the turn. Not told, and now
+        // held as a's.
+        assert!(
+            desk.release(CODEX, &pooled(Failover::Spare, "a"), 1_000)
+                .is_none()
+        );
+        // On a still, and no seat would: told, with failover none.
+        let told = desk
+            .release(CODEX, &pooled(Failover::None, "a"), 2_000)
+            .unwrap();
         assert_eq!(
             (&told["kind"], &told["failover"]),
             (&json!("warning"), &json!("none"))
