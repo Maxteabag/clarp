@@ -1555,7 +1555,7 @@ pub(crate) async fn decide(
         return Err(ApiError::plain(StatusCode::NOT_FOUND, "not found"));
     };
     let decision_id = decision_id.trim_matches('/').to_string();
-    let want = match action {
+    let mut want = match action {
         "resolve" => {
             let on_behalf = data
                 .get("on_behalf_session")
@@ -1660,6 +1660,15 @@ pub(crate) async fn decide(
     let Some(member) = fleet.asker(&decision_id) else {
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
+    // The message the answer becomes is spoken only where something on this Host could speak
+    // the agent, as a send is (issue 802).
+    if let Want::Resolve {
+        synthesize_audio, ..
+    } = &mut want
+        && *synthesize_audio
+    {
+        *synthesize_audio = app.mouth.can_speak(&member.record).await;
+    }
     let done = ask_agent(member, want).await?;
     if action != "resolve" {
         // A card withdrawn or dismissed asks nothing any more: what the Host kept of it goes.
