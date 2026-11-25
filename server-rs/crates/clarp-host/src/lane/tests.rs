@@ -797,13 +797,18 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
         .place(&run, Some("t"), "d", |_| false, defaults, false)
         .unwrap();
     assert_eq!(place, Place::Full);
-    // Nor is a Muse lane, whose start is always optional (issue 762).
+    assert!(busy.iter().all(|lane| lane.asked() == ["inspect"]));
+    // Nor is a Muse lane, whose start is always optional (issue 762): the busy lanes are only
+    // looked at again.
     let muse = Endpoint::of(Tool::Muse, &run, "muse");
     let place = muse
         .place(&run, Some("t"), "d", |_| false, defaults, false)
         .unwrap();
     assert_eq!(place, Place::Full);
-    assert!(busy.iter().all(|lane| lane.asked() == ["inspect"]));
+    assert!(
+        busy.iter()
+            .all(|lane| lane.asked() == ["inspect", "inspect"])
+    );
     // A native goal needs its lane: it starts past the limits, and counts.
     let goal = Endpoint::of(Tool::Codex, &run, "goal");
     let place = goal
