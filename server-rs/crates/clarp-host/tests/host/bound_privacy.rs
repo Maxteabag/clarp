@@ -395,10 +395,14 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     // Asked again, it is the same card.
     assert_eq!(ask(&["--clear"])["asked"][0]["decision_id"], json!(card));
     // Started again in place, a bound agent keeps its binding.
+    let elsewhere = own_home(&place, "home-b");
     let (status, said) = host.ask(
         "POST",
         "/agents",
-        Some(&json!({"replace_sid": ada, "codex_home": "", "codex_provider": ""})),
+        Some(&json!({
+            "replace_sid": ada, "name": "Ada", "backend": "codex",
+            "codex_home": elsewhere, "codex_provider": "stand-in",
+        })),
     );
     assert_eq!(status, 409, "{said}");
     assert_eq!(said["error"], "own_provider", "{said}");
