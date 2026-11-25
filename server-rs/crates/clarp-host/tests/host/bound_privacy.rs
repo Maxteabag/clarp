@@ -445,7 +445,14 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
         "codex_home": elsewhere, "codex_provider": "stand-in",
     })
     .to_string();
-    let answered = fetch(&host, &host.token, "POST", "/agents", &as_ben, again.as_bytes());
+    let answered = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/agents",
+        &as_ben,
+        again.as_bytes(),
+    );
     let said: Value = serde_json::from_slice(&answered.body).unwrap_or(Value::Null);
     assert_eq!(answered.status, 409, "{said}");
     assert_eq!(said["error"], "own_provider", "{said}");
@@ -457,7 +464,12 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     };
     assert_eq!(home_of(&host), json!(home));
     let answered = fetch(&host, &host.token, "POST", "/agents", &[], again.as_bytes());
-    assert_eq!(answered.status, 200, "{}", String::from_utf8_lossy(&answered.body));
+    assert_eq!(
+        answered.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&answered.body)
+    );
     assert_eq!(home_of(&host), json!(elsewhere));
     // The owner says yes to the unbinding: Ada is let go.
     host.post(

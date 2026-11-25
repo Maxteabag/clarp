@@ -194,7 +194,9 @@ impl Withheld {
             Value::String(text) if self.keeps(key, text) => value.clone(),
             Value::String(_) => Value::String(String::new()),
             Value::Array(items)
-                if items.iter().all(Value::is_string) && !kept_key(key) && !key.ends_with("_ids") =>
+                if items.iter().all(Value::is_string)
+                    && !kept_key(key)
+                    && !key.ends_with("_ids") =>
             {
                 Value::Array(Vec::new())
             }
@@ -859,7 +861,8 @@ pub fn withheld_update(sender: &AgentRecord, reader: &AgentRecord) -> Option<Str
 
 /// What a team member is given of an update whose sender, or whose reader, the Host cannot
 /// place: it is withheld, since it cannot be said who may read it.
-pub const UNPLACED_UPDATE: &str = "posted an update (words withheld: its sender could not be placed)";
+pub const UNPLACED_UPDATE: &str =
+    "posted an update (words withheld: its sender could not be placed)";
 
 // ---- the agents' own tools ------------------------------------------------------------------
 
@@ -946,12 +949,11 @@ pub(crate) const ASKED: &str = "bound-privacy-asked";
 
 /// What this desk keeps, declared once (`kept.rs`): a question per card it made, read when a
 /// card is answered or an agent asks again.
-pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
-    ASKED,
-    crate::kept::Key::Plain,
-    crate::kept::fits::<Asked>,
-)
-.when_read()];
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[
+        crate::kept::Kind::book(ASKED, crate::kept::Key::Plain, crate::kept::fits::<Asked>)
+            .when_read(),
+    ];
 
 /// A question the Host asked its owner: whether an agent may read a bound agent, or whether
 /// a bound agent's binding may change.
@@ -1090,7 +1092,11 @@ async fn ask_owner(
     change: Change,
     card: Value,
 ) -> Result<Value, (StatusCode, Value)> {
-    let kept = app.fleet.kept_listed(ASKED).await.map_err(|why| unkept(&why))?;
+    let kept = app
+        .fleet
+        .kept_listed(ASKED)
+        .await
+        .map_err(|why| unkept(&why))?;
     let same: Vec<String> = kept
         .into_iter()
         .filter_map(|(id, bytes)| {

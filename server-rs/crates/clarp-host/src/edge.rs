@@ -1948,7 +1948,9 @@ async fn started_again(
     if !owner && let Some(member) = app.fleet.directory().by_session(&replaces) {
         let before = &member.record;
         let said = |asked: &Option<String>, had: &String| {
-            asked.as_deref().map_or_else(|| had.clone(), |said| said.trim().to_string())
+            asked
+                .as_deref()
+                .map_or_else(|| had.clone(), |said| said.trim().to_string())
         };
         let to = crate::bound_privacy::Binding {
             home: said(&request.codex_home, &before.codex_home),

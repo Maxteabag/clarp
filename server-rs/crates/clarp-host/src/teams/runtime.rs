@@ -55,7 +55,10 @@ impl clarp_actor::teams::Runtime for TurnTeams {
             }
             let placed = directory.as_deref().and_then(|directory| {
                 let from = directory.named(source)?;
-                Some(crate::bound_privacy::withheld_update(&from.record, &reader?.record))
+                Some(crate::bound_privacy::withheld_update(
+                    &from.record,
+                    &reader?.record,
+                ))
             });
             placed.unwrap_or_else(|| Some(crate::bound_privacy::UNPLACED_UPDATE.to_string()))
         };

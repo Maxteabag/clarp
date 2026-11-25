@@ -3918,7 +3918,11 @@ impl Fleet {
                     return Err(Told::new(409, "own_provider", why).into());
                 }
                 let cloud_speech = request.cloud_speech.or(bound.cloud_speech);
-                (bound.codex_home.clone(), bound.codex_provider.clone(), cloud_speech)
+                (
+                    bound.codex_home.clone(),
+                    bound.codex_provider.clone(),
+                    cloud_speech,
+                )
             }
             _ => bound_as(&request, &backend, None)?,
         };
