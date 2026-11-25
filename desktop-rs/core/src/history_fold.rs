@@ -268,6 +268,15 @@ fn tool_item(value: &Value, cell: bool, options: &Options) -> Object {
     json!({"id": format!("log:{call}"), "kind": "tool", "status": status(value), "tool": tool}).as_object().cloned().unwrap_or_default()
 }
 
+/// Whether a settled row's text reads before its tool calls. The one place
+/// that decides it: a row the Host splits from a Claude turn holds the text
+/// written first and the tool calls made after it, as the live turn draws
+/// them, and the stored row says nothing else today, so text comes first.
+/// Should rows come to say their order, this reads it.
+pub fn text_before_tools(_row: &Message) -> bool {
+    true
+}
+
 fn ms(row: &Message) -> Option<i64> {
     crate::time_format::epoch_ms(&row.timestamp)
 }
@@ -360,16 +369,21 @@ fn turn(
             !due
         });
     };
+    // A row's text: the answer (after any reasoning still due), else commentary.
+    let mut text_of = |items: &mut Vec<Object>, reasoning: &mut Vec<&Object>, row: &Message, is_answer: bool| {
+        if is_answer {
+            flush(items, reasoning, None);
+            message(items, row, "final");
+        } else if !row.display_text.trim().is_empty() {
+            message(items, row, "commentary");
+        }
+    };
     for (index, row) in members.iter().enumerate() {
         let has_text = !row.display_text.trim().is_empty();
         let is_answer = has_text && final_text(index, row);
-        // In a row the text came first and its tool calls after it: the
-        // text goes before them, the answer too, as the live turn drew it.
-        if is_answer {
-            flush(&mut items, &mut reasoning, None);
-            message(&mut items, row, "final");
-        } else if has_text {
-            message(&mut items, row, "commentary");
+        let text_first = text_before_tools(row);
+        if text_first {
+            text_of(&mut items, &mut reasoning, row, is_answer);
         }
         for (value, cell) in calls(row) {
             let call = text(value, "id");
@@ -391,6 +405,9 @@ fn turn(
                     items.push(item);
                 }
             }
+        }
+        if !text_first {
+            text_of(&mut items, &mut reasoning, row, is_answer);
         }
     }
     flush(&mut items, &mut reasoning, None);
