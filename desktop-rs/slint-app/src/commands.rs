@@ -257,11 +257,11 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     if keyboard::tracing() {
         let held = keyboard::Modifiers { control, alt, shift, meta };
         let chord = keymap::chord(text, held.shortcut_control(), alt, shift).unwrap_or_default();
-        let state = match (crate::app(), crate::window()) {
-            (Some(app), Some(window)) => context(&app, &window).to_string(),
-            _ => String::new(),
+        let (state, focus) = match (crate::app(), crate::window()) {
+            (Some(app), Some(window)) => (context(&app, &window).to_string(), keyboard::focus_described(window.window())),
+            _ => (String::new(), String::new()),
         };
-        eprintln!("key-trace: pressed {} {held:?} repeat={repeat} chord={chord:?} state={state} -> {}", keyboard::code_points(text), if used { "taken" } else { "passed on" });
+        eprintln!("key-trace: pressed {} {held:?} repeat={repeat} chord={chord:?} state={state} -> {} (keyboard: {focus})", keyboard::code_points(text), if used { "taken" } else { "passed on" });
     }
     used
 }
