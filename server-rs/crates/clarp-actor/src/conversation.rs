@@ -180,13 +180,14 @@ impl Which {
 /// How many items are read at a time when some of them are left out.
 const CHUNK: usize = 256;
 
-/// The rows of the messages read into a running turn, oldest first (issue 808), from the
-/// actor's kept walk of it: a read walks only what was written since the last.
+/// The rows of the messages read into a running turn, oldest first (issue 808), and how each
+/// was read (issue 859), from the actor's kept walk of it: a read walks only what was written
+/// since the last.
 pub(crate) fn read_rows_of(
     log: &dyn AgentLog,
     cache: &AnchorCache,
     turn: u64,
-) -> Result<Vec<String>, ActorError> {
+) -> Result<Vec<(String, ReadAt)>, ActorError> {
     Ok(cache.anchors(log, turn, None, false)?.read_rows)
 }
 
@@ -284,6 +285,30 @@ pub struct ReadInto {
     pub trace_id: String,
     /// The turn's number.
     pub turn: u64,
+    /// How it was read: with the turn's own message at its start, or steered in as it ran.
+    pub at: ReadAt,
+}
+
+/// How a message was read into a turn other than its own (issue 859).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadAt {
+    /// With the turn's own message, in the prompt the turn started with: it waited behind
+    /// that message and the turn took it along (`Join::together`). It stands above the turn's
+    /// work, as part of what the turn was asked, and splits none of it.
+    Start,
+    /// Into the tool's process as the turn ran: what the turn did before it answered what
+    /// came before, and its work splits there.
+    Steer,
+}
+
+impl ReadAt {
+    /// The word clients are given (`read_into.at`, the live turn's `read_rows_at`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Steer => "steer",
+        }
+    }
 }
 
 impl Versioned {
@@ -763,7 +788,7 @@ impl<'a> Reader<'a> {
     fn decided_by(&mut self, item: &Item, entry: &Entry) -> Result<Option<String>, ActorError> {
         let turn = match entry {
             Entry::Reply(reply) => Some(item.turn.unwrap_or(reply.turn)),
-            Entry::Message(_) => read_into_turn(self.log, item)?,
+            Entry::Message(_) => read_into_turn(self.log, item)?.map(|(turn, _)| turn),
             _ => None,
         };
         Ok(match turn {
@@ -794,13 +819,23 @@ impl<'a> Reader<'a> {
         {
             // An anchor changed where it entered the conversation view: the row or the end
             // that decided it.
-            if let Some(anchor) = self.anchors(turn)?.of(row.entry.id()) {
-                row.session_rows = Some(anchor.session_rows);
-                row.revision = row.revision.max(anchor.entered * REVISION_STEP);
-                // The answer of its turn is said at the end, also where work came after it (a
-                // turn stopped as its tool ran): as those who watched the turn were shown it,
-                // and as the conversation view holds it (issue 801).
-                row.commentary = false;
+            match self.anchors(turn)?.of(row.entry.id()) {
+                Some(anchor) => {
+                    row.session_rows = Some(anchor.session_rows);
+                    row.revision = row.revision.max(anchor.entered * REVISION_STEP);
+                    // The answer of its turn is said at the end, also where work came after it
+                    // (a turn stopped as its tool ran): as those who watched the turn were shown
+                    // it, and as the conversation view holds it (issue 801).
+                    row.commentary = false;
+                }
+                // Words of a running turn that nothing has decided yet are no answer: those
+                // who watch the turn are shown them as commentary until the turn decides
+                // (issue 771), and a chat read in the middle of the turn says the same (issue
+                // 858). Whatever decides them later (the next words, a message read into the
+                // turn, work, or the turn's end) is newer than the row, so its revision rises
+                // with the change.
+                None if !ended && !row.live => row.commentary = true,
+                None => {}
             }
         }
         // A goal's check-in that was sent again for the apps (`resend`) is, in a chat, as new
@@ -940,11 +975,12 @@ impl<'a> Reader<'a> {
         // A message read into another turn names that turn: written with the read, so it is
         // there from the row's first revision on.
         if matches!(row.entry, Entry::Message(_))
-            && let Some(into) = read_into_turn(self.log, item)?
+            && let Some((into, at)) = read_into_turn(self.log, item)?
         {
             row.read_into = self.turn_id(into)?.map(|trace_id| ReadInto {
                 trace_id,
                 turn: into,
+                at,
             });
         }
         let split = if let Some(turn) = row.turn_number {

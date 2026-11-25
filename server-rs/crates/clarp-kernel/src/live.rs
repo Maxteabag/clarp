@@ -421,6 +421,11 @@ pub enum Glimpse {
 /// How many of the rows read into a turn it carries, the newest ([`Hub::read_rows`]).
 pub const READ_ROWS_KEPT: usize = 20;
 
+/// A message read with the turn's own at its start, in its prompt (`read_rows_at`).
+pub const READ_AT_START: &str = "start";
+/// A message steered into the turn's process as it ran (`read_rows_at`).
+pub const STEER: &str = "steer";
+
 /// One agent's live items on the Host.
 #[derive(Debug, Clone)]
 pub struct Hub {
@@ -650,6 +655,17 @@ impl Hub {
     /// them (issue 808). It keeps the newest [`READ_ROWS_KEPT`]; where older ones were left out,
     /// `read_rows_more` is true. Told again only when the list grows.
     pub fn read_rows(&mut self, rows: &[String], now: i64) -> Vec<Value> {
+        let rows: Vec<(String, &str)> = rows.iter().map(|row| (row.clone(), STEER)).collect();
+        self.read_rows_at(&rows, now)
+    }
+
+    /// As [`Hub::read_rows`], with how each row was read: [`READ_AT_START`], with the turn's own
+    /// message in the prompt it started with, or [`STEER`], into its process as it ran. The
+    /// turn carries the words as `read_rows_at`, one for each of its `read_rows`, in the same
+    /// order (issue 859): a client splits the turn's work at a steer only, as the row's own
+    /// `read_into.at` tells it in the history. A list beside the other, so an app that reads
+    /// `read_rows` as names reads them as before.
+    pub fn read_rows_at(&mut self, rows: &[(String, &str)], now: i64) -> Vec<Value> {
         let mut out = Vec::new();
         if !self.open(None) {
             return out;
@@ -662,12 +678,20 @@ impl Hub {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        let mut at: Vec<Value> = turn
+            .get("read_rows_at")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        // The two lists always have one length; a list from before is read as steers.
+        at.resize(read.len(), json!(STEER));
         let before = read.len();
         // A row the turn read before is not read again, also one the list no longer holds: told
         // the whole list again (a second show, a replay), the newest stays last.
-        for row in rows.iter().filter(|row| !row.is_empty()) {
+        for (row, how) in rows.iter().filter(|(row, _)| !row.is_empty()) {
             if self.read_seen.insert(row.clone()) {
                 read.push(json!(row));
+                at.push(json!(how));
             }
         }
         if read.len() == before {
@@ -677,9 +701,11 @@ impl Hub {
         // into for hours would otherwise grow every op of its turn without end.
         if read.len() > READ_ROWS_KEPT {
             read.drain(..read.len() - READ_ROWS_KEPT);
+            at.drain(..at.len() - READ_ROWS_KEPT);
             turn.insert("read_rows_more".to_string(), json!(true));
         }
         turn.insert("read_rows".to_string(), Value::Array(read));
+        turn.insert("read_rows_at".to_string(), Value::Array(at));
         self.flush(now, &mut out);
         let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
         self.emit(vec![op], (false, ""), now, &mut out);

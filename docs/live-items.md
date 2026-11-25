@@ -224,8 +224,15 @@ messages read together with the turn's own at its start. Absent while none was r
 with the longer list follows each read, and the turn keeps the list as it goes on and ends. It
 holds the newest 20; where older ones were left out, `read_rows_more` is `true`.
 
+`read_rows_at` (Rust Host contract 195, feature `read_into_at`, issue 859): how each row of
+`read_rows` was read, one word for each, in the same order and trimmed with it: `start`, read with
+the turn's own message in the prompt it started with, or `steer`, read into the turn as it ran.
+Messages read at the start are in `read_rows` from the turn's first `turn` op. A list beside
+`read_rows` rather than objects in it, so a client that reads `read_rows` as row ids reads it as
+before. Absent where `read_rows` is.
+
 The rows themselves say it too (Rust Host contract 189, feature `read_into`): a `/log`
-message row read into a turn other than its own carries `read_into`, `{trace_id, turn}`, whose
+message row read into a turn other than its own carries `read_into`, `{trace_id, turn, at}`, whose
 `trace_id` is that turn's `turn_id`, from the row's first revision, so a client that reads `/log` before this op arrives places the
 row above the working line already ([the protocol](protocol.md#2-load-a-chat-get-log)).
 
@@ -237,7 +244,9 @@ message's row (issue 798), so a client that places the working line by time puts
 message.
 
 **What ran before a read message stays above it** (issue 843): the turn's work splits at each
-row in `read_rows`, by when that row was written. Work begun before it stays above it, work
+row in `read_rows` read as a `steer`, by when that row was written. A row read at the turn's
+start (`read_rows_at` `start`, `read_into.at` `start` in `/log`) stands above all of the work, as
+part of what the turn was asked, and splits nothing, live or in history (issue 859). Work begun before it stays above it, work
 begun after it goes below it with the working line, so the turn reads in the same order while it
 runs, once it settles, and once history (`/log`) holds it, where a user row written between the
 turn's rows splits it the same way. The Rust desktop folds each part on its own: the last under

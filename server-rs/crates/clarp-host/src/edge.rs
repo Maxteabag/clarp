@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 194;
+pub const HOST_CONTRACT: u64 = 195;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -484,6 +484,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // 186, and nothing of the machine's pressure: no turn waits for it (the owner, 25 Nov 2026).
     // `turn_pressure_admission`, its thresholds and `held_for_pressure` are gone.
     ("lanes_live", 194),
+    // How a message was read into a turn other than its own: `read_into.at` on its `/log` row,
+    // and `read_rows_at` beside the live turn's `read_rows`, `start` (with the turn's own
+    // message, in the prompt it started with) or `steer` (as it ran). A message read at the
+    // start splits none of the turn's work (issue 859).
+    ("read_into_at", 195),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

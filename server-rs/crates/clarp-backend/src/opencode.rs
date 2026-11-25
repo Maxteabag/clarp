@@ -121,6 +121,11 @@ struct Stream {
     types: BTreeMap<String, String>,
     texts: BTreeMap<String, String>,
     order: Vec<String>,
+    /// What each text part has written into a reply so far, whole. OpenCode tells a text part
+    /// whole once more when it ends, and that can come after the call its words announced has
+    /// begun (opencode/big-pickle, 25 Nov 2026): those words are written already, and only
+    /// words beyond them are new (issue 858).
+    filed: BTreeMap<String, String>,
     tools: BTreeMap<String, ToolCall>,
     tokens: Option<(u64, u64)>,
     cost: Option<f64>,
@@ -247,7 +252,15 @@ impl Stream {
     /// too, the row its tool is shown on.
     fn flush_with(&mut self, tools: Vec<String>, out: &mut Vec<Signal>) {
         let text = self.said();
-        self.order.clear();
+        // The words go into the reply: the part keeps only what it says after them.
+        for id in std::mem::take(&mut self.order) {
+            let new = self
+                .texts
+                .get_mut(&id)
+                .map(std::mem::take)
+                .unwrap_or_default();
+            self.filed.entry(id).or_default().push_str(&new);
+        }
         if text.is_empty() && tools.is_empty() {
             return;
         }
@@ -270,6 +283,23 @@ impl Stream {
             s.push_str(text);
         } else {
             *s = text.into();
+        }
+        // A part whose words a reply holds already: told whole again, it says nothing new, and
+        // is no second reply of the same words. Only what it says beyond them is new.
+        if let Some(filed) = self.filed.get(id) {
+            let whole = if delta {
+                format!("{filed}{s}")
+            } else {
+                s.clone()
+            };
+            match whole.strip_prefix(filed.as_str()) {
+                Some(rest) if rest.trim().is_empty() => {
+                    s.clear();
+                    return;
+                }
+                Some(rest) => *s = rest.to_owned(),
+                None => {}
+            }
         }
         if !self.order.iter().any(|x| x == id) {
             self.order.push(id.into());

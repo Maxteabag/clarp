@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use clarp_actor::conversation::{Versioned, Which};
+use clarp_actor::conversation::{ReadAt, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, Stepped, TRACE_TAKEN,
     TraceTaken, TurnFate,
@@ -6865,6 +6865,93 @@ fn the_users_waiting_messages_are_one_turn_and_its_retry_is_given_all_of_them() 
     );
     assert!(actor.queue().unwrap().is_empty());
     assert_eq!(actor.status().waiting, vec![]);
+}
+
+/// Android's CL-042 (issues 858 and 859): two of the user's messages wait behind a turn, and the
+/// next turn takes the second with its own at its start. While that turn runs, the live turn and
+/// a chat read agree on both: the message read with its own is in `read_rows` from the turn's
+/// start, read at the start (`read_rows_at`), as its row's `read_into.at` says; and words of the
+/// turn that nothing has decided yet are no answer in either until the turn decides.
+#[test]
+fn a_message_read_at_a_turns_start_is_told_so_live_and_in_the_chat_and_undecided_words_are_no_answer()
+ {
+    let mut world = World::new("together-read-at-start");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "first words", Admission::Queue);
+    world.send(&mut actor, "u-3", "second words", Admission::Queue);
+    world.says(1, "One.");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(world.took, vec![1, 2], "one turn for the two");
+
+    let chat = |actor: &Actor| actor.tail_of(100, Which::chat(true)).unwrap().entries;
+    let row = |rows: &[Versioned], id: &str| {
+        rows.iter()
+            .find(|row| row.entry.id() == id)
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is a row: {:?}", shown_rows(rows)))
+    };
+    let live = actor.shown_whole(world.tick());
+    assert_eq!(live["turn"]["read_rows"], json!(["u-3"]), "{live}");
+    assert_eq!(live["turn"]["read_rows_at"], json!(["start"]), "{live}");
+    let rows = chat(&actor);
+    assert_eq!(row(&rows, "u-2").read_into, None, "the turn's own message");
+    let read = row(&rows, "u-3")
+        .read_into
+        .expect("read into the turn of u-2");
+    assert_eq!((read.turn, read.at), (2, ReadAt::Start));
+
+    // It says a word before it works. Nothing has decided it yet: the chat says commentary, as
+    // the live turn does (issue 771; the scripted tool's whole replies show no live item, so the
+    // hub's own tests hold that side).
+    world.says(2, r#"{"reply": "OK"}"#);
+    world.hint(&mut actor);
+    let interim = row(&chat(&actor), "r-2-1");
+    assert!(
+        interim.commentary && !interim.live,
+        "undecided words are no answer in the chat: {interim:?}"
+    );
+    world.says(
+        2,
+        r#"{"tool": "Bash", "id": "t1", "input": {"command": "ls"}}"#,
+    );
+    world.says(2, r#"{"done": "t1", "output": "a.txt"}"#);
+    world.says(2, r#"{"reply": "Both done."}"#);
+    world.hint(&mut actor);
+    let rows = chat(&actor);
+    assert!(row(&rows, "r-2-1").commentary, "work came after it");
+    let answer = row(&rows, "r-2-2");
+    assert!(
+        answer.commentary,
+        "not decided while the turn runs: {answer:?}"
+    );
+    let undecided = answer.revision;
+    let live = actor.shown_whole(world.tick());
+    assert_eq!(
+        live["turn"]["read_rows"],
+        json!(["u-3"]),
+        "told once: {live}"
+    );
+
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let rows = chat(&actor);
+    assert!(
+        row(&rows, "r-2-1").commentary,
+        "said along the way, for good"
+    );
+    let answer = row(&rows, "r-2-2");
+    assert!(
+        !answer.commentary,
+        "the turn's end decides its last words: {answer:?}"
+    );
+    assert!(
+        answer.revision > undecided,
+        "a reader that holds the undecided row is given the answer again"
+    );
+    let read = row(&rows, "u-3").read_into.expect("still read into turn 2");
+    assert_eq!(read.at, ReadAt::Start);
 }
 
 /// Turn 1 runs, and the user's three messages wait behind it: turn 2 takes the two behind

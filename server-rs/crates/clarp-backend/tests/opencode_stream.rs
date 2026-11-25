@@ -272,3 +272,112 @@ fn a_steps_words_go_with_its_call_and_are_written_before_it() {
         ]
     );
 }
+
+/// Issue 858, as an Android run on OpenCode saw it (opencode/big-pickle, 25 Nov 2026): a step says
+/// "OK", calls a tool, and only then OpenCode tells the text part whole once more, as it ends.
+/// Those words are written once, with the call they announced, and shown as one message: they
+/// are no second reply that the answer's words would make an answer. Only the answer is a reply
+/// of words alone.
+#[test]
+fn a_text_part_told_whole_after_its_call_began_is_no_second_reply() {
+    use clarp_kernel::live::Glimpse;
+    let part = |part: Value| {
+        json!({"type": "message.part.updated", "properties": {"sessionID": "s", "part": part}})
+            .to_string()
+    };
+    let delta = |message: &str, id: &str, words: &str| {
+        json!({"type": "message.part.delta", "properties": {
+            "sessionID": "s", "messageID": message, "partID": id, "field": "text", "delta": words,
+        }})
+        .to_string()
+    };
+    let tool = |status: &str| {
+        part(
+            json!({"id": "prt-tool", "messageID": "m1", "type": "tool", "tool": "bash",
+                    "callID": "call-1", "state": {"status": status, "input": {"command": "sleep 1"}}}),
+        )
+    };
+    let lines = [
+        part(json!({"id": "prt-s1", "messageID": "m1", "type": "step-start"})),
+        part(
+            json!({"id": "prt-ok", "messageID": "m1", "type": "text", "text": "",
+                    "time": {"start": 1}}),
+        ),
+        delta("m1", "prt-ok", "OK"),
+        tool("pending"),
+        tool("running"),
+        // The text part ends after its call began: the same words, whole.
+        part(
+            json!({"id": "prt-ok", "messageID": "m1", "type": "text", "text": "OK",
+                    "time": {"start": 1, "end": 2}}),
+        ),
+        tool("completed"),
+        part(
+            json!({"id": "prt-f1", "messageID": "m1", "type": "step-finish",
+                    "reason": "tool-calls"}),
+        ),
+        part(json!({"id": "prt-s2", "messageID": "m2", "type": "step-start"})),
+        part(
+            json!({"id": "prt-answer", "messageID": "m2", "type": "text", "text": "",
+                    "time": {"start": 3}}),
+        ),
+        delta("m2", "prt-answer", "SKUNK"),
+        part(
+            json!({"id": "prt-answer", "messageID": "m2", "type": "text", "text": "SKUNK",
+                    "time": {"start": 3, "end": 4}}),
+        ),
+        part(json!({"id": "prt-f2", "messageID": "m2", "type": "step-finish", "reason": "stop"})),
+    ];
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "said-once");
+    let mut signals = Vec::new();
+    for line in lines {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            &mut signals,
+        );
+    }
+    interpreter.on_record(
+        &Record {
+            t: 2,
+            entry: Entry::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        },
+        &mut signals,
+    );
+    let replies: Vec<(String, String, usize)> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Reply(reply) if !reply.text.is_empty() => {
+                Some((reply.id.clone(), reply.text.clone(), reply.tools.len()))
+            }
+            _ => None,
+        })
+        .collect();
+    let texts: Vec<(&str, usize)> = replies
+        .iter()
+        .map(|(_, text, tools)| (text.as_str(), *tools))
+        .collect();
+    assert_eq!(
+        texts,
+        [("OK", 1), ("SKUNK", 0)],
+        "the words once, with their call, then the answer: {replies:?}"
+    );
+    // Shown as one message, the row the words are written into: never a second item of them.
+    let shown: std::collections::BTreeSet<String> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Glimpse(Glimpse::Message { id, text, .. }) if text == "OK" => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        shown.into_iter().collect::<Vec<_>>(),
+        [replies[0].0.clone()],
+        "one live message for the words"
+    );
+}

@@ -520,7 +520,7 @@ Response:
       "reply_to_agent_id": null, "reply_to_name": null, "reply_to_session": null,
       "automation_kind": null,
       "audience": "user | agents",
-      "read_into": { "trace_id": "…", "turn": 41 }
+      "read_into": { "trace_id": "…", "turn": 41, "at": "start | steer" }
     }
   ],
   "latest_revision": 812,
@@ -687,7 +687,10 @@ Rules:
   first; [Live items](live-items.md) §1.4). Where `read_rows` is absent, as before: after the
   turn's own message, before the first row written after the turn began. A message steered into
   a running turn is in `read_rows`, so the working line goes below it; a message that waits for
-  the next turn is not, so the working line stays above it.
+  the next turn is not, so the working line stays above it. A message read together with the
+  turn's own at its start is in `read_rows` from the turn's first `turn` op, marked `start` in
+  `read_rows_at` (feature `read_into_at`, Rust Host contract 195), and in no turn does it split
+  the work.
 - **A message read into another turn says so on its own row (feature `read_into`, Rust Host
   contract 189, issue 845).** A user row whose message was read into a turn other than its own
   (steered into the running turn, or read together with the turn's own message at its start)
@@ -703,7 +706,15 @@ Rules:
   carries it, so match by `trace_id`. The Host writes the row in the same write as the read that joined it, and
   `read_into` is on the row's first revision: a client that fetches `/log` on
   `transcript-updated` before the live `turn` op with `read_rows` arrives already knows the
-  row belongs above the turn's working line. Absent on every other row: a message that started
+  row belongs above the turn's working line. From Rust Host contract 195 (feature
+  `read_into_at`, issue 859) the object also says how the message was read, as `at`: `start`,
+  read together with the turn's own message in the prompt the turn started with (it waited
+  behind that message, and the turn took it along), or `steer`, read into the turn as it ran. A
+  message read at the start stands above all of the turn's work, as part of what the turn was
+  asked: do not split the turn's work at it, neither while it runs nor in history. Splitting a
+  turn's work at the user's messages is the client's own (the Host's rows only say how each was
+  read): clients split only at messages read as a `steer`. The live turn marks its `read_rows` the same way (`read_rows_at`). Without
+  `at` (an older Host), every read row splits as before. Absent on every other row: a message that started
   its own turn, one that waits (it has no row yet), and a message a conversation fork answered
   (the fork's turn is its own). A row keeps `read_into` however that turn ends, also when a
   newer message's turn replaces it (its end's `status` `replaced`): the message was read into
@@ -955,7 +966,12 @@ same steps, as Codex closes its plan after its last words, is no work), the word
 the way (`phase` `commentary`) and do not enter as an answer. Words whose own message called
 tools announced work: they never enter as an answer, and whatever comes next, other words
 included, makes them `commentary` in `/log` as the live turn shows them from when their tool
-began (issue 836; rows written before keep the phase they have). A plan counts as work from contract
+began (issue 836; rows written before keep the phase they have). While the turn runs, words
+nothing has decided yet are `commentary` in `/log` too, as the live turn shows them (issue 858):
+a reply such as "OK" before a tool call is never `final` in a chat read in the middle of the
+turn. When they are decided (the next words, a message read into the turn, or the turn's end
+make them an answer) the row is given again with a new revision and `phase` `final`; when work
+comes next they stay `commentary`. A plan counts as work from contract
 174 on: a Codex turn written before it whose words came before a plan and then more words has
 the first words as an answer too. Each message the turn answers keeps
 its answer, also one given before a follow-up was read into the turn; two replies with no work

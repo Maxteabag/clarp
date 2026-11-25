@@ -15,7 +15,7 @@ use clarp_kernel::journal::kind;
 use clarp_kernel::turn::TurnEvent;
 use clarp_ports::log::{AgentLog, Item, Kinds, Seq};
 
-use super::{CHUNK, conversation_in, corrupt, joined_read};
+use super::{CHUNK, ReadAt, conversation_in, corrupt, joined_read};
 use crate::ActorError;
 
 /// A row the conversation view shows in place of the work of a turn: an answer to a message of
@@ -41,8 +41,8 @@ pub(super) struct TurnAnchors {
     /// given the reply again, now in the conversation view.
     pub(super) decides: HashMap<String, String>,
     /// The rows of the messages read into the turn as it ran, oldest first: steered into it,
-    /// or read with its own at its start.
-    pub(super) read_rows: Vec<String>,
+    /// or read with its own at its start, and which of the two.
+    pub(super) read_rows: Vec<(String, ReadAt)>,
     /// The turn's id as the live view names it: the trace of the message it began for. A
     /// message read into the turn carries it as `read_into` (issue 845).
     pub(super) turn_id: Option<String>,
@@ -158,8 +158,11 @@ impl Walk {
             if read_into(log, item)?
                 && let Some(entry) = Entry::from_item(item).map_err(|why| corrupt(item, why))?
             {
+                // A join no longer found is taken as a steer: the turn's work splits there, as
+                // it did before reads were told apart.
+                let at = read_into_turn(log, item)?.map_or(ReadAt::Steer, |(_, at)| at);
                 self.call = None;
-                self.decided.read_rows.push(entry.id().to_owned());
+                self.decided.read_rows.push((entry.id().to_owned(), at));
                 self.decide(log, item.seq, entry.id())?;
             }
             return Ok(());
@@ -313,8 +316,12 @@ fn read_into(log: &dyn AgentLog, item: &Item) -> Result<bool, ActorError> {
         .is_none_or(|record| record.kind != kind::FORK))
 }
 
-/// The turn a message was read into, when it is one: the one its join named.
-pub(super) fn read_into_turn(log: &dyn AgentLog, item: &Item) -> Result<Option<u64>, ActorError> {
+/// The turn a message was read into, when it is one: the one its join named, and whether it
+/// was read with that turn's own message at its start or steered in as it ran.
+pub(super) fn read_into_turn(
+    log: &dyn AgentLog,
+    item: &Item,
+) -> Result<Option<(u64, ReadAt)>, ActorError> {
     if !read_into(log, item)? {
         return Ok(None);
     }
@@ -336,7 +343,14 @@ pub(super) fn read_into_turn(log: &dyn AgentLog, item: &Item) -> Result<Option<u
             match serde_json::from_slice::<AgentEvent>(&event.body)
                 .map_err(|why| corrupt(event, why))?
             {
-                AgentEvent::Joined { join, .. } => return Ok(Some(join.into.0)),
+                AgentEvent::Joined { join, .. } => {
+                    let at = if join.together {
+                        ReadAt::Start
+                    } else {
+                        ReadAt::Steer
+                    };
+                    return Ok(Some((join.into.0, at)));
+                }
                 // Its acceptance comes before any join: there was none.
                 AgentEvent::Turn {
                     change: TurnEvent::Accepted { .. },
@@ -993,7 +1007,10 @@ mod tests {
 
     /// The turn each message row says it was read into, as a reader of everything and a
     /// reader of the chat are given them now.
-    fn read_into(recorder: &Recorder) -> Vec<(String, Option<(String, u64)>)> {
+    /// The turn a row says it was read into: its trace, its number, and how it was read.
+    type Link = (String, u64, &'static str);
+
+    fn read_into(recorder: &Recorder) -> Vec<(String, Option<Link>)> {
         let mut read = Vec::new();
         for which in [super::super::Which::All, Which::chat(true)] {
             let page = tail(recorder.log(), &[], span(recorder), 100, which).unwrap();
@@ -1003,7 +1020,7 @@ mod tests {
                 .filter(|row| matches!(row.entry, Entry::Message(_)))
                 .map(|row| {
                     let into = row.read_into.as_ref();
-                    let into = into.map(|into| (into.trace_id.clone(), into.turn));
+                    let into = into.map(|into| (into.trace_id.clone(), into.turn, into.at.name()));
                     (row.entry.id().to_owned(), into)
                 })
                 .collect();
@@ -1025,7 +1042,11 @@ mod tests {
         read_in(&mut recorder, turn, "u-more");
         // In the write that read it: the turn's id as the live view names it (no trace here).
         let ask = ("u-ask".to_owned(), None);
-        let more = ("u-more".to_owned(), Some(("turn-ask".to_owned(), turn.0)));
+        // Steered in as the turn ran.
+        let more = (
+            "u-more".to_owned(),
+            Some(("turn-ask".to_owned(), turn.0, "steer")),
+        );
         assert_eq!(read_into(&recorder), [ask.clone(), more.clone()]);
         // A delta that brings the row brings the link with it.
         let (given, _) = {
@@ -1164,7 +1185,7 @@ mod tests {
                 ("u-first".to_owned(), None),
                 (
                     "u-second".to_owned(),
-                    Some(("tr-first".to_owned(), first.0))
+                    Some(("tr-first".to_owned(), first.0, "start"))
                 ),
             ]
         );

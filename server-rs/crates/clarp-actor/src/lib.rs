@@ -1909,12 +1909,15 @@ impl Actor {
 
     /// The rows of the messages read into a running turn (issue 808). A native goal's turn
     /// has no message of its own and reads none: its walk would read the log back to its start.
-    fn read_rows(&self, turn: TurnId, origin: &Origin) -> Vec<String> {
+    fn read_rows(&self, turn: TurnId, origin: &Origin) -> Vec<(String, &'static str)> {
         if *origin == Origin::NativeGoal {
             return Vec::new();
         }
         conversation::read_rows_of(self.recorder.log(), &self.anchor_cache, turn.0)
             .unwrap_or_default()
+            .into_iter()
+            .map(|(row, at)| (row, at.name()))
+            .collect()
     }
 
     /// How many tool calls the conversation kept of a turn that ended: what its end says.
@@ -2020,7 +2023,7 @@ impl Actor {
                 // What the turn read before it was shown: read with its own message at its
                 // start, or steered in already.
                 let read = self.read_rows(turn, &live.origin);
-                let events = self.shown.read_rows(&read, now_ms);
+                let events = self.shown.read_rows_at(&read, now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = Some((turn, name));
             }
@@ -5883,7 +5886,7 @@ impl Actor {
         }
         // What the turn read, those who watch it are told again: its working line goes below it.
         let read = self.read_rows(turn, &message.origin);
-        let _ = self.shown.read_rows(&read, now_ms);
+        let _ = self.shown.read_rows_at(&read, now_ms);
         // One write to the log, so that every revision from here on is above every revision the
         // actor before this one gave to something it showed and did not store.
         let mut batch = self.recorder.batch();

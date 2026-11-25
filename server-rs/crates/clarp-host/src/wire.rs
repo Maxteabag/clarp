@@ -1694,9 +1694,14 @@ pub fn row(version: &Versioned) -> Value {
             };
             row["trace_id"] = json!(message.trace_id.clone().unwrap_or_default());
             // Read into a turn other than its own: that turn's trace (its `turn_id`) and number
-            // (feature `read_into`). Absent on a message that began its own turn.
+            // (feature `read_into`), and how (`at`, feature `read_into_at`): `start`, with the
+            // turn's own message in the prompt it began with, so it stands above the turn's work
+            // and splits none of it, or `steer`, into the turn as it ran. Absent on a message
+            // that began its own turn.
             if let Some(into) = &version.read_into {
-                row["read_into"] = json!({"trace_id": into.trace_id, "turn": into.turn});
+                row["read_into"] = json!({
+                    "trace_id": into.trace_id, "turn": into.turn, "at": into.at.name(),
+                });
             }
             row["origin"] = json!(message.origin.name());
             if let Some(sender) = &message.sender {
