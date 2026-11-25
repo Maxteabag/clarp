@@ -37,7 +37,8 @@ export component NavRail inherits Rectangle {
     in property <bool> muted;
     in property <string> server-initial;
     callback select-surface(string);
-    callback open-switcher();
+    // The magnifier: message search across chats (Ctrl+F).
+    callback open-message-search();
     callback toggle-muted();
     callback open-connection();
     in property <bool> live: true;
@@ -49,7 +50,7 @@ export component NavRail inherits Rectangle {
         alignment: start;
         RailButton { icon: @image-url("icons/rail-chats.svg"); tip: "Chats"; selected: root.surface == "chats"; clicked => { root.select-surface("chats"); } }
         RailButton { icon: @image-url("icons/rail-overview.svg"); tip: "All agents"; selected: root.surface == "overview"; clicked => { root.select-surface("overview"); } }
-        RailButton { icon: @image-url("icons/rail-search.svg"); tip: "Go to agent (Ctrl+K)"; clicked => { root.open-switcher(); } }
+        RailButton { icon: @image-url("icons/rail-search.svg"); tip: "Search messages (Ctrl+F)"; clicked => { root.open-message-search(); } }
         RailButton { icon: @image-url("icons/rail-updates.svg"); tip: "Updates"; badge: root.attention; selected: root.surface == "updates"; clicked => { root.select-surface("updates"); } }
         RailButton { icon: @image-url("icons/rail-teams.svg"); tip: "Teams"; selected: root.surface == "teams"; clicked => { root.select-surface("teams"); } }
     }

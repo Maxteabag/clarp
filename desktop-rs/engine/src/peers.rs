@@ -613,7 +613,7 @@ impl Engine {
     }
 
     /// What the primary's rows say about their Host.
-    fn primary_label(&self) -> String {
+    pub(crate) fn primary_label(&self) -> String {
         self.label_of(&self.base_url, &self.server_name)
     }
 

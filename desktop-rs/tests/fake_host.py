@@ -185,6 +185,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from live_projection import LiveView  # noqa: E402
 
 live_features = False
+# Message search across chats (feature message_search, Rust Host contract
+# 196): off until /__control/message-search turns it on. `partial` answers
+# partial: true (older history still being indexed); `page` caps a page
+# below the limit asked, so a check can page with a few rows.
+message_search = {"on": False, "partial": False, "page": 0}
 # One agent's change in its roster event (feature roster_fields, Rust Host
 # contract 182) and the read of one row, GET /agents/<session> (agent_row,
 # 183): off until /__control/roster-rows turns them on.
@@ -766,6 +771,54 @@ def summary_row(artifact):
         if digest is None:
             goal["history_omitted"]["digest_pending"] = True
     return row
+
+
+def search_answer(query):
+    """GET /search as docs/protocol.md has it: the rows of every chat that
+    hold each word of `q` at the start of one of their words, newest first,
+    in pages; `before` is an offset into the hits here (opaque to clients)."""
+    words = [w for w in re.findall(r"\w+", query.get("q", "").lower())]
+    if not words:
+        return 400, {"error": "nothing to search for in q"}
+    session = query.get("session", "")
+    limit = max(1, min(int(query.get("limit", "20") or 20), 100))
+    if message_search["page"]:
+        limit = min(limit, message_search["page"])
+    before = query.get("before") or "0"
+    if not before.isdigit():
+        return 400, {"error": "before is not a cursor"}
+    found = []
+    with state_lock:
+        for agent in agents:
+            name = agent["session"]
+            if session and session not in (name, agent.get("agent_id")):
+                continue
+            for row in turns.get(name, []):
+                if row.get("role") not in ("user", "assistant") or row.get("activity") or row.get("kind") == "live":
+                    continue
+                text = " ".join((row.get("display_text") or row.get("text") or "").split())
+                said = re.findall(r"\w+", text.lower())
+                if all(any(w.startswith(word) for w in said) for word in words):
+                    found.append((row.get("timestamp", ""), row.get("revision", 0), agent, row, text))
+    found.sort(key=lambda f: (f[0], f[1]), reverse=True)
+    start = int(before)
+    page = found[start:start + limit]
+    hits = []
+    for timestamp, revision, agent, row, text in page:
+        parts, at = [], 0
+        for m in re.finditer(r"\w+", text):
+            if any(m.group().lower().startswith(word) for word in words):
+                if m.start() > at:
+                    parts.append({"text": text[at:m.start()], "match": False})
+                parts.append({"text": m.group(), "match": True})
+                at = m.end()
+        if at < len(text):
+            parts.append({"text": text[at:], "match": False})
+        hits.append({"session": agent["session"], "agent_id": agent.get("agent_id", ""), "name": agent.get("persona", ""),
+                     "message_id": row["id"], "role": row["role"], "timestamp": timestamp, "revision": revision,
+                     "snippet": text, "parts": parts})
+    following = str(start + limit) if start + limit < len(found) else None
+    return 200, {"q": query.get("q", ""), "hits": hits, "next_before": following, "partial": message_search["partial"]}
 
 
 def record(entry):
@@ -1645,6 +1698,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("turn_audience_returns")
             if stall_feature:
                 features.append("stalled_turn")
+            if message_search["on"]:
+                features.append("message_search")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
             if chat_view.get("helper"):
@@ -1935,6 +1990,10 @@ class Handler(BaseHTTPRequestHandler):
                 if hidden_after and not query.get("before"):
                     answer["hidden_after"] = hidden_after
             return self.reply(200, answer)
+        if url.path == "/search":
+            if not message_search["on"]:
+                return self.reply(404, {"error": "not found"})
+            return self.reply(*search_answer(query))
         if url.path == "/live":
             session = query.get("session", "")
             with state_lock:
@@ -2405,6 +2464,12 @@ class Handler(BaseHTTPRequestHandler):
             # /server-info on connecting).
             global spoken_when_asked
             spoken_when_asked = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/message-search":
+            # Test control: message search on or off, partial, and a page cap
+            # (read from /server-info on connecting).
+            message_search.update({"on": bool(body.get("on", True)), "partial": bool(body.get("partial", False)),
+                                   "page": int(body.get("page", 0))})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/stop-text":
             # Test control: the stop_receipt_text feature on or off (read from

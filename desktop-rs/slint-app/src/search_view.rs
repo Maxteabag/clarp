@@ -1,8 +1,16 @@
-//! Message search in the switcher (Ctrl+F; Ctrl+K lists no messages):
-//! the text of every chat this computer holds, best and newest first, each
-//! row its chat, when, and the words around the match. Choosing one opens
-//! the chat, brings the message into view and marks it. The Host has no
-//! search, so the switcher says what was searched.
+//! Message search in the switcher (Ctrl+F, or the rail's magnifier; Ctrl+K
+//! lists no messages). Each row is its chat, who said it, when, and the
+//! words around the match; choosing one opens the chat, loads the page
+//! holding the message if it is not loaded yet, brings it into view and
+//! marks it.
+//!
+//! A Host that searches messages itself (`message_search`) is asked, a
+//! moment after the typing stops, for every chat it holds, newest first;
+//! with chats from all paired Hosts, every Host that can is asked and the
+//! hits merge. "Load more" pages back. Until the Hosts answer, and on a
+//! Host without the feature, the search runs over what this computer holds
+//! (loaded and cached chats), best and newest first, and the switcher says
+//! what was searched.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,6 +31,14 @@ pub const LOAD_OLDER: &str = "search-load-older";
 pub const EMPTY: &str = "No match in the messages loaded on this computer";
 /// Ctrl+K points to message search from this many characters typed.
 pub const HINT_FROM: usize = 3;
+/// The row that asks the Hosts for older matches.
+pub const LOAD_MORE: &str = "search-load-more";
+/// What the Hosts' search says when nothing matches.
+pub const HOST_EMPTY: &str = "No message in any chat has these words";
+/// What it says while the Hosts are asked.
+pub const SEARCHING: &str = "Searching every chat…";
+/// The Hosts are asked this long after the last key typed.
+pub const DEBOUNCE: Duration = Duration::from_millis(250);
 
 const SEPARATOR: char = '\u{1f}';
 
@@ -101,6 +117,142 @@ pub fn note(results: &SearchResults) -> String {
         note.push_str(&format!(" The cache could not be read: {}", results.cache_error));
     }
     note
+}
+
+thread_local! {
+    /// The words the Hosts were last asked (or are about to be).
+    static ASKED: RefCell<String> = const { RefCell::new(String::new()) };
+    static ASK_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+/// The switcher opened: the next words are asked afresh.
+pub fn forget_asked() {
+    ASKED.with(|a| a.borrow_mut().clear());
+    ASK_TIMER.with(|t| t.borrow_mut().take());
+}
+
+/// Asks the Hosts for `query` once the typing pauses (`DEBOUNCE`); empty
+/// words clear their results at once. Nothing on Hosts without the feature.
+pub fn ask(app: &App, query: &str) {
+    if !app.engine.borrow().host_search_offered() {
+        return;
+    }
+    let query = query.trim().to_owned();
+    if ASKED.with(|a| *a.borrow() == query) {
+        return;
+    }
+    ASKED.with(|a| *a.borrow_mut() = query.clone());
+    if query.is_empty() {
+        ASK_TIMER.with(|t| t.borrow_mut().take());
+        app.engine.borrow_mut().search_host("", "");
+        return;
+    }
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::SingleShot, DEBOUNCE, move || {
+        let Some(app) = crate::app() else { return };
+        // Still the words in the field: ask.
+        if ASKED.with(|a| *a.borrow() == query) {
+            app.engine.borrow_mut().search_host(&query, "");
+            pump_now(&app);
+        }
+    });
+    ASK_TIMER.with(|t| *t.borrow_mut() = Some(timer));
+}
+
+/// "Load more" was chosen: the next page from every Host that has one;
+/// the switcher stays open.
+pub fn load_more(app: &Rc<App>) {
+    app.engine.borrow_mut().search_host_more();
+    pump_now(app);
+}
+
+/// Names as a list: "A", "A and B", "A, B and C".
+fn listed(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What message search lists, says, and says when it finds nothing.
+pub struct Found {
+    pub items: Vec<Item>,
+    pub note: String,
+    pub empty: &'static str,
+}
+
+/// Message search's rows for `query`: the Hosts' hits where they search,
+/// else (and until they answer) what this computer holds.
+pub fn found(engine: &mut Engine, query: &str) -> Found {
+    if !engine.host_search_offered() {
+        let (items, results) = items(engine, query, LIMIT);
+        return Found { items, note: note(&results), empty: EMPTY };
+    }
+    let results = engine.host_search_results();
+    let words = query.trim();
+    if words.is_empty() {
+        return Found { items: Vec::new(), note: String::new(), empty: HOST_EMPTY };
+    }
+    let answered = results.query == words && results.answered;
+    // The primary cannot search but a paired Host can: its chats are
+    // searched as this computer holds them.
+    let primary_local = !engine.host_search_offered_for("");
+    let local = |engine: &mut Engine| -> Vec<Item> { items(engine, query, LIMIT).0.into_iter().filter(|i| i.target != LOAD_OLDER).collect() };
+    let where_ = if results.hosts > 1 { format!("on {} Hosts", results.hosts) } else { "on the Host".to_owned() };
+    if !answered {
+        // Until the Hosts answer the words: what this computer holds.
+        return Found { items: local(engine), note: format!("Searching every chat {where_}…"), empty: SEARCHING };
+    }
+    let now = chrono::Local::now();
+    let mut items: Vec<Item> = results
+        .hits
+        .iter()
+        .map(|hit| {
+            let snippet: String = hit.snippet.iter().map(|s| if s.mark { format!("**{}**", escape(&s.text)) } else { escape(&s.text) }).collect();
+            let when = clarp_core::time_format::chat_stamp(hit.epoch_ms, &now);
+            let who = if hit.role == "user" { "you" } else { "agent" };
+            let known = engine.chat_name(&hit.session);
+            let name = if (known == hit.session || known.is_empty()) && !hit.name.is_empty() { hit.name.clone() } else { known };
+            let badge = if results.hosts > 1 { engine.host_badge(&hit.session) } else { String::new() };
+            let badge = if badge.is_empty() { badge } else { format!(" · {badge}") };
+            Item::message(format!("{}{SEPARATOR}{}", hit.session, hit.message_id), format!("{name} · {who} · {when}{badge}"), snippet)
+        })
+        .collect();
+    if results.more {
+        let loading = results.pending;
+        items.push(Item {
+            kind: crate::switcher::Kind::Command,
+            target: LOAD_MORE.to_owned(),
+            label: if loading { "Loading more messages…".to_owned() } else { "Load more messages".to_owned() },
+            detail: "Older matches, from every chat".to_owned(),
+            key: String::new(),
+            group: "message",
+            description: String::new(),
+            aliases: &[],
+            value: String::new(),
+            entry: "",
+        });
+    }
+    if primary_local {
+        items.extend(local(engine));
+    }
+    let mut said: Vec<String> = Vec::new();
+    said.push(if results.hosts > 1 { format!("Searched every chat on {} Hosts.", results.hosts) } else { "Searched every chat on the Host.".to_owned() });
+    if !results.partial.is_empty() {
+        // Once, quietly: some older rows may not be found yet.
+        said.push(format!("Older history is still being indexed on {}: some older messages are not found yet.", listed(&results.partial)));
+    }
+    for error in &results.errors {
+        said.push(format!("Not searched: {error}."));
+    }
+    if !results.without.is_empty() {
+        said.push(format!("{} cannot search messages: its chats are not searched.", listed(&results.without)));
+    }
+    if primary_local {
+        said.push("This Host cannot search messages: its chats are searched as loaded on this computer.".to_owned());
+    }
+    Found { items, note: said.join(" "), empty: HOST_EMPTY }
 }
 
 /// A chosen message, until the chat shows it.
@@ -187,6 +339,14 @@ mod tests {
     #[test]
     fn a_snippet_shows_markdown_punctuation_as_typed() {
         assert_eq!(escape("run `cargo test` *now* [x](y) #1"), "run \\`cargo test\\` \\*now\\* \\[x\\]\\(y\\) \\#1");
+    }
+
+    #[test]
+    fn names_read_as_a_list() {
+        let names = |n: &[&str]| listed(&n.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert_eq!(names(&["Laptop"]), "Laptop");
+        assert_eq!(names(&["Laptop", "Office"]), "Laptop and Office");
+        assert_eq!(names(&["A", "B", "C"]), "A, B and C");
     }
 
     #[test]

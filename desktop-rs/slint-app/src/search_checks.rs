@@ -10,6 +10,14 @@
 //! after it into its field, and a '/' search leaves the window's scale and
 //! size as they were.
 //!
+//! `--check host-search`: on a Host that searches messages itself
+//! (`message_search`), the rail's magnifier opens message search; the words
+//! typed are asked once, after the typing pauses; hits from chats never
+//! loaded here show newest first with their matches marked, with a quiet
+//! note while the Host still indexes older history; "Load more" brings the
+//! next page; Enter opens a chat never loaded at the hit, loading the page
+//! that holds it.
+//!
 //! `--check mention`: `@` in the composer lists the agents, the arrows move
 //! through them, Tab completes the name, the route chip says where Enter
 //! sends, the message goes to that agent's chat (`/send` to its session),
@@ -18,7 +26,7 @@
 
 use std::time::Duration;
 
-use serde_json::json;
+use serde_json::{Value, json};
 use slint::Model;
 
 use super::{Stage, app_now, check, check_window_size_free, control, rows, run_stages, sends, shot, view};
@@ -358,6 +366,121 @@ pub fn message_search_check(out: String) {
                 return false;
             }
             check_window_size_free(window, "after a '/' search and Enter");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// The fake Host's `GET /search` requests: the words of each.
+fn searches() -> Vec<String> {
+    super::requests("GET", "/search").iter().map(|r| r["query"]["q"].as_str().unwrap_or_default().to_owned()).collect()
+}
+
+/// The rail's magnifier, where it is drawn: its middle.
+fn magnifier() -> Option<(f32, f32)> {
+    use i_slint_backend_testing::ElementQuery;
+    let window = crate::window()?;
+    ElementQuery::from_root(&window)
+        .match_predicate(|e| e.accessible_label().is_some_and(|l| l == "Search messages (Ctrl+F)") && e.size().width > 0.0)
+        .find_first()
+        .map(|e| (e.absolute_position().x + e.size().width / 2.0, e.absolute_position().y + e.size().height / 2.0))
+}
+
+pub fn host_search_check(out: String) {
+    use slint::platform::Key;
+    let (out1, out2, out3) = (out.clone(), out.clone(), out);
+    let row = |id: &str, role: &str, text: &str, at: &str| json!({"id": id, "role": role, "text": text, "timestamp": at});
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, _, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
+            if !open {
+                return false;
+            }
+            // Oscar: never opened here, a long chat whose match is far older
+            // than its last page.
+            let mut turns = Vec::new();
+            for i in 0..160 {
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                let at = format!("2026-11-20T{:02}:{:02}:00Z", 8 + i / 60, i % 60);
+                turns.push(if i == 2 { row("o-target", role, "The heron survey covers the northern lakes.", &at) } else { row(&format!("o-{i}"), role, &format!("Row {i}: a routine note about the build."), &at) });
+            }
+            check(control("/__control/add-agent", &json!({"session": "oscar", "persona": "Oscar"})).is_ok(), "the Host adds Oscar");
+            check(control("/__control/turns", &json!({"session": "oscar", "turns": turns})).is_ok(), "the Host holds Oscar's long chat");
+            check(control("/__control/add-agent", &json!({"session": "pia", "persona": "Pia"})).is_ok(), "the Host adds Pia");
+            check(control("/__control/turns", &json!({"session": "pia", "turns": [row("p-heron", "assistant", "A heron nests by the pier.", "2026-11-15T12:00:00Z")]})).is_ok(), "the Host holds Pia's chat");
+            let mike = json!([row("m1", "assistant", "Mike here", "2026-09-29T09:00:00Z"), row("m-heron", "user", "Did you see the herons?", "2026-11-01T12:00:00Z")]);
+            check(control("/__control/turns", &json!({"session": "mike", "turns": mike})).is_ok(), "Mike's chat holds an older match");
+            // The Host searches, still indexing older history, two hits a page.
+            check(control("/__control/message-search", &json!({"on": true, "partial": true, "page": 2})).is_ok(), "the Host offers message_search");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("magnifier", Box::new(|app, window, elapsed| {
+            let ready = app.engine.borrow().host_search_offered() && app.engine.borrow().roster().find("pia").is_some();
+            if !ready || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(app.engine.borrow().conversation("oscar").is_none_or(|c| c.rows().is_empty()), "Oscar's chat was never loaded here");
+            let Some((x, y)) = magnifier() else {
+                check(false, "the rail draws the magnifier");
+                return true;
+            };
+            super::click_at(window, x, y);
+            true
+        })),
+        ("opened", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_switcher_open() && window.get_switcher_placeholder() == "Search messages in every chat", "the rail's magnifier opens message search");
+            headless::type_text("heron");
+            true
+        })),
+        ("found", Box::new(move |_, window, elapsed| {
+            let messages: Vec<String> = window.get_switcher_rows().iter().filter(|r| r.kind == "message").map(|r| r.label.to_string()).collect();
+            let done = messages.first().is_some_and(|l| l.starts_with("Oscar"));
+            if !done {
+                check(elapsed < Duration::from_secs(5), &format!("the Host's hits show: {messages:?} {:?}", window.get_switcher_note()));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(searches() == ["heron"], &format!("the words are asked once, after the typing paused: {:?}", searches()));
+            check(messages.len() == 2 && messages[0].starts_with("Oscar · you") && messages[1].starts_with("Pia · agent"), &format!("hits from chats never loaded, newest first: {messages:?}"));
+            let snippet = window.get_switcher_rows().row_data(0).map(|r| r.detail.to_string()).unwrap_or_default();
+            check(snippet.contains("**heron**"), &format!("the snippet marks the match: {snippet}"));
+            let note = window.get_switcher_note().to_string();
+            check(note.contains("still being indexed") && !note.contains("on this computer"), &format!("it says, quietly, that older history is still being indexed: {note}"));
+            let last = window.get_switcher_rows().iter().last().map(|r| r.label.to_string()).unwrap_or_default();
+            check(last == "Load more messages", &format!("a row loads more: {last}"));
+            shot(&out1, "host-search-01-results");
+            let index = window.get_switcher_rows().row_count() as i32 - 1;
+            window.invoke_switcher_chosen(index);
+            true
+        })),
+        ("more", Box::new(move |_, window, elapsed| {
+            let messages: Vec<String> = window.get_switcher_rows().iter().filter(|r| r.kind == "message").map(|r| r.label.to_string()).collect();
+            if messages.len() < 3 {
+                check(elapsed < Duration::from_secs(5), &format!("Load more brings the next page: {messages:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(window.get_switcher_open(), "the switcher stays open on Load more");
+            check(messages.len() == 3 && messages[2].starts_with("Mike · you"), &format!("the older match comes last: {messages:?}"));
+            let pages: Vec<Value> = super::requests("GET", "/search");
+            check(pages.last().is_some_and(|r| r["query"]["before"] == "2"), &format!("the next page is asked with the cursor: {pages:?}"));
+            let more = window.get_switcher_rows().iter().any(|r| r.label.starts_with("Load more"));
+            check(!more, "no more rows to load after the last page");
+            shot(&out2, "host-search-02-more");
+            window.invoke_switcher_chosen(0);
+            true
+        })),
+        ("jumped", Box::new(move |app, window, elapsed| {
+            let shown = !window.get_switcher_open() && app.engine.borrow().selected_session() == "oscar" && app_now().marked_row() == "o-target" && in_view("o-target");
+            if !shown {
+                check(elapsed < Duration::from_secs(15), "Enter opens Oscar's chat at the hit");
+                return elapsed >= Duration::from_secs(15);
+            }
+            check(true, "Enter opens a chat never loaded at the hit, its older page loaded, the message marked and in view");
+            shot(&out3, "host-search-03-jumped");
             true
         })),
     ];
