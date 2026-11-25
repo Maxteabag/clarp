@@ -544,6 +544,11 @@ enum Ask {
     TerminalFacts {
         answer: Answer<TerminalFacts>,
     },
+    /// Whether a turn's tool may run now, as a terminal would be refused for: a question only,
+    /// which takes no lease and changes nothing (a plain read of the terminal's address).
+    TerminalTurnRuns {
+        answer: Answer<bool>,
+    },
     OpenTerminal {
         answer: Answer<TerminalLease>,
     },
@@ -1376,6 +1381,12 @@ impl AgentHandle {
     /// What a terminal on the agent's own tool is started with.
     pub async fn terminal_facts(&self) -> Result<TerminalFacts, Unavailable> {
         self.ask(|answer| Ask::TerminalFacts { answer }).await
+    }
+
+    /// Whether a terminal on the agent's tool would be refused now because a turn of the agent
+    /// runs. Asks only: no lease is taken and nothing changes.
+    pub async fn terminal_turn_runs(&self) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::TerminalTurnRuns { answer }).await
     }
 
     /// Tells the agent's thread that a terminal on its tool was opened, or closed. Does
@@ -3000,6 +3011,10 @@ impl Worker {
             }
         }
         let ask = match ask {
+            Ask::TerminalTurnRuns { answer } => {
+                let _ = answer.send(Ok(self.turn_runs()));
+                return Ok(());
+            }
             Ask::OpenTerminal { answer } => {
                 if let Some(actor) = self.actor.as_ref()
                     && let Err(why) = actor.require_here()
@@ -3878,6 +3893,7 @@ impl Worker {
             | Ask::Goal { .. }
             | Ask::Amended { .. }
             | Ask::OpenTerminal { .. }
+            | Ask::TerminalTurnRuns { .. }
             | Ask::Terminal { .. }
             | Ask::VisitProvider(_)
             | Ask::TakeLibrary { .. }
@@ -5840,6 +5856,7 @@ fn refuse_for(
             Ok(Ask::Hold { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::OpenTerminal { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TerminalTurnRuns { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Bookkeeping { answer, .. }) => drop(answer.send(Err(refusal()))),

@@ -322,9 +322,10 @@ async fn of_an_agent(
     Named(named): Named<String>,
     socket: Socket,
 ) -> Response {
-    if !socket.asked() {
-        return line::refused(StatusCode::UPGRADE_REQUIRED, NO_SOCKET);
-    }
+    // A plain read of this address is answered what the upgrade would be refused with, and
+    // `426` only where nothing refuses: an app that cannot read a refused upgrade's body (iOS)
+    // reads the address once as plain HTTP for the reason. It takes no lease and starts
+    // nothing: everything up to the upgrade only asks.
     let session = named.trim_matches('/');
     let Some(member) = app.anyone(session) else {
         return line::refused(StatusCode::NOT_FOUND, "no such agent");
@@ -350,6 +351,12 @@ async fn of_an_agent(
     let binding = member.record.binding();
     if let Err(why) = crate::fleet::admitted(&binding) {
         return line::refused(StatusCode::CONFLICT, &why);
+    }
+    if !socket.asked() {
+        return match member.agent.terminal_turn_runs().await {
+            Ok(true) => turn_running(),
+            _ => line::refused(StatusCode::UPGRADE_REQUIRED, NO_SOCKET),
+        };
     }
     if let Ok(Some(own)) = &binding {
         let provider = serde_json::Value::String(own.provider.clone());

@@ -64,10 +64,42 @@ fn an_agents_terminal_is_refused_while_a_turn_of_it_runs_and_opens_after() {
             "agent_turn_running",
         )
     );
+    // A plain read of the address, as an app that cannot read a refused upgrade's body makes,
+    // is told the same, and takes nothing: the turn runs on, no terminal is counted.
+    let plain = fetch(&host, ADMIN, "GET", &path, &[], b"");
+    assert_eq!(
+        (
+            plain.status,
+            serde_json::from_slice::<Value>(&plain.body).unwrap(),
+            plain.header("x-clarp-code"),
+        ),
+        (
+            409,
+            json!({
+                "error": "A turn of this agent is running. Stop it or wait until it ends, \
+                          then open the terminal.",
+                "code": "agent_turn_running",
+            }),
+            "agent_turn_running",
+        )
+    );
     // The refusal held nothing: the turn goes on and ends as ever.
     std::fs::write(&go, "").unwrap();
     wait_for("the turn to end", || host.state(&agent) == "done");
     assert_eq!(host.conversation(&agent).len(), 2);
+
+    // A plain read of an idle agent's address is told only that it asked for no socket, and
+    // holds nothing back: the next turn starts at once.
+    let plain = fetch(&host, ADMIN, "GET", &path, &[], b"");
+    assert_eq!(
+        (plain.status, plain.text().as_str()),
+        (426, "upgrade required (websocket)")
+    );
+    host.send(&agent, "after a plain read", "m0");
+    wait_for("the turn after a plain read", || {
+        std::fs::read_to_string(&started).is_ok_and(|ran| ran.lines().count() == 2)
+    });
+    wait_for("that turn to end", || host.state(&agent) == "done");
 
     // With no turn running, the terminal opens on the agent's conversation, and a turn sent
     // meanwhile waits for it to be closed, as before.
@@ -76,7 +108,7 @@ fn an_agents_terminal_is_refused_while_a_turn_of_it_runs_and_opens_after() {
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
         std::fs::read_to_string(&started).unwrap().lines().count(),
-        1
+        2
     );
     // A second terminal while that turn waits for the first is no second writer beside a
     // tool: it opens.
@@ -86,6 +118,6 @@ fn an_agents_terminal_is_refused_while_a_turn_of_it_runs_and_opens_after() {
     wait_for("the turn that waited", || host.state(&agent) == "done");
     assert_eq!(
         std::fs::read_to_string(&started).unwrap().lines().count(),
-        2
+        3
     );
 }

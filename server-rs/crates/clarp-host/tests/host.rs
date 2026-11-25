@@ -34930,14 +34930,15 @@ fn an_agents_own_tool_is_spoken_to_in_a_terminal_and_its_turns_wait_meanwhile() 
     let work = std::fs::canonicalize(place.root.join("work")).unwrap();
     let path = format!("/terminal/{agent}");
 
-    // What is asked that is no terminal of an agent: in the order the Python Host asks.
-    for asked in [path.as_str(), "/terminal/nobody"] {
+    // A plain read is told what the upgrade would be refused with, and that it asked for no
+    // socket only where nothing refuses (an app that cannot read a refused upgrade's body reads
+    // the address so; the Python Host says 426 first).
+    for (asked, said) in [
+        (path.as_str(), (426, "upgrade required (websocket)")),
+        ("/terminal/nobody", (404, "no such agent")),
+    ] {
         let plain = fetch(&host, ADMIN, "GET", asked, &[], b"");
-        assert_eq!(
-            (plain.status, plain.text().as_str()),
-            (426, "upgrade required (websocket)"),
-            "{asked}"
-        );
+        assert_eq!((plain.status, plain.text().as_str()), said, "{asked}");
     }
     let nobody = asked_for_a_socket(&host, ADMIN, "/terminal/nobody");
     assert_eq!(
