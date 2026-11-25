@@ -50,4 +50,35 @@ fn on_a_host_with_no_speech_set_up_a_reply_is_not_spoken_and_not_reported_unspok
     };
     assert_eq!(ours("tts-error"), 0, "no reply is reported as not spoken");
     assert_eq!(ours("audio"), 0, "and nothing was announced to be heard");
+
+    // Nor are a form's answers asked to be answered aloud.
+    let form = json!({"session":session,"type":"html_form","artifact_id":"quiet-form",
+        "title":"Plan","payload":{"content":"<p>Plan</p>","version":"v1",
+        "answer_schema":{"type":"object","properties":{"note":{"type":"string"}}}}});
+    assert_eq!(host.ask("POST", "/artifacts", Some(&form)).0, 201);
+    let answers = json!({"version":"v1","submission_id":"aloud-01",
+        "answers":{"note":"<speak>Read it.</speak>"},"synthesize_audio":true});
+    let sent = host.ask("POST", "/artifacts/quiet-form/submit", Some(&answers));
+    assert_eq!(sent.0, 200, "{}", sent.1);
+    wait_for("the answer to the form", || {
+        host.turns(&session)
+            .iter()
+            .filter(|row| row["role"] == "assistant")
+            .count()
+            == 2
+            && host.state(&session) == "done"
+    });
+    // The same answers sent again are the same submission, not another wish.
+    let again = host.ask("POST", "/artifacts/quiet-form/submit", Some(&answers));
+    assert_eq!(again.0, 200, "{}", again.1);
+    std::thread::sleep(Duration::from_millis(500));
+    let events = heard.lock().unwrap().clone();
+    let ours = |kind: &str| {
+        events
+            .iter()
+            .filter(|event| event["type"] == kind && event["session"] == session.as_str())
+            .count()
+    };
+    assert_eq!(ours("tts-error"), 0, "nor is the form's answer reported unspoken");
+    assert_eq!(ours("audio"), 0);
 }
