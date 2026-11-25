@@ -23,6 +23,7 @@ pub mod apps;
 pub mod artifact_tool;
 pub mod audio;
 mod bookkeeping;
+pub mod bound_privacy;
 pub mod calendar;
 pub mod calls;
 mod chat_view;

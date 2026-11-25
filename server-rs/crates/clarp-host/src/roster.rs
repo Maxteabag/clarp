@@ -318,14 +318,39 @@ pub(crate) async fn tune(app: &App, asked: &Fields) -> Result<Value, Refusal> {
 /// whether what it says may be spoken by a speech provider in the cloud (`null`: as its kind
 /// has it). What the request leaves out stays. Its next turn runs with what it now has; one
 /// that runs keeps what it was started with.
-async fn provider(State(app): State<App>, body: Bytes) -> Answered {
-    Ok(Json(bind(&app, &object(&body)?).await?))
+async fn provider(
+    State(app): State<App>,
+    axum::Extension(principal): axum::Extension<edge::Principal>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
+    let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await;
+    let reader = match reader {
+        Ok(reader) => reader,
+        Err(refused) => return refused.into_response(),
+    };
+    let answer = match object(&body) {
+        Ok(asked) => bind(&app, &asked, &reader).await,
+        Err(refused) => Err(refused),
+    };
+    match answer {
+        Ok(answer) => Json(answer).into_response(),
+        Err(refused) => refused.into_response(),
+    }
 }
 
 /// Binds an agent to a provider of its own, or lets it go, from what a request said, and
 /// answers what the route answers. The agents' own tool for it (`clarp-admin agent provider`)
 /// asks the same thing.
-pub(crate) async fn bind(app: &App, asked: &Fields) -> Result<Value, Refusal> {
+///
+/// `add_readers` and `remove_readers` (sessions or ids) change which agents may read it while
+/// it is bound ([`crate::bound_privacy`]): the owner's word is done at once; an agent's adding
+/// asks the owner on a card (`asked`), and an agent cannot remove one (403 `owner_only`).
+pub(crate) async fn bind(
+    app: &App,
+    asked: &Fields,
+    reader: &crate::bound_privacy::Reader,
+) -> Result<Value, Refusal> {
     let session = edge::body_text(asked, "session")?;
     if session.is_empty() {
         return Err(bad("session required"));
@@ -363,20 +388,94 @@ pub(crate) async fn bind(app: &App, asked: &Fields) -> Result<Value, Refusal> {
             ));
         }
     }
-    let change = Amend::Provider {
-        home,
-        provider,
-        cloud_speech,
+    let adding = agents_named(app, asked, "add_readers")?;
+    let removing = agents_named(app, asked, "remove_readers")?;
+    let rebinds = ["codex_home", "codex_provider", "cloud_speech"]
+        .iter()
+        .any(|key| asked.contains_key(*key));
+    let mut record = if rebinds || (adding.is_empty() && removing.is_empty()) {
+        let change = Amend::Provider {
+            home,
+            provider,
+            cloud_speech,
+        };
+        amend(app, &before.agent_id, change).await?
+    } else {
+        before.clone()
     };
-    let record = amend(app, &before.agent_id, change).await?;
-    Ok(json!({
+    let mut cards = Vec::new();
+    for (agents, add) in [(&removing, false), (&adding, true)] {
+        if agents.is_empty() {
+            continue;
+        }
+        if add && !record.bound() && *reader != crate::bound_privacy::Reader::Owner {
+            let why = format!(
+                "{} is not bound to a provider of its own: every agent reads it already.",
+                record.persona
+            );
+            return Err(Refusal::Told(
+                StatusCode::CONFLICT,
+                json!({"error": "not_bound", "message": why}),
+            ));
+        }
+        let changed = crate::bound_privacy::change_readers(app, reader, &record, agents, add).await;
+        match changed.map_err(|(status, body)| Refusal::Told(status, body))? {
+            crate::bound_privacy::ReadersChange::Done(readers) => record.readers = readers,
+            crate::bound_privacy::ReadersChange::Asked(asked) => cards.extend(asked),
+        }
+    }
+    let directory = app.fleet.directory();
+    let readers: Vec<&str> = record
+        .readers
+        .iter()
+        .filter_map(|id| {
+            let mut members = directory.members.iter();
+            let member = members.find(|member| member.record.agent_id == *id)?;
+            Some(member.record.session.as_str())
+        })
+        .collect();
+    let mut answer = json!({
         "ok": true,
         "session": record.session,
         "backend": record.backend,
         "codex_home": record.codex_home,
         "codex_provider": record.codex_provider,
         "cloud_speech": record.speaks_to_cloud(),
-    }))
+        "readers": readers,
+    });
+    if !cards.is_empty() {
+        answer["asked"] = json!(cards);
+    }
+    Ok(answer)
+}
+
+/// The agents a request names under `key` (a list of sessions or ids), each once.
+fn agents_named(app: &App, asked: &Fields, key: &str) -> Result<Vec<AgentRecord>, Refusal> {
+    let named = match asked.get(key) {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(named)) => named,
+        Some(_) => return Err(bad(&format!("{key} must be a list of sessions"))),
+    };
+    let directory = app.fleet.directory();
+    let mut agents: Vec<AgentRecord> = Vec::new();
+    for said in named {
+        let Some(said) = said.as_str().map(str::trim).filter(|said| !said.is_empty()) else {
+            return Err(bad(&format!("{key} must be a list of sessions")));
+        };
+        let mut members = directory.members.iter();
+        let Some(member) =
+            members.find(|member| member.record.session == said || member.record.agent_id == said)
+        else {
+            return Err(no_such_agent());
+        };
+        if !agents
+            .iter()
+            .any(|agent| agent.agent_id == member.record.agent_id)
+        {
+            agents.push(member.record.clone());
+        }
+    }
+    Ok(agents)
 }
 
 /// `GET /agents/archived?limit=&cursor=`: one page of the agents that are put away, the

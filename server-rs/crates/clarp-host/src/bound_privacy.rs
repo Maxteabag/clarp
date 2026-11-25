@@ -1,0 +1,1195 @@
+//! Who may read the words of an agent bound to a model provider of its own (issue 751).
+//!
+//! Such an agent's turns run on that provider alone, and its words go to no model or service
+//! of the Host's. Other agents run on their own providers: what they read of it they may pass
+//! to theirs. So its words are read only by:
+//!
+//! - its owner: the apps (a paired device), and the administrator's token presented without
+//!   an agent's turn;
+//! - itself, and every agent bound as it is (the same Codex home and the same provider: the
+//!   helpers and forks it makes are);
+//! - the agents the owner lets read it, one by one (`readers` on its record). An agent asks
+//!   with `clarp-admin agent provider --reader`, and the owner answers on a card.
+//!
+//! Any other reader (another agent, a tool call that cannot say whose turn it is, another
+//! Host, a page of another origin) is told the agent is there, its name and its state, and
+//! not what it says. One check decides it ([`may_read`]); one guard ([`guard`]) applies it to
+//! every route by the class the route is given in [`CLASSES`], and a test walks the Host's
+//! routes so that a route that answers an agent's words cannot be added without a class.
+//! The agents' own tools ask the same check ([`reader_of_call`]), as do the messages an agent
+//! sends ([`withheld_message`]) and the updates it gives its teams ([`withheld_update`]).
+//!
+//! What it does not stop: an agent on the same machine that reads the Host's configuration
+//! (its administrator token) or the agent's own files. The Host keeps its words out of what
+//! it hands to other agents; the machine's own files are the machine's.
+
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use axum::body::{Body, Bytes};
+use axum::extract::{MatchedPath, Request, State};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt;
+use serde_json::{Map, Value, json};
+
+use crate::edge::{App, Principal};
+use crate::fleet::{AgentRecord, Member};
+
+/// The code a read of a withheld agent's words is refused with.
+pub const REFUSED: &str = "bound_conversation";
+
+/// Who reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reader {
+    /// The owner: the apps, and the administrator without an agent's turn.
+    Owner,
+    /// An agent, by its turn: its id, and the Codex home and provider it is bound to (empty
+    /// where it is not).
+    Agent {
+        agent_id: String,
+        home: String,
+        provider: String,
+    },
+    /// An agent's tool or script that cannot say whose turn it is.
+    Unknown,
+    /// Another Host, or a page of another origin.
+    Elsewhere,
+}
+
+impl Reader {
+    /// The reader an agent is.
+    pub fn agent(record: &AgentRecord) -> Self {
+        Reader::Agent {
+            agent_id: record.agent_id.clone(),
+            home: record.codex_home.clone(),
+            provider: record.codex_provider.clone(),
+        }
+    }
+
+    /// The agent's id, where the reader is one.
+    pub fn agent_id(&self) -> Option<&str> {
+        match self {
+            Reader::Agent { agent_id, .. } => Some(agent_id),
+            _ => None,
+        }
+    }
+}
+
+/// The one check: whether this reader may read what this agent says.
+pub fn may_read(reader: &Reader, record: &AgentRecord) -> bool {
+    if !record.bound() {
+        return true;
+    }
+    match reader {
+        Reader::Owner => true,
+        Reader::Agent {
+            agent_id,
+            home,
+            provider,
+        } => {
+            *agent_id == record.agent_id
+                || (*home == record.codex_home && *provider == record.codex_provider)
+                || record.readers.iter().any(|reader| reader == agent_id)
+        }
+        Reader::Unknown | Reader::Elsewhere => false,
+    }
+}
+
+/// The agents whose words a reader may not read, and every agent's names (which stay shown).
+#[derive(Debug, Default)]
+pub struct Withheld {
+    /// By id and by session.
+    agents: HashSet<String>,
+    /// Every agent's persona and session: a name is no word.
+    names: HashSet<String>,
+}
+
+impl Withheld {
+    /// What this reader may not read on this Host now; `None` where it may read everything.
+    pub fn of(app: &App, reader: &Reader) -> Option<Withheld> {
+        if *reader == Reader::Owner {
+            return None;
+        }
+        let directory = app.fleet.directory();
+        let everyone = directory.members.iter().chain(directory.janitors.iter());
+        let records: Vec<&AgentRecord> = everyone.map(|member| &member.record).collect();
+        Self::among(records, reader)
+    }
+
+    /// What this reader may not read among these agents; `None` where it may read them all.
+    pub fn among<'a>(
+        records: impl IntoIterator<Item = &'a AgentRecord>,
+        reader: &Reader,
+    ) -> Option<Withheld> {
+        let mut withheld = Withheld::default();
+        for record in records {
+            withheld.names.insert(record.persona.clone());
+            withheld.names.insert(record.session.clone());
+            if !may_read(reader, record) {
+                withheld.agents.insert(record.agent_id.clone());
+                withheld.agents.insert(record.session.clone());
+            }
+        }
+        withheld.agents.remove("");
+        (!withheld.agents.is_empty()).then_some(withheld)
+    }
+
+    /// Whether this agent (by id or session) is withheld.
+    pub fn has(&self, agent: &str) -> bool {
+        !agent.is_empty() && self.agents.contains(agent)
+    }
+
+    /// Blanks the words of every object in `value` that is of a withheld agent. Answers
+    /// whether anything was blanked.
+    pub fn walk(&self, value: &mut Value) -> bool {
+        match value {
+            Value::Object(fields) => {
+                if self.names_one(fields) {
+                    *value = self.blanked(fields);
+                    return true;
+                }
+                let mut changed = false;
+                for child in fields.values_mut() {
+                    changed |= self.walk(child);
+                }
+                changed
+            }
+            Value::Array(items) => {
+                let mut changed = false;
+                for item in items {
+                    changed |= self.walk(item);
+                }
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether an object is of a withheld agent: one of the keys that say whose it is names
+    /// one.
+    fn names_one(&self, fields: &Map<String, Value>) -> bool {
+        WHOSE
+            .iter()
+            .filter_map(|key| fields.get(*key).and_then(Value::as_str))
+            .any(|agent| self.has(agent))
+    }
+
+    /// An object of a withheld agent with its words blanked: what says whose it is, what it
+    /// is and when stays, and every other text is emptied, all the way down.
+    fn blanked(&self, fields: &Map<String, Value>) -> Value {
+        let mut kept = Map::new();
+        for (key, value) in fields {
+            kept.insert(key.clone(), self.blank(key, value));
+        }
+        kept.insert("words_withheld".to_string(), Value::Bool(true));
+        Value::Object(kept)
+    }
+
+    fn blank(&self, key: &str, value: &Value) -> Value {
+        match value {
+            Value::String(text) if self.keeps(key, text) => value.clone(),
+            Value::String(_) => Value::String(String::new()),
+            Value::Array(items) if items.iter().all(Value::is_string) && !kept_key(key) => {
+                Value::Array(Vec::new())
+            }
+            Value::Array(items) => {
+                Value::Array(items.iter().map(|item| self.blank(key, item)).collect())
+            }
+            Value::Object(fields) => {
+                let mut kept = Map::new();
+                for (inner, value) in fields {
+                    kept.insert(inner.clone(), self.blank(inner, value));
+                }
+                Value::Object(kept)
+            }
+            other => other.clone(),
+        }
+    }
+
+    /// Whether a text under this key is no word of the agent's: an id, a moment, an address,
+    /// a name the Host gave, or a value of a short list (a state, a kind).
+    fn keeps(&self, key: &str, text: &str) -> bool {
+        if NAME_KEYS.contains(&key) {
+            return self.names.contains(text);
+        }
+        if key.ends_with("_id") || key.ends_with("_ids") || key.ends_with("_url") {
+            return true;
+        }
+        if key.ends_with("_at") || key.ends_with("_ms") || key == "timestamp" || key == "ts" {
+            return true;
+        }
+        (kept_key(key) || key.ends_with("state") || key.ends_with("status")) && is_token(text)
+    }
+
+    /// The same SSE frame with every event of a withheld agent blanked.
+    fn frame(&self, frame: &[u8]) -> Vec<u8> {
+        let Ok(text) = std::str::from_utf8(frame) else {
+            return frame.to_vec();
+        };
+        let mut out = String::with_capacity(text.len());
+        for line in text.split_inclusive('\n') {
+            let (body, end) = match line.strip_suffix('\n') {
+                Some(body) => (body, "\n"),
+                None => (line, ""),
+            };
+            let Some(data) = body.strip_prefix("data:") else {
+                out.push_str(line);
+                continue;
+            };
+            let data = data.strip_prefix(' ').unwrap_or(data);
+            let mut event = serde_json::from_str::<Value>(data).unwrap_or(Value::Null);
+            if self.walk(&mut event) {
+                out.push_str("data: ");
+                out.push_str(&event.to_string());
+                out.push_str(end);
+            } else {
+                out.push_str(line);
+            }
+        }
+        out.into_bytes()
+    }
+}
+
+/// The keys that say whose an object is.
+const WHOSE: &[&str] = &[
+    "session",
+    "agent_id",
+    "agent_session",
+    "source_agent_id",
+    "sender_agent_id",
+    "requester_agent_id",
+];
+
+/// The keys a name is under: kept where it is an agent's name, as every name is shown.
+const NAME_KEYS: &[&str] = &[
+    "name",
+    "persona",
+    "agent_name",
+    "display_name",
+    "sender_name",
+];
+
+/// The keys whose short values are no words.
+fn kept_key(key: &str) -> bool {
+    matches!(
+        key,
+        "session"
+            | "agent_session"
+            | "parent"
+            | "parent_session"
+            | "type"
+            | "kind"
+            | "state"
+            | "status"
+            | "op"
+            | "event"
+            | "role"
+            | "backend"
+            | "model"
+            | "effort"
+            | "origin"
+            | "view"
+            | "audience"
+            | "codex_provider"
+            | "voice_id"
+            | "coordination_visibility"
+            | "helper_state"
+            | "chat_view"
+    )
+}
+
+/// Whether a text is one word of a short list: no space, and short.
+fn is_token(text: &str) -> bool {
+    text.len() <= 64 && !text.chars().any(char::is_whitespace)
+}
+
+// ---- who asks ----------------------------------------------------------------------------------
+
+/// The reader a request is: an agent by the turn it presents (`X-Clarp-Turn`), an agent's tool
+/// by its token, another Host by `X-Clarp-Peer` or a listed origin, and otherwise the owner.
+/// A key that cannot be read is answered so (503), as the Host answers any turn it cannot place.
+pub async fn reader_of(
+    app: &App,
+    principal: Option<&Principal>,
+    headers: &HeaderMap,
+) -> Result<Reader, crate::edge::ApiError> {
+    let turn = headers
+        .get(crate::turn_identity::HEADER)
+        .map(|token| token.to_str().unwrap_or_default().trim())
+        .filter(|token| !token.is_empty());
+    if let Some(token) = turn {
+        return by_turn(app, token)
+            .await
+            .map_err(|why| crate::edge::ApiError::retryable(StatusCode::SERVICE_UNAVAILABLE, why));
+    }
+    if matches!(principal, Some(Principal::Tools)) {
+        return Ok(Reader::Unknown);
+    }
+    if crate::coordination::from_a_peer(headers)
+        || crate::cross_origin::from_listed_origin(headers, &app.config.web_read_origins)
+    {
+        return Ok(Reader::Elsewhere);
+    }
+    Ok(Reader::Owner)
+}
+
+/// The reader an agent's own tool is: the agent whose turn it carries, the owner where it
+/// carries none and was called with the owner's token, and otherwise an agent that cannot
+/// say whose turn it is.
+pub async fn reader_of_call(
+    app: &App,
+    call: &crate::tools::ToolCall,
+    owner_token: bool,
+) -> Result<Reader, String> {
+    let turn = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty());
+    match turn {
+        Some(token) => by_turn(app, token).await,
+        None if owner_token => Ok(Reader::Owner),
+        None => Ok(Reader::Unknown),
+    }
+}
+
+async fn by_turn(app: &App, token: &str) -> Result<Reader, String> {
+    match crate::turn_identity::caller(app, token).await {
+        Ok(Some(member)) => Ok(Reader::agent(&member.record)),
+        Ok(None) => Ok(Reader::Unknown),
+        Err(why) => Err(why.0),
+    }
+}
+
+/// The words a refusal says, of the agent it is about.
+pub fn refusal_words(persona: &str) -> String {
+    format!(
+        "{persona} is bound to a model provider of its own, and its words are not read by \
+         other agents. Its owner can let an agent read it: clarp-admin agent provider \
+         --session <its session> --reader <the agent>."
+    )
+}
+
+/// The refusal of a read of a withheld agent's words.
+pub fn refused(persona: &str) -> Response {
+    let body = json!({ "error": REFUSED, "message": refusal_words(persona) });
+    (StatusCode::FORBIDDEN, axum::Json(body)).into_response()
+}
+
+// ---- the routes ----------------------------------------------------------------------------------
+
+/// What a route answers, for the guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Class {
+    /// No agent's words.
+    NoWords,
+    /// Agents' words. Refused where the request names a withheld agent (its `session` or
+    /// `agent_id`, or what [`Names`] adds); otherwise every object of a withheld agent in its
+    /// JSON answer is blanked.
+    Words(Names),
+    /// A stream of events: every event of a withheld agent is blanked.
+    Stream,
+    /// The owner's own surfaces (files, terminals, recordings, sound, sockets): refused to
+    /// every other reader while one agent's words are withheld from it.
+    OwnerOnly,
+}
+
+/// What else names the agent a route of words is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Names {
+    /// Its query alone.
+    Query,
+    /// The path's segment at this place (from 0, after the first `/`): a session or an id.
+    Segment(usize),
+    /// The path's segment at this place is an artifact's id: the agent that made it.
+    Artifact(usize),
+    /// The query's `plan_id`: the agent whose goal it is.
+    Plan,
+}
+
+use Class::{NoWords, OwnerOnly, Stream, Words};
+use Names::{Artifact, Plan, Query, Segment};
+
+/// Every route a `GET` reaches, by the path it is declared with, and what it answers.
+pub const CLASSES: &[(&str, Class)] = &[
+    ("/", NoWords),
+    ("/agent-file", OwnerOnly),
+    ("/agent-files", OwnerOnly),
+    ("/agent-goal", Words(Query)),
+    ("/agent-heartbeat/status", Words(Query)),
+    ("/agent-helper-state", NoWords),
+    ("/agent-model-options", NoWords),
+    ("/agent-portrait-generation", NoWords),
+    ("/agent-portraits", NoWords),
+    ("/agent-portraits/{id}/content", NoWords),
+    ("/agent-schedules", Words(Query)),
+    ("/agent-transit", Words(Query)),
+    ("/agents/archived", Words(Query)),
+    ("/agents/snapshot", Words(Query)),
+    ("/agents/{id}", Words(Segment(1))),
+    ("/artifact-catalogs/clarp.form/1", NoWords),
+    ("/artifact-catalogs/clarp.form/2", NoWords),
+    ("/artifacts", Words(Query)),
+    ("/artifacts/{*rest}", Words(Artifact(1))),
+    ("/attention", Words(Query)),
+    ("/attention/inbox", Words(Query)),
+    ("/audio/", OwnerOnly),
+    ("/audio/{*name}", OwnerOnly),
+    ("/automation-settings", NoWords),
+    ("/avatar-settings", NoWords),
+    ("/avatars/{agent}", NoWords),
+    ("/backend-auth", NoWords),
+    ("/backend-usage", NoWords),
+    ("/background-jobs", Words(Query)),
+    ("/background-jobs/{job_id}", Words(Query)),
+    ("/broken", Words(Query)),
+    ("/calls", Words(Query)),
+    ("/calls/ring", Words(Query)),
+    ("/calls/ring/device", Words(Query)),
+    ("/calls/ring/live", OwnerOnly),
+    ("/calls/ring/settings", NoWords),
+    ("/cartesia-voice-preview", NoWords),
+    ("/cartesia-voices", NoWords),
+    ("/client-log", NoWords),
+    ("/clips/message", Words(Query)),
+    ("/clips/recoverable", Words(Query)),
+    ("/clips/{clip}/complete.mp3", OwnerOnly),
+    ("/clips/{clip}/stream", OwnerOnly),
+    ("/controller-actions", Words(Query)),
+    ("/controller-actions/audit", Words(Query)),
+    ("/controller-narration", Words(Query)),
+    ("/coordination-settings", NoWords),
+    ("/devices/push-tokens", NoWords),
+    ("/diagnostics/health", NoWords),
+    ("/diagnostics/settings", NoWords),
+    ("/dirs", OwnerOnly),
+    ("/events", Stream),
+    ("/favorite-paths", NoWords),
+    ("/goal-ledger", Words(Plan)),
+    ("/goal-ledger/delegations", Words(Query)),
+    ("/harness-providers", NoWords),
+    ("/harness-providers/models", NoWords),
+    ("/heartbeat/settings", NoWords),
+    ("/herald/settings", NoWords),
+    ("/host/start", NoWords),
+    ("/hotseat/desk", NoWords),
+    ("/hotseat/status", NoWords),
+    ("/icon.png", NoWords),
+    ("/janitor-policy", NoWords),
+    ("/janitor-runs/{*rest}", Words(Query)),
+    ("/janitor-triggers", Words(Query)),
+    ("/janitor-triggers/preview", Words(Query)),
+    ("/janitors", Words(Query)),
+    ("/janitors/{session}", Words(Segment(1))),
+    ("/janitors/{session}/{action}", Words(Segment(1))),
+    ("/judgments/settings", NoWords),
+    ("/launch-directories", NoWords),
+    ("/live", Words(Query)),
+    ("/location", NoWords),
+    ("/log", Words(Query)),
+    ("/managed-skills", NoWords),
+    ("/manifest.json", NoWords),
+    ("/media", Words(Query)),
+    ("/media/", OwnerOnly),
+    ("/media/deleted", Words(Query)),
+    ("/media/{*asset_id}", OwnerOnly),
+    ("/message-tool-details", Words(Query)),
+    ("/network/relay", NoWords),
+    ("/notification-avatars/{agent}", NoWords),
+    ("/oracle/calls/status", Words(Query)),
+    ("/oracle/contact", Words(Query)),
+    ("/oracle/delegations", Words(Query)),
+    ("/oracle/handoff", Words(Query)),
+    ("/oracle/status", Words(Query)),
+    ("/oracle/v2", OwnerOnly),
+    ("/oracle/voice-provider", NoWords),
+    ("/orchestrator/decisions", Words(Query)),
+    ("/orchestrator/settings", NoWords),
+    ("/paired-devices", NoWords),
+    ("/pairing/identity", NoWords),
+    ("/past-sessions", OwnerOnly),
+    ("/peers", NoWords),
+    ("/peers/snapshot", Words(Query)),
+    ("/persona-avatars/{id}", NoWords),
+    ("/personalities/settings", NoWords),
+    ("/pinned-artifacts", Words(Query)),
+    ("/podcast-history", Words(Query)),
+    ("/podcast-history/sources", Words(Query)),
+    ("/remote-action", NoWords),
+    ("/server-info", NoWords),
+    ("/server-terminal", OwnerOnly),
+    ("/server-update", NoWords),
+    ("/static/", NoWords),
+    ("/static/{*path}", NoWords),
+    ("/status", Words(Query)),
+    ("/stt/stream", OwnerOnly),
+    ("/styles.css", NoWords),
+    ("/sw.js", NoWords),
+    ("/task-plan", Words(Query)),
+    ("/task-plan/document", Words(Plan)),
+    ("/task-plans", Words(Query)),
+    ("/teams", Words(Query)),
+    ("/teams/{id}/messages", Words(Query)),
+    ("/terminal", OwnerOnly),
+    ("/terminal/{*named}", OwnerOnly),
+    ("/tool-explanations/settings", NoWords),
+    ("/tool-explanations/stats", NoWords),
+    ("/transcription-audio", OwnerOnly),
+    ("/transcription-capabilities", NoWords),
+    ("/transcription-guidance", NoWords),
+    ("/transcription-providers", NoWords),
+    ("/tts/providers", NoWords),
+    ("/turn-queue", Words(Query)),
+    ("/viz", NoWords),
+    ("/vocab/budgets", NoWords),
+    ("/voice-catalog", NoWords),
+    ("/voice-events", Words(Query)),
+    ("/voice-events/utterances", Words(Query)),
+    ("/voice-humanness", NoWords),
+    ("/voice-preview", NoWords),
+    ("/voices", NoWords),
+];
+
+/// The class of the route a request reached; `None` for one not in [`CLASSES`].
+pub fn class_of(route: &str) -> Option<Class> {
+    CLASSES
+        .iter()
+        .find(|(path, _)| *path == route)
+        .map(|(_, class)| *class)
+}
+
+/// The guard: every request that reaches a route passes it. The owner passes untouched, as
+/// does whatever reaches a route that answers no words, and every other method than a read
+/// (what an agent writes is no other agent's words; the tools ask [`reader_of_call`]). A read
+/// by anyone else is refused where it names an agent whose words are withheld from it, and is
+/// answered with every object of such an agent blanked. A route without a class is treated
+/// as one of words.
+pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Response {
+    if request.method() != axum::http::Method::GET && request.method() != axum::http::Method::HEAD {
+        return next.run(request).await;
+    }
+    let route = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|path| path.as_str().to_string())
+        .unwrap_or_default();
+    let class = class_of(&route).unwrap_or(Words(Query));
+    if class == NoWords {
+        return next.run(request).await;
+    }
+    let principal = request.extensions().get::<Principal>().cloned();
+    let reader = match reader_of(&app, principal.as_ref(), request.headers()).await {
+        Ok(reader) => reader,
+        Err(refused) => return refused.into_response(),
+    };
+    let Some(withheld) = Withheld::of(&app, &reader) else {
+        return next.run(request).await;
+    };
+    match class {
+        NoWords => next.run(request).await,
+        OwnerOnly => owner_only(),
+        Stream => {
+            let response = next.run(request).await;
+            let (parts, body) = response.into_parts();
+            Response::from_parts(parts, sse_filtered(body, Arc::new(withheld)))
+        }
+        Words(names) => {
+            let about = named(&app, &request, names, &withheld);
+            if let About::Withheld(persona) = &about {
+                return refused(persona);
+            }
+            let response = next.run(request).await;
+            blanked(response, &withheld, about == About::Readable).await
+        }
+    }
+}
+
+/// Which agent a read names.
+#[derive(Debug, PartialEq, Eq)]
+enum About {
+    /// None.
+    Nobody,
+    /// Only agents whose words the reader may read.
+    Readable,
+    /// One whose words are withheld from it, by its name.
+    Withheld(String),
+}
+
+/// The refusal of a read only the owner makes while an agent's words are withheld from the
+/// reader: files, terminals, recordings, sound, sockets.
+fn owner_only() -> Response {
+    let message = "Only the owner reads this while the Host has an agent bound to a model \
+        provider of its own whose words are not yours to read.";
+    let body = json!({ "error": REFUSED, "message": message });
+    (StatusCode::FORBIDDEN, axum::Json(body)).into_response()
+}
+
+/// Which agents a request names: one whose words are withheld from the reader, by its name,
+/// before any other.
+fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> About {
+    let query = request.uri().query().unwrap_or("");
+    let mut asked: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
+        .filter(|(key, _)| key == "session" || key == "agent_id")
+        .map(|(_, value)| value.trim().to_string())
+        .collect();
+    let segments: Vec<String> = request
+        .uri()
+        .path()
+        .trim_start_matches('/')
+        .split('/')
+        .map(decoded)
+        .collect();
+    match names {
+        Query => {}
+        Segment(at) => asked.extend(segments.get(at).cloned()),
+        Artifact(at) => {
+            let maker = segments
+                .get(at)
+                .and_then(|id| crate::library::maker_of(app, id));
+            asked.extend(maker);
+        }
+        Plan => {
+            let plan = url::form_urlencoded::parse(query.as_bytes())
+                .find(|(key, _)| key == "plan_id")
+                .map(|(_, value)| value.into_owned());
+            asked.extend(plan.map(|plan| crate::goaltool::owner_of(&plan).to_string()));
+        }
+    }
+    asked.retain(|agent| !agent.is_empty());
+    let directory = app.fleet.directory();
+    let withheld = asked
+        .iter()
+        .filter(|agent| withheld.has(agent))
+        .find_map(|agent| {
+            let everyone = directory.members.iter().chain(directory.janitors.iter());
+            everyone
+                .map(|member: &Arc<Member>| &member.record)
+                .find(|record| record.session == *agent || record.agent_id == *agent)
+                .map(|record| record.persona.clone())
+        });
+    match withheld {
+        Some(persona) => About::Withheld(persona),
+        None if asked.is_empty() => About::Nobody,
+        None => About::Readable,
+    }
+}
+
+/// A segment of a path as it reads, its escapes undone.
+fn decoded(segment: &str) -> String {
+    let pair = format!("x={}", segment.replace('+', "%2B"));
+    url::form_urlencoded::parse(pair.as_bytes())
+        .next()
+        .map(|(_, value)| value.into_owned())
+        .unwrap_or_default()
+}
+
+/// The answer with every object of a withheld agent blanked, where it is JSON. Any other
+/// answer of a route of words is given only where the read named agents the reader may read
+/// (an artifact's page, of an agent it reads), and refused otherwise, as nothing in it can
+/// be told apart.
+async fn blanked(response: Response, withheld: &Withheld, readable: bool) -> Response {
+    let json = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|kind| kind.to_str().ok())
+        .is_some_and(|kind| kind.starts_with("application/json"));
+    if !json {
+        if response.status().is_success() && !readable {
+            return owner_only();
+        }
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "answer could not be read",
+        )
+            .into_response();
+    };
+    let Ok(mut value) = serde_json::from_slice::<Value>(&bytes) else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    if !withheld.walk(&mut value) {
+        return Response::from_parts(parts, Body::from(bytes));
+    }
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(value.to_string()))
+}
+
+/// A stream of events with every event of a withheld agent blanked, frame by frame.
+fn sse_filtered(body: Body, withheld: Arc<Withheld>) -> Body {
+    let inner = body.into_data_stream();
+    let frames = futures_util::stream::unfold(
+        (inner, Vec::<u8>::new(), withheld, false),
+        |(mut inner, mut held, withheld, done)| async move {
+            if done {
+                return None;
+            }
+            loop {
+                if let Some(end) = held.windows(2).position(|pair| pair == b"\n\n") {
+                    let frame: Vec<u8> = held.drain(..end + 2).collect();
+                    let out = Bytes::from(withheld.frame(&frame));
+                    return Some((Ok(out), (inner, held, withheld, false)));
+                }
+                match inner.next().await {
+                    Some(Ok(chunk)) => held.extend_from_slice(&chunk),
+                    Some(Err(why)) => return Some((Err(why), (inner, held, withheld, true))),
+                    None if held.is_empty() => return None,
+                    None => {
+                        let rest = std::mem::take(&mut held);
+                        let out = Bytes::from(withheld.frame(&rest));
+                        return Some((Ok(out), (inner, held, withheld, true)));
+                    }
+                }
+            }
+        },
+    );
+    Body::from_stream(frames)
+}
+
+// ---- what a bound agent sends ------------------------------------------------------------------
+
+/// What an agent is given of a message a bound agent sends it, where it may not read the
+/// sender: that one came, and not what it says. `None` where it may read it.
+pub fn withheld_message(sender: &AgentRecord, recipient: &AgentRecord) -> Option<String> {
+    if may_read(&Reader::agent(recipient), sender) {
+        return None;
+    }
+    Some(format!(
+        "{} sent you a message. Its words are withheld: it is bound to a model provider of \
+         its own, and you are not one of the agents its owner lets read it.",
+        sender.persona
+    ))
+}
+
+/// What a team member is given of an update a bound teammate posted, where it may not read
+/// that teammate; `None` where it may.
+pub fn withheld_update(sender: &AgentRecord, reader: &AgentRecord) -> Option<String> {
+    if may_read(&Reader::agent(reader), sender) {
+        return None;
+    }
+    Some("posted an update (words withheld: bound to a model provider of its own)".to_string())
+}
+
+// ---- the agents' own tools ------------------------------------------------------------------
+
+/// The exit code a tool's read of a withheld agent's words ends with (`EX_NOPERM`).
+pub const TOOL_REFUSED: i32 = 77;
+
+/// Whether a verb of an agent's tool reads what one agent wrote: its goals and their
+/// documents, the artifacts it published and the cards it asked.
+fn reads_about(tool: &str, verb: &str) -> bool {
+    match tool {
+        "clarp-goal" | "clarp-agent-tasks" => true,
+        "clarp-agent-artifacts" => matches!(
+            verb,
+            "list" | "wait" | "form-events" | "report-history" | "attention"
+        ),
+        _ => false,
+    }
+}
+
+/// The refusal of a tool's read about a withheld agent: one named by its session or id, by a
+/// goal of its, or by an artifact it made. `None` where the call reads no such agent.
+pub fn tool_refused(
+    app: &App,
+    call: &crate::tools::ToolCall,
+    withheld: &Withheld,
+) -> Option<crate::tools::ToolAnswer> {
+    let verb = call.argv.first().map_or("", String::as_str);
+    if !reads_about(&call.tool, verb) {
+        return None;
+    }
+    let goals = call.tool != "clarp-agent-artifacts";
+    let about = call.argv.iter().find_map(|said| {
+        let said = said.trim();
+        let maker = (!goals)
+            .then(|| crate::library::maker_of(app, said))
+            .flatten();
+        let owner = goals.then(|| crate::goaltool::owner_of(said).to_string());
+        [Some(said.to_string()), maker, owner]
+            .into_iter()
+            .flatten()
+            .find(|agent| withheld.has(agent))
+    })?;
+    let directory = app.fleet.directory();
+    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+    let persona = everyone
+        .find(|member| member.record.session == about || member.record.agent_id == about)
+        .map_or_else(|| about.clone(), |member| member.record.persona.clone());
+    Some(crate::tools::ToolAnswer::said(
+        TOOL_REFUSED,
+        format!("{}: {REFUSED}: {}", call.tool, refusal_words(&persona)),
+    ))
+}
+
+/// A tool's answer with every object of a withheld agent in what it printed as JSON blanked.
+pub fn tool_blanked(
+    mut answer: crate::tools::ToolAnswer,
+    withheld: &Withheld,
+) -> crate::tools::ToolAnswer {
+    let Ok(mut printed) = serde_json::from_str::<Value>(answer.stdout.trim()) else {
+        return answer;
+    };
+    if withheld.walk(&mut printed) {
+        let shown = serde_json::to_string_pretty(&printed).unwrap_or_default();
+        answer.stdout = format!("{shown}\n");
+    }
+    answer
+}
+
+// ---- who the owner lets read -------------------------------------------------------------------
+
+/// What a request to change who may read a bound agent became.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadersChange {
+    /// The owner asked: done.
+    Done(Vec<String>),
+    /// An agent asked: a card asks the owner (by its artifact's id), one a reader.
+    Asked(Vec<Value>),
+}
+
+/// The reference of the card that asks whether `reader` may read `bound`: one card a pair.
+fn card_reference(bound: &AgentRecord, reader: &AgentRecord) -> String {
+    format!("bound-reader:{}:{}", bound.agent_id, reader.agent_id)
+}
+
+/// The card that asks the owner whether `reader` may read what `bound` says, in the chat of
+/// the agent that asked (its answer is that agent's to read).
+fn card(asker: &AgentRecord, bound: &AgentRecord, reader: &AgentRecord) -> Value {
+    json!({
+        "session": asker.session,
+        "title": format!("Let {} read {}'s conversation?", reader.persona, bound.persona),
+        "question": format!(
+            "{} is bound to a model provider of its own. Let {} read what it says? \
+             {} runs on {}.",
+            bound.persona,
+            reader.persona,
+            reader.persona,
+            if reader.codex_provider.is_empty() {
+                "the machine's own provider".to_string()
+            } else {
+                format!("the provider {}", reader.codex_provider)
+            }
+        ),
+        "context": "Yes adds it to the agents that may read this agent's conversation, its \
+            messages and its team updates. It can be taken back with clarp-admin agent \
+            provider --no-reader.",
+        "reference_id": card_reference(bound, reader),
+        "payload": {"bound_reader": {
+            "agent_id": bound.agent_id, "reader_id": reader.agent_id,
+        }},
+    })
+}
+
+/// Lets these agents read `bound`, or stops them (`add` false), as `reader` asks: the owner's
+/// word is done at once; an agent's adding is a card to the owner, one a reader not yet let
+/// in (an agent asked again is answered the card it has); an agent cannot stop one.
+pub async fn change_readers(
+    app: &App,
+    reader: &Reader,
+    bound: &AgentRecord,
+    agents: &[AgentRecord],
+    add: bool,
+) -> Result<ReadersChange, (StatusCode, Value)> {
+    if *reader == Reader::Owner {
+        let mut readers = bound.readers.clone();
+        for agent in agents {
+            readers.retain(|id| *id != agent.agent_id);
+            if add {
+                readers.push(agent.agent_id.clone());
+            }
+        }
+        set_readers(app, bound, readers.clone()).await?;
+        return Ok(ReadersChange::Done(readers));
+    }
+    if !add {
+        let why = "Only the owner stops an agent reading a bound agent.";
+        return Err((
+            StatusCode::FORBIDDEN,
+            json!({"error": "owner_only", "message": why}),
+        ));
+    }
+    let asker_id = reader.agent_id().unwrap_or_default();
+    let directory = app.fleet.directory();
+    let Some(asker) = directory
+        .members
+        .iter()
+        .find(|member| member.record.agent_id == asker_id)
+        .cloned()
+    else {
+        let why = "An agent asks for a reader from its own turn.";
+        return Err((
+            StatusCode::FORBIDDEN,
+            json!({"error": "owner_only", "message": why}),
+        ));
+    };
+    let mut asked = Vec::new();
+    for agent in agents {
+        if bound.readers.contains(&agent.agent_id) {
+            continue;
+        }
+        let reference = card_reference(bound, agent);
+        let made_before = crate::library::decisions_of(app, &asker.record.session)
+            .into_iter()
+            .find(|card| card["reference_id"] == reference.as_str());
+        let made = match made_before {
+            Some(made) => made,
+            None => {
+                let card = card(&asker.record, bound, agent);
+                let fields = card.as_object().cloned().unwrap_or_default();
+                crate::library::asked_of(app, &asker, &fields)
+                    .await
+                    .map_err(|why| {
+                        let message = why.message().to_string();
+                        (
+                            why.status(),
+                            json!({"error": "card_not_made", "message": message}),
+                        )
+                    })?
+            }
+        };
+        asked.push(json!({
+            "reader": agent.session,
+            "artifact_id": made["artifact_id"],
+            "decision_id": made["decision"]["decision_id"],
+        }));
+    }
+    Ok(ReadersChange::Asked(asked))
+}
+
+async fn set_readers(
+    app: &App,
+    bound: &AgentRecord,
+    readers: Vec<String>,
+) -> Result<(), (StatusCode, Value)> {
+    let change = crate::fleet::Amend::Readers(readers);
+    match app.fleet.amend(bound.agent_id.clone(), change).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(why)) => Err((
+            StatusCode::CONFLICT,
+            json!({"error": "not_changed", "message": format!("{why:?}")}),
+        )),
+        Err(why) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            json!({"error": "not_changed", "message": why.0}),
+        )),
+    }
+}
+
+/// What the Host does when a card is answered: where it is one that asked whether an agent
+/// may read a bound agent and the owner said yes, that agent is let in. An answer given on
+/// behalf of the owner by the agent that asked, or by the bound agent, is not taken for his.
+pub async fn answered(app: &App, artifact: &Value, on_behalf: Option<&str>) {
+    let asked = &artifact["payload"]["bound_reader"];
+    if !asked.is_object() || artifact["decision"]["resolved_choice"] != "accepted" {
+        return;
+    }
+    let (bound_id, reader_id) = (
+        asked["agent_id"].as_str().unwrap_or(""),
+        asked["reader_id"].as_str().unwrap_or(""),
+    );
+    let directory = app.fleet.directory();
+    let find = |id: &str| {
+        let mut members = directory.members.iter();
+        members.find(|member| member.record.agent_id == id).cloned()
+    };
+    let (Some(bound), Some(reader)) = (find(bound_id), find(reader_id)) else {
+        return;
+    };
+    let asker = artifact["session"].as_str().unwrap_or("");
+    if let Some(acting) = on_behalf.map(str::trim)
+        && [asker, &*bound.record.session, &*reader.record.session].contains(&acting)
+    {
+        eprintln!(
+            "clarp-host: a card letting an agent read a bound agent was answered by {acting} on \
+             the owner's behalf; it is not taken"
+        );
+        return;
+    }
+    if bound.record.readers.contains(&reader.record.agent_id) {
+        return;
+    }
+    let mut readers = bound.record.readers.clone();
+    readers.push(reader.record.agent_id.clone());
+    if let Err((_, why)) = set_readers(app, &bound.record, readers).await {
+        eprintln!("clarp-host: a reader the owner let in was not kept: {why}");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn record(session: &str, home: &str, provider: &str) -> AgentRecord {
+        AgentRecord {
+            agent_id: format!("id-{session}"),
+            session: session.to_string(),
+            persona: session.to_uppercase(),
+            backend: "codex".to_string(),
+            codex_home: home.to_string(),
+            codex_provider: provider.to_string(),
+            ..AgentRecord::default()
+        }
+    }
+
+    #[test]
+    fn bound_privacy_readers_are_the_owner_itself_its_binding_and_those_let_in() {
+        let mut bound = record("ada", "/homes/ada", "theirs");
+        let free = record("ben", "", "");
+        let twin = record("cid", "/homes/ada", "theirs");
+        let other_home = record("dot", "/homes/dot", "theirs");
+        assert!(may_read(&Reader::Owner, &bound));
+        assert!(may_read(&Reader::agent(&bound), &bound));
+        assert!(may_read(&Reader::agent(&twin), &bound));
+        assert!(!may_read(&Reader::agent(&free), &bound));
+        assert!(!may_read(&Reader::agent(&other_home), &bound));
+        assert!(!may_read(&Reader::Unknown, &bound));
+        assert!(!may_read(&Reader::Elsewhere, &bound));
+        // Every reader reads an agent that is not bound.
+        assert!(may_read(&Reader::Unknown, &free));
+        assert!(may_read(&Reader::agent(&bound), &free));
+        bound.readers.push(free.agent_id.clone());
+        assert!(may_read(&Reader::agent(&free), &bound));
+    }
+
+    #[test]
+    fn bound_privacy_blanks_a_withheld_agents_objects_and_keeps_its_name_and_state() {
+        let bound = record("ada", "/homes/ada", "theirs");
+        let free = record("ben", "", "");
+        let withheld = Withheld::among([&bound, &free], &Reader::agent(&free)).unwrap();
+        let mut answer = json!({"agents": [
+            {"session": "ada", "agent_id": "id-ada", "name": "ADA", "state": "working",
+             "busy": true, "last_message": "the customer's figures",
+             "status_text": "Reading the ledger", "updated_at": 5,
+             "live_activity": {"headline": "Running tests", "kind": "tool"},
+             "tags": ["secret"]},
+            {"session": "ben", "agent_id": "id-ben", "last_message": "hello"}
+        ]});
+        assert!(withheld.walk(&mut answer));
+        let ada = &answer["agents"][0];
+        assert_eq!(ada["session"], "ada");
+        assert_eq!(ada["name"], "ADA");
+        assert_eq!(ada["state"], "working");
+        assert_eq!(ada["busy"], true);
+        assert_eq!(ada["updated_at"], 5);
+        assert_eq!(ada["last_message"], "");
+        assert_eq!(ada["status_text"], "");
+        assert_eq!(ada["live_activity"]["headline"], "");
+        assert_eq!(ada["live_activity"]["kind"], "tool");
+        assert_eq!(ada["tags"], json!([]));
+        assert_eq!(ada["words_withheld"], true);
+        assert_eq!(answer["agents"][1]["last_message"], "hello");
+        assert!(answer["agents"][1].get("words_withheld").is_none());
+        // A reader that may read everything has nothing withheld.
+        assert!(Withheld::among([&bound, &free], &Reader::agent(&bound)).is_none());
+    }
+
+    #[test]
+    fn bound_privacy_blanks_a_withheld_agents_events_in_a_stream() {
+        let bound = record("ada", "/homes/ada", "theirs");
+        let withheld = Withheld::among([&bound], &Reader::Unknown).unwrap();
+        let frame =
+            b"id: 4\ndata: {\"type\":\"log-row\",\"session\":\"ada\",\"text\":\"secret\"}\n\n";
+        let out = String::from_utf8(withheld.frame(frame)).unwrap();
+        assert!(out.starts_with("id: 4\ndata: "), "{out}");
+        assert!(!out.contains("secret"), "{out}");
+        assert!(out.ends_with("\n\n"), "{out}");
+        let other = b"data: {\"type\":\"log-row\",\"session\":\"ben\",\"text\":\"fine\"}\n\n";
+        assert_eq!(withheld.frame(other), other.to_vec());
+    }
+
+    #[test]
+    fn bound_privacy_messages_and_team_updates_of_a_bound_agent_carry_no_words() {
+        let bound = record("ada", "/homes/ada", "theirs");
+        let twin = record("cid", "/homes/ada", "theirs");
+        let free = record("ben", "", "");
+        let said = withheld_message(&bound, &free).unwrap();
+        assert!(said.starts_with("ADA sent you a message."), "{said}");
+        assert!(withheld_message(&bound, &twin).is_none());
+        assert!(withheld_message(&free, &bound).is_none());
+        assert!(withheld_update(&bound, &free).is_some());
+        assert!(withheld_update(&bound, &twin).is_none());
+    }
+
+    /// Every `GET` route the Host declares, by the path it is declared with: read from the
+    /// sources, so a route added anywhere is seen.
+    fn declared_reads() -> Vec<(String, String)> {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![src];
+        let mut found = Vec::new();
+        while let Some(path) = files.pop() {
+            if path.is_dir() {
+                for entry in std::fs::read_dir(&path).unwrap() {
+                    files.push(entry.unwrap().path());
+                }
+                continue;
+            }
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find(".route(") {
+                rest = &rest[at + ".route(".len()..];
+                // The call's arguments, to its closing parenthesis.
+                let mut depth = 1_i32;
+                let mut end = 0;
+                for (index, character) in rest.char_indices() {
+                    match character {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth == 0 {
+                        end = index;
+                        break;
+                    }
+                }
+                let arguments = &rest[..end];
+                let Some(open) = arguments.find('"') else {
+                    continue;
+                };
+                let Some(close) = arguments[open + 1..].find('"') else {
+                    continue;
+                };
+                let route = &arguments[open + 1..open + 1 + close];
+                let handler = &arguments[open + 1 + close..];
+                if route.starts_with('/') && (handler.contains("get(") || handler.contains("any("))
+                {
+                    found.push((route.to_string(), path.display().to_string()));
+                }
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn bound_privacy_every_read_route_has_a_class() {
+        let declared = declared_reads();
+        assert!(declared.len() > 100, "found {} routes", declared.len());
+        let unclassed: Vec<String> = declared
+            .iter()
+            .filter(|(route, _)| class_of(route).is_none())
+            .map(|(route, file)| format!("{route} ({file})"))
+            .collect();
+        assert!(
+            unclassed.is_empty(),
+            "GET routes without a class in bound_privacy::CLASSES (say whether they answer \
+             an agent's words): {unclassed:?}"
+        );
+        let stale: Vec<&str> = CLASSES
+            .iter()
+            .map(|(route, _)| *route)
+            .filter(|route| !declared.iter().any(|(declared, _)| declared == route))
+            .collect();
+        assert!(
+            stale.is_empty(),
+            "classes of routes that are gone: {stale:?}"
+        );
+    }
+}

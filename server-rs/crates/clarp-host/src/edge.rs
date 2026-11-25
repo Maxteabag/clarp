@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 178;
+pub const HOST_CONTRACT: u64 = 179;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -432,6 +432,13 @@ pub const FEATURES: &[(&str, u64)] = &[
     // helper's, whatever its role is now; a move takes it along, so a moved helper's chat keeps
     // the turns other agents gave it (issue 777).
     ("helper_chat", 177),
+    // The words of an agent bound to a model provider of its own are read by its owner, by
+    // itself and the agents bound as it is, and by the agents its owner lets in (`readers`);
+    // every other agent, another Host and a tool that cannot say whose turn it is is refused
+    // (403 `bound_conversation`), given rows and events blank (`words_withheld`), and given
+    // that a message of it came, not its words. An agent asks for a reader on a card
+    // (`crate::bound_privacy`, issue 751).
+    ("bound_privacy", 179),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -854,6 +861,12 @@ pub fn router(app: App) -> Router {
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::web_app::routes())
+        // Every route's answer passes the guard of the words of agents bound to a provider of
+        // their own, by the class it has there (issue 751).
+        .route_layer(middleware::from_fn_with_state(
+            app.clone(),
+            crate::bound_privacy::guard,
+        ))
         // What is no route of this Host, by its path or by its method, is answered as the
         // Python Host answers it: to whoever may ask at all.
         .fallback(no_route)
@@ -3359,6 +3372,19 @@ async fn send_as(
                 .flatten()
         })
     };
+    // From an agent bound to a model provider of its own, to an agent that may not read it:
+    // that a message came, and not what it says (`bound_privacy`).
+    let withheld = sender
+        .as_ref()
+        .filter(|sender| !sender.agent_id.is_empty())
+        .and_then(|sender| {
+            let directory = app.fleet.directory();
+            let mut members = directory.members.iter();
+            let from = members.find(|member| member.record.agent_id == sender.agent_id)?;
+            crate::bound_privacy::withheld_message(&from.record, &member.record)
+        });
+    let words_withheld = withheld.is_some();
+    let text = withheld.unwrap_or(text);
     if let Some(sender) = &sender
         && app
             .fleet
@@ -3594,6 +3620,7 @@ async fn send_as(
             0
         }),
         queue_revision: Some(if sent.queued { sent.queue.revision } else { 0 }),
+        words_withheld: words_withheld.then_some(true),
         ..SendResponse::default()
     })
 }

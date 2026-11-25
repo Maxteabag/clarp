@@ -79,6 +79,23 @@ fn teams_runtime_matches_the_reference_fanout_digest_protocol_and_wake_rules() {
     inbox.sort();
     assert_eq!(json!(inbox), vectors["inbox"]);
     assert_eq!(digest, vectors["digest"]);
+    // Updates of a teammate whose words the reader may not read: that it posted, not what.
+    let instead = |source: &str| {
+        (source == "a-worker").then(|| "posted an update (words withheld)".to_string())
+    };
+    let (withheld, _) =
+        runtime::pending_withheld(&teams, &deliveries, "a-leader", &person, &instead);
+    let quoted: Vec<&str> = withheld
+        .lines()
+        .filter(|line| line.starts_with("- ["))
+        .collect();
+    assert!(!quoted.is_empty(), "{withheld}");
+    for line in quoted {
+        assert_eq!(
+            line, "- [Ops] Worker posted an update (words withheld)",
+            "{withheld}"
+        );
+    }
     for row in vectors["protocols"].as_array().unwrap() {
         let agent = row["agent"].as_str().unwrap();
         let origin = row["origin"].as_str().unwrap();

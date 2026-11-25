@@ -102,11 +102,25 @@ What the Host then does:
 
 Limits to know:
 
-- Other agents can still read a bound agent's conversation through the Host: the log API
-  (`GET /log`, the snapshot), a status fork or a front desk's relay, a message it sends to
-  another agent or one another agent's tool reads, and a team leader's ticks. Those agents
-  run on their own providers. This is not gated yet: keep customer material away from
-  agents that are not bound to the same provider, and out of teams and calls with them.
+- Who reads its words (Rust Host contract 179, feature `bound_privacy`; on an older Host
+  every agent reads every word): its owner, itself, every agent bound to the same Codex
+  home and provider (its helpers and forks), and the agents its owner lets in (`readers` on
+  its row, agent ids). Every other agent, another Host and a tool that cannot say whose
+  turn it is gets its name and state and no words: its log, goals, artifacts and status
+  fork are refused (`bound_conversation`, HTTP 403 or exit 77), its rows and events come
+  with `words_withheld: true`, and its messages and team updates arrive as "sent you a
+  message" / "posted an update" with the words withheld.
+
+  ```bash
+  clarp-admin agent provider --session ada-1a2b --reader ben-3c4d   # the owner: done at once
+  clarp-admin agent provider --session ada-1a2b --no-reader ben-3c4d
+  ```
+
+  The same from an agent's turn makes a decision card to the owner in that agent's chat
+  ("Let Ben read Ada's conversation?"); his yes adds the reader. An agent cannot remove a
+  reader (`owner_only`). Over HTTP: `add_readers` / `remove_readers` on
+  `POST /agent-provider`. Still not covered: an agent on the same machine that reads the
+  Host's configuration or the agent's files, and a Python peer Host (it reads as a device).
 - Clearing the binding (`--clear`) moves the agent to the machine's own Codex: its next
   turn begins a new thread there, carrying the Host's record of the conversation to the
   default provider.

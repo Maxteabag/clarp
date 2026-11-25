@@ -2177,6 +2177,10 @@ pub(crate) fn own_provider_fields(row: &mut Value, record: &AgentRecord) {
     if bound || record.cloud_speech.is_some() {
         row["cloud_speech"] = json!(record.speaks_to_cloud());
     }
+    // The agents (by id) its owner lets read it while it is bound (`bound_privacy`).
+    if bound || !record.readers.is_empty() {
+        row["readers"] = json!(record.readers);
+    }
 }
 
 #[cfg(test)]

@@ -37,6 +37,8 @@ mod agy_acp_steer;
 mod backend_auth;
 #[path = "host/body_text.rs"]
 mod body_text;
+#[path = "host/bound_privacy.rs"]
+mod bound_privacy;
 #[path = "host/bounded_close.rs"]
 mod bounded_close;
 #[path = "host/call_opening.rs"]

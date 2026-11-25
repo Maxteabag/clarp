@@ -18,6 +18,7 @@ import shlex
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 SHARE = Path(os.environ.get("CLARP_SHARE_DIR", Path.home() / ".local/share/clarp"))
@@ -366,10 +367,15 @@ def rust_fork_argv(agent, question, binary, env):
 
     # Codex has a native ephemeral fork. Keep the filesystem sandbox read-only
     # and remove shell, plugins and configured MCP tools at the request boundary.
+    # An agent bound to a model provider of its own forks on that provider only:
+    # its own Codex home (whose config.toml defines the provider, so it is read)
+    # and the provider named on the command line.
+    bound = own_provider(agent, env)
     cmd = [binary, "-a", "never", "exec", "--sandbox", "read-only", "fork",
-           "--ephemeral", "--ignore-user-config", "--ignore-rules",
+           "--ephemeral", *([] if bound else ["--ignore-user-config"]), "--ignore-rules",
            "--disable", "shell_tool", "--disable", "plugins",
            "-c", "mcp_servers={}", "-c", 'web_search="disabled"',
+           *(["-c", "model_provider=" + json.dumps(bound)] if bound else []),
            "--skip-git-repo-check", "--json"]
     if model:
         cmd += ["--model", model]
@@ -378,7 +384,33 @@ def rust_fork_argv(agent, question, binary, env):
     return cmd + [native, "-"], cwd
 
 
+def own_provider(agent, env):
+    """The provider of an agent bound to one of its own, with CODEX_HOME set to its
+    home in `env`; None for an agent that is not bound. Refused where the home's
+    config.toml does not define that provider: the fork would run elsewhere."""
+    home, provider = agent.get("codex_home") or "", agent.get("codex_provider") or ""
+    if not home and not provider:
+        return None
+    if not home or not provider:
+        raise Refused("the agent's binding to a provider of its own is incomplete")
+    try:
+        config = tomllib.loads((Path(home) / "config.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        raise Refused("the agent's Codex home has no readable config.toml") from None
+    if provider not in (config.get("model_providers") or {}):
+        raise Refused(f"the agent's Codex home does not define the provider {provider}")
+    env["CODEX_HOME"] = home
+    return provider
+
+
 def fork_status(agent, question):
+    if agent.get("words_withheld"):
+        return {**agent, "ok": False, "seconds": 0.0,
+                "error": f"refused, nothing launched: {agent.get('persona') or agent['session']} "
+                         "is bound to a model provider of its own, and its words are not read "
+                         "by other agents (feature bound_privacy). Its owner can let an agent "
+                         "read it: clarp-admin agent provider --session <its session> "
+                         "--reader <the agent>."}
     rust = agent.get("source") == "rust"
     if agent["backend"] not in ({"claude", "codex"} if rust else {"claude"}):
         return {**agent, "ok": False, "error": f"unsupported fork backend {agent['backend']}"}
@@ -480,7 +512,10 @@ def main(argv=None):
                 if host is not None and not rust_host.running("clarp.service"):
                     raise rust_host.HostError(f"no local Rust Host agent matches {name!r}")
                 agent = resolve(name)
-            if args.show_facts or not args.no_facts:
+            if agent.get("words_withheld"):
+                # Its facts are its words too: the Host refuses them to this turn.
+                agent["facts"] = ""
+            elif args.show_facts or not args.no_facts:
                 agent["facts"] = rust_host.live_facts(host, roster, agent) if agent.get("source") == "rust" else live_facts(agent)
             else:
                 agent["facts"] = ""

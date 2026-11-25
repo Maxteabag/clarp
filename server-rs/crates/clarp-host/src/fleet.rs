@@ -247,6 +247,12 @@ pub struct AgentRecord {
     /// kind has it ([`AgentRecord::speaks_to_cloud`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_speech: Option<bool>,
+    /// The agents (by id) the owner lets read the words of this agent while it is bound to a
+    /// provider of its own, beside itself and the agents bound as it is
+    /// ([`crate::bound_privacy`]). Kept when the binding is let go, and of no use until it is
+    /// bound again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readers: Vec<String>,
 }
 
 impl AgentRecord {
@@ -355,6 +361,8 @@ pub enum Amend {
         provider: String,
         cloud_speech: Option<bool>,
     },
+    /// The agents the owner lets read its words while it is bound (by id, each once).
+    Readers(Vec<String>),
     /// The tool it runs on: for a member that has no conversation with the tool it had.
     /// Whoever asks has seen to that.
     Tool(String),
@@ -4109,6 +4117,7 @@ impl Fleet {
                 record.codex_provider = provider;
                 record.cloud_speech = cloud_speech;
             }
+            Amend::Readers(readers) => record.readers = readers,
             Amend::Voice { provider, voice } => {
                 let occupied = self
                     .members
