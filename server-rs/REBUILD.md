@@ -254,6 +254,8 @@ server-rs/
   docs/reference-defects.md   what the conformance runs showed to be wrong in the Python Host
   tools/build           the build queue: check, test, clippy, fmt, conform on the XPS 15, one job at a time
   tools/repo-gates      the repository's Python gates, on the same machine and queue
+  tools/*-vectors.py    gone: the generators left with the Python Host (#787); the fixtures they wrote stay,
+                        and a fixture's 'Written by' line is its history
 ```
 
 Ownership is by crate. A crate has one owner at a time, named in section 8. Shared files (`Cargo.toml` of the
