@@ -89,7 +89,14 @@ pub fn quiet_chat_check(out: String) {
                 if elapsed > Duration::from_millis(14_800) {
                     let engine = app.engine.borrow();
                     let view = engine.live_view("rachel");
-                    println!("diag lseq {:?} awaiting {:?} epoch {:?} live_items {} active {}", lseq(), view.map(|v| v.awaiting_snapshot()), view.and_then(|v| v.epoch().map(str::to_owned)), engine.live_items(), engine.live_active("rachel"));
+                    let mut asked: Vec<(f64, String)> = ["/events", "/live", "/server-info"]
+                        .iter()
+                        .flat_map(|path| requests("GET", path).into_iter().map(move |r| (r["at"].as_f64().unwrap_or(0.0), format!("{path}{}", r["query"]))))
+                        .collect();
+                    asked.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    let first = asked.first().map_or(0.0, |a| a.0);
+                    let asked: Vec<String> = asked.iter().map(|(at, what)| format!("{:.3} {what}", at - first)).collect();
+                    check(false, &format!("working: lseq {:?} awaiting {:?} epoch {:?} live_items {} active {} subscribed {:?}; asked {asked:?}", lseq(), view.map(|v| v.awaiting_snapshot()), view.and_then(|v| v.epoch().map(str::to_owned)), engine.live_items(), engine.live_active("rachel"), engine.live_subscription()));
                 }
                 return false;
             }
