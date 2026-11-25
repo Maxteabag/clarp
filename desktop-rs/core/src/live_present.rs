@@ -530,12 +530,20 @@ pub(crate) fn arrange_parts(
         // The working line goes on below the last message read while the
         // turn runs, even before anything runs after it.
         let working = !settled && index == last && last > 0;
-        let entries = arrange(&key, turn, settled, index == last, timed, working, items, &mut rows_of, options);
+        let entries = arrange_part(&key, turn, settled, index == last, timed, working, items, &mut rows_of, options);
         timed &= !entries.iter().any(|e| e.kind == Kind::Fold);
         arranged.push(entries);
     }
     arranged.reverse();
     arranged
+}
+
+/// A turn's item rows as one part, never split (`arrange_parts` without a
+/// message read into it). Older `history_fold` builds call it this way.
+#[allow(dead_code)]
+pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Object], rows_of: HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
+    let began = |item: &Object| int(item, "started_at_ms");
+    arrange_parts(turn_id, turn, settled, shown, &began, &[], rows_of, options).into_iter().flatten().collect()
 }
 
 /// One part of a turn's item rows: one entry per item (an entry in `rows_of`
@@ -544,7 +552,7 @@ pub(crate) fn arrange_parts(
 /// that runs now (a running turn's Working row); `timed`: the part that
 /// shows the worked time; `working`: a Working row even with nothing folded.
 #[allow(clippy::too_many_arguments)]
-fn arrange(key: &str, turn: &Object, settled: bool, last: bool, timed: bool, working: bool, shown: &[&Object], rows_of: &mut HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
+fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool, working: bool, shown: &[&Object], rows_of: &mut HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
     // One entry per item, consecutive explore members as one.
     let mut entries: Vec<Entry> = Vec::new();
     let mut index = 0;

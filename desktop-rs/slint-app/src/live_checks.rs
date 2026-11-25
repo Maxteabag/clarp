@@ -972,6 +972,10 @@ pub fn live_check(out: String) {
         ("anchor steered grouped", Box::new(move |_, _window, elapsed| {
             let before = format!("live:fold:{ANCHOR_TURN}@{ANCHOR_QUEUED}");
             if live_row(&before).is_none() || elapsed < Duration::from_millis(600) {
+                if elapsed > Duration::from_secs(12) && elapsed < Duration::from_millis(12_150) {
+                    let shown: Vec<String> = rows(&crate::window().expect("window")).iter().map(|r| format!("{}|{}|{}", r.id, r.live.key, r.live.title)).collect();
+                    check(false, &format!("no work row before the read message; drawn: {shown:?}"));
+                }
                 return false;
             }
             let working = format!("live:fold:{ANCHOR_TURN}");
