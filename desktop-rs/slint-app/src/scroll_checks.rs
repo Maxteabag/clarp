@@ -406,7 +406,7 @@ pub(super) fn scroll_check(out: String) {
     use slint::platform::Key;
     let state = Rc::new(RefCell::new(State::default()));
     let s = || state.clone();
-    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     const LONG: usize = 400;
     let streams: usize = 5;
     let stages: Vec<Stage> = vec![
@@ -946,8 +946,108 @@ pub(super) fn scroll_check(out: String) {
                 true
             }
         })),
+        // 12. A long reply in Conversation view, as the Host sends a turn
+        // with no live items: the user's message, the Running box at the
+        // end while the agent works, then the reply in the box's place (the
+        // row count as it was). It stops at its first line all the same.
+        ("conversation chat", Box::new(|app, _, _| {
+            let mut turns: Vec<serde_json::Value> = (0..14)
+                .map(|i| json!({"id": format!("convo-{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" }, "text": LOREM.repeat(2),
+                                "view": "conversation", "phase": "final", "timestamp": "2026-11-25T09:00:00Z"}))
+                .collect();
+            turns.push(json!({"id": "convo-hello", "role": "assistant", "text": "Hello.", "view": "conversation", "phase": "final", "timestamp": "2026-11-25T09:00:00Z"}));
+            check(
+                control("/__control/add-agent", &json!({"session": "convo", "persona": "Convo"})).is_ok()
+                    && control("/__control/turns", &json!({"session": "convo", "turns": turns})).is_ok()
+                    && control("/__control/agent", &json!({"session": "convo", "set": {"chat_view": "conversation"}})).is_ok()
+                    && control("/__control/chat-view", &json!({"on": true})).is_ok(),
+                "the Host holds a chat in Conversation view",
+            );
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("open conversation chat", Box::new(|app, _, _| {
+            if !app.engine.borrow().chat_view_offered("convo") {
+                return false;
+            }
+            app.engine.borrow_mut().select("convo");
+            crate::pump();
+            true
+        })),
+        ("conversation opens at the newest", Box::new(|_, _, elapsed| {
+            if !has_row("convo-hello") || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let (visible, numbers) = last_row_visible();
+            check(visible && report().follows, &format!("the conversation chat opens at its newest message and follows (follows {}): {numbers}", report().follows));
+            // The user's message lands and the agent works on it: no live
+            // turn says so, so a Running box stands at the end.
+            upsert("convo", json!([{"id": "convo-ask-a", "role": "user", "text": "Write a detailed guide to starting a small bakery.", "origin": "user",
+                                    "trace_id": "convo-ta", "view": "conversation", "timestamp": "2026-11-25T09:01:00Z"}]));
+            check(control("/__control/agent", &json!({"session": "convo", "set": {"latest_state": "thinking", "busy": true, "turn_started_at": now_ms() - 5_000}})).is_ok(), "the agent starts working");
+            true
+        })),
+        ("running box at the end", Box::new(|_, _, elapsed| {
+            if last_id() != "live:fold:convo-ta" || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            let (visible, numbers) = last_row_visible();
+            check(visible && report().follows, &format!("the Running box is followed at the end (follows {}): {numbers}", report().follows));
+            // The turn ends: the reply takes the box's place.
+            upsert("convo", json!([{"id": "convo-long-a", "role": "assistant", "text": format!("{}\n\n{}", "First line of the bakery guide.", LOREM.repeat(80)),
+                                    "phase": "final", "trace_id": "convo-ta", "view": "conversation", "session_rows": 0, "timestamp": "2026-11-25T09:01:50Z",
+                                    "turn": {"turn_id": "convo-ta", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 51_000, "worked_ms": 50_000, "tool_count": 0}}]));
+            check(control("/__control/agent", &json!({"session": "convo", "set": {"latest_state": "idle", "busy": false}})).is_ok(), "the agent goes idle");
+            true
+        })),
+        ("reply in the box's place read from its top", Box::new({
+            let out = out5;
+            move |_, _, elapsed| {
+                if !has_row("convo-long-a") || has_row("live:fold:convo-ta") || elapsed < Duration::from_millis(1500) {
+                    return false;
+                }
+                let (top, placed) = at_top("convo-long-a");
+                check(top && !report().follows && !report().at_end, &format!("a long reply in the Running box's place stops at its first line (follows {}, at end {}): {placed}", report().follows, report().at_end));
+                check(news(), "and the jump-to-latest dot says there is more below");
+                shot(&out, "scroll-04-conversation-reply-top");
+                app_now().to_latest();
+                true
+            }
+        })),
+        // A reply's row that comes first without text and fills in place.
+        ("reply row fills in place", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(report().follows && report().at_end, &format!("End follows again (follows {}, at end {})", report().follows, report().at_end));
+            upsert("convo", json!([{"id": "convo-ask-b", "role": "user", "text": "And the permits?", "origin": "user", "trace_id": "convo-tb", "view": "conversation", "timestamp": "2026-11-25T09:02:00Z"},
+                                   {"id": "convo-long-b", "role": "assistant", "text": "", "phase": "final", "trace_id": "convo-tb", "view": "conversation", "session_rows": 0, "timestamp": "2026-11-25T09:02:01Z"}]));
+            true
+        })),
+        ("empty reply row followed", Box::new(|_, _, elapsed| {
+            if !has_row("convo-long-b") || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            check(report().follows, &format!("the empty reply row is followed (follows {})", report().follows));
+            upsert("convo", json!([{"id": "convo-long-b", "role": "assistant", "text": format!("{}\n\n{}", "First line of the permits answer.", LOREM.repeat(80)),
+                                    "phase": "final", "trace_id": "convo-tb", "view": "conversation", "session_rows": 0, "timestamp": "2026-11-25T09:02:40Z"}]));
+            true
+        })),
+        ("filled reply read from its top", Box::new(|_, _, elapsed| {
+            if !holds("convo-long-b", &format!("{}\n\n{}", "First line of the permits answer.", LOREM.repeat(80))) || elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (top, placed) = at_top("convo-long-b");
+            check(top && !report().follows && !report().at_end, &format!("a reply that fills its row in place stops at its first line (follows {}, at end {}): {placed}", report().follows, report().at_end));
+            check(news(), "and the jump-to-latest dot says there is more below");
+            true
+        })),
     ];
     run_stages(stages);
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 // ---- the chat jumping far up (`--check scroll-jump`)

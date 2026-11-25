@@ -1478,7 +1478,7 @@ export component Transcript inherits FocusScope {
     property <length> reply-y;
     property <length> reply-h;
     property <bool> reply-drawn;
-    function is-reply(index: int) -> bool {
+    pure function is-reply(index: int) -> bool {
         return index >= 0 && index < root.rows.length
             && ((root.rows[index].author == "assistant" && root.rows[index].blocks.length > 0)
                 || (root.rows[index].author == "live" && root.rows[index].live.kind == "message"));
@@ -1511,19 +1511,28 @@ export component Transcript inherits FocusScope {
             root.disarm();
         }
     }
-    // The row count and first row `arm` last saw: more rows under the same
-    // first row are new rows in the same chat.
+    // The chat's last row, and whether it holds a reply yet. A reply often
+    // leaves the row count as it was: in Conversation view it takes the
+    // Running box's place when the turn ends (one row out, one in), and a
+    // reply's row can come first without text and fill in place. Either
+    // way the last row changes, and that arms it as a new row does.
+    property <string> tail: root.rows.length == 0 ? "" : (root.is-reply(root.rows.length - 1) ? "reply:" : "row:") + root.rows[root.rows.length - 1].id;
+    changed tail => { root.rows-counted(); }
+    // The row count, first row and last row `arm` last saw: more rows, or
+    // another last row, under the same first row are news in the same chat.
     property <int> reply-count;
     property <string> reply-first;
+    property <string> reply-tail;
     function rows-counted() {
         let same-chat = root.reply-count > 0 && root.rows.length > 0 && root.rows[0].id == root.reply-first;
         if (!same-chat) {
             root.disarm();
-        } else if (root.follow && Look.follow && root.rows.length > root.reply-count) {
+        } else if (root.follow && Look.follow && (root.rows.length > root.reply-count || root.tail != root.reply-tail)) {
             root.arm();
         }
         root.reply-count = root.rows.length;
         root.reply-first = root.rows.length > 0 ? root.rows[0].id : "";
+        root.reply-tail = root.tail;
     }
     function disarm() {
         root.reply-id = "";
