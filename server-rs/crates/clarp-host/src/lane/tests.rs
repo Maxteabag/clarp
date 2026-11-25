@@ -10,8 +10,8 @@ use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
 use super::{
-    Endpoint, Place, Room, Settings, Tool, held, lanes_in, make_room, make_way_within, once_more,
-    replied,
+    Endpoint, Place, Room, Settings, Tool, held, lanes_in, make_room, make_way_within,
+    mark_owners_turn, mark_owners_view, once_more, replied,
 };
 
 fn of(text: &str) -> Settings {
@@ -560,5 +560,86 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
     assert_eq!(place, Place::Free);
     assert_eq!(lanes[7].asked(), ["inspect", "retire"]);
     assert!(lanes[..7].iter().all(|lane| lane.asked() == ["inspect"]));
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Eight lanes in a run folder: `busy` running turns, the rest idle (the lower the index, the
+/// longer idle), each of an agent named by its place; `his` names which agents are the owner's.
+fn eight(run: &Path, busy: usize, his: &[usize]) -> Vec<FakeLane> {
+    (0..8usize)
+        .map(|n| {
+            if his.contains(&n) {
+                mark_owners_view(run, &format!("a{n}"));
+            }
+            let idle_ms = if n < busy { 0 } else { 100_000 - u64::try_from(n).unwrap() };
+            FakeLane::start(run, &format!("a{n}"), status("t", "d", idle_ms, n < busy))
+        })
+        .collect()
+}
+
+fn retired(lanes: &[FakeLane]) -> Vec<usize> {
+    lanes
+        .iter()
+        .enumerate()
+        .filter(|(_, lane)| lane.asked().contains(&"retire".to_owned()))
+        .map(|(n, _)| n)
+        .collect()
+}
+
+#[test]
+fn a_lane_of_the_agents_own_never_takes_an_owners_place() {
+    // Eight lanes, the six idle ones all of agents the owner talks with: a helper's lane may
+    // send none of them away, so it does not start and nothing leaves (the owner's rule).
+    let run = run_dir("owners-kept");
+    let lanes = eight(&run, 2, &[2, 3, 4, 5, 6, 7]);
+    let helper = Endpoint::of(Tool::Codex, &run, "helper");
+    let room = Settings::of(None).room();
+    let place = helper
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    assert!(retired(&lanes).is_empty());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn the_owners_turn_sends_an_idle_helper_lane_away_before_an_idle_lane_of_his() {
+    // Seven busy lanes and one idle helper lane: a lane for an agent the owner just wrote to
+    // starts, and the helper's idle lane is the one that leaves.
+    let run = run_dir("owners-first");
+    let lanes = eight(&run, 7, &[]);
+    mark_owners_turn(&run, "his");
+    let his = Endpoint::of(Tool::Codex, &run, "his");
+    let room = Settings::of(None).room();
+    let place = his
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(retired(&lanes), [7]);
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // Six busy, an idle lane of his that has waited the longest and an idle helper lane: the
+    // helper's leaves first, though the owner's has been idle longer.
+    let run = run_dir("owners-order");
+    let lanes = eight(&run, 6, &[6]);
+    mark_owners_turn(&run, "his");
+    let his = Endpoint::of(Tool::Codex, &run, "his");
+    let place = his
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(retired(&lanes), [7]);
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // With no helper lane idle, a lane of his may take the place of another idle lane of his.
+    let run = run_dir("owners-own");
+    let lanes = eight(&run, 7, &[7]);
+    mark_owners_view(&run, "his");
+    let his = Endpoint::of(Tool::Codex, &run, "his");
+    let place = his
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(retired(&lanes), [7]);
     std::fs::remove_dir_all(&run).unwrap();
 }

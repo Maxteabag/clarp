@@ -236,6 +236,45 @@ fn make_way_within(run: &Path, agent_id: &str, bound: Duration) {
     }
 }
 
+/// How long a turn the owner sent keeps an agent's lane his (the owner's rule of 25 Nov 2026).
+const OWNERS_TURN: Duration = Duration::from_secs(30 * 60);
+/// How long a chat the owner has open keeps its agent's lane his after its last mark: a
+/// connection that watches the chat marks it every `VIEW_MARK_EVERY` while it is open.
+const OWNERS_VIEW: Duration = Duration::from_secs(60);
+pub(crate) const VIEW_MARK_EVERY: Duration = Duration::from_secs(15);
+
+/// A turn of origin user started for this agent: its lanes are the owner's for half an hour.
+/// Kept as a file's time in the run folder, where lanes already keep what each other may read,
+/// so a lane's room is decided without asking the agent's thread. Blocking, and short.
+pub(crate) fn mark_owners_turn(run: &Path, agent_id: &str) {
+    touch(&run.join(format!("{agent_id}-owner-turn.mark")));
+}
+
+/// A chat of this agent is open on one of the owner's devices (a connection watches it live).
+pub(crate) fn mark_owners_view(run: &Path, agent_id: &str) {
+    touch(&run.join(format!("{agent_id}-owner-view.mark")));
+}
+
+fn touch(path: &Path) {
+    let _ = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|file| file.set_modified(std::time::SystemTime::now()));
+}
+
+/// Whether this agent's lanes are the owner's: a turn of his within half an hour, or a chat of
+/// it open on one of his devices. Every other lane is the agents' own (helpers, janitors,
+/// one agent asking another).
+fn owners(run: &Path, agent_id: &str) -> bool {
+    let fresh = |name: &str, within: Duration| {
+        std::fs::metadata(run.join(format!("{agent_id}-{name}.mark")))
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|at| at.elapsed().is_ok_and(|age| age <= within))
+    };
+    fresh("owner-turn", OWNERS_TURN) || fresh("owner-view", OWNERS_VIEW)
+}
+
 /// Where an agent's lane keeps the identity of its running turn.
 pub(crate) fn turn_file(run: &Path, agent_id: &str) -> PathBuf {
     run.join(format!("{agent_id}-turn.token"))
@@ -306,13 +345,15 @@ impl Endpoint {
 
     /// The turn file of this lane's agent, named from its socket.
     pub(crate) fn turn_file(&self, run: &Path) -> PathBuf {
-        let agent = self
-            .socket
+        turn_file(run, self.agent().unwrap_or("lane"))
+    }
+
+    /// The agent this lane is of, from its socket's name.
+    fn agent(&self) -> Option<&str> {
+        self.socket
             .file_name()
             .and_then(|name| name.to_str())
             .and_then(|name| name.strip_suffix(self.tool.suffix()))
-            .unwrap_or("lane");
-        turn_file(run, agent)
     }
 
     /// Decides whether the lane that runs is used for `thread` with options of `digest`: one
@@ -515,7 +556,13 @@ pub(crate) fn once_more<T>(
 /// and counts. Read only when a lane is about to start. The Host reads no `/proc` here: each
 /// lane weighed itself, in its own process. Answers whether both limits hold with the new lane
 /// counted: `false` when the lanes that are left all run work.
+///
+/// The owner's agents come first (his rule of 25 Nov 2026). The idle lanes of agents he is not
+/// talking with leave first, longest idle first, then idle lanes of his, longest idle first. A
+/// lane for an agent of his may send any idle lane away; a lane of the agents' own may send
+/// away only idle lanes of the agents' own, so it never takes an owner's place.
 fn make_room(run: &Path, own: &Endpoint, room: Room) -> bool {
+    let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
     let mut idle = Vec::new();
     let mut live = 1usize;
     let mut held = own.tool.typical_bytes();
@@ -524,12 +571,15 @@ fn make_room(run: &Path, own: &Endpoint, room: Room) -> bool {
         live += 1;
         held = held.saturating_add(memory);
         if state.claim.is_none() && state.available {
-            idle.push((state.idle_ms, memory, lane));
+            let his = lane.agent().is_some_and(|agent| owners(run, agent));
+            if for_owner || !his {
+                idle.push((his, state.idle_ms, memory, lane));
+            }
         }
     }
-    idle.sort_by_key(|(idle_ms, _, _)| std::cmp::Reverse(*idle_ms));
+    idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
     let fits = |live: usize, held: u64| live <= room.most && held <= room.budget;
-    for (_, memory, lane) in idle {
+    for (_, _, memory, lane) in idle {
         if fits(live, held) {
             break;
         }

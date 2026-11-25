@@ -4422,7 +4422,12 @@ async fn events(
             .map(str::to_string)
             .collect()
     });
-    let watched = wanted.map(|wanted| (wanted, app.hub.watch()));
+    // A chat watched live is a chat open on one of the owner's devices: its agent's lanes are
+    // his while the connection lasts (the owner's rule of 25 Nov 2026).
+    let watched = wanted.map(|wanted| {
+        let marks = ViewMarks::start(&app, &wanted);
+        (wanted, app.hub.watch(), marks)
+    });
     // First what the client missed, then the word to look at everything: whatever happened
     // while it was away for longer than the hub remembers, the snapshot and the conversations
     // will tell.
@@ -4451,7 +4456,7 @@ async fn events(
                     // not, a wait that never ends.
                     let shown = async {
                         match watched.as_mut() {
-                            Some((_, shown)) => shown.recv().await,
+                            Some((_, shown, _)) => shown.recv().await,
                             None => std::future::pending().await,
                         }
                     };
@@ -4471,7 +4476,7 @@ async fn events(
                             numbered(&published)
                         }
                         Ok(Heard::Shown(Ok(shown))) => {
-                            let wanted = watched.as_ref().map(|(wanted, _)| wanted);
+                            let wanted = watched.as_ref().map(|(wanted, _, _)| wanted);
                             match wanted.and_then(|wanted| shown.for_one(wanted)) {
                                 Some(json) => shown_event(json),
                                 // Not for this connection.
@@ -4497,6 +4502,44 @@ async fn events(
         },
     );
     Sse::new(stream)
+}
+
+/// Marks the chats a connection watches live as open, for their agents' lanes, every
+/// `lane::VIEW_MARK_EVERY` while the connection lasts. Ends with the connection.
+struct ViewMarks(Option<tokio::task::JoinHandle<()>>);
+
+impl ViewMarks {
+    fn start(app: &App, sessions: &HashSet<String>) -> Self {
+        let agents: Vec<String> = sessions
+            .iter()
+            .filter_map(|session| app.member(session))
+            .map(|member| member.record.agent_id.clone())
+            .collect();
+        if agents.is_empty() {
+            return Self(None);
+        }
+        let run = app.config.run_dir.clone();
+        Self(Some(tokio::spawn(async move {
+            loop {
+                let (run, agents) = (run.clone(), agents.clone());
+                let _ = tokio::task::spawn_blocking(move || {
+                    for agent in &agents {
+                        crate::lane::mark_owners_view(&run, agent);
+                    }
+                })
+                .await;
+                tokio::time::sleep(crate::lane::VIEW_MARK_EVERY).await;
+            }
+        })))
+    }
+}
+
+impl Drop for ViewMarks {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.abort();
+        }
+    }
 }
 
 /// What a connection that listens heard: an event every connection is sent, or something a

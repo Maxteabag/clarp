@@ -92,6 +92,17 @@ as before.
   Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread
   and runs in a process of its own. A native goal's lane is needed: it starts past the limits
   and counts, so the next optional lane waits for a free place.
+- **The owner's agents come first** (his rule of 25 Nov 2026). A lane is the owner's when its
+  agent had a turn of origin user in the last 30 minutes, or a chat of it is open on one of his
+  devices (a connection watches it live, `/events?live=`). Every other lane is the agents' own:
+  helpers, janitors, one agent asking another. Both are kept as file times in the run folder
+  (`<agent>-owner-turn.mark`, set when such a turn starts; `<agent>-owner-view.mark`, set every
+  15 s while the chat is watched, counted for 60 s), so room is decided without asking any
+  agent's thread. When room is needed, idle lanes of the agents' own leave first, longest idle
+  first, then idle lanes of the owner's, longest idle first; a busy lane never leaves. A lane for
+  an agent of the owner's may send any idle lane away. A lane of the agents' own may send away
+  only idle lanes of the agents' own; where that is not enough it does not start, and its agent
+  runs per turn. A native goal's lane is never refused, and counts. No turn waits for a lane.
 - **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
   that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
   at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on

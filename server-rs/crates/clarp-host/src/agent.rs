@@ -4288,6 +4288,17 @@ impl Worker {
 
     /// Carries out an action that neither a terminal nor the account pool holds back.
     fn carry_out_now(&mut self, action: Action) {
+        // A turn the owner sent makes this agent's lanes his for a while: they keep their place
+        // ahead of the agents' own (the owner's rule of 25 Nov 2026).
+        if matches!(action, Action::Launch(_))
+            && self
+                .actor
+                .as_ref()
+                .and_then(|actor| actor.status().live)
+                .is_some_and(|live| live.origin.is_user())
+        {
+            crate::lane::mark_owners_turn(&self.setup.profile.run_dir, &self.setup.record.agent_id);
+        }
         let action = match action {
             // An opening turn keeps its own gated launch.
             Action::Launch(order)
