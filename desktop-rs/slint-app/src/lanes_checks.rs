@@ -187,7 +187,7 @@ pub fn kept_processes_check(out: String) {
             app.engine.borrow_mut().reconnect();
             true
         })),
-        ("pressure shown", Box::new(move |_, window, elapsed| {
+        ("pressure shown", Box::new(|_, window, elapsed| {
             let shown = by_id(window, "kept-pressure-cpu").is_some() && row(window, "Pressure").is_some();
             if !shown && elapsed < Duration::from_secs(8) {
                 return false;
@@ -212,9 +212,23 @@ pub fn kept_processes_check(out: String) {
                 ("    Memory", "0% stalled, last 10 seconds · holds at 10%"),
             ]);
             check(groups == expected, &format!("live processes, cold starts and pressure: {groups:?}"));
-            // The page brings the last of the readings into view for the shot.
-            if let Some(index) = window.get_setting_rows().iter().position(|r| r.kind == "info" && r.label == "    Memory") {
-                window.set_setting_current(index as i32);
+            window.invoke_focus_settings();
+            true
+        })),
+        ("scrolled to the readings", Box::new(|_, window, elapsed| {
+            // Down, a row a step, as the owner moves: the list follows the
+            // current row past the readings, so the shot shows them.
+            let readings = window.get_setting_rows().iter().position(|r| r.kind == "info" && r.label == "    Memory").unwrap_or(0) as i32;
+            if window.get_setting_current() <= readings && elapsed < Duration::from_secs(10) {
+                crate::headless::press(slint::platform::Key::DownArrow);
+                return false;
+            }
+            true
+        })),
+        ("pressure in view", Box::new(move |_, _, elapsed| {
+            // A frame has drawn the list where it scrolled to.
+            if elapsed < Duration::from_millis(500) {
+                return false;
             }
             shot(&out4, "kept-processes-04-pressure");
             change("kept-pressure-cpu", 1);
