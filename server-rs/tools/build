@@ -75,6 +75,12 @@ if [ "${1:-}" != status ]; then
     flock 8
 fi
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
+# The VM wants a key and a password, so a batch login there only works through the master `buildbox-cargo status`
+# opens, which lives under buildbox-cargo's own ControlPath, not ~/.ssh's (review of 25 Nov 2026). rsync follows
+# through its -e.
+if [ "$HOST" = ecit-buildbox ]; then
+    ssh_opts+=(-o "ControlPath=${XDG_STATE_HOME:-$HOME/.local/state}/buildbox-cargo/cm-%C")
+fi
 cmd="${1:-check}"; shift || true
 
 if [ "$cmd" = status ]; then
