@@ -538,6 +538,34 @@ pub(super) fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, 
 }
 
 impl Actor {
+    /// Before a message of the user's steers into the live turn, the user's older messages
+    /// that still wait go in first, oldest first (issue 839): what the tool reads is in the
+    /// order it was said. Stops at the first that cannot go in; the newer one then waits
+    /// with it (the kernel refuses to let it jump).
+    pub fn steer_older(&mut self, turn: TurnId, now_ms: i64) -> Result<Vec<Action>, ActorError> {
+        let mut actions = Vec::new();
+        for older in self.recorder.agent().older_words_waiting(turn) {
+            let Some(message_seq) = self
+                .recorder
+                .agent()
+                .waiting()
+                .find(|waiting| waiting.id == older)
+                .map(|waiting| waiting.message_seq)
+            else {
+                break;
+            };
+            let message = message_at(self.recorder.log(), message_seq)?;
+            let Some(uuid) = message.trace_id.as_deref().and_then(takeover::prompt_uuid) else {
+                break;
+            };
+            match self.steer_active(older, uuid, &message.text, now_ms)? {
+                Some(action) => actions.push(action),
+                None => break,
+            }
+        }
+        Ok(actions)
+    }
+
     /// Reserve the already accepted row before handing its bytes to the tool's stdin. A restart
     /// replays echoes but never attempts an uncertain write a second time.
     pub fn steer_active(

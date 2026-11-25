@@ -3501,6 +3501,8 @@ impl Worker {
                             .as_deref()
                             .and_then(clarp_kernel::takeover::prompt_uuid)
                     {
+                        // The user's older messages that wait go in first (issue 839).
+                        out.actions.extend(actor.steer_older(turn, now)?);
                         actor.steer_active(turn, uuid, &message.text, now)?
                     } else {
                         None

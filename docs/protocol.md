@@ -1231,7 +1231,10 @@ Rules:
   process. On a Rust Host with feature `agy_acp_steering` (contract 168) an
   `agy-acp` turn takes it the same way: Antigravity is given it inside the same
   turn, or right after the turn's answer in the same process, and it is answered
-  there. Only words go so: a send that names a file the user attached (a picture,
+  there. The user's messages go in in the order they were said: a send is read
+  into the turn only once none of the user's older sends still waits; from Rust
+  Host contract 187 those older sends are offered to the turn first, oldest first,
+  and where one of them cannot go in, the newer send waits with them. Only words go so: a send that names a file the user attached (a picture,
   a sound, a PDF), or that begins with `/`, waits for its own turn. Until the CLI reads it the send answers `queued: true` and is a
   queue item that can no longer be edited or deleted; its `/log` row appears
   when it is read, with a `queue-updated` event. A send that cannot be steered

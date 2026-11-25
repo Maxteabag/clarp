@@ -35,7 +35,7 @@ fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_
             .any(|row| text_of(row).contains("was cut short because the owner wrote to you"))
     });
     let turns = host.turns(&target);
-    let at = |found: &dyn Fn(&Value) -> bool| turns.iter().position(|row| found(row)).unwrap();
+    let at = |found: &dyn Fn(&Value) -> bool| turns.iter().position(found).unwrap();
     let answered = at(&|row| row["role"] == "assistant" && text_of(row) == "owner says hi");
     let note = at(&|row| text_of(row).contains("was cut short because the owner wrote to you"));
     assert!(answered < note, "{turns:#?}");

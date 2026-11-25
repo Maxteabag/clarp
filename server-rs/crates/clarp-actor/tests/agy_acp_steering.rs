@@ -431,6 +431,74 @@ fn a_message_read_before_the_first_answer_joins_the_running_turn() {
     assert!(status.live.is_none() && status.waiting.is_empty());
 }
 
+/// Issue 839: the user's messages that waited while nothing offered them to the running turn
+/// go into it before a newer one that is offered, in the order they were said; the newer one
+/// alone is refused while they wait.
+#[test]
+fn messages_that_waited_go_in_before_a_newer_one_in_the_order_they_were_said() {
+    let mut world = World::new("order");
+    let mut actor = running(&mut world);
+    world.says(1, &chunk("Working on it."));
+    world.hint(&mut actor);
+    let said = |id: u64| Message {
+        id: format!("u-{id}"),
+        text: format!("message {id}"),
+        origin: Origin::User,
+        trace_id: Some(format!("trace-{id}")),
+        ..Message::default()
+    };
+    let uuid = |id: u64| takeover::prompt_uuid(&format!("trace-{id}")).unwrap();
+    let mut newest = TurnId(0);
+    for id in 2..=6 {
+        let now = world.tick();
+        let (sent, out) = actor.send(&said(id), Admission::Queue, now).unwrap();
+        world.carry_out(&mut actor, out);
+        assert!(sent.queued, "it waits behind the running turn");
+        newest = sent.turn.unwrap();
+    }
+    let now = world.tick();
+    assert!(
+        actor
+            .steer_active(newest, uuid(6), "message 6", now)
+            .unwrap()
+            .is_none(),
+        "the newest may not go in before the older ones"
+    );
+    let now = world.tick();
+    let mut actions = actor.steer_older(newest, now).unwrap();
+    actions.extend(
+        actor
+            .steer_active(newest, uuid(6), "message 6", now)
+            .unwrap(),
+    );
+    world.carry_out(
+        &mut actor,
+        Outputs {
+            actions,
+            ..Outputs::default()
+        },
+    );
+    let offered: Vec<Value> = world
+        .steered
+        .iter()
+        .map(|line| line["uuid"].clone())
+        .collect();
+    assert_eq!(
+        offered,
+        (2..=6).map(|id| json!(uuid(id))).collect::<Vec<_>>()
+    );
+    for id in 2..=6 {
+        world.says(1, &echo(&uuid(id)));
+    }
+    world.hint(&mut actor);
+    assert_eq!(
+        messages(&actor),
+        ["u-1", "u-2", "u-3", "u-4", "u-5", "u-6"],
+        "stored in the order they were said"
+    );
+    assert!(actor.status().waiting.is_empty());
+}
+
 #[test]
 fn a_message_read_after_the_first_answer_is_a_turn_of_its_own_in_the_same_process() {
     let mut world = World::new("separate");

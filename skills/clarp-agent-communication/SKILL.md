@@ -114,8 +114,10 @@ reaches an agent while its turn runs is read into that turn where the agent's
 tool can take it: Claude Code on the Rust Host, and Codex on a Rust Host whose
 owner turned the `codex_chat_lane` setting on (off by default; see
 `clarp-server-admin`). Elsewhere, and for every other message between agents,
-it waits and runs as the agent's next turn. Either way, send it once: the queue
-shows it until it is read.
+it waits and runs as the agent's next turn. The user's messages always reach
+you in the order they were said: a newer one is not read into your turn while an
+older one still waits. Either way, send it once: the queue shows it until it is
+read.
 
 Messages from agents keep a turn each. The user's own messages that waited while you were
 busy (because your tool could not take them into the running turn) do not: on a Rust Host from contract 169 (feature `queued_read_together`) they reach you

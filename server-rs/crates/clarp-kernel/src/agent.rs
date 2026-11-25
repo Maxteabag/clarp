@@ -63,6 +63,16 @@ fn gives_back(outcome: &Outcome) -> bool {
     }
 }
 
+/// Whether a waiting message may be read into the live turn: the user's own words, said to
+/// the agent, or a front desk's relay of them.
+fn joins_live(waiting: &Queued) -> bool {
+    match waiting.admission {
+        Admission::Queue => waiting.origin.is_user_send(),
+        Admission::Later => waiting.user_word && matches!(waiting.origin, Origin::Agent { .. }),
+        _ => false,
+    }
+}
+
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -945,23 +955,32 @@ impl Agent {
                 .is_some_and(|live| live.id() == join.into && live.has_process())
             && self.stopping.is_none()
             && self.selected_takeover.is_none()
-            && self.mailbox.iter().any(|waiting| {
-                if waiting.id != turn {
-                    return false;
-                }
-                match waiting.admission {
-                    Admission::Queue => waiting.origin.is_user_send(),
-                    Admission::Later => {
-                        waiting.user_word && matches!(waiting.origin, Origin::Agent { .. })
-                    }
-                    _ => false,
-                }
-            })
+            && self
+                .mailbox
+                .iter()
+                .any(|waiting| waiting.id == turn && joins_live(waiting))
             && !self.holds(turn)
             && (!join.together || self.can_gather(turn, join.into))
             && !join.uuid.is_empty()
             && !self.joins.contains_key(&turn)
             && !self.joins.values().any(|held| held.join.uuid == join.uuid)
+    }
+
+    /// The user's words that wait and were said before `turn`, oldest first, and are not yet
+    /// given to the live turn: a message of the user's steers into the live turn only once none
+    /// of these waits (issue 839), so the tool reads the user's messages in the order they were
+    /// said. They go in first, or the newer one waits with them.
+    pub fn older_words_waiting(&self, turn: TurnId) -> Vec<TurnId> {
+        let mut older: Vec<TurnId> = self
+            .mailbox
+            .iter()
+            .filter(|waiting| {
+                waiting.id < turn && joins_live(waiting) && !self.joins.contains_key(&waiting.id)
+            })
+            .map(|waiting| waiting.id)
+            .collect();
+        older.sort();
+        older
     }
 
     /// A message goes into the prompt of the turn that is being started only as the next of
@@ -1113,10 +1132,12 @@ impl Agent {
             }
             Command::Join { turn, join } => {
                 work.agent.require_here()?;
-                // No newer follow-up can jump a waiting send released by Stop. This is
-                // an admission rule, so a log that already recorded a join can still replay.
+                // No newer follow-up can jump a waiting send released by Stop, nor an older
+                // message of the user's that waits (issue 839). This is an admission rule, so
+                // a log that already recorded a join can still replay.
                 if !work.agent.can_join(turn, &join)
                     || work.agent.stop_released.range(..turn).next().is_some()
+                    || (!join.together && !work.agent.older_words_waiting(turn).is_empty())
                 {
                     return Err(Refusal::NotWaiting(turn));
                 }
@@ -2975,6 +2996,56 @@ mod tests {
         assert!(a.waiting().is_empty());
     }
 
+    /// Issue 839: a newer message of the user's never steers into the live turn ahead of their
+    /// older ones that still wait. Those go in first, in the order they were said.
+    #[test]
+    fn a_newer_message_steers_in_only_after_the_older_ones_that_wait() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        for seq in [11, 12, 13, 14, 15] {
+            a.user(seq);
+        }
+        assert_eq!(
+            a.agent.older_words_waiting(TurnId(6)),
+            [2, 3, 4, 5].map(TurnId)
+        );
+        let join = |turn: u64| Command::Join {
+            turn: TurnId(turn),
+            join: Join {
+                into: TurnId(1),
+                uuid: format!("steer-{turn}"),
+                recovery: None,
+                together: false,
+            },
+        };
+        assert_eq!(a.send(join(6)), Err(Refusal::NotWaiting(TurnId(6))));
+        assert_eq!(a.send(join(3)), Err(Refusal::NotWaiting(TurnId(3))));
+        for turn in [2, 3, 4, 5, 6] {
+            a.send(join(turn)).unwrap();
+        }
+        for turn in [2, 3, 4, 5, 6] {
+            a.send(Command::JoinRead { turn: TurnId(turn) }).unwrap();
+        }
+        assert!(a.waiting().is_empty());
+        // Another agent's message that waits is not the user's: it does not hold the user back.
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(Command::Accept {
+            message_seq: 11,
+            origin: Origin::Agent {
+                agent_id: "a-peer".into(),
+            },
+            admission: Admission::Later,
+            coordination: None,
+            user_word: false,
+        })
+        .unwrap();
+        a.user(12);
+        a.send(join(3)).unwrap();
+    }
+
     /// Issue 747: the user's Stop lets their waiting messages run and holds the rest. When the
     /// last of those messages starts, the hold is still there: it ends with the user's next
     /// fresh message, so the queue a Stop leaves is the same whenever it is read.
@@ -3080,22 +3151,27 @@ mod tests {
             "a fresh send ends the busy agent's pause on admission"
         );
         assert_eq!(a.waiting(), vec![5, 6]);
-        a.send(Command::Join {
-            turn: TurnId(6),
+        let join = |turn: u64, uuid: &str| Command::Join {
+            turn: TurnId(turn),
             join: Join {
                 into: TurnId(4),
-                uuid: "post-stop".into(),
+                uuid: uuid.into(),
                 recovery: None,
                 together: false,
             },
-        })
-        .unwrap();
+        };
+        // The user's older message, no longer held, goes in first (issue 839).
+        assert_eq!(
+            a.send(join(6, "post-stop")),
+            Err(Refusal::NotWaiting(TurnId(6)))
+        );
+        a.send(join(5, "released")).unwrap();
+        a.send(Command::JoinRead { turn: TurnId(5) }).unwrap();
+        a.send(join(6, "post-stop")).unwrap();
         a.send(Command::JoinRead { turn: TurnId(6) }).unwrap();
         assert!(!a.agent.is_paused());
-        assert_eq!(a.waiting(), vec![5]);
+        assert!(a.waiting().is_empty());
         assert_eq!(a.live(), Some(4));
-        a.finish(4);
-        assert_eq!(a.live(), Some(5));
     }
 
     #[test]

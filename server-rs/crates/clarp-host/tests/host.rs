@@ -143,6 +143,8 @@ mod native_agent_goal;
 mod native_goal_folder;
 #[path = "host/network_wait.rs"]
 mod network_wait;
+#[path = "host/owner_preempts.rs"]
+mod owner_preempts;
 #[path = "host/pairing_identity.rs"]
 mod pairing_identity;
 #[path = "host/peer_snapshot.rs"]
@@ -157,8 +159,6 @@ mod plan_closed;
 mod provider_tasks;
 #[path = "host/question_cards.rs"]
 mod question_cards;
-#[path = "host/owner_preempts.rs"]
-mod owner_preempts;
 #[path = "host/queue_provenance.rs"]
 mod queue_provenance;
 #[path = "host/queue_together.rs"]
