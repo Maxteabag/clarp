@@ -81,7 +81,7 @@ jobs:
           source = source.replace(field, field + '    pub hide_settled: bool,\n    pub show_commentary: bool,\n')
           literal = 'host_now_ms: 0 }'
           assert source.count(literal) == 2
-          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, show_commentary: false, veil: false }')
+          source = source.replace(literal, 'host_now_ms: 0, fold_running: false, hide_settled: false, show_commentary: false, veil: false, whole_turn: false }')
           path.write_text(source)
           PYCTRL
           set +e
