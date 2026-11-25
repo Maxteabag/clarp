@@ -24,7 +24,7 @@ test-results/
 playwright-report/
 .qa/
 
-# Built PWA bundle — install.sh / Docker run npm run build
+# Built PWA bundle — npm run build
 static/app/
 
 # Local Docker Compose overrides

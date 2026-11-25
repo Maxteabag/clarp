@@ -79,7 +79,6 @@ with no display, a private bus (`tests/private-bus.conf`) and scratch config.
 cargo build --workspace && cargo test --workspace
 slint-app/tests/check.sh NAME [OUT]      # e.g. startup, artifacts, scroll, transcript, composer,
                                          # panes, sidebar, updates, launch, profile, extras, voice
-slint-app/tests/run-e2e.sh [OUT]         # against the real server (tests/qa/host.py) in a network namespace
 slint-app/tests/shot.sh OUT.png SESSION  # one screenshot
 slint-app/tests/perf.sh [RUNS]           # launch-to-first-chat time and memory (release build)
 net/tests/run-keyring-tests.sh           # keyring against a throwaway gnome-keyring

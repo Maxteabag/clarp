@@ -101,11 +101,8 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 
 ## End-to-end
 
-`slint-app/tests/run-e2e.sh` runs the Slint app against `tests/qa/host.py` in a
-loopback-only network namespace (isolated HOME, system PATH), headless on
-Slint's software renderer. The driver (`slint-app/src/driver.rs`) types and
-sends through the real composer, sees the reply stream and complete, and opens
-a second chat. Screenshots: `slint-app/docs/e2e/`.
+The end-to-end run against the Python Host (`slint-app/tests/run-e2e.sh`) was
+removed with that Host. The checks above run against `tests/fake_host.py`.
 
 ### Build and performance
 

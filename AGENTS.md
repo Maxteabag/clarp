@@ -1,23 +1,22 @@
 # Clarp Host
 
-This repository is the Clarp server, PWA, and Tauri desktop shell.
+This repository is the Clarp Host (in Rust, `server-rs/`), the web app, the
+Rust desktop app and the Tauri desktop shell.
 The iOS app is a separate private repo (`clarp-ios`). Do not document
 or duplicate iOS build/signing steps here.
 
-## Refactor program (ended 10 Nov 2026)
+## The Python Host is retired
 
-The server refactor program that began on 3 Nov 2026 was retired on 10 Nov 2026
-by the owner's decision. No file is claimed and there is no lead to ask: the
-rules below are the only ones. `REFACTOR.md` stays in the tree as the program's
-record, and its final hand-off is
-`FINAL-HANDOFF.md` in `laptopstudio:~/clarp-refactor-program-records/`,
-with the decision log, registers and reviews beside it.
+The Host is the Rust one in `server-rs/`. The Python Host (`server/`, its tests,
+installer and Docker image) was retired and removed from the repository; git
+history keeps it. Comments that name a `server/...` file say where a rule came
+from; that file is no longer in the tree.
 
 ## Deploying
 
-Do not deploy, update or restart the Clarp Host yourself (`make deploy`,
-`install.sh`, `make deploy-static`, `clarp-admin update`, restarting the
-`clarp*` units). Push to main as described below and ask whoever gave you the
+Do not deploy, update or restart the Clarp Host yourself
+(`server-rs/tools/install-host`, `clarp-admin update`, restarting the
+`clarp-host` unit). Push to main as described below and ask whoever gave you the
 task to have it shipped. Peter can still deploy himself.
 
 ## Agent instruction files
@@ -80,15 +79,13 @@ Ever."
   test to understand a failure you are fixing is fine; it is not a gate.
 - A change lands once it builds and a reviewer has read it. Review is by reading.
 - No workflow starts by itself on a push or pull request; they run only when
-  someone starts them ("Run workflow", or `gh workflow run`). Version tags still
-  publish the Docker image, and main's `desktop.yml` still publishes the desktop
-  binary: those are releases, not tests.
-- When the owner of the work considers it complete, run one full test pass
-  (`make test-critical`, `make test-guards` and the tests of what changed, or the
-  Tests workflow started by hand), fix what it finds, and only then install it
-  on Peter's Hosts, which are live.
-- Do not run the full suite (`make test`) locally: forty agents doing so overload
-  the owner's laptops.
+  someone starts them ("Run workflow", or `gh workflow run`). Main's
+  `desktop.yml` still publishes the desktop binary: that is a release, not a test.
+- When the owner of the work considers it complete, run the one final pass
+  (`server-rs/tools/final-pass`, with the tests of what changed), fix what it
+  finds, and only then install it on Peter's Hosts, which are live.
+- Do not run the whole Rust suite locally: forty agents doing so overload the
+  owner's laptops.
 
 When you run a test command in the background through a wrapper such as
 `pytest > log; echo "exit=$?" >> log`, the wrapper exits 0 whether or not the
@@ -96,21 +93,6 @@ suite failed, so a harness "completed (exit code 0)" notification says nothing
 about the tests. Read the recorded
 `exit=` line and grep the log for `^FAILED`, or run the suite in the
 foreground. Two commits were pushed and deployed from a false green this way.
-
-A change to any file in `server/lib/transcript_incremental.py`'s
-`_VERSION_SOURCES`, `_PARSE_COMMON` or `_STORE_SOURCES` moves the transcript
-digest, so it regenerates the digest's golden in the same change:
-`UPDATE_TRANSCRIPT_VERSION_GOLDEN=1 python -m pytest
-tests/unit/test_transcript_parser_version.py` writes
-`tests/fixtures/transcript-parser-version.json`, and the diff is part of the
-change, like any generated fixture (generating it builds the change; it is not
-a test gate). Otherwise main is red at the install pass. A moved parse digest
-is a decision to say in the pull request: it refuses every checkpoint of that
-backend, so the next import re-reads every transcript of it in full.
-
-`tests/unit/test_dashboard_projection.py` and `test_model_fallbacks.py` are
-load-sensitive under `pytest-xdist`: confirm a failure by running that test
-alone before treating it as a regression, and say which it was.
 
 ## Push to main
 
@@ -142,14 +124,14 @@ as a new ADR and update the index; do not silently rewrite the rationale to matc
 
 ## Client contract
 
-`server/lib/server_identity.py` carries `HOST_CONTRACT` and
+`server-rs/crates/clarp-host/src/edge.rs` carries `HOST_CONTRACT` and
 `MIN_IOS_CONTRACT`, the integers the iOS app uses to decide whether it can
 talk to this Host. When you add or change anything a client may depend on
 (an endpoint, a response field, an SSE event, a feature in `FEATURES`), bump
-`HOST_CONTRACT`, give a new feature its number in `FEATURE_CONTRACTS`, and add
+`HOST_CONTRACT`, add a new feature to `FEATURES`, and add
 a row at the top of `docs/compatibility.md`. Bump `MIN_IOS_CONTRACT` only when
 old apps genuinely stop working; it puts a red banner in front of every user
-below it. `tests/unit/test_client_contract.py` fails when the table and the
+below it. `server-rs/tools/tests/test_rust_contract.py` fails when the table and the
 constants disagree; keep them in step in the same commit.
 
 ## A feature agents can use ships with its skill
@@ -217,8 +199,7 @@ work goes to the iOS app, the Android app and the Rust desktop app (desktop-rs/)
 touch it: it names the lead, the rules, and who owns which crate. Its Rust compiles on the XPS 15 through
 `server-rs/tools/build` (one build at a time, Peter's word of 15 Nov 2026) and in the `Server (Rust)` workflow,
 which runs only when started by hand. The
-rule in the next section still holds on elitebook and laptopstudio, for `server-rs` too. Nothing in `server/` changes
-for it: the Python Host is as before.
+rule in the next section still holds on elitebook and laptopstudio, for `server-rs` too.
 
 ## The Rust desktop compiles only in GitHub Actions
 
