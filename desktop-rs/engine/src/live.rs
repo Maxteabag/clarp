@@ -65,6 +65,11 @@ impl Engine {
         self.live.enabled
     }
 
+    /// The `live=` value the event stream was last opened with.
+    pub fn live_subscription(&self) -> Option<&str> {
+        self.live.subscribed.as_deref()
+    }
+
     /// Whether `/log` rows carry the turn summaries finished turns fold by
     /// (`log_turn_summary`, docs/live-items.md §9).
     pub fn log_turn_summary(&self) -> bool {
