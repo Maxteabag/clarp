@@ -187,3 +187,41 @@ fn a_working_helper_stays_active_and_an_idle_finished_one_folds() {
     assert!(!helper_finished("ended-unreported", false));
     assert!(!helper_finished("reported", true));
 }
+
+mod keep_order {
+    use clarp_core::sidebar::keep_order;
+
+    fn kept(shown: &[&str], fresh: &[(&str, bool)]) -> Vec<String> {
+        let shown: Vec<String> = shown.iter().map(|s| (*s).to_owned()).collect();
+        let fresh: Vec<(String, bool)> = fresh.iter().map(|(s, n)| ((*s).to_owned(), *n)).collect();
+        keep_order(&shown, fresh, |row| row.0.as_str(), |row| row.1).into_iter().map(|row| row.0).collect()
+    }
+
+    #[test]
+    fn a_chat_with_new_activity_keeps_its_place() {
+        assert_eq!(kept(&["a", "b", "c"], &[("c", false), ("a", false), ("b", false)]), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_removed_chat_is_gone() {
+        assert_eq!(kept(&["a", "b", "c"], &[("c", false), ("a", false)]), ["a", "c"]);
+    }
+
+    #[test]
+    fn a_new_chat_goes_at_the_end() {
+        assert_eq!(kept(&["a", "b"], &[("new", false), ("b", false), ("a", false)]), ["a", "b", "new"]);
+    }
+
+    #[test]
+    fn a_new_sub_agent_goes_under_its_chat() {
+        assert_eq!(kept(&["a", "b", "c"], &[("b", false), ("h1", true), ("h2", true), ("a", false), ("c", false)]), ["a", "b", "h1", "h2", "c"]);
+    }
+
+    #[test]
+    fn rows_take_their_fresh_content() {
+        let shown = vec!["a".to_owned(), "b".to_owned()];
+        let fresh = vec![("b", "new preview"), ("a", "old")];
+        let rows = keep_order(&shown, fresh, |row| row.0, |_| false);
+        assert_eq!(rows, [("a", "old"), ("b", "new preview")]);
+    }
+}

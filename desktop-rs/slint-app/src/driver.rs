@@ -2300,6 +2300,7 @@ fn select_text_check(out: String) {
 
 thread_local! {
     static PREVIEW_FROM: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static FROZEN_ORDER: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// `--check sidebar --out DIR`: search and the Unread scope filter the
@@ -2307,6 +2308,8 @@ thread_local! {
 /// restored, and the pane header says what the agent runs. A working
 /// agent's row shows its turn's running time instead of the last message's
 /// time, ticking, and the last message's time again once idle (#354).
+/// With the pointer over the list an older chat's news updates its row in
+/// place, and the chat moves to the top once the pointer leaves (#826).
 fn sidebar_check(out: String) {
     use slint::platform::Key;
     let out1 = out.clone();
@@ -2314,8 +2317,13 @@ fn sidebar_check(out: String) {
     let out3 = out.clone();
     let out4 = out.clone();
     let out5 = out.clone();
+    let out6 = out.clone();
+    let out7 = out.clone();
     fn names(window: &crate::AppWindow) -> Vec<String> {
         window.get_chats().iter().map(|r| r.name.to_string()).collect()
+    }
+    fn sessions(window: &crate::AppWindow) -> Vec<String> {
+        window.get_chats().iter().map(|r| r.session.to_string()).collect()
     }
     let stages: Vec<Stage> = vec![
         ("live", Box::new(|app, window, _| {
@@ -2617,6 +2625,49 @@ fn sidebar_check(out: String) {
                 return false;
             }
             check(window.get_sidebar_focused() && !report().composer_focused, "live preview opens the chat under the cursor and leaves the keyboard in the explorer");
+            true
+        })),
+        ("pointer moves over the list", Box::new(|_, window, _| {
+            let names = names(window);
+            let (Some(top), true) = (names.first(), names.len() == 2) else { return false };
+            let Some(row) = explorer_row(top) else { return false };
+            headless::pointer_move(row.0 + row.2 / 2.0, row.1 + row.3 / 2.0);
+            FROZEN_ORDER.with(|o| *o.borrow_mut() = sessions(window));
+            true
+        })),
+        ("pointer over the list", Box::new(|app, window, _| {
+            if !window.get_sidebar_pointer_in_list() {
+                return false;
+            }
+            check(app.list_frozen.get(), "the pointer over the list holds its order");
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            let newest = order.iter().filter_map(|s| app.engine.borrow().roster().find(s).map(|a| a.last_activity)).max().unwrap_or(0);
+            let news = serde_json::json!({"session": order[1], "set": {"last_activity": newest + 1000, "last_message": "Fresh news while you look"}});
+            check(control("/__control/agent", &news).is_ok(), "the lower chat gets newer activity than the top one");
+            true
+        })),
+        ("frozen", Box::new(move |_, window, elapsed| {
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            let fresh = window.get_chats().iter().any(|r| r.session == order[1].as_str() && r.preview.contains("Fresh news"));
+            if !fresh || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(sessions(window) == order, &format!("while the pointer is over the list no row moves: {:?}, was {order:?}", sessions(window)));
+            check(true, "and the lower row shows its new preview in place");
+            shot(&out6, "sidebar-04-frozen-under-pointer");
+            // Out of the list, over the chat.
+            let (width, height, scale) = headless::size_from_env();
+            headless::pointer_move(width as f32 / scale - 60.0, height as f32 / scale / 2.0);
+            true
+        })),
+        ("caught up", Box::new(move |app, window, elapsed| {
+            let order = FROZEN_ORDER.with(|o| o.borrow().clone());
+            if window.get_sidebar_pointer_in_list() || sessions(window).first() != Some(&order[1]) || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(!app.list_frozen.get(), "the pointer leaving the list lets its order go");
+            check(sessions(window) == [order[1].clone(), order[0].clone()], &format!("and the chat with news moves to the top in one update: {:?}", sessions(window)));
+            shot(&out7, "sidebar-05-caught-up");
             true
         })),
     ];

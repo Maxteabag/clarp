@@ -218,6 +218,10 @@ export component AppWindow inherits Window {
     callback fold-toggled(string);
     callback restore-agent(string);
     callback filter-changed();
+    // The pointer entered (true) or left the explorer's list.
+    callback list-pointer(bool);
+    out property <bool> sidebar-pointer-in-list: sidebar.pointer-in-list;
+    changed sidebar-pointer-in-list => { root.list-pointer(self.sidebar-pointer-in-list); }
     callback toggle-muted();
     callback open-switcher();
     callback link-clicked(string);

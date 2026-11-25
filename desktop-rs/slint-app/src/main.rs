@@ -88,6 +88,9 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
+    /// The pointer is over the explorer's list: its rows keep their order
+    /// and change only in place until it leaves (`frozen_order`).
+    pub list_frozen: std::cell::Cell<bool>,
     /// A live-preview selection (explorer cursor): the keyboard stays put.
     pub previewing: std::cell::Cell<bool>,
     /// Chats opened in this window, the most recent first (Ctrl+R).
@@ -348,6 +351,17 @@ impl App {
         rows
     }
 
+    /// `rows` in the order `model` shows them while the pointer is over the
+    /// list, so nothing the reader is about to click moves; new chats go at
+    /// the end, a new sub-agent under its chat, and a removed one goes.
+    fn frozen_order(&self, model: &VecModel<ChatRow>, rows: Vec<ChatRow>) -> Vec<ChatRow> {
+        if !self.list_frozen.get() {
+            return rows;
+        }
+        let shown: Vec<String> = model.iter().map(|row| row.session.to_string()).collect();
+        clarp_core::sidebar::keep_order(&shown, rows, |row| row.session.as_str(), |row| row.depth > 0)
+    }
+
     fn refresh(&self, changes: &[Change]) {
         let Some(window) = self.window.upgrade() else { return };
         let mut whole = perf::Laps::new();
@@ -379,6 +393,7 @@ impl App {
             laps.lap("portraits");
             window.set_explorer_compact_width(compact_width(&window, &chats, avatar_view::sizes(self).compact));
             laps.lap("compact width");
+            let chats = self.frozen_order(&self.chats, chats);
             sync_rows(&self.chats, chats);
             laps.lap("set");
             let engine = self.engine.borrow();
@@ -409,9 +424,9 @@ impl App {
                 .collect();
             window.set_unread_rooms(engine.unread_rooms() as i32);
             drop(engine);
-            let rooms = self.with_portraits(&window, rooms);
+            let rooms = self.frozen_order(&self.rooms, self.with_portraits(&window, rooms));
             sync_rows(&self.rooms, rooms);
-            let archived = self.with_portraits(&window, archived);
+            let archived = self.frozen_order(&self.archived, self.with_portraits(&window, archived));
             sync_rows(&self.archived, archived);
             laps.lap("rooms and archive");
             laps.done("list");
@@ -719,6 +734,7 @@ fn main() {
         unfolded: RefCell::new(std::collections::HashSet::new()),
         recent: RefCell::new(Vec::new()),
         previewing: std::cell::Cell::new(false),
+        list_frozen: std::cell::Cell::new(false),
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
@@ -1031,7 +1047,20 @@ fn main() {
     });
     window.on_filter_changed(|| {
         if let Some(app) = app() {
+            // A search or scope the reader chose shows its own order, even
+            // with the pointer over the list.
+            let frozen = app.list_frozen.replace(false);
             app.refresh(&[Change::Roster]);
+            app.list_frozen.set(frozen);
+        }
+    });
+    // Over the list the order holds; leaving it, the list catches up at once.
+    window.on_list_pointer(|inside| {
+        if let Some(app) = app() {
+            app.list_frozen.set(inside);
+            if !inside {
+                app.refresh(&[Change::Roster]);
+            }
         }
     });
     window.on_toggle_muted(|| {

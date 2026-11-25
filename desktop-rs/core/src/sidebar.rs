@@ -62,6 +62,51 @@ pub fn helper_finished(state: &str, working: bool) -> bool {
     !working && finished_helper_state(state)
 }
 
+/// The chat list while the pointer is over it: `fresh`, the rows as they
+/// now stand, in the order `shown` already has them, so no row the reader
+/// sees moves up or down. A row no longer in `fresh` is gone. A new row
+/// nested under another (`nested`, a sub-agent) goes right after the row
+/// before it in `fresh`, which keeps it under its chat; any other new row
+/// goes at the end. Each row's content is the fresh one.
+pub fn keep_order<T>(shown: &[String], fresh: Vec<T>, id: impl Fn(&T) -> &str, nested: impl Fn(&T) -> bool) -> Vec<T> {
+    let place: HashMap<&str, usize> = shown.iter().enumerate().map(|(at, session)| (session.as_str(), at)).collect();
+    let mut kept: Vec<Option<T>> = shown.iter().map(|_| None).collect();
+    // New sub-agents by the row they follow in `fresh`; other new rows.
+    let mut pending: Vec<(Option<String>, T)> = Vec::new();
+    let mut at_end = Vec::new();
+    let mut previous: Option<String> = None;
+    for row in fresh {
+        let session = id(&row).to_owned();
+        if let Some(&at) = place.get(session.as_str()) {
+            kept[at] = Some(row);
+        } else if nested(&row) && previous.is_some() {
+            pending.push((previous.clone(), row));
+        } else {
+            at_end.push(row);
+        }
+        previous = Some(session);
+    }
+    let mut order: Vec<T> = Vec::with_capacity(kept.len() + pending.len() + at_end.len());
+    // Places every new row waiting on `session`, and the ones waiting on those.
+    fn follow<T>(session: &str, pending: &mut Vec<(Option<String>, T)>, order: &mut Vec<T>, id: &impl Fn(&T) -> &str) {
+        while let Some(at) = pending.iter().position(|(anchor, _)| anchor.as_deref() == Some(session)) {
+            let (_, row) = pending.remove(at);
+            let next = id(&row).to_owned();
+            order.push(row);
+            follow(&next, pending, order, id);
+        }
+    }
+    for row in kept.into_iter().flatten() {
+        let session = id(&row).to_owned();
+        order.push(row);
+        follow(&session, &mut pending, &mut order, &id);
+    }
+    // A nested row whose row before it is itself gone goes at the end too.
+    order.extend(pending.into_iter().map(|(_, row)| row));
+    order.extend(at_end);
+    order
+}
+
 #[derive(Debug, Default)]
 pub struct Sidebar {
     pub query: String,
