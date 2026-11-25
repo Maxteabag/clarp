@@ -242,11 +242,22 @@ pub fn status_words(activity: &Object) -> String {
             }
             tool_words(&tool.map(|t| text(t, "name")).unwrap_or_default()).to_owned()
         }
+        // A turn held for the machine looks like any working turn (the
+        // owner, 25 Nov 2026): no words of its own, whatever the Host sends.
+        "limited" if held_for_the_machine(activity) => "Working".to_owned(),
         "waiting" | "limited" | "background" if !headline.is_empty() => headline,
         "limited" => limited_words(activity).to_owned(),
         "thinking" if !headline.is_empty() => headline,
         _ => step_words(&state, "").unwrap_or_default().to_owned(),
     }
+}
+
+/// A `limited` turn the Host holds for the machine's load (`waits_for`
+/// `machine`): drawn exactly as a working turn, with no banner, words, icon
+/// or figure of its own (the owner, 25 Nov 2026). Network and quota holds
+/// keep their words.
+pub fn held_for_the_machine(activity: &Object) -> bool {
+    activity.get("state").and_then(Value::as_str) == Some("limited") && activity.get("waits_for").and_then(Value::as_str) == Some("machine")
 }
 
 /// What a `limited` turn waits for, in plain words, when the Host sends no
@@ -255,7 +266,7 @@ pub fn status_words(activity: &Object) -> String {
 /// (an older Host) `limited` is a usage limit, as before.
 pub fn limited_words(activity: &Object) -> &'static str {
     match activity.get("waits_for").and_then(Value::as_str).unwrap_or_default() {
-        "machine" => "Waiting for the machine",
+        "machine" => "Working",
         "network" => "Waiting for the network",
         _ => "Waiting for the usage limit",
     }
