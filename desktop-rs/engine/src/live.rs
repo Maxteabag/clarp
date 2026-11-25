@@ -9,10 +9,11 @@ use serde_json::Value;
 
 use crate::{Change, Engine};
 
-/// Chats kept on the stream besides the selected one and those shown in a
-/// pane: the ones opened last. A chat further back is let go, so the Host
-/// does not count it as open on the owner's device (`docs/lanes.md`).
-const MAX_OTHERS: usize = 3;
+/// Chats watched live besides the selected one and those shown in a pane:
+/// the ones opened last. A chat further back is let go, so the Host does not
+/// count it as open on the owner's device (`docs/lanes.md`); opened again,
+/// it is watched again.
+const MAX_WATCHED: usize = 4;
 /// How many chats the order they were opened in is remembered for.
 const OPENED_REMEMBERED: usize = 64;
 
@@ -182,6 +183,13 @@ impl Engine {
     /// subscribe the stream to it.
     pub(crate) fn live_chat_opened(&mut self, session: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.live_chat_opened(local));
+        self.live_watch(session, true);
+    }
+
+    /// Watches a chat live. `opened_now`: the user opened it now, so it is
+    /// the one opened last; a chat watched again after a reconnect keeps
+    /// its place in that order.
+    fn live_watch(&mut self, session: &str, opened_now: bool) {
         if !self.live.enabled || session.is_empty() || session.starts_with("pair:") {
             return;
         }
@@ -190,10 +198,12 @@ impl Engine {
         if fresh || (view.lseq().is_none() && !view.awaiting_snapshot()) {
             self.request_live(session);
         }
-        self.live.opened.retain(|s| s != session);
-        self.live.opened.push_back(session.to_owned());
-        while self.live.opened.len() > OPENED_REMEMBERED {
-            self.live.opened.pop_front();
+        if opened_now {
+            self.live.opened.retain(|s| s != session);
+            self.live.opened.push_back(session.to_owned());
+            while self.live.opened.len() > OPENED_REMEMBERED {
+                self.live.opened.pop_front();
+            }
         }
         self.let_go_of_old_chats();
         self.sync_live_subscription(true);
@@ -202,25 +212,23 @@ impl Engine {
     /// Lets go of the live views of chats that are neither selected nor
     /// shown in a pane, but the few opened last.
     fn let_go_of_old_chats(&mut self) {
-        let shown = self.shown_here();
-        let opened_at = |session: &str| self.live.opened.iter().position(|s| s == session).map_or(0, |at| at + 1);
-        let mut others: Vec<(usize, String)> = self
-            .live
-            .views
-            .keys()
-            .filter(|s| **s != self.selected && !shown.contains(*s))
-            .map(|s| (opened_at(s), s.clone()))
-            .collect();
-        if others.len() <= MAX_OTHERS {
-            return;
-        }
-        others.sort_unstable();
-        let gone = others.len() - MAX_OTHERS;
-        for (_, session) in others.into_iter().take(gone) {
+        let kept = self.kept_watched();
+        let held: Vec<&String> = self.live.views.keys().collect();
+        for session in let_go(&held, &self.live.opened, &kept, MAX_WATCHED) {
             self.live.views.remove(&session);
             self.live.heard.remove(&session);
             self.live.joining.remove(&session);
         }
+    }
+
+    /// The chats always watched live: the selected one and every one shown
+    /// in a pane, on this engine's Host.
+    fn kept_watched(&self) -> std::collections::HashSet<String> {
+        let mut kept = self.shown_here();
+        if !self.selected.is_empty() {
+            kept.insert(self.selected.clone());
+        }
+        kept
     }
 
     /// The chats this engine's Host has shown in a pane: the primary's own
@@ -251,19 +259,15 @@ impl Engine {
         }
     }
 
-    /// The chats to open again when the stream starts anew: the oldest
-    /// first and the selected one last, so the order they were opened in
-    /// decides which are kept, never the order they are stored in.
-    pub(crate) fn live_reopen_order(&self) -> Vec<String> {
-        let shown = self.shown_here();
-        let opened_at = |session: &str| self.live.opened.iter().position(|s| s == session).map_or(0, |at| at + 1);
-        let mut open: Vec<(bool, bool, usize, &String)> = self
-            .conversations
-            .keys()
-            .map(|s| (*s == self.selected, shown.contains(s), opened_at(s), s))
-            .collect();
-        open.sort_unstable();
-        open.into_iter().map(|(.., s)| s.clone()).collect()
+    /// The stream starts anew (`/server-info`): the loaded chats are
+    /// watched again, those always watched first, the rest by when they were
+    /// last opened, so the cap keeps the same ones as before.
+    pub(crate) fn live_rewatch(&mut self) {
+        let kept = self.kept_watched();
+        let loaded: Vec<&String> = self.conversations.keys().collect();
+        for session in rewatch_order(&loaded, &self.live.opened, &kept) {
+            self.live_watch(&session, false);
+        }
     }
 
     fn request_live(&mut self, session: &str) {
@@ -395,5 +399,96 @@ impl Engine {
             view.snapshot_failed();
         }
         true
+    }
+}
+
+/// Where a chat is in the order chats were opened: 0 when it was never
+/// opened (or so long ago it is forgotten), the one opened last highest.
+fn opened_at(opened: &std::collections::VecDeque<String>, session: &str) -> usize {
+    opened.iter().position(|s| s == session).map_or(0, |at| at + 1)
+}
+
+/// Of the chats `held` live, those to let go: never one `kept` (the selected
+/// chat and those shown in a pane); of the rest, all but the `most` opened
+/// last.
+pub(crate) fn let_go(held: &[&String], opened: &std::collections::VecDeque<String>, kept: &std::collections::HashSet<String>, most: usize) -> Vec<String> {
+    let mut others: Vec<(usize, &String)> = held.iter().filter(|s| !kept.contains(**s)).map(|s| (opened_at(opened, s), *s)).collect();
+    if others.len() <= most {
+        return Vec::new();
+    }
+    others.sort_unstable();
+    let gone = others.len() - most;
+    others.into_iter().take(gone).map(|(_, s)| s.clone()).collect()
+}
+
+/// The order loaded chats are watched again in: those `kept` first, then
+/// the rest from the one opened last back.
+pub(crate) fn rewatch_order(loaded: &[&String], opened: &std::collections::VecDeque<String>, kept: &std::collections::HashSet<String>) -> Vec<String> {
+    let mut order: Vec<(bool, std::cmp::Reverse<usize>, &String)> =
+        loaded.iter().map(|s| (!kept.contains(*s), std::cmp::Reverse(opened_at(opened, s)), *s)).collect();
+    order.sort_unstable();
+    order.into_iter().map(|(.., s)| s.clone()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{let_go, rewatch_order};
+    use std::collections::{HashSet, VecDeque};
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn refs(list: &[String]) -> Vec<&String> {
+        list.iter().collect()
+    }
+
+    #[test]
+    fn the_selected_chat_and_every_shown_pane_are_never_let_go_and_the_cap_is_on_the_rest() {
+        // Five panes shown (one selected), browsed past six other chats, and
+        // the panes opened before all of them.
+        let opened: VecDeque<String> = names(&["p1", "p2", "p3", "p4", "b1", "b2", "b3", "b4", "b5", "b6", "sel"]).into();
+        let kept: HashSet<String> = names(&["p1", "p2", "p3", "p4", "sel"]).into_iter().collect();
+        let held = names(&["sel", "b3", "p2", "b1", "p4", "b6", "b2", "p1", "b5", "p3", "b4"]);
+        let mut gone = let_go(&refs(&held), &opened, &kept, 4);
+        gone.sort();
+        assert_eq!(gone, ["b1", "b2"]);
+        // Within the cap nothing is let go, however many are kept.
+        let few = names(&["p1", "p2", "p3", "p4", "sel", "b5", "b6"]);
+        assert!(let_go(&refs(&few), &opened, &kept, 4).is_empty());
+        // A chat never opened (loaded some other way) goes before any opened.
+        let held = names(&["sel", "b3", "b4", "b5", "b6", "x"]);
+        assert_eq!(let_go(&refs(&held), &opened, &kept, 4), ["x"]);
+    }
+
+    #[test]
+    fn a_chat_let_go_and_opened_again_is_watched_again() {
+        let mut opened: VecDeque<String> = names(&["a", "b", "c", "d", "e"]).into();
+        let kept: HashSet<String> = HashSet::new();
+        assert_eq!(let_go(&refs(&names(&["a", "b", "c", "d", "e"])), &opened, &kept, 4), ["a"]);
+        // "a" opened again is the one opened last: "b" goes instead.
+        opened.retain(|s| s != "a");
+        opened.push_back("a".to_owned());
+        assert_eq!(let_go(&refs(&names(&["b", "c", "d", "e", "a"])), &opened, &kept, 4), ["b"]);
+    }
+
+    #[test]
+    fn after_a_reconnect_the_kept_chats_are_watched_first_and_the_rest_by_when_they_were_last_opened() {
+        let opened: VecDeque<String> = names(&["c1", "c3", "c4", "c5", "c6", "c2"]).into();
+        let kept: HashSet<String> = names(&["c2"]).into_iter().collect();
+        // Stored in any order; watched again kept first, then newest first.
+        let loaded = names(&["c4", "c1", "c6", "c2", "c3", "c5"]);
+        let order = rewatch_order(&refs(&loaded), &opened, &kept);
+        assert_eq!(order, ["c2", "c6", "c5", "c4", "c3", "c1"]);
+        // Watched one by one in that order, with the cap applied after each,
+        // the selected chat and the four opened last are what remain.
+        let mut held: Vec<String> = Vec::new();
+        for session in order {
+            held.push(session);
+            let gone = let_go(&refs(&held), &opened, &kept, 4);
+            held.retain(|s| !gone.contains(s));
+        }
+        held.sort();
+        assert_eq!(held, ["c2", "c3", "c4", "c5", "c6"]);
     }
 }

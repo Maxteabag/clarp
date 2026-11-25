@@ -1637,9 +1637,7 @@ impl Engine {
             self.chat_view_server_info(object);
             self.form_events_server_info(object);
             self.artifact_summary_server_info(object);
-            for session in self.live_reopen_order() {
-                self.live_chat_opened(&session);
-            }
+            self.live_rewatch();
             self.sse.start();
         } else if let Some(generation) = tag.strip_prefix("snapshot:") {
             if generation.parse::<u64>().ok() != Some(self.snapshot_generation) {
