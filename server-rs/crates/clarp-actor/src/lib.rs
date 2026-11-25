@@ -2065,6 +2065,7 @@ impl Actor {
         {
             match batch.command(Command::HoldUnsentForMove { turn }, now_ms) {
                 Ok(()) => {
+                    // In the same batch, as at a retry: where the next attempt begins.
                     batch.cursor(turn, 0, now_ms);
                     true
                 }
@@ -2162,6 +2163,7 @@ impl Actor {
         batch
             .command(Command::HoldUnsentForMove { turn }, now_ms)
             .map_err(JournalError::Refused)?;
+        // In the same batch, as at a retry: where the next attempt begins.
         batch.cursor(turn, 0, now_ms);
         batch.commit()?;
         self.held_for_an_account = false;
@@ -6177,7 +6179,10 @@ impl Actor {
             return Ok(out);
         }
         self.network = None;
-        // The next attempt has a spool of its own, read from its beginning.
+        // The next attempt has a spool of its own, read from its beginning. The cursor goes in
+        // the same batch as the retry, always: it marks in the log where the attempt began, and
+        // the replay after a restart seeds the attempt from what the log held before it
+        // (`said::unfollowed_at_start`, which asserts it).
         batch.cursor(turn, 0, now_ms);
         let effects = batch.commit()?.effects;
         out.changed.status = true;

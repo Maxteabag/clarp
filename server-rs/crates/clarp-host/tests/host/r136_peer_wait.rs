@@ -32,6 +32,8 @@ fn end_request(place: &Place, agent_id: &str, message_id: &str, ran: bool) {
         batch
             .command(AgentCommand::TurnRetried { turn }, now)
             .unwrap();
+        // As the actor does: the next attempt's spool cursor at 0, in the same batch.
+        batch.cursor(turn, 0, now);
     }
     let reason = "fixture tool failed".to_string();
     if ran {

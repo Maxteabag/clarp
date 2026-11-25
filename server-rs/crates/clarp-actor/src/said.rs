@@ -150,10 +150,34 @@ pub(super) fn unfollowed_at_start(
     attempt: u32,
     message_seq: Seq,
 ) -> Result<(Vec<String>, bool), ActorError> {
-    const AT_A_TIME: usize = 256;
     if attempt <= 1 {
         return Ok((Vec::new(), false));
     }
+    let began = attempt_began(log, turn, message_seq)?;
+    // Every write that makes an attempt after the first (the turn tried again, or given back
+    // unsent) writes this cursor in the same batch (`Actor::retry_as` and the two holds
+    // for a move). The replay's seed depends on it: an attempt made without it would be
+    // seeded from the log as it is now, not as the attempt found it.
+    debug_assert!(
+        began.is_some(),
+        "attempt {attempt} of turn {} began without a cursor of its spool at offset 0",
+        turn.0
+    );
+    match began {
+        Some(seq) => unfollowed_before(log, turn, seq),
+        // A log written before attempts were marked so: what the log says now stands.
+        None => unfollowed(log, turn),
+    }
+}
+
+/// Where in the log the attempt of this turn that runs began: its newest cursor of the turn's
+/// spool at offset 0, looked for no further back than the turn's message.
+fn attempt_began(
+    log: &dyn AgentLog,
+    turn: TurnId,
+    message_seq: Seq,
+) -> Result<Option<Seq>, ActorError> {
+    const AT_A_TIME: usize = 256;
     let mut before = Seq::MAX;
     while before > message_seq {
         let chunk = log.read_before(before, Kinds::only(kind::SPOOL_CURSOR), AT_A_TIME)?;
@@ -162,7 +186,7 @@ pub(super) fn unfollowed_at_start(
                 ActorError::Corrupt(format!("a spool cursor cannot be read: {error}"))
             })?;
             if cursor.turn == turn && cursor.offset == 0 {
-                return unfollowed_before(log, turn, item.seq);
+                return Ok(Some(item.seq));
             }
         }
         match chunk.first() {
@@ -170,9 +194,7 @@ pub(super) fn unfollowed_at_start(
             _ => break,
         }
     }
-    // No cursor says where the attempt began: as for a log written before attempts were
-    // marked so, what the log says now stands.
-    unfollowed(log, turn)
+    Ok(None)
 }
 
 /// [`unfollowed`], of what the log holds before `before`.

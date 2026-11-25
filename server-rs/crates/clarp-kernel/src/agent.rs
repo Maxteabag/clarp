@@ -1450,6 +1450,9 @@ impl Agent {
                 };
                 work.record(AgentEvent::Turn { turn, change });
             }
+            // The next attempt's spool begins at 0: the writer of this command puts a cursor of
+            // that spool at offset 0 in the same batch, which marks in the log where the attempt
+            // began (the actor's replay after a restart seeds the attempt from it).
             Command::TurnRetried { turn } | Command::NetworkBack { turn } => {
                 work.agent.require_here()?;
                 let network_back = matches!(command, Command::NetworkBack { .. });
