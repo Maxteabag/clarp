@@ -630,6 +630,33 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
         assert_eq!(&one, expected);
         assert!(!one.to_string().contains(SECRET), "{one}");
     }
+    // Her conversation's changes reach Ben as the revision and conversation his row of her has,
+    // and nothing more.
+    let heard = heard_as(&host, &as_ben, || {
+        host.send(&ada, "more", "u-3");
+        wait_for("Ada's next answer", || {
+            said_by(&host, &ada).matches(SECRET).count() >= 2
+        });
+    });
+    assert!(!heard.contains(SECRET), "{heard}");
+    let (_, snapshot) = read_as(&host, &as_ben, "/agents/snapshot");
+    let rows_ada = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == ada)
+        .cloned()
+        .unwrap();
+    let told = heard
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:")))
+        .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+        .filter(|event| event["type"] == "transcript-updated" && event["session"] == ada)
+        .last()
+        .unwrap_or_else(|| panic!("Ben hears that Ada's conversation changed: {heard}"));
+    assert_eq!(told["conversation_id"], rows_ada["conversation_id"], "{told}");
+    assert!(told["head_revision"].as_u64().unwrap() <= rows_ada["head_revision"].as_u64().unwrap());
+
     // The owner reads Ada's row whole.
     let (status, one) = read_as(&host, &[], &format!("/agents/{ada}"));
     assert_eq!(status, 200, "{one}");

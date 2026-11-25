@@ -129,7 +129,9 @@ Host with feature `roster_fields` (contract 182), an `agent-roster` event of
 kind `helper-state`, `mute-changed`, `chat_view` or a beginning
 `agent-transit` carries `fields` (the changed fields of that row) and, for a
 helper, `parent` (its maker's counts and state), so a watcher of `/events`
-needs no read for it.
+needs no read for it; and `transcript-updated` carries the conversation's
+`head_revision` and `conversation_id`, so a reader that already holds that
+revision skips `GET /log`.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.

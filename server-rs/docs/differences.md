@@ -562,7 +562,8 @@ the daily schedule.
   session, and an app reads the whole snapshot for each. The Rust Host adds `agent_id` and
   `fields` (the changed fields of the agent's snapshot row, made by the code that makes the row)
   to the kinds `helper-state`, `mute-changed`, `chat_view` and a beginning `agent-transit`, and
-  `parent` (the maker's counts and state) to `helper-state` (feature `roster_fields`); and it
+  `parent` (the maker's counts and state) to `helper-state`, and `head_revision` and
+  `conversation_id` to `transcript-updated` (feature `roster_fields`); and it
   answers `GET /agents/{session}` with one row of the snapshot (feature `agent_row`). A phone re-read
   a 940 kB snapshot about 300 times an hour for events that changed one or two fields.
 

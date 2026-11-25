@@ -431,7 +431,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `held` what the machine has free, what auto keeps free of new lanes and what is left
     // (`available_mb`, `reserve_mb`, `room_mb`); `POST` sets any of them.
     ("lane_auto_limits", 180),
-    // An `agent-roster` event about one agent of the kind `helper-state`, `mute-changed`,
+    // `transcript-updated` says the head revision and conversation the row has. An
+    // `agent-roster` event about one agent of the kind `helper-state`, `mute-changed`,
     // `chat_view` or `agent-transit` (as a change of backend begins) carries `fields`, the
     // fields of the agent's snapshot row its change moved, as the row has them; a helper's
     // also carries `parent` with the maker's `fields` that its helpers decide. An app patches

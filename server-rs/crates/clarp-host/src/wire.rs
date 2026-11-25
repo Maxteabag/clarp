@@ -178,9 +178,17 @@ pub fn server_version(version: &str, now_ms: i64) -> Value {
     json!({ "type": "server-version", "version": version, "ts": now_ms })
 }
 
-/// The conversation changed. A wake-up, not the data.
-pub fn transcript_updated(record: &AgentRecord) -> Value {
-    json!({ "type": "transcript-updated", "agent_id": record.agent_id, "session": record.session })
+/// The conversation changed. A wake-up, not the data: with the conversation and its head
+/// revision as the agent's snapshot row has them now (`head_revision`, `conversation_id`,
+/// feature `roster_fields`, issue 809), so an app that holds that revision of that
+/// conversation reads nothing. Both are numbers and an id, which the snapshot gives a reader
+/// who may not read the agent too.
+pub fn transcript_updated(record: &AgentRecord, status: &Status) -> Value {
+    json!({
+        "type": "transcript-updated", "agent_id": record.agent_id, "session": record.session,
+        "head_revision": status.head_revision,
+        "conversation_id": conversation_id(record, status),
+    })
 }
 
 /// A message was handed to the agent and its turn began: the answer to a send, for every

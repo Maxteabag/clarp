@@ -142,6 +142,25 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
     let mut renames = told.iter().filter(|event| event["kind"] == "agent-renamed");
     assert!(renames.all(|event| event.get("fields").is_none()));
 
+    // A conversation's change says its head revision and conversation as the row has them: an
+    // app that holds that revision reads nothing.
+    host.send(&maker, "hello", "u-1");
+    wait_for("the turn to settle", || host.state(&maker) == "done");
+    wait_for("the newest transcript event to name the row's head", || {
+        let row = snapshot_row(&host, &maker);
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|event| event["type"] == "transcript-updated" && event["session"] == *maker)
+            .is_some_and(|event| {
+                event["head_revision"] == row["head_revision"]
+                    && event["conversation_id"] == row["conversation_id"]
+            })
+    });
+    assert!(snapshot_row(&host, &maker)["head_revision"].as_u64().unwrap() > 0);
+
     // One agent's row is its row in the snapshot, the maker's and the helper's alike; a session the Host does not have is not found.
     for session in [maker.as_str(), "slice"] {
         wait_for("the one row to be the snapshot's", || {

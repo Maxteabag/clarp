@@ -1108,7 +1108,7 @@ Event types and payloads:
 
 | `type` | Fields | Client action |
 |---|---|---|
-| `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
+| `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
@@ -1734,6 +1734,11 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
   - `agent-transit` as a change of backend begins: `transit`. The event at its end (`done` or
     `failed`) carries no `fields`: the agent's backend, model and what follows from them
     changed; read the row.
+  - `transcript-updated` (not a roster event) carries `head_revision` and `conversation_id` as
+    the agent's row has them when the event is sent. A client whose cache holds that
+    conversation at that revision or later drops the event and reads nothing; otherwise it
+    fetches the delta as before. A change that comes while the Host holds the event back (it
+    sends at most about four a second for an agent) is in the next one.
   An event of these kinds without `fields` (an agent the Host no longer has, or an older Host)
   is read as before. The values are made by the code that makes the snapshot's rows, so a
   patched row equals a fresh read.
@@ -1753,7 +1758,9 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
 - **Bound privacy (feature `bound_privacy`).** A reader who may not read an agent's words is
   given its event and its row as the snapshot gives that reader its row: names, states, numbers
   and times kept, words blank, `words_withheld: true`. The event and its `parent` are each
-  judged by their own `session`, frame by frame as the stream is sent. `GET /agents/{session}`
+  judged by their own `session`, frame by frame as the stream is sent. `head_revision` and
+  `conversation_id` on `transcript-updated` are a number and an id, which such a reader's
+  snapshot row has too. `GET /agents/{session}`
   of such an agent answers 200 with that row, never 403.
 
 ### The sync algorithm
@@ -1781,7 +1788,8 @@ fetch delta(session):
     if r.replace_required or r.conversation_id != cached.conversation_id: reload tail
     else: upsert r.turns by id; cursor = r.latest_revision; if r.has_more: fetch delta again
 
-on transcript-updated(session): debounce ~100 ms, then fetch delta(session)
+on transcript-updated(session): if it names head_revision and conversation_id and the cache
+    holds that conversation at that revision or later: nothing; else debounce ~100 ms, then fetch delta(session)
 on agent-roster created or reset for a cached session: drop cache, reload
     (a relaunch or a conversation fork keeps conversation_id: fetch delta)
 

@@ -5761,7 +5761,9 @@ impl Worker {
         self.transcript_due = None;
         self.transcript_sent = Some(Instant::now());
         let now = self.now_ms();
-        let mut event = wire::transcript_updated(&self.setup.record);
+        // The view the apps read: what its row in the snapshot says now.
+        let view = self.view.borrow().clone();
+        let mut event = wire::transcript_updated(&self.setup.record, &view.status);
         if let Some(session) = self.helper_change_session.take() {
             event["backend_session_id"] = Value::String(session);
         }

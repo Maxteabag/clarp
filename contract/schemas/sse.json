@@ -19,7 +19,9 @@
         "type": {"const": "transcript-updated"},
         "session": {"type": "string"},
         "agent_id": {"type": "string"},
-        "backend_session_id": {"type": "string"}
+        "backend_session_id": {"type": "string"},
+        "head_revision": {"type": "integer", "description": "feature roster_fields: the conversation's head revision as the agent's snapshot row has it (issue 809)"},
+        "conversation_id": {"type": "string", "description": "feature roster_fields: the conversation that revision is of"}
       }
     },
     "agent-state": {

@@ -40,6 +40,13 @@ pub struct TranscriptUpdated {
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_session_id: Option<String>,
+    /// The conversation's head revision as the agent's snapshot row has it: a client that
+    /// holds it reads nothing (feature `roster_fields`, issue 809).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_revision: Option<u64>,
+    /// The conversation the revision is of (feature `roster_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
