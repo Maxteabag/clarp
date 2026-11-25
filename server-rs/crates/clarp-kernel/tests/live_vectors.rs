@@ -525,4 +525,12 @@ fn a_turn_carries_the_rows_read_into_it() {
     assert_eq!(snapshot["turn"]["read_rows"], json!(kept));
     assert_eq!(kept.len(), clarp_kernel::live::READ_ROWS_KEPT);
     assert_eq!(snapshot["turn"]["read_rows_more"], json!(true));
+    // Told the whole list again (a second show, a replay): nothing moves, the newest stays last.
+    assert!(hub.read_rows(&rows, 72).is_empty(), "nothing new is told");
+    let (again, _) = hub.snapshot(73).unwrap();
+    assert_eq!(again["turn"]["read_rows"], json!(kept));
+    let _ = hub.read_rows(&["u-r25".to_string()], 74);
+    let (newer, _) = hub.snapshot(75).unwrap();
+    let last = newer["turn"]["read_rows"].as_array().unwrap().last().cloned();
+    assert_eq!(last, Some(json!("u-r25")));
 }

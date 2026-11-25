@@ -24,7 +24,7 @@
 //! again builds the view of a running turn from that turn's own records, under a new epoch,
 //! and a client that sees the epoch change asks for the snapshot.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use clarp_speech::listen::{is_space, strip};
 use serde_json::{Map, Value, json};
@@ -455,6 +455,9 @@ pub struct Hub {
     pending: Option<String>,
     /// The newest message since the last that was decided: the turn's end decides it.
     last_words: Option<String>,
+    /// Every row the running turn read, also those its `read_rows` no longer holds: a row is
+    /// added once, however often the rows read are told again (issue 808).
+    read_seen: HashSet<String>,
 }
 
 impl Hub {
@@ -477,6 +480,7 @@ impl Hub {
             grows: false,
             pending: None,
             last_words: None,
+            read_seen: HashSet::new(),
         }
     }
 
@@ -611,6 +615,7 @@ impl Hub {
         }
         self.pending = None;
         self.last_words = None;
+        self.read_seen.clear();
         self.flush(now, &mut out);
         self.explore_group = None;
         self.account_wait = None;
@@ -658,8 +663,10 @@ impl Hub {
             .cloned()
             .unwrap_or_default();
         let before = read.len();
+        // A row the turn read before is not read again, also one the list no longer holds: told
+        // the whole list again (a second show, a replay), the newest stays last.
         for row in rows.iter().filter(|row| !row.is_empty()) {
-            if !read.iter().any(|held| held.as_str() == Some(row.as_str())) {
+            if self.read_seen.insert(row.clone()) {
                 read.push(json!(row));
             }
         }
