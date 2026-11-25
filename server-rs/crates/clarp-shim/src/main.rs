@@ -28,6 +28,7 @@ mod lane_memory;
 mod lane_own;
 mod lane_socket;
 mod opencode;
+mod tool_child;
 
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -1527,6 +1528,10 @@ fn main() -> ExitCode {
         argv.next();
         background_hook(argv.next());
         return ExitCode::SUCCESS;
+    }
+    if argv.peek().is_some_and(|word| word == tool_child::MODE) {
+        argv.next();
+        return tool_child::run(argv);
     }
     if argv.peek().is_some_and(|word| word == "codex-goal-lane") {
         argv.next();

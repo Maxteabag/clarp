@@ -132,26 +132,43 @@ of them is not done.
     locks because a tool may refuse a second process at once instead of waiting: Muse fails
     `muse exec` on a session that a `muse serve` holds. A lane that still runs a turn refuses to
     leave, and the other process must not go ahead.
-  - **No turn waits on a lane's exit without a bound** (issue #772). Every retirement (a turn's
-    `place`, an exec turn making way, a terminal, `once_more` after a changed login) waits at
-    most 15 s (`LEAVE_WAIT`) for the lane's owner lock. A lane answers a retirement only once
-    it has gone, so no answer within the bound is a lane on its way out, never a refusal. One
-    that has not let go by then is ended with its tool by its own systemd scope: the launcher
-    starts every lane in a scope of its own (`clarp-claude-lane-*.scope`,
-    `clarp-codex-goal-*.scope`), and a scope is a cgroup, so `systemctl --user kill
-    --signal=SIGKILL` on it ends the lane and every process it started, whatever their process
-    groups, with no window in which an id names another process. A tool that hangs may not
-    read the end of its input, and with only the lane's process gone it would write the
-    conversation beside the next lane or turn, and hold memory outside the budget. The Host
-    finds the scope from the lane's process id, which the lane wrote into its owner lock once
-    it held it: `/proc/<pid>/cgroup`, read while that lock is still held, so it is that lane's,
-    also after a Host restart that forgot the unit it launched. Only a lane scope that is not
-    the Host's own unit is ended. A lane with no scope of its own (one started outside systemd,
-    as in tests) is ended with SIGKILL by its process id alone. This is said once in the Host's
-    log. The turn then goes on without it: a new lane, or its own process. A death signal on
-    the tool (`PR_SET_PDEATHSIG`) is not set as a second guard: the lane spawns its tool from
-    its main thread, which lives as long as the lane, but setting it needs `pre_exec`, which is
-    `unsafe`, and this Host has no `unsafe` without the lead's signature (REBUILD.md section 5).
+  - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
+    (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
+    `once_more` after a changed login) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
+    lock.
+    - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
+      it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
+      that works, or does not say (an older shim), or is slow to answer, is asked to leave and
+      waited for, and never ended: a busy Codex lane can take 25 s to load a long conversation.
+      A lane answers a retirement only once it has gone, so a lane that said it was idle and
+      has neither answered nor let go by the bound is on its way out. So is one whose socket
+      nobody listens on any more: a lane removes its socket as soon as it stops serving, before
+      it ends its tool.
+    - **Ended with its tool.** Such a lane is ended with its tool, logged once, and the turn
+      goes on without it: a new lane, or its own process. A tool that hangs may not read the
+      end of its input, and with only the lane gone it would write the conversation beside the
+      next lane or turn, and hold memory outside the budget. Three things end it:
+      - **its own systemd scope.** The launcher starts every lane in a scope of its own
+        (`clarp-claude-lane-*.scope`, `clarp-codex-goal-*.scope`), a cgroup, so `systemctl
+        --user kill --signal=SIGKILL` on it ends the lane and every process it started,
+        whatever their groups, with no window in which a name means another process. The unit
+        is read from the lane's process (`/proc/<pid>/cgroup`), so it is known after a Host
+        restart too; only a lane scope that is not the Host's own unit is ended;
+      - **where it has no scope** (a lane started outside systemd, as in tests): its tool's
+        process group, which the lane writes into its owner lock beside its own id
+        (`<pid> <group>`), signalled only while that group's leader is still the lane's child,
+        then the lane's process;
+      - **a death signal on the tool.** The lane starts its tool through `clarp-shim
+        tool-child <lane pid> -- <program>`, which sets `PR_SET_PDEATHSIG` (SIGKILL), checks
+        the lane is still its parent, and becomes the tool in place (`execvp`). The tool so ends
+        with its lane however the lane ends. It is set there, not in a `pre_exec` of the lane,
+        because that is `unsafe` and the workspace forbids it; it fires when the starting
+        thread ends, and both lanes start their tool on their main thread.
+    - **Whose process.** The lane's id is the holder of its owner lock as the kernel names it
+      (`/proc/locks`), looked at again right before the signal, never the lock file's words
+      alone: a new lane takes the lock before it writes its id, so the file may still name the
+      lane before it. No safe call opens a process by a handle (`pidfd_open`) here, so what is
+      left is the microseconds between that last look and the signal.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails

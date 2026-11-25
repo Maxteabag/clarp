@@ -27,7 +27,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
@@ -39,7 +39,7 @@ use clarp_spool::{Entry, MAX_OUTPUT_CHUNK, Record, ShimEvent, SpoolWriter};
 use serde_json::{Value, json};
 
 use crate::lane_login::Login;
-use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive};
+use crate::lane_own::{Idle, Own, hold_owner, lock_exclusive, name_tool};
 use crate::lane_socket::{Socket, TurnAsk, write};
 
 /// How long a Stop that named no time gives Claude Code to answer its interrupt.
@@ -159,7 +159,8 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
                     .collect()
             })
             .unwrap_or_default();
-        let mut command = Command::new(&program);
+        // Started through the shim's `tool-child`, so Claude Code ends with the lane's process.
+        let mut command = crate::tool_child::command(&program);
         command
             .args(&args)
             .stdin(Stdio::piped())
@@ -170,6 +171,11 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
             command.current_dir(cwd);
         }
         let mut child = command.spawn()?;
+        // Claude Code leads a group of its own: named in the owner lock, so a lane that hangs on
+        // its way out is ended with it.
+        if let Err(error) = name_tool(&lock, child.id()) {
+            eprintln!("clarp-shim: the lane could not name its tool in its owner lock: {error}");
+        }
         let stdin = child.stdin.take();
         if let Some(stdout) = child.stdout.take() {
             let relay = send.clone();
@@ -211,6 +217,9 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
         println!("ready");
         io::stdout().flush()?;
         let served = lane.serve();
+        // No longer answered from here on: the socket goes first, so a Host that asks finds a
+        // lane on its way out (nobody listens), never a busy one that is slow to answer.
+        let _ = fs::remove_file(path);
         let retired = lane.leave();
         let state = lane.inspect();
         // The locks witness Claude Code's real lifetime: it has been reaped before either is
@@ -322,6 +331,7 @@ impl Lane {
             idle_ms: self.idle.ms(self.turn.is_some()),
             claims: self.claims,
             memory_bytes: self.memory,
+            working: Some(self.turn.is_some()),
         }
     }
 

@@ -22,6 +22,7 @@
 
 pub(crate) mod claude;
 pub(crate) mod codex;
+mod holder;
 mod scope;
 
 use std::fs::OpenOptions;
@@ -30,7 +31,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_lock, owner_pid};
+use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_group, owner_lock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -209,11 +210,12 @@ pub(crate) fn config_path() -> Option<PathBuf> {
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
 /// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
-/// exited: one writer per conversation. Blocking, for at most [`LEAVE_WAIT`]: a lane that has
-/// not let go by then (its tool hangs on its way out) is ended by its own process id and said
+/// exited: one writer per conversation. Blocking, for at most [`LEAVE_WAIT`]: an idle lane
+/// that has not let go by then (its tool hangs on its way out) is ended with its tool and said
 /// once in the Host's log, rather than holding the request and the agent's lease (reviews of
-/// 25 Nov 2026). False: a lane refused to leave because it runs work of its own, and the
-/// terminal is refused as it is while any turn of the agent runs (issue #770).
+/// 25 Nov 2026). False: a lane refused to leave because it runs work of its own, or was too
+/// slow to say what it does, and the terminal is refused as it is while any turn of the agent
+/// runs (issue #770).
 pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) -> bool {
     make_way_within(run, agent_id, LEAVE_WAIT)
 }
@@ -467,8 +469,9 @@ impl Endpoint {
     }
 
     /// Ask an idle lane to leave, and wait until it has, for at most [`LEAVE_WAIT`]: its owner
-    /// lock is let go only after its tool has been reaped. A lane that still runs work refuses,
-    /// and so does one that has not let go by the bound, after it was ended by its process id.
+    /// lock is let go only after its tool has been reaped. A lane that still runs work refuses;
+    /// one that has not let go by the bound is an error too, whether it was ended or not
+    /// ([`Self::retire_within`]).
     pub(crate) fn retire(&self) -> io::Result<()> {
         if self.retire_within(LEAVE_WAIT)? {
             Ok(())
@@ -481,34 +484,53 @@ impl Endpoint {
     }
 
     /// Asks an idle lane to leave and waits at most `bound` for it to have gone: `true` once its
-    /// owner lock is free. A lane that still runs work refuses, which is an error. A lane
-    /// answers a retirement only once it has gone, so its answer is waited for within the
-    /// bound; no answer, a closed connection or a socket that no longer listens is a lane on
-    /// its way out, never a refusal. One that has not let go by the bound is ended by its own
-    /// process id ([`Self::let_go_within`]), and `false` means even that did not free it.
+    /// owner lock is free. It is asked what it does first, and never ended while it works: a
+    /// lane busy with a turn may be slow to answer (Codex loads a long conversation for up to
+    /// 25 s), and a slow answer is no sign of a lane on its way out (review of 25 Nov 2026).
+    /// - A lane that answers it works, or does not say, is asked to leave and may refuse, which
+    ///   is an error; one that is slow to answer is an error too. Either is waited for, never
+    ///   ended.
+    /// - A lane that said it was idle answers a retirement only once it has gone, so its answer
+    ///   is waited for within the bound; one that has not let go by then is ended with its tool
+    ///   ([`Self::let_go_within`]).
+    /// - A socket nobody listens on any more is a lane on its way out: it stops answering before
+    ///   it ends its tool. It too is ended once the bound has passed.
+    ///
+    /// `false`: the lane has not let go, and was not ended, or even that did not free it.
     pub(crate) fn retire_within(&self, bound: Duration) -> io::Result<bool> {
         if self.released()? {
             return Ok(true);
         }
         let until = Instant::now() + bound;
-        match self.connect(&Lifecycle::Retire, bound) {
-            Ok(stream) => match replied::<Status>(&mut BufReader::new(stream), self.tool) {
-                Ok(_) => {}
-                Err(error) if leaving(&error) => {}
-                Err(error) => return Err(error),
-            },
-            Err(error) if leaving(&error) => {}
+        let asked = self
+            .connect(&Lifecycle::Inspect, bound)
+            .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool));
+        let idle = match asked {
+            Ok(state) => state.working == Some(false) && state.claim.is_none(),
+            Err(error) if gone(&error) => return self.let_go_within(until, true),
+            Err(error) => return Err(error),
+        };
+        let left = until.saturating_duration_since(Instant::now());
+        let retired = self
+            .connect(&Lifecycle::Retire, left)
+            .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool));
+        match retired {
+            Ok(_) => {}
+            Err(error) if gone(&error) => {}
+            Err(error) if idle && unanswered(&error) => {}
             Err(error) => return Err(error),
         }
-        self.let_go_within(until)
+        self.let_go_within(until, idle)
     }
 
     /// Waits until `until` for a lane on its way out to let go of its owner lock. One that has
-    /// not by then is ended with its tool by its own systemd scope ([`scope`]), found from the
-    /// process id it wrote into the lock once it held it, or by that id alone where it has no
-    /// scope of its own; never by a name or a pattern. Said once in the Host's log, and given a
-    /// moment to be gone. `true`: the lock is free.
-    pub(crate) fn let_go_within(&self, until: Instant) -> io::Result<bool> {
+    /// not by then is ended with its tool, where `may_end` says it may be (it said it was idle,
+    /// or it stopped answering on its way out): by its own systemd scope ([`scope`]), which
+    /// holds the lane and every process it started; where it has none, by its tool's process
+    /// group and its own id. The lane's id is the lock's holder as the kernel names it
+    /// ([`holder`]), never the lock file's words alone, and never a name or a pattern. Said once
+    /// in the Host's log, and given a moment to be gone. `true`: the lock is free.
+    pub(crate) fn let_go_within(&self, until: Instant, may_end: bool) -> io::Result<bool> {
         if self.released_by(until)? {
             return Ok(true);
         }
@@ -517,36 +539,55 @@ impl Endpoint {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        // Read while the lock is held, so the id is that of the process holding it.
-        let pid = owner_pid(&self.socket);
-        if self.released()? {
-            return Ok(true);
-        }
-        let Some(pid) = pid.filter(|pid| may_signal(*pid)) else {
+        if !may_end {
             eprintln!(
-                "clarp-host: the {} lane {name} did not let go in time and names no process \
-                 to end; it is left as it is",
+                "clarp-host: the {} lane {name} did not let go in time; it said it works, or \
+                 did not say, so it is left as it is",
                 self.tool.name()
             );
             return Ok(false);
+        }
+        // The lock's holder now, from the kernel: the lock file may still name the lane before
+        // this one, which wrote it before this one took the lock and wrote its own.
+        let lock = owner_lock(&self.socket);
+        let Some(pid) = holder::of(&lock).filter(|pid| may_signal(*pid)) else {
+            eprintln!(
+                "clarp-host: the {} lane {name} did not let go in time and no process of it \
+                 holds its lock; it is left as it is",
+                self.tool.name()
+            );
+            return self.released();
         };
         // Its own scope ends the lane and its tool together, whatever their process groups: a
         // tool that hangs may not read the end of its input, and with only the lane's process
-        // gone it would write the conversation beside the lane or turn that comes next. The
-        // scope is read from the lane's process while it holds the lock, so it is that lane's.
-        // A lane with no scope of its own (started outside systemd) is ended by its id.
-        let scope = scope::of_process(pid);
-        let how = match &scope {
-            Some(unit) if scope::end(unit) => {
+        // gone it would write the conversation beside the lane or turn that comes next. Where
+        // it has no scope of its own (started outside systemd), its tool's group goes first,
+        // while the lane is still that group leader's parent, then the lane. Its tool also ends
+        // with the lane by itself: the lane starts it with a death signal (`tool-child`).
+        let how = match scope::of_process(pid) {
+            Some(unit) if scope::end(&unit) => {
                 format!("its scope {unit} is ended, its tool with it")
             }
-            Some(unit) => {
-                signal(pid);
-                format!("its scope {unit} could not be ended, so its process {pid} is")
-            }
-            None => {
-                signal(pid);
-                format!("it runs in no scope of its own, so its process {pid} is ended")
+            unended => {
+                let group = owner_group(&self.socket)
+                    .filter(|group| may_signal(*group) && holder::leads_for(*group, pid));
+                // Looked at again right before the signals: the same process holds the lock.
+                if holder::of(&lock) != Some(pid) {
+                    return self.released();
+                }
+                if let Some(group) = group {
+                    signal(group, true);
+                }
+                signal(pid, false);
+                let tool = group.map_or_else(
+                    || "its tool leads no group of its own any more".to_owned(),
+                    |group| format!("its tool's process group {group}"),
+                );
+                let why = unended.map_or_else(
+                    || "it runs in no scope of its own".to_owned(),
+                    |unit| format!("its scope {unit} could not be ended"),
+                );
+                format!("{why}, so its process {pid} is ended, and {tool}")
             }
         };
         eprintln!(
@@ -617,7 +658,7 @@ pub(crate) fn once_more<T>(
     match first {
         Err(error) if !spool.try_exists().unwrap_or(true) => {
             if error.kind() == io::ErrorKind::PermissionDenied {
-                lane.let_go_within(Instant::now() + LEAVE_WAIT)?;
+                lane.let_go_within(Instant::now() + LEAVE_WAIT, true)?;
             }
             again()
         }
@@ -822,14 +863,12 @@ fn line(input: &mut impl BufRead, tool: Tool) -> io::Result<Vec<u8>> {
     Ok(line)
 }
 
-/// An answer that never came, a connection closed without one, or a socket no longer there:
-/// what a lane on its way out gives, which is no refusal.
-fn leaving(error: &io::Error) -> bool {
+/// A socket nobody listens on any more, or a connection closed without an answer: what a lane
+/// on its way out gives, which is no refusal. A lane stops answering before it ends its tool.
+fn gone(error: &io::Error) -> bool {
     matches!(
         error.kind(),
-        io::ErrorKind::WouldBlock
-            | io::ErrorKind::TimedOut
-            | io::ErrorKind::UnexpectedEof
+        io::ErrorKind::UnexpectedEof
             | io::ErrorKind::NotFound
             | io::ErrorKind::ConnectionRefused
             | io::ErrorKind::ConnectionReset
@@ -837,23 +876,40 @@ fn leaving(error: &io::Error) -> bool {
     )
 }
 
-/// Whether the id a lane wrote into its owner lock may be signalled: never one that would reach
-/// more than one process by itself (0, 1), nor this Host.
-fn may_signal(pid: u32) -> bool {
-    pid > 1 && pid != std::process::id() && i32::try_from(pid).is_ok()
+/// An answer that did not come in time: from a lane that said it was idle, one on its way out
+/// (its answer to a retirement comes only once it has gone); from any other, perhaps a busy one.
+fn unanswered(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
-/// Ends the process `pid` of a lane that holds its owner lock and did not let go, with SIGKILL:
-/// it was asked to leave and given its time. The id is safe to signal while the lock is held:
-/// the lane wrote it there after it took the lock, the lock is let go when that process ends,
-/// and no child of it inherits the lock.
-fn signal(pid: u32) {
-    if let Ok(raw) = i32::try_from(pid) {
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(raw),
-            nix::sys::signal::Signal::SIGKILL,
-        );
-    }
+/// Whether an id may be signalled: never one that would reach more than one process or group by
+/// itself (0, 1), nor this Host's own process or group.
+fn may_signal(id: u32) -> bool {
+    id > 1
+        && id != std::process::id()
+        && i32::try_from(id).is_ok_and(|raw| raw != nix::unistd::getpgrp().as_raw())
+}
+
+/// Ends with SIGKILL the lane's process `id`, or its tool's process `group`, after the lane was
+/// asked to leave and given its time. The lane's id is the one the kernel names as the holder of
+/// its owner lock, looked at right before; the group's leader was checked to be its child. No
+/// safe call opens a process by a handle (`pidfd_open`) in this workspace, which has no
+/// `unsafe`: the window left is between the last look and the signal, microseconds against an
+/// id space of millions.
+fn signal(id: u32, group: bool) {
+    let Ok(raw) = i32::try_from(id) else {
+        return;
+    };
+    let target = nix::unistd::Pid::from_raw(raw);
+    let kill = nix::sys::signal::Signal::SIGKILL;
+    let _ = if group {
+        nix::sys::signal::killpg(target, kill)
+    } else {
+        nix::sys::signal::kill(target, kill)
+    };
 }
 
 #[cfg(test)]

@@ -132,6 +132,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "Only the standalone goal-lane shim starts this app-server. The Host already prepared its environment, including the assigned agent session and no per-turn token.",
     ),
     (
+        "crates/clarp-shim/src/tool_child.rs",
+        "Starts a lane's tool through the shim itself, from the lane runtimes above, with the environment the Host already prepared for the lane; it adds only the tool's death signal.",
+    ),
+    (
         "crates/clarp-shim/src/opencode.rs",
         "Only the shim binary's main declares this module and runs the OpenCode driver; it is absent from the linked protocol library.",
     ),

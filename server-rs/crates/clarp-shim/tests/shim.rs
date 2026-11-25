@@ -1845,3 +1845,74 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         std::fs::remove_dir_all(&running.dir).unwrap();
     }
 }
+
+/// Whether the process `pid` is gone, or ended and only waits to be reaped.
+fn is_gone(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true;
+    };
+    stat.rsplit_once(')')
+        .is_some_and(|(_, after)| after.trim_start().starts_with('Z'))
+}
+
+/// A lane's tool started through `tool-child` ends with the lane's process, however that ends
+/// (issue #772): here a tool that ignores SIGTERM and the end of its input, as a hung one does,
+/// in a group of its own, under a lane that is killed.
+#[test]
+fn a_lanes_tool_ends_with_the_lane_however_the_lane_ends() {
+    let dir = dir_of("tool-child");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ready = dir.join("tool");
+    let lane_process = r#"
+import os, subprocess, sys, time
+shim, ready = sys.argv[1], sys.argv[2]
+tool = subprocess.Popen([shim, "tool-child", str(os.getpid()), "--",
+                         "sh", "-c", "trap '' TERM; exec sleep 600"],
+                        stdin=subprocess.PIPE, start_new_session=True)
+with open(ready + ".part", "w") as said:
+    said.write(str(tool.pid))
+os.rename(ready + ".part", ready)
+time.sleep(600)
+"#;
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    let world = clarp_sealed::sealed(&clarp_sealed::runner(), &dir, &[], &[]);
+    let mut lane = clarp_sealed::command("python3", world)
+        .args(["-c", lane_process, env!("CARGO_BIN_EXE_clarp-shim")])
+        .arg(&ready)
+        .spawn()
+        .unwrap();
+    wait_for("the lane's tool", || ready.exists());
+    let tool: u32 = std::fs::read_to_string(&ready)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    // The tool is what `tool-child` became in place: the same process, now the program.
+    wait_for("the tool to run in place", || {
+        std::fs::read_to_string(format!("/proc/{tool}/comm"))
+            .is_ok_and(|name| name.trim() == "sleep")
+    });
+    lane.kill().unwrap();
+    lane.wait().unwrap();
+    wait_for("the tool to end with its lane", || is_gone(tool));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A tool is never started for a lane that is not its parent (one that has already ended):
+/// nothing would end it with that lane.
+#[test]
+fn a_tool_is_not_started_for_a_lane_that_is_not_its_parent() {
+    let dir = dir_of("tool-child-orphan");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ran = dir.join("ran");
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    let world = clarp_sealed::sealed(&clarp_sealed::runner(), &dir, &[], &[]);
+    let status = clarp_sealed::command(env!("CARGO_BIN_EXE_clarp-shim"), world)
+        .args(["tool-child", "1", "--", "touch"])
+        .arg(&ran)
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+    assert!(!ran.exists());
+    std::fs::remove_dir_all(&dir).unwrap();
+}

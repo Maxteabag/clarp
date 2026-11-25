@@ -241,14 +241,15 @@ fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
         .endpoint
         .place(&run, Some("t"), "d", |_| true, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Free);
-    assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
+    // Asked what it does before it is asked to leave.
+    assert_eq!(same.asked(), ["inspect", "inspect", "inspect", "retire"]);
 
     let other = FakeLane::start(&run, "b", status("t", "old", 5, false));
     let place = other
         .endpoint
         .place(&run, Some("t"), "new", |_| false, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Free);
-    assert_eq!(other.asked(), ["inspect", "retire"]);
+    assert_eq!(other.asked(), ["inspect", "inspect", "retire"]);
     assert!(other.endpoint.released().unwrap());
 
     // A lane that still runs work is used as it is for its own thread, and refuses another.
@@ -466,27 +467,70 @@ fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
     std::fs::remove_dir_all(&run).unwrap();
 }
 
-/// A lane whose process never lets go when asked (its tool hangs on its way out): it answers
-/// `inspect`, takes `retire` and never answers it, and holds its owner lock for as long as
-/// `process` lives, whose id it wrote into the lock as a lane's process does.
+/// A lane's process as the tests start it: it takes its owner lock itself (so the kernel names
+/// it as the holder), starts its tool where `group` is `tool` (a process that leads a group of
+/// its own and ignores SIGTERM and the end of its input, as a hung tool does), writes `<pid>
+/// <group>` into the lock as a lane does, says the group in `ready`, and stands still. Started
+/// outside systemd, it runs in no scope of its own.
+const LANE_PROCESS: &str = r#"
+import fcntl, os, subprocess, sys, time
+lock, ready, group = sys.argv[1], sys.argv[2], sys.argv[3]
+held = open(lock, "a+")
+fcntl.flock(held, fcntl.LOCK_EX)
+if group == "tool":
+    tool = subprocess.Popen(["sh", "-c", "trap '' TERM; exec sleep 600"],
+                            stdin=subprocess.PIPE, start_new_session=True)
+    group = str(tool.pid)
+held.seek(0)
+held.truncate()
+held.write(f"{os.getpid()} {group}\n")
+held.flush()
+with open(ready + ".part", "w") as said:
+    said.write(group)
+os.rename(ready + ".part", ready)
+time.sleep(600)
+"#;
+
+/// A lane whose process never lets go when asked: its control socket answers `inspect` with
+/// `status`, takes `retire` and never answers it. Its process ([`LANE_PROCESS`]) holds the owner
+/// lock until it ends; `ended` says how it ended.
 struct StuckLane {
     endpoint: Endpoint,
     asked: Arc<Mutex<Vec<String>>>,
     ended: std::sync::mpsc::Receiver<std::process::ExitStatus>,
+    /// The lane's process id, captured when it was started.
+    pid: u32,
+    /// The group its lock names: its tool's, or what the test gave.
+    group: u32,
 }
 
 impl StuckLane {
-    fn start(run: &Path, agent: &str, status: Value, mut process: std::process::Child) -> Self {
+    fn start(run: &Path, agent: &str, status: Value, group: &str) -> Self {
         let endpoint = Endpoint::of(Tool::Codex, run, agent);
         let listener = UnixListener::bind(endpoint.socket()).unwrap();
-        let mut owner = File::create(owner_lock(endpoint.socket())).unwrap();
-        owner.try_lock().unwrap();
-        writeln!(owner, "{}", process.id()).unwrap();
+        let ready = run.join(format!("{agent}.ready"));
+        let mut process = crate::child::command("python3")
+            .args(["-c", LANE_PROCESS])
+            .arg(owner_lock(endpoint.socket()))
+            .arg(&ready)
+            .arg(group)
+            .spawn()
+            .unwrap();
+        let pid = process.id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let group = loop {
+            if let Ok(said) = std::fs::read_to_string(&ready) {
+                break said.trim().parse().unwrap();
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the lane did not start"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
         let (tell, ended) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let exit = process.wait().unwrap();
-            drop(owner);
-            let _ = tell.send(exit);
+            let _ = tell.send(process.wait().unwrap());
         });
         let asked = Arc::new(Mutex::new(Vec::new()));
         let seen = asked.clone();
@@ -511,34 +555,54 @@ impl StuckLane {
             endpoint,
             asked,
             ended,
+            pid,
+            group,
         }
+    }
+
+    fn asked(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
     }
 }
 
+/// What a lane says of itself while it is idle, or while it works.
+fn saying(working: bool) -> Value {
+    let mut said = status("t", "old", 50, false);
+    said["working"] = json!(working);
+    said
+}
+
+/// Whether the process `pid` is gone, or ended and only waits to be reaped.
+fn is_ended(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true;
+    };
+    stat.rsplit_once(')')
+        .is_some_and(|(_, after)| after.trim_start().starts_with('Z'))
+}
+
+fn sleeper() -> std::process::Child {
+    crate::child::command("sleep").arg("600").spawn().unwrap()
+}
+
 #[test]
-fn a_turn_goes_on_within_the_bound_and_ends_only_the_process_of_a_lane_that_never_lets_go() {
+fn an_idle_lane_that_never_lets_go_is_ended_with_its_tool_within_the_bound() {
     use std::os::unix::process::ExitStatusExt;
     let run = run_dir("stuck");
-    let sleeper = || {
-        std::process::Command::new("sleep")
-            .arg("600")
-            .spawn()
-            .unwrap()
-    };
     let mut beside = sleeper();
-    // Started outside systemd, the lane runs in no scope of its own (it shares the test's unit,
-    // which is no lane scope, or is this process's own): it is ended by its own id.
-    let stuck = StuckLane::start(&run, "a", status("t", "old", 50, false), sleeper());
+    let stuck = StuckLane::start(&run, "a", saying(false), "tool");
+    let tool = stuck.group;
+    assert!(!is_ended(tool));
     let bound = std::time::Duration::from_millis(300);
     let started = std::time::Instant::now();
     let place = stuck
         .endpoint
         .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, bound);
     let waited = started.elapsed();
-    // Asked to leave, waited for the bound, then ended by its own id: its lock is free and a
-    // new lane may start, with no turn held on the lane's exit.
+    // Asked what it does, asked to leave, waited for the bound, then ended with its tool: its
+    // lock is free and a new lane may start, with no turn held on the lane's exit.
     assert_eq!(place.unwrap(), Place::Free);
-    assert_eq!(stuck.asked.lock().unwrap().clone(), ["inspect", "retire"]);
+    assert_eq!(stuck.asked(), ["inspect", "inspect", "retire"]);
     assert!(waited >= bound, "{waited:?}");
     assert!(waited < std::time::Duration::from_secs(5), "{waited:?}");
     let exit = stuck
@@ -546,10 +610,72 @@ fn a_turn_goes_on_within_the_bound_and_ends_only_the_process_of_a_lane_that_neve
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
     assert_eq!(exit.signal(), Some(nix::libc::SIGKILL));
-    // Only the lane's own process: one beside it is untouched.
+    // The tool is gone too: it ignored SIGTERM and the end of its input, and no process of it
+    // writes the conversation beside the next lane.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !is_ended(tool) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the lane's tool lives"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
+    // A group whose leader is no child of the lane is not its tool: only the lane goes.
+    let elsewhere = StuckLane::start(&run, "b", saying(false), &beside.id().to_string());
+    let place = elsewhere
+        .endpoint
+        .place_within(&run, (Some("t"), "new"), |_| false, ROOMY, bound);
+    assert_eq!(place.unwrap(), Place::Free);
+    let exit = elsewhere
+        .ended
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(exit.signal(), Some(nix::libc::SIGKILL));
+    // Nothing beside the lane and its tool is signalled.
     assert!(beside.try_wait().unwrap().is_none());
     beside.kill().unwrap();
     beside.wait().unwrap();
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_lane_that_works_or_does_not_say_is_never_ended_however_slow_it_answers() {
+    let run = run_dir("working");
+    let bound = std::time::Duration::from_millis(300);
+    for (agent, said) in [
+        ("working", saying(true)),
+        ("unsaid", status("t", "old", 50, false)),
+    ] {
+        let lane = StuckLane::start(&run, agent, said, "tool");
+        // It does not answer the retirement in time, as a lane loading a long conversation in
+        // a turn may not: it is waited for, and the turn goes on without that lane's room.
+        let place = lane
+            .endpoint
+            .place_within(&run, (Some("u"), "new"), |_| false, ROOMY, bound);
+        assert!(place.is_err(), "{agent}: {place:?}");
+        assert_eq!(lane.asked(), ["inspect", "inspect", "retire"], "{agent}");
+        assert!(
+            lane.ended
+                .recv_timeout(std::time::Duration::from_millis(500))
+                .is_err(),
+            "{agent}: the lane was ended"
+        );
+        assert!(!is_ended(lane.group), "{agent}: its tool was ended");
+        // The test ends what it started, by the ids it captured.
+        for (id, group) in [(lane.group, true), (lane.pid, false)] {
+            let target = nix::unistd::Pid::from_raw(i32::try_from(id).unwrap());
+            let kill = nix::sys::signal::Signal::SIGKILL;
+            if group {
+                nix::sys::signal::killpg(target, kill).unwrap();
+            } else {
+                nix::sys::signal::kill(target, kill).unwrap();
+            }
+        }
+        lane.ended
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+    }
     std::fs::remove_dir_all(&run).unwrap();
 }
 
@@ -567,7 +693,7 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     ));
     let waited = started.elapsed();
     // Asked to leave, waited for at most the bound, and the terminal goes on.
-    assert_eq!(hanging.asked(), ["retire"]);
+    assert_eq!(hanging.asked(), ["inspect", "retire"]);
     assert!(
         waited >= std::time::Duration::from_millis(300),
         "{waited:?}"
@@ -581,7 +707,7 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
         "other",
         std::time::Duration::from_secs(5)
     ));
-    assert_eq!(leaving.asked(), ["retire"]);
+    assert_eq!(leaving.asked(), ["inspect", "retire"]);
     assert!(leaving.endpoint.released().unwrap());
     // A lane that runs work of its own refuses to leave, and the terminal is refused.
     let busy = FakeLane::start(&run, "busy", status("t", "d", 0, true));
@@ -590,7 +716,7 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
         "busy",
         std::time::Duration::from_secs(5)
     ));
-    assert_eq!(busy.asked(), ["retire"]);
+    assert_eq!(busy.asked(), ["inspect", "retire"]);
     assert!(!busy.endpoint.released().unwrap());
     std::fs::remove_dir_all(&run).unwrap();
 }
