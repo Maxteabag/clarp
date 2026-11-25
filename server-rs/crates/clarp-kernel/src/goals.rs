@@ -2326,6 +2326,14 @@ impl GoalBook {
             }
         }
         // A checkpoint's texts are the goal's once, in `checkpoint`; its entry keeps excerpts.
+        // The size and digest beside them are the Host's to write: what a request says of them
+        // is dropped, so a text is never kept whole under a digest that is not its own.
+        if let Some(fields) = data.as_object_mut() {
+            for name in ["progress", "next_work"] {
+                fields.remove(&format!("{name}_bytes"));
+                fields.remove(&format!("{name}_sha256"));
+            }
+        }
         excerpted(&mut data);
         remember(&mut plan, &mut goal, action, revision + 1, data, now);
         plan.goal = Some(goal);
@@ -2729,6 +2737,37 @@ mod tests {
         let shown = &read["goal"]["history"].as_array().unwrap().last().unwrap()["detail"];
         assert_eq!(shown, entry);
         assert!(read.to_string().len() < progress.len() + next_work.len() + 4_000);
+    }
+
+    #[test]
+    fn a_checkpoint_that_names_its_own_digest_is_still_excerpted_under_the_hosts() {
+        let mut ids = counter();
+        let mut book = GoalBook::new();
+        let plan_id = a_goal(&mut book, &mut ids);
+        let progress = "p".repeat(HISTORY_EXCERPT * 3);
+        let checkpoint = json!({
+            "progress": progress, "next_work": "Then",
+            "progress_sha256": "made-up", "progress_bytes": 1, "next_work_sha256": "made-up",
+        });
+        let change = book
+            .act(
+                &plan_id,
+                0,
+                "checkpoint",
+                &checkpoint,
+                &mut world(2_000, &mut ids),
+            )
+            .unwrap();
+        keep(&mut book, &change, 2_000);
+        let goal = book.plan(&plan_id).unwrap().goal.as_ref().unwrap();
+        let entry = &goal.history.last().unwrap()["detail"];
+        assert_eq!(
+            entry["progress"].as_str().unwrap().chars().count(),
+            HISTORY_EXCERPT + 1
+        );
+        assert_eq!(entry["progress_bytes"], json!(progress.len()));
+        assert_eq!(entry["progress_sha256"], json!(sha256_hex(&progress)));
+        assert!(entry.get("next_work_sha256").is_none(), "{entry}");
     }
 
     #[test]
