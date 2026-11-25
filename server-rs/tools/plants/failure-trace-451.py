@@ -23,7 +23,7 @@ PLANTS = [
     # "the Stop told at once without its end" left with wire::stopped (issue 747): a Stop's end is
     # told once, through the ended state, which the next rule plants.
     (W, "stop", "an ended state told without its end",
-     '(None, Some(last)) => ending_detail(last, backend, &record.model, ended),', '(None, Some(last)) => ending_detail(last, backend, &record.model, None),'),
+     'let mut detail = ending_detail(last, backend, &record.model, ended);', 'let mut detail = ending_detail(last, backend, &record.model, None);'),
     (T, "job", "a job between turns given a trace",
      '.and_then(|live| live.trace_id.clone())\n                .unwrap_or_default();', '.and_then(|live| live.trace_id.clone())\n                .unwrap_or_else(|| "the-last-turn".to_string());'),
     (T, "job", "a job in a turn given none",
