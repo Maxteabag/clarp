@@ -320,14 +320,23 @@ session.
   resumes the thread (`thread/resume`, up to 25 s for a long rollout) before `turn/start`. Codex
   stays so in step 1, until the lead says otherwise. Moving it means a lane that waits for the
   thread's lock, where today it fails at once while an exec turn holds it.
-- **Claude keeps the rule, but starts its lane after the per-turn process, not beside it.** A
-  stream-json Claude Code takes its conversation when it starts (`--resume <session>`) and has no
-  request that takes one up later, so a process spawned beside the per-turn one would have no
-  session to hand over to. Its lane is started once the per-turn shim has exited (and the agent
-  runs no turn, has no terminal open and is not moving), with that turn's own arguments. The
-  start (about 0.6 s, measured 24 Nov 2026) falls in the time the user reads the answer, so the
-  next turn finds the lane warm. A turn that comes sooner runs per turn again, as the rule says.
-  No turn ever waits for a Claude lane.
+- **Claude keeps the rule by starting the turn's own process as the lane** (issue 833). A
+  stream-json Claude Code takes its conversation when it starts (`--resume <session>`, or
+  `--session-id` for a conversation its first turn opens) and has no request that takes one up
+  later. A turn with no lane there for its conversation starts its Claude Code as the lane, with
+  its own arguments, and runs on it: the start is the turn's start, which it would pay as a
+  process of its own anyway, and the process is kept for the next turn. Before issue 833 the lane
+  was started only after a per-turn process had exited and while the agent ran no turn, so a
+  busy agent, whose next turn was already live by then, never got one: on the owner's EliteBook
+  one hour saw 199 of 344 Claude turns start cold, and the busiest agent's 46 all did, each
+  reading about 1.2 GB of its conversation. A turn for which no lane may start (no place within
+  the limits, or a turn nobody waits on while the machine is under pressure) runs per turn as
+  the rule says, and a lane may start after it as before. No turn ever waits for a Claude lane.
+- **Muse's queued turn has the lane take the session** (issue 833). A conversation's first turn
+  still runs on exec, which names the session. A turn launched while no lane holds a session
+  that is there (the one queued behind an exec turn, whose lane could not take the session while
+  that next turn was already live) has the lane take it first, starting the lane where none
+  runs, and runs on it; one the lane cannot take runs on exec as before.
 
 ## A follow-up turn in the same process
 
@@ -493,13 +502,14 @@ Host's address and token); the MCP choice; and what the catalog defines those se
 runs per turn, as with the switch off, and holds its conversation's lock shared
 (`lane::claude::guard_turn`).
 
-**When the lane starts.** After the per-turn process is gone, not beside it: a stream-json
-Claude Code takes its conversation when it starts (`--resume`), and has no way to take one up
-later. So once that turn's shim has exited, and the agent runs no turn, has no terminal open and
-is not moving, the lane starts with that turn's own arguments: it takes the lock exclusive and
-runs `claude -p --input-format stream-json --resume <session>`. Its start (about 0.6 s) falls in
-the time the user reads the answer, so the next turn finds it warm. A conversation's first turn
-named it with `--session-id`; the lane resumes it.
+**When the lane starts.** As the turn that finds none (issue 833): a stream-json Claude Code takes
+its conversation when it starts and has no way to take one up later, so the turn's own process
+is started as the lane, with that turn's arguments (`--session-id <session>` for a conversation's
+first turn, `--resume <session>` after), within the limits and the reserve, and the turn is its
+first claim. A turn for which none may start runs per turn; once its shim has exited, and the
+agent runs no turn, has no terminal open and is not moving, a lane starts with that turn's
+arguments, resuming what it made (`lane::claude::resuming`). Its start (about 0.6 s) falls in the
+time the user reads the answer.
 
 **A turn on the lane** (the shim's `claude_lane_runtime.rs`):
 - its attempt gets a spool of its own, opened as a turn's shim opens one (`session`, `spawned`,

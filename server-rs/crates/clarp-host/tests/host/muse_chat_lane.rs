@@ -1,7 +1,8 @@
 //! Issue 762. With the owner's `muse_chat_lane` on, a Muse agent's chat turns run on one kept
 //! `muse serve`: the first on exec (which names the session), while the lane starts beside it and
-//! takes the session once exec is gone; the turns after on the lane, which takes steered words
-//! and keeps its process through a Stop. With the switch off again, the lane leaves before exec
+//! takes the session once exec is gone, or for the turn queued behind exec, before it (issue
+//! 833); the turns after on the lane, which takes steered words and keeps its process through a
+//! Stop. With the switch off again, the lane leaves before exec
 //! runs the session, which Muse would refuse while the lane holds it.
 
 use super::*;
@@ -255,9 +256,9 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
     };
 
     // The first turn runs on exec, which names the session, while the lane starts beside it.
-    // A second message, sent while the first runs, is launched the moment exec ends: it never
-    // meets a session the lane is taking (one decision, on the agent's thread, about who holds
-    // the session next). The lane takes it once no turn runs.
+    // A second message, sent while the first runs, is launched the moment exec ends: the lane
+    // takes the session for it and runs it, rather than a second exec (issue 833). Exec never
+    // meets a session the lane holds.
     host.send("muser", "hold-one", "one");
     wait_for("the first exec turn", || {
         place.root.join("holding-one").exists()
@@ -269,7 +270,8 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
     );
     std::fs::write(place.root.join("release-one"), "").unwrap();
     answered(&host, "muser", "exec-hold-one");
-    answered(&host, "muser", "exec-ask-onemore");
+    answered(&host, "muser", "lane-ask-onemore");
+    assert_eq!(answers(&host, "muser", "exec-ask-onemore"), 0);
     wait_for("the lane to take the session", || {
         noted(&place, "resumed").lines().count() == 1
     });
@@ -278,7 +280,7 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
         "",
         "exec never met a held session"
     );
-    assert_eq!(launched(&place), [("exec", 2), ("serve", 1)]);
+    assert_eq!(launched(&place), [("exec", 1), ("serve", 1)]);
     assert_eq!(noted(&place, "approval"), "allowAll\n");
     assert_eq!(noted(&place, "lane-env"), "turn=absent\n");
     assert!(
@@ -314,7 +316,7 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
     answered(&host, "muser", "lane-hold-three");
     assert_eq!(
         noted(&place, "turns"),
-        "ask-two\nhold-three\n",
+        "ask-onemore\nask-two\nhold-three\n",
         "the steered words never ran as a turn of their own"
     );
 
@@ -334,9 +336,9 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
     assert_eq!(answers(&host, "muser", "lane-hold-four"), 0);
     host.send("muser", "ask-five", "five");
     answered(&host, "muser", "lane-ask-five");
-    assert_eq!(launched(&place), [("exec", 2), ("serve", 1)]);
+    assert_eq!(launched(&place), [("exec", 1), ("serve", 1)]);
     let tokens: Vec<String> = noted(&place, "tokens").lines().map(str::to_owned).collect();
-    assert_eq!(tokens.len(), 4, "{tokens:?}");
+    assert_eq!(tokens.len(), 5, "{tokens:?}");
     assert!(tokens.iter().all(|token| !token.is_empty()), "{tokens:?}");
     assert_ne!(tokens[0], tokens[1], "each turn has its own identity");
 
@@ -346,7 +348,7 @@ fn muse_chat_turns_run_on_one_kept_serve_after_exec_and_take_steered_words_and_a
     assert_eq!(switched["muse_chat_lane"], false, "{switched}");
     host.send("muser", "ask-six", "six");
     answered(&host, "muser", "exec-ask-six");
-    assert_eq!(launched(&place), [("exec", 3), ("serve", 1)]);
+    assert_eq!(launched(&place), [("exec", 2), ("serve", 1)]);
     assert_eq!(
         noted(&place, "refused"),
         "",

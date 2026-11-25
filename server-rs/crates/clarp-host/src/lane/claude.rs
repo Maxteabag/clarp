@@ -3,10 +3,12 @@
 //! `claude_chat_lane` is on. What every lane shares is in [`crate::lane`]; the lane process is
 //! the shim's `claude-lane`.
 //!
-//! No turn waits for a cold lane. A turn runs on the agent's lane only when one is already
-//! there for its conversation, started with what the turn would start Claude Code with; any
-//! other runs in a process of its own as before, and once that process is gone a lane is
-//! started for the next turn ([`Lane::warm`]).
+//! No turn waits for a cold lane: a turn with no lane there for its conversation starts its
+//! Claude Code as the lane ([`Lane::start`]), and runs on it; starting the lane is the turn's
+//! start, so nothing is started twice (issue 833). Where no lane may start (no place within the
+//! limits, or a turn nobody waits on while the machine is under pressure), the turn runs in a
+//! process of its own as before, and once that process is gone a lane may be started for the
+//! next turn ([`Lane::warm`]).
 //!
 //! A turn that a kept process cannot run keeps a process of its own: an opening of a call, a
 //! takeover or rewind (`--resume-session-at`), a turn that only reads (its edit guard is the
@@ -221,8 +223,10 @@ impl Lane {
     }
 
     /// Starts a lane for the conversation `fit` names, with what `order` (a turn's, before it
-    /// was wrapped for its own process) starts Claude Code with. A lane that runs otherwise is
-    /// retired first, while idle; one there as wanted is left. `None`: nothing new started.
+    /// was wrapped for its own process) starts Claude Code with: `--session-id` for a
+    /// conversation the lane's first turn opens, `--resume` for one that is there. A lane that
+    /// runs otherwise is retired first, while idle; one there as wanted is left. `None`: nothing
+    /// new started.
     pub(crate) fn start(
         &self,
         launcher: &crate::launcher::Launcher,
@@ -248,13 +252,6 @@ impl Lane {
         }
         let mut lane_order = order.clone();
         lane_order.stdin_file = self.endpoint.socket().with_extension("stdin");
-        // The conversation is there by now, made by the turn that ran before the lane: the
-        // lane resumes it, whatever that turn was started with.
-        for arg in &mut lane_order.args {
-            if arg == "--session-id" {
-                "--resume".clone_into(arg);
-            }
-        }
         let owned: Vec<PathBuf> = crate::mcp::configure(&mut lane_order, mcp.0, mcp.1.as_deref())
             .map(crate::mcp::ScopedConfig::keep)
             .into_iter()
@@ -346,6 +343,19 @@ impl Lane {
     }
 }
 
+/// The order of a turn that ran in a process of its own, as a lane for the next turn starts
+/// with it: the conversation is there by now, made by that turn, so the lane resumes it,
+/// whatever that turn was started with.
+pub(crate) fn resuming(order: &ShimOrder) -> ShimOrder {
+    let mut order = order.clone();
+    for arg in &mut order.args {
+        if arg == "--session-id" {
+            "--resume".clone_into(arg);
+        }
+    }
+    order
+}
+
 /// The guard of a held start, kept while a lane starts or is ended for a terminal or a move.
 pub(crate) fn held(hold: &Mutex<()>) -> MutexGuard<'_, ()> {
     hold.lock().unwrap_or_else(PoisonError::into_inner)
@@ -354,7 +364,7 @@ pub(crate) fn held(hold: &Mutex<()>) -> MutexGuard<'_, ()> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{digest, fits, guard_turn, without_session};
+    use super::{digest, fits, guard_turn, resuming, without_session};
     use clarp_actor::ShimOrder;
     use clarp_kernel::turn::TurnId;
     use std::path::PathBuf;
@@ -447,6 +457,21 @@ mod tests {
         let mut moved = order(&ARGS);
         moved.env.push(("host_address".into(), "other".into()));
         assert_ne!(digest(&one, &mcp, &none), digest(&moved, &mcp, &none));
+    }
+
+    #[test]
+    fn a_lane_after_a_turn_of_its_own_resumes_and_a_first_turns_lane_opens_its_conversation() {
+        let first = order(&["-p", "--session-id", "s-2", "--replay-user-messages"]);
+        // After that turn's own process, the lane resumes what it made.
+        assert_eq!(
+            resuming(&first).args,
+            ["-p", "--resume", "s-2", "--replay-user-messages"]
+        );
+        // Started as the turn itself, it opens it: the order is the turn's own.
+        assert_eq!(first.args[1], "--session-id");
+        // Both are one lane: the conversation's flags are not in the digest.
+        let fit = fits(&first, &NONE).unwrap();
+        assert_eq!(fits(&resuming(&first), &NONE).unwrap().digest, fit.digest);
     }
 
     #[test]

@@ -1,6 +1,6 @@
-//! Issue 761. With the owner's `claude_chat_lane` on, a Claude agent's first turn runs in a
-//! process of its own, and once that process is gone one Claude Code is kept for the agent: the
-//! turns after it are written to its input and end at their `result`, a message sent while one
+//! Issue 761. With the owner's `claude_chat_lane` on, a Claude agent's first turn starts its
+//! Claude Code as the agent's kept process (issue 833), and the turns after it are written to
+//! its input and end at their `result`, a message sent while one
 //! runs is steered into it, a Stop is Claude Code's interrupt and keeps the process, and the
 //! turns' tools find their turn's identity in the lane's turn file. With the setting off again,
 //! the lane leaves and the next turn runs in a process of its own on the same conversation.
@@ -194,23 +194,17 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
             .collect::<Vec<_>>()
     };
 
-    // The first turn never waits for a lane: it runs in a process of its own, which names its
-    // turn in its environment. Once it is gone, the lane resumes the conversation.
+    // The first turn waits for no lane: its own Claude Code starts as the lane, opening the
+    // conversation, and is kept (issue 833). Its tools find the turn in the lane's turn file.
     asked(&host, "kept", "ask-one");
-    wait_for("the lane to start after the first turn", || {
-        noted(&place, "launches").lines().count() == 2
-    });
-    assert_eq!(
-        noted(&place, "launches"),
-        "--session-id turn=set\n--resume turn=absent\n"
-    );
+    assert_eq!(noted(&place, "launches"), "--session-id turn=absent\n");
     wait_for("the lane to answer", || {
         lane_said(&socket, "inspect").is_some_and(|said| said["state"]["available"] == true)
     });
 
     // The next turn is written to the kept process and ends at its result.
     asked(&host, "kept", "ask-two");
-    assert_eq!(noted(&place, "launches").lines().count(), 2);
+    assert_eq!(noted(&place, "launches").lines().count(), 1);
 
     // Words sent while a turn runs reach it on the same input, and are answered with it.
     host.send("kept", "hold-three", "hold");
@@ -247,7 +241,7 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
     asked(&host, "kept", "ask-five");
     assert_eq!(
         noted(&place, "launches").lines().count(),
-        2,
+        1,
         "the interrupt kept the process"
     );
     assert_eq!(
@@ -260,7 +254,7 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
     // the environment.
     let tokens: Vec<String> = noted(&place, "tokens").lines().map(str::to_owned).collect();
     assert_eq!(tokens.len(), 5, "{tokens:?}");
-    let lane_tokens: Vec<&str> = tokens[1..]
+    let lane_tokens: Vec<&str> = tokens
         .iter()
         .map(|line| {
             let mut words = line.splitn(3, ' ');
@@ -279,16 +273,21 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
     );
 
     // Another login, written to the credentials file alone: the lane on the old one serves
-    // no more turns. The next turn runs in a process of its own, and a lane starts after it.
+    // no more turns. A lane on the new login resumes the conversation: started as the next turn
+    // where the old one has left, or once that turn's own process is gone where it refused it.
     credentials("r2");
     asked(&host, "kept", "ask-login");
     wait_for("a lane on the new login", || {
-        noted(&place, "launches").lines().count() == 4
+        noted(&place, "launches").lines().last() == Some("--resume turn=absent")
+            && lane_said(&socket, "inspect").is_some_and(|said| said["state"]["available"] == true)
     });
-    assert_eq!(
-        noted(&place, "launches"),
-        "--session-id turn=set\n--resume turn=absent\n--resume turn=set\n--resume turn=absent\n"
+    let launches = noted(&place, "launches");
+    assert!(
+        launches == "--session-id turn=absent\n--resume turn=absent\n"
+            || launches == "--session-id turn=absent\n--resume turn=set\n--resume turn=absent\n",
+        "{launches}"
     );
+    let before = launches.lines().count();
 
     // Turned off: the lane leaves before the next turn, which runs in a process of its own on
     // the same conversation.
@@ -298,6 +297,73 @@ fn claude_turns_after_the_first_run_on_one_kept_process_and_its_interrupt_keeps_
         noted(&place, "launches").lines().last(),
         Some("--resume turn=set")
     );
-    assert_eq!(noted(&place, "launches").lines().count(), 5);
+    assert_eq!(noted(&place, "launches").lines().count(), before + 1);
     assert!(lane_said(&socket, "inspect").is_none(), "the lane left");
+}
+
+/// Issue 833. Turns queued behind one another (another agent's messages, which wait their turn
+/// rather than join the running one) ran each in a process of its own: when a turn ended, the
+/// next was already live, so no lane was ever started for a busy agent. Now the first starts its
+/// Claude Code as the lane and the queued ones run on it: three turns, one process.
+#[test]
+fn turns_queued_back_to_back_run_on_one_process_started_as_the_first() {
+    let place = Place::new("claude-queued-lane");
+    let _lanes = Lanes(place.root.clone());
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let config = place.root.join("config");
+    std::fs::create_dir_all(config.join("clarp-host")).unwrap();
+    std::fs::write(
+        config.join("clarp-host/config.toml"),
+        "claude_chat_lane = true\ncodex_lane_idle_minutes = 15\n",
+    )
+    .unwrap();
+    let home = place.root.join("home");
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(
+        home.join(".claude/.credentials.json"),
+        json!({"claudeAiOauth": {"refreshToken": "r1", "accessToken": "a"}}).to_string(),
+    )
+    .unwrap();
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = host.post(
+        "/agents",
+        json!({"name": "Busy", "session": "busy", "backend": "claude"}),
+    );
+    assert_eq!(made["session"], "busy", "{made}");
+    let cold_before = host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["claude"]
+        .as_u64()
+        .unwrap_or(0);
+    for word in ["hold-qone", "ask-qtwo", "ask-qthree"] {
+        let sent = host.post(
+            "/send",
+            json!({"session": "busy", "text": word, "client_msg_id": word,
+                   "origin": "agent", "queue_if_busy": true}),
+        );
+        assert_eq!(sent["ok"], true, "{sent}");
+    }
+    wait_for("the first turn", || {
+        place.root.join("holding-qone").exists()
+    });
+    std::fs::write(place.root.join("release-qone"), "").unwrap();
+    wait_for("all three answered", || {
+        noted(&place, "answered") == "hold-qone\nask-qtwo\nask-qthree\n"
+    });
+    wait_for("the last turn to end", || host.state("busy") == "done");
+    assert_eq!(
+        noted(&place, "launches"),
+        "--session-id turn=absent\n",
+        "three queued turns, one process, started as the first"
+    );
+    assert_eq!(noted(&place, "turns"), "hold-qone\nask-qtwo\nask-qthree\n");
+    // None of them started a tool anew without a lane.
+    let cold_after = host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["claude"]
+        .as_u64()
+        .unwrap_or(0);
+    assert_eq!(cold_after, cold_before);
 }

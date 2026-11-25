@@ -342,8 +342,10 @@ bound them instead:
 claude_chat_lane = true       # off by default; false rolls back to a process per turn
 ```
 
-No turn waits for the lane: a turn with no free lane started as it would start Claude Code runs
-in a process of its own as before, and the lane starts once that process is gone. Stop is Claude
+No turn waits for the lane: a turn with no lane there for its conversation starts its Claude Code
+as the lane and runs on it, so a busy agent's queued turns, and a first turn, start one process
+between them (issue 833). A turn for which no lane may start (no place, or one nobody waits on
+under pressure) runs in a process of its own, and a lane may start once it is gone. Stop is Claude
 Code's own interrupt and keeps the process; steering is as before. A background Bash command of
 a lane turn can run on after the reply, but ends whenever the lane leaves (idle, a change of
 model, effort, identity, MCP servers or account, an error or compaction, a terminal, a move):
@@ -398,8 +400,9 @@ memory budget (`lane_memory_mb`, PSS of all lanes together) are shared with ever
 tool's lanes. A Muse lane weighs about 255-300 MB.
 
 - A conversation's first turn runs on exec, which names the session. The lane
-  starts beside it without the session and takes it once exec has exited and no
-  turn runs, so no turn waits for a cold lane. The turns after run on the lane.
+  starts beside it without the session and takes it once exec has exited, or just
+  before the turn queued behind exec, which then runs on the lane (issue 833). No
+  turn waits for a cold lane. The turns after run on the lane.
 - A message sent while a lane turn runs is steered into it (`turn/steer`) and
   enters the conversation when Muse reads it. Words Muse has not read when the
   turn ends, or when a Stop comes, are taken back and run as a turn of their own.

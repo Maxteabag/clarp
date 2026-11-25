@@ -1,7 +1,10 @@
 //! Runs an agent's Claude chat turns on its kept Claude Code while the owner's
-//! `claude_chat_lane` is on (issue 761). No turn waits for a cold lane: a turn goes to the lane
-//! only when one is there for its conversation, started as the turn would start Claude Code.
-//! Any other runs in a process of its own, and the lane is started once that process is gone.
+//! `claude_chat_lane` is on (issue 761). No turn waits for a cold lane: a turn runs on the lane
+//! that is there for its conversation, started as the turn would start Claude Code, or, where
+//! none is, starts its Claude Code as the lane and runs on that (issue 833): a queued turn, and
+//! an idle agent's first, start one process and keep it. A turn for which no lane may start
+//! (no place, or one nobody waits on under the machine's pressure) runs in a process of its
+//! own, and a lane may be started once that process is gone.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -36,6 +39,12 @@ pub(super) struct Start {
     login: claude::Login,
 }
 
+/// What a turn with no lane there needs to start its Claude Code as the lane.
+struct AsLane {
+    start: Start,
+    launcher: std::sync::Arc<crate::launcher::Launcher>,
+}
+
 impl Start {
     /// Starts the lane for the next turn, with what this turn's process was started with, once
     /// that process is gone. Nothing is started where the agent's thread says no.
@@ -56,9 +65,11 @@ impl Start {
         if !(asked && permit.recv().unwrap_or(false)) {
             return;
         }
+        // The conversation is there by now: the lane resumes what this turn made.
+        let order = claude::resuming(order);
         match self
             .lane
-            .start(launcher, &self.run, order, fit, mcp, &self.login)
+            .start(launcher, &self.run, &order, fit, mcp, &self.login)
         {
             Ok(child) => reap(child),
             Err(error) => eprintln!("claudeLaneStartFail: {error}"),
@@ -115,6 +126,12 @@ impl Worker {
         let token = self.setup.turns.token(&agent_id, order.turn.0);
         let mcp: Mcp = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
         let lane = self.claude_lane();
+        // Where no lane is there for it, the turn starts its Claude Code as the lane: unless no
+        // lane may start for it now (a turn nobody waits on, under the machine's pressure).
+        let as_lane = self.may_start_lane().then(|| AsLane {
+            start: self.claude_lane_start(),
+            launcher: self.setup.launcher.clone(),
+        });
         let (versions, runtime) = (self.setup.versions.clone(), self.setup.runtime.clone());
         let tx = self.tx.clone();
         let (turn, attempt) = (order.turn, order.attempt);
@@ -130,7 +147,31 @@ impl Worker {
                 };
                 let hold = lane.hold();
                 let held = claude::held(&hold);
-                let Some(state) = lane.warm(&fit) else {
+                let state = match lane.warm(&fit) {
+                    Some(state) => Some(state),
+                    // None there: the turn's own Claude Code starts as the lane, with what the
+                    // turn would start it with, within the limits and the reserve.
+                    None => as_lane.and_then(|as_lane| {
+                        let AsLane { start, launcher } = as_lane;
+                        match start.lane.start(
+                            &launcher,
+                            &start.run,
+                            &lane_order,
+                            &fit,
+                            &mcp,
+                            &start.login,
+                        ) {
+                            Ok(Some(child)) => reap(Some(child)),
+                            Ok(None) => return None,
+                            Err(error) => {
+                                eprintln!("claudeLaneStartFail: {error}");
+                                return None;
+                            }
+                        }
+                        lane.warm(&fit)
+                    }),
+                };
+                let Some(state) = state else {
                     drop(held);
                     return missed(order);
                 };

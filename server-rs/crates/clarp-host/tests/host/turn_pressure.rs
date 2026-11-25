@@ -299,10 +299,10 @@ fn a_held_helper_turn_does_not_use_or_start_a_lane() {
     let launches = || noted(&place, "launches").lines().count();
     let answered = |word: &str| noted(&place, "answered").lines().any(|line| line == word);
 
-    // Calm: the owner's first turn runs in a process of its own, and a lane takes it after.
+    // Calm: the owner's first turn starts its Claude Code as the lane (issue 833).
     host.send("kept", "ask-one", "u1");
     wait_for("the first answer", || answered("ask-one"));
-    wait_for("the lane after the first turn", || launches() == 2);
+    assert_eq!(launches(), 1);
     wait_for("the lane to answer", || {
         lane_said(&kept, "inspect").is_some_and(|said| said["state"]["available"] == true)
     });
@@ -319,7 +319,7 @@ fn a_held_helper_turn_does_not_use_or_start_a_lane() {
         "a held turn used the lane"
     );
     assert!(!noted(&place, "turns").contains("ask-three"));
-    assert_eq!(launches(), 2);
+    assert_eq!(launches(), 1);
 
     // At the bound, the pressure as high: the one with a lane uses it; the one without runs in
     // a process of its own, and no lane starts after it.
@@ -331,16 +331,21 @@ fn a_held_helper_turn_does_not_use_or_start_a_lane() {
         host.state("kept") == "done" && host.state("cold") == "done"
     });
     std::thread::sleep(Duration::from_secs(3));
-    assert_eq!(launches(), 3, "{}", noted(&place, "launches"));
+    assert_eq!(launches(), 2, "{}", noted(&place, "launches"));
+    assert!(
+        noted(&place, "launches").ends_with("--session-id turn=set\n"),
+        "the turn without a lane ran in a process of its own: {}",
+        noted(&place, "launches")
+    );
     assert!(
         lane_said(&cold, "inspect").is_none(),
         "a lane started for a turn nobody waited on"
     );
 
-    // The owner's turn starts a lane whatever the pressure.
+    // The owner's turn starts its Claude Code as the lane whatever the pressure.
     host.send("cold", "ask-four", "u4");
     wait_for("the owner's answer", || answered("ask-four"));
-    wait_for("the owner's lane", || launches() == 5);
+    assert_eq!(launches(), 3, "{}", noted(&place, "launches"));
     wait_for("the owner's lane to answer", || {
         lane_said(&cold, "inspect").is_some()
     });

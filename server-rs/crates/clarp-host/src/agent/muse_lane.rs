@@ -1,7 +1,10 @@
 //! Runs an agent's Muse chat turns on its kept `muse serve` while the owner's `muse_chat_lane` is
-//! on (issue 762). No turn waits for a cold lane: a turn goes to the lane only when one holds its
-//! session, ready. Any other runs on exec, while a lane starts beside it on a thread of its own,
-//! without the session. Muse refuses a second process on a session it holds (its own
+//! on (issue 762). No turn waits for a cold lane: a turn goes to the lane when one holds its
+//! session, ready. A turn whose session is there but held by no lane (a turn queued behind an
+//! exec turn, whose lane could not take the session while the next turn was already live) has
+//! the lane take it first, starting the lane where none runs (issue 833). Any other runs on exec
+//! (a conversation's first turn, which names the session), while a lane starts beside it on a
+//! thread of its own, without the session. Muse refuses a second process on a session it holds (its own
 //! `.session.lock`), so who holds the session next is decided in one place, the agent's thread:
 //!
 //! - once an exec turn's process is gone, its thread asks the agent's thread ([`Ask::MuseTake`]);
@@ -191,6 +194,15 @@ impl Worker {
     pub(super) fn launch_on_muse_lane(&mut self, order: Box<ShimOrder>) {
         let lane = self.muse_lane();
         let profile = self.setup.profile.clone();
+        // A lane may start for this turn, or take its session: only once a turn has named the
+        // session (a conversation's first turn names it on exec, as Muse opens no other), and not
+        // for a turn nobody waits on while the machine is under pressure.
+        let named = self
+            .actor
+            .as_ref()
+            .and_then(|actor| actor.status().backend_session)
+            .is_some_and(|session| order.named_session.as_deref() == Some(session.as_str()));
+        let launcher = (named && self.may_start_lane()).then(|| self.setup.launcher.clone());
         let token = self
             .setup
             .turns
@@ -198,11 +210,29 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let (turn, attempt) = (order.turn, order.attempt);
-            let ready = order
-                .named_session
-                .as_deref()
-                .is_some_and(|session| lane.ready(&profile, session, order.model.as_deref()));
-            if !ready {
+            let ready = |lane: &Lane| {
+                order
+                    .named_session
+                    .as_deref()
+                    .is_some_and(|session| lane.ready(&profile, session, order.model.as_deref()))
+            };
+            let mut is_ready = ready(&lane);
+            // No lane holds the session: the turn before this one ran on exec and its process
+            // is gone, so the lane takes the session now, started first where none runs. A
+            // session that is not there yet, or one a process still holds, is refused, and the
+            // turn runs on exec as before.
+            if !is_ready
+                && let (Some(launcher), Some(session)) = (&launcher, order.named_session.as_deref())
+            {
+                match lane.warm(launcher, &profile, session) {
+                    Ok(child) => reap(child),
+                    Err(error) => eprintln!("clarp-host: the Muse lane did not start: {error}"),
+                }
+                if lane.take().is_ok() {
+                    is_ready = ready(&lane);
+                }
+            }
+            if !is_ready {
                 let _ = tx.send(Ask::MuseMissed(order));
                 return;
             }
