@@ -194,7 +194,7 @@ in `GET /live` and on `/agents/snapshot` agents as `live_activity`:
 | `waiting` | the agent needs the user (a provider notification) | no |
 | `interrupted` | the last turn was stopped or died | no |
 | `background` | the turn ended but a helper or background job will wake the agent | no |
-| `limited` | parked behind a provider usage limit (account recovery), or its next turn is held while the runtime drains for an update (`headline` "Waiting for the Clarp update", `turn_id` and `turn_started_ms` null). On a Rust Host also a turn that waits for this machine's network to come back after its tool lost its connection (`headline` "Waiting for the network"): draw the headline, not a usage limit | yes |
+| `limited` | parked behind a provider usage limit (account recovery), or its next turn is held while the runtime drains for an update (`headline` "Waiting for the Clarp update", `turn_id` and `turn_started_ms` null). On a Rust Host also a turn that waits for this machine's network to come back after its tool lost its connection (`headline` "Waiting for the network"), and a turn whose start is held while the machine is under pressure (`headline` "Waiting for the machine (io 45%)", naming the reading that is high, issue 834). Tell them apart by `waits_for` (from Rust Host contract 188, feature `waits_for`), never by the words: `"quota"` is a usage limit, `"network"` and `"machine"` are not. Key on the feature: without it (an older Host, or the update drain) there is no `waits_for`, and `limited` is treated as before. Show the words as sent and draw the headline; draw a quota badge only for `"quota"` | yes |
 
 State rules on the Host:
 - A tool finishing returns the state to `thinking`, not `tool`. With parallel

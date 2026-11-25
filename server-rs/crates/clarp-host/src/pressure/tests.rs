@@ -409,3 +409,36 @@ fn the_hosts_own_cpu_is_read_only_where_its_turns_run_apart_from_it() {
     assert_eq!(reading.cpu_source, CpuSource::System);
     assert_eq!(reading.cpu.unwrap().some.avg60, 90.0);
 }
+
+#[test]
+fn a_turn_held_in_a_later_episode_is_told_its_words_even_where_they_repeat() {
+    let fake = Fake::new("episodes");
+    fake.set(0.0, 45.0, 0.0);
+    let gate = gate(Some(fake.0.clone()), Arc::new(Hand::default()));
+    let said: Arc<Mutex<Vec<(u64, String)>>> = Arc::default();
+    let saying = |turn: u64| -> Box<dyn Fn(&str) + Send> {
+        let heard = said.clone();
+        Box::new(move |words: &str| heard.lock().unwrap().push((turn, words.to_owned())))
+    };
+    let (count, order) = (Arc::default(), Arc::default());
+    // The first episode: held, told, let go once calm, and the queue empties.
+    assert!(gate.hold("a", 1, counted(&count, &order, 1), saying(1)));
+    assert_eq!(gate.tick(), Some(EVERY));
+    fake.set(0.0, 0.0, 0.0);
+    assert_eq!(gate.tick(), Some(BETWEEN));
+    assert_eq!(gate.tick(), None);
+    // A later episode with the same reading: the new turn is told it too.
+    fake.set(0.0, 45.0, 0.0);
+    assert!(gate.hold("b", 2, counted(&count, &order, 2), saying(2)));
+    assert_eq!(gate.tick(), Some(EVERY));
+    let words = "Waiting for the machine (io 45%)".to_owned();
+    assert_eq!(
+        *said.lock().unwrap(),
+        [(1, words.clone()), (2, words.clone())]
+    );
+    // The same, where the queue emptied by a forget before the gate looked again.
+    gate.forget("b", 2);
+    assert!(gate.hold("c", 3, counted(&count, &order, 3), saying(3)));
+    assert_eq!(gate.tick(), Some(EVERY));
+    assert_eq!(said.lock().unwrap().last(), Some(&(3, words)));
+}

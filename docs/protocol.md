@@ -1092,18 +1092,25 @@ connection to the provider and the Host finds no network) is shown as a turn tha
 account, in other words: `agent-activity` `state` `limited` with `summary` "Waiting for the
 network", `agent-state` `detail.account_recovery` `"waiting"` with `detail.message` "Waiting for
 the network", and `live_activity` `limited` with that `headline`. Show the words as sent; do not
-read `limited` alone as a usage limit. No contract number goes with it (see
-[compatibility](compatibility.md)).
+read `limited` alone as a usage limit. From Rust Host contract 188 (feature `waits_for`,
+issue 834) each of the three also says what a `limited` turn waits for, as a word to key on:
+`waits_for` `"network"` here, `"machine"` for a start held for the machine's pressure, `"quota"`
+for an account wait (the only usage limit). Key on the feature: without it, and on any state
+that is not `limited`, there is no `waits_for`, and `limited` is treated as before. The network
+wait itself has no contract number (see [compatibility](compatibility.md)).
 
 A turn whose start is held while the machine is under pressure (a Rust Host with
 `turn_pressure_admission`: a turn nobody waits on, issue 834) is shown the same way, in its own
 words: `agent-activity` `state` `limited` with `summary` "Waiting for the machine (io 45%)",
 `agent-state` `detail.account_recovery` `"waiting"` with `detail.message` the same words, and
-`live_activity` `limited` with that `headline`. The words name the reading that is high (`cpu`,
+`live_activity` `limited` with that `headline`, each with `waits_for` `"machine"` from contract
+188 (feature `waits_for`). The words name
+the reading that is high (`cpu`,
 `io` or `memory`, the highest of several, as a whole percent) and follow it while the turn waits:
 the apps are told again when the shown percent changes. They are gone once the turn starts (the
 machine is calm again, ten minutes have passed, or the owner's message let it go) or is stopped.
-Show the words as sent. No contract number goes with it.
+Show the words as sent. The words themselves have no contract number; `waits_for` is contract
+188.
 
 A turn that waits for an account on a Rust Host from contract 176 (feature `quota_pool`) shows the
 reset of the tool's pool, not only of the account that ran out: while another seat of the pool

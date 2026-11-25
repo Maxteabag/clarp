@@ -372,6 +372,11 @@ impl Gate {
         if !look.high && state.waiting.is_empty() {
             return false;
         }
+        // The first turn of an episode (the last one's queue emptied, also by a forget the
+        // ticker has not seen yet) is told its words anew.
+        if state.waiting.is_empty() {
+            state.told = None;
+        }
         state.waiting.push_back(Waiting {
             agent: agent.to_owned(),
             turn,
@@ -469,7 +474,10 @@ impl Gate {
         let go = {
             let mut state = self.state();
             if state.waiting.is_empty() {
+                // The episode is over: a turn held in the next is told its words anew, even
+                // where they repeat this one's last.
                 state.ticking = false;
+                state.told = None;
                 return None;
             }
             let look = self.looked(&mut state);

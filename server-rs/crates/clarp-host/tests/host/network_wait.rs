@@ -66,6 +66,9 @@ fn a_turn_whose_network_is_gone_waits_for_it_and_goes_on_on_the_same_account() {
     assert_eq!(shown["live_activity"]["state"], "limited");
     assert_eq!(shown["activity"]["summary"], "Waiting for the network");
     assert_eq!(shown["activity"]["state"], "limited");
+    // The word an app keys on, rather than the words (issue 834).
+    assert_eq!(shown["live_activity"]["waits_for"], "network");
+    assert_eq!(shown["activity"]["waits_for"], "network");
     assert_eq!(started(), 1);
     // It is checked again and again, and the tool is not started again meanwhile.
     std::thread::sleep(Duration::from_millis(6_000));

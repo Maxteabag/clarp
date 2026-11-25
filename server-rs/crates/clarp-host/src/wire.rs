@@ -337,6 +337,22 @@ fn waiting_for(live: &LiveStatus, backend: &str) -> Option<String> {
         .or_else(|| waiting_for_account(live, backend))
 }
 
+/// What a `limited` turn waits for, as a word an app can key on rather than read the words
+/// (`waits_for`): `"machine"` (its start held while the machine is under pressure), `"network"`
+/// (this machine's network is gone) or `"quota"` (an account with usage left, or one that serves
+/// its model). The words say the same for a person; only a quota wait is a usage limit. Absent
+/// where the turn is not limited, and on Hosts from before issue 834: such an app treats
+/// `limited` as before.
+pub(crate) fn waits_for(live: &LiveStatus, backend: &str) -> Option<&'static str> {
+    if live.waits_for_the_machine.is_some() {
+        Some("machine")
+    } else if waiting_for_network(live).is_some() {
+        Some("network")
+    } else {
+        waiting_for_account(live, backend).map(|_| "quota")
+    }
+}
+
 /// What a live turn that waits for an account says it waits for: when it waits for one.
 fn waiting_for_account(live: &LiveStatus, backend: &str) -> Option<String> {
     let parked = live.parked.as_ref();
@@ -495,6 +511,7 @@ pub fn state(
             "message": waiting_for(live, backend).unwrap_or_default(),
             "origin": live.origin.name(),
             "trace_id": live.trace_id.clone().unwrap_or_default(),
+            "waits_for": waits_for(live, backend),
         }),
         // It writes its answer: thinking still, by its state, and in the phase of answering.
         (Some(live), _) if live.activity == Activity::Responding => json!({
@@ -747,6 +764,14 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "turn_started_ms": running.map(|live| live.started_at_ms),
         "ts": state_stamp(record, status),
     });
+    // What a limited turn waits for, as a word an app keys on (`waits_for`).
+    if let Some(kind) = waiting
+        .as_ref()
+        .and(running)
+        .and_then(|live| waits_for(live, &record.backend))
+    {
+        activity["waits_for"] = json!(kind);
+    }
     // Who stopped or repaired the agent and why, while that is its latest state.
     let marked = match (&status.note, status.last.as_ref()) {
         (Some(note), _) => Some(control::marked(control::REPAIRED, &note.by, &note.released)),
@@ -2093,7 +2118,7 @@ pub fn summary(
             0 => usize::from(kind == AgentStateKind::Tool),
             running => running,
         };
-        json!({
+        let mut shown = json!({
             "state": state,
             "headline": headline,
             "since_ms": tools
@@ -2104,7 +2129,15 @@ pub fn summary(
             "running_tools": running_tools,
             "tool": tool,
             "item_id": tools.last().map(|tool| &tool.id),
-        })
+        });
+        // What a limited turn waits for, as a word an app keys on (`waits_for`).
+        if let Some(kind) = live
+            .filter(|_| state == "limited")
+            .and_then(|live| waits_for(live, backend))
+        {
+            shown["waits_for"] = json!(kind);
+        }
+        shown
     };
     // The start of the turn that runs: what an app counts the running turn from. At rest
     // there is no such turn, however the last one ended.

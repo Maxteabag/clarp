@@ -505,8 +505,27 @@ fn a_held_turn_says_it_waits_for_the_machine_and_stops_saying_it_when_let_go() {
                 && event["session"] == session
                 && event["detail"]["account_recovery"] == "waiting"
                 && event["detail"]["message"] == words
+                && event["detail"]["waits_for"] == "machine"
         })
     });
+    // An app tells it from a usage limit by a word it keys on, in each of the three.
+    let held_row = row(&host, &session);
+    assert_eq!(
+        held_row["live_activity"]["waits_for"], "machine",
+        "{held_row}"
+    );
+    assert_eq!(held_row["activity"]["waits_for"], "machine", "{held_row}");
+    wait_for(
+        "the agent-activity that says it waits for the machine",
+        || {
+            events.lock().unwrap().iter().any(|event| {
+                event["type"] == "agent-activity"
+                    && event["session"] == session
+                    && event["state"] == "limited"
+                    && event["waits_for"] == "machine"
+            })
+        },
+    );
     assert!(!started(&spools));
     // The words follow the reading at the gate's next look.
     pressure(&place, 52.0);
@@ -523,6 +542,9 @@ fn a_held_turn_says_it_waits_for_the_machine_and_stops_saying_it_when_let_go() {
             && !summary.starts_with("Waiting for the machine"),
         "{headline} / {summary}"
     );
+    let after = row(&host, &session);
+    assert!(after["live_activity"].get("waits_for").is_none(), "{after}");
+    assert!(after["activity"].get("waits_for").is_none(), "{after}");
     assert_eq!(held(&host), 0);
 }
 

@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 187;
+pub const HOST_CONTRACT: u64 = 188;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -455,6 +455,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A person's send never waits behind a turn that is not a person's: that turn makes way at
     // once, and the agent is left a note to take it up again (issue 839).
     ("owner_preempts", 187),
+    // A `limited` turn says what it waits for, as a word an app keys on rather than its words:
+    // `waits_for` `"machine"` (its start held for the machine's pressure), `"network"` or
+    // `"quota"` (the only usage limit), in `live_activity`, `agent-activity` and `agent-state`'s
+    // `detail` (issue 834).
+    ("waits_for", 188),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
