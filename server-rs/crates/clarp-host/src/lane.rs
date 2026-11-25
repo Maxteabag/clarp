@@ -1037,10 +1037,8 @@ impl Endpoint {
                 };
             }
         }
-        let idle = match asked {
-            Ok(state) => state.working == Some(false) && state.claim.is_none(),
-            Err(error) => return Err(error),
-        };
+        let state = asked?;
+        let idle = state.working == Some(false) && state.claim.is_none();
         // The answer to the ask to leave comes once the lane has gone (Claude's) or at once:
         // read beside the wait, which watches the lane itself.
         let (sender, answer) = std::sync::mpsc::channel();
