@@ -203,8 +203,10 @@ PLANTS = [
     (I, 'install', 'the other Host\'s releases are not named', '    [ -d "$python_share/releases" ] && skills="$skills --skills-other-releases $python_share/releases"', '    true'),
     (I, 'install', 'the other Host\'s list is not named', '    [ -f "$python_chosen" ] && skills="$skills --skills-chosen-before $python_chosen"', '    true'),
     (I, 'install', 'the tree is copied under one name for every version', '    release="$share/releases/$version"', '    release="$share/releases/current"'),
-    (I, 'install', 'the version before is removed', '        if [ "$old" != "$version" ] && [ "$old" != "$previous" ]; then', '        if [ "$old" != "$version" ]; then'),
-    (I, 'install', 'older versions stay', '        if [ "$old" != "$version" ] && [ "$old" != "$previous" ]; then', '        if false; then'),
+    # Pruning keeps the version installed now, the one before it and the last one that ran steady (issue 853; that
+    # one's survival is tested in tools/tests/test_install_host_rollback.py, which no Host test runs).
+    (I, 'install', 'the version before is removed', '    case "$old" in "$version"|"$previous"|"$steady_version") continue ;; esac', '    case "$old" in "$version"|"$steady_version") continue ;; esac'),
+    (I, 'install', 'older versions stay', '    rm -rf "${releases:?}/${old:?}"', '    true'),
     # The install tool's gate: select only where no Python Host runs.
     (I, 'install', 'a running Python Host is not seen', '            *) return 0 ;;', '            *) return 1 ;;'),
     (I, 'install', 'the runtime unit is not looked at', '    for unit in clarp.service clarp-runtime.service; do', '    for unit in clarp.service; do'),
