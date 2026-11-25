@@ -129,6 +129,10 @@ yours; the launch only carries them.)
   turn dies mid-launch, the worker checks the goal itself for up to two
   minutes: a stored wake still runs the command once, an unstored one never
   runs it, and a relaunch never collides with the old attempt.
+- Exit 1 with "the worker could not register" or "did not register within":
+  the Host did not take the job, and the message says why for each of the
+  worker's two tries (a busy Host may not answer one within 25 s). Nothing
+  ran; launching again is safe.
 - `--no-wake` starts the command with no dependency. Nobody will tell you
   when it ends; say so.
 - With a user systemd manager (Linux) the worker runs as its own service,

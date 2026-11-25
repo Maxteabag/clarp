@@ -41,6 +41,11 @@ read -r -a GOAL <<< "${CLARP_GOAL:-clarp-goal}"
 # Worker identity overrides any absent, stale or spoofed caller value.
 UNIT_VARS=" CLARP_BACKGROUND_WORKER_PID INVOCATION_ID JOURNAL_STREAM SYSTEMD_EXEC_PID MANAGERPID NOTIFY_SOCKET WATCHDOG_PID WATCHDOG_USEC LISTEN_PID LISTEN_FDS LISTEN_FDNAMES MEMORY_PRESSURE_WATCH MEMORY_PRESSURE_WRITE RUNTIME_DIRECTORY STATE_DIRECTORY CACHE_DIRECTORY LOGS_DIRECTORY CONFIGURATION_DIRECTORY CREDENTIALS_DIRECTORY "
 READY_WAIT=120  # how long a worker holds the command for its dependency
+# How long one try of the worker's registration may wait for the Host. A busy Host has taken
+# longer than 30 s to answer one (issue 775): a try that gets no answer is made once more, and
+# the launcher waits for both.
+REGISTER_WAIT=${CLARP_JOB_REGISTER_WAIT:-25}
+case $REGISTER_WAIT in ''|*[!0-9]*|0) REGISTER_WAIT=25 ;; esac
 
 # One reading of a goal (clarp-goal get JSON on stdin) for every decision.
 GOAL_PY='
@@ -151,13 +156,31 @@ if [ "${1:-}" = "__worker" ]; then
   read -r -a GOAL <<< "${CLARP_GOAL:-clarp-goal}"
   exec 2>>"$log.worker.err"
   export CLARP_BACKGROUND_WORKER_PID=$$
-  out=$("${BG[@]}" "$session" job-upsert "$job_id" "$kind" "$title"); status=$?
-  handle=$(printf '%s\n' "$out" | tail -n 1)
-  if [ "$status" != 0 ] || [ "${handle#bg1:}" = "$handle" ]; then
-    printf 'job-upsert failed (exit %s): %s\n' "$status" "$out" > "$run.handle.err"
+  # Registering again is safe: this worker (CLARP_BACKGROUND_WORKER_PID) keeps the same run.
+  # Only a try the Host did not answer is made again; a refusal is the answer.
+  tries="" handle=""
+  for attempt in 1 2; do
+    out=$(timeout "$REGISTER_WAIT" "${BG[@]}" "$session" job-upsert "$job_id" "$kind" "$title" \
+      2>"$run.register.err"); status=$?
+    said=$(tr '\n' ' ' < "$run.register.err"); rm -f "$run.register.err"
+    handle=$(printf '%s\n' "$out" | tail -n 1)
+    [ "$status" = 0 ] && [ "${handle#bg1:}" != "$handle" ] && break
+    handle=""
+    case $status in
+      124) tries="${tries}try $attempt: the Host did not answer within ${REGISTER_WAIT} s; " ;;
+      69) tries="${tries}try $attempt: the Host could not be reached: ${said}; " ;;
+      *) tries="${tries}try $attempt: refused (exit $status): ${out}${said}; "; break ;;
+    esac
+    # What the launcher says if it gives up while a try runs.
+    printf '%s\n' "$tries" > "$run.register.tmp" && mv "$run.register.tmp" "$run.register"
+  done
+  if [ -z "$handle" ]; then
+    printf 'job-upsert failed: %s\n' "${tries%; }" > "$run.handle.err"
+    rm -f "$run.register"
     [ -n "$envfile" ] && rm -f "$envfile"
     exit 1
   fi
+  rm -f "$run.register"
   "${BG[@]}" "$session" job-log "$handle" "$log" >/dev/null 2>&1 || true
   echo "$handle" > "$run.handle.tmp" && mv "$run.handle.tmp" "$run.handle"
   if [ "$goal" != - ]; then
@@ -322,9 +345,11 @@ else
 fi
 
 handle=""
-for _ in $(seq 300); do
+# Both tries of the worker's registration, and the time the worker takes to start.
+register_for=$((2 * REGISTER_WAIT + 10))
+for _ in $(seq $((register_for * 10))); do
   [ -s "$run.handle" ] && { handle=$(cat "$run.handle"); break; }
-  [ -s "$run.handle.err" ] && { cat "$run.handle.err" >&2; cleanup; exit 1; }
+  [ -s "$run.handle.err" ] && { printf 'run_detached_job: the worker could not register: ' >&2; cat "$run.handle.err" >&2; cleanup; exit 1; }
   sleep 0.1
 done
 if [ -z "$handle" ]; then
@@ -335,10 +360,12 @@ if [ -z "$handle" ]; then
   sleep 1
   if [ -s "$run.handle" ]; then  # it registered just as it was stopped: close that job
     "${BG[@]}" "$session" job-cancel "$(cat "$run.handle")" >/dev/null 2>&1
-    echo "run_detached_job: worker registered only after 30 s and was stopped; job $(cat "$run.handle") is closed as cancelled; see $log.worker.err" >&2
+    echo "run_detached_job: worker registered only after $register_for s and was stopped; job $(cat "$run.handle") is closed as cancelled; see $log.worker.err" >&2
   else
-    echo "run_detached_job: worker did not register within 30 s and was stopped; see $log.worker.err" >&2
+    why=$(cat "$run.register" 2>/dev/null)
+    echo "run_detached_job: worker did not register within $register_for s and was stopped (${why:-it had not answered from its first try}); see $log.worker.err" >&2
   fi
+  rm -f "$run.register"
   exit 1
 fi
 

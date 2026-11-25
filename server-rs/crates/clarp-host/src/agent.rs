@@ -564,6 +564,92 @@ enum Ask {
     Close(CloseReply),
 }
 
+impl Ask {
+    /// The name of the request, for the journal line of one that held the thread long.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::ClaudeLane(..) => "ClaudeLane",
+            Self::NativeGoal { .. } => "NativeGoal",
+            Self::NativeGoalReply { .. } => "NativeGoalReply",
+            Self::NativeGoalSeen(..) => "NativeGoalSeen",
+            Self::NativeGoalWatchLost => "NativeGoalWatchLost",
+            Self::NativeGoalReconciled(..) => "NativeGoalReconciled",
+            Self::NativeGoalRetired { .. } => "NativeGoalRetired",
+            Self::SetMove { .. } => "SetMove",
+            Self::LaunchPermit { .. } => "LaunchPermit",
+            Self::RefreshTelling => "RefreshTelling",
+            Self::Bookkeeping { .. } => "Bookkeeping",
+            Self::Delegation { .. } => "Delegation",
+            Self::VisitProvider(..) => "VisitProvider",
+            Self::ExpireProviderLinks(..) => "ExpireProviderLinks",
+            Self::HistoricalRead { .. } => "HistoricalRead",
+            Self::HelperRead { .. } => "HelperRead",
+            Self::Send { .. } => "Send",
+            Self::LeaveNote { .. } => "LeaveNote",
+            Self::Stop { .. } => "Stop",
+            Self::Repair { .. } => "Repair",
+            Self::Resume { .. } => "Resume",
+            Self::StartAgain { .. } => "StartAgain",
+            Self::Queue { .. } => "Queue",
+            Self::Experience { .. } => "Experience",
+            Self::OpeningRow { .. } => "OpeningRow",
+            Self::Fate { .. } => "Fate",
+            Self::UnrunRequest { .. } => "UnrunRequest",
+            Self::Standing { .. } => "Standing",
+            Self::RunningTrace { .. } => "RunningTrace",
+            Self::Shown { .. } => "Shown",
+            Self::SaidSoFar { .. } => "SaidSoFar",
+            Self::ChangeTool { .. } => "ChangeTool",
+            Self::Import { .. } => "Import",
+            Self::TakeUp { .. } => "TakeUp",
+            Self::Withdraw { .. } => "Withdraw",
+            Self::SendNow { .. } => "SendNow",
+            Self::Reword { .. } => "Reword",
+            Self::Note { .. } => "Note",
+            Self::KeeperEvents { .. } => "KeeperEvents",
+            Self::GoalEvents { .. } => "GoalEvents",
+            Self::Tail { .. } => "Tail",
+            Self::After { .. } => "After",
+            Self::Before { .. } => "Before",
+            Self::Label { .. } => "Label",
+            Self::RetireLabel { .. } => "RetireLabel",
+            Self::Job { .. } => "Job",
+            Self::Goal { .. } => "Goal",
+            Self::Artifact { .. } => "Artifact",
+            Self::TakeLibrary { .. } => "TakeLibrary",
+            Self::Hold { .. } => "Hold",
+            Self::TakePlans { .. } => "TakePlans",
+            Self::Publish { .. } => "Publish",
+            Self::JobRecord { .. } => "JobRecord",
+            Self::JobTimeline { .. } => "JobTimeline",
+            Self::Row { .. } => "Row",
+            Self::Delivery { .. } => "Delivery",
+            Self::RevisionAt { .. } => "RevisionAt",
+            Self::ClaimLine { .. } => "ClaimLine",
+            Self::LineBegun { .. } => "LineBegun",
+            Self::LineEnded { .. } => "LineEnded",
+            Self::LineAnnounced { .. } => "LineAnnounced",
+            Self::LinePlayed { .. } => "LinePlayed",
+            Self::TakeoverHeld { .. } => "TakeoverHeld",
+            Self::SpoolChanged => "SpoolChanged",
+            Self::ShimGone { .. } => "ShimGone",
+            Self::LaunchFailed { .. } => "LaunchFailed",
+            Self::Amended { .. } => "Amended",
+            Self::LoginChanged => "LoginChanged",
+            Self::NetworkChecked { .. } => "NetworkChecked",
+            Self::TerminalFacts { .. } => "TerminalFacts",
+            Self::OpenTerminal { .. } => "OpenTerminal",
+            Self::Terminal { .. } => "Terminal",
+            Self::AccountStop => "AccountStop",
+            Self::AccountBack => "AccountBack",
+            Self::AccountEnd => "AccountEnd",
+            Self::AccountHeld => "AccountHeld",
+            Self::Explained { .. } => "Explained",
+            Self::Close(..) => "Close",
+        }
+    }
+}
+
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
@@ -1858,9 +1944,15 @@ impl Worker {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
         let mut wait = REOPEN_FIRST;
         let mut mailbox = Mailbox::default();
+        // How the journal names this thread when one request holds it long.
+        let thread = format!("the thread of agent {}", self.setup.record.session);
         loop {
             if self.actor.is_none() {
-                match self.open() {
+                let opened = {
+                    let _held = crate::held::Held::new(&thread, "its opening");
+                    self.open()
+                };
+                match opened {
                     Ok(()) => wait = REOPEN_FIRST,
                     Err(why) => {
                         eprintln!(
@@ -1962,6 +2054,7 @@ impl Worker {
             let ask = match request {
                 Ok(ask) => ask,
                 Err(RecvTimeoutError::Timeout) => {
+                    let _held = crate::held::Held::new(&thread, "its timed work");
                     let now = Instant::now();
                     if self.transcript_due.is_some_and(|due| due <= now) {
                         self.tell_transcript();
@@ -2007,6 +2100,7 @@ impl Worker {
                 }
                 Err(RecvTimeoutError::Disconnected) => return,
             };
+            let _held = crate::held::Held::new(&thread, ask.kind());
             if let Ask::Close(closed) = ask {
                 // The agent is gone: the pool of its tool's accounts does not wait for its
                 // turn, and does not take it up.

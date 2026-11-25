@@ -1029,6 +1029,57 @@ enum Ask {
     },
 }
 
+impl Ask {
+    /// The name of the request, for the journal line of one that held the thread long.
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::AppendVoice { .. } => "AppendVoice",
+            Self::DelegationMismatch(..) => "DelegationMismatch",
+            Self::GoalDelegation { .. } => "GoalDelegation",
+            Self::Create { .. } => "Create",
+            Self::StartAgain { .. } => "StartAgain",
+            Self::Amend { .. } => "Amend",
+            Self::MakeJanitor { .. } => "MakeJanitor",
+            Self::Mark { .. } => "Mark",
+            Self::Noted { .. } => "Noted",
+            Self::Adopt { .. } => "Adopt",
+            Self::StoredAgent { .. } => "StoredAgent",
+            Self::PastLedger { .. } => "PastLedger",
+            Self::Remove { .. } => "Remove",
+            Self::Select { .. } => "Select",
+            Self::Issue { .. } => "Issue",
+            Self::Exchange { .. } => "Exchange",
+            Self::Revoke { .. } => "Revoke",
+            Self::PairedDeviceHistory { .. } => "PairedDeviceHistory",
+            Self::ComputerJobs { .. } => "ComputerJobs",
+            Self::ComputerJob { .. } => "ComputerJob",
+            Self::WatchComputerJob { .. } => "WatchComputerJob",
+            Self::ChangeComputerJob { .. } => "ChangeComputerJob",
+            Self::ClaimJob { .. } => "ClaimJob",
+            Self::JobOwner { .. } => "JobOwner",
+            Self::PushRegister { .. } => "PushRegister",
+            Self::PushDisable { .. } => "PushDisable",
+            Self::Pushed { .. } => "Pushed",
+            Self::Set { .. } => "Set",
+            Self::VoiceMigration { .. } => "VoiceMigration",
+            Self::SetCoordination { .. } => "SetCoordination",
+            Self::SetChatView { .. } => "SetChatView",
+            Self::Keep { .. } => "Keep",
+            Self::KeepTogether { .. } => "KeepTogether",
+            Self::OpeningAudio { .. } => "OpeningAudio",
+            Self::Kept { .. } => "Kept",
+            Self::Judged { .. } => "Judged",
+            Self::Listed { .. } => "Listed",
+            Self::PersonaWrite { .. } => "PersonaWrite",
+            Self::PictureMade { .. } => "PictureMade",
+            Self::PortraitStatus { .. } => "PortraitStatus",
+            Self::BeginPortraits { .. } => "BeginPortraits",
+            Self::AcceptPortraits { .. } => "AcceptPortraits",
+            Self::PersonaRemove { .. } => "PersonaRemove",
+        }
+    }
+}
+
 pub(crate) enum PersonaRemoval {
     Removed,
     Missing,
@@ -2238,6 +2289,8 @@ fn read_opening_audio(
 
 impl Fleet {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
+        /// How the journal names this thread when one request holds it long.
+        const THREAD: &str = "the fleet's thread";
         let every = Duration::from_millis(self.works.config.helpers_checked_every_ms.max(1));
         let mut looked = Instant::now();
         loop {
@@ -2249,6 +2302,7 @@ impl Fleet {
             };
             if looked.elapsed() >= every {
                 looked = Instant::now();
+                let _held = crate::held::Held::new(THREAD, "its look after the helpers");
                 if let Err(why) = self.look_after_helpers() {
                     eprintln!(
                         "clarp-host: the helpers could not be looked after: {}",
@@ -2257,6 +2311,7 @@ impl Fleet {
                 }
             }
             let Some(ask) = ask else { continue };
+            let _held = crate::held::Held::new(THREAD, ask.kind());
             // Each answer goes to whoever asked. One who has gone by then is told nothing:
             // nobody is left to tell, and what was done is done (and said, where it failed).
             match ask {

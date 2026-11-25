@@ -318,11 +318,15 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 "" => ids::hex(16),
                 id => id.to_string(),
             };
-            match app
+            // A registration waits for two threads in turn, the fleet's and the agent's: the
+            // journal says which it waited for when it took long (issue 775).
+            let began = std::time::Instant::now();
+            let claimed = app
                 .fleet
                 .claim_job(id.clone(), member.record.agent_id.clone())
-                .await
-            {
+                .await;
+            let fleet_took = began.elapsed();
+            match claimed {
                 Err(error) => return could_not(&error),
                 Ok(Err(owner)) => {
                     let what = match owner {
@@ -361,7 +365,18 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 .env
                 .get("CLARP_BACKGROUND_ORIGIN")
                 .and_then(|raw| clarp_kernel::provider_tasks::RegistrationOrigin::parse(raw));
-            match member.agent.job_with_origin(command, origin).await {
+            let registered = member.agent.job_with_origin(command, origin).await;
+            let took = began.elapsed();
+            if took >= crate::held::SLOW {
+                eprintln!(
+                    "clarp-host: a background job's registration for {session} took {} ms: {} ms \
+                     for the fleet's thread, {} ms for the agent's",
+                    took.as_millis(),
+                    fleet_took.as_millis(),
+                    took.saturating_sub(fleet_took).as_millis()
+                );
+            }
+            match registered {
                 Err(error) => could_not(&error),
                 Ok(Err(refusal)) => ToolAnswer::said(1, format!("agent_bg: {refusal}")),
                 Ok(Ok(change)) => match change.job {

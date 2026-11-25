@@ -25,10 +25,10 @@ def run(tmp_path):
            'CLARP_AGENT_BG': shlex.join([sys.executable, str(ROOT / 'scripts/agent_bg.py')])}
     env.pop('CLARP_BACKGROUND_WORKER_PID', None)
 
-    def start(job_id, *command, log_name=None, expect=0):
+    def start(job_id, *command, log_name=None, expect=0, extra_env=None):
         log = tmp_path / 'out' / (log_name or f'{job_id}.log')   # directory made by the script
         out = subprocess.run([str(SCRIPT), '--no-wake', 'ziggy-fixture', job_id, 'render', 'Render fixture', str(log), '--', *command],
-                             env=env, capture_output=True, text=True, timeout=40)
+                             env={**env, **(extra_env or {})}, capture_output=True, text=True, timeout=40)
         assert out.returncode == expect, out.stderr
         return (out.stdout.strip() if expect == 0 else out.stderr), log
     return start
@@ -72,6 +72,42 @@ def test_a_cancelled_job_id_is_not_reused_for_a_new_run(run, tmp_path):
     assert 'job-upsert failed' in error
     time.sleep(1)
     assert not marker.exists() and jobs.get('one-run', reconcile=False)['status'] == 'cancelled'
+
+
+def _slow_registration(tmp_path, tries_unanswered):
+    """An agent_bg whose first `tries_unanswered` job-upserts never answer, as a busy Host's
+    did (issue 775); everything else, and every later try, is the real one."""
+    real = shlex.join([sys.executable, str(ROOT / 'scripts/agent_bg.py')])
+    count = tmp_path / 'upserts'
+    helper = tmp_path / 'slow-bg.sh'
+    helper.write_text(f"""#!/bin/sh
+if [ "$2" = job-upsert ]; then
+  echo x >> {count}
+  [ "$(wc -l < {count})" -le {tries_unanswered} ] && exec sleep 60
+fi
+exec {real} "$@"
+""")
+    helper.chmod(0o755)
+    return {'CLARP_AGENT_BG': str(helper), 'CLARP_JOB_REGISTER_WAIT': '2'}, count
+
+
+def test_a_registration_the_host_did_not_answer_is_tried_once_more(run, tmp_path):
+    extra, count = _slow_registration(tmp_path, 1)
+    handle, log = run('slow-host', 'sleep', '1', extra_env=extra)
+    assert handle == 'bg1:1:slow-host'
+    assert count.read_text().count('x') == 2
+    assert wait_for(lambda: jobs.get('slow-host', reconcile=False)['status'] == 'succeeded')
+
+
+def test_a_registration_never_answered_stops_the_worker_and_says_why(run, tmp_path):
+    extra, count = _slow_registration(tmp_path, 2)
+    marker = tmp_path / 'ran'
+    error, _ = run('silent-host', 'touch', str(marker), extra_env=extra, expect=1)
+    assert 'try 1: the Host did not answer within 2 s' in error, error
+    assert 'try 2: the Host did not answer within 2 s' in error, error
+    assert count.read_text().count('x') == 2
+    time.sleep(1)
+    assert not marker.exists() and jobs.get('silent-host', reconcile=False) is None
 
 
 def test_a_worker_killed_before_its_receipt_is_never_reported_as_success(run, tmp_path):
