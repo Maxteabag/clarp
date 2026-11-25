@@ -222,13 +222,26 @@ fn after_a_reconnect_the_selected_chat_and_the_ones_opened_last_stay_live() {
         d.engine.select(session);
     }
     let watched = ["c2", "c3", "c4", "c5", "c6"];
-    d.until("the stream carries five", |_| asked_for(&host, 0, &watched));
-    d.settle(std::time::Duration::from_millis(300));
+    let held = |d: &Driver| -> Vec<&str> { ["c1", "c2", "c3", "c4", "c5", "c6"].into_iter().filter(|s| d.engine.live_view(s).is_some()).collect() };
+    for _ in 0..50 {
+        if held(&d) == watched && asked_for(&host, 0, &watched) {
+            break;
+        }
+        d.settle(std::time::Duration::from_millis(200));
+    }
+    assert_eq!(held(&d), watched, "live views held; streams asked: {:?}", events_queries(&host));
+    assert!(asked_for(&host, 0, &watched), "streams asked: {:?}", events_queries(&host));
     let streams = events_queries(&host).len();
     // Six chats are loaded; reconnecting opens them again in the order they
     // were opened, never in the order they are stored in.
     d.engine.reconnect();
-    d.until("the stream is opened again for the same five", |_| asked_for(&host, streams, &watched));
+    for _ in 0..50 {
+        if asked_for(&host, streams, &watched) {
+            break;
+        }
+        d.settle(std::time::Duration::from_millis(200));
+    }
+    assert!(asked_for(&host, streams, &watched), "live views held: {:?}; streams asked after the reconnect: {:?}", held(&d), &events_queries(&host)[streams.min(events_queries(&host).len())..]);
     assert!(d.engine.live_view("c2").is_some(), "the selected chat keeps its live view");
     assert!(d.engine.live_view("c1").is_none(), "c1 was let go");
 }
