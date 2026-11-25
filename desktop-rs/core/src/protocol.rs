@@ -463,6 +463,10 @@ pub struct Message {
     /// Rust Host contract 189): that turn's id, `read_into.trace_id`, as
     /// `GET /live` names it (`turn.turn_id`). Empty on every other row.
     pub read_into: String,
+    /// How it was read into that turn (`read_into.at`, contract 195): `start`
+    /// (read with the turn's own message as it began) or `steer` (read into
+    /// it as it ran); empty on an older Host.
+    pub read_into_at: String,
     /// Which view the row belongs to (`chat_view`, #702): `conversation`,
     /// `session`, or empty from a Host without the feature.
     pub view: String,
@@ -543,6 +547,7 @@ impl Message {
             phase: s("phase"),
             turn: object.get("turn").and_then(Value::as_object).cloned(),
             read_into: object.get("read_into").and_then(Value::as_object).map(|r| json::string(r, "trace_id")).unwrap_or_default(),
+            read_into_at: object.get("read_into").and_then(Value::as_object).map(|r| json::string(r, "at")).unwrap_or_default(),
             hidden_before: object.get("hidden_before").and_then(Value::as_object).cloned(),
             view: s("view").trim().to_ascii_lowercase(),
             session_rows: object.get("session_rows").and_then(Value::as_i64).map(|n| n.max(0)),

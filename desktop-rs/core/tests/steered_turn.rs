@@ -78,6 +78,11 @@ fn tool_item(id: &str, call: &str, command: &str, ordinal: i64, at: i64, settled
 
 /// The live turn: running (its tools running), or settled with its answer.
 fn live(echo: bool, settled: bool) -> LiveView {
+    live_at(echo, settled, None)
+}
+
+/// As `live`, the turn saying how [s2] was read (`read_rows_at`, contract 195).
+fn live_at(echo: bool, settled: bool, at: Option<&str>) -> LiveView {
     let mut items = vec![tool_item("cx:sleep", SLEEP_ROW, "sleep 20", 1, SLEEP_AT, settled || echo)];
     if echo {
         items.push(tool_item("cx:echo", ECHO_ROW, "echo VIPER", 2, ECHO_AT, settled));
@@ -90,6 +95,9 @@ fn live(echo: bool, settled: bool) -> LiveView {
     if settled {
         turn["ended_at_ms"] = json!(ENDED_AT);
         turn["worked_ms"] = json!(25_568);
+    }
+    if let Some(at) = at {
+        turn["read_rows_at"] = json!([at]);
     }
     let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": if settled { ENDED_AT } else { ECHO_AT + 1_000 },
         "activity": {"state": if settled { "idle" } else { "tool" }, "turn_id": T}, "turn": turn, "items": items});
@@ -188,9 +196,24 @@ fn read_into(mut rows: Vec<Message>, turn: &str) -> Vec<Message> {
 }
 
 fn row_with_read_into(row: &Message, turn: &str) -> Message {
+    row_read_at(row, turn, None)
+}
+
+/// [s2] read into `turn` `at` its start or as a steer (contract 195).
+fn row_read_at(row: &Message, turn: &str, at: Option<&str>) -> Message {
     let mut value = json!({"id": row.id, "role": row.role, "timestamp": row.timestamp, "trace_id": row.trace_id, "text": row.text});
     value["read_into"] = json!({"trace_id": turn, "turn": 41});
+    if let Some(at) = at {
+        value["read_into"]["at"] = json!(at);
+    }
     self::row(value)
+}
+
+fn read_at(mut rows: Vec<Message>, turn: &str, at: &str) -> Vec<Message> {
+    for row in rows.iter_mut().filter(|r| r.id == S2) {
+        *row = row_read_at(row, turn, Some(at));
+    }
+    rows
 }
 
 fn fold_keys(folded: &Folded) -> Vec<String> {
@@ -352,4 +375,23 @@ fn with_read_into_a_turn_begun_without_a_trace_splits_at_its_turn_id() {
     let working = format!("live:fold:{TT}");
     assert_eq!(fold_keys(&folded), [before.clone(), working.clone()]);
     assert_eq!(history_order(&rows, &folded), [S1, before.as_str(), S2, working.as_str(), ANSWER, S3]);
+}
+
+#[test]
+fn a_message_read_at_the_turns_start_is_no_split_point_a_steer_is() {
+    // Contract 195: only a steer splits the work; one read at the start
+    // belongs with the turn's own message.
+    let start = read_at(log_rows(true, true), T, "start");
+    assert_eq!(start.iter().find(|r| r.id == S2).map(|r| r.read_into_at.as_str()), Some("start"));
+    assert_eq!(fold_keys(&history_on(&start, Mode::Grouped, true)), [working()], "read at the start: one piece");
+    let steer = read_at(log_rows(true, true), T, "steer");
+    assert!(fold_keys(&history_on(&steer, Mode::Grouped, true)).contains(&before()), "a steer splits");
+
+    // Live: read_rows_at says the same word per read_rows entry.
+    for (word, split) in [("start", false), ("steer", true)] {
+        let rows = log_rows(true, false);
+        let running = present(&live_at(true, false, Some(word)), &rows, &live_options(Mode::Grouped));
+        let keys: Vec<String> = running.entries.iter().map(|e| e.key.clone()).collect();
+        assert_eq!(keys.contains(&before()), split, "live, read at {word}: {keys:?}");
+    }
 }
