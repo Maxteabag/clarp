@@ -563,3 +563,30 @@ fn a_recovery_is_asked_and_run_as_the_python_host_asks_and_runs_it() {
             && !quota::settled("waiting")
     );
 }
+
+#[test]
+fn an_account_two_tools_run_on_is_told_once() {
+    // Antigravity over ACP runs on Antigravity's account: /backend-usage gives both tools that
+    // account's row, under one provider_instance_id. One crossing is one notice.
+    let window = json!({
+        "window_id": "puw-gemini-five-hour", "kind": "five_hour", "label": "Gemini Models",
+        "unit": "percent", "used_percentage": 95.0, "resets_at": "2026-11-25T02:45:04Z",
+        "observed_at": "2026-11-24T23:56:11Z", "freshness": "fresh",
+    });
+    let row = json!({
+        "provider_id": "agy", "provider_instance_id": "server:agy", "windows": [window],
+    });
+    let usage = json!({ "providers": { "agy": row.clone(), "agy-acp": row } });
+    let owner = Owner {
+        agent_id: "keeper",
+        session: "keeper",
+        name: "Quota keeper",
+        generation: 1,
+        threshold: 10.0,
+        recovery_mode: "off",
+    };
+    let mut memory = Kept(BTreeMap::new());
+    let notices = quota::looked(&usage, &owner, &mut memory);
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].provider, "agy");
+}

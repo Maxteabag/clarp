@@ -254,7 +254,16 @@ pub fn looked(usage: &Value, owner: &Owner<'_>, memory: &mut dyn Memory) -> Vec<
     let Some(providers) = usage["providers"].as_object() else {
         return notices;
     };
+    // An account is told once. A tool that runs on another tool's account (Antigravity over
+    // ACP) carries that account's row with the same windows, and told under each tool's name,
+    // one crossing reached the owner twice.
+    let mut accounts = std::collections::BTreeSet::new();
     for (provider_id, provider) in providers {
+        if let Some(account) = provider.get("provider_instance_id").and_then(Value::as_str)
+            && !accounts.insert(account)
+        {
+            continue;
+        }
         let Some(windows) = provider["windows"].as_array() else {
             continue;
         };
