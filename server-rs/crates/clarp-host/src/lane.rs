@@ -558,6 +558,15 @@ impl Endpoint {
             );
             return self.released();
         };
+        // A handle on that process, opened before the holder is looked at again: from here it
+        // names this process whatever its id comes to name, and the second look shows that it
+        // held the lock when the handle was opened.
+        let Ok(process) = handle_on(pid) else {
+            return self.released();
+        };
+        if holder::of(&lock) != Some(pid) {
+            return self.released();
+        }
         // Its own scope ends the lane and its tool together, whatever their process groups: a
         // tool that hangs may not read the end of its input, and with only the lane's process
         // gone it would write the conversation beside the lane or turn that comes next. Where
@@ -571,14 +580,18 @@ impl Endpoint {
             unended => {
                 let group = owner_group(&self.socket)
                     .filter(|group| may_signal(*group) && holder::leads_for(*group, pid));
-                // Looked at again right before the signals: the same process holds the lock.
-                if holder::of(&lock) != Some(pid) {
-                    return self.released();
-                }
                 if let Some(group) = group {
                     signal(group, true);
                 }
-                signal(pid, false);
+                match &process {
+                    Some(handle) => {
+                        let _ = rustix::process::pidfd_send_signal(
+                            handle,
+                            rustix::process::Signal::KILL,
+                        );
+                    }
+                    None => signal(pid, false),
+                }
                 let tool = group.map_or_else(
                     || "its tool leads no group of its own any more".to_owned(),
                     |group| format!("its tool's process group {group}"),
@@ -893,12 +906,26 @@ fn may_signal(id: u32) -> bool {
         && i32::try_from(id).is_ok_and(|raw| raw != nix::unistd::getpgrp().as_raw())
 }
 
-/// Ends with SIGKILL the lane's process `id`, or its tool's process `group`, after the lane was
-/// asked to leave and given its time. The lane's id is the one the kernel names as the holder of
-/// its owner lock, looked at right before; the group's leader was checked to be its child. No
-/// safe call opens a process by a handle (`pidfd_open`) in this workspace, which has no
-/// `unsafe`: the window left is between the last look and the signal, microseconds against an
-/// id space of millions.
+/// A handle on the process `pid` (`pidfd`), through which it is signalled whatever its id comes
+/// to name. `Err`: the process is gone. `Ok(None)`: this kernel has no handles on processes.
+fn handle_on(pid: u32) -> io::Result<Option<std::os::fd::OwnedFd>> {
+    let Ok(raw) = i32::try_from(pid) else {
+        return Ok(None);
+    };
+    let Some(id) = rustix::process::Pid::from_raw(raw) else {
+        return Ok(None);
+    };
+    match rustix::process::pidfd_open(id, rustix::process::PidfdFlags::empty()) {
+        Ok(handle) => Ok(Some(handle)),
+        Err(error) if error == rustix::io::Errno::SRCH => Err(io::Error::from(error)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Ends with SIGKILL a lane's tool's process `group` (whose leader was checked to be the lane's
+/// child, and keeps its id until the lane reaps it), or, on a kernel without handles on
+/// processes, the lane's process `id`, which the kernel named as its lock's holder right before.
+/// The lane's process is otherwise signalled through its handle (`pidfd`).
 fn signal(id: u32, group: bool) {
     let Ok(raw) = i32::try_from(id) else {
         return;

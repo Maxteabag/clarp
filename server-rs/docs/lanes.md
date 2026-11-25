@@ -165,10 +165,12 @@ of them is not done.
         because that is `unsafe` and the workspace forbids it; it fires when the starting
         thread ends, and both lanes start their tool on their main thread.
     - **Whose process.** The lane's id is the holder of its owner lock as the kernel names it
-      (`/proc/locks`), looked at again right before the signal, never the lock file's words
-      alone: a new lane takes the lock before it writes its id, so the file may still name the
-      lane before it. No safe call opens a process by a handle (`pidfd_open`) here, so what is
-      left is the microseconds between that last look and the signal.
+      (`/proc/locks`), never the lock file's words alone: a new lane takes the lock before it
+      writes its id, so the file may still name the lane before it. A handle on that process
+      (`pidfd_open`, through `rustix`, as the workspace has no `unsafe`) is opened, the holder is
+      looked at again, and the lane is signalled through the handle (`pidfd_send_signal`), so a
+      process whose id came free and was given again is never reached. Only a kernel without
+      process handles falls back to the id, right after that second look.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails
