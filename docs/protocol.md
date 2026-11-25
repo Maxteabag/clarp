@@ -1355,6 +1355,24 @@ turn: a steer, or a message read together with the turn's own at its start. The 
 `/log` row's `read_into` (Rust Host contract 189, feature `read_into`) tell that later; the answer to the send never
 changes.
 
+Where the turn's trace sits on the state events:
+
+- `agent-state` at a turn's start (`thinking`) and end (`done`, `failed`, …) carries it as
+  `detail.trace_id`.
+- `agent-state` that is the queue's notice that a waiting message's turn started carries it at
+  the top level, `trace_id`, beside `client_msg_id` and `queue_started: true` (and
+  `queue_remaining`); it has no `detail`.
+- `agent-activity` carries no trace: it is the agent's current activity, and the newest event
+  replaces the one before.
+
+At a hand-over from one turn to the next queued one, the events of that moment may come in this
+order: the queue's started notice for the new turn (top-level `trace_id` of the new turn), then
+the previous turn's `agent-state` `done` (`detail.trace_id` of the previous turn) with its
+`agent-activity`, then the new turn's `agent-state` `thinking` (`detail.trace_id` of the new
+turn) with its `agent-activity`. A client tells the turns apart by these traces, never by the
+kind alone: a `done` ends only the turn its trace names. The order is older than contract 188
+and the apps follow it; it is documented, not changed.
+
 A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which
 answers the same way) replayed with the same `client_msg_id` answers what the first
 answered: the same `orchestrator.action`, `session`, `dispatch`, `decision_id` and
