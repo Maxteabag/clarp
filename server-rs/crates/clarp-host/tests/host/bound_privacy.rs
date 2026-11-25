@@ -370,6 +370,13 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     let done: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(done["readers"], json!([]), "{done}");
     assert_eq!(read_as(&host, &as_cid, &log).0, 403);
+    // The card's yes sent again does nothing: Cid stays out.
+    let replayed = host.ask(
+        "POST",
+        &format!("/decisions/{decision}/resolve"),
+        Some(&json!({"choice": "accepted"})),
+    );
+    assert_eq!(read_as(&host, &as_cid, &log).0, 403, "{replayed:?}");
 
     // Only the owner changes Ada's binding. Ben's --clear is a card, and Ada stays bound;
     // so does a change of her cloud speech.
@@ -386,6 +393,39 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
         assert_eq!(code, 0, "{args:?}: {err}");
         serde_json::from_str::<Value>(&out).unwrap()
     };
+    // A card an agent makes itself changes nothing when the owner says yes, whatever it
+    // carries: the Host acts only on cards it keeps a question for.
+    let (ada_id, ben_id) = (agent_id(&host, &ada), agent_id(&host, &ben));
+    for payload in [
+        json!({"bound_change": {"agent_id": ada_id, "codex_home": "", "codex_provider": ""}}),
+        json!({"bound_reader": {"agent_id": ada_id, "reader_id": ben_id}}),
+    ] {
+        let payload = payload.to_string();
+        let (code, out, err) = tool_as(
+            &host,
+            &dir,
+            &ben_turn,
+            &[
+                "clarp-agent-artifacts",
+                "decision",
+                &ben,
+                "Ship build 141?",
+                "Ship it now?",
+                "Yes",
+                "No",
+                &payload,
+            ],
+        );
+        assert_eq!(code, 0, "{err}");
+        let planted: Value = serde_json::from_str(&out).unwrap();
+        let id = planted["decision"]["decision_id"].as_str().unwrap();
+        host.post(
+            &format!("/decisions/{id}/resolve"),
+            json!({"choice": "accepted", "expected_revision": 1}),
+        );
+    }
+    assert_eq!(provider_of(&host).0, json!("stand-in"));
+    assert_eq!(read_as(&host, &as_ben, &log).0, 403);
     let speech = ask(&["--cloud-speech", "on"]);
     assert!(speech["asked"][0]["decision_id"].is_string(), "{speech}");
     let unbind = ask(&["--clear"]);
@@ -397,19 +437,28 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     assert_eq!(provider_of(&host), (json!("stand-in"), json!(false)));
     // Asked again, it is the same card.
     assert_eq!(ask(&["--clear"])["asked"][0]["decision_id"], json!(card));
-    // Started again in place, a bound agent keeps its binding.
+    // Started again in place by an agent, a bound agent keeps its binding; by the owner, it
+    // takes the binding he gives it.
     let elsewhere = own_home(&place, "home-b");
-    let (status, said) = host.ask(
-        "POST",
-        "/agents",
-        Some(&json!({
-            "replace_sid": ada, "name": "Ada", "backend": "codex",
-            "codex_home": elsewhere, "codex_provider": "stand-in",
-        })),
-    );
-    assert_eq!(status, 409, "{said}");
+    let again = json!({
+        "replace_sid": ada, "name": "Ada", "backend": "codex",
+        "codex_home": elsewhere, "codex_provider": "stand-in",
+    })
+    .to_string();
+    let answered = fetch(&host, &host.token, "POST", "/agents", &as_ben, again.as_bytes());
+    let said: Value = serde_json::from_slice(&answered.body).unwrap_or(Value::Null);
+    assert_eq!(answered.status, 409, "{said}");
     assert_eq!(said["error"], "own_provider", "{said}");
-    assert_eq!(provider_of(&host).0, json!("stand-in"));
+    let home_of = |host: &Host| {
+        let (_, owners) = read_as(host, &[], "/agents/snapshot");
+        let rows = owners["agents"].as_array().unwrap().clone();
+        let row = rows.into_iter().find(|row| row["session"] == ada).unwrap();
+        row["codex_home"].clone()
+    };
+    assert_eq!(home_of(&host), json!(home));
+    let answered = fetch(&host, &host.token, "POST", "/agents", &[], again.as_bytes());
+    assert_eq!(answered.status, 200, "{}", String::from_utf8_lossy(&answered.body));
+    assert_eq!(home_of(&host), json!(elsewhere));
     // The owner says yes to the unbinding: Ada is let go.
     host.post(
         &format!("/decisions/{card}/resolve"),
@@ -437,4 +486,26 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     let done: Value = serde_json::from_str(&out).unwrap();
     assert!(done.get("asked").is_none(), "{done}");
     assert_eq!(provider_of(&host).0, json!("stand-in"));
+
+    // A helper made with Ada as its parent is bound as she is; one on another tool is refused.
+    let hal = host.post(
+        "/agents",
+        json!({"name": "Hal", "backend": "codex", "parent": ada, "role": "helper"}),
+    );
+    let hal = hal["session"].as_str().unwrap().to_string();
+    let (_, owners) = read_as(&host, &[], "/agents/snapshot");
+    let rows = owners["agents"].as_array().unwrap().clone();
+    let row = rows.into_iter().find(|row| row["session"] == hal).unwrap();
+    assert_eq!(
+        (&row["codex_home"], &row["codex_provider"]),
+        (&json!(home), &json!("stand-in")),
+        "{row}"
+    );
+    let (status, said) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name": "Sal", "backend": "scripted", "parent": ada, "role": "helper"})),
+    );
+    assert_eq!(status, 409, "{said}");
+    assert_eq!(said["error"], "own_provider", "{said}");
 }
