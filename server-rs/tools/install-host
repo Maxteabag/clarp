@@ -842,7 +842,9 @@ except (OSError, UnicodeError, ValueError):
 for name, kind in (("codex_chat_lane", bool), ("claude_chat_lane", bool), ("muse_chat_lane", bool),
                    ("codex_lane_idle_minutes", int),
                    ("codex_lane_most", int), ("lane_memory_mb", int), ("lane_limits", str),
-                   ("lane_reserve_percent", int), ("lane_ceiling", int)):
+                   ("lane_reserve_percent", int), ("lane_ceiling", int),
+                   ("pressure_cpu_percent", int), ("pressure_io_percent", int),
+                   ("pressure_memory_percent", int)):
     if name not in config:
         continue
     item = config[name]

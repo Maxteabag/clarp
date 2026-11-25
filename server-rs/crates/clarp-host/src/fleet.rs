@@ -2035,6 +2035,7 @@ fn setup(
         turns: works.turns.clone(),
         pools: works.pools.clone(),
         network: crate::network::checker(works.config.network_down_file.clone()),
+        pressure: crate::pressure::shared(),
     })
 }
 

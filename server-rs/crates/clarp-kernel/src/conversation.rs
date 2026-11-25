@@ -76,6 +76,12 @@ pub struct Message {
     /// A message whose turn started at once has none: its row's time is when it was sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sent_at_ms: Option<i64>,
+    /// Another agent sent it from a turn of the owner's own (his message, or the Oracle's with
+    /// his words): the owner waits on it, for this one hop. A turn it starts is never held for
+    /// the machine's pressure. Decided once, where the send is accepted, and kept with it; what
+    /// that turn sends on is not marked.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub owner_relayed: bool,
 }
 
 /// The key the log keeps a waiting message's send time under in its row ([`Message::sent_at_ms`]).

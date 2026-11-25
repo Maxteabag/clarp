@@ -215,7 +215,13 @@ async fn seed_of(member: &Member) -> String {
 
 /// Makes one child: its worktree, the helper, and its task sent from its parent. Answers
 /// its row.
-async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Result<Value, Refused> {
+async fn child_of(
+    app: &App,
+    parent: &Member,
+    child: &Child,
+    seed: &str,
+    relayed: bool,
+) -> Result<Value, Refused> {
     parent.agent.accepting_work().map_err(removing)?;
     let record = &parent.record;
     let cwd = if child.repo.is_empty() {
@@ -297,7 +303,12 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
         queue_if_busy: Some(true),
         ..SendRequest::default()
     };
-    match edge::send_own(app, request).await {
+    // Opened from a turn of the owner's, the task is his for this one hop.
+    let made = crate::coordination::Made {
+        owner_relayed: relayed,
+        ..Default::default()
+    };
+    match edge::send_own_made(app, request, &made).await {
         Ok(_) => row["delivered"] = json!(true),
         // The helper is there: its row says so, and that its task is not.
         Err(refused) => {
@@ -316,7 +327,14 @@ fn removing(why: crate::agent::Unavailable) -> Refused {
 /// each child: its name and either its session, where it works, its tool, how it started
 /// and whether its task was delivered, or why it was not made. A request that is malformed
 /// makes nothing.
-pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Answered {
+/// `relayed`: the fork is opened from a turn of the owner's own; its children's tasks are his
+/// for that one hop (`crate::coordination::relayed_by`).
+pub(crate) async fn fork_agent(
+    app: &App,
+    session: &str,
+    request: &Value,
+    relayed: bool,
+) -> Answered {
     let children = fork::asked(request).map_err(|refused| told(&refused))?;
     let session = session.trim_matches('/');
     let directory = app.fleet.directory();
@@ -350,7 +368,7 @@ pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Ans
     let seed = seed_of(&parent).await;
     let mut rows = Vec::with_capacity(children.len());
     for child in &children {
-        rows.push(match child_of(app, &parent, child, &seed).await {
+        rows.push(match child_of(app, &parent, child, &seed, relayed).await {
             Ok(row) => row,
             Err(why) => json!({ "name": child.name, "error": why.code, "message": why.message }),
         });
@@ -378,7 +396,8 @@ async fn fork_route(
     if let Err(why) = crate::fleet::delegations::lineage(&app, &session, token).await {
         return why.into_response();
     }
-    match fork_agent(&app, &session, &request).await {
+    let relayed = crate::coordination::relayed_by(&app, token).await;
+    match fork_agent(&app, &session, &request, relayed).await {
         Ok(answer) => Json(answer).into_response(),
         Err((status, why)) => (status, Json(why)).into_response(),
     }

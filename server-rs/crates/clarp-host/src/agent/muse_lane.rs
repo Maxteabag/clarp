@@ -39,6 +39,9 @@ pub(super) struct Beside {
     /// The session exec runs: the one a lane would take.
     session: Option<String>,
     tx: std::sync::mpsc::Sender<Ask>,
+    /// A new lane may start beside the turn: not for a turn nobody waits on while the machine
+    /// is under pressure (`crate::pressure`).
+    new_lane: bool,
 }
 
 impl Beside {
@@ -70,6 +73,9 @@ impl Beside {
         &self,
         launcher: &crate::launcher::Launcher,
     ) -> Option<std::thread::JoinHandle<()>> {
+        if !self.new_lane {
+            return None;
+        }
         let session = self.switched_on()?.to_owned();
         let (lane, profile, launcher) = (self.lane.clone(), self.profile.clone(), launcher.clone());
         std::thread::Builder::new()
@@ -111,6 +117,7 @@ impl Worker {
             profile: self.setup.profile.clone(),
             session: order.named_session.clone(),
             tx: self.tx.clone(),
+            new_lane: self.may_start_lane(),
         })
     }
 

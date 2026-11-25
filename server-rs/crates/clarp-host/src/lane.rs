@@ -140,7 +140,9 @@ pub(crate) const LIMITS: &str = "lane_limits";
 /// In auto: the share of the machine's memory, in percent, kept free of new lanes.
 pub(crate) const RESERVE_PERCENT: &str = "lane_reserve_percent";
 const RESERVE_PERCENT_DEFAULT: u64 = 20;
-/// In auto: the most lanes this Host keeps, whatever memory is free.
+/// Once the most lanes in auto, whatever was free. Auto has no count of lanes since the owner's
+/// word of 25 Nov 2026 (many live agents are fine; what counts is the memory, and turns that
+/// start cold): the key is still read and told, and bounds nothing.
 pub(crate) const CEILING: &str = "lane_ceiling";
 const CEILING_DEFAULT: usize = 24;
 
@@ -148,7 +150,7 @@ const CEILING_DEFAULT: usize = 24;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
     /// From the memory the machine has free when a lane starts: a lane starts while what is
-    /// free after it stays above the reserve, up to the ceiling.
+    /// free after it stays above the reserve, however many lanes run.
     Auto,
     /// By the count and the memory budget the owner set.
     Fixed,
@@ -239,6 +241,15 @@ pub(crate) struct Room {
 }
 
 impl Room {
+    /// Room for no new lane: a lane that runs is used as it is, and none starts. What a turn
+    /// nobody waits on is given while the machine is under pressure (`crate::pressure`); never
+    /// with a lane that is `needed`, which would send idle lanes away to fit in it.
+    pub(crate) const NONE: Self = Self {
+        most: 0,
+        budget: 0,
+        free: None,
+    };
+
     /// Whether `live` lanes holding `held` bytes fit, a new one of `new` bytes among them, once
     /// lanes that weighed `freed` bytes together have left.
     fn fits(&self, live: usize, held: u64, new: u64, freed: u64) -> bool {
@@ -260,10 +271,13 @@ impl Room {
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
 /// lane_limits = "auto"          # from the memory free (default), or "fixed" by the two below
 /// lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes
-/// lane_ceiling = 24             # auto: the most lanes, whatever is free
+/// lane_ceiling = 24             # read and told, and bounds nothing: auto has no count
 /// codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool
 /// lane_memory_mb = 2200         # fixed: and what they may hold together (PSS); a lane starts
 ///                               # only when both allow it, the longest idle one leaving first
+/// pressure_cpu_percent = 60     # the machine is under pressure from cpu some avg60 (5-95) ...
+/// pressure_io_percent = 30      # ... or io some avg60 ...
+/// pressure_memory_percent = 10  # ... or memory full avg10 (`crate::pressure`)
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
@@ -277,8 +291,11 @@ pub(crate) struct Settings {
     pub mode: Mode,
     /// In auto: percent of the machine's memory kept free of new lanes.
     pub reserve_percent: u64,
-    /// In auto: the most lanes, whatever is free.
+    /// Read and told; it bounds nothing ([`CEILING`]).
     pub ceiling: usize,
+    /// When the machine is under pressure: no optional lane starts, and the turns nobody waits
+    /// on wait ([`crate::pressure`]).
+    pub pressure: crate::pressure::Thresholds,
 }
 
 impl Settings {
@@ -324,6 +341,7 @@ impl Settings {
                 i64::try_from(CEILING_DEFAULT).unwrap_or(24),
             ))
             .unwrap_or(CEILING_DEFAULT),
+            pressure: crate::pressure::Thresholds::of(file),
         }
     }
 
@@ -336,8 +354,9 @@ impl Settings {
     /// cannot be read keeps the fixed limits.
     pub(crate) fn room_with(&self, memory: Option<Memory>) -> Room {
         match (self.mode, memory) {
+            // No count: as many lanes as the memory keeps above the reserve.
             (Mode::Auto, Some(memory)) => Room {
-                most: self.ceiling,
+                most: usize::MAX,
                 budget: u64::MAX,
                 free: Some(Free {
                     available: memory.available,
@@ -459,6 +478,19 @@ pub(crate) enum Place {
     /// No place is free within both limits, and the lane is not one a turn needs: it does not
     /// start, and the turn runs in a process of its own (issue 786).
     Full,
+}
+
+/// What a lane's start may do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Want {
+    /// A native goal's lane: it starts even past the limits, and counts.
+    Needed,
+    /// A chat turn's lane: it starts within the limits, else its turn runs in a process of its
+    /// own (`Place::Full`).
+    Optional,
+    /// A lane that runs already, and none new: a turn nobody waits on while the machine is under
+    /// pressure (`crate::pressure`). Its turn runs in a process of its own where none runs.
+    Running,
 }
 
 /// A lane that would start past both limits and that no turn needs: none is started (issue 786).

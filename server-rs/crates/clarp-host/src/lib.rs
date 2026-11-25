@@ -99,6 +99,7 @@ pub mod places;
 pub mod plans;
 pub mod pool;
 pub mod portrait_generation;
+pub mod pressure;
 pub mod process;
 pub mod profile;
 pub mod push;

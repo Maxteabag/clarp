@@ -80,6 +80,10 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::child_environment();
     let config = Arc::new(config);
     let clock = host_clock();
+    // Turns nobody waits on wait while the machine is under pressure; the lanes ask it too.
+    let pressure =
+        clarp_host::pressure::Gate::new(Some(config.pressure_dir.clone()), clock.clone());
+    clarp_host::pressure::install(pressure.clone());
     let (engine, tables) = engines(&config.engine)
         .ok_or_else(|| format!("there is no engine named `{}`", config.engine))?;
     let codecs = clarp_codec::standard_set(&config.codec)
@@ -331,6 +335,7 @@ async fn serve(config: Config) -> Result<(), String> {
         oracle: Arc::default(),
         keeper: Arc::default(),
         quota_keeper: Arc::default(),
+        pressure,
         label_checker: Arc::default(),
         audio: Arc::default(),
         limits,
