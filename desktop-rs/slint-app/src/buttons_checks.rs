@@ -3,7 +3,8 @@
 //! Stop shows while the agent works and stops it, as Ctrl+. does; scrolled
 //! up from the end a jump-to-latest button floats over the chat (no row
 //! moves when it comes), a dot on it when a message arrives below while
-//! the reader is up, and it brings the chat back to its end, where both go.
+//! the reader is up, which stays while a reply streams and after it
+//! finished below, and it brings the chat back to its end, where both go.
 //! Stop says its word beside its icon in the composer's one line.
 //! Needs the fake Host.
 
@@ -60,6 +61,19 @@ fn long_chat(count: usize) -> Vec<serde_json::Value> {
         .map(|i| json!({"id": format!("long-{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" },
             "text": format!("Line {i}: a note long enough to fill some of the chat's height on its own.")}))
         .collect()
+}
+
+/// The agent's reply below the long chat, `parts` paragraphs long.
+fn reply(parts: usize) -> serde_json::Value {
+    let text: Vec<String> = (0..parts).map(|i| format!("Part {i}: the reply goes on below the reader, a paragraph at a time, long enough to wrap.")).collect();
+    json!({"id": "reply", "role": "assistant", "text": text.join("\n\n")})
+}
+
+/// A row's text in the chat as the engine holds it ("" before it arrives).
+fn conversation_text(app: &crate::App, id: &str) -> String {
+    let engine = app.engine.borrow();
+    let Some(conversation) = engine.conversation("rachel") else { return String::new() };
+    conversation.index_of(id).and_then(|at| conversation.rows().get(at)).map(|row| row.text.clone()).unwrap_or_default()
 }
 
 pub fn buttons_check(out: String) {
@@ -163,6 +177,53 @@ pub fn buttons_check(out: String) {
             }
             check(!report().at_end, "the reader stays where they were");
             check(chat() == end3.get(), "the dot moves no row: the chat keeps its place and size");
+            // A reply starts below while the reader is still up.
+            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true}}))
+                .and_then(|()| control("/__control/upsert", &json!({"session": "rachel", "turns": [reply(1)]})));
+            check(set.is_ok(), &format!("Rachel starts a reply: {set:?}"));
+            true
+        })),
+        ("streaming", Box::new(|app, _, elapsed| {
+            if !app.engine.borrow().conversation("rachel").is_some_and(|c| c.index_of("reply").is_some()) || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), "the reply's first words arrive");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(control("/__control/upsert", &json!({"session": "rachel", "turns": [reply(6)]})).is_ok(), "the reply grows");
+            true
+        })),
+        ("finishing", Box::new(|app, _, elapsed| {
+            if !conversation_text(app, "reply").contains("Part 5") || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), "the reply grows below");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(view_news(), "while it streams below, the news stays");
+            // It finishes: the agent is idle and the reply settles at its full length.
+            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "idle", "busy": false}}))
+                .and_then(|()| control("/__control/upsert", &json!({"session": "rachel", "turns": [reply(12)]})));
+            check(set.is_ok(), &format!("the reply finishes: {set:?}"));
+            true
+        })),
+        ("finished", Box::new(move |app, _, elapsed| {
+            let settled = conversation_text(app, "reply").contains("Part 11") && !app.engine.borrow().roster().find("rachel").is_some_and(|a| a.busy);
+            if !settled {
+                check(elapsed < Duration::from_secs(5), "the finished reply settles");
+                return elapsed >= Duration::from_secs(5);
+            }
+            // Seconds after it finished, the reader still up: the dot stays.
+            if elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            check(!report().at_end && !report().follows, "the reader is still up");
+            check(drawn(&news_id()) && view_news(), "3 s after a reply below finished, the jump button still shows the dot");
+            // A frame in which the chat's end shows without the reader
+            // going there (rows handed over or measured again below) is
+            // not the reader back at the end: the news stays.
+            let (real, pane) = (report(), app_now().active_id());
+            if let Some(window) = crate::window() {
+                window.invoke_pane_reported(pane.clone().into(), false, true, real.offset, real.transcript_focused, real.composer_focused, real.top);
+                check(view_news(), "the end showing for a frame, the reader not following it, leaves the news");
+                window.invoke_pane_reported(pane.into(), real.follows, real.at_end, real.offset, real.transcript_focused, real.composer_focused, real.top);
+            }
             shot(&out3, "buttons-03-jump");
             check(press(&jump_id()), "the jump button is pressed");
             true

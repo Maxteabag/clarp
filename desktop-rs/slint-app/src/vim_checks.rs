@@ -6,7 +6,8 @@
 //! Insert typing letters as letters. Then the Ctrl keys for tabs (Ctrl+T,
 //! Ctrl+Tab, Ctrl+Shift+Tab) and Ctrl+B handing the explorer the keyboard,
 //! and ? showing the keys for the chat and for the explorer. A click on
-//! the composer in Normal mode takes a word typed at once, exactly once.
+//! the composer's folded line in Normal mode, or just above it, takes the
+//! words typed at once, every key, exactly once.
 //! Needs the fake Host.
 
 use std::time::Duration;
@@ -52,9 +53,14 @@ fn normal(window: &crate::AppWindow, elapsed: Duration) -> bool {
 
 /// The open chat's composer box in the window: (x, y, width, height).
 fn composer_box() -> Option<(f32, f32, f32, f32)> {
+    element_box(&format!("composer-box:{}", app_now().active_id()))
+}
+
+/// An element's box in the window, by its accessible id.
+fn element_box(id: &str) -> Option<(f32, f32, f32, f32)> {
     use i_slint_backend_testing::ElementQuery;
     let window = crate::window()?;
-    let id = format!("composer-box:{}", app_now().active_id());
+    let id = id.to_owned();
     let e = ElementQuery::from_root(&window)
         .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().height > 0.0)
         .find_first()?;
@@ -539,14 +545,19 @@ pub fn vim_check(out: String) {
                     true
                 };
             }
-            // Normal mode, then a click on the composer's folded line and a
-            // word typed at once, before any frame is drawn.
-            let Some((x, y, w, h)) = composer_box() else {
-                check(false, "the composer's folded line is drawn");
+            // Normal mode, a click in the chat, then a click on the
+            // composer's folded line that misses it by a little (in the chat
+            // frame's margin above it) and words typed at once, in one go,
+            // before any frame is drawn: each key lands in the draft, none
+            // goes to Normal mode (where h, e, l and o move the keyboard).
+            let (Some((x, y, w, _)), Some((cx, cy, cw, ch))) = (composer_box(), element_box(&format!("chat:{}", app_now().active_id()))) else {
+                check(false, "the chat and the composer's folded line are drawn");
                 return true;
             };
-            headless::click(x + w / 2.0, y + h / 2.0);
-            headless::type_text("hello");
+            headless::click(cx + cw / 2.0, cy + ch / 2.0);
+            check(window.get_vim_mode() == "NORMAL", &format!("a click in the chat leaves Normal mode as it is: {:?}", window.get_vim_mode()));
+            headless::click(x + w / 2.0, y - 3.0);
+            headless::type_text("hello world");
             true
         })),
         ("typed after the click", Box::new(|_, window, elapsed| {
@@ -554,7 +565,7 @@ pub fn vim_check(out: String) {
                 return false;
             }
             let draft = app_now().active_draft();
-            check(draft == "hello", &format!("a word typed straight after clicking the composer in Normal mode lands once: {draft:?}"));
+            check(draft == "hello world", &format!("words typed straight after clicking the composer's line in Normal mode all land, once: {draft:?}"));
             check(window.get_vim_mode() == "INSERT" && report().composer_focused, &format!("and the composer is Insert: {:?}", window.get_vim_mode()));
             for _ in 0..draft.chars().count() {
                 headless::press(Key::Backspace);
