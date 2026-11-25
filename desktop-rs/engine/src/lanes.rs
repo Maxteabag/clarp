@@ -239,28 +239,9 @@ pub fn cold_starts_group(answer: &Object) -> Option<Group> {
     Some(Group { title: "Cold starts, last hour".to_owned(), summary: total.to_string(), lines })
 }
 
-fn percent(value: f64) -> String {
-    let rounded = (value * 10.0).round() / 10.0;
-    if rounded.fract() == 0.0 { format!("{rounded:.0}%") } else { format!("{rounded:.1}%") }
-}
-
-/// One reading the Host weighs ("12% waiting, last minute · holds at 60%"),
-/// or that it is not read.
-fn reading(pressure: &Object, kind: &str, line: &str, window: &str, threshold: Option<f64>, over: &str) -> String {
-    let value = pressure.get(kind).and_then(|k| k.get(line)).and_then(|l| l.get(window)).and_then(Value::as_f64);
-    let mut text = match value {
-        Some(v) => format!("{} {over}", percent(v)),
-        None => "not read on this machine".to_owned(),
-    };
-    if let Some(t) = threshold {
-        text.push_str(&format!(" · holds at {}", percent(t)));
-    }
-    text
-}
-
-/// The machine's pressure (`pressure`, `held_for_pressure`): high or calm with
-/// how many turns are held now, then CPU, IO and memory as the Host weighs
-/// them, each with its threshold.
+/// The machine's pressure (`pressure`, `held_for_pressure`): calm or high,
+/// with how many turns are held now. No percentages: the owner found the
+/// CPU/IO figures misleading (25 Nov 2026), so only the state is shown.
 pub fn pressure_group(answer: &Object) -> Option<Group> {
     let pressure = answer.get("pressure")?.as_object()?;
     let held = whole(answer.get("held_for_pressure")).unwrap_or(0);
@@ -270,21 +251,7 @@ pub fn pressure_group(answer: &Object) -> Option<Group> {
         1 => "1 turn held".to_owned(),
         n => format!("{n} turns held"),
     };
-    // The threshold the Host weighs now, else the limit it was set to.
-    let thresholds = pressure.get("thresholds");
-    let threshold = |key: &str, limit: &str| thresholds.and_then(|t| t.get(key)).and_then(Value::as_f64).or_else(|| number(answer, limit));
-    let cpu = match pressure.get("cpu_source").and_then(Value::as_str) {
-        Some("host-cgroup") => "CPU, the Host's own",
-        Some("system") => "CPU, whole machine",
-        _ => "CPU",
-    };
-    let last_minute = "waiting, last minute";
-    let lines = vec![
-        (cpu.to_owned(), reading(pressure, "cpu", "some", "avg60", threshold("cpu_some_avg60", PRESSURE_NUMBERS[0]), last_minute)),
-        ("IO".to_owned(), reading(pressure, "io", "some", "avg60", threshold("io_some_avg60", PRESSURE_NUMBERS[1]), last_minute)),
-        ("Memory".to_owned(), reading(pressure, "memory", "full", "avg10", threshold("memory_full_avg10", PRESSURE_NUMBERS[2]), "stalled, last 10 seconds")),
-    ];
-    Some(Group { title: "Pressure".to_owned(), summary: format!("{state} · {turns}"), lines })
+    Some(Group { title: "Pressure".to_owned(), summary: format!("{state} · {turns}"), lines: Vec::new() })
 }
 
 impl Engine {
@@ -495,9 +462,7 @@ mod tests {
         assert_eq!(cold.lines, vec![("Claude".to_owned(), "3".to_owned()), ("Scripted".to_owned(), "1".to_owned())]);
         let pressure = pressure_group(&a).unwrap();
         assert_eq!(pressure.summary, "High · 2 turns held");
-        assert_eq!(pressure.lines[0], ("CPU, the Host's own".to_owned(), "64.3% waiting, last minute · holds at 60%".to_owned()));
-        assert_eq!(pressure.lines[1].1, "4% waiting, last minute · holds at 30%");
-        assert_eq!(pressure.lines[2].1, "not read on this machine · holds at 10%");
+        assert!(pressure.lines.is_empty(), "no percentages: {:?}", pressure.lines);
         a["pressure"]["high"] = json!(false);
         a["held_for_pressure"] = Value::Null;
         assert_eq!(pressure_group(&a).unwrap().summary, "Calm · no turns held");

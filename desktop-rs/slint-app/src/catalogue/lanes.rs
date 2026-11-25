@@ -52,10 +52,6 @@ fn auto_offered(app: &App) -> bool {
 }
 
 /// The Host says what loads its machine and holds turns while it is under pressure.
-fn pressure_offered(app: &App) -> bool {
-    offered(app) && app.engine.borrow().lane_pressure_offered()
-}
-
 /// The Host's limits follow its free memory now.
 fn in_auto(app: &App) -> bool {
     auto_offered(app) && app.engine.borrow().lane_settings().and_then(lanes::limits) == Some(lanes::AUTO)
@@ -170,7 +166,9 @@ pub(super) fn register() -> Vec<Setting> {
         (5.0, 95.0),
         "%",
     )
-    .when(pressure_offered));
+    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
+    // defaults hold; the setting stays for when it is wanted again.
+    .when(|_| false));
     all.push(host_number(
         "kept-pressure-io",
         "IO pressure that holds turns",
@@ -180,7 +178,9 @@ pub(super) fn register() -> Vec<Setting> {
         (5.0, 95.0),
         "%",
     )
-    .when(pressure_offered));
+    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
+    // defaults hold; the setting stays for when it is wanted again.
+    .when(|_| false));
     all.push(host_number(
         "kept-pressure-memory",
         "Memory pressure that holds turns",
@@ -190,7 +190,9 @@ pub(super) fn register() -> Vec<Setting> {
         (5.0, 95.0),
         "%",
     )
-    .when(pressure_offered));
+    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
+    // defaults hold; the setting stays for when it is wanted again.
+    .when(|_| false));
     all.push(limit(
         "kept-most",
         "Most kept processes",
