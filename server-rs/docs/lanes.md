@@ -136,12 +136,15 @@ of them is not done.
     `place`, an exec turn making way, a terminal, `once_more` after a changed login) waits at
     most 15 s (`LEAVE_WAIT`) for the lane's owner lock. A lane answers a retirement only once
     it has gone, so no answer within the bound is a lane on its way out, never a refusal. One
-    that has not let go by then is ended with SIGKILL by its own process id, which the lane
-    wrote into its owner lock once it held it, and only by that id; this is said once in the
-    Host's log. The turn then goes on without it: a new lane, or its own process. The id is
-    read and used only while the lock is held, and the lock is let go when that process ends,
-    so it names the lane's process and no other. The lane's tool, in a process group of its
-    own, is not signalled: what holds the conversation's lock is the lane's process.
+    that has not let go by then is ended with SIGKILL, with its tool, by the ids it wrote into
+    its owner lock (`<pid> <group>`): its own process id once it held the lock, and its tool's
+    process group once it started the tool. The tool's group goes first, and only while its
+    leader is still the lane's child (`/proc/<group>/stat`), so the id still names that tool.
+    A tool that hangs may not read the end of its input, and once the lane is gone it would
+    write the conversation beside the next lane or turn, and hold memory outside the budget.
+    Then the lane's process goes. Both are signalled only while the lock is held, and the lock
+    goes with the lane's process, so the ids name that lane and nothing else. This is said
+    once in the Host's log. The turn then goes on without it: a new lane, or its own process.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails
