@@ -126,7 +126,8 @@ fn without_auto_limits_no_limits_are_read() {
     assert_eq!(clarp_engine::lanes::free_line(d.engine.lane_settings().unwrap()), "");
     // A fixed limit set: no switch to fixed is posted or shown.
     d.engine.set_lane_setting("most", json!(9));
-    d.until("the most", |e| most_of(e) == Some(9.0));
+    d.until("the most posted", |_| !host.requests("POST", "/lane-settings").is_empty());
     assert_eq!(host.requests("POST", "/lane-settings")[0]["body"], json!({"most": 9}));
+    d.until("the Host's answer", |e| most_of(e) == Some(9.0));
     assert_eq!(limits_of(&d.engine), None);
 }
