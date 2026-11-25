@@ -539,7 +539,9 @@ impl Indexer {
                 next.later = Some(next.later.map_or(due, |later| later.min(due)));
             }
         }
-        next.now = rests.map(|agent| (agent, false)).or(works.map(|agent| (agent, true)));
+        next.now = rests
+            .map(|agent| (agent, false))
+            .or(works.map(|agent| (agent, true)));
         next
     }
 

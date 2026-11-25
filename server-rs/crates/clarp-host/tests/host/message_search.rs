@@ -333,7 +333,10 @@ fn an_agent_whose_queue_a_stop_holds_is_read_and_partial_ends() {
     assert_eq!(row["busy"], false, "{row}");
     assert_eq!(search(&host, "q=kites")["partial"], true);
     let hits = found(&host, "q=kites", 2);
-    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
+    assert!(
+        hits.iter().all(|hit| hit["session"] == ada.as_str()),
+        "{hits:?}"
+    );
     // Read while its queue was still held, and nothing of the held work ran for it.
     assert_eq!(row_of(&host, &ada)["queue_paused"], true);
 }
@@ -342,7 +345,10 @@ fn an_agent_whose_queue_a_stop_holds_is_read_and_partial_ends() {
 fn an_agent_that_works_on_is_read_at_the_slow_rate_and_partial_ends() {
     let place = Place::new("message-search-busy");
     // The ten minutes and the minute of a live Host, shortened.
-    let world = [("CLARP_SEARCH_BUSY_MS", "2000"), ("CLARP_SEARCH_SLOW_MS", "1000")];
+    let world = [
+        ("CLARP_SEARCH_BUSY_MS", "2000"),
+        ("CLARP_SEARCH_SLOW_MS", "1000"),
+    ];
     let host = place.start_in("", &[], &world);
     let ada = host.new_agent("Ada");
     host.send(&ada, "Comets over Bergen", "w-1");
@@ -357,7 +363,10 @@ fn an_agent_that_works_on_is_read_at_the_slow_rate_and_partial_ends() {
     wait_for("the turn taken up", || row_of(&host, &ada)["busy"] == true);
     assert_eq!(search(&host, "q=comets")["partial"], true);
     let hits = found(&host, "q=comets", 2);
-    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
+    assert!(
+        hits.iter().all(|hit| hit["session"] == ada.as_str()),
+        "{hits:?}"
+    );
     let row = row_of(&host, &ada);
     assert_eq!(row["busy"], true, "read while it worked: {row}");
 }
