@@ -526,6 +526,19 @@ pub fn vim_check(out: String) {
             }
             check(true, "Ctrl+B hiding it gives the chat the keyboard");
             shot(&out4, "vim-04-explorer-hidden");
+            // The letters typed in Insert earlier go: an empty composer folds.
+            let app = app_now();
+            app.set_draft_at(&app.active_id(), "", 0);
+            true
+        })),
+        ("folded", Box::new(|_, window, elapsed| {
+            let folded = composer_box().is_some_and(|(_, _, _, h)| h <= 16.5);
+            if !folded || !normal(window, elapsed) || !app_now().active_draft().is_empty() {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, &format!("an empty composer folds to its line in Normal mode: {:?}", composer_box()));
+                    true
+                };
+            }
             // Normal mode, then a click on the composer's folded line and a
             // word typed at once, before any frame is drawn.
             let Some((x, y, w, h)) = composer_box() else {
