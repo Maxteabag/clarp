@@ -218,6 +218,14 @@ lanes = {"on": False,
          "held": {"lanes": 8, "memory_mb": 1945, "unanswered": 0,
                   "tools": {"codex": {"lanes": 0, "busy": 0, "memory_mb": 0},
                             "claude": {"lanes": 8, "busy": 2, "memory_mb": 1945}}}}
+# Limits that follow the free memory (feature lane_auto_limits, Rust Host
+# contract 180): off until /__control/lane-settings sends "auto": true. Then
+# the answer carries `auto` settings and their ranges, and `held` the `free`
+# values (each may be null: the Host cannot read its memory).
+LANE_AUTO_RANGES = {"reserve_percent": {"min": 5, "max": 50}, "ceiling": {"min": 1, "max": 64}}
+lanes_auto = {"on": False,
+              "settings": {"limits": "auto", "reserve_percent": 20, "ceiling": 24},
+              "free": {"available_mb": 15800, "reserve_mb": 6200, "room_mb": 9600}}
 # Moving an agent to another backend (feature agent_backend_transit, Rust
 # Host contract 158): off until /__control/transit turns it on. `respond`
 # answers the next POST /agent-transit instead ({status, body}); `fail`
@@ -894,36 +902,57 @@ def render_view(row, capable, full):
     return out
 
 
+def lane_settings_now():
+    """The settings the Host uses now, the auto ones with the feature."""
+    now = copy.deepcopy(lanes["settings"])
+    if lanes_auto["on"]:
+        now.update(copy.deepcopy(lanes_auto["settings"]))
+    return now
+
+
 def lane_settings_answer():
-    return {**copy.deepcopy(lanes["settings"]), "ranges": copy.deepcopy(LANE_RANGES), "held": copy.deepcopy(lanes["held"])}
+    answer = {**lane_settings_now(), "ranges": copy.deepcopy(LANE_RANGES), "held": copy.deepcopy(lanes["held"])}
+    if lanes_auto["on"]:
+        answer["ranges"].update(copy.deepcopy(LANE_AUTO_RANGES))
+        answer["held"].update(copy.deepcopy(lanes_auto["free"]))
+    return answer
 
 
 def lane_settings_change(body):
     """POST /lane-settings as the Host answers it: (status, body)."""
     if not isinstance(body, dict):
         return 400, {"ok": False, "code": "bad_json", "error": "the body must be a JSON object"}
-    known = [k for k in body if k in lanes["settings"] and body[k] is not None]
+    settings = lane_settings_now()
+    ranges = {**LANE_RANGES, **(LANE_AUTO_RANGES if lanes_auto["on"] else {})}
+    known = [k for k in body if k in settings and body[k] is not None]
     if not known:
         return 400, {"ok": False, "code": "nothing_to_change", "error": "name a setting to change"}
     changes = {}
     for key in known:
-        value, now = body[key], lanes["settings"][key]
+        value, now = body[key], settings[key]
         if value == now:
             continue
-        if key.endswith("_chat_lane"):
+        if key == "limits":
+            if value not in ("auto", "fixed"):
+                return 400, {"ok": False, "code": "wrong_type", "error": 'limits must be "auto" or "fixed"', "setting": key}
+        elif key.endswith("_chat_lane"):
             if not isinstance(value, bool):
                 return 400, {"ok": False, "code": "wrong_type", "error": f"{key} must be true or false", "setting": key}
         else:
-            span = LANE_RANGES[key]
+            span = ranges[key]
             if isinstance(value, bool) or not isinstance(value, int):
                 return 400, {"ok": False, "code": "wrong_type", "error": f"{key} must be a whole number", "setting": key, "range": span}
             if not span["min"] <= value <= span["max"]:
                 return 400, {"ok": False, "code": "out_of_range", "error": f"{key} must be between {span['min']} and {span['max']}",
                              "setting": key, "range": span}
         changes[key] = value
+    # A count or a budget set selects the fixed limits, unless the request names limits.
+    if lanes_auto["on"] and "limits" not in body and ("most" in changes or "memory_mb" in changes):
+        changes["limits"] = "fixed"
     if changes:
-        lanes["settings"].update(changes)
-        broadcast({"type": "lane-settings-updated", **lanes["settings"]})
+        for key, value in changes.items():
+            (lanes["settings"] if key in lanes["settings"] else lanes_auto["settings"])[key] = value
+        broadcast({"type": "lane-settings-updated", **lane_settings_now()})
     return 200, lane_settings_answer()
 
 
@@ -1524,6 +1553,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("conversation_fork")
             if lanes["on"]:
                 features.append("lane_settings")
+                if lanes_auto["on"]:
+                    features.append("lane_auto_limits")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -2147,7 +2178,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/lane-settings":
             # Test control: the lane_settings feature on or off (read from
             # /server-info on connecting), and what the lanes hold now.
+            # "auto" turns lane_auto_limits on or off, "free" sets what the
+            # machine has free (values may be null), "auto_settings" its settings.
             lanes["on"] = bool(body.get("on", lanes["on"]))
+            lanes_auto["on"] = bool(body.get("auto", lanes_auto["on"]))
+            if "free" in body:
+                lanes_auto["free"].update(body["free"])
+            if "auto_settings" in body:
+                lanes_auto["settings"].update(body["auto_settings"])
             if "held" in body:
                 lanes["held"] = body["held"]
             if "settings" in body:

@@ -4,11 +4,17 @@
 //! key, so a tool the Host adds shows without a change here), the three
 //! numbers with the ranges the Host gives, and what the lanes hold now as
 //! information below them (`settings_view`). Peer Hosts are not shown.
+//!
+//! Where the Host also offers `lane_auto_limits` (contract 180): how the
+//! limits are set (auto or fixed), in auto the memory kept free and the
+//! most kept processes, and what the machine has free. In auto the two
+//! fixed limits stay listed, marked as the fixed limits: setting either
+//! switches the Host to fixed.
 
 use clarp_engine::lanes;
 use serde_json::Value;
 
-use super::{Setting, e};
+use super::{Choice, Setting, e};
 use crate::App;
 
 pub const SECTION: &str = "KEPT PROCESSES";
@@ -40,6 +46,16 @@ fn range(app: &App, key: &str) -> Option<(f64, f64)> {
     app.engine.borrow().lane_settings().and_then(|answer| lanes::range(answer, key))
 }
 
+/// The Host offers auto limits and has said how they are set.
+fn auto_offered(app: &App) -> bool {
+    offered(app) && app.engine.borrow().lane_auto_limits_offered()
+}
+
+/// The Host's limits follow its free memory now.
+fn in_auto(app: &App) -> bool {
+    auto_offered(app) && app.engine.borrow().lane_settings().and_then(lanes::limits) == Some(lanes::AUTO)
+}
+
 fn set_number(app: &App, key: &str, value: f64) {
     app.engine.borrow_mut().set_lane_setting(key, Value::from(value.round() as i64));
 }
@@ -67,6 +83,11 @@ fn tool_switch(slot: usize) -> Setting {
 
 #[allow(clippy::too_many_arguments)]
 fn limit(id: &'static str, label: &'static str, description: &'static str, aliases: &'static [&'static str], key: &'static str, fallback: (f64, f64), step: f64, unit: &'static str) -> Setting {
+    let shown = move |app: &App| {
+        let value = super::with_unit(&super::number_text(number(app, key), step), unit);
+        // In auto a fixed limit is not used: said beside it.
+        if lanes::FIXED_NUMBERS.contains(&key) && in_auto(app) { format!("{value} · fixed limit, setting it switches to fixed") } else { value }
+    };
     Setting::number(
         e(id, label, "host", description, aliases),
         SECTION,
@@ -78,11 +99,60 @@ fn limit(id: &'static str, label: &'static str, description: &'static str, alias
         unit,
     )
     .range_from(move |app| range(app, key))
+    .detail(shown)
     .when(offered)
+}
+
+fn limits_choice() -> Setting {
+    Setting::choice(
+        e(
+            "kept-limits",
+            "Limits",
+            "host",
+            "Auto keeps processes while the connected Host's machine keeps enough memory free; fixed holds to the most and the memory set below.",
+            &["auto", "fixed", "limits", "free memory", "dynamic", "kept processes", "lanes", "mode"],
+        ),
+        SECTION,
+        |_| {
+            vec![
+                Choice::new(lanes::AUTO, "Auto").about("Follow the machine's free memory"),
+                Choice::new(lanes::FIXED, "Fixed").about("Most kept processes and the memory they may hold"),
+            ]
+        },
+        |app| app.engine.borrow().lane_settings().and_then(lanes::limits).unwrap_or_default().to_owned(),
+        |app, _, value| app.engine.borrow_mut().set_lane_setting(lanes::LIMITS, Value::from(value)),
+    )
+    .when(auto_offered)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn auto_limit(id: &'static str, label: &'static str, description: &'static str, aliases: &'static [&'static str], key: &'static str, fallback: (f64, f64), unit: &'static str) -> Setting {
+    Setting::number(e(id, label, "host", description, aliases), SECTION, move |app| number(app, key), move |app, _, value| set_number(app, key, value), fallback.0, fallback.1, 1.0, unit)
+        .range_from(move |app| range(app, key))
+        .when(in_auto)
 }
 
 pub(super) fn register() -> Vec<Setting> {
     let mut all: Vec<Setting> = (0..SLOTS.len()).map(tool_switch).collect();
+    all.push(limits_choice());
+    all.push(auto_limit(
+        "kept-reserve",
+        "Memory kept free",
+        "In auto, how much of the machine's memory the connected Host keeps free: a process is kept only while this much stays free.",
+        &["reserve", "reserve percent", "free memory", "headroom", "auto", "kept processes"],
+        "reserve_percent",
+        (5.0, 50.0),
+        "%",
+    ));
+    all.push(auto_limit(
+        "kept-ceiling",
+        "Most kept in auto",
+        "In auto, how many kept processes the connected Host holds at most, however much memory is free.",
+        &["ceiling", "cap", "most lanes", "auto", "how many", "kept processes", "maximum"],
+        "ceiling",
+        (1.0, 64.0),
+        "",
+    ));
     all.push(limit(
         "kept-most",
         "Most kept processes",
@@ -124,7 +194,16 @@ pub fn information(app: &App) -> Vec<(String, String)> {
         return Vec::new();
     }
     let now = engine.lane_settings().map(lanes::held_line).filter(|line| !line.is_empty()).unwrap_or_else(|| "Loading…".to_owned());
-    let mut out = vec![("Now".to_owned(), now)];
+    let mut out = Vec::new();
+    let auto = engine.lane_auto_limits_offered() && engine.lane_settings().and_then(lanes::limits) == Some(lanes::AUTO);
+    if auto {
+        let free = engine.lane_settings().map(lanes::free_line).filter(|line| !line.is_empty());
+        out.push(("Free memory".to_owned(), free.unwrap_or_else(|| "The Host has not said what its machine has free".to_owned())));
+    }
+    out.push(("Now".to_owned(), now));
+    if auto {
+        out.push(("Fixed limits".to_owned(), "Most kept processes and Memory they may hold apply when the limits are fixed; setting either switches the Host to fixed.".to_owned()));
+    }
     if !engine.lane_settings_error().is_empty() {
         out.push(("Not changed".to_owned(), engine.lane_settings_error().to_owned()));
     }

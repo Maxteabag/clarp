@@ -4,7 +4,11 @@
 //! hold now. Stepping "Most kept processes" posts the new value and shows
 //! the Host's answer, a switch posts its tool's key, a refused value shows
 //! the Host's sentence and keeps its value, and `lane-settings-updated`
-//! reads what the lanes hold again.
+//! reads what the lanes hold again. Then the Host offers `lane_auto_limits`
+//! (contract 180): Limits shows Auto with the memory kept free, the most in
+//! auto and what the machine has free, the fixed limits say they are fixed;
+//! switching Limits posts it and hides the auto rows, and stepping a fixed
+//! limit in auto posts it alone and shows Fixed.
 
 use std::time::Duration;
 
@@ -27,7 +31,7 @@ fn change(id: &str, delta: i32) {
 }
 
 pub fn kept_processes_check(out: String) {
-    let (out1, out2) = (out.clone(), out.clone());
+    let (out1, out2, out3) = (out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("without the feature", Box::new(|app, window, _| {
             if !app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty()) {
@@ -95,12 +99,66 @@ pub fn kept_processes_check(out: String) {
             check(control("/__control/event", &json!({"type": "lane-settings-updated", "most": 9})).is_ok(), "another device changed something");
             true
         })),
-        ("event", Box::new(|_, window, elapsed| {
+        ("event", Box::new(|app, window, elapsed| {
             let now = row(window, "Now").map(|r| r.detail.to_string()).unwrap_or_default();
             if !now.starts_with("3 kept") && elapsed < Duration::from_secs(5) {
                 return false;
             }
             check(now == "3 kept · 500 MB · claude 3 · 2 did not answer in time, not counted", &format!("the event reads what they hold again: {now:?}"));
+            check(by_id(window, "kept-limits").is_none(), "no Limits without lane_auto_limits");
+            check(control("/__control/lane-settings", &json!({"auto": true})).is_ok(), "the Host turns lane_auto_limits on");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("auto shown", Box::new(move |_, window, elapsed| {
+            let shown = by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto");
+            if !shown && elapsed < Duration::from_secs(8) {
+                return false;
+            }
+            let detail = |id: &str| by_id(window, id).map(|r| r.detail.to_string());
+            check(shown, &format!("Limits shows Auto: {:?}", detail("kept-limits")));
+            check(detail("kept-reserve").as_deref() == Some("20%"), &format!("memory kept free 20%: {:?}", detail("kept-reserve")));
+            check(detail("kept-ceiling").as_deref() == Some("24"), &format!("most in auto 24: {:?}", detail("kept-ceiling")));
+            let free = row(window, "Free memory").map(|r| r.detail.to_string()).unwrap_or_default();
+            check(free == "15800 MB free · 6200 MB kept free · 9600 MB room for kept processes", &format!("what the machine has free: {free:?}"));
+            check(detail("kept-most").as_deref() == Some("9 · fixed limit, setting it switches to fixed"), &format!("most says it is a fixed limit: {:?}", detail("kept-most")));
+            check(detail("kept-memory").is_some_and(|d| d.starts_with("2200 MB · fixed limit")), &format!("memory says it is a fixed limit: {:?}", detail("kept-memory")));
+            check(row(window, "Fixed limits").is_some_and(|r| r.detail.contains("switches the Host to fixed")), "the fixed-limits note");
+            shot(&out3, "kept-processes-03-auto");
+            change("kept-limits", 1);
+            true
+        })),
+        ("switched to fixed", Box::new(|_, window, elapsed| {
+            let posted = posts("/lane-settings");
+            let fixed = by_id(window, "kept-limits").is_some_and(|r| r.detail == "Fixed");
+            if (!fixed || by_id(window, "kept-reserve").is_some()) && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(posted.last().is_some_and(|p| p["body"] == json!({"limits": "fixed"})), &format!("Right posts limits fixed: {:?}", posted.last()));
+            check(fixed, "Limits shows Fixed");
+            check(by_id(window, "kept-reserve").is_none() && by_id(window, "kept-ceiling").is_none(), "the auto rows leave in fixed");
+            check(row(window, "Fixed limits").is_none() && row(window, "Free memory").is_none(), "no fixed-limits note or free memory in fixed");
+            check(by_id(window, "kept-most").is_some_and(|r| r.detail == "9"), "most is plain in fixed");
+            change("kept-limits", 1);
+            true
+        })),
+        ("auto again", Box::new(|_, window, elapsed| {
+            let auto = by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto") && by_id(window, "kept-reserve").is_some();
+            if !auto && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(auto, "Limits shows Auto again");
+            change("kept-most", 1);
+            true
+        })),
+        ("a fixed limit switches to fixed", Box::new(|_, window, elapsed| {
+            let posted = posts("/lane-settings");
+            let done = by_id(window, "kept-most").is_some_and(|r| r.detail == "10") && by_id(window, "kept-limits").is_some_and(|r| r.detail == "Fixed");
+            if !done && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(posted.last().is_some_and(|p| p["body"] == json!({"most": 10})), &format!("most posted alone: {:?}", posted.last()));
+            check(done, "most 10, and the Host switched to fixed");
             true
         })),
     ];
