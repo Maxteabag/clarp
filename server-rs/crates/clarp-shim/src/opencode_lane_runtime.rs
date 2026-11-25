@@ -39,6 +39,11 @@ use crate::opencode_http::{Client, port};
 const STOP_GRACE: Duration = Duration::from_secs(5);
 /// How long a server asked to end may take before its group is killed.
 const END_GRACE: Duration = Duration::from_secs(5);
+/// How long a turn held open at its idle only because OpenCode's answers took its unread steered
+/// words in by message order waits for the run that order says is coming (issue 864). With no
+/// busy event by then, the order was wrong (an id from a clock that stepped back), and the turn
+/// ends as that idle would have.
+const RECHECK: Duration = Duration::from_secs(5);
 /// What a claim's turn ends with when the server went away under it: today's driver's words.
 const SERVER_GONE: &str = "OpenCode server stopped before the turn finished";
 
@@ -122,6 +127,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         turn_socket: None,
         followers: Vec::new(),
         stop_deadline: None,
+        recheck: None,
         stale_login: false,
         model: None,
         effort: None,
@@ -293,6 +299,16 @@ fn taken_in(message: &str, parent: &str) -> bool {
     parent.starts_with("msg_") && message <= parent
 }
 
+/// What the idle that ends a turn found of its unread steered words.
+enum Settle {
+    /// None is left unread or untaken back: the turn ends.
+    Done,
+    /// The session runs again: its events come, and the turn stays open for them.
+    Runs,
+    /// An answer took them in by message order alone, with no run seen yet.
+    ByOrder,
+}
+
 /// Whether an answer of a session's message `list` took in any of `messages` ([`taken_in`]).
 fn any_taken_in(list: &Value, messages: &[(String, String)]) -> bool {
     list.as_array().into_iter().flatten().any(|message| {
@@ -365,6 +381,8 @@ struct Lane {
     turn_socket: Option<Socket>,
     followers: Vec<UnixStream>,
     stop_deadline: Option<(Instant, (u64, u32))>,
+    /// A turn held open at its idle by message order alone is looked at again then.
+    recheck: Option<Instant>,
     stale_login: bool,
     model: Option<String>,
     effort: Option<String>,
@@ -416,7 +434,10 @@ impl Lane {
         if let Some((at, _)) = self.stop_deadline {
             return Some(at);
         }
-        self.idle.deadline(self.turn.is_none())
+        self.recheck
+            .into_iter()
+            .chain(self.idle.deadline(self.turn.is_none()))
+            .min()
     }
 
     /// Err: the server did not end a stopped turn in time, and the lane leaves. True: the
@@ -441,6 +462,11 @@ impl Lane {
 
     fn next_input(&mut self) -> io::Result<Option<Input>> {
         loop {
+            if self.recheck.is_some_and(|at| Instant::now() >= at) {
+                self.recheck = None;
+                self.look_again();
+                continue;
+            }
             if self
                 .stop_deadline
                 .is_some_and(|(at, _)| Instant::now() >= at)
@@ -736,7 +762,7 @@ impl Lane {
 
     /// At the idle that ends the turn: the steered words OpenCode stored and has not read are
     /// taken out of the session, so the Host runs them as a turn of their own and OpenCode never
-    /// meets them twice. False: the session runs again, and the turn stays open until that ends.
+    /// meets them twice. Unless [`Settle::Done`], the turn stays open until a later idle.
     ///
     /// OpenCode 1.18 starts no run by itself for words stored while its run went on: such a
     /// prompt only waits for that run (`effect/runner.ts`, `ensureRunning`). But words that
@@ -746,16 +772,22 @@ impl Lane {
     /// A delete the session refuses as busy (409) says the same. A Stop's idle comes after an
     /// abort, and takes the words back as they are. Words not taken back otherwise count as
     /// read, so that the Host never runs them a second time.
-    fn take_back_unread(&mut self, stopping: bool) -> io::Result<bool> {
+    ///
+    /// `by_order`: an answer that took the words in by message order holds the turn open
+    /// ([`Settle::ByOrder`]); a recheck that found no run since passes false.
+    fn take_back_unread(&mut self, stopping: bool, by_order: bool) -> io::Result<Settle> {
         let unread = match self.turn.as_ref() {
             Some(turn) => turn.unread(),
-            None => return Ok(true),
+            None => return Ok(Settle::Done),
         };
         if unread.is_empty() {
-            return Ok(true);
+            return Ok(Settle::Done);
         }
-        if !stopping && (self.session_runs() == Some(true) || self.answered(&unread)) {
-            return Ok(false);
+        if !stopping && self.session_runs() == Some(true) {
+            return Ok(Settle::Runs);
+        }
+        if !stopping && by_order && self.answered(&unread) {
+            return Ok(Settle::ByOrder);
         }
         for (message, id) in unread {
             let path = format!(
@@ -765,7 +797,7 @@ impl Lane {
             );
             match self.serve.client.delete(&path, 10) {
                 Ok(200..=299) => {}
-                Ok(409) if !stopping => return Ok(false),
+                Ok(409) if !stopping => return Ok(Settle::Runs),
                 answer => {
                     eprintln!(
                         "clarp-shim: OpenCode lane: steered words were not taken back ({answer:?}), and count as read"
@@ -776,7 +808,22 @@ impl Lane {
                 }
             }
         }
-        Ok(true)
+        Ok(Settle::Done)
+    }
+
+    /// The recheck of a turn held open by message order alone (issue 864): no busy event came,
+    /// so no run is coming. The turn ends as its idle would have without that order: its unread
+    /// words are taken back and run as a turn of their own.
+    fn look_again(&mut self) {
+        let Some(stopping) = self.turn.as_ref().map(|turn| turn.stopping) else {
+            return;
+        };
+        match self.take_back_unread(stopping, false) {
+            Ok(Settle::Runs) => self.hint(),
+            Ok(_) if stopping => self.end(None, Some(nix::libc::SIGINT), None),
+            Ok(_) => self.end(Some(0), None, None),
+            Err(error) => self.end(Some(1), None, Some(&error.to_string())),
+        }
     }
 
     fn event(&mut self, event: &Value) {
@@ -785,6 +832,10 @@ impl Lane {
             match event["type"].as_str() {
                 Some("session.status") => {
                     self.session_busy = props["status"]["type"] != "idle";
+                    // The run that message order said was coming: the turn goes on with it.
+                    if self.session_busy {
+                        self.recheck = None;
+                    }
                 }
                 Some("session.idle") => self.session_busy = false,
                 _ => {}
@@ -828,10 +879,15 @@ impl Lane {
             return;
         }
         if matches!(seen, Ok(true)) {
-            match self.take_back_unread(stopping) {
-                Ok(true) => {}
+            match self.take_back_unread(stopping, true) {
+                Ok(Settle::Done) => {}
                 // The session runs the steered words: the turn goes on to its next idle.
-                Ok(false) => return self.hint(),
+                Ok(Settle::Runs) => return self.hint(),
+                // Only message order says a run took them in: it must show within RECHECK.
+                Ok(Settle::ByOrder) => {
+                    self.recheck = Some(Instant::now() + RECHECK);
+                    return self.hint();
+                }
                 Err(error) => return self.end(Some(1), None, Some(&error.to_string())),
             }
         }
@@ -886,6 +942,7 @@ impl Lane {
             eprintln!("clarp-shim: OpenCode lane: a turn's end was not kept: {error}");
         }
         self.stop_deadline = None;
+        self.recheck = None;
         self.hint();
         self.followers.clear();
         self.turn_socket = None;

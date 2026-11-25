@@ -205,7 +205,8 @@ rules(LANE_SHIM, 'lane_host', [
     ('steered words go under a message OpenCode names', 'posted["messageID"] = json!(message);', ''),
     ('unread steered words stay in the session', 'match self.serve.client.delete(&path, 10) {', 'match crate::opencode_http::Result::<i32>::Ok(500) {'),
     ('words not taken back run again', 'turn.spool.steer_read(&id, super::now_ms())?;', 'let _ = &id;'),
-    ('a stale idle ends the turn under words OpenCode runs again', 'if !stopping && (self.session_runs() == Some(true) || self.answered(&unread)) {', 'if false {'),
+    ('a stale idle ends the turn under words OpenCode runs again', 'if !stopping && self.session_runs() == Some(true) {', 'if false {'),
+    ('words OpenCode already answered are taken back at a stale idle', 'if !stopping && by_order && self.answered(&unread) {', 'if false {'),
 ])
 PLANTS.append(('clarp-backend/src/opencode.rs', 'lane_host', "a step's words wait for the next step, after words read between them",
                '                self.usage(p);\n                self.flush(out);\n', '                self.usage(p);\n'))
@@ -215,5 +216,8 @@ PLANTS.append((LANE_SHIM, 'lane_host', 'only the message an answer names is read
                '    parent.starts_with("msg_") && message <= parent', '    parent.starts_with("msg_") && message == parent'))
 PLANTS.append((LANE_SHIM, 'lane_shim', 'a message stored after an answer\'s parent counts as answered',
                '    parent.starts_with("msg_") && message <= parent', '    parent.starts_with("msg_")'))
+# A turn held open by message order alone is rechecked (issue 864).
+PLANTS.append((LANE_SHIM, 'lane_host', 'a turn held open by message order alone waits for a run that never comes',
+               '                    self.recheck = Some(Instant::now() + RECHECK);\n', ''))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

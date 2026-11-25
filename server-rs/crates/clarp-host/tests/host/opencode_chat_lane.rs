@@ -19,7 +19,9 @@ use super::*;
 /// turn never reads, or `race-<x>`, which reached it as its run ended: as OpenCode does, it starts
 /// a run of its own for that right after the run's idle, so that idle is stale when the lane reads
 /// it, and it refuses to delete a message while a run goes on; `done-<x>` is the same, but that
-/// run has answered before the lane reads the stale idle, and only its events are still to come. It tells the sessions that run (`/session/status`) and a session's answers, each with the
+/// run has answered before the lane reads the stale idle, and only its events are still to come;
+/// `skew-<x>` is never read, but the session holds an answer whose parent sorts after it, with
+/// no run behind it. It tells the sessions that run (`/session/status`) and a session's answers, each with the
 /// message it answers. While the file `slow-delete` exists a delete takes two seconds. What it
 /// was asked is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
@@ -113,7 +115,7 @@ def run(sid, words, user):
     # user message since its last answer: one answer, whose parent is the last of them.
     while True:
         with lock:
-            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-"))]
+            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-"))]
             if not ready:
                 break
             for s in ready:
@@ -121,6 +123,11 @@ def run(sid, words, user):
         if not step(sid, *together(ready)):
             return idle(sid)
     with lock:
+        # An answer the session holds whose parent sorts after these words, though no run took
+        # them in and none will come: what a clock that stepped back would make of the order.
+        for s in stored:
+            if s[1].startswith("skew-"):
+                parents.append(ascending())
         racing = [s for s in stored if s[1].startswith("race-")]
         done = [s for s in stored if s[1].startswith("done-")]
         for s in racing + done:
@@ -215,7 +222,7 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done)-[a-z0-9]+", text)))
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew)-[a-z0-9]+", text)))
             word = words[0]
             if "messageID" in body:
                 note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
@@ -1232,4 +1239,54 @@ fn a_steer_after_the_last_answers_parent_runs_once_as_its_own_turn() {
     assert_ne!(read_at(&host, "after", "u-r"), "steer");
     assert_eq!(answers(&host, "after", "said-hold-p"), 1);
     assert_eq!(answers(&host, "after", "said-late-r"), 1);
+}
+
+/// Issue 864. At the idle, message order says an answer took the unread words in, but no run
+/// follows (an id from a clock that stepped back). The lane holds the turn open for a recheck
+/// only: with no busy event by then, the turn ends as the idle would have, the words are taken
+/// back and run once as a turn of their own. Nothing hangs.
+#[test]
+fn a_turn_held_open_by_message_order_alone_ends_at_the_recheck() {
+    let world = world("opencode-lane-skew", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "skew", "opencode");
+    asked(&host, "skew", "ask-first");
+    lane_ready(&socket);
+
+    host.send("skew", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("skew", "skew-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let skewed = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the held turn's answer", || {
+        answers(&host, "skew", "said-hold-a") == 1
+    });
+    // Held open for the recheck: the words are not taken back at the idle.
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    let began = Instant::now();
+    wait_for("the words taken back at the recheck", || {
+        world.lines("deleted") == [skewed.as_str()]
+    });
+    assert!(
+        began.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        began.elapsed()
+    );
+    wait_for("the words answered on their own", || {
+        answers(&host, "skew", "said-skew-b") == 1
+    });
+    wait_for("the last turn to end", || host.state("skew") == "done");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "skew-b"]);
+    assert_ne!(read_at(&host, "skew", "u-b"), "steer");
+    assert_eq!(answers(&host, "skew", "said-skew-b"), 1);
 }
