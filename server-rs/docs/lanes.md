@@ -337,6 +337,11 @@ session.
   that is there (the one queued behind an exec turn, whose lane could not take the session while
   that next turn was already live) has the lane take it first, starting the lane where none
   runs, and runs on it; one the lane cannot take runs on exec as before.
+- **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
+  Muse lane take its session, waits for that before its first output: the lane's start, or the
+  session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the
+  Host's 30 s). It is the one place a turn waits on a lane, and it stands in for the per-turn
+  process's own start and load of the conversation, which that turn would pay instead.
 
 ## A follow-up turn in the same process
 

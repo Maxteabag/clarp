@@ -5,7 +5,9 @@
 //! the lane take it first, starting the lane where none runs (issue 833). Any other runs on exec
 //! (a conversation's first turn, which names the session), while a lane starts beside it on a
 //! thread of its own, without the session. Muse refuses a second process on a session it holds (its own
-//! `.session.lock`), so who holds the session next is decided in one place, the agent's thread:
+//! `.session.lock`), so who holds the session next is decided in one place: the agent's thread,
+//! or the live turn's own launch, which no other take can run beside (the agent's thread defers
+//! launches while it takes, and takes only while no turn is live):
 //!
 //! - once an exec turn's process is gone, its thread asks the agent's thread ([`Ask::MuseTake`]);
 //!   the agent's thread lets the lane take the session only while no turn runs, no terminal is

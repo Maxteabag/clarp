@@ -3373,6 +3373,10 @@ impl Worker {
                 } else if actor.moved().is_some() {
                     let held = actor.refuse_moved_launch(turn, now)?;
                     self.after(held);
+                    // A lane this turn started, or had take its session, before it asked (issue
+                    // 833) leaves too: the move's own end may have run before that start.
+                    self.end_claude_lane();
+                    self.end_muse_lane();
                     let _ = answer.send(false);
                 } else if actor.is_leader_tick()
                     && !self
