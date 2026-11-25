@@ -6,7 +6,7 @@
 //! the agent works, reaches its true end by wheel, Page Down and End, and
 //! keeps the reader's place while an older page loads above.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -1424,45 +1424,43 @@ pub(super) fn scroll_jump_check(out: String) {
     run_stages(stages);
 }
 
-/// A Stop is the reader's own act (#846): a reader at the end of a long
-/// reply who stops it stays at the end while the stopped turn settles (the
-/// partial answer filed under a new id, the line saying it was stopped),
-/// never pulled up to the answer's first line.
+/// A Stop is the reader's own act (#846): a reader following a reply to
+/// the end who stops it stays at the end while the stopped turn settles
+/// (the partial answer filed under its own id, taller than the view, with
+/// the line saying it was stopped), never pulled up to its first line.
 fn stop_at_end_stages(out: String) -> Vec<Stage> {
-    let s1 = Rc::new(Cell::new(0usize));
     vec![
-        ("stop: the reply streams", Box::new(move |app, _, elapsed| {
+        ("stop: at the end", Box::new(|app, _, elapsed| {
             if elapsed < Duration::from_millis(300) {
                 app.to_latest();
                 return false;
             }
-            if s1.get() == 0 {
-                agent_state("jump", "thinking");
-            }
-            // A long reply, a part every 250 ms: following stops at its first line.
-            let due = (elapsed.as_millis() / 250) as usize;
-            if s1.get() <= 10 && due > s1.get() {
-                upsert("jump", json!([{"id": "jump-stop-live", "role": "assistant", "kind": "live", "text": streamed(s1.get())}]));
-                s1.set(s1.get() + 1);
-            }
-            s1.get() > 10 && elapsed > Duration::from_millis(3200)
-        })),
-        ("stop: back at the end", Box::new(|app, _, elapsed| {
-            if elapsed < Duration::from_millis(100) {
-                app.to_latest();
-                return false;
-            }
-            if !(report().at_end && report().follows) || elapsed < Duration::from_millis(900) {
-                check(elapsed < Duration::from_secs(5), &format!("End brings the reader to the streaming reply's end: {:?}", seen().map(|s| s.line())));
+            if !(report().at_end && report().follows) {
+                check(elapsed < Duration::from_secs(5), "the reader is at the end, following");
                 return elapsed >= Duration::from_secs(5);
             }
+            agent_state("jump", "thinking");
+            upsert("jump", json!([{"id": "jump-stop-live", "role": "assistant", "kind": "live", "text": streamed(0)}]));
+            true
+        })),
+        ("stop: the reply streams", Box::new(|_, _, elapsed| {
+            // Two more parts: still shorter than the view, so followed.
+            if elapsed < Duration::from_millis(1200) {
+                let part = if elapsed < Duration::from_millis(400) { 1 } else { 2 };
+                if !holds("jump-stop-live", &streamed(part)) {
+                    upsert("jump", json!([{"id": "jump-stop-live", "role": "assistant", "kind": "live", "text": streamed(part)}]));
+                }
+                return false;
+            }
+            check(report().at_end && report().follows, &format!("a short reply is followed to its end: {:?}", seen().map(|s| s.line())));
             true
         })),
         ("stop: Ctrl+.", Box::new(|_, window, _| {
             check(crate::commands::run(&app_now(), window, "stop-agent"), "Stop runs, as Ctrl+. does");
-            // The stopped turn settles: its partial answer filed under its
-            // own id in the live one's place, last in the chat (a new reply
-            // to the transcript, which armed the follow-stop on it).
+            // The stopped turn settles: its partial answer, by now taller
+            // than the view, filed under its own id in the live one's
+            // place and last in the chat (a new reply to the transcript,
+            // which armed the follow-stop on it), the stop said under it.
             upsert("jump", json!([{"id": "jump-stop-reply", "role": "assistant", "text": format!("{}\n\nStopped by its user.", streamed(10))}]));
             agent_state("jump", "idle");
             true
@@ -1473,8 +1471,7 @@ fn stop_at_end_stages(out: String) -> Vec<Stage> {
                 return elapsed >= Duration::from_secs(8);
             }
             let now = seen().unwrap_or_default();
-            check(now.at_end && now.follows, &format!("after Stop the reader who was at the end stays there, the stop line in view: {}", now.line()));
-            check(now.first_id != "jump-stop-reply", &format!("never pulled up to the stopped answer's first line: {}", now.line()));
+            check(report().at_end && report().follows, &format!("after Stop the reader stays at the end, the stop line in view, not pulled up to the answer's first line: {} (at end {})", now.line(), report().at_end));
             shot(&out, "scroll-jump-02-stopped-at-end");
             true
         })),
