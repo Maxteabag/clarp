@@ -256,10 +256,12 @@ pub(crate) const CONFIG_FILE: &str = "config.toml";
 /// readers sit deep in the lanes and workers, which are given no `Config`.
 static NAMED_CONFIG: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
 
-/// Fixes the configuration folder of this process. Only `main` calls it, once; a later call
-/// changes nothing. A process that never calls it (a unit test) has none.
-pub fn name_config_dir(dir: Option<PathBuf>) {
-    let _ = NAMED_CONFIG.set(dir);
+/// Fixes the configuration folder of this process. Only `main` calls it, once; a second call
+/// is refused and changes nothing. A process that never calls it (a unit test) has none.
+pub fn name_config_dir(dir: Option<PathBuf>) -> Result<(), &'static str> {
+    NAMED_CONFIG
+        .set(dir)
+        .map_err(|_| "the configuration folder was named twice")
 }
 
 /// This Rust Host's configuration folder, as `--config` named it: the one place every reader

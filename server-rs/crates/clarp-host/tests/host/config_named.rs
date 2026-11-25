@@ -84,8 +84,7 @@ fn spent_pool(name: &str, named: bool) -> (Place, Host, PathBuf) {
 
 fn read_the_pool(place: &Place) {
     wait_for("the switcher to read the pool", || {
-        std::fs::read_to_string(place.root.join("calls"))
-            .is_ok_and(|calls| calls.contains("list"))
+        std::fs::read_to_string(place.root.join("calls")).is_ok_and(|calls| calls.contains("list"))
     });
 }
 
@@ -115,11 +114,10 @@ fn a_host_started_without_config_never_runs_the_reset_command_the_installed_fold
     let lanes = host.get("/lane-settings");
     assert_eq!(lanes["codex_chat_lane"], false, "{lanes}");
     assert_eq!(lanes["most"], 8, "the default, not the folder's 6: {lanes}");
-    let (status, refused) = host.ask(
-        "POST",
-        "/lane-settings",
-        Some(&json!({"memory_mb": 3000})),
+    let (status, refused) = host.ask("POST", "/lane-settings", Some(&json!({"memory_mb": 3000})));
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("config_unwritable"))
     );
-    assert_eq!((status, &refused["code"]), (409, &json!("config_unwritable")));
     assert_eq!(std::fs::read(&installed).unwrap(), before);
 }

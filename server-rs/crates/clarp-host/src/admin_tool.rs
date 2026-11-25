@@ -2573,8 +2573,8 @@ mod tests {
         let paths: Value = serde_json::from_str(&answer.stdout).unwrap();
         assert_eq!(paths["platform"], std::env::consts::OS);
         assert_eq!(paths["database"], "/fixture/rust-data/fleet.db");
-        let config = paths["config"].as_str().unwrap();
-        assert!(config.ends_with("/clarp-host/config.toml"), "{config}");
+        // A process named no folder (`--config`) shows none.
+        assert!(paths["config"].is_null(), "{paths}");
         let service = paths["service"].as_str().unwrap();
         assert!(
             service.ends_with("/systemd/user/clarp-host.service"),

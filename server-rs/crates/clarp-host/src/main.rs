@@ -626,7 +626,10 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    clarp_host::config::name_config_dir(config.config_dir.clone());
+    if let Err(why) = clarp_host::config::name_config_dir(config.config_dir.clone()) {
+        eprintln!("clarp-host: {why}");
+        return ExitCode::from(2);
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

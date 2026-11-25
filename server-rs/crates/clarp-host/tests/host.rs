@@ -51,12 +51,12 @@ mod codex_chat_lane;
 mod codex_own_provider;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
+#[path = "host/config_named.rs"]
+mod config_named;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
 mod controller_actions;
-#[path = "host/config_named.rs"]
-mod config_named;
 #[path = "host/conversation_fork.rs"]
 mod conversation_fork;
 #[path = "host/coordination.rs"]
