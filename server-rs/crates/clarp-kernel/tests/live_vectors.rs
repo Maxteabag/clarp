@@ -583,6 +583,9 @@ fn a_live_message_never_shows_a_hidden_block_or_half_a_tag() {
         );
         let text = shown(&mut hub, 25 + at * 10);
         assert_eq!(text, *expected, "after {written:?}");
-        assert!(!text.contains("secret") && !text.contains("oai-mem"), "{text}");
+        assert!(
+            !text.contains("secret") && !text.contains("oai-mem"),
+            "{text}"
+        );
     }
 }
