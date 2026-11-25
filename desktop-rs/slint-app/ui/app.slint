@@ -424,6 +424,7 @@ export component AppWindow inherits Window {
     callback switcher-dismissed();
     callback switcher-adjusted(int, int);
     public function show-switcher() { switcher.open(); }
+    public function set-switcher-query(text: string) { switcher.set-query(text); }
 
     changed search-focused => { root.focus-moved(); }
     changed sidebar-focused => { root.focus-moved(); }

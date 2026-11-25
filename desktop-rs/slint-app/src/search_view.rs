@@ -17,6 +17,10 @@ use crate::{App, pump_now};
 
 /// Rows message search lists.
 pub const LIMIT: usize = 50;
+/// The row that loads the open chat's older messages, to search them too.
+pub const LOAD_OLDER: &str = "search-load-older";
+/// What message search says when nothing matches: what it looked in.
+pub const EMPTY: &str = "No match in the messages loaded on this computer";
 /// Ctrl+K points to message search from this many characters typed.
 pub const HINT_FROM: usize = 3;
 
@@ -50,7 +54,36 @@ pub fn items(engine: &mut Engine, query: &str, limit: usize) -> (Vec<Item>, Sear
             Item::message(format!("{}{SEPARATOR}{}", hit.session, hit.id), format!("{} · {who} · {when}{cached}", engine.chat_name(&hit.session)), snippet)
         })
         .collect();
+    let mut items: Vec<Item> = items;
+    // The open chat holds older messages than this computer loaded: one
+    // row loads them, and the search runs again over them.
+    let selected = engine.selected_session().to_owned();
+    let more = engine.conversation(&selected).is_some_and(|c| c.has_more());
+    if !query.trim().is_empty() && more {
+        let name = engine.chat_name(&selected);
+        let loading = engine.log_pending(&selected);
+        items.push(Item {
+            kind: crate::switcher::Kind::Command,
+            target: LOAD_OLDER.to_owned(),
+            label: if loading { format!("Loading older messages of {name}…") } else { format!("Load older messages of {name}") },
+            detail: "Search them too: this chat has more than is loaded here".to_owned(),
+            key: String::new(),
+            group: "message",
+            description: String::new(),
+            aliases: &[],
+            value: String::new(),
+            entry: "",
+        });
+    }
     (items, results)
+}
+
+/// The older-messages row was chosen: the open chat's page before is fetched
+/// and the switcher stays open, searching again as it arrives.
+pub fn load_older(app: &Rc<App>) {
+    let selected = app.engine.borrow().selected_session().to_owned();
+    app.engine.borrow_mut().load_older(&selected);
+    pump_now(app);
 }
 
 /// What was searched, said plainly: only what this computer holds.

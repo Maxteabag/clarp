@@ -465,7 +465,10 @@ impl App {
             window.set_roster_note(note.into());
             window.set_roster_note_detail(detail.into());
         }
-        if changes.iter().any(|c| matches!(c, Change::Roster | Change::RosterFreshness | Change::Preferences | Change::Search)) {
+        // Message search searches again as a chat's messages arrive (its
+        // older page, loaded from the switcher).
+        let searching = self.switcher.borrow().open && self.switcher.borrow().messages_only;
+        if changes.iter().any(|c| matches!(c, Change::Roster | Change::RosterFreshness | Change::Preferences | Change::Search) || (searching && matches!(c, Change::Conversation(_)))) {
             commands::refresh_switcher(self, &window);
         }
         whole.lap("switcher");

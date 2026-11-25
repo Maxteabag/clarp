@@ -41,6 +41,12 @@ export component Switcher inherits Rectangle {
         search.text = "";
         search.focus();
     }
+    // Words carried over from another mode (Ctrl+K's to Ctrl+F's).
+    public function set-query(text: string) {
+        search.text = text;
+        search.focus();
+        search.cursor-to-end();
+    }
     background: #00000080;
     // A click outside the panel closes it.
     TouchArea { clicked => { root.dismissed(); } }

@@ -3,7 +3,9 @@
 //! chats, and Enter opens that chat with the message marked and in view
 //! (it is near the top, so the chat scrolls up to it). Ctrl+K lists
 //! messages too: one in a chat only the transcript cache holds opens the
-//! same way.
+//! same way. Ctrl+F inside Ctrl+K's switcher turns it into message search
+//! with the words already typed, and what is typed next arrives once. With
+//! no match it says it searched the messages loaded on this computer.
 //!
 //! `--check mention`: `@` in the composer lists the agents, the arrows move
 //! through them, Tab completes the name, the route chip says where Enter
@@ -48,7 +50,7 @@ fn cache_root() -> std::path::PathBuf {
 
 pub fn message_search_check(out: String) {
     use slint::platform::Key;
-    let (out1, out2, out3) = (out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
     let stages: Vec<Stage> = vec![
         ("live", Box::new(|app, _, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
@@ -108,7 +110,8 @@ pub fn message_search_check(out: String) {
         })),
         ("found", Box::new(move |_, window, elapsed| {
             if window.get_switcher_query() != "pelican report" || elapsed < Duration::from_millis(300) {
-                return false;
+                check(elapsed < Duration::from_secs(3), &format!("the words typed right after Ctrl+F arrive once: {:?}", window.get_switcher_query()));
+                return elapsed >= Duration::from_secs(3);
             }
             let (kind, label) = first(window);
             check(kind == "message" && label.starts_with("Mike · you"), &format!("the message in Mike's chat is found: {kind} {label}"));
@@ -143,6 +146,24 @@ pub fn message_search_check(out: String) {
             check(!kinds.iter().any(|k| k == "message"), &format!("Ctrl+K lists no messages: {kinds:?}"));
             check(window.get_switcher_note().contains("Ctrl+F"), "and points to message search");
             shot(&out3, "message-search-03-ctrl-k");
+            // Ctrl+F there, as its note says: message search, same words.
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        ("ctrl f in ctrl k", Box::new(|_, window, elapsed| {
+            if window.get_switcher_placeholder() != "Search messages in every chat" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_switcher_open(), "Ctrl+F in the switcher keeps it open, as message search");
+            check(window.get_switcher_query() == "walrus", &format!("the words typed carry over, once: {:?}", window.get_switcher_query()));
+            headless::type_text(" plan");
+            true
+        })),
+        ("typed on", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_switcher_query() == "walrus plan", &format!("what is typed next arrives once, after them: {:?}", window.get_switcher_query()));
             headless::press(Key::Escape);
             true
         })),
@@ -174,6 +195,26 @@ pub fn message_search_check(out: String) {
                 return false;
             }
             check(true, "the cached chat opens with its message marked");
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        // Nothing matches: the switcher says what it looked in.
+        ("no match", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("zyzzyva");
+            true
+        })),
+        ("honest empty", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "zyzzyva" || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            let messages = window.get_switcher_rows().iter().filter(|r| r.kind == "message").count();
+            check(messages == 0, "nothing matches");
+            check(window.get_switcher_empty() == crate::search_view::EMPTY, &format!("it says what it searched: {:?}", window.get_switcher_empty()));
+            shot(&out4, "message-search-04-no-match");
+            headless::press(Key::Escape);
             true
         })),
     ];
