@@ -288,7 +288,11 @@ fn an_own_message_never_leaves_the_conversation_before_the_host_sends_it_back() 
 fn a_limited_turn_without_words_says_what_it_waits_for() {
     use clarp_core::chat_view::limited_words;
     let o = |v: serde_json::Value| v.as_object().unwrap().clone();
-    assert_eq!(limited_words(&o(serde_json::json!({"state": "limited", "waits_for": "machine"}))), "Waiting for the machine");
+    // Held for the machine: drawn as working, even with the Host's words.
+    let machine = o(serde_json::json!({"state": "limited", "waits_for": "machine", "headline": "Waiting for the machine (io 41%)"}));
+    assert!(clarp_core::chat_view::held_for_the_machine(&machine));
+    assert_eq!(clarp_core::chat_view::status_words(&machine), "Working");
+    assert_eq!(limited_words(&machine), "Working");
     assert_eq!(limited_words(&o(serde_json::json!({"state": "limited", "waits_for": "network"}))), "Waiting for the network");
     assert_eq!(limited_words(&o(serde_json::json!({"state": "limited", "waits_for": "quota"}))), "Waiting for the usage limit");
     // An older Host sends no waits_for: a usage limit, as before.
