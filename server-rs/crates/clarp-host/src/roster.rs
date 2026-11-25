@@ -393,17 +393,27 @@ pub(crate) async fn bind(
     let rebinds = ["codex_home", "codex_provider", "cloud_speech"]
         .iter()
         .any(|key| asked.contains_key(*key));
-    let mut record = if rebinds || (adding.is_empty() && removing.is_empty()) {
+    // A bound agent's binding is the owner's: anyone else asks him on a card (`bound_privacy`).
+    let to = crate::bound_privacy::Binding {
+        home,
+        provider,
+        cloud_speech,
+    };
+    let mut cards = Vec::new();
+    let mut record = if rebinds && crate::bound_privacy::must_ask(reader, before, &to) {
+        let asked = crate::bound_privacy::ask_binding(app, reader, before, &to).await;
+        cards.push(asked.map_err(|(status, body)| Refusal::Told(status, body))?);
+        before.clone()
+    } else if rebinds || (adding.is_empty() && removing.is_empty()) {
         let change = Amend::Provider {
-            home,
-            provider,
-            cloud_speech,
+            home: to.home,
+            provider: to.provider,
+            cloud_speech: to.cloud_speech,
         };
         amend(app, &before.agent_id, change).await?
     } else {
         before.clone()
     };
-    let mut cards = Vec::new();
     for (agents, add) in [(&removing, false), (&adding, true)] {
         if agents.is_empty() {
             continue;

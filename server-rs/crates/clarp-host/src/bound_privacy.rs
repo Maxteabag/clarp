@@ -943,45 +943,13 @@ pub async fn change_readers(
             json!({"error": "owner_only", "message": why}),
         ));
     }
-    let asker_id = reader.agent_id().unwrap_or_default();
-    let directory = app.fleet.directory();
-    let Some(asker) = directory
-        .members
-        .iter()
-        .find(|member| member.record.agent_id == asker_id)
-        .cloned()
-    else {
-        let why = "An agent asks for a reader from its own turn.";
-        return Err((
-            StatusCode::FORBIDDEN,
-            json!({"error": "owner_only", "message": why}),
-        ));
-    };
+    let asker = asker_of(app, reader, "An agent asks for a reader from its own turn.")?;
     let mut asked = Vec::new();
     for agent in agents {
         if bound.readers.contains(&agent.agent_id) {
             continue;
         }
-        let reference = card_reference(bound, agent);
-        let made_before = crate::library::decisions_of(app, &asker.record.session)
-            .into_iter()
-            .find(|card| card["reference_id"] == reference.as_str());
-        let made = match made_before {
-            Some(made) => made,
-            None => {
-                let card = card(&asker.record, bound, agent);
-                let fields = card.as_object().cloned().unwrap_or_default();
-                crate::library::asked_of(app, &asker, &fields)
-                    .await
-                    .map_err(|why| {
-                        let message = why.message().to_string();
-                        (
-                            why.status(),
-                            json!({"error": "card_not_made", "message": message}),
-                        )
-                    })?
-            }
-        };
+        let made = ask_owner(app, &asker, card(&asker.record, bound, agent)).await?;
         asked.push(json!({
             "reader": agent.session,
             "artifact_id": made["artifact_id"],
@@ -989,6 +957,142 @@ pub async fn change_readers(
         }));
     }
     Ok(ReadersChange::Asked(asked))
+}
+
+/// The agent whose turn asks, where a turn asks; refused (`owner_only`, in these words) for
+/// any other caller that is not the owner.
+fn asker_of(
+    app: &App,
+    reader: &Reader,
+    why: &str,
+) -> Result<Arc<Member>, (StatusCode, Value)> {
+    let asker_id = reader.agent_id().unwrap_or_default();
+    let directory = app.fleet.directory();
+    let mut members = directory.members.iter();
+    members
+        .find(|member| !asker_id.is_empty() && member.record.agent_id == asker_id)
+        .cloned()
+        .ok_or_else(|| {
+            (
+                StatusCode::FORBIDDEN,
+                json!({"error": "owner_only", "message": why}),
+            )
+        })
+}
+
+/// Asks the owner a card in the chat of the agent that asked: the card it has under the
+/// same reference where it has one (one card a question), else a new one.
+async fn ask_owner(
+    app: &App,
+    asker: &Member,
+    card: Value,
+) -> Result<Value, (StatusCode, Value)> {
+    let reference = card["reference_id"].clone();
+    let made_before = crate::library::decisions_of(app, &asker.record.session)
+        .into_iter()
+        .find(|made| made["reference_id"] == reference);
+    if let Some(made) = made_before {
+        return Ok(made);
+    }
+    let fields = card.as_object().cloned().unwrap_or_default();
+    crate::library::asked_of(app, asker, &fields)
+        .await
+        .map_err(|why| {
+            let message = why.message().to_string();
+            (
+                why.status(),
+                json!({"error": "card_not_made", "message": message}),
+            )
+        })
+}
+
+/// A binding a bound agent is asked to change to: its Codex home and provider (both empty to
+/// let it go) and its choice of cloud speech.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Binding {
+    pub home: String,
+    pub provider: String,
+    pub cloud_speech: Option<bool>,
+}
+
+impl Binding {
+    /// The binding an agent has now.
+    pub fn of(record: &AgentRecord) -> Self {
+        Binding {
+            home: record.codex_home.clone(),
+            provider: record.codex_provider.clone(),
+            cloud_speech: record.cloud_speech,
+        }
+    }
+}
+
+/// Whether this reader must ask the owner before `bound`'s binding becomes `to`: any change
+/// of the binding of an agent bound to a provider of its own, asked by anyone but the owner.
+/// Letting it go would carry its conversation to the machine's provider, another home or
+/// provider to another, and cloud speech on to a speech provider in the cloud.
+pub fn must_ask(reader: &Reader, bound: &AgentRecord, to: &Binding) -> bool {
+    *reader != Reader::Owner && bound.bound() && Binding::of(bound) != *to
+}
+
+/// Asks the owner, on a card in the asking agent's chat, to change `bound`'s binding to `to`
+/// ("Unbind B from its provider?" where it lets it go); his yes changes it
+/// ([`answered`]). Answers the card as `asked` lists it.
+pub async fn ask_binding(
+    app: &App,
+    reader: &Reader,
+    bound: &AgentRecord,
+    to: &Binding,
+) -> Result<Value, (StatusCode, Value)> {
+    let why = "Only the owner changes the binding of an agent bound to a provider of its own; \
+        an agent asks him from its own turn.";
+    let asker = asker_of(app, reader, why)?;
+    let unbinds = to.home.is_empty() && to.provider.is_empty();
+    let title = if unbinds {
+        format!("Unbind {} from its provider?", bound.persona)
+    } else {
+        format!("Change {}'s provider?", bound.persona)
+    };
+    let speech = match to.cloud_speech {
+        None => "as its kind has it",
+        Some(true) => "on",
+        Some(false) => "off",
+    };
+    let question = if unbinds {
+        format!(
+            "{} asks to let {} go from the model provider {}. Its next turn would run on the \
+             machine's own provider, with its conversation. Cloud speech: {speech}.",
+            asker.record.persona, bound.persona, bound.codex_provider
+        )
+    } else {
+        format!(
+            "{} asks to run {} on the provider {} in the Codex home {}. Cloud speech: {speech}.",
+            asker.record.persona, bound.persona, to.provider, to.home
+        )
+    };
+    let reference = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (&to.home, &to.provider, to.cloud_speech).hash(&mut hasher);
+        format!("bound-change:{}:{:016x}", bound.agent_id, hasher.finish())
+    };
+    let card = json!({
+        "session": asker.record.session,
+        "title": title,
+        "question": question,
+        "context": "Yes changes it as asked. Its conversation goes where its binding points.",
+        "reference_id": reference,
+        "payload": {"bound_change": {
+            "agent_id": bound.agent_id, "codex_home": to.home,
+            "codex_provider": to.provider, "cloud_speech": to.cloud_speech,
+        }},
+    });
+    let made = ask_owner(app, &asker, card).await?;
+    Ok(json!({
+        "binding": {"codex_home": to.home, "codex_provider": to.provider,
+                    "cloud_speech": to.cloud_speech},
+        "artifact_id": made["artifact_id"],
+        "decision_id": made["decision"]["decision_id"],
+    }))
 }
 
 async fn set_readers(
@@ -1014,8 +1118,14 @@ async fn set_readers(
 /// may read a bound agent and the owner said yes, that agent is let in. An answer given on
 /// behalf of the owner by the agent that asked, or by the bound agent, is not taken for his.
 pub async fn answered(app: &App, artifact: &Value, on_behalf: Option<&str>) {
+    if artifact["decision"]["resolved_choice"] != "accepted" {
+        return;
+    }
+    if artifact["payload"]["bound_change"].is_object() {
+        return rebound(app, artifact, on_behalf).await;
+    }
     let asked = &artifact["payload"]["bound_reader"];
-    if !asked.is_object() || artifact["decision"]["resolved_choice"] != "accepted" {
+    if !asked.is_object() {
         return;
     }
     let (bound_id, reader_id) = (
@@ -1047,6 +1157,59 @@ pub async fn answered(app: &App, artifact: &Value, on_behalf: Option<&str>) {
     readers.push(reader.record.agent_id.clone());
     if let Err((_, why)) = set_readers(app, &bound.record, readers).await {
         eprintln!("clarp-host: a reader the owner let in was not kept: {why}");
+    }
+}
+
+/// A card that asked to change a bound agent's binding, answered yes: the binding is changed
+/// as asked, where it is still one the Host takes. An answer on the owner's behalf by the
+/// agent that asked or by the bound agent is not taken for his.
+async fn rebound(app: &App, artifact: &Value, on_behalf: Option<&str>) {
+    let asked = &artifact["payload"]["bound_change"];
+    let text = |key: &str| asked[key].as_str().unwrap_or("").to_string();
+    let to = Binding {
+        home: text("codex_home"),
+        provider: text("codex_provider"),
+        cloud_speech: asked["cloud_speech"].as_bool(),
+    };
+    let bound_id = text("agent_id");
+    let directory = app.fleet.directory();
+    let Some(bound) = directory
+        .members
+        .iter()
+        .find(|member| member.record.agent_id == bound_id)
+        .cloned()
+    else {
+        return;
+    };
+    let asker = artifact["session"].as_str().unwrap_or("");
+    if let Some(acting) = on_behalf.map(str::trim)
+        && [asker, &*bound.record.session].contains(&acting)
+    {
+        eprintln!(
+            "clarp-host: a card changing a bound agent's binding was answered by {acting} on the \
+             owner's behalf; it is not taken"
+        );
+        return;
+    }
+    if !to.home.is_empty() || !to.provider.is_empty() {
+        let backend = bound.record.backend.clone();
+        let (home, provider) = (to.home.clone(), to.provider.clone());
+        let checked = tokio::task::spawn_blocking(move || {
+            crate::fleet::check_binding(&backend, &home, &provider)
+        })
+        .await;
+        if !matches!(checked, Ok(Ok(_))) {
+            eprintln!("clarp-host: a binding the owner approved can no longer be used; not changed");
+            return;
+        }
+    }
+    let change = crate::fleet::Amend::Provider {
+        home: to.home,
+        provider: to.provider,
+        cloud_speech: to.cloud_speech,
+    };
+    if !matches!(app.fleet.amend(bound_id, change).await, Ok(Ok(_))) {
+        eprintln!("clarp-host: a binding the owner approved was not kept");
     }
 }
 
