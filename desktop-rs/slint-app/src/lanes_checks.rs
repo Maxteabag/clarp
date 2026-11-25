@@ -9,11 +9,9 @@
 //! auto and what the machine has free, the fixed limits say they are fixed;
 //! switching Limits posts it and hides the auto rows, and stepping a fixed
 //! limit in auto posts it alone and shows Fixed. Last the Host offers
-//! `turn_pressure_admission` (contract 186): no pressure thresholds and no
-//! most kept in auto are listed; below the limits Live processes,
-//! Cold starts, last hour (a line per tool) and Pressure (calm or high,
-//! with the turns held; no percentages). The settings event reads the
-//! pressure again.
+//! `lanes_live` (contract 194; `turn_pressure_admission` on an older Host): no most kept in auto and nothing of the machine's pressure;
+//! below the limits Live processes and Cold starts, last hour, each with a
+//! line per tool.
 
 use std::time::Duration;
 
@@ -78,7 +76,7 @@ pub fn kept_processes_check(out: String) {
             let now = row(window, "Now").map(|r| r.detail.to_string()).unwrap_or_default();
             check(now == "8 kept · 1945 MB · claude 8 (2 busy) · codex 0", &format!("what the lanes hold now: {now:?}"));
             check(row(window, "When").is_some_and(|r| r.detail.contains("next message")), "says when a change takes effect");
-            check(row(window, "Live processes").is_none() && by_id(window, "kept-pressure-cpu").is_none(), "no pressure without turn_pressure_admission");
+            check(row(window, "Live processes").is_none() && by_id(window, "kept-pressure-cpu").is_none(), "no live lanes without lanes_live");
             shot(&out1, "kept-processes-01");
             change("kept-most", 1);
             true
@@ -182,13 +180,13 @@ pub fn kept_processes_check(out: String) {
             check(posted.last().is_some_and(|p| p["body"] == json!({"most": 10})), &format!("most posted alone: {:?}", posted.last()));
             check(done, "most 10, and the Host switched to fixed");
             let held = json!({"lanes": 8, "memory_mb": 1945, "unanswered": 0, "tools": {"claude": {"lanes": 8, "busy": 2, "memory_mb": 1945}}});
-            let on = json!({"pressure": true, "held": held, "auto_settings": {"limits": "auto"}});
-            check(control("/__control/lane-settings", &on).is_ok(), "the Host turns turn_pressure_admission on");
+            let on = json!({"live": true, "held": held, "auto_settings": {"limits": "auto"}});
+            check(control("/__control/lane-settings", &on).is_ok(), "the Host turns lanes_live on");
             app.engine.borrow_mut().reconnect();
             true
         })),
-        ("pressure shown", Box::new(move |app, window, elapsed| {
-            let shown = row(window, "Pressure").is_some();
+        ("live lanes shown", Box::new(move |app, window, elapsed| {
+            let shown = row(window, "Live processes").is_some();
             if !shown && elapsed < Duration::from_secs(8) {
                 return false;
             }
@@ -197,17 +195,17 @@ pub fn kept_processes_check(out: String) {
             check(by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto") && by_id(window, "kept-reserve").is_some(), "auto, with the memory kept free");
             check(by_id(window, "kept-ceiling").is_none(), "no most kept in auto: it bounds nothing");
             check(row(window, "Now").is_none(), "the live processes say what Now said");
-            let groups = info_from(window, "Live processes", 6);
+            let groups = info_from(window, "Live processes", 5);
             let expected = pairs(&[
                 ("Live processes", "8 · 2 busy · 6 idle · 1945 MB"),
                 ("    Claude", "8 · 2 busy · 6 idle"),
                 ("Cold starts, last hour", "5"),
                 ("    Claude", "3"),
                 ("    Codex", "2"),
-                ("Pressure", "High · 2 turns held"),
             ]);
-            check(groups == expected, &format!("live processes, cold starts and pressure, no percentages: {groups:?}"));
-            check(!groups.iter().chain(&info_from(window, "Pressure", 4)).any(|(_, detail)| detail.contains('%')), "no percentage in the section");
+            check(groups == expected, &format!("live processes and cold starts: {groups:?}"));
+            // Nothing of the machine's pressure, whatever the Host sends (the owner, 25 Nov 2026).
+            check(row(window, "Pressure").is_none(), "no pressure row");
             // A search for a group's title finds its lines too (#846).
             let found = |query: &str| -> Vec<(String, String)> {
                 crate::settings_view::filter(crate::settings_view::rows(app), query).iter().filter(|r| r.kind == "info").map(|r| (r.label.to_string(), r.detail.to_string())).collect()
@@ -215,17 +213,6 @@ pub fn kept_processes_check(out: String) {
             let cold = found("cold");
             check(cold.contains(&("    Claude".to_owned(), "3".to_owned())) && cold.contains(&("    Codex".to_owned(), "2".to_owned())), &format!("searching \"cold\" shows the cold starts per tool: {cold:?}"));
             shot(&out4, "kept-processes-04-pressure");
-            let calm = json!({"pressure_status": {"held_for_pressure": 0, "pressure": {"cpu_source": "system", "cpu": null, "io": null, "memory": null, "high": false}}});
-            check(control("/__control/lane-settings", &calm).is_ok(), "the machine calms");
-            check(control("/__control/event", &json!({"type": "lane-settings-updated", "pressure_cpu_percent": 60})).is_ok(), "the settings event");
-            true
-        })),
-        ("calm", Box::new(|_, window, elapsed| {
-            let calm = row(window, "Pressure").is_some_and(|r| r.detail == "Calm · no turns held");
-            if !calm && elapsed < Duration::from_secs(5) {
-                return false;
-            }
-            check(calm, "the event reads the pressure again: calm, no turns held");
             true
         })),
     ];

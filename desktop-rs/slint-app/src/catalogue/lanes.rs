@@ -155,44 +155,8 @@ pub(super) fn register() -> Vec<Setting> {
         (1.0, 64.0),
         "",
     )
-    // Where the Host holds turns for pressure the ceiling bounds nothing.
-    .when(|app| in_auto(app) && !app.engine.borrow().lane_pressure_offered()));
-    all.push(host_number(
-        "kept-pressure-cpu",
-        "CPU pressure that holds turns",
-        "When the connected Host's own work has waited for the CPU this share of the last minute, turns nobody waits on wait until it calms.",
-        &["pressure", "cpu", "cpu pressure", "load", "hold turns", "admission", "kept processes"],
-        lanes::PRESSURE_NUMBERS[0],
-        (5.0, 95.0),
-        "%",
-    )
-    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
-    // defaults hold; the setting stays for when it is wanted again.
-    .when(|_| false));
-    all.push(host_number(
-        "kept-pressure-io",
-        "IO pressure that holds turns",
-        "When the machine has waited for its disks this share of the last minute, turns nobody waits on wait until it calms.",
-        &["pressure", "io", "disk", "io pressure", "load", "hold turns", "admission", "kept processes"],
-        lanes::PRESSURE_NUMBERS[1],
-        (5.0, 95.0),
-        "%",
-    )
-    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
-    // defaults hold; the setting stays for when it is wanted again.
-    .when(|_| false));
-    all.push(host_number(
-        "kept-pressure-memory",
-        "Memory pressure that holds turns",
-        "When the machine has stalled for memory this share of the last ten seconds, turns nobody waits on wait until it calms.",
-        &["pressure", "memory", "memory pressure", "ram", "swap", "hold turns", "admission", "kept processes"],
-        lanes::PRESSURE_NUMBERS[2],
-        (5.0, 95.0),
-        "%",
-    )
-    // No pressure percentages anywhere (the owner, 25 Nov 2026): the Host's
-    // defaults hold; the setting stays for when it is wanted again.
-    .when(|_| false));
+    // Where the Host says which processes live, the ceiling bounds nothing.
+    .when(|app| in_auto(app) && !app.engine.borrow().lane_live_offered()));
     all.push(limit(
         "kept-most",
         "Most kept processes",
@@ -240,7 +204,7 @@ pub fn information(app: &App) -> Vec<(String, String)> {
         let free = engine.lane_settings().map(lanes::free_line).filter(|line| !line.is_empty());
         out.push(("Free memory".to_owned(), free.unwrap_or_else(|| "The Host has not said what its machine has free".to_owned())));
     }
-    let groups = if engine.lane_pressure_offered() { engine.lane_settings().map(groups).unwrap_or_default() } else { Vec::new() };
+    let groups = if engine.lane_live_offered() { engine.lane_settings().map(groups).unwrap_or_default() } else { Vec::new() };
     if groups.is_empty() {
         out.push(("Now".to_owned(), now));
     }
@@ -264,5 +228,5 @@ pub const TOOL_INDENT: &str = "    ";
 /// What loads the connected Host's machine, the groups it says: live
 /// processes, cold starts in the last hour, and pressure.
 fn groups(answer: &serde_json::Map<String, Value>) -> Vec<lanes::Group> {
-    [lanes::live_group(answer), lanes::cold_starts_group(answer), lanes::pressure_group(answer)].into_iter().flatten().collect()
+    [lanes::live_group(answer), lanes::cold_starts_group(answer)].into_iter().flatten().collect()
 }

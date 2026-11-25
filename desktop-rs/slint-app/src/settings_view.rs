@@ -142,9 +142,9 @@ pub fn filter(rows: Vec<SettingRow>, query: &str) -> Vec<SettingRow> {
         return rows;
     }
     // Settings before the information rows (the keys listed under KEYBOARD).
-    // A line under a group (indented: Kept processes' per-tool and
-    // per-reading lines) is found by its group's title too, so "pressure"
-    // or "cold" shows the group's lines, not its title row alone.
+    // A line under a group (indented: Kept processes' per-tool lines) is
+    // found by its group's title too, so "cold" shows the group's lines,
+    // not its title row alone.
     let mut group = String::new();
     let mut scored: Vec<(bool, u32, usize, SettingRow)> = rows
         .into_iter()
@@ -205,13 +205,13 @@ thread_local! {
     static PRESSURE_READ: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
-/// How often the page reads again what loads the Host's machine while it is
-/// open: the event never carries it.
+/// How often the page reads the live lanes and cold starts again while it is
+/// open: the event never carries them.
 const PRESSURE_EVERY: Duration = Duration::from_secs(15);
 
-/// While the page is open on a Host that says what loads its machine
-/// (`turn_pressure_admission`), reads it again now and then; stops once the
-/// page is left.
+/// While the page is open on a Host that says which processes live
+/// (`lanes_live`), reads them again now and then; stops once the page is
+/// left.
 fn watch_pressure() {
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, PRESSURE_EVERY, || {
@@ -220,7 +220,7 @@ fn watch_pressure() {
             PRESSURE_READ.with(|t| t.borrow_mut().take());
             return;
         }
-        if app.engine.borrow().lane_pressure_offered() {
+        if app.engine.borrow().lane_live_offered() {
             app.engine.borrow_mut().load_lane_settings();
             crate::pump_now(&app);
         }

@@ -14,14 +14,13 @@
 //! read its memory). In auto, `most` and `memory_mb` are the fixed limits:
 //! the Host switches to fixed when either is set.
 //!
-//! Where the Host also lists `turn_pressure_admission` (Rust Host contract
-//! 186) the answer carries what loads the machine, read anew each time (the
-//! event never carries it): `live` (the processes that live now, per tool),
-//! `cold_starts_last_hour` (turns that started their tool anew), `pressure`
-//! (the kernel's CPU, IO and memory pressure, whether it is high, and the
-//! thresholds) and `held_for_pressure` (turns waiting for the machine to
-//! calm). The three thresholds are limits like the others; setting one does
-//! not switch to fixed. `ceiling` bounds nothing there and is not shown.
+//! Where the Host also lists `lanes_live` (Rust Host contract 194; an
+//! older Host listed `turn_pressure_admission`, 186) the answer carries,
+//! read anew each time (the event never carries it), `live` (the processes
+//! that live now, per tool) and `cold_starts_last_hour` (turns that started
+//! their tool anew). Nothing of the machine's pressure is shown, whatever a
+//! Host still sends (the owner, 25 Nov 2026). `ceiling` bounds nothing there
+//! and is not shown.
 
 use clarp_core::json::Object;
 use serde_json::Value;
@@ -45,10 +44,12 @@ pub const AUTO_NUMBERS: [&str; 2] = ["reserve_percent", "ceiling"];
 /// The numbers that are the fixed limits: setting one switches the Host to fixed.
 pub const FIXED_NUMBERS: [&str; 2] = ["most", "memory_mb"];
 
-/// The feature in `/server-info` for turns held while the machine is under pressure.
-pub const PRESSURE_FEATURE: &str = "turn_pressure_admission";
-/// The pressure thresholds, in percent, in the order they are shown.
-pub const PRESSURE_NUMBERS: [&str; 3] = ["pressure_cpu_percent", "pressure_io_percent", "pressure_memory_percent"];
+/// The feature in `/server-info` for the live lanes and cold starts in the
+/// answer (`lanes_live`, Rust Host contract 194).
+pub const LIVE_FEATURE: &str = "lanes_live";
+/// The same figures on a Host between contracts 186 and 194, which listed
+/// them with its pressure gate (now gone; its pressure is never shown).
+pub const OLD_LIVE_FEATURE: &str = "turn_pressure_admission";
 
 const READ: &str = "lane-settings";
 /// A change's tag: `lane-settings-write:<n>`, the n-th change.
@@ -60,8 +61,9 @@ pub(crate) struct Lanes {
     pub feature: bool,
     /// `lane_auto_limits` was in it too.
     pub auto: bool,
-    /// `turn_pressure_admission` was in it too.
-    pub pressure: bool,
+    /// `lanes_live` (or, on an older Host, `turn_pressure_admission`) was
+    /// in it too: the answer says which processes live and the cold starts.
+    pub live: bool,
     /// The Host's last answer (settings, ranges and what is held).
     pub answer: Option<Object>,
     /// Why the last change or read did not go through, as the Host said it.
@@ -239,21 +241,6 @@ pub fn cold_starts_group(answer: &Object) -> Option<Group> {
     Some(Group { title: "Cold starts, last hour".to_owned(), summary: total.to_string(), lines })
 }
 
-/// The machine's pressure (`pressure`, `held_for_pressure`): calm or high,
-/// with how many turns are held now. No percentages: the owner found the
-/// CPU/IO figures misleading (25 Nov 2026), so only the state is shown.
-pub fn pressure_group(answer: &Object) -> Option<Group> {
-    let pressure = answer.get("pressure")?.as_object()?;
-    let held = whole(answer.get("held_for_pressure")).unwrap_or(0);
-    let state = if pressure.get("high").and_then(Value::as_bool).unwrap_or(false) { "High" } else { "Calm" };
-    let turns = match held {
-        0 => "no turns held".to_owned(),
-        1 => "1 turn held".to_owned(),
-        n => format!("{n} turns held"),
-    };
-    Some(Group { title: "Pressure".to_owned(), summary: format!("{state} · {turns}"), lines: Vec::new() })
-}
-
 impl Engine {
     /// The connected Host lets the owner set its lanes.
     pub fn lane_settings_offered(&self) -> bool {
@@ -265,10 +252,10 @@ impl Engine {
         self.lanes.feature && self.lanes.auto
     }
 
-    /// The connected Host holds turns while its machine is under pressure
-    /// (`turn_pressure_admission`) and says what loads it.
-    pub fn lane_pressure_offered(&self) -> bool {
-        self.lanes.feature && self.lanes.pressure
+    /// The connected Host says which processes live and the cold starts
+    /// (`lanes_live`, or `turn_pressure_admission` on an older Host).
+    pub fn lane_live_offered(&self) -> bool {
+        self.lanes.feature && self.lanes.live
     }
 
     /// The Host's last answer, once it gave one.
@@ -315,12 +302,12 @@ impl Engine {
     pub(crate) fn lanes_server_info(&mut self, info: &Object) {
         let features = info.get("capabilities").and_then(|c| c.get("features")).and_then(Value::as_array);
         let lists = |name: &str| features.is_some_and(|features| features.iter().any(|f| f.as_str() == Some(name)));
-        let (has, auto, pressure) = (lists(FEATURE), lists(AUTO_FEATURE), lists(PRESSURE_FEATURE));
-        if has != self.lanes.feature || auto != self.lanes.auto || pressure != self.lanes.pressure {
+        let (has, auto, live) = (lists(FEATURE), lists(AUTO_FEATURE), lists(LIVE_FEATURE) || lists(OLD_LIVE_FEATURE));
+        if has != self.lanes.feature || auto != self.lanes.auto || live != self.lanes.live {
             self.lanes = Default::default();
             self.lanes.feature = has;
             self.lanes.auto = auto;
-            self.lanes.pressure = pressure;
+            self.lanes.live = live;
             self.changes.push(Change::HostStatus);
         }
         self.load_lane_settings();
@@ -444,7 +431,6 @@ mod tests {
         let mut a = answer();
         assert_eq!(live_group(&a), None);
         assert_eq!(cold_starts_group(&a), None);
-        assert_eq!(pressure_group(&a), None);
         a.insert("live".into(), json!({"lanes": 5, "busy": 2, "idle": 3, "tools": {"codex": {"lanes": 0, "busy": 0, "idle": 0}, "claude": {"lanes": 5, "busy": 2, "idle": 3}}}));
         a.insert("cold_starts_last_hour".into(), json!({"total": 4, "tools": {"scripted": 1, "claude": 3, "codex": 0}}));
         a.insert("held_for_pressure".into(), json!(2));
@@ -460,12 +446,6 @@ mod tests {
         let cold = cold_starts_group(&a).unwrap();
         assert_eq!(cold.summary, "4");
         assert_eq!(cold.lines, vec![("Claude".to_owned(), "3".to_owned()), ("Scripted".to_owned(), "1".to_owned())]);
-        let pressure = pressure_group(&a).unwrap();
-        assert_eq!(pressure.summary, "High · 2 turns held");
-        assert!(pressure.lines.is_empty(), "no percentages: {:?}", pressure.lines);
-        a["pressure"]["high"] = json!(false);
-        a["held_for_pressure"] = Value::Null;
-        assert_eq!(pressure_group(&a).unwrap().summary, "Calm · no turns held");
     }
 
     #[test]
