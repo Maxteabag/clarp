@@ -15,7 +15,7 @@ use clarp_actor::ShimOrder;
 
 use super::{Ask, Told, Worker, launch_permitted, tell};
 use crate::lane::opencode::{Lane, Start, Words};
-use crate::lane::{LEAVE_WAIT, LoginChanged, Settings, Tool, Want};
+use crate::lane::{LoginChanged, Settings, TURN_LEAVE_WAIT, Tool, Want};
 
 /// What the worker keeps of its OpenCode lane between turns.
 #[derive(Default)]
@@ -92,13 +92,14 @@ impl Worker {
             let (turn, attempt, socket) = (order.turn, order.attempt, order.socket.clone());
             let session = words.session.clone();
             // The lane under the login there now, in place of the turn's own server: the one
-            // there, idle, leaves first within LEAVE_WAIT (`place`). Whether it is ready.
+            // there, idle, leaves first (`place`). Whether it is ready.
             let begin = || {
                 // In place of a lane that has just left: a start that still finds its owner there
-                // is tried once more once it has let go.
-                let started = crate::lane::start_once_more(lane.endpoint(), LEAVE_WAIT, || {
-                    lane.start(&launcher, &profile, &start, &session, Want::Optional)
-                });
+                // is tried once more once it has let go, all within the turn's bound.
+                let started =
+                    crate::lane::start_once_more(lane.endpoint(), TURN_LEAVE_WAIT, || {
+                        lane.start(&launcher, &profile, &start, &session, Want::Optional)
+                    });
                 match started {
                     Ok(Some(mut child)) => {
                         let _ = std::thread::Builder::new()
@@ -143,8 +144,10 @@ impl Worker {
                 && LoginChanged::is(error)
                 && !reached()
             {
-                let until = std::time::Instant::now() + LEAVE_WAIT;
-                if lane.endpoint().let_go_within(until, true).unwrap_or(false) && begin() {
+                // At most TURN_LEAVE_WAIT, never ending it: one that has not let go by then is
+                // left, and the turn runs on its own server at once (issue 860).
+                let gone = lane.endpoint().gone_within(TURN_LEAVE_WAIT);
+                if gone.unwrap_or(false) && begin() {
                     if !permitted() {
                         return;
                     }

@@ -56,10 +56,11 @@ impl AsLane {
     /// the start failed), and the turn runs in a process of its own. A start that fails, which
     /// may be one that met the old lane's owner still there (a lane on its way out, or one that
     /// just refused for its login), is tried once more once that owner has let go, within
-    /// `LEAVE_WAIT` (issues 857 and 860), whichever way the turn came to start it.
+    /// `TURN_LEAVE_WAIT`, the turn's bound, never `LEAVE_WAIT` (issues 857 and 860), whichever
+    /// way the turn came to start it.
     fn begin(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
         let endpoint = self.start.lane.endpoint();
-        let started = crate::lane::start_once_more(endpoint, crate::lane::LEAVE_WAIT, || {
+        let started = crate::lane::start_once_more(endpoint, crate::lane::TURN_LEAVE_WAIT, || {
             self.start(order, fit, mcp)
         });
         self.warm(started, fit)
@@ -239,8 +240,10 @@ impl Worker {
                     && crate::lane::LoginChanged::is(error)
                     && !reached()
                 {
-                    let until = std::time::Instant::now() + crate::lane::LEAVE_WAIT;
-                    if lane.endpoint().let_go_within(until, true).unwrap_or(false)
+                    // At most TURN_LEAVE_WAIT: one that has not let go by then is left, and the
+                    // turn runs in a process of its own at once (issue 860).
+                    let wait = crate::lane::TURN_LEAVE_WAIT;
+                    if lane.endpoint().gone_within(wait).unwrap_or(false)
                         && let Some(state) = as_lane.begin(&lane_order, &fit, &mcp)
                     {
                         let Some(again) = offer(state) else {

@@ -171,9 +171,16 @@ struct FakeLane {
 impl FakeLane {
     fn start(run: &Path, agent: &str, status: Value) -> Self {
         let endpoint = Endpoint::of(Tool::Codex, run, agent);
-        let listener = UnixListener::bind(endpoint.socket()).unwrap();
         let owner = File::create(owner_lock(endpoint.socket())).unwrap();
         owner.try_lock().unwrap();
+        Self::start_holding(run, agent, status, owner)
+    }
+
+    /// The same for a lane that took its owner lock already and binds its socket only now, as a
+    /// lane that is starting does.
+    fn start_holding(run: &Path, agent: &str, status: Value, owner: File) -> Self {
+        let endpoint = Endpoint::of(Tool::Codex, run, agent);
+        let listener = UnixListener::bind(endpoint.socket()).unwrap();
         let asked = Arc::new(Mutex::new(Vec::new()));
         let seen = asked.clone();
         let socket = endpoint.socket().to_owned();
@@ -1351,45 +1358,133 @@ fn a_start_waits_for_a_lane_on_its_way_out_to_let_go() {
     std::fs::remove_dir_all(&run).unwrap();
 }
 
-/// Issue 860. The order of a start in place of a lane on its way out whose owner holds its lock
-/// for about ten seconds: the first try finds the owner there, the one retry starts only after
-/// the owner has let go of its lock (its own disconnect, not a timer), and there is no third.
+/// Issue 860. A turn's start in place of a lane on its way out whose owner holds its lock for ten
+/// seconds: the turn waits TURN_LEAVE_WAIT, about three seconds, never the ten, and goes on
+/// without the lane (its start is refused, once, and the turn runs in a process of its own). The
+/// owner is not ended for it, and the next turn's start, once it has let go, finds it gone.
 #[test]
-fn the_one_retry_starts_after_an_owner_that_holds_ten_seconds_lets_go() {
+fn a_turn_does_not_wait_ten_seconds_for_an_owner_that_holds_its_lock() {
     let run = run_dir("ten-seconds");
     let lane = Endpoint::of(Tool::Claude, &run, "a");
     let owner = File::create(owner_lock(lane.socket())).unwrap();
     owner.lock().unwrap();
-    let hold = std::time::Duration::from_secs(10);
-    let (sender, let_go) = std::sync::mpsc::channel();
     let late = std::thread::spawn(move || {
-        std::thread::sleep(hold);
-        // Just before the lock goes: any try at or after this one may find it free.
-        let _ = sender.send(std::time::Instant::now());
+        std::thread::sleep(std::time::Duration::from_secs(10));
         drop(owner);
     });
+    let tries = std::cell::Cell::new(0);
     let began = std::time::Instant::now();
-    let tries = std::cell::RefCell::new(Vec::new());
-    let started = start_once_more(&lane, super::LEAVE_WAIT, || {
-        tries.borrow_mut().push(std::time::Instant::now());
-        if lane.released()? {
-            Ok("started")
-        } else {
-            Err(std::io::Error::other(
-                "the Claude lane owner has not disconnected",
-            ))
-        }
+    let started = start_once_more(&lane, super::TURN_LEAVE_WAIT, || {
+        tries.set(tries.get() + 1);
+        lane.place_within(
+            &run,
+            (Some("t"), "d"),
+            |_| false,
+            ROOMY,
+            false,
+            super::LEAVE_WAIT,
+        )
     });
-    late.join().unwrap();
-    let released_at = let_go.recv().unwrap();
-    assert_eq!(started.unwrap(), "started");
-    let tries = tries.into_inner();
-    assert_eq!(tries.len(), 2, "one try, and one retry");
-    assert!(tries[0] < released_at, "the first try met the owner");
-    assert!(
-        tries[1] >= released_at,
-        "the retry came after the owner let go"
+    let waited = began.elapsed();
+    assert_eq!(
+        started.unwrap_err().to_string(),
+        "the Claude lane owner has not disconnected"
     );
-    assert!(began.elapsed() < super::LEAVE_WAIT, "within the bound");
+    assert_eq!(tries.get(), 1, "no retry while the owner holds");
+    assert!(
+        waited >= std::time::Duration::from_millis(2500)
+            && waited < std::time::Duration::from_secs(5),
+        "the turn waited about TURN_LEAVE_WAIT, not the owner's ten seconds: {waited:?}"
+    );
+    late.join().unwrap();
+    let next = lane.place_within(
+        &run,
+        (Some("t"), "d"),
+        |_| false,
+        ROOMY,
+        false,
+        super::LEAVE_WAIT,
+    );
+    assert_eq!(next.unwrap(), Place::Free);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 860. A lane that hangs while leaving (its socket gone, its owner lock never let go)
+/// holds a turn's start about TURN_LEAVE_WAIT, never LEAVE_WAIT's fifteen seconds; the turn then
+/// runs on its own at once, and the lane is left as it is, not ended on the turn's time.
+#[test]
+fn a_lane_that_hangs_while_leaving_holds_a_turn_about_three_seconds_never_fifteen() {
+    let run = run_dir("hangs-leaving");
+    let lane = Endpoint::of(Tool::Claude, &run, "a");
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.lock().unwrap();
+    let began = std::time::Instant::now();
+    let started = start_once_more(&lane, super::TURN_LEAVE_WAIT, || {
+        lane.place_within(
+            &run,
+            (Some("t"), "d"),
+            |_| false,
+            ROOMY,
+            false,
+            super::LEAVE_WAIT,
+        )
+    });
+    let waited = began.elapsed();
+    assert!(started.is_err());
+    assert!(
+        waited >= std::time::Duration::from_millis(2500)
+            && waited < std::time::Duration::from_secs(5),
+        "{waited:?}"
+    );
+    assert!(!lane.released().unwrap(), "the hung lane is left as it is");
+    drop(owner);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 860. A lane that is starting holds its owner lock before it binds its socket (OpenCode's
+/// for about 1.5 s, while it starts its server), and so looks like one on its way out. A start
+/// that meets it waits, ends its wait as soon as the socket answers, and uses the lane: it is
+/// never ended, and nothing but a look is asked of it.
+#[test]
+fn a_start_that_meets_a_lane_starting_keeps_it_once_its_socket_answers() {
+    let run = run_dir("starting");
+    let lane = Endpoint::of(Tool::Codex, &run, "a");
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.lock().unwrap();
+    let (sender, started) = std::sync::mpsc::channel();
+    let binding = run.clone();
+    let binder = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let fake = FakeLane::start_holding(&binding, "a", status("t", "d", 60_000, false), owner);
+        let _ = sender.send(fake);
+    });
+    let began = std::time::Instant::now();
+    let place = lane.place_within(
+        &run,
+        (Some("t"), "d"),
+        |_| false,
+        ROOMY,
+        false,
+        super::LEAVE_WAIT,
+    );
+    let waited = began.elapsed();
+    binder.join().unwrap();
+    let fake = started.recv().unwrap();
+    assert_eq!(
+        place.unwrap(),
+        Place::Kept,
+        "the lane that started is the one used"
+    );
+    assert!(
+        waited < std::time::Duration::from_secs(2),
+        "the wait ended when the socket answered: {waited:?}"
+    );
+    assert_eq!(
+        fake.asked(),
+        ["inspect"],
+        "nothing but a look was asked of it"
+    );
+    assert!(!lane.released().unwrap(), "it was never ended");
+    lane.retire().unwrap();
     std::fs::remove_dir_all(&run).unwrap();
 }

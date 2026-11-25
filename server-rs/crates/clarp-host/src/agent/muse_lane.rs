@@ -24,8 +24,8 @@
 use clarp_actor::{Action, ShimOrder};
 use clarp_kernel::turn::TurnId;
 
-use crate::lane::LEAVE_WAIT;
 use crate::lane::muse::Lane;
+use crate::lane::{LEAVE_WAIT, TURN_LEAVE_WAIT};
 use crate::lane::{Settings, Tool};
 
 use super::{Ask, Told, Worker, launch_permitted, launcher, tell};
@@ -253,8 +253,10 @@ impl Worker {
                 && launcher.is_some()
                 && !reached()
             {
-                let until = std::time::Instant::now() + LEAVE_WAIT;
-                if lane.endpoint().let_go_within(until, true).unwrap_or(false) && begin() {
+                // At most TURN_LEAVE_WAIT, never ending it: one that has not let go by then is
+                // left, and the turn runs on exec at once (issue 860).
+                let gone = lane.endpoint().gone_within(TURN_LEAVE_WAIT);
+                if gone.unwrap_or(false) && begin() {
                     if !launch_permitted(&tx, turn, attempt) {
                         tell(
                             &tx,

@@ -404,6 +404,14 @@ pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) -> bool {
 /// is ended by its process id and the turn or terminal goes on without it (issue #772): no
 /// turn waits on a lane's exit without a bound.
 pub(crate) const LEAVE_WAIT: Duration = Duration::from_secs(15);
+/// How long a turn waits for a lane on its way out (refused for its login, retired or idle, its
+/// socket gone and its owner lock still held) to let go before it starts the lane in its place:
+/// a lane's tool is given 2 s to end before its group is ended (the shim's `EXIT_LIMIT`), and a
+/// cold start costs about as much as this. A turn never waits the 15 s of [`LEAVE_WAIT`] for one:
+/// one that has not let go by then is left as it is, the turn runs in a process of its own at
+/// once, and the lane starts for the next turn (issue 860). Retirements, and any wait no turn
+/// stands behind, keep [`LEAVE_WAIT`].
+pub(crate) const TURN_LEAVE_WAIT: Duration = Duration::from_secs(3);
 /// How long a lane ended by its process id is given to have let go of its owner lock.
 const ENDED_WAIT: Duration = Duration::from_secs(2);
 /// How often a bounded wait looks at the owner lock again.
@@ -631,34 +639,34 @@ impl Endpoint {
         needed: bool,
         bound: Duration,
     ) -> io::Result<Place> {
-        match self.inspect() {
-            Ok(state) => {
-                let same_thread = state.thread == thread.unwrap_or_default();
-                if same_thread && state.options == digest && !kept(&state) {
-                    return Ok(Place::Kept);
-                }
-                // A lane that does not let go in time has been ended with its tool, where it may
-                // be; the look at its owner lock below says whether it has gone.
-                if self.retire_within(bound).is_err() {
-                    return if same_thread {
-                        Ok(Place::Kept)
-                    } else {
-                        Err(io::Error::other(format!(
-                            "the {} lane owns another thread",
-                            self.tool.name()
-                        )))
-                    };
-                }
+        let mut look = self.inspect();
+        // Nobody listens on its socket, and its owner lock is held: a lane on its way out
+        // (retired, idle, or refused for its login: it stops answering before it ends its tool,
+        // and lets go of the lock up to seconds later), or one that is starting (every lane takes
+        // its lock before it binds its socket; OpenCode's starts its server in between, about
+        // 1.5 s). It is waited for, at most TURN_LEAVE_WAIT since a turn may stand behind this
+        // start, until its lock is let go, or its socket answers, and then looked at as any
+        // lane that answers. It is never ended from here (issue 860).
+        if matches!(&look, Err(error) if gone(error)) && !self.released()? {
+            look = self.answers_or_lets_go(Instant::now() + TURN_LEAVE_WAIT.min(bound), look);
+        }
+        if let Ok(state) = look {
+            let same_thread = state.thread == thread.unwrap_or_default();
+            if same_thread && state.options == digest && !kept(&state) {
+                return Ok(Place::Kept);
             }
-            // Nobody listens on its socket, and its owner lock is still held: a lane on its way
-            // out (retired, idle, or refused for its login), which stops answering before it
-            // ends its tool and lets go of the lock seconds later. It is waited for within the
-            // bound, and ended once the bound has passed, as a retirement does; never looked at
-            // once and given up on (issue 860: a turn's start met one and ran cold).
-            Err(error) if gone(&error) && !self.released()? => {
-                self.let_go_within(Instant::now() + bound, true)?;
+            // A lane that does not let go in time has been ended with its tool, where it may
+            // be; the look at its owner lock below says whether it has gone.
+            if self.retire_within(bound).is_err() {
+                return if same_thread {
+                    Ok(Place::Kept)
+                } else {
+                    Err(io::Error::other(format!(
+                        "the {} lane owns another thread",
+                        self.tool.name()
+                    )))
+                };
             }
-            Err(_) => {}
         }
         if !self.released()? {
             return Err(io::Error::other(format!(
@@ -671,6 +679,34 @@ impl Endpoint {
             Ok(Place::Free)
         } else {
             Ok(Place::Full)
+        }
+    }
+
+    /// Waits until `until` for a lane nobody answers for while its owner lock is held: until the
+    /// lock is let go (it was leaving), or its socket answers (it was starting), whichever comes
+    /// first. Never ends it. What the lane answered, or `missing` (the look that found nobody)
+    /// where it did not.
+    fn answers_or_lets_go(
+        &self,
+        until: Instant,
+        missing: io::Result<Status>,
+    ) -> io::Result<Status> {
+        loop {
+            if self.released()? {
+                return missing;
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return missing;
+            }
+            if self.socket.exists()
+                && let Ok(state) = self
+                    .connect(&Lifecycle::Inspect, left)
+                    .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool))
+            {
+                return Ok(state);
+            }
+            std::thread::sleep(left.min(RELEASE_LOOK));
         }
     }
 
@@ -886,6 +922,13 @@ impl Endpoint {
         }
     }
 
+    /// Waits at most `bound` for a lane on its way out to let go of its owner lock, its own proof
+    /// that it has gone, and never ends it: what a turn waits for (with [`TURN_LEAVE_WAIT`])
+    /// before it starts the lane in its place. `true`: the lock is free.
+    pub(crate) fn gone_within(&self, bound: Duration) -> io::Result<bool> {
+        self.released_by(Instant::now() + bound)
+    }
+
     /// A retirement response only acknowledges the request. The process
     /// releases the owner lock after reaping its tool.
     ///
@@ -924,16 +967,18 @@ impl Endpoint {
 
 /// Starts a lane in place of one that has just left (refused for its login, or idle and of
 /// another login): a start that fails, which may be one that still found the old lane's owner
-/// there a moment after it was seen gone, is tried once more once that owner has let go within
-/// `bound`. Never more than twice (issue 857).
+/// there a moment after it was seen gone, is tried once more once that owner has let go. All of
+/// it within `bound`, counted from before the first try, so a start's own wait and this one
+/// never add up: on a turn's path [`TURN_LEAVE_WAIT`]. Never more than twice (issues 857, 860).
 pub(crate) fn start_once_more<T>(
     lane: &Endpoint,
     bound: Duration,
     mut start: impl FnMut() -> io::Result<T>,
 ) -> io::Result<T> {
+    let until = Instant::now() + bound;
     match start() {
         Err(first) => {
-            if lane.released_by(Instant::now() + bound).unwrap_or(false) {
+            if lane.released_by(until).unwrap_or(false) {
                 eprintln!(
                     "clarp-host: a {} lane start is tried once more: {first}",
                     lane.tool.name()

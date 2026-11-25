@@ -175,7 +175,7 @@ of them is not done.
     leave, and the other process must not go ahead.
   - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
     (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
-    `once_more` after a changed login, a Claude or Muse turn refused for one, a start that meets a lane on its way out) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
+    `once_more` after a changed login) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
     lock.
     - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
       it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
@@ -321,25 +321,34 @@ session.
   nothing of the turn reaching the tool. That turn used to run per turn, so one switch cost a
   cold start per live lane at once (one Host saw 9 Claude cold starts in the 11 minutes after a
   switch, against none in the hour before), each reading about 1.2 GB. Now the refused turn waits
-  for the lane to let go (within `LEAVE_WAIT`) and then does what a turn with no lane there does:
-  a Claude turn starts its own Claude Code as the lane, still within the lane's start hold, and a
+  for the lane to let go (within `TURN_LEAVE_WAIT`, below) and then does what a turn with no lane
+  there does: a Claude turn starts its own Claude Code as the lane, still within the lane's start hold, and a
   Muse turn has a new lane take the session. The new lane reads the login there now as it starts.
   A start that still finds the old lane's owner there a moment after it was seen gone is tried
-  once more once the owner has let go, within `LEAVE_WAIT` (issue 857: one seat switch saw it, as
-  other agents' lanes made room). The Host's own looks at an owner lock take it shared, so two of
+  once more once the owner has let go, within `TURN_LEAVE_WAIT` (issue 857: one seat switch saw
+  it, as other agents' lanes made room). The Host's own looks at an owner lock take it shared, so two of
   them never make a lane that has left seem there to each other.
   It is tried once for the attempt, never again; where the start gets no place, fails, or no lane
   may start for the turn (one nobody waits on under pressure), the turn runs per turn as before.
   Codex already did so: its chat turns and goals offer a refused attempt to a new lane once
   (`once_more`), started within the same limits. OpenCode does so for a refused claim and for a
   lane that differs from the turn's by the login alone (issue 857, in "OpenCode's lane").
-- **A start waits for a lane on its way out** (issue 860). A lane that leaves (retired, idle, or
-  refused for its login) stops answering first and lets go of its owner lock only once its tool
-  has ended, up to seconds later (Claude Code's `EXIT_LIMIT` is 2 s before its group is ended).
-  Every lane start's `place`, of every tool, waits for such a lane, nobody on its socket and its
-  owner lock held, within `LEAVE_WAIT`, and ends it once the bound has passed, as a retirement
-  does; it no longer looks once and gives up. One seat switch's turn came in that moment, through
-  the start of a turn with no lane there, which has no second try, and ran cold.
+- **A start waits for a lane on its way out, a turn's at most 3 s** (issue 860). A lane that
+  leaves (retired, idle, or refused for its login) stops answering first and lets go of its owner
+  lock only once its tool has ended, up to seconds later (Claude Code's `EXIT_LIMIT` is 2 s
+  before its group is ended). Every lane start's `place`, of every tool, waits for such a lane,
+  nobody on its socket and its owner lock held, rather than looking once and giving up: one seat
+  switch's turn came in that moment, through the start of a turn with no lane there, and ran
+  cold. A turn waits for a lane on its way out at most `TURN_LEAVE_WAIT` (3 s: the 2 s a tool
+  is given, and what a cold start costs anyway), never the 15 s of `LEAVE_WAIT`, in all of it:
+  `place`'s wait, the one retry of its start (`start_once_more`, bounded from before its first
+  try) and a refused turn's wait before it starts the new lane. A lane that is starting looks the
+  same, since every lane takes its owner lock before it binds its socket (OpenCode's holds it
+  about 1.5 s while it starts its server first): `place`'s wait ends as soon as the socket
+  answers, and the lane is then used, or retired if it was started otherwise, as any lane that
+  answers. No lane is ended from that wait. One that has not let go or answered by the bound is
+  left; the turn runs in a process of its own at once, and the lane starts for the next turn. `LEAVE_WAIT` stays for retirements (a lane asked
+  to leave, a terminal, a move) and for waits no turn stands behind.
 - **Where a turn's start includes the lane's.** A turn that starts the Claude lane, or has the
   Muse lane take its session, waits for that before its first output: the lane's start, or the
   session's load (`session/resume`, given up at the lane's `LOAD_LIMIT` of 25 s, within the
