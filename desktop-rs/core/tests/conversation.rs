@@ -622,3 +622,27 @@ fn a_delivered_send_not_yet_sent_back_survives_a_replace() {
     assert!(!own.sent_here && !own.pending, "the Host's row took its place");
     assert_eq!(h.model.rows().iter().filter(|m| m.id == "u-m1").count(), 1);
 }
+
+/// A message sent while a turn runs (held, then started) and a second one
+/// steered into its turn keep the Host's order, B, C, then B's answer: live,
+/// whichever order the Host's rows arrive in, and after reading the chat again.
+#[test]
+fn a_held_message_and_one_steered_into_its_turn_keep_the_hosts_order() {
+    let ids = |h: &Harness| h.model.rows().iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    let row = |id: &str, role: &str, trace: &str, rev: i64| json!({"id": id, "role": role, "text": id, "trace_id": trace, "revision": rev});
+    let mut h = Harness::new("s");
+    h.log(json!({"conversation_id": "c", "latest_revision": 2, "turns": [row("u-a", "user", "ta", 1), row("r-a", "assistant", "ta", 2)]}), LoadKind::Tail);
+    // B sent while A ran (held), C steered into B's turn once it started.
+    h.optimistic("b", "B");
+    h.model.confirm_delivery("b");
+    h.optimistic("c", "C");
+    h.model.confirm_delivery("c");
+    h.sync();
+    // The answer's row can come before C's own row is read back.
+    h.log(json!({"conversation_id": "c", "latest_revision": 5, "turns": [row("u-b", "user", "tb", 3), row("r-b", "assistant", "tb", 5)]}), LoadKind::Delta);
+    h.log(json!({"conversation_id": "c", "latest_revision": 6, "turns": [row("u-c", "user", "tc", 6)]}), LoadKind::Delta);
+    assert_eq!(ids(&h)[2..], ["u-b", "u-c", "r-b"], "live: B, C, then B's answer");
+    // Read again (a reopen): the Host's order.
+    h.log(json!({"conversation_id": "c", "latest_revision": 6, "turns": [row("u-a", "user", "ta", 1), row("r-a", "assistant", "ta", 2), row("u-b", "user", "tb", 3), row("u-c", "user", "tc", 4), row("r-b", "assistant", "tb", 5)]}), LoadKind::Tail);
+    assert_eq!(ids(&h)[2..], ["u-b", "u-c", "r-b"], "after reading again: the Host's order");
+}
