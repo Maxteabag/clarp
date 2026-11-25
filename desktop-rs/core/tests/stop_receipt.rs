@@ -113,3 +113,38 @@ fn no_line_ever_promises_a_resume() {
         assert!(!text.to_lowercase().contains("resume"), "{text}");
     }
 }
+
+#[test]
+fn a_host_with_the_sentence_is_shown_in_place_of_the_built_line() {
+    let answer = json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
+        "queue_paused": true, "goals_paused": 1, "text": "Stopped. 2 messages wait; send one to go on."});
+    assert_eq!(said(answer), line("Stopped. 2 messages wait; send one to go on."));
+    let nothing_waits = json!({"ok": true, "terminated": 1, "stop_actor": "user", "queue_paused": false,
+        "goals_paused": 0, "text": "Stopped. You can keep chatting."});
+    assert_eq!(said_waiting(nothing_waits, false), line("Stopped. You can keep chatting."), "also where the built line would be empty");
+}
+
+#[test]
+fn a_stop_from_elsewhere_shows_the_hosts_sentence_from_its_detail() {
+    let detail = object(json!({"source": "user_stop", "stop_actor": "agent:theo-97e5", "stop_actor_verified": true,
+        "stop_reason": "Pebble busy", "stop_text": "Stopped. The message that waits goes on next."}));
+    let receipt = StopReceipt::from_detail(&detail).unwrap();
+    assert_eq!(receipt.said(&names, true), line("Stopped. The message that waits goes on next."));
+    // The response's own field is `text`; a detail's `text` is not the sentence.
+    let other = object(json!({"source": "user_stop", "stop_actor": "agent:theo-97e5", "text": "ignored"}));
+    assert_eq!(StopReceipt::from_detail(&other).unwrap().said(&names, false), line("Stopped by Theo"));
+}
+
+#[test]
+fn without_the_feature_the_desktop_keeps_its_own_line() {
+    let answer = json!({"ok": true, "terminated": 1, "stop_actor": "agent:theo-97e5", "stop_actor_verified": true,
+        "stop_reason": "Pebble busy", "queue_paused": true, "goals_paused": 1, "text": "Stopped. 1 message waits; send one to go on."});
+    let receipt = StopReceipt::from_response(&object(answer)).without_host_text();
+    assert_eq!(receipt.said(&names, true), line("Stopped by Theo: Pebble busy · queue paused · 1 goal paused"));
+}
+
+#[test]
+fn a_stop_that_did_nothing_is_still_an_error_with_the_sentence() {
+    let refused = json!({"ok": false, "text": "Stopped. You can keep chatting."});
+    assert_eq!(said(refused), Said::Error("Stop did not take effect".into()));
+}

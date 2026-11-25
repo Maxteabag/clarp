@@ -852,3 +852,66 @@ fn a_refused_tool_says_why_in_one_quiet_line_without_the_tags() {
     assert!(tool.lines.is_empty() && !tool.expandable && !tool.explaining, "no output box: {:?}", tool.lines);
     assert_eq!(clarp_core::live_present::refusal("plain output"), None);
 }
+
+/// A running turn: a tool that ran before a message was steered into it,
+/// one still running that began before it too; `read_rows` as given.
+fn steered_turn(read_rows: Option<Value>) -> LiveView {
+    const S: i64 = 1_791_000_000_000;
+    let tool = |call: &str, ordinal: i64, at: i64, status: &str| {
+        let mut item = json!({"id": format!("cl:{call}"), "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": "tr-s", "status": status, "ordinal": ordinal,
+            "started_at_ms": S + at, "tool": {"name": "Bash", "call_id": call, "category": "exec", "group": null, "label": call, "command": call}});
+        if status == "completed" {
+            item["ended_at_ms"] = json!(S + at + 100);
+        }
+        item
+    };
+    let mut turn = json!({"turn_id": "tr-s", "status": "running", "started_at_ms": S + 1_000, "tool_count": 2});
+    if let Some(read) = read_rows {
+        turn["read_rows"] = read;
+    }
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": S + 4_000,
+        "activity": {"state": "tool", "turn_id": "tr-s"}, "turn": turn,
+        "items": [tool("s1", 1, 2_000, "completed"), tool("s2", 2, 2_200, "running")]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+fn steered_rows() -> Vec<Message> {
+    const S: i64 = 1_791_000_000_000;
+    let mut prompt = user_at("u-go", S + 1_000);
+    prompt.trace_id = "tr-s".into();
+    vec![prompt, user_at("u-steer", S + 2_500)]
+}
+
+#[test]
+fn the_working_line_goes_below_a_message_read_into_the_running_turn() {
+    let rows = steered_rows();
+    // Grouped: the Working row folds both tools.
+    let mut grouped = options(&[], 0);
+    grouped.fold_running = true;
+    let before = present(&steered_turn(None), &rows, &grouped);
+    assert_eq!(shown_order(&before, &rows), ["u-go", "live:fold:tr-s", "u-steer"], "without read_rows, as before");
+    let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &grouped);
+    assert_eq!(read.read_rows, ["u-steer"]);
+    assert_eq!(shown_order(&read, &rows), ["u-go", "u-steer", "live:fold:tr-s"], "Working below the steered message");
+    // Each step in its row: what ran before the message stays above it,
+    // the step that still runs is the working line and goes below it.
+    let open = options(&[], 0);
+    let before = present(&steered_turn(None), &rows, &open);
+    assert_eq!(shown_order(&before, &rows), ["u-go", "live:cl:s1", "live:cl:s2", "u-steer"]);
+    let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &open);
+    assert_eq!(shown_order(&read, &rows), ["u-go", "live:cl:s1", "u-steer", "live:cl:s2"]);
+}
+
+#[test]
+fn a_message_that_waits_for_the_next_turn_stays_below_the_working_line() {
+    // Read rows name only what the turn read: a waiting message is in none.
+    const S: i64 = 1_791_000_000_000;
+    let mut rows = steered_rows();
+    rows.push(user_at("u-waits", S + 3_000));
+    let mut grouped = options(&[], 0);
+    grouped.fold_running = true;
+    let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &grouped);
+    assert_eq!(shown_order(&read, &rows), ["u-go", "u-steer", "live:fold:tr-s", "u-waits"]);
+}
