@@ -7564,3 +7564,67 @@ fn a_chat_once_read_as_a_helpers_keeps_the_turns_other_agents_gave_it() {
     let mut actor = world.open();
     assert_eq!(conversation(&mut actor, &mut world, false), helper);
 }
+
+/// Issue 798: two messages sent back to back to a tool that does not steer. The second waits,
+/// and its turn starts in the very millisecond the first turn's answer and end come. Every row
+/// is later than the row above it, and a reader of what is newer is given the first answer
+/// before the second message: a client that orders by time, and keeps the order rows came in
+/// on a tie, draws the conversation as it is.
+#[test]
+fn a_message_that_waited_for_its_turn_is_later_than_the_answer_before_it() {
+    let mut world = World::new("row-order");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "first", Admission::Queue);
+    let held = actor.head_revision();
+    world.send(&mut actor, "u-2", "second", Admission::Queue);
+    assert_eq!(actor.status().waiting, vec![TurnId(2)]);
+    // The answer, the tool's end and the next turn's start, all at one time.
+    let at = world.now_ms + 10;
+    world.now_ms = at;
+    {
+        let shim = world.shims.get_mut(&1).expect("the first turn's shim");
+        for entry in [
+            Line::Out("ALPHA".to_string()),
+            Line::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        ] {
+            shim.append(&Record { t: at, entry }).unwrap();
+        }
+    }
+    world.shims.remove(&1);
+    let out = actor.spool_changed(at).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(2, "BRAVO");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+
+    let shown = |page: &clarp_actor::conversation::Page| -> Vec<(String, i64)> {
+        page.entries
+            .iter()
+            .map(|row| {
+                let text = match &row.entry {
+                    Entry::Message(message) => message.text.clone(),
+                    Entry::Reply(reply) => reply.text.clone(),
+                    other => other.id().to_string(),
+                };
+                (text, row.ts_ms)
+            })
+            .collect()
+    };
+    let rows = shown(&actor.tail_of(100, Which::chat(true)).unwrap());
+    let texts: Vec<&str> = rows.iter().map(|(text, _)| text.as_str()).collect();
+    assert_eq!(texts, ["first", "ALPHA", "second", "BRAVO"]);
+    for pair in rows.windows(2) {
+        assert!(pair[0].1 < pair[1].1, "a row is later than the one above it: {rows:?}");
+    }
+    let (answer, waited) = (rows[1].1, rows[2].1);
+    assert_eq!(answer, at, "the answer keeps its time");
+    assert_eq!(waited, at + 1, "the message that waited comes a millisecond after it");
+    // What is newer than the first message, in the order of its revisions: the first answer
+    // before the second message.
+    let newer = shown(&actor.after_of(held, 100, Which::chat(true)).unwrap());
+    let texts: Vec<&str> = newer.iter().map(|(text, _)| text.as_str()).collect();
+    assert_eq!(texts, ["ALPHA", "second", "BRAVO"], "{newer:?}");
+}

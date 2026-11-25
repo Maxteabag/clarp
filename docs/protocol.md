@@ -607,7 +607,12 @@ Rules:
   a send that waits (the agent is busy and cannot take it), only by the write that starts its
   own turn. Rows are never moved or re-timed: a row's place is its place for good. Such a row
   carries `sent_at` (ISO, the same form as `timestamp`): the time it was sent; `timestamp` is
-  when its turn started. `sent_at` is absent on every row that did not wait. While it waits the
+  when its turn started, or one millisecond after the row above it where that is later (the
+  Rust Host, issue 798: every row is later than the row above it in the conversation, so a
+  client that orders rows by `timestamp` draws them in the conversation's order even when the
+  answer before it ended in the same millisecond; and the end of the turn before it, which
+  gives that turn's last row a new `revision`, comes before it in a delta). `sent_at` is absent
+  on every row that did not wait. While it waits the
   message is an item of `GET /turn-queue` (see Queue), not a row. A client may rely on this:
   an accepted message is either a queue item or a row, never both and never neither, because
   the write that starts its turn writes the row and takes the item out of the queue in one

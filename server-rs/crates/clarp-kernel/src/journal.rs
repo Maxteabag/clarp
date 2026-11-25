@@ -271,6 +271,9 @@ pub struct Recorder {
     last_seq: Seq,
     /// The position of the newest item of the conversation: 0 when it has none.
     conversation_seq: Seq,
+    /// The time of the newest row of the conversation: a row written after it is later
+    /// ([`Batch::commit`]).
+    row_ts: i64,
     team_effect_seq: Seq,
     /// Where the agent was last started again: its conversation, as it is read, is what
     /// was written after this. 0: it never was.
@@ -292,6 +295,24 @@ pub fn mixed_turn(turn: u64, at: i64) -> NewItem {
     NewItem::new(kind::MIXED_TURN, at, Vec::new())
         .in_turn(turn)
         .keyed(mixed_coordination_key(turn))
+}
+
+/// Every row is later than the row above it in the conversation: a row written now that would
+/// share its millisecond with the row before it, or come before it, is given that row's time
+/// and one millisecond more. A client orders rows by time, and one that keeps the order rows
+/// came in on a tie would otherwise draw a message that waited for its turn above the answer
+/// before it, which ended in the same millisecond (issue 798). A call written again keeps the
+/// time it was first written at, and a row brought from another Host keeps its own: both are
+/// where they first stood. `newest`: the time of the newest row already in the log. Answers
+/// the time of the newest row once these are written.
+fn later_rows(items: &mut [NewItem], mut newest: i64) -> i64 {
+    for item in items.iter_mut().filter(|item| kind::ROWS.has(item.kind)) {
+        if !matches!(item.kind, kind::TOOL | kind::IMPORTED) {
+            item.ts_ms = item.ts_ms.max(newest.saturating_add(1));
+        }
+        newest = newest.max(item.ts_ms);
+    }
+    newest
 }
 
 /// The key of the item that says which message a trace belongs to ([`kind::TRACE`]).
@@ -400,6 +421,10 @@ impl Recorder {
             .read_before(Seq::MAX, kind::CONVERSATION, 1)?
             .last()
             .map_or(0, |item| item.seq);
+        let row_ts = log
+            .read_before(Seq::MAX, kind::ROWS, 1)?
+            .last()
+            .map_or(0, |item| item.ts_ms);
         let team_effect_seq = log
             .read_before(Seq::MAX, Kinds::only(kind::TEAM_EFFECT), 1)?
             .last()
@@ -432,6 +457,7 @@ impl Recorder {
             cursor,
             last_seq,
             conversation_seq,
+            row_ts,
             team_effect_seq,
             floor,
         })
@@ -629,6 +655,7 @@ impl Recorder {
             work: self.agent.clone(),
             recorder: self,
             items: Vec::new(),
+            entered: Vec::new(),
             events: Vec::new(),
             effects: Vec::new(),
             cursor: None,
@@ -832,6 +859,10 @@ pub struct Batch<'a> {
     recorder: &'a mut Recorder,
     work: Agent,
     items: Vec<NewItem>,
+    /// The rows a turn that starts in this batch brings into the conversation: its message,
+    /// waited until now. They are written after everything else of the batch, so the end of
+    /// the turn before it (the row that closed it, which that end changes) comes first.
+    entered: Vec<NewItem>,
     events: Vec<AgentEvent>,
     effects: Vec<Effect>,
     cursor: Option<SpoolCursor>,
@@ -875,16 +906,19 @@ impl Batch<'_> {
                 self.turn_bindings
                     .push((turn, self.work.backend_session().map(str::to_owned)));
             }
+            // A message read into a running turn enters where it is read: right after the read,
+            // which the conversation finds it by.
             if let AgentEvent::JoinRead { turn, .. } = &event
                 && let Some(join) = self.work.joins().get(turn)
             {
-                self.enter(*turn, join.message_seq, now_ms);
+                self.enter(*turn, join.message_seq, now_ms, false);
             }
             self.events.push(event);
         }
+        // A turn that starts brings its message in after the rest of the batch.
         for effect in &decision.effects {
             if let Effect::StartTurn { turn, message_seq } = effect {
-                self.enter(*turn, *message_seq, now_ms);
+                self.enter(*turn, *message_seq, now_ms, true);
             }
         }
         self.effects.extend(decision.effects);
@@ -892,8 +926,9 @@ impl Batch<'_> {
     }
 
     /// Enter a queued message at its own turn's start or at Claude's read of a follow-up.
-    /// A message that waited for its own turn keeps its original send time.
-    fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
+    /// A message that waited for its own turn keeps its original send time. `last`: its rows
+    /// are written after the rest of the batch ([`Batch::entered`]).
+    fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64, last: bool) {
         if matches!(self.work.live(), Some(Turn::Starting(started)) if started.id == turn && started.origin == Origin::NativeGoal)
         {
             return;
@@ -953,8 +988,16 @@ impl Batch<'_> {
                     };
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
-                    self.queue_shown(turn, now_ms);
-                    self.items.push(item);
+                    if last {
+                        self.entered.push(item);
+                        self.entered.push(
+                            NewItem::new(kind::QUEUE_SHOWN, now_ms, Vec::new()).in_turn(turn.0),
+                        );
+                        self.work.queue_item_shown();
+                    } else {
+                        self.queue_shown(turn, now_ms);
+                        self.items.push(item);
+                    }
                 }
             }
             Err(error) => {
@@ -993,7 +1036,7 @@ impl Batch<'_> {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.items.is_empty() && self.entered.is_empty()
     }
 
     /// The agent as it will be once this batch is in the log.
@@ -1014,13 +1057,15 @@ impl Batch<'_> {
     }
 
     /// Writes everything in one append, then changes the state.
-    pub fn commit(self) -> Result<Committed, JournalError> {
+    pub fn commit(mut self) -> Result<Committed, JournalError> {
         if let Some(error) = self.failed {
             return Err(error);
         }
+        self.items.append(&mut self.entered);
         if self.items.is_empty() {
             return Ok(Committed::default());
         }
+        self.recorder.row_ts = later_rows(&mut self.items, self.recorder.row_ts);
         let last_seq = self.recorder.log.append(&self.items)?;
         // The items are durable. From here the state follows them.
         let first_seq = last_seq + 1 - self.items.len() as Seq;
