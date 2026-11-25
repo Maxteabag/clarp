@@ -7728,7 +7728,7 @@ fn what_a_stopped_turn_showed_is_what_its_conversation_keeps() {
     let items = shown["items"].as_array().cloned().unwrap_or_default();
     let rows = actor.tail_of(100, Which::chat(true)).unwrap().entries;
     let stored = |id: &str| rows.iter().find(|row| row.entry.id() == id);
-    let messages: Vec<&Value> = items.iter().filter(|item| item["kind"] == "message").collect();
+    let messages: Vec<&serde_json::Value> = items.iter().filter(|item| item["kind"] == "message").collect();
     assert_eq!(messages.len(), 2, "{shown}");
     for item in &messages {
         let row_id = item["row_id"].as_str().unwrap_or_default();
@@ -7739,7 +7739,7 @@ fn what_a_stopped_turn_showed_is_what_its_conversation_keeps() {
         assert_eq!(answer, row.session_rows.is_some(), "{row_id}: {shown}");
     }
     assert_eq!(messages[1]["phase"], "final", "the words the Stop cut off end the turn: {shown}");
-    let calls: Vec<&Value> = items.iter().filter(|item| item["kind"] == "tool").collect();
+    let calls: Vec<&serde_json::Value> = items.iter().filter(|item| item["kind"] == "tool").collect();
     assert_eq!(calls.len(), 1, "{shown}");
     for item in &calls {
         let call_id = item["tool"]["call_id"].as_str().unwrap_or_default();
