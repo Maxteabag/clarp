@@ -370,4 +370,64 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     let done: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(done["readers"], json!([]), "{done}");
     assert_eq!(read_as(&host, &as_cid, &log).0, 403);
+
+    // Only the owner changes Ada's binding. Ben's --clear is a card, and Ada stays bound;
+    // so does a change of her cloud speech.
+    let provider_of = |host: &Host| {
+        let (_, owners) = read_as(host, &[], "/agents/snapshot");
+        let rows = owners["agents"].as_array().unwrap().clone();
+        let row = rows.into_iter().find(|row| row["session"] == ada).unwrap();
+        (row["codex_provider"].clone(), row["cloud_speech"].clone())
+    };
+    let ask = |args: &[&str]| {
+        let mut all = vec!["clarp-admin", "agent", "provider", "--session", &ada];
+        all.extend_from_slice(args);
+        let (code, out, err) = tool_as(&host, &dir, &ben_turn, &all);
+        assert_eq!(code, 0, "{args:?}: {err}");
+        serde_json::from_str::<Value>(&out).unwrap()
+    };
+    let speech = ask(&["--cloud-speech", "on"]);
+    assert!(speech["asked"][0]["decision_id"].is_string(), "{speech}");
+    let unbind = ask(&["--clear"]);
+    let card = unbind["asked"][0]["decision_id"].as_str().unwrap().to_string();
+    assert_eq!(unbind["codex_provider"], "stand-in", "{unbind}");
+    assert_eq!(provider_of(&host), (json!("stand-in"), json!(false)));
+    // Asked again, it is the same card.
+    assert_eq!(ask(&["--clear"])["asked"][0]["decision_id"], json!(card));
+    // Started again in place, a bound agent keeps its binding.
+    let (status, said) = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"replace_sid": ada, "codex_home": "", "codex_provider": ""})),
+    );
+    assert_eq!(status, 409, "{said}");
+    assert_eq!(said["error"], "own_provider", "{said}");
+    assert_eq!(provider_of(&host).0, json!("stand-in"));
+    // The owner says yes to the unbinding: Ada is let go.
+    host.post(
+        &format!("/decisions/{card}/resolve"),
+        json!({"choice": "accepted", "expected_revision": 1}),
+    );
+    assert_eq!(provider_of(&host).0, Value::Null);
+    // The owner's own word binds her again at once.
+    let (code, out, err) = tool(
+        &host,
+        &dir,
+        None,
+        &[
+            "clarp-admin",
+            "agent",
+            "provider",
+            "--session",
+            &ada,
+            "--codex-home",
+            home.to_str().unwrap(),
+            "--codex-provider",
+            "stand-in",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+    let done: Value = serde_json::from_str(&out).unwrap();
+    assert!(done.get("asked").is_none(), "{done}");
+    assert_eq!(provider_of(&host).0, json!("stand-in"));
 }
