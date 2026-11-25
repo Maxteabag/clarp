@@ -28,6 +28,9 @@ mod artifact_key_checks;
 // ---- the error banner
 #[path = "banner_checks.rs"]
 mod banner_checks;
+// ---- the chat's Send, Stop and jump-to-latest buttons
+#[path = "buttons_checks.rs"]
+mod buttons_checks;
 // ---- link hints
 #[path = "link_hint_checks.rs"]
 mod link_hint_checks;
@@ -554,6 +557,7 @@ pub fn start_check(name: &str, out: String) {
         "artifact-summary" => artifact_checks::artifact_summary_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
+        "composer-buttons" => buttons_checks::buttons_check(out),
         "refocus" => refocus_checks::refocus_check(out),
         "vim" => vim_checks::vim_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),

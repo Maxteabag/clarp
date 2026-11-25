@@ -818,9 +818,16 @@ fn main() {
         }
     });
     window.on_stop(|pane| {
-        if let Some(app) = app() {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
             let session = app.session_of(&pane);
-            app.engine.borrow_mut().stop_session(&session);
+            // The open chat's Stop button is its key's action (Settings →
+            // Confirm stop asks first); another pane's stops that chat.
+            if session == app.engine.borrow().selected_session() {
+                commands::run(&app, &window, "stop-agent");
+                commands::show_hints(&app, &window);
+            } else {
+                app.engine.borrow_mut().stop_session(&session);
+            }
         }
     });
     window.on_pane_activated(|pane| {
