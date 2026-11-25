@@ -184,11 +184,7 @@ fn a_turn_stopped_while_it_waits_for_an_account_ends_under_its_message() {
             &ends[0]["turn"]["status"],
             &ends[0]["turn"]["reason"]
         ),
-        (
-            &json!(trace),
-            &json!("interrupted"),
-            &json!("Stopped.")
-        ),
+        (&json!(trace), &json!("interrupted"), &json!("Stopped.")),
         "{rows:#?}"
     );
     let messages = rows.iter().filter(|row| row["id"] == "u-parked-1").count();

@@ -31,7 +31,9 @@ fn a_stop_is_said_in_one_sentence_on_its_answer_its_events_and_the_snapshot() {
     }
     let queue = format!("/turn-queue?session={session}");
     wait_for("both to wait", || {
-        host.get(&queue)["items"].as_array().is_some_and(|items| items.len() == 2)
+        host.get(&queue)["items"]
+            .as_array()
+            .is_some_and(|items| items.len() == 2)
     });
     let stopped = host.post("/stop", json!({ "session": session }));
     let said = "Stopped. 2 messages wait; send one to go on.";
@@ -66,6 +68,9 @@ fn a_stop_is_said_in_one_sentence_on_its_answer_its_events_and_the_snapshot() {
         let state = ours("agent-state").iter().any(|event| {
             event["detail"]["source"] == "user_stop" && event["detail"]["stop_text"] == said
         });
-        state && ours("agent-activity").iter().any(|event| event["stop_text"] == said)
+        state
+            && ours("agent-activity")
+                .iter()
+                .any(|event| event["stop_text"] == said)
     });
 }
