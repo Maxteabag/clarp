@@ -4,7 +4,12 @@
 //! an agent writes waits for it. It is derived from the agents' logs and can be thrown away; the
 //! Host then builds it again. A row's words and how far its agent has been read are written in
 //! one transaction, so after a crash the index stands where its agent's mark says it does.
-//! Hence `synchronous=NORMAL`: what a power cut takes back, the next read gives again.
+//! Hence `synchronous=NORMAL`: what a power cut takes back, the next read gives again. A file
+//! that will not open, or that SQLite finds damaged, is thrown away and built again.
+//!
+//! One connection writes ([`SearchIndex`]), on the thread that keeps the index; a search reads
+//! on a connection of its own, opened read-only ([`SearchReader`]), so a search never waits for
+//! a page being written and never writes.
 //!
 //! The words are kept in an FTS5 table, folded to lower case and without accents
 //! (`unicode61 remove_diacritics 2`: "på" is found by "pa" as by "på"; ø and æ are letters of
@@ -15,7 +20,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS hit (
@@ -38,8 +43,10 @@ CREATE TABLE IF NOT EXISTS agent (
     older_than TEXT,
     complete INTEGER NOT NULL
 ) STRICT;
-CREATE TEMP TABLE IF NOT EXISTS allowed (agent_id TEXT PRIMARY KEY);
 ";
+
+/// SQLite's own files of the index, beside the index's file: what is thrown away with it.
+const SIDE_FILES: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 /// What marks the start and the end of a match in a snippet as SQLite writes it. Taken out of
 /// every text before it is kept, so a text cannot forge a mark.
@@ -56,6 +63,8 @@ pub enum SearchError {
     Asked(String),
     /// The file underneath failed. The text is for the operator.
     Storage(String),
+    /// The file is damaged or is no database: it was thrown away and the index begins anew.
+    Broken(String),
 }
 
 impl fmt::Display for SearchError {
@@ -63,6 +72,7 @@ impl fmt::Display for SearchError {
         match self {
             Self::Asked(why) => write!(f, "{why}"),
             Self::Storage(why) => write!(f, "search index failed: {why}"),
+            Self::Broken(why) => write!(f, "search index was damaged and begins anew: {why}"),
         }
     }
 }
@@ -71,7 +81,15 @@ impl std::error::Error for SearchError {}
 
 impl From<rusqlite::Error> for SearchError {
     fn from(error: rusqlite::Error) -> Self {
-        Self::Storage(error.to_string())
+        let damaged = matches!(
+            error.sqlite_error_code(),
+            Some(ErrorCode::DatabaseCorrupt | ErrorCode::NotADatabase)
+        );
+        if damaged {
+            Self::Broken(error.to_string())
+        } else {
+            Self::Storage(error.to_string())
+        }
     }
 }
 
@@ -134,20 +152,51 @@ pub struct Asked<'a> {
     pub before: Option<&'a str>,
 }
 
+/// The index as its one writer has it.
 pub struct SearchIndex {
     db: Connection,
+    #[cfg(test)]
+    path: std::path::PathBuf,
 }
 
 impl SearchIndex {
-    /// Opens the index at `path`, creating it when it is not there.
-    pub fn open(path: &Path) -> Result<Self, SearchError> {
+    /// Opens the index at `path`, creating it when it is not there. A file that does not open
+    /// as the index is thrown away and made anew: what it held is read again from the logs.
+    /// Answers whether it began anew.
+    pub fn open(path: &Path) -> Result<(Self, bool), SearchError> {
+        match Self::open_once(path) {
+            Ok(index) => Ok((index, false)),
+            Err(why) => {
+                eprintln!("search index: {why}; it is made anew");
+                discard(path);
+                Ok((Self::open_once(path)?, true))
+            }
+        }
+    }
+
+    fn open_once(path: &Path) -> Result<Self, SearchError> {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "synchronous", "NORMAL")?;
         db.execute_batch(SCHEMA)?;
+        // A file that is not what this index writes is found here, not at the first search.
+        db.query_row("SELECT count(*) FROM agent", [], |row| row.get::<_, i64>(0))?;
         private(path);
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            #[cfg(test)]
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// A search as a reader of this index makes it.
+    #[cfg(test)]
+    fn search(&self, asked: Asked<'_>) -> Result<Found, SearchError> {
+        let reader = SearchReader::open(&self.path)?;
+        reader
+            .ok_or_else(|| SearchError::Storage("no file".into()))?
+            .search(asked)
     }
 
     /// Every agent the index holds anything of, with its mark.
@@ -249,28 +298,41 @@ impl SearchIndex {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// A search's own connection to the index, read-only.
+pub struct SearchReader {
+    db: Connection,
+}
+
+impl SearchReader {
+    /// Opens the index at `path` to read; `None` while its writer has not made it yet.
+    pub fn open(path: &Path) -> Result<Option<Self>, SearchError> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let db = Connection::open_with_flags(path, flags)?;
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        db.pragma_update(None, "query_only", true)?;
+        Ok(Some(Self { db }))
+    }
 
     /// The rows of these agents that have every word asked, newest first.
-    pub fn search(&mut self, asked: Asked<'_>) -> Result<Found, SearchError> {
+    pub fn search(&self, asked: Asked<'_>) -> Result<Found, SearchError> {
         let query = fts_query(asked.words)
             .ok_or_else(|| SearchError::Asked("nothing to search for in q".to_string()))?;
         let before = asked.before.map(cursor).transpose()?;
         let limit = asked.limit.clamp(1, MOST);
-        let tx = self.db.transaction()?;
-        tx.execute("DELETE FROM temp.allowed", [])?;
-        {
-            let mut allow = tx.prepare("INSERT OR IGNORE INTO temp.allowed VALUES (?1)")?;
-            for agent in asked.agents {
-                allow.execute([agent])?;
-            }
-        }
+        let agents = json_list(asked.agents);
+        let tx = self.db.unchecked_transaction()?;
         let mut hits = Vec::new();
         {
             let mut statement = tx.prepare(
                 "SELECT h.id, h.agent_id, h.row_id, h.role, h.ts_ms, h.revision, \
                  snippet(words, 0, char(1), char(2), '…', ?2) \
                  FROM words JOIN hit h ON h.id = words.rowid \
-                 WHERE words MATCH ?1 AND h.agent_id IN (SELECT agent_id FROM temp.allowed) \
+                 WHERE words MATCH ?1 AND h.agent_id IN (SELECT value FROM json_each(?6)) \
                  AND (?3 IS NULL OR h.ts_ms < ?3 OR (h.ts_ms = ?3 AND h.id < ?4)) \
                  ORDER BY h.ts_ms DESC, h.id DESC LIMIT ?5",
             )?;
@@ -281,7 +343,8 @@ impl SearchIndex {
                     SNIPPET_WORDS,
                     before_ts,
                     before_id,
-                    i64::try_from(limit + 1).unwrap_or(i64::MAX)
+                    i64::try_from(limit + 1).unwrap_or(i64::MAX),
+                    agents,
                 ],
                 |row| {
                     Ok((
@@ -301,14 +364,14 @@ impl SearchIndex {
                 hits.push(row?);
             }
         }
+        // Read in the same snapshot as the hits.
         let behind: i64 = tx.query_row(
-            "SELECT count(*) FROM temp.allowed a LEFT JOIN agent m ON m.agent_id = a.agent_id \
+            "SELECT count(*) FROM json_each(?1) a LEFT JOIN agent m ON m.agent_id = a.value \
              WHERE m.complete IS NOT 1",
-            [],
+            [&agents],
             |row| row.get(0),
         )?;
-        tx.execute("DELETE FROM temp.allowed", [])?;
-        tx.commit()?;
+        tx.finish()?;
         let more = hits.len() > limit;
         hits.truncate(limit);
         let next = more
@@ -320,6 +383,40 @@ impl SearchIndex {
             partial: behind > 0,
         })
     }
+}
+
+/// Throws the index away with SQLite's files beside it: it is derived, and is built again.
+pub fn discard(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    for side in SIDE_FILES {
+        let mut name = path.as_os_str().to_owned();
+        name.push(side);
+        let _ = std::fs::remove_file(std::path::PathBuf::from(name));
+    }
+}
+
+/// Texts as a JSON array, for `json_each`.
+fn json_list(texts: &[String]) -> String {
+    let mut list = String::from("[");
+    for (at, text) in texts.iter().enumerate() {
+        if at > 0 {
+            list.push(',');
+        }
+        list.push('"');
+        for sign in text.chars() {
+            match sign {
+                '"' => list.push_str("\\\""),
+                '\\' => list.push_str("\\\\"),
+                sign if u32::from(sign) < 0x20 => {
+                    list.push_str(&format!("\\u{:04x}", u32::from(sign)));
+                }
+                sign => list.push(sign),
+            }
+        }
+        list.push('"');
+    }
+    list.push(']');
+    list
 }
 
 /// The index holds what agents said: only its owner reads the file.
@@ -415,7 +512,8 @@ mod tests {
         );
         let dir = std::env::temp_dir().join(unique);
         std::fs::create_dir_all(&dir).unwrap();
-        let index = SearchIndex::open(&dir.join("search.db")).unwrap();
+        let (index, anew) = SearchIndex::open(&dir.join("search.db")).unwrap();
+        assert!(!anew);
         (index, Scratch(dir))
     }
 
@@ -479,8 +577,15 @@ mod tests {
             .unwrap();
         let hit = &found.hits[0];
         assert!(hit.parts.contains(&("Bergen".to_string(), true)));
-        assert!(hit.parts.iter().any(|(text, on)| !on && text.contains("train")));
-        assert_eq!((hit.agent_id.as_str(), hit.ts_ms, hit.revision), ("a1", 2_000, 2));
+        assert!(
+            hit.parts
+                .iter()
+                .any(|(text, on)| !on && text.contains("train"))
+        );
+        assert_eq!(
+            (hit.agent_id.as_str(), hit.ts_ms, hit.revision),
+            ("a1", 2_000, 2)
+        );
     }
 
     #[test]
@@ -505,16 +610,28 @@ mod tests {
     fn a_newer_revision_replaces_the_words_and_an_older_one_changes_nothing() {
         let (mut index, _scratch) = index();
         index
-            .apply("a1", &[row("r1", 1, 5, "first draft about apples")], &mark(5))
+            .apply(
+                "a1",
+                &[row("r1", 1, 5, "first draft about apples")],
+                &mark(5),
+            )
             .unwrap();
         index
-            .apply("a1", &[row("r1", 1, 9, "final answer about pears")], &mark(9))
+            .apply(
+                "a1",
+                &[row("r1", 1, 9, "final answer about pears")],
+                &mark(9),
+            )
             .unwrap();
         assert!(ids(&mut index, "apples", &["a1"]).is_empty());
         assert_eq!(ids(&mut index, "pears", &["a1"]), ["r1"]);
         // A page read again from before (a backfill behind a live update) is older: kept out.
         index
-            .apply("a1", &[row("r1", 1, 5, "first draft about apples")], &mark(9))
+            .apply(
+                "a1",
+                &[row("r1", 1, 5, "first draft about apples")],
+                &mark(9),
+            )
             .unwrap();
         assert!(ids(&mut index, "apples", &["a1"]).is_empty());
         assert_eq!(index.marks().unwrap()["a1"].revision, 9);
@@ -526,7 +643,9 @@ mod tests {
         index
             .apply("a1", &[row("w1", 1, 1, "a message about kites")], &mark(1))
             .unwrap();
-        index.apply("a1", &[row("w1", 1, 2, "  ")], &mark(2)).unwrap();
+        index
+            .apply("a1", &[row("w1", 1, 2, "  ")], &mark(2))
+            .unwrap();
         assert!(ids(&mut index, "kites", &["a1"]).is_empty());
         // And an empty row is never kept at all.
         index.apply("a1", &[row("w2", 2, 3, "")], &mark(3)).unwrap();
@@ -541,19 +660,29 @@ mod tests {
     fn a_forgotten_agent_is_never_found_again_and_others_stay() {
         let (mut index, _scratch) = index();
         index
-            .apply("gone", &[row("g1", 1, 1, "secret plans for lunch")], &mark(1))
+            .apply(
+                "gone",
+                &[row("g1", 1, 1, "secret plans for lunch")],
+                &mark(1),
+            )
             .unwrap();
         index
-            .apply("kept", &[row("k1", 2, 1, "public plans for lunch")], &mark(1))
+            .apply(
+                "kept",
+                &[row("k1", 2, 1, "public plans for lunch")],
+                &mark(1),
+            )
             .unwrap();
         index.forget("gone").unwrap();
         assert_eq!(ids(&mut index, "lunch", &["gone", "kept"]), ["k1"]);
         assert!(!index.marks().unwrap().contains_key("gone"));
         let words: i64 = index
             .db
-            .query_row("SELECT count(*) FROM words WHERE words MATCH 'secret'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT count(*) FROM words WHERE words MATCH 'secret'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(words, 0, "its words are gone from the full-text table too");
     }
@@ -604,7 +733,7 @@ mod tests {
 
     #[test]
     fn nothing_to_search_for_and_a_strange_cursor_are_refused_in_words() {
-        let (mut index, _scratch) = index();
+        let (index, _scratch) = index();
         let allowed = agents(&["a1"]);
         let asked = |words, before| Asked {
             words,
@@ -612,7 +741,10 @@ mod tests {
             limit: 5,
             before,
         };
-        assert!(matches!(index.search(asked("  \"?! ", None)), Err(SearchError::Asked(_))));
+        assert!(matches!(
+            index.search(asked("  \"?! ", None)),
+            Err(SearchError::Asked(_))
+        ));
         assert!(matches!(
             index.search(asked("oslo", Some("yesterday"))),
             Err(SearchError::Asked(_))
@@ -639,7 +771,9 @@ mod tests {
     fn a_text_cannot_forge_a_mark() {
         let (mut index, _scratch) = index();
         let forged = format!("look {OPEN}here{CLOSE} at the comet");
-        index.apply("a1", &[row("f1", 1, 1, &forged)], &mark(1)).unwrap();
+        index
+            .apply("a1", &[row("f1", 1, 1, &forged)], &mark(1))
+            .unwrap();
         let allowed = agents(&["a1"]);
         let found = index
             .search(Asked {
@@ -680,7 +814,9 @@ mod tests {
             older_than: Some("t1".to_string()),
             ..Mark::default()
         };
-        index.apply("a1", &[row("t1", 1, 1, "tea")], &begun).unwrap();
+        index
+            .apply("a1", &[row("t1", 1, 1, "tea")], &begun)
+            .unwrap();
         assert!(partial(&mut index, &["a1"]));
         let done = Mark {
             complete: true,
@@ -703,6 +839,182 @@ mod tests {
         };
         index.apply("a1", &[], &kept).unwrap();
         assert_eq!(index.marks().unwrap()["a1"], kept);
+    }
+
+    #[test]
+    fn a_damaged_file_is_thrown_away_and_the_index_begins_anew() {
+        let (index, scratch) = index();
+        drop(index);
+        let path = scratch.0.join("search.db");
+        for side in SIDE_FILES {
+            let mut name = path.as_os_str().to_owned();
+            name.push(side);
+            let _ = std::fs::remove_file(std::path::PathBuf::from(name));
+        }
+        std::fs::write(
+            &path,
+            b"this is not what the index writes, and is long enough",
+        )
+        .unwrap();
+        let (mut index, anew) = SearchIndex::open(&path).unwrap();
+        assert!(anew);
+        assert!(index.marks().unwrap().is_empty());
+        index
+            .apply("a1", &[row("d1", 1, 1, "fresh start")], &mark(1))
+            .unwrap();
+        assert_eq!(ids(&mut index, "fresh", &["a1"]), ["d1"]);
+    }
+
+    #[test]
+    fn a_reader_reads_only_and_finds_nothing_before_the_index_is_made() {
+        let (index, scratch) = index();
+        assert!(
+            SearchReader::open(&scratch.0.join("absent.db"))
+                .unwrap()
+                .is_none()
+        );
+        let reader = SearchReader::open(&scratch.0.join("search.db"))
+            .unwrap()
+            .unwrap();
+        assert!(reader.db.execute("DELETE FROM agent", []).is_err());
+        drop(index);
+    }
+
+    #[test]
+    fn agents_are_listed_for_sqlite_as_json_whatever_their_signs() {
+        assert_eq!(json_list(&[]), "[]");
+        let odd = vec!["a\"b".to_string(), "c\\d".to_string(), "e\u{1}".to_string()];
+        assert_eq!(json_list(&odd), r#"["a\"b","c\\d","e\u0001"]"#);
+    }
+
+    /// What the index costs at the size of a real Host's history (632 agents, about 300 000
+    /// rows, about 215 MB of words), on generated words only. Run by hand, in release:
+    /// `cargo test --release -p clarp-store-sqlite --lib -- --ignored --nocapture measure`.
+    #[test]
+    #[ignore = "a measurement, run by hand"]
+    fn measure_an_index_of_a_large_hosts_size() {
+        const AGENTS: usize = 632;
+        const ROWS: usize = 300_000;
+        const BYTES: usize = 215_000_000;
+        const PAGE: usize = 200;
+        const PACE_MS: f64 = 250.0;
+        let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        // A vocabulary of made-up words whose use falls off as in speech: a few very common.
+        let syllables = [
+            "ka", "lo", "mi", "ne", "su", "ta", "ri", "vo", "be", "ø", "på", "en",
+        ];
+        let mut vocabulary: Vec<String> = ["the", "and", "to", "of", "a", "er", "og", "det"]
+            .iter()
+            .map(|word| word.to_string())
+            .collect();
+        while vocabulary.len() < 20_000 {
+            let length = 2 + (next() % 3) as usize;
+            let word: String = (0..length)
+                .map(|_| syllables[(next() % syllables.len() as u64) as usize])
+                .collect();
+            vocabulary.push(word);
+        }
+        let per_row = BYTES / ROWS;
+        let (index, scratch) = index();
+        let path = scratch.0.join("search.db");
+        let mut index = index;
+        let mut row_number = 0_usize;
+        let mut slowest = std::time::Duration::ZERO;
+        let mut pages = 0_usize;
+        let started = std::time::Instant::now();
+        for agent in 0..AGENTS {
+            let agent_id = format!("agent-{agent:04}");
+            let rows_here = ROWS / AGENTS + usize::from(agent < ROWS % AGENTS);
+            let mut written = 0;
+            while written < rows_here {
+                let mut page = Vec::with_capacity(PAGE);
+                for _ in 0..PAGE.min(rows_here - written) {
+                    let mut text = String::with_capacity(per_row + 16);
+                    while text.len() < per_row {
+                        // Zipf-like: the square of a uniform draw favours the first words.
+                        let draw = (next() % 1_000_000) as f64 / 1_000_000.0;
+                        let at = (draw * draw * draw * vocabulary.len() as f64) as usize;
+                        text.push_str(&vocabulary[at.min(vocabulary.len() - 1)]);
+                        text.push(' ');
+                    }
+                    if row_number % 40_000 == 7 {
+                        text.push_str("Zanzibarquest");
+                    }
+                    page.push(row(
+                        &format!("r-{row_number}"),
+                        1_700_000_000_000 + row_number as i64 * 1_000,
+                        row_number as u64 + 1,
+                        &text,
+                    ));
+                    row_number += 1;
+                    written += 1;
+                }
+                let one = std::time::Instant::now();
+                let mark = Mark {
+                    revision: row_number as u64,
+                    begins_after: 0,
+                    older_than: page.first().map(|row| row.row_id.clone()),
+                    complete: written >= rows_here,
+                };
+                index.apply(&agent_id, &page, &mark).unwrap();
+                slowest = slowest.max(one.elapsed());
+                pages += 1;
+            }
+        }
+        let writing = started.elapsed();
+        index
+            .db
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+            .unwrap();
+        let size = std::fs::metadata(&path).unwrap().len();
+        let all: Vec<String> = (0..AGENTS)
+            .map(|agent| format!("agent-{agent:04}"))
+            .collect();
+        let reader = SearchReader::open(&path).unwrap().unwrap();
+        let time = |words: &str| {
+            let mut found = 0;
+            let started = std::time::Instant::now();
+            for _ in 0..5 {
+                found = reader
+                    .search(Asked {
+                        words,
+                        agents: &all,
+                        limit: 20,
+                        before: None,
+                    })
+                    .unwrap()
+                    .hits
+                    .len();
+            }
+            (started.elapsed() / 5, found)
+        };
+        let per_page = writing / pages as u32;
+        let paced_s = pages as f64 * PACE_MS.max(per_page.as_secs_f64() * 1000.0) / 1000.0;
+        println!(
+            "rows {row_number}, agents {AGENTS}, pages {pages}, words ~{} MB",
+            BYTES / 1_000_000
+        );
+        println!("index {:.1} MB after a checkpoint", size as f64 / 1e6);
+        println!(
+            "writing without pauses {:.1} s, {:.1} ms a page on average, slowest {:.1} ms",
+            writing.as_secs_f64(),
+            per_page.as_secs_f64() * 1000.0,
+            slowest.as_secs_f64() * 1000.0
+        );
+        println!("backfill at one page per {PACE_MS} ms: {:.0} s", paced_s);
+        for words in ["the", "og", "zanzibarquest", "the og", "ka"] {
+            let (took, found) = time(words);
+            println!(
+                "search {words:?}: {:.1} ms, {found} hits",
+                took.as_secs_f64() * 1000.0
+            );
+        }
     }
 
     #[test]

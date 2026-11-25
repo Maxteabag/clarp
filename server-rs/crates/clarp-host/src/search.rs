@@ -1,18 +1,21 @@
 //! Message search (issue 803): `GET /search` and `clarp-admin search` over the conversations
 //! the caller may read, from an index kept as the agents' rows change.
 //!
-//! The index is `search.db` beside the fleet's file, owned by one thread of its own ([`Desk`]).
-//! Nothing an agent writes waits for it: no agent's append and no fsync of an agent's log
-//! touches it. What changed is read off the hub, which says `transcript-updated` with the
-//! conversation's head; the indexer then asks the agent for the rows that changed since the
-//! revision it holds, the same page an app asks for on that event (`after`), and keeps them.
-//! The rows are read through the actor, not from its file, so they are the rows `/log` serves:
-//! the same ids, the same text, the same view, the same beginning.
+//! The index is `search.db` beside the fleet's file. One thread of its own writes it
+//! ([`Desk`]); each search reads it on a read-only connection of its own. Nothing an agent
+//! writes waits for it: no agent's append and no fsync of an agent's log touches it. What
+//! changed is read off the hub, which says `transcript-updated` with the conversation's head;
+//! the indexer then asks the agent for the rows that changed since the revision it holds, the
+//! same page an app asks for on that event (`after`), and keeps them. The rows are read through
+//! the actor, not from its file, so they are the rows `/log` serves: the same ids, the same
+//! text, the same view, the same beginning.
 //!
-//! History from before is read in the background once the Host is up, one agent and one page
-//! at a time, newest first, behind every live change; a search meanwhile answers what is
-//! indexed and says `partial`. Where each agent stands is kept with its rows, so a restart
-//! resumes.
+//! History from before is read in the background once the Host is up: one page at a time, at
+//! most one every [`PACE`], and of an agent only while it has no turn running and nothing
+//! waiting, so a working agent's thread is never kept from its work and the disk never sees a
+//! burst (on 25 Nov 2026 a laptop's evening stalls were filesystem-wide fsyncs). A search
+//! meanwhile answers what is indexed and says `partial`. Where each agent stands is kept with
+//! its rows, so a restart resumes; an index found damaged is thrown away and read anew.
 //!
 //! Who may read what is decided when a search is made, not when a row is kept: only agents in
 //! the fleet now, here and not moved away, and whose words the reader may read
@@ -21,17 +24,17 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Extension, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use clarp_actor::conversation::{Page, Versioned, Which};
-use clarp_store_sqlite::search::{Asked, Found, Mark, Row, SearchError, SearchIndex};
+use clarp_store_sqlite::search::{Asked, Found, Mark, Row, SearchError, SearchIndex, SearchReader};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{Semaphore, broadcast, oneshot};
 use tokio::time::Instant;
 
 use crate::bound_privacy::{Reader, Withheld};
@@ -46,12 +49,16 @@ const PAGE: usize = 200;
 /// The least time between two reads of one agent's changes: a reply that grows is told a few
 /// times a second, and is kept once it has settled.
 const EVERY: Duration = Duration::from_secs(2);
-/// The pause between two pages of history read in the background.
-const PACE: Duration = Duration::from_millis(50);
+/// The least time between two pages of history read in the background.
+const PACE: Duration = Duration::from_millis(250);
+/// The pause after a read of an agent's changes.
+const BREATH: Duration = Duration::from_millis(50);
 /// How long after the Host is up the index begins: what a start does first comes first.
 const AFTER_START: Duration = Duration::from_secs(5);
 /// How many hits a page has when the caller does not say.
 const LIMIT: usize = 20;
+/// How many searches read at once.
+const READERS: usize = 4;
 
 // ---- the index's own thread ------------------------------------------------------------------
 
@@ -69,31 +76,32 @@ enum Command {
         agent_id: String,
         answer: Answer<()>,
     },
-    Search {
-        words: String,
-        agents: Vec<String>,
-        limit: usize,
-        before: Option<String>,
-        answer: Answer<Found>,
-    },
+    /// A reader found the file damaged: it is thrown away and made anew.
+    Discard,
 }
 
-/// The way to the thread that owns the index. It opens the file at its first command, and
-/// again at the next where that failed.
+/// The way to the index: its writer's thread, and the file searches read.
 pub struct Desk {
     tx: mpsc::Sender<Command>,
+    path: PathBuf,
+    readers: Arc<Semaphore>,
 }
 
 impl Desk {
     pub fn new(path: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel::<Command>();
+        let at = path.clone();
         let spawned = std::thread::Builder::new()
             .name("search-index".to_string())
-            .spawn(move || serve(&path, &rx));
+            .spawn(move || Writer::new(at).serve(&rx));
         if let Err(why) = spawned {
             eprintln!("clarp-host: the search index has no thread: {why}");
         }
-        Self { tx }
+        Self {
+            tx,
+            path,
+            readers: Arc::new(Semaphore::new(READERS)),
+        }
     }
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Command) -> Result<T, SearchError> {
@@ -123,9 +131,11 @@ impl Desk {
 
     async fn forget(&self, agent_id: &str) -> Result<(), SearchError> {
         let agent_id = agent_id.to_string();
-        self.ask(|answer| Command::Forget { agent_id, answer }).await
+        self.ask(|answer| Command::Forget { agent_id, answer })
+            .await
     }
 
+    /// A search, on a read-only connection of its own, off the runtime.
     async fn search(
         &self,
         words: String,
@@ -133,66 +143,114 @@ impl Desk {
         limit: usize,
         before: Option<String>,
     ) -> Result<Found, SearchError> {
-        self.ask(|answer| Command::Search {
-            words,
-            agents,
-            limit,
-            before,
-            answer,
+        let _turn = self
+            .readers
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| SearchError::Storage("the search index is closed".to_string()))?;
+        let path = self.path.clone();
+        let found = tokio::task::spawn_blocking(move || {
+            // Before the writer has made the file there is nothing yet: everything is to come.
+            let Some(reader) = SearchReader::open(&path)? else {
+                return Ok(Found {
+                    partial: true,
+                    ..Found::default()
+                });
+            };
+            reader.search(Asked {
+                words: &words,
+                agents: &agents,
+                limit,
+                before: before.as_deref(),
+            })
         })
         .await
+        .map_err(|why| SearchError::Storage(why.to_string()))?;
+        if matches!(found, Err(SearchError::Broken(_))) {
+            let _ = self.tx.send(Command::Discard);
+        }
+        found
     }
 }
 
-fn serve(path: &std::path::Path, rx: &mpsc::Receiver<Command>) {
-    let mut index: Option<SearchIndex> = None;
-    while let Ok(command) = rx.recv() {
-        if index.is_none() {
-            match SearchIndex::open(path) {
-                Ok(opened) => index = Some(opened),
-                Err(why) => eprintln!("clarp-host: the search index did not open: {why}"),
-            }
+/// The index's one writer. A file that is damaged is thrown away and made anew; the next
+/// answer to the indexer says so once ([`SearchError::Broken`]), so it reads everything again.
+struct Writer {
+    path: PathBuf,
+    index: Option<SearchIndex>,
+    began_anew: bool,
+}
+
+impl Writer {
+    fn new(path: PathBuf) -> Self {
+        let mut writer = Self {
+            path,
+            index: None,
+            began_anew: false,
+        };
+        // Made at once, so a search finds a file to read from the start.
+        let _ = writer.index();
+        writer
+    }
+
+    fn index(&mut self) -> Result<&mut SearchIndex, SearchError> {
+        if self.index.is_none() {
+            let (index, anew) = SearchIndex::open(&self.path)?;
+            self.began_anew |= anew;
+            self.index = Some(index);
         }
-        let closed = || SearchError::Storage("the search index did not open".to_string());
-        match command {
-            Command::Marks(answer) => {
-                let _ = answer.send(index.as_ref().ok_or_else(closed).and_then(|i| i.marks()));
-            }
-            Command::Apply {
-                agent_id,
-                rows,
-                mark,
-                answer,
-            } => {
-                let done = index
-                    .as_mut()
-                    .ok_or_else(closed)
-                    .and_then(|i| i.apply(&agent_id, &rows, &mark));
-                let _ = answer.send(done);
-            }
-            Command::Forget { agent_id, answer } => {
-                let done = index
-                    .as_mut()
-                    .ok_or_else(closed)
-                    .and_then(|i| i.forget(&agent_id));
-                let _ = answer.send(done);
-            }
-            Command::Search {
-                words,
-                agents,
-                limit,
-                before,
-                answer,
-            } => {
-                let found = index.as_mut().ok_or_else(closed).and_then(|i| {
-                    i.search(Asked {
-                        words: &words,
-                        agents: &agents,
-                        limit,
-                        before: before.as_deref(),
-                    })
-                });
-                let _ = answer.send(found);
+        self.index
+            .as_mut()
+            .ok_or_else(|| SearchError::Storage("the search index did not open".to_string()))
+    }
+
+    fn discard(&mut self, why: &str) {
+        eprintln!("clarp-host: the search index is made anew: {why}");
+        self.index = None;
+        clarp_store_sqlite::search::discard(&self.path);
+        self.began_anew = true;
+    }
+
+    /// What one command answers, with what a damaged file means for it.
+    fn done<T>(&mut self, done: Result<T, SearchError>) -> Result<T, SearchError> {
+        if let Err(SearchError::Broken(why)) = &done {
+            let why = why.clone();
+            self.discard(&why);
+        }
+        if std::mem::take(&mut self.began_anew) {
+            let _ = self.index();
+            return Err(SearchError::Broken("the index was made anew".to_string()));
+        }
+        done
+    }
+
+    fn serve(mut self, rx: &mpsc::Receiver<Command>) {
+        while let Ok(command) = rx.recv() {
+            match command {
+                Command::Marks(answer) => {
+                    let done = self.index().and_then(|index| index.marks());
+                    let _ = answer.send(self.done(done));
+                }
+                Command::Apply {
+                    agent_id,
+                    rows,
+                    mark,
+                    answer,
+                } => {
+                    let done = self
+                        .index()
+                        .and_then(|index| index.apply(&agent_id, &rows, &mark));
+                    let _ = answer.send(self.done(done));
+                }
+                Command::Forget { agent_id, answer } => {
+                    let done = self.index().and_then(|index| index.forget(&agent_id));
+                    let _ = answer.send(self.done(done));
+                }
+                Command::Discard => {
+                    self.discard("a search found it damaged");
+                    let _ = self.index();
+                }
             }
         }
     }
@@ -206,10 +264,7 @@ pub fn run(app: &App) {
     tokio::spawn(async move {
         let events = app.hub.subscribe(None).1;
         tokio::time::sleep(AFTER_START).await;
-        match Indexer::start(app).await {
-            Ok(indexer) => indexer.keep(events).await,
-            Err(why) => eprintln!("clarp-host: message search is not kept: {why}"),
-        }
+        Indexer::new(app).keep(events).await;
     });
 }
 
@@ -217,33 +272,49 @@ struct Indexer {
     app: App,
     /// Where each agent the index holds stands, as the index has it.
     marks: HashMap<String, Mark>,
+    /// The index's marks are to be read again (at the start, and after it began anew).
+    reread: bool,
     /// The agents whose changes are to be read, and from when.
     due: BTreeMap<String, Instant>,
     /// When each agent's changes were last read.
     read_at: HashMap<String, Instant>,
-    /// The agents whose older history could not be read: tried again after their next change.
+    /// The agents the index holds nothing of yet: their newest page is read first, as history.
+    unread: HashSet<String>,
+    /// The agents whose history could not be read: tried again after their next change.
     stalled: HashSet<String>,
     /// The roster changed since the index was last looked over: many changes, one look.
     roster_changed: bool,
+    /// When the last page of history was read.
+    paced_from: Option<Instant>,
 }
 
 impl Indexer {
-    async fn start(app: App) -> Result<Self, SearchError> {
-        let marks = app.search.marks().await?;
-        let mut indexer = Self {
+    fn new(app: App) -> Self {
+        Self {
             app,
-            marks,
+            marks: HashMap::new(),
+            reread: true,
             due: BTreeMap::new(),
             read_at: HashMap::new(),
+            unread: HashSet::new(),
             stalled: HashSet::new(),
-            roster_changed: false,
-        };
-        indexer.sweep().await;
-        Ok(indexer)
+            roster_changed: true,
+            paced_from: None,
+        }
     }
 
-    async fn keep(mut self, mut events: broadcast::Receiver<std::sync::Arc<crate::hub::Published>>) {
+    async fn keep(mut self, mut events: broadcast::Receiver<Arc<crate::hub::Published>>) {
         loop {
+            if self.reread {
+                match self.app.search.marks().await {
+                    Ok(marks) => {
+                        self.marks = marks;
+                        self.reread = false;
+                        self.roster_changed = true;
+                    }
+                    Err(why) => self.failed(&why),
+                }
+            }
             // What the hub said meanwhile, without waiting.
             loop {
                 match events.try_recv() {
@@ -253,7 +324,7 @@ impl Indexer {
                     Err(broadcast::error::TryRecvError::Closed) => return,
                 }
             }
-            if std::mem::take(&mut self.roster_changed) {
+            if !self.reread && std::mem::take(&mut self.roster_changed) {
                 self.sweep().await;
             }
             let now = Instant::now();
@@ -262,29 +333,36 @@ impl Indexer {
                 .iter()
                 .find(|(_, at)| **at <= now)
                 .map(|(agent, _)| agent.clone());
-            if let Some(agent_id) = ready {
+            if let (Some(agent_id), false) = (ready, self.reread) {
                 self.due.remove(&agent_id);
                 self.read_at.insert(agent_id.clone(), Instant::now());
                 self.changes(&agent_id).await;
-                tokio::time::sleep(PACE).await;
+                tokio::time::sleep(BREATH).await;
                 continue;
             }
-            let older = self
-                .marks
-                .iter()
-                .find(|(agent_id, mark)| !mark.complete && !self.stalled.contains(*agent_id))
-                .map(|(agent_id, _)| agent_id.clone());
-            if let Some(agent_id) = older {
-                self.history(&agent_id).await;
-                tokio::time::sleep(PACE).await;
-                continue;
+            // History, one page, when the last is far enough behind.
+            let paced = self.paced_from.map(|from| from + PACE);
+            if !self.reread && paced.is_none_or(|at| at <= now) {
+                if let Some(agent_id) = self.next_history() {
+                    self.paced_from = Some(Instant::now());
+                    self.history(&agent_id).await;
+                    continue;
+                }
             }
-            // Nothing to do but what the hub says next, or the next change that is due.
-            let next = self.due.values().min().copied();
-            let heard = match next {
+            // Nothing to do now: wait for the hub, the next change that is due, or the pace.
+            let wake = self
+                .due
+                .values()
+                .copied()
+                // The pace, where an agent that rests has history to read; one that works
+                // is passed over until its turn ends, which the roster says.
+                .chain(paced.filter(|_| self.next_history().is_some()))
+                .chain(self.reread.then(|| now + PACE * 4))
+                .min();
+            let heard = match wake {
                 Some(at) => tokio::select! {
                     heard = events.recv() => Some(heard),
-                    () = tokio::time::sleep_until(at) => None,
+                    () = tokio::time::sleep_until(at.max(now)) => None,
                 },
                 None => Some(events.recv().await),
             };
@@ -298,8 +376,23 @@ impl Indexer {
         }
     }
 
+    /// The index answered with an error. One that says it began anew has everything read
+    /// again; any other is told and the work it was for waits for the agent's next change.
+    fn failed(&mut self, why: &SearchError) {
+        if matches!(why, SearchError::Broken(_)) {
+            self.marks.clear();
+            self.unread.clear();
+            self.stalled.clear();
+            self.reread = true;
+        } else {
+            eprintln!("clarp-host: search index: {why}");
+        }
+    }
+
     /// An event of the hub: a conversation that changed is read again, no sooner than
-    /// [`EVERY`] after its last read; a change of the roster has the index looked over.
+    /// [`EVERY`] after its last read; a change of the roster has the index looked over. Every
+    /// event wakes the indexer, so an agent that stood busy has its history read once a turn's
+    /// end (which changes its conversation) has been told.
     fn heard(&mut self, event: &str) {
         if event.contains("\"type\":\"transcript-updated\"") {
             let agent_id = serde_json::from_str::<Value>(event)
@@ -323,7 +416,7 @@ impl Indexer {
     }
 
     /// The agent of this id, while it is in the fleet and here.
-    fn here(&self, agent_id: &str) -> Option<std::sync::Arc<Member>> {
+    fn here(&self, agent_id: &str) -> Option<Arc<Member>> {
         let directory = self.app.fleet.directory();
         directory
             .members
@@ -334,8 +427,36 @@ impl Indexer {
             .cloned()
     }
 
+    /// The next agent whose history is read: one the index holds nothing of first, and only
+    /// one that rests now (no turn running, nothing waiting). A busy one is passed over.
+    fn next_history(&self) -> Option<String> {
+        let directory = self.app.fleet.directory();
+        let rests = |agent_id: &str| {
+            directory
+                .members
+                .iter()
+                .chain(&directory.janitors)
+                .find(|member| member.record.agent_id == agent_id)
+                .is_none_or(|member| resting(member))
+        };
+        let unread = self
+            .unread
+            .iter()
+            .find(|agent| !self.stalled.contains(*agent) && rests(agent));
+        let older = || {
+            self.marks
+                .iter()
+                .find(|(agent, mark)| {
+                    !mark.complete && !self.stalled.contains(*agent) && rests(agent)
+                })
+                .map(|(agent, _)| agent)
+        };
+        unread.or_else(older).cloned()
+    }
+
     /// Looks the index over against the fleet: an agent that is gone or moved away leaves it,
-    /// and one whose conversation is newer than what the index holds of it is read.
+    /// one it holds nothing of is to be read, and one whose conversation is newer than what
+    /// the index holds of it is read.
     async fn sweep(&mut self) {
         let directory = self.app.fleet.directory();
         let present: Vec<(String, u64)> = directory
@@ -355,12 +476,18 @@ impl Indexer {
             .filter(|agent_id| !here.contains(agent_id.as_str()))
             .cloned()
             .collect();
+        self.unread
+            .retain(|agent_id| here.contains(agent_id.as_str()));
         for agent_id in gone {
             let _ = self.forget(&agent_id).await;
         }
         for (agent_id, head) in present {
-            if self.marks.get(&agent_id).is_none_or(|mark| mark.revision < head) {
-                self.mark_due(agent_id);
+            match self.marks.get(&agent_id) {
+                None => {
+                    self.unread.insert(agent_id);
+                }
+                Some(mark) if mark.revision < head => self.mark_due(agent_id),
+                Some(_) => {}
             }
         }
     }
@@ -376,25 +503,27 @@ impl Indexer {
                 true
             }
             Err(why) => {
-                eprintln!("clarp-host: search index: {why}");
+                self.failed(&why);
                 false
             }
         }
     }
 
     /// Reads what changed in an agent's conversation since the index last read it. An agent
-    /// never read is read from its newest page; one whose conversation began again is read anew.
+    /// the index holds nothing of is left to the history, read while it rests; one whose
+    /// conversation began again is forgotten, and read anew the same way.
     async fn changes(&mut self, agent_id: &str) {
         let Some(member) = self.here(agent_id) else {
             if self.marks.contains_key(agent_id) {
                 let _ = self.forget(agent_id).await;
             }
+            self.unread.remove(agent_id);
             return;
         };
         let which = which(&member);
         loop {
             let Some(mark) = self.marks.get(agent_id).cloned() else {
-                self.newest(&member, which).await;
+                self.unread.insert(agent_id.to_string());
                 return;
             };
             let page = match member.agent.after(mark.revision, PAGE, which).await {
@@ -404,13 +533,12 @@ impl Indexer {
                     return;
                 }
             };
-            // The conversation began again: what the index held of it is gone, and it is read
-            // anew from its newest page.
+            // The conversation began again: what the index held of it is gone.
             if page.begins_after != mark.begins_after || mark.revision > page.head_revision {
-                if !self.forget(agent_id).await {
-                    return;
+                if self.forget(agent_id).await {
+                    self.unread.insert(agent_id.to_string());
                 }
-                continue;
+                return;
             }
             let more = page.has_more && page.latest_revision > mark.revision;
             let next = Mark {
@@ -423,58 +551,46 @@ impl Indexer {
         }
     }
 
-    /// The first read of an agent: its newest page, from where its older history is read.
-    async fn newest(&mut self, member: &Member, which: Which) {
-        let agent_id = member.record.agent_id.clone();
-        let page = match member.agent.tail(PAGE, which).await {
-            Ok(page) => page,
-            Err(why) => {
-                eprintln!("clarp-host: search index: {agent_id}: {}", why.0);
-                return;
-            }
-        };
-        let older_than = page.entries.first().map(|row| row.entry.id().to_string());
-        let mark = Mark {
-            revision: page.latest_revision,
-            begins_after: page.begins_after,
-            complete: !page.has_more || older_than.is_none(),
-            older_than,
-        };
-        self.keep_page(&agent_id, &page, mark).await;
-    }
-
-    /// One page of an agent's older history.
+    /// One page of an agent's history: its newest page when the index holds nothing of it,
+    /// else the page before the oldest row read.
     async fn history(&mut self, agent_id: &str) {
         let Some(member) = self.here(agent_id) else {
-            if !self.forget(agent_id).await {
+            self.unread.remove(agent_id);
+            if self.marks.contains_key(agent_id) && !self.forget(agent_id).await {
                 self.stalled.insert(agent_id.to_string());
             }
             return;
         };
-        let Some(mark) = self.marks.get(agent_id).cloned() else {
-            return;
-        };
-        let Some(older_than) = mark.older_than.clone() else {
-            // Nothing read yet to go back from: its newest page is its next.
-            self.stalled.insert(agent_id.to_string());
-            self.mark_due(agent_id.to_string());
-            return;
-        };
-        let page = match member.agent.before(older_than, PAGE, which(&member)).await {
-            Ok(page) => page,
-            Err(why) => {
-                eprintln!("clarp-host: search index: {agent_id}: {}", why.0);
-                // Tried again after the next change of the agent, not at once.
-                self.stalled.insert(agent_id.to_string());
-                return;
+        let which = which(&member);
+        let mark = self.marks.get(agent_id).cloned();
+        let (page, mark) = match mark {
+            None => match member.agent.tail(PAGE, which).await {
+                Ok(page) => {
+                    let mark = Mark {
+                        revision: page.latest_revision,
+                        begins_after: page.begins_after,
+                        ..Mark::default()
+                    };
+                    (page, mark)
+                }
+                Err(why) => return self.stall(agent_id, &why.0),
+            },
+            Some(mark) => {
+                let Some(older_than) = mark.older_than.clone() else {
+                    return self.stall(agent_id, "nothing read to go back from");
+                };
+                match member.agent.before(older_than, PAGE, which).await {
+                    Ok(Some(page)) => (page, mark),
+                    // A row the conversation no longer has: it began again, and is read anew.
+                    Ok(None) => {
+                        if self.forget(agent_id).await {
+                            self.unread.insert(agent_id.to_string());
+                        }
+                        return;
+                    }
+                    Err(why) => return self.stall(agent_id, &why.0),
+                }
             }
-        };
-        // A row the conversation no longer has (it began again): its history is read anew.
-        let Some(page) = page else {
-            if !self.forget(agent_id).await {
-                self.stalled.insert(agent_id.to_string());
-            }
-            return;
         };
         let older_than = page
             .entries
@@ -486,7 +602,15 @@ impl Indexer {
             older_than,
             ..mark
         };
-        self.keep_page(agent_id, &page, next).await;
+        if self.keep_page(agent_id, &page, next).await {
+            self.unread.remove(agent_id);
+        }
+    }
+
+    /// History that could not be read is tried again after the agent's next change.
+    fn stall(&mut self, agent_id: &str, why: &str) {
+        eprintln!("clarp-host: search index: {agent_id}: {why}");
+        self.stalled.insert(agent_id.to_string());
     }
 
     async fn keep_page(&mut self, agent_id: &str, page: &Page, mark: Mark) -> bool {
@@ -497,12 +621,21 @@ impl Indexer {
                 true
             }
             Err(why) => {
-                eprintln!("clarp-host: search index: {why}");
-                self.stalled.insert(agent_id.to_string());
+                if !matches!(why, SearchError::Broken(_)) {
+                    self.stalled.insert(agent_id.to_string());
+                }
+                self.failed(&why);
                 false
             }
         }
     }
+}
+
+/// Whether an agent rests: no turn of it runs and nothing of it waits. Only then is its
+/// history read, so its thread serves its work first.
+fn resting(member: &Member) -> bool {
+    let view = member.agent.view();
+    view.status.live.is_none() && view.status.waiting.is_empty()
 }
 
 /// The rows an agent's chat shows, as `/log` reads them for an app.
@@ -569,7 +702,10 @@ pub(crate) async fn find(app: &App, reader: &Reader, asking: Asking) -> Result<V
     if words.trim().is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "q is required"));
     }
-    let limit = asking.limit.unwrap_or(LIMIT).clamp(1, clarp_store_sqlite::search::MOST);
+    let limit = asking
+        .limit
+        .unwrap_or(LIMIT)
+        .clamp(1, clarp_store_sqlite::search::MOST);
     let session = asking
         .session
         .map(|session| session.trim().to_string())
@@ -602,7 +738,7 @@ pub(crate) async fn find(app: &App, reader: &Reader, asking: Asking) -> Result<V
         .await
         .map_err(|why| match why {
             SearchError::Asked(why) => ApiError::new(StatusCode::BAD_REQUEST, why),
-            SearchError::Storage(why) => {
+            SearchError::Storage(why) | SearchError::Broken(why) => {
                 ApiError::retryable(StatusCode::SERVICE_UNAVAILABLE, format!("search: {why}"))
             }
         })?;
@@ -653,15 +789,12 @@ pub(crate) async fn tool(
     let names: Vec<&str> = std::iter::once("words")
         .chain(std::iter::repeat_n("[words]", args.len()))
         .collect();
-    let parsed = match crate::artifact_tool::parse(
-        args,
-        &["--session", "--limit", "--before"],
-        &[],
-        &names,
-    ) {
-        Ok(parsed) => parsed,
-        Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
-    };
+    let parsed =
+        match crate::artifact_tool::parse(args, &["--session", "--limit", "--before"], &[], &names)
+        {
+            Ok(parsed) => parsed,
+            Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
+        };
     let limit = match parsed.whole("--limit") {
         Ok(limit) => limit.map(|limit| usize::try_from(limit.max(1)).unwrap_or(1)),
         Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
