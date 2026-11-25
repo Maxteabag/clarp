@@ -514,11 +514,11 @@ fn what_waits_enters_the_conversation_when_its_turn_starts_whether_said_or_left_
         vec!["u-1", "r-1-1", "u-2", "r-2-1", "u-3"],
         "each message stands above the answer that read it"
     );
-    // A client that asks what is newer is given the message and the answer that closed the
-    // turn before it, and holds the newest revision afterwards.
+    // A client that asks what is newer is given the answer that closed the turn before it and
+    // then the message (issue 798), and holds the newest revision afterwards.
     let page = actor.after(before, 10).unwrap();
     let newer: Vec<&str> = page.entries.iter().map(|v| v.entry.id()).collect();
-    assert_eq!(newer, vec!["u-3", "r-2-1"]);
+    assert_eq!(newer, vec!["r-2-1", "u-3"]);
     assert_eq!(page.latest_revision, actor.head_revision());
     assert_eq!(
         page.entries[1].revision,
