@@ -187,7 +187,7 @@ pub fn kept_processes_check(out: String) {
             app.engine.borrow_mut().reconnect();
             true
         })),
-        ("pressure shown", Box::new(move |_, window, elapsed| {
+        ("pressure shown", Box::new(move |app, window, elapsed| {
             let shown = by_id(window, "kept-pressure-cpu").is_some() && row(window, "Pressure").is_some();
             if !shown && elapsed < Duration::from_secs(8) {
                 return false;
@@ -212,6 +212,16 @@ pub fn kept_processes_check(out: String) {
                 ("    Memory", "0% stalled, last 10 seconds · holds at 10%"),
             ]);
             check(groups == expected, &format!("live processes, cold starts and pressure: {groups:?}"));
+            // A search for a group's title finds its lines too (#846).
+            let found = |query: &str| -> Vec<(String, String)> {
+                crate::settings_view::filter(crate::settings_view::rows(app), query).iter().filter(|r| r.kind == "info").map(|r| (r.label.to_string(), r.detail.to_string())).collect()
+            };
+            let pressure = found("pressure");
+            let lines = ["    CPU, the Host's own", "    IO", "    Memory"];
+            check(lines.iter().all(|l| pressure.iter().any(|(label, _)| label == l)), &format!("searching \"pressure\" shows the Pressure lines: {pressure:?}"));
+            let cold = found("cold");
+            check(cold.contains(&("    Claude".to_owned(), "3".to_owned())) && cold.contains(&("    Codex".to_owned(), "2".to_owned())), &format!("searching \"cold\" shows the cold starts per tool: {cold:?}"));
+            check(!cold.iter().any(|(label, _)| label == "    IO"), &format!("and not another group's lines: {cold:?}"));
             shot(&out4, "kept-processes-04-pressure");
             change("kept-pressure-cpu", 1);
             true
