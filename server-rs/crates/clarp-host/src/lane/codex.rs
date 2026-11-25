@@ -101,7 +101,7 @@ impl Lane {
         login: &Login,
         thread: Option<&str>,
         turn: Option<(&Option<String>, &Option<String>)>,
-        needed: bool,
+        want: crate::lane::Want,
     ) -> io::Result<Option<Child>> {
         // A lane bound to a provider starts on that provider's configuration or not at all.
         crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
@@ -128,8 +128,11 @@ impl Lane {
             thread,
             &digest,
             kept,
-            settings.room(),
-            needed,
+            match want {
+                crate::lane::Want::Running => crate::lane::Room::NONE,
+                _ => settings.room(),
+            },
+            want == crate::lane::Want::Needed,
         )?;
         match place {
             Place::Kept => return Ok(None),

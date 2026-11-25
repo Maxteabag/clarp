@@ -52,9 +52,12 @@ muse_chat_lane = true         # Muse chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
 lane_limits = "auto"          # the limits follow the free memory (the default), or "fixed"
 lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes (the default)
-lane_ceiling = 24             # auto: the most lanes, whatever is free (the default)
+lane_ceiling = 24             # read and told, and bounds nothing: auto has no count
 codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool (the default)
 lane_memory_mb = 2200         # fixed: what they may hold together, in MiB of PSS (the default)
+pressure_cpu_percent = 60     # the machine is under pressure from cpu some avg60 (the default) ...
+pressure_io_percent = 30      # ... or io some avg60 ...
+pressure_memory_percent = 10  # ... or memory full avg10: no chat lane starts meanwhile
 ```
 
 The owner changes them from his apps too (issue 779, feature `lane_settings`): `POST
@@ -70,9 +73,10 @@ as before.
   issue 792; `lane_limits`, `"auto"` unless set):
   - **In auto**, a lane starts while the memory the machine has free (`MemAvailable` in
     `/proc/meminfo`, read at each start: one file read, no polling), less the new lane's typical
-    size, stays at or above `lane_reserve_percent` of its memory (20 unless set), and the lanes
-    with it are at most `lane_ceiling` (24 unless set). Each idle lane that leaves gives back
-    what it weighed. A machine with memory to spare keeps more lanes, and a busy one fewer, with
+    size, stays at or above `lane_reserve_percent` of its memory (20 unless set), however many
+    lanes run: auto has no count (the owner's word of 25 Nov 2026: many live agents are fine;
+    what loads the machine is a tool started anew for each turn). `lane_ceiling` is still read
+    and told, and bounds nothing. Each idle lane that leaves gives back what it weighed. A machine with memory to spare keeps more lanes, and a busy one fewer, with
     no number to tune.
   - **Between starts**, the Host has the kernel tell it of memory pressure (a trigger on
     `/proc/pressure/memory`: tasks waiting for memory 10% of two seconds) and then sends idle
@@ -91,6 +95,35 @@ as before.
   - **A test's Host** runs fixed (`--lane-limits-default fixed`, which the host harness passes
     unless a test asks for auto) and sheds nothing on pressure (`--no-lane-pressure`), so its
     lanes never follow the test machine's memory.
+- **Under pressure the work waits, not the processes** (feature `turn_pressure_admission`,
+  `src/pressure.rs`): the machine is under pressure once io `some` avg60, cpu `some` avg60 or
+  memory `full` avg10 in `/proc/pressure` reaches its threshold (`pressure_io_percent` 30,
+  `pressure_cpu_percent` 60, `pressure_memory_percent` 10), and calm only once each is below 80%
+  of its own. A turn nobody waits on waits in `Agent::carry_out` before any lane or process is
+  chosen for it, so it neither runs on a live lane nor starts cold. Let go while the pressure
+  lasts (at its ten minutes), it may use a lane that runs and starts none (`lane::Want::Running`,
+  `Room::NONE`; Claude's and Muse's lanes after an exec turn are not started either). The owner's
+  turns start lanes at any time, and a native goal's lane (`Want::Needed`) still starts. What
+  another agent sends or forks from one of the owner's running turns is his for one hop
+  (`Message::owner_relayed`, set in `coordination::made` and by the fork routes): it neither
+  waits nor is kept from a lane; what that turn sends on is no longer his.
+  `/lane-settings` tells the live lanes (`live`) apart from the turns that started a tool anew in
+  the last hour (`cold_starts_last_hour`).
+- **Whose CPU pressure counts.** io and memory are the machine's (`/proc/pressure/io`,
+  `memory`): every process stalls on them. The CPU figure is the Host's own cgroup's (the
+  `cpu.pressure` of the cgroup `/proc/self/cgroup` names in its `0::` line), and the machine's
+  `/proc/pressure/cpu` only where that cannot be read. The agents' turns run in scopes of their
+  own, outside it: measured on the owner's EliteBook at 09:33 on 25 Nov 2026 (load 39, renders
+  in turns), cpu `some` avg10 was 76% for the machine, 77% for `app.slice`, 15% for the Host's
+  cgroup and 0.06% for the owner's own session. The machine's figure measures the agents' work
+  and would hold new work for hours. `/lane-settings` says which was read
+  (`pressure.cpu_source`: `"host-cgroup"` or `"system"`). A test's Host reads `host-cpu` and
+  `cpu` in its own pressure folder.
+- **The gate is for new work.** Pressure holds turns that have not started; it does not slow or
+  stop work that already runs. A turn that is running when the pressure rises goes on as it is,
+  with everything it starts: one helper's checksum of 52 GB inside a running turn made the
+  owner's machine stall on its disk (25 Nov 2026), and no gate at a turn's start can catch that. A test's Host reads the pressure files of its own place
+  (`--pressure-dir`), which are not there unless a test writes them.
 - **Fixed: two limits, both on** (the lead's decision of 25 Nov 2026). A lane starts only when
   both allow it:
   - **a count**, `codex_lane_most`, 8 unless set: live lanes of every tool, the one about to

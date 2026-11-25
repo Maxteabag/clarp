@@ -6,6 +6,7 @@ use clarp_actor::native_goal::{NativeGoal, Ownership};
 use clarp_kernel::agent_goal::{Goal, Status as GoalStatus};
 use clarp_shim::codex_lane::{GoalAction, Request, Snapshot};
 
+use crate::lane::Want;
 use crate::lane::codex::{Lane, Login, Submission};
 use crate::lane::{Settings, Tool};
 
@@ -146,7 +147,14 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, Some(&thread), None, true)
+                .start(
+                    &launcher,
+                    &profile,
+                    &login,
+                    Some(&thread),
+                    None,
+                    Want::Needed,
+                )
                 .and_then(|child| {
                     reap(child);
                     lane.ask(Request::Goal { action, objective })
@@ -296,6 +304,15 @@ impl Worker {
         // A chat turn's lane is optional: with every place running work, the turn runs in a
         // process of its own instead (issue 786).
         let needed = private || self.native.owns();
+        // A chat turn nobody waits on starts no lane while the machine is under pressure: it
+        // uses one that runs, else runs in a process of its own.
+        let want = if needed {
+            Want::Needed
+        } else if self.may_start_lane() {
+            Want::Optional
+        } else {
+            Want::Running
+        };
         let back = (!needed).then(|| order.clone());
         let wanted = match &submission {
             Submission::Prompt { model, effort } => Some((model.clone(), effort.clone())),
@@ -314,14 +331,7 @@ impl Worker {
         self.setup.runtime.spawn_blocking(move || {
             let start = || {
                 let asked = wanted.as_ref().map(|(model, effort)| (model, effort));
-                reap(lane.start(
-                    &launcher,
-                    &profile,
-                    &login,
-                    thread.as_deref(),
-                    asked,
-                    needed,
-                )?);
+                reap(lane.start(&launcher, &profile, &login, thread.as_deref(), asked, want)?);
                 Ok::<(), std::io::Error>(())
             };
             let result = (|| {
@@ -589,7 +599,14 @@ impl Worker {
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let result = lane
-                .start(&launcher, &profile, &login, Some(&thread), None, true)
+                .start(
+                    &launcher,
+                    &profile,
+                    &login,
+                    Some(&thread),
+                    None,
+                    Want::Needed,
+                )
                 .and_then(|child| {
                     reap(child);
                     if stopping {

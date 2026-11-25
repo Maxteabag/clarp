@@ -686,6 +686,8 @@ struct LiveTurn {
     /// Who asked for it: what every row of the turn is filed under.
     origin: Origin,
     sender_agent_id: Option<String>,
+    /// The message it answers was relayed from a turn of the owner's ([`Message::owner_relayed`]).
+    owner_relayed: bool,
     /// The last row this turn put into the conversation: the message itself until the turn
     /// says something. It is the row that is told how the turn ended.
     last_row: String,
@@ -1694,6 +1696,7 @@ impl Actor {
                 message_id: message.id,
                 trace_id: message.trace_id,
                 origin: message.origin,
+                owner_relayed: message.owner_relayed,
                 sender_agent_id: message.sender.map(|sender| sender.agent_id),
                 model: None,
                 tokens: None,
@@ -2848,6 +2851,13 @@ impl Actor {
             read_together,
             ..Waiting::from_message(&message, turn, accepted_at_ms, admission, status)
         })
+    }
+
+    /// Whether the message that opened the live turn was relayed from a turn of the owner's.
+    pub fn live_owner_relayed(&self, turn: TurnId) -> bool {
+        self.live
+            .as_ref()
+            .is_some_and(|live| live.turn == turn && live.owner_relayed)
     }
 
     /// The sender stored on the message that opened the live turn.
@@ -5334,6 +5344,7 @@ impl Actor {
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
+            owner_relayed: message.owner_relayed,
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             model,
             tokens,
@@ -5704,6 +5715,7 @@ impl Actor {
             message_id: message.id,
             trace_id: message.trace_id,
             origin: message.origin,
+            owner_relayed: message.owner_relayed,
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             last_row,
             said,

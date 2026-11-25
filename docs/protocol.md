@@ -1136,7 +1136,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
 | `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only, and only to a Live-capable client: an iPhone's VoIP registration or an Android phone's push row declares `agent_live_v1`); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
-| `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `most`, `memory_mb`, `idle_minutes` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
+| `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `most`, `memory_mb`, `idle_minutes`; from contract 186 also `pressure_cpu_percent`, `pressure_io_percent`, `pressure_memory_percent` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
@@ -2078,7 +2078,9 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
   - `limits`: `"auto"` (the default) or `"fixed"`.
   - In auto, a lane starts while the memory the machine has free (`MemAvailable`), less the new
     lane's typical size, stays at or above `reserve_percent` of its memory (20 unless set, range
-    5-50), up to `ceiling` lanes (24 unless set, range 1-64). Idle lanes leave first, as they do
+    5-50), however many lanes run: from contract 186 auto has no count (`ceiling` is still told,
+    with its range, and bounds nothing; a `POST` that names it changes nothing). Idle lanes leave
+    first, as they do
     for the fixed limits, and each one that leaves gives back what it weighed. Idle lanes also
     leave when the kernel reports memory pressure between starts. A lane started in the last
     minute, or one that has not weighed itself, is counted at its tool's typical size until it
@@ -2095,6 +2097,51 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
     `ceiling` as it takes the other limits. They are the top-level keys `lane_limits`,
     `lane_reserve_percent` and `lane_ceiling` of the Host's `config.toml`.
   - Show the auto settings, and what is free, only where the Host lists the feature.
+- From Rust Host contract 186 (feature `turn_pressure_admission`) the Host holds the turns nobody
+  waits on while the machine is under pressure, read from the kernel's `/proc/pressure`:
+  - The machine is under pressure when io `some` avg60 reaches `pressure_io_percent` (30 unless
+    set), cpu `some` avg60 reaches `pressure_cpu_percent` (60), or memory `full` avg10 reaches
+    `pressure_memory_percent` (10). It is calm again only once every one of the three is below
+    80% of its threshold, so a reading that wavers about a threshold does not flap. A machine
+    without the pressure files is never under pressure.
+  - While it is, a turn whose origin is not the owner's word waits before its tool is started:
+    a helper's, a janitor's, another agent's message, a goal's wake, a schedule or another
+    trigger. The owner's own turns, and the Oracle's carrying his words, never wait. A turn that
+    waits starts when the machine is calm again, or ten minutes after it began to wait, whichever
+    comes first; one at a time, the pressure read again between two. A message of the owner's
+    that would queue behind a waiting turn lets it go at once. A Stop of a waiting turn ends it at
+    once. A waiting turn shows as a turn that has started and has said nothing yet.
+  - What the owner waits on through another agent is his for one hop: a message another agent
+    sends (`/send` with its turn's token, as `clarp-admin prompt` does) or a fork it opens
+    (`POST /agents/<session>/fork`, `clarp-admin agent fork`) while that agent runs one of the
+    owner's own turns is marked when it is accepted, and the turn it starts never waits. What
+    that turn sends on is not marked, nor is anything sent from a helper's own turn. The mark is
+    kept with the message (`owner_relayed` in the agent's log, never read from a request).
+  - The hold is of work, not of processes: a waiting turn is held whether it would run on a lane
+    that lives or start its tool anew. Once let go while the machine is still under pressure (at
+    the ten minutes), it uses a lane that runs, and starts none: its turn runs in a process of
+    its own where no lane runs, and no lane starts after it. The owner's turns may start a lane
+    at any time. A native goal's lane, which its turn needs, still starts.
+  - `live`: the processes that live now, apart from the turns that start a tool anew:
+    `{"lanes", "busy", "idle", "tools": {"codex"|"claude"|"muse": {"lanes", "busy", "idle"}}}`,
+    as `held` counts them. Many live lanes are fine; what loads the machine is tools started anew.
+  - `cold_starts_last_hour`: the turns that started without a lane in the last hour, `total` and
+    `tools` by the agent's tool (`{"claude": 3, "scripted": 1}`), counted since the Host started.
+  - The CPU figure is the Host's own cgroup's (its `cpu.pressure`), so the agents' own heavy work
+    in their turns does not count; the machine's `/proc/pressure/cpu` only where the cgroup
+    cannot be read. io and memory are the machine's.
+  - `pressure`: what was read now. `cpu_source`: `"host-cgroup"` or `"system"`. `cpu`, `io` and
+    `memory` each
+    `{"some": {"avg10", "avg60"}, "full": {"avg10", "avg60"} | null}` in percent, or `null`
+    where the Host has no such file; `high`; and `thresholds`
+    (`cpu_some_avg60`, `io_some_avg60`, `memory_full_avg10`). `held_for_pressure`: how many turns
+    wait now, across the Host.
+  - `pressure_cpu_percent`, `pressure_io_percent` and `pressure_memory_percent` are limits like
+    the others, with their `ranges` (5-95), set by `POST` and kept as top-level keys of the same
+    names in the Host's `config.toml`. Setting one does not switch the lanes to `"fixed"`.
+  - The `lane-settings-updated` event carries the three thresholds, never `pressure`,
+    `held_for_pressure`, `live` or `cold_starts_last_hour`, which are read anew.
+  - Show the pressure, and its thresholds, only where the Host lists the feature.
 - `held`: the lanes that run now, from each lane's own reading of its memory. `busy` counts those
   that hold a turn. A lane that has not weighed itself yet counts at its tool's typical size, as
   the budget counts it. The lanes are asked all at once, and the Host waits for them at most about

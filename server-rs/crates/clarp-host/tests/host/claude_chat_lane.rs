@@ -11,7 +11,7 @@ use super::*;
 /// `ask-<x>` is answered `said-ask-<x>` at once; `hold-<x>` once the file `release-<x>` exists,
 /// or at an interrupt. A message that comes while a word is held is read into its turn, and the
 /// result that ends the turn names both. What it was started with and asked is noted beside it.
-const CLAUDE: &str = r#"#!/usr/bin/env python3
+pub(super) const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json
 import os
 import pathlib
@@ -95,7 +95,7 @@ while True:
 note("exits", session)
 "#;
 
-fn noted(place: &Place, name: &str) -> String {
+pub(super) fn noted(place: &Place, name: &str) -> String {
     std::fs::read_to_string(place.root.join(name)).unwrap_or_default()
 }
 
@@ -115,7 +115,7 @@ fn asked(host: &Host, session: &str, word: &str) {
 }
 
 /// What a lane answers one request with, or `None` when no lane answers on the socket.
-fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
+pub(super) fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
     let mut stream = std::os::unix::net::UnixStream::connect(socket).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     writeln!(stream, "{}", json!({ "op": op })).ok()?;
@@ -125,7 +125,7 @@ fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
 }
 
 /// Asks the place's lanes to leave when the test ends, so none outlives it by its idle time.
-struct Lanes(std::path::PathBuf);
+pub(super) struct Lanes(pub(super) std::path::PathBuf);
 
 impl Drop for Lanes {
     fn drop(&mut self) {

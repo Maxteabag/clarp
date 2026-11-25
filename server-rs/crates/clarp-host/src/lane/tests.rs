@@ -56,6 +56,7 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
         mode: Mode::Auto,
         reserve_percent: 20,
         ceiling: 24,
+        pressure: crate::pressure::Thresholds::DEFAULT,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
@@ -1010,11 +1011,11 @@ fn the_limits_are_auto_from_the_free_memory_unless_the_owner_fixes_them() {
     assert_eq!(memory.total, 16_303_836 * 1024);
     assert_eq!(memory.available, 9_011_696 * 1024);
     assert_eq!(Memory::of("MemTotal: 1 kB\n"), None);
-    // Auto: the ceiling counts, the budget does not, and a fifth of the machine stays free.
+    // Auto: no count and no budget; a fifth of the machine stays free.
     assert_eq!(
         default.room_with(Some(machine(4_000))),
         Room {
-            most: 24,
+            most: usize::MAX,
             budget: u64::MAX,
             free: Some(Free {
                 available: 4_000 * MIB,
@@ -1023,7 +1024,9 @@ fn the_limits_are_auto_from_the_free_memory_unless_the_owner_fixes_them() {
         }
     );
     let tuned = of("lane_reserve_percent = 30\nlane_ceiling = 10\n");
-    assert_eq!(tuned.room_with(Some(machine(4_000))).most, 10);
+    // The ceiling is read, and bounds nothing in auto.
+    assert_eq!(tuned.ceiling, 10);
+    assert_eq!(tuned.room_with(Some(machine(4_000))).most, usize::MAX);
     assert_eq!(tuned.reserve_of(machine(4_000)), 10_240 * MIB / 100 * 30);
     // Fixed: the count and the budget as before, whatever is free.
     let fixed = of("lane_limits = \"fixed\"\ncodex_lane_most = 12\nlane_memory_mb = 3000\n");
@@ -1053,14 +1056,13 @@ fn in_auto_idle_lanes_leave_until_what_is_free_after_the_new_one_stays_above_the
     assert!(retired(&busy).is_empty());
     std::fs::remove_dir_all(&run).unwrap();
 
-    // With plenty free, the ceiling binds: two idle lanes, two busy ones and the new one under
-    // a ceiling of three send both idle ones away; the busy ones count, and stay.
+    // With plenty free, no count binds: a ceiling of three set by hand sends no idle lane away.
     let run = run_dir("auto-ceiling");
     let (idle, busy) = idle_and_busy(&run, 2);
     let own = Endpoint::of(Tool::Codex, &run, "new");
     let room = of("lane_ceiling = 3\n").room_with(Some(machine(9_000)));
     assert!(make_room(&run, &own, room, false));
-    assert_eq!(retired(&idle), [0, 1]);
+    assert!(retired(&idle).is_empty());
     assert!(retired(&busy).is_empty());
     std::fs::remove_dir_all(&run).unwrap();
 
@@ -1081,6 +1083,41 @@ fn in_auto_idle_lanes_leave_until_what_is_free_after_the_new_one_stays_above_the
         .unwrap();
     assert_eq!(place, Place::Free);
     assert_eq!(retired(&idle), [0, 1]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn auto_starts_a_25th_lane_when_memory_allows() {
+    // Twenty-four lanes run work, each weighed small, and the machine has plenty free. The
+    // ceiling of 24 once refused a 25th; auto now counts the memory alone.
+    let run = run_dir("auto-25th");
+    let busy: Vec<FakeLane> = (0..24u64)
+        .map(|at| {
+            let mut said = status("t", "d", 0, true);
+            said["memory_bytes"] = json!(60 * MIB);
+            aged(FakeLane::start(&run, &format!("b{at}"), said))
+        })
+        .collect();
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    let room = Settings::of(None).room_with(Some(machine(6_000)));
+    let place = own
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert!(retired(&busy).is_empty());
+    // A ceiling in the owner's file (the live Hosts carry `lane_ceiling = 64`) bounds nothing in
+    // auto: under a ceiling of 3, or of 24, the 25th starts too.
+    for ceiling in [3, 24] {
+        let set = of(&format!("lane_ceiling = {ceiling}\n"));
+        assert_eq!(set.mode, Mode::Auto);
+        assert_eq!(set.ceiling, ceiling);
+        let room = set.room_with(Some(machine(6_000)));
+        assert!(make_room(&run, &own, room, false), "ceiling {ceiling}");
+        assert!(retired(&busy).is_empty(), "ceiling {ceiling}");
+    }
+    // Short of memory, the same 25th does not start: the reserve still binds.
+    let short = Settings::of(None).room_with(Some(machine(2_100)));
+    assert!(!make_room(&run, &own, short, false));
     std::fs::remove_dir_all(&run).unwrap();
 }
 

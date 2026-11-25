@@ -504,6 +504,7 @@ impl Desk {
         let msg = Message {
             managed_model: None,
             sent_at_ms: None,
+            owner_relayed: false,
             id: filed,
             marked,
             unminted: true,

@@ -1075,7 +1075,8 @@ async fn agent_fork(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     if let Err(why) = crate::fleet::delegations::lineage(app, parent, turn).await {
         return refused_by_host(why.status().as_u16(), &json!({"error":why.message()}));
     }
-    match crate::forks::fork_agent(app, parent, &Value::Object(asked)).await {
+    let relayed = crate::coordination::relayed_by(app, turn).await;
+    match crate::forks::fork_agent(app, parent, &Value::Object(asked), relayed).await {
         Ok(answer) => {
             let children = answer["children"].as_array();
             let failed = children.is_some_and(|children| {
