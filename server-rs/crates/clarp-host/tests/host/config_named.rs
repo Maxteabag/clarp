@@ -38,7 +38,11 @@ fn spent_pool(name: &str, named: bool) -> (Place, Host, PathBuf) {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(
         folder.join("config.toml"),
-        format!("[agents]\nclaude_reset_command = [\"{}\"]\n", reset.display()),
+        format!(
+            "codex_chat_lane = true\ncodex_lane_most = 6\n\
+             [agents]\nclaude_reset_command = [\"{}\"]\n",
+            reset.display()
+        ),
     )
     .unwrap();
     let mut more = vec![
@@ -104,4 +108,18 @@ fn a_host_started_without_config_never_runs_the_reset_command_the_installed_fold
     // The read and the decision on it are one pass; what it would run starts at once.
     std::thread::sleep(Duration::from_secs(3));
     assert!(!ran.exists(), "no reset command runs without --config");
+
+    // Nor does it read the installed folder's lane settings, or write into it.
+    let installed = sealed::home(&place.root).join(".config/clarp-host/config.toml");
+    let before = std::fs::read(&installed).unwrap();
+    let lanes = host.get("/lane-settings");
+    assert_eq!(lanes["codex_chat_lane"], false, "{lanes}");
+    assert_eq!(lanes["most"], 8, "the default, not the folder's 6: {lanes}");
+    let (status, refused) = host.ask(
+        "POST",
+        "/lane-settings",
+        Some(&json!({"memory_mb": 3000})),
+    );
+    assert_eq!((status, &refused["code"]), (409, &json!("config_unwritable")));
+    assert_eq!(std::fs::read(&installed).unwrap(), before);
 }
