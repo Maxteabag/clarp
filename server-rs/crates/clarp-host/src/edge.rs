@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 178;
+pub const HOST_CONTRACT: u64 = 179;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -432,6 +432,13 @@ pub const FEATURES: &[(&str, u64)] = &[
     // helper's, whatever its role is now; a move takes it along, so a moved helper's chat keeps
     // the turns other agents gave it (issue 777).
     ("helper_chat", 177),
+    // The words of an agent bound to a model provider of its own are read by its owner, by
+    // itself and the agents bound as it is, and by the agents its owner lets in (`readers`);
+    // every other agent, another Host and a tool that cannot say whose turn it is is refused
+    // (403 `bound_conversation`), given rows and events blank (`words_withheld`), and given
+    // that a message of it came, not its words. An agent asks for a reader on a card
+    // (`crate::bound_privacy`, issue 751).
+    ("bound_privacy", 179),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -854,6 +861,12 @@ pub fn router(app: App) -> Router {
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::web_app::routes())
+        // Every route's answer passes the guard of the words of agents bound to a provider of
+        // their own, by the class it has there (issue 751).
+        .route_layer(middleware::from_fn_with_state(
+            app.clone(),
+            crate::bound_privacy::guard,
+        ))
         // What is no route of this Host, by its path or by its method, is answered as the
         // Python Host answers it: to whoever may ask at all.
         .fallback(no_route)
@@ -1929,7 +1942,30 @@ async fn started_again(
     app: &App,
     replaces: String,
     request: CreateAgentRequest,
+    owner: bool,
 ) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
+    // A bound agent's binding is its owner's: anyone else starting it again keeps it.
+    if !owner && let Some(member) = app.fleet.directory().by_session(&replaces) {
+        let before = &member.record;
+        let said = |asked: &Option<String>, had: &String| {
+            asked
+                .as_deref()
+                .map_or_else(|| had.clone(), |said| said.trim().to_string())
+        };
+        let to = crate::bound_privacy::Binding {
+            home: said(&request.codex_home, &before.codex_home),
+            provider: said(&request.codex_provider, &before.codex_provider),
+            cloud_speech: request.cloud_speech.or(before.cloud_speech),
+        };
+        if crate::bound_privacy::must_ask(&crate::bound_privacy::Reader::Unknown, before, &to) {
+            let why = "An agent bound to a model provider of its own keeps its binding when \
+                anyone but its owner starts it again. Ask him with clarp-admin agent provider.";
+            return Err((
+                StatusCode::CONFLICT,
+                json!({ "error": "own_provider", "message": why }),
+            ));
+        }
+    }
     let unavailable = |why: Unavailable| {
         let why = ApiError::from(why);
         let body = match why.body {
@@ -2005,6 +2041,16 @@ fn creation_backend(backend: &str) -> String {
 pub(crate) async fn make_agent(
     app: &App,
     asked: &serde_json::Map<String, Value>,
+) -> Result<Value, (StatusCode, Value)> {
+    make_agent_as(app, asked, false).await
+}
+
+/// [`make_agent`], where `owner` says the owner asks: only he starts an agent bound to a
+/// provider of its own again with another binding (`bound_privacy`).
+pub(crate) async fn make_agent_as(
+    app: &App,
+    asked: &serde_json::Map<String, Value>,
+    owner: bool,
 ) -> Result<Value, (StatusCode, Value)> {
     let refused = |status: StatusCode, code: &str, message: &str| {
         (status, json!({ "error": code, "message": message }))
@@ -2131,7 +2177,7 @@ pub(crate) async fn make_agent(
     let record = match replaces {
         Some(replaces) => {
             request.mcp_servers = mcp_selection()?;
-            started_again(app, replaces, request)
+            started_again(app, replaces, request, owner)
                 .await?
                 .map_err(not_made)?
         }
@@ -2360,6 +2406,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
 
 async fn create_agent(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
@@ -2380,7 +2427,12 @@ async fn create_agent(
     {
         return why.into_response();
     }
-    match make_agent(&app, asked).await {
+    let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await;
+    let owner = match reader {
+        Ok(reader) => reader == crate::bound_privacy::Reader::Owner,
+        Err(refused) => return refused.into_response(),
+    };
+    match make_agent_as(&app, asked, owner).await {
         Ok(made) => Json(made).into_response(),
         Err((status, why)) => (status, Json(why)).into_response(),
     }
@@ -3359,6 +3411,19 @@ async fn send_as(
                 .flatten()
         })
     };
+    // From an agent bound to a model provider of its own, to an agent that may not read it:
+    // that a message came, and not what it says (`bound_privacy`).
+    let withheld = sender
+        .as_ref()
+        .filter(|sender| !sender.agent_id.is_empty())
+        .and_then(|sender| {
+            let directory = app.fleet.directory();
+            let mut members = directory.members.iter();
+            let from = members.find(|member| member.record.agent_id == sender.agent_id)?;
+            crate::bound_privacy::withheld_message(&from.record, &member.record)
+        });
+    let words_withheld = withheld.is_some();
+    let text = withheld.unwrap_or(text);
     if let Some(sender) = &sender
         && app
             .fleet
@@ -3594,6 +3659,7 @@ async fn send_as(
             0
         }),
         queue_revision: Some(if sent.queued { sent.queue.revision } else { 0 }),
+        words_withheld: words_withheld.then_some(true),
         ..SendResponse::default()
     })
 }

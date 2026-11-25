@@ -140,10 +140,63 @@ pub(crate) async fn prompt(
                 _ => {}
             }
         }
+        // The timer runs outside any turn. What an agent bound to a provider of its own
+        // schedules for another agent is its words: it goes out under its name, whatever
+        // `--from` says, so an agent that may not read it is given that it came and not what
+        // it says, and another Host is refused it (`bound_privacy`). Its own timed wakeups
+        // (`--to` itself) stay as they were asked.
+        let own = match crate::turn_identity::presented(app, token).await {
+            Ok(own) => own,
+            Err(why) => {
+                return ToolAnswer::said(
+                    4,
+                    format!("clarp-admin prompt: {}; nothing was sent", why.message()),
+                );
+            }
+        };
+        let is_own = |named: Option<&str>, own: &crate::fleet::Member| {
+            named
+                .and_then(|named| app.anyone(python::strip(named)))
+                .is_some_and(|named| named.record.agent_id == own.record.agent_id)
+        };
+        let bound_sender = own.filter(|own| own.record.bound()).and_then(|own| {
+            let to_itself = is_own(parsed.option("--to"), &own);
+            let as_itself = is_own(from, &own);
+            (!to_itself && !as_itself).then(|| own.record.session.clone())
+        });
+        let stamped;
+        let parsed = match bound_sender {
+            Some(session) => {
+                // Its own arguments, with any `--from` and `--origin` left out (it is neither
+                // another sender's nor an automation's), and itself as the sender.
+                let mut sent: Vec<String> = Vec::with_capacity(args.len() + 2);
+                let mut skip = false;
+                for arg in args {
+                    if std::mem::take(&mut skip) {
+                        continue;
+                    }
+                    if arg == "--origin" || arg == "--from" {
+                        skip = true;
+                        continue;
+                    }
+                    if arg.starts_with("--origin=") || arg.starts_with("--from=") {
+                        continue;
+                    }
+                    sent.push(arg.clone());
+                }
+                sent.extend(["--from".to_string(), session]);
+                stamped = match parse(&sent, &valued, &[PROMPT_TIMER], &[]) {
+                    Ok(parsed) => parsed,
+                    Err(why) => return usage(&why),
+                };
+                &stamped
+            }
+            None => &parsed,
+        };
         // The delayed prompt is sent by this Host's own tool, which finds the Host by the file
-        // its installer wrote: the timer runs outside any turn.
+        // its installer wrote.
         let executable = share_dir().join("tools/clarp-admin");
-        return schedule_prompt(&parsed, &executable, app.clock.now_ms(), async |args| {
+        return schedule_prompt(parsed, &executable, app.clock.now_ms(), async |args| {
             if !tokio::fs::metadata(&executable)
                 .await
                 .is_ok_and(|file| file.is_file())
@@ -188,6 +241,33 @@ pub(crate) async fn prompt(
         .option("--server")
         .filter(|server| !server.is_empty())
     {
+        // Another Host reads no word of an agent bound to a provider of its own: one that
+        // sends there, or is named as the sender, is refused (`bound_privacy`).
+        let caller = crate::bound_privacy::reader_of_call(app, call, owner_token).await;
+        let caller = caller
+            .ok()
+            .and_then(|reader| reader.agent_id().map(str::to_string));
+        let named = from.and_then(|from| app.anyone(python::strip(from)));
+        let directory = app.fleet.directory();
+        let bound = directory
+            .members
+            .iter()
+            .find(|member| Some(&member.record.agent_id) == caller.as_ref())
+            .cloned()
+            .into_iter()
+            .chain(named)
+            .find(|member| member.record.bound());
+        if let Some(bound) = bound {
+            return ToolAnswer::said(
+                4,
+                format!(
+                    "clarp-admin prompt: the Host refused it (HTTP 409): {}: {} Another Host \
+                     reads none of its words.",
+                    crate::bound_privacy::REFUSED,
+                    crate::bound_privacy::refusal_words(&bound.record.persona)
+                ),
+            );
+        }
         let mut payload = json!(request);
         payload["force_session"] = json!(true);
         return match peers::send(app, server, payload).await {
@@ -1088,14 +1168,20 @@ async fn agent_transit(app: &App, args: &[String]) -> ToolAnswer {
 /// [--cloud-speech on|off|default]`: binds a Codex agent to a model provider of its own, or
 /// lets it go, and says whether its words may be spoken in the cloud
 /// ([`roster::bind`]); prints the Host's answer.
-async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+async fn agent_provider(
+    app: &App,
+    call: &ToolCall,
+    args: &[String],
+    owner_token: bool,
+) -> ToolAnswer {
     let usage = |why: &str| {
         ToolAnswer::said(
             2,
             format!(
                 "usage: clarp-admin agent provider [-h] --session SESSION \
                  [--codex-home CODEX_HOME] [--codex-provider CODEX_PROVIDER] [--clear] \
-                 [--cloud-speech {{on,off,default}}]\n\
+                 [--cloud-speech {{on,off,default}}] [--reader READER] \
+                 [--no-reader READER]\n\
                  clarp-admin agent provider: error: {why}"
             ),
         )
@@ -1105,6 +1191,8 @@ async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnsw
         "--codex-home",
         "--codex-provider",
         "--cloud-speech",
+        "--reader",
+        "--no-reader",
     ];
     let parsed = match parse(args, &valued, &["--clear"], &[]) {
         Ok(parsed) => parsed,
@@ -1146,7 +1234,24 @@ async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnsw
             ));
         }
     }
-    match roster::bind(app, &asked).await {
+    // The agents it lets read it while it is bound, or stops (sessions, by commas): the
+    // owner's word is done; an agent's asks the owner on a card.
+    for (flag, key) in [
+        ("--reader", "add_readers"),
+        ("--no-reader", "remove_readers"),
+    ] {
+        if let Some(named) = parsed.option(flag) {
+            let named: Vec<&str> = named
+                .split(',')
+                .map(str::trim)
+                .filter(|said| !said.is_empty())
+                .collect();
+            asked.insert(key.to_string(), json!(named));
+        }
+    }
+    let reader = crate::bound_privacy::reader_of_call(app, call, owner_token).await;
+    let reader = reader.unwrap_or(crate::bound_privacy::Reader::Unknown);
+    match roster::bind(app, &asked, &reader).await {
         Ok(answer) => shown(&answer),
         Err(refused) => {
             let (status, body) = refused.answered();
@@ -1156,13 +1261,15 @@ async fn agent_provider(app: &App, call: &ToolCall, args: &[String]) -> ToolAnsw
 }
 
 /// `clarp-admin agent ...`: what an agent does about other agents.
-async fn agent(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+async fn agent(app: &App, call: &ToolCall, args: &[String], owner_token: bool) -> ToolAnswer {
     match args.split_first() {
         Some((command, rest)) if command == "create" => agent_create(app, call, rest).await,
         Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
         Some((command, rest)) if command == "fork" => agent_fork(app, call, rest).await,
         Some((command, rest)) if command == "transit" => agent_transit(app, rest).await,
-        Some((command, rest)) if command == "provider" => agent_provider(app, call, rest).await,
+        Some((command, rest)) if command == "provider" => {
+            agent_provider(app, call, rest, owner_token).await
+        }
         Some((command, _)) => not_here(&format!("agent {command}")),
         None => ToolAnswer::said(
             2,
@@ -2509,7 +2616,7 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         }
         Some((command, rest)) if command == "prompt" => prompt(app, call, rest, owner_token).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
-        Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
+        Some((command, rest)) if command == "agent" => agent(app, call, rest, owner_token).await,
         Some((command, [action])) if command == "peers" && action == "list" => {
             match peers::list_public(app).await {
                 Ok(listed) => shown(&json!(listed)),

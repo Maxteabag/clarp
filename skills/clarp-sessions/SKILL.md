@@ -76,7 +76,8 @@ What the Host then does:
   uses the model its `config.toml` names. It waits for none of the machine's Codex
   accounts. Its sessions, for `resume_session_id`, are read from its own home.
 - It cannot be moved to another tool (`agent transit` answers 409 `own_provider`),
-  and helpers it forks (`clarp-admin agent fork`) run on the same home and provider.
+  and its helpers (`clarp-admin agent fork`, or `agent create --parent` it) run on the same
+  home and provider.
 - `cloud_speech` is off for such an agent unless set: nothing it says is spoken by a
   cloud speech provider (its replies stay text, no ring opening or announcement in
   its voice, live calls and live rings for it answer 409 `cloud_speech_off`, and the
@@ -102,11 +103,37 @@ What the Host then does:
 
 Limits to know:
 
-- Other agents can still read a bound agent's conversation through the Host: the log API
-  (`GET /log`, the snapshot), a status fork or a front desk's relay, a message it sends to
-  another agent or one another agent's tool reads, and a team leader's ticks. Those agents
-  run on their own providers. This is not gated yet: keep customer material away from
-  agents that are not bound to the same provider, and out of teams and calls with them.
+- Who reads its words (Rust Host contract 179, feature `bound_privacy`; on an older Host
+  every agent reads every word): its owner, itself, every agent bound to the same Codex
+  home and provider (its forks, and helpers made with `--parent` it: those are bound as it
+  is, and must be Codex), and the agents its owner lets in (`readers` on its row, agent
+  ids). Every other agent, another Host and a tool that cannot say whose turn it is gets its
+  name and state and no words: its log, goals, artifacts and status fork are refused
+  (`bound_conversation`, HTTP 403 or exit 77), its rows and events come with
+  `words_withheld: true`, and its messages (delayed ones too) and team updates arrive as
+  "sent you a message" / "posted an update" with the words withheld.
+
+  ```bash
+  clarp-admin agent provider --session ada-1a2b --reader ben-3c4d   # the owner: done at once
+  clarp-admin agent provider --session ada-1a2b --no-reader ben-3c4d
+  ```
+
+  The same from an agent's turn makes a decision card to the owner in that agent's chat
+  ("Let Ben read Ada's conversation?"); only his own tap counts (an answer on his behalf,
+  the front desk's included, is not taken). An agent cannot remove a reader (`owner_only`).
+  Likewise its binding is the owner's: from an agent's turn, `--clear`, another
+  `--codex-home`/`--codex-provider` or `--cloud-speech` on a bound agent changes nothing and
+  makes a card ("Unbind Ada from its provider?"); the answer lists it under `asked`.
+  Starting a bound agent again in place with another binding is refused to anyone but the
+  owner (409 `own_provider`). Over HTTP: `add_readers` / `remove_readers` on
+  `POST /agent-provider`.
+
+  Not covered, so do not rely on it: anything run with the Host's administrator token and
+  no turn reads as the owner. An agent tool run outside a turn (a timer, a durable job, a
+  subprocess without the turn's environment) falls back to that token, and the scripts of
+  `clarp-agent-admin` and `clarp-adopt` use it without a turn. Nor an agent on the same
+  machine that reads the Host's configuration or the agent's files, nor a Python peer Host
+  (it reads as a device).
 - Clearing the binding (`--clear`) moves the agent to the machine's own Codex: its next
   turn begins a new thread there, carrying the Host's record of the conversation to the
   default provider.

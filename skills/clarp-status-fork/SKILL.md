@@ -97,6 +97,17 @@ approval policy `never`, and shell, plugins and configured MCP tools disabled.
 - The facts cover Clarp state only. Cloud resources, GitHub or e-mail can still be
   stale; the fork should cite its source and time.
 - Agent-written timestamps can be wrong. Trust the fact sheet's times.
+- An agent bound to a model provider of its own (Rust Host contract 179, feature
+  `bound_privacy`): run from an agent's turn, the script presents that turn
+  (`X-Clarp-Turn`), and where the Host answers the bound agent's row with
+  `words_withheld: true` it stops and launches nothing ("refused, nothing launched: <name>
+  is bound to a model provider of its own …"). That is the answer: you are not one of the
+  agents its owner lets read it, so do not relay its status. Ask for access with
+  `clarp-admin agent provider --session <it> --reader <you>` (a card to the owner), or name
+  it as working or idle from its row. Run by the owner (no turn), or by an agent bound to
+  the same home and provider or let in, a bound Codex agent is forked in its own Codex home
+  and on its own provider (its `config.toml` is read, `-c model_provider=<its provider>`),
+  never the machine's; a home that does not define that provider launches nothing.
 
 ## Front-desk agent
 

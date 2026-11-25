@@ -42,8 +42,29 @@ impl clarp_actor::teams::Runtime for TurnTeams {
     fn brief(&self, agent: &str, session: &str, origin: &str) -> Brief {
         let directory = self.hub.queue_directory();
         let person = |agent: &str| person(directory.as_deref(), agent);
+        // What a teammate bound to a provider of its own posted is not read by a member that
+        // may not read it: that it posted, and not what (`bound_privacy`).
+        let reader = directory
+            .as_deref()
+            .and_then(|directory| directory.named(agent));
+        // An update of a sender or to a reader that cannot be placed is withheld too; the
+        // user's own posts are always read.
+        let withheld = |source: &str| {
+            if source == clarp_kernel::teams::USER_SOURCE {
+                return None;
+            }
+            let placed = directory.as_deref().and_then(|directory| {
+                let from = directory.named(source)?;
+                Some(crate::bound_privacy::withheld_update(
+                    &from.record,
+                    &reader?.record,
+                ))
+            });
+            placed.unwrap_or_else(|| Some(crate::bound_privacy::UNPLACED_UPDATE.to_string()))
+        };
         let (teams, digest, ids) = self.desk.read(|teams, deliveries| {
-            let (digest, ids) = runtime::pending(teams, deliveries, agent, &person);
+            let (digest, ids) =
+                runtime::pending_withheld(teams, deliveries, agent, &person, &withheld);
             let teams = teams
                 .iter()
                 .filter(|(_, team)| team.archived_at.is_none() && team.has(agent))

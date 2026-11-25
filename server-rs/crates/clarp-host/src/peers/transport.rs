@@ -53,7 +53,12 @@ pub(super) fn fetch(
             .header("Accept", "application/json")
             .send_json(body)
     } else {
-        let request = agent.get(&url).header("Accept", "application/json");
+        // Says it is another Host that reads: one that keeps the words of agents bound to a
+        // provider of their own from other Hosts answers it so (`bound_privacy`).
+        let request = agent
+            .get(&url)
+            .header("Accept", "application/json")
+            .header(crate::coordination::PEER_HEADER, "peer-read");
         match token {
             Some(token) => request
                 .header("Authorization", format!("Bearer {token}"))

@@ -127,6 +127,18 @@ pub fn pending(
     agent: &str,
     person: &impl Fn(&str) -> Option<Person>,
 ) -> (String, Vec<String>) {
+    pending_withheld(teams, deliveries, agent, person, &|_| None)
+}
+
+/// [`pending`], where `withheld` gives, for a teammate (by id) whose words this agent may not
+/// read, the line it is shown in their place: the update came, and not what it says.
+pub fn pending_withheld(
+    teams: &Teams,
+    deliveries: &Deliveries,
+    agent: &str,
+    person: &impl Fn(&str) -> Option<Person>,
+    withheld: &impl Fn(&str) -> Option<String>,
+) -> (String, Vec<String>) {
     let mut unread: Vec<_> = active_for(teams, agent)
         .filter(|team| team.communication_enabled)
         .flat_map(|team| {
@@ -176,7 +188,10 @@ pub fn pending(
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| "A teammate".into())
         };
-        lines.push(format!("- [{}] {source}: {}", team.name, msg.text));
+        match withheld(&msg.source_agent_id) {
+            Some(instead) => lines.push(format!("- [{}] {source} {instead}", team.name)),
+            None => lines.push(format!("- [{}] {source}: {}", team.name, msg.text)),
+        }
     }
     lines.push(String::new());
     lines.push("This is background awareness. Keep broadcasting your OWN progress with <team> as you work — that's expected. Just don't get pulled into back-and-forth replies to teammates unless the user asks or it directly affects your current task.".into());

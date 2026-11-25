@@ -43,10 +43,15 @@ class RustHost:
 
     def get(self, route, **query):
         path = route + ("?" + urlencode(query) if query else "")
+        headers = {"Authorization": "Bearer " + self._token}
+        # Run from an agent's turn, the Host is told whose: an agent bound to a model provider
+        # of its own is then answered without its words (feature bound_privacy).
+        if turn := turn_token():
+            headers["X-Clarp-Turn"] = turn
         # Direct HTTP to the validated numeric address, with no proxy or redirect.
         conn = http.client.HTTPConnection(str(self.address), self.port, timeout=10)
         try:
-            conn.request("GET", path, headers={"Authorization": "Bearer " + self._token})
+            conn.request("GET", path, headers=headers)
             response = conn.getresponse()
             if response.status != 200:
                 raise HostError(f"Rust Host GET {route} returned HTTP {response.status}")
@@ -83,6 +88,17 @@ class RustHost:
         raise HostError("Rust Host attention inbox repeated a cursor")
 
 
+def turn_token():
+    """The token of the agent's turn this runs in, where it runs in one."""
+    token = os.environ.get("CLARP_PROVIDER_TURN", "").strip()
+    if not token and (path := os.environ.get("CLARP_PROVIDER_TURN_FILE")):
+        try:
+            token = Path(path).read_text()[:4096].strip()
+        except OSError:
+            token = ""
+    return token if token and not any(c.isspace() for c in token) else ""
+
+
 def resolve(name, rows):
     folded = name.casefold()
     rows = [row for row in rows if not row.get("moved")]
@@ -97,7 +113,8 @@ def resolve(name, rows):
         raise HostError(f"{name!r} is ambiguous: " + ", ".join(row["session"] for row in found))
     row = found[0]
     agent = {key: row.get(key) for key in ("agent_id", "session", "persona", "backend",
-                                          "cwd", "model", "effort")}
+                                          "cwd", "model", "effort", "codex_home",
+                                          "codex_provider", "words_withheld")}
     return {**agent, "native_id": row.get("backend_session_id"), "source": "rust"}
 
 

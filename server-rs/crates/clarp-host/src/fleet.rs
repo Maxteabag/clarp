@@ -247,6 +247,12 @@ pub struct AgentRecord {
     /// kind has it ([`AgentRecord::speaks_to_cloud`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_speech: Option<bool>,
+    /// The agents (by id) the owner lets read the words of this agent while it is bound to a
+    /// provider of its own, beside itself and the agents bound as it is
+    /// ([`crate::bound_privacy`]). Kept when the binding is let go, and of no use until it is
+    /// bound again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub readers: Vec<String>,
 }
 
 impl AgentRecord {
@@ -355,6 +361,8 @@ pub enum Amend {
         provider: String,
         cloud_speech: Option<bool>,
     },
+    /// The agents the owner lets read its words while it is bound (by id, each once).
+    Readers(Vec<String>),
     /// The tool it runs on: for a member that has no conversation with the tool it had.
     /// Whoever asks has seen to that.
     Tool(String),
@@ -3896,7 +3904,28 @@ impl Fleet {
             &effort,
             &file,
         )?;
-        let (codex_home, codex_provider, cloud_speech) = bound_as(&request, &backend, None)?;
+        // A helper of an agent bound to a provider of its own is given its words: it is bound
+        // as its parent is (as a fork of it is), unless the request binds it itself.
+        let inherits = request.codex_home.is_none() && request.codex_provider.is_none();
+        let (codex_home, codex_provider, cloud_speech) = match parent.filter(|p| p.bound()) {
+            Some(bound) if inherits => {
+                if backend != "codex" {
+                    let why = format!(
+                        "{} is bound to a model provider of its own, and its helpers run on \
+                         Codex on that provider: make it with backend codex.",
+                        bound.persona
+                    );
+                    return Err(Told::new(409, "own_provider", why).into());
+                }
+                let cloud_speech = request.cloud_speech.or(bound.cloud_speech);
+                (
+                    bound.codex_home.clone(),
+                    bound.codex_provider.clone(),
+                    cloud_speech,
+                )
+            }
+            _ => bound_as(&request, &backend, None)?,
+        };
         let voice_id = self.assigned_voice(
             &file,
             &owner,
@@ -4109,6 +4138,7 @@ impl Fleet {
                 record.codex_provider = provider;
                 record.cloud_speech = cloud_speech;
             }
+            Amend::Readers(readers) => record.readers = readers,
             Amend::Voice { provider, voice } => {
                 let occupied = self
                     .members

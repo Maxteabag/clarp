@@ -22,6 +22,10 @@ pub struct SendResponse {
     /// What the router for spoken commands decided, when it took part.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestrator: Option<Value>,
+    /// True where the message came from an agent bound to a model provider of its own and
+    /// went to an agent that may not read it: it was given that a message came, not its words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words_withheld: Option<bool>,
 }
 
 /// The answer to `POST /stop`.

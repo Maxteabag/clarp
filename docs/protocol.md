@@ -1474,9 +1474,98 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   defaults to true, and to false for an agent with `codex_provider`; when false nothing the
   agent says reaches a speech provider in the cloud: its lines are not spoken, nothing is
   made in its voice, `POST /preview` for it answers 409, live calls and live rings for it
-  answer 409 `cloud_speech_off`, the Oracle is told none of its words, and what is said to it is heard only by the Host's own engine (`POST /transcribe` and a call's clips answer 409 with a sentence where there is none; `GET /stt/stream` answers 409). The Host's own model calls leave a bound agent out: no janitor scope holds it, its tools are explained without a model, and the goal keeper (also of a bound helper), label checker, router and other agents of a call leave its words out. Pushes, questions and the Live Activity of a bound agent carry only a neutral line ("<name> answered", "<name> asks", "<name> is working"). An exec turn whose rollout in the agent's home names no provider within 3 seconds of its first item, or is not there at all within 30 seconds, is stopped, and one whose provider is still not verified when its process is gone (Codex may flush its rollout after the turn's end) fails closed as `provider_mismatch`, its answer not shown; this only detects, the launch settings are what prevent. **Not gated:** other agents can still read a bound agent's conversation through the Host (`GET /log` and the snapshot with a tool token, a status fork or front-desk relay, agent-to-agent messages, a team leader's ticks), and they run on their own providers; keep customer material away from them. The snapshot row
-  carries `codex_home` and `codex_provider` when the agent is bound, and `cloud_speech` (the
-  value in effect) when it is bound or the choice was set.
+  answer 409 `cloud_speech_off`, the Oracle is told none of its words, and what is said to it is heard only by the Host's own engine (`POST /transcribe` and a call's clips answer 409 with a sentence where there is none; `GET /stt/stream` answers 409). The Host's own model calls leave a bound agent out: no janitor scope holds it, its tools are explained without a model, and the goal keeper (also of a bound helper), label checker, router and other agents of a call leave its words out. Pushes, questions and the Live Activity of a bound agent carry only a neutral line ("<name> answered", "<name> asks", "<name> is working"). An exec turn whose rollout in the agent's home names no provider within 3 seconds of its first item, or is not there at all within 30 seconds, is stopped, and one whose provider is still not verified when its process is gone (Codex may flush its rollout after the turn's end) fails closed as `provider_mismatch`, its answer not shown; this only detects, the launch settings are what prevent. What other agents read of a bound agent: see the next item (Rust Host contract 179, feature `bound_privacy`; before it, every agent read every word). The snapshot row
+  carries `codex_home` and `codex_provider` when the agent is bound, `cloud_speech` (the
+  value in effect) when it is bound or the choice was set, and `readers` (below).
+- **Who reads a bound agent's words (Rust Host contract 179, feature `bound_privacy`).**
+  Its words are read by its owner (a paired device, from any page it reads; the
+  administrator's token presented without `X-Clarp-Turn`), by itself and by every agent
+  bound to the same `codex_home` and `codex_provider`, and by the agents its owner lets in,
+  listed as agent ids in `readers` on its snapshot row. Its forks and the helpers made with
+  it as their parent (`POST /agents` with `parent`, `clarp-admin agent create --parent`)
+  are bound as it is, unless the request binds them itself; a helper of it on another tool
+  is refused (409 `own_provider`). Every other reader sees that it is there, its name and
+  its state, and none of its words. Such a reader is a request that presents another
+  agent's `X-Clarp-Turn` (any token beside it), an agent's tool token without a turn, or a
+  request with `X-Clarp-Peer` (another Host; a Rust Host sends it on its peer reads). For
+  such a reader, on every `GET`:
+  - A read that names the agent (`session` or `agent_id` in the query, its session in the
+    path, an artifact it made, a plan of its) is refused: `403 {"error":
+    "bound_conversation", "message": "<name> is bound to a model provider of its own …"}`.
+    This covers `GET /log`, `/live`, `/turn-queue`, `/agent-goal`, `/task-plan(s)`,
+    `/goal-ledger`, `/artifacts`, `/message-tool-details` and the rest.
+  - Every JSON answer of a read of agents' words (`GET /agents/snapshot`,
+    `/agents/archived`, `/attention`, `/background-jobs`, `/teams/<id>/messages`, `/calls`,
+    `/status`, `/live`, `/orchestrator/decisions`, `/controller-actions`,
+    `/oracle/delegations`, `/goal-ledger/delegations` and others) has each object that is
+    the agent's with every text emptied, lists of texts emptied, and `words_withheld: true`;
+    ids, sessions, `persona`, states, kinds, addresses and times stay. An object is the
+    agent's where one of these names it: `session`, `agent_id`, `agent_session`,
+    `source_*`, `sender_*`, `requester_agent_id`, `requested_session`, `target_*`,
+    `delegate_*`, `principal_*`, `owner_*`, `answer_session`, `reply_to_*`, `actor_*`,
+    `helper_session`.
+  - `GET /events`: each event of the agent is blanked the same way, judged frame by frame
+    against the fleet as it is then, so a stream opened before an agent was bound is
+    filtered from then on, and a reader the owner stops reads no more.
+  - Answers that cannot be blanked (files, terminals, recordings, clips, gallery images,
+    sockets, the vocabulary mined from conversations) are given where the read names only
+    agents this reader may read: `/agent-file` and `/agent-files` and `/stt/stream` by their
+    `session`, `/terminal/<session>`, `/clips/<n>/…` by the agent whose speech the clip is,
+    `/media/<asset>` by the chat the image was shown in. Where the read names no agent the
+    reader may read, or the route cannot say whose words it serves (`/dirs`,
+    `/past-sessions`, `/server-terminal`, `/audio/<name>`, `/media/`,
+    `/transcription-audio`, `/calls/ring/live`, `/oracle/v2`, `/vocab/*`, a clip still
+    being made), it is refused while the Host holds a bound agent this reader may not read.
+    A read of words that names readable agents and answers other than JSON (an artifact's
+    page) is given; one that names none is refused the same way. A route the Host has not
+    classed is treated as one that cannot say whose words it serves.
+  - The agents' own tools ask the same: `clarp-goal`/`clarp-agent-tasks` about it, and
+    `clarp-agent-artifacts list|wait|form-events|report-history|attention` about it, exit
+    77 with `bound_conversation`; JSON a tool prints is blanked as above.
+  - A message it sends to such an agent (`clarp-admin prompt`, a request's reply, a helper's
+    report) arrives as "<name> sent you a message. Its words are withheld: …", and the send
+    answers `words_withheld: true`. A delayed prompt it schedules (`--delay`) for another agent
+    goes out under its name when it is sent, whatever `--from` says; one to itself keeps
+    its `--origin`. `clarp-admin prompt --server` from
+    it (or naming it as the sender) is refused (409 `bound_conversation`). Its `<team>`
+    updates reach such members' briefs (and a leader's tick) as "<name> posted an update
+    (words withheld: …)"; an update whose sender or reader the Host cannot place is
+    withheld the same way (the user's own posts always read).
+  - `POST /agent-provider` takes `add_readers` and `remove_readers` (lists of sessions or
+    ids) and answers `readers` (sessions). From the owner the change is made at once. From
+    an agent (its turn), `add_readers` makes one decision card per agent, in the asking
+    agent's chat ("Let X read B's conversation?"), listed in the answer as
+    `asked: [{reader, artifact_id, decision_id}]`. An agent's `remove_readers` is 403
+    `owner_only`; an agent asking a reader of an agent that is not bound is 409 `not_bound`.
+  - Its binding is its owner's. On `POST /agent-provider`, a change of a bound agent's
+    `codex_home`, `codex_provider` (letting it go included) or `cloud_speech` asked by
+    anyone but the owner is not made: a card in the asking agent's chat ("Unbind B from its
+    provider?" or "Change B's provider?") is listed under `asked` as
+    `{binding, artifact_id, decision_id}`. A caller with no turn to ask from is 403
+    `owner_only`. The owner's own call changes it at once. `POST /agents` that starts a
+    bound agent again in place (`replace_sid`) with another binding is 409 `own_provider`
+    for anyone but the owner.
+  - The cards: the Host keeps what each card asks under the decision's id, never on the
+    card, and acts only on a card it keeps such a question for: a card an agent made itself
+    with a payload or reference of its choosing changes nothing. It acts once, when the
+    owner's answer changes the card (a resolve sent again does nothing), and only on his
+    own tap in an app: an answer given on his behalf by any agent (`on_behalf_session`,
+    the front desk included) is not taken. Asking the same question again answers the card
+    that still waits; once that card is answered or gone, a new one is made.
+    `clarp-admin agent provider --session B --reader X[,Y] | --no-reader X` is the tool.
+  - Not covered:
+    - Anything run with the administrator's token and no `X-Clarp-Turn` reads as the owner.
+      That includes every agent tool run outside a turn (the tool shim falls back to the
+      installed file's administrator token: a timer, a delayed prompt as it is sent, a
+      durable background job, a subprocess without the turn's environment), and the scripts
+      of the `clarp-agent-admin` and `clarp-adopt` skills, which read `[server].auth_token`
+      and present no turn. Such a run reads a bound agent and may rebind it as the owner.
+    - An agent on the same machine that reads the Host's configuration (its administrator
+      token) or the agent's files.
+    - A Python peer Host, which sends no `X-Clarp-Peer` on its reads and is answered as a
+      paired device.
+    - `POST` answers that carry words (`/task-plan/action`, `/decisions/<id>/resolve`) are
+      not blanked; an agent's tool token cannot reach them.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a

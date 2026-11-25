@@ -546,6 +546,15 @@ impl Fleet {
     }
 }
 
+/// The session of the agent that made the artifact with this id, a discarded one too; `None`
+/// where no agent of the roster has it. The guard of bound agents' words asks it
+/// ([`crate::bound_privacy`]).
+pub(crate) fn maker_of(app: &App, artifact_id: &str) -> Option<String> {
+    let fleet = Fleet::of(app);
+    let maker = fleet.holder(artifact_id, true);
+    maker.map(|member| member.record.session.clone())
+}
+
 fn refused(status: StatusCode, message: impl Into<String>) -> ApiError {
     ApiError::new(status, message)
 }
@@ -1630,11 +1639,31 @@ pub(crate) async fn decide(
             }
         }
     };
+    let on_behalf = match &want {
+        Want::Resolve {
+            on_behalf_session, ..
+        } => on_behalf_session.clone(),
+        _ => None,
+    };
     let fleet = Fleet::holding(app, &decision_id);
     let Some(member) = fleet.asker(&decision_id) else {
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
     let done = ask_agent(member, want).await?;
+    if action != "resolve" {
+        // A card withdrawn or dismissed asks nothing any more: what the Host kept of it goes.
+        crate::bound_privacy::let_go(app, &decision_id, done.changed).await;
+    } else {
+        // A card that asked whether an agent may read a bound agent: a yes lets it in.
+        crate::bound_privacy::answered(
+            app,
+            &decision_id,
+            &done.artifact,
+            done.changed,
+            on_behalf.as_deref(),
+        )
+        .await;
+    }
     Ok(if action == "withdraw" {
         json!({ "artifact": done.artifact, "changed": done.changed })
     } else {

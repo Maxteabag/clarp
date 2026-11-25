@@ -1778,6 +1778,12 @@ impl Mouth {
 
 // ---- finding a clip ---------------------------------------------------------------------------
 
+/// The session of the agent whose speech a clip is; `None` for a clip no agent has (one
+/// being made is not yet any agent's line).
+pub(crate) fn speaker_of(directory: &Directory, clip: u64) -> Option<String> {
+    clip_of(directory, clip).map(|(member, _)| member.record.session.clone())
+}
+
 /// The line that became the clip with this number, and whose it is, as the agents' logs
 /// have it.
 fn clip_of(directory: &Directory, clip: u64) -> Option<(Arc<Member>, Line)> {

@@ -137,6 +137,25 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
     if let Some(refused) = fenced(call) {
         return refused;
     }
+    // Whose words the caller may not read: an agent bound to a provider of its own is read by
+    // its owner and the agents it lets in (`bound_privacy`). A turn that cannot be placed reads
+    // as an agent that cannot say whose it is.
+    let reader = crate::bound_privacy::reader_of_call(app, call, owner_token).await;
+    let reader = reader.unwrap_or(crate::bound_privacy::Reader::Unknown);
+    let withheld = crate::bound_privacy::Withheld::of(app, &reader);
+    if let Some(withheld) = &withheld
+        && let Some(refused) = crate::bound_privacy::tool_refused(app, call, withheld)
+    {
+        return refused;
+    }
+    let answer = answered(app, call, owner_token).await;
+    match withheld {
+        Some(withheld) => crate::bound_privacy::tool_blanked(answer, &withheld),
+        None => answer,
+    }
+}
+
+async fn answered(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
     match call.tool.as_str() {
         "clarp-agent-bg" => agent_bg(app, call).await,
         "clarp-goal" | "clarp-agent-tasks" => goal(app, call).await,

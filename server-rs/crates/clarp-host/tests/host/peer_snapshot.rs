@@ -104,7 +104,9 @@ fn only_full_scope_reads_the_registered_peer_and_shares_the_cache() {
         let head = request_head(request);
         assert!(head.contains(&format!("authorization: bearer {PEER_TOKEN}")));
         assert!(!head.contains("cookie:"));
-        assert!(!head.contains("x-clarp-peer:"));
+        // A read says it is another Host's: the peer keeps the words of its agents bound to a
+        // provider of their own from it (feature `bound_privacy`).
+        assert!(head.contains("x-clarp-peer:"));
     }
 }
 

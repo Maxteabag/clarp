@@ -13,6 +13,7 @@ pub static REGISTRY: &[&[crate::kept::Kind]] = &[
     crate::calls::tools::KEPT,
     crate::android_chip::KEPT,
     crate::audio::KEPT,
+    crate::bound_privacy::KEPT,
     crate::chip::KEPT,
     crate::edge::KEPT,
     crate::controller_actions::KEPT,

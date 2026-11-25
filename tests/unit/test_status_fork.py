@@ -272,3 +272,79 @@ def test_settings_on_either_side_of_a_symlinked_cwd_are_checked(
     assert resolved == real.resolve()
     with pytest.raises(status_fork.Refused, match="pre-approve"):
         status_fork.preflight("claude", resolved, alias=saved)
+
+
+def _bound_agent(tmp_path, **extra):
+    work = tmp_path / "work"
+    work.mkdir(exist_ok=True)
+    return {"agent_id": "a-1", "session": "ada-1a2b", "persona": "Ada", "backend": "codex",
+            "cwd": str(work), "model": "", "effort": "", "native_id": "thread-1",
+            "source": "rust", **extra}
+
+
+def test_a_row_whose_words_are_withheld_launches_no_fork(monkeypatch, tmp_path):
+    def never(*args, **kwargs):
+        raise AssertionError("nothing may be launched")
+
+    monkeypatch.setattr(status_fork.subprocess, "run", never)
+    monkeypatch.setattr(status_fork.rust_host, "program_for", never)
+    result = status_fork.fork_status(_bound_agent(tmp_path, words_withheld=True), "status?")
+    assert result["ok"] is False
+    assert "bound to a model provider of its own" in result["error"]
+    assert "nothing launched" in result["error"]
+
+
+def test_a_bound_agent_forks_in_its_own_codex_home_on_its_own_provider(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        'model_provider = "theirs"\n[model_providers.theirs]\nbase_url = "https://example.invalid"\n')
+    env = {"CODEX_HOME": "/machine/codex"}
+    agent = _bound_agent(tmp_path, codex_home=str(home), codex_provider="theirs")
+    argv, _ = status_fork.rust_fork_argv(agent, "status?", "/bin/codex", env)
+    assert env["CODEX_HOME"] == str(home)
+    assert "model_provider=\"theirs\"" in argv
+    assert "--ignore-user-config" not in argv
+    # An agent that is not bound keeps the machine's home and ignores its user config.
+    env = {"CODEX_HOME": "/machine/codex"}
+    argv, _ = status_fork.rust_fork_argv(_bound_agent(tmp_path), "status?", "/bin/codex", env)
+    assert env["CODEX_HOME"] == "/machine/codex"
+    assert "--ignore-user-config" in argv
+    assert not any(arg.startswith("model_provider=") for arg in argv)
+
+
+def test_a_bound_agent_whose_home_lacks_its_provider_is_not_forked(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text('model_provider = "openai"\n')
+    agent = _bound_agent(tmp_path, codex_home=str(home), codex_provider="theirs")
+    with pytest.raises(status_fork.Refused, match="does not define the provider theirs"):
+        status_fork.rust_fork_argv(agent, "status?", "/bin/codex", {})
+
+
+def test_the_fact_reader_presents_the_turn_it_runs_in(monkeypatch, tmp_path):
+    rust_host = status_fork.rust_host
+    monkeypatch.setenv("CLARP_PROVIDER_TURN", "turn-token")
+    assert rust_host.turn_token() == "turn-token"
+    monkeypatch.delenv("CLARP_PROVIDER_TURN")
+    turn_file = tmp_path / "turn"
+    turn_file.write_text("from-the-lane\n")
+    monkeypatch.setenv("CLARP_PROVIDER_TURN_FILE", str(turn_file))
+    assert rust_host.turn_token() == "from-the-lane"
+    monkeypatch.delenv("CLARP_PROVIDER_TURN_FILE")
+    assert rust_host.turn_token() == ""
+
+
+def test_a_withheld_agent_is_reported_beside_the_others_without_reading_its_facts(monkeypatch, capsys):
+    rows = [{"agent_id": "a-1", "session": "ada-1a2b", "persona": "Ada", "backend": "codex",
+             "words_withheld": True},
+            {"agent_id": "b-1", "session": "ben-3c4d", "persona": "Ben", "backend": "codex"}]
+    monkeypatch.setattr(status_fork.rust_host.RustHost, "discover", classmethod(lambda cls: (object(), rows)))
+    read = []
+    monkeypatch.setattr(status_fork.rust_host, "live_facts", lambda host, roster, agent: read.append(agent["session"]) or "facts")
+    monkeypatch.setattr(status_fork, "fork_status", lambda agent, question: (
+        {**agent, "ok": False, "error": "refused"} if agent.get("words_withheld") else {**agent, "ok": True}))
+    assert status_fork.main(["ada", "ben", "--json"]) == 1
+    assert read == ["ben-3c4d"]
+    results = json.loads(capsys.readouterr().out)
+    assert [result["session"] for result in results] == ["ada-1a2b", "ben-3c4d"]
