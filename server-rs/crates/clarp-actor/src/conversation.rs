@@ -180,9 +180,14 @@ impl Which {
 /// How many items are read at a time when some of them are left out.
 const CHUNK: usize = 256;
 
-/// The rows of the messages read into a turn as it ran, oldest first (issue 808).
-pub(crate) fn read_rows_of(log: &dyn AgentLog, turn: u64) -> Result<Vec<String>, ActorError> {
-    Ok(find_anchors(log, turn, None, false)?.read_rows)
+/// The rows of the messages read into a running turn, oldest first (issue 808), from the
+/// actor's kept walk of it: a read walks only what was written since the last.
+pub(crate) fn read_rows_of(
+    log: &dyn AgentLog,
+    cache: &AnchorCache,
+    turn: u64,
+) -> Result<Vec<String>, ActorError> {
+    Ok(cache.anchors(log, turn, None, false)?.read_rows)
 }
 
 /// Rows that are conversation without needing to be a turn's anchor.

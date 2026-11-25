@@ -1822,6 +1822,16 @@ impl Actor {
 
     /// How a turn that no longer holds the agent ended, in the words of those who watch:
     /// `completed`, `failed` with what went wrong, or `interrupted`.
+    /// The rows of the messages read into a running turn (issue 808). A native goal's turn
+    /// has no message of its own and reads none: its walk would read the log back to its start.
+    fn read_rows(&self, turn: TurnId, origin: &Origin) -> Vec<String> {
+        if *origin == Origin::NativeGoal {
+            return Vec::new();
+        }
+        conversation::read_rows_of(self.recorder.log(), &self.anchor_cache, turn.0)
+            .unwrap_or_default()
+    }
+
     fn ended_as(&self, turn: TurnId) -> (&'static str, Option<serde_json::Value>) {
         let last = self.recorder.agent().last();
         let Some(settled) = last.filter(|settled| settled.id == turn) else {
@@ -1905,8 +1915,7 @@ impl Actor {
                 self.shown_events.extend(events);
                 // What the turn read before it was shown: read with its own message at its
                 // start, or steered in already.
-                let read =
-                    conversation::read_rows_of(self.recorder.log(), turn.0).unwrap_or_default();
+                let read = self.read_rows(turn, &live.origin);
                 let events = self.shown.read_rows(&read, now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = Some((turn, name));
@@ -5648,7 +5657,7 @@ impl Actor {
             offset = read.next_offset;
         }
         // What the turn read, those who watch it are told again: its working line goes below it.
-        let read = conversation::read_rows_of(self.recorder.log(), turn.0)?;
+        let read = self.read_rows(turn, &message.origin);
         let _ = self.shown.read_rows(&read, now_ms);
         // One write to the log, so that every revision from here on is above every revision the
         // actor before this one gave to something it showed and did not store.
