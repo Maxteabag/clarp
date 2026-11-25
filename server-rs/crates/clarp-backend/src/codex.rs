@@ -489,10 +489,20 @@ const VERIFY_WITHIN_MS: i64 = 3_000;
 /// another provider. It is stopped. A shorter turn is judged when its process is gone.
 const FIND_WITHIN_MS: i64 = 30_000;
 
-/// What the ids of Codex's live items begin with.
+/// What the ids of Codex's live items begin with. The turn follows it: `codex exec` numbers a
+/// turn's items from `item_0` every turn ([`CodexInterpreter::live_id`]).
 const SHOWN: &str = "cx";
 
 impl CodexInterpreter {
+    /// The id of a live item of this turn: unique to the turn, so that an item of one turn
+    /// never takes the place of another turn's (`cx:item_0` in every turn before 25 Nov 2026).
+    /// The same on a replay of the spool, since the turn is. An app-server lane's items carry
+    /// ids of their own that do not repeat (a message `msg_…`, a command `exec-<uuid>`), and are
+    /// named the same way.
+    fn live_id(&self, raw: &str) -> String {
+        format!("{SHOWN}:{}:{raw}", self.turn)
+    }
+
     pub fn new(turn: u64, name: &str) -> Self {
         let home = std::env::var_os("HOME").map_or_else(|| "/".into(), std::path::PathBuf::from);
         let sessions = crate::transit::tool_home("codex", &home).join("sessions");
@@ -763,7 +773,7 @@ impl CodexInterpreter {
         if raw.is_empty() {
             return;
         }
-        let id = format!("{SHOWN}:{raw}");
+        let id = self.live_id(raw);
         let mut glimpse = |glimpse: Glimpse| out.push(Signal::Glimpse(glimpse));
         match text_of(&item["type"]) {
             "agent_message" => {
@@ -1164,11 +1174,11 @@ mod tests {
         assert_eq!(
             shown,
             [
-                ("cx:item_0", "reasoning", "completed"),
+                ("cx:3:item_0", "reasoning", "completed"),
                 ("cx:tr-1:plan", "plan", "completed"),
-                ("cx:item_2", "tool", "failed"),
-                ("cx:item_3", "tool", "completed"),
-                ("cx:item_4", "message", "completed"),
+                ("cx:3:item_2", "tool", "failed"),
+                ("cx:3:item_3", "tool", "completed"),
+                ("cx:3:item_4", "message", "completed"),
             ]
         );
         assert_eq!(items[0]["title"], "Looking at the tests");

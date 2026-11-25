@@ -212,3 +212,40 @@ fn a_real_turn_that_was_stopped_leaves_the_command_it_was_running_to_the_host() 
         }))
     );
 }
+
+/// The ids of the live items a turn of this number shows, reading a recorded turn.
+fn live_ids(turn: u64, fixture: &str) -> Vec<String> {
+    let path = format!("{}/tests/fixtures/{fixture}", env!("CARGO_MANIFEST_DIR"));
+    let recorded = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut interpreter = CodexInterpreter::reading(turn, &format!("m{turn}"), None);
+    let mut out = Vec::new();
+    for (t, line) in (1..).zip(recorded.lines()) {
+        let entry = Entry::Out(line.to_string());
+        interpreter.on_record(&Record { t, entry }, &mut out);
+    }
+    let id = regex::Regex::new(r#"\bid: "([^"]*)""#).unwrap();
+    out.iter()
+        .filter(|signal| matches!(signal, Signal::Glimpse(_)))
+        .flat_map(|signal| {
+            let shown = format!("{signal:?}");
+            id.captures_iter(&shown)
+                .map(|found| found[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn the_live_items_of_two_turns_of_a_thread_never_share_an_id() {
+    // Both turns begin at `item_0`: without the turn, the second turn's answer took the place
+    // of the first turn's command while it was shown. A replay names them as the turn did.
+    let first = live_ids(302, "codex-0.167.1-tool.jsonl");
+    let second = live_ids(303, "codex-0.167.1-resumed.jsonl");
+    assert!(first.iter().any(|id| id == "cx:302:item_0"), "{first:?}");
+    assert!(second.iter().any(|id| id == "cx:303:item_0"), "{second:?}");
+    assert!(
+        first.iter().all(|id| !second.contains(id)),
+        "{first:?} {second:?}"
+    );
+    assert_eq!(live_ids(302, "codex-0.167.1-tool.jsonl"), first);
+}
