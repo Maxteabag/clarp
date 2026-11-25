@@ -2979,8 +2979,12 @@ fn transcript_check(out: String) {
             if elapsed < Duration::from_millis(400) {
                 return false;
             }
-            check(at("o-a1").is_some_and(|a| Some(a) < tool) && tool < at("o-a2"),
-                &format!("settled, a row's text reads above its tool, then the answer, as live drew it: {ids:?}"));
+            // Its text came with its own tool and words followed: said along
+            // the way, as live drew it (#827). Grouped folds it with the work;
+            // the refused tool stays in view, then the answer.
+            let fold = at("live:fold:o-t1");
+            check(at("o-a1").is_none() && fold.is_some_and(|f| Some(f) < tool) && tool < at("o-a2"),
+                &format!("settled, the text folds with the work as live folded it, the refused tool and then the answer stay: {ids:?}"));
             true
         })),
     ];
