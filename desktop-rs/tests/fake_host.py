@@ -166,6 +166,11 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
 # /server-info's server_id; /__control/server-id changes it (another Host).
 server_id = "fake-host-1"
+# An agent's terminal (GET /terminal/<session>): an echo of the keys it is
+# sent. /__control/terminal makes the next ones refused: an HTTP `status`
+# with a `body` (text, or JSON when an object), or a close frame with
+# `close_reason` right after the upgrade.
+terminal_refusal = {}
 # /server-info's name; --peer answers as another Host.
 host_name = "Fake Host"
 CLOSE = object()
@@ -1304,6 +1309,98 @@ def artifact_chat(session, kinds, now_ms):
     return rows, made
 
 
+WS_GUID = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_frame(opcode, data):
+    """A server frame (unmasked, final)."""
+    import struct
+    head = bytes([0x80 | opcode])
+    if len(data) < 126:
+        head += bytes([len(data)])
+    elif len(data) < 65536:
+        head += bytes([126]) + struct.pack(">H", len(data))
+    else:
+        head += bytes([127]) + struct.pack(">Q", len(data))
+    return head + data
+
+
+def ws_read(rfile):
+    """A client frame: (opcode, payload), or None at the end."""
+    import struct
+    head = rfile.read(2)
+    if len(head) < 2:
+        return None
+    opcode, size = head[0] & 0x0F, head[1] & 0x7F
+    if size == 126:
+        size = struct.unpack(">H", rfile.read(2))[0]
+    elif size == 127:
+        size = struct.unpack(">Q", rfile.read(8))[0]
+    mask = rfile.read(4) if head[1] & 0x80 else b""
+    data = rfile.read(size)
+    if mask:
+        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    return opcode, data
+
+
+def serve_terminal(handler, session):
+    """The agent's terminal: refused as /__control/terminal says, else each
+    binary frame echoed back as `echo:<keys>`, each size recorded, and a
+    Ctrl-D (0x04) ending it with a normal close, as the CLI exiting would."""
+    import base64
+    import struct
+    handler.close_connection = True
+    refusal = dict(terminal_refusal)
+    if not any(a["session"] == session for a in agents):
+        refusal = {"status": 404, "body": "no such agent"}
+    if refusal.get("status"):
+        body = refusal.get("body", "")
+        kind = "text/plain"
+        if isinstance(body, dict):
+            body, kind = json.dumps(body), "application/json"
+        data = body.encode()
+        handler.send_response(int(refusal["status"]))
+        handler.send_header("Content-Type", kind)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        # The body after the headers, as a Host writing them apart sends it.
+        handler.wfile.flush()
+        time.sleep(0.05)
+        handler.wfile.write(data)
+        return
+    key = handler.headers.get("Sec-WebSocket-Key", "").strip().encode()
+    if handler.headers.get("Upgrade", "").lower() != "websocket" or not key:
+        return handler.reply_bytes(426, b"upgrade required (websocket)", "text/plain")
+    accept = base64.b64encode(hashlib.sha1(key + WS_GUID).digest()).decode()
+    handler.wfile.write((
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
+    if refusal.get("close_reason"):
+        reason = refusal["close_reason"].encode()
+        handler.wfile.write(ws_frame(0x8, struct.pack(">H", 1008) + reason))
+        return
+    path = f"/terminal/{session}"
+    while True:
+        frame = ws_read(handler.rfile)
+        if frame is None:
+            return
+        opcode, data = frame
+        if opcode == 0x1:
+            record({"method": "WS", "path": path, "text": json.loads(data.decode())})
+        elif opcode == 0x2:
+            record({"method": "WS", "path": path, "keys": data.decode("utf-8", "replace")})
+            if b"\x04" in data:
+                handler.wfile.write(ws_frame(0x8, struct.pack(">H", 1000)))
+                return
+            handler.wfile.write(ws_frame(0x2, b"echo:" + data))
+        elif opcode == 0x8:
+            handler.wfile.write(ws_frame(0x8, data[:2]))
+            return
+        elif opcode == 0x9:
+            handler.wfile.write(ws_frame(0xA, data))
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1353,6 +1450,8 @@ class Handler(BaseHTTPRequestHandler):
         if failure and failure[1] > 0:
             failure[1] -= 1
             return self.reply(failure[0], {"error": "Gateway Timeout"})
+        if url.path.startswith("/terminal/"):
+            return serve_terminal(self, unquote(url.path[len("/terminal/"):]))
         if url.path == "/server-info":
             # As the real Host and contract/schemas/server-info.json have it:
             # feature flags under capabilities.features.
@@ -1774,6 +1873,11 @@ class Handler(BaseHTTPRequestHandler):
             # `artifact_summary`); the keys given replace the current ones.
             with state_lock:
                 artifact_summary.update(body)
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/terminal":
+            # Test control: how the next terminals are refused ({} opens them).
+            terminal_refusal.clear()
+            terminal_refusal.update(body)
             return self.reply(200, {"ok": True})
         if url.path == "/__control/server-id":
             # Test control: this Host answers as another instance.

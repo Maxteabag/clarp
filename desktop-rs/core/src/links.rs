@@ -1,51 +1,31 @@
 //! What the desktop may open for a chat (C++ `TerminalLaunch`,
-//! `LocalReport.h` and `AppController::openAgentTerminal`): an agent's own CLI
-//! in the default terminal, and local report files an agent wrote. Transcript
-//! text is model, tool and web output, so each policy only ever widens to a
-//! named, checked target.
+//! `LocalReport.h` and `AppController::openAgentTerminal`): an agent's
+//! terminal on its Host in the default terminal, and local report files an
+//! agent wrote. Transcript text is model, tool and web output, so each policy
+//! only ever widens to a named, checked target.
 
 use std::path::{Path, PathBuf};
 
-use crate::protocol::Agent;
-
-/// The agent's interactive CLI, resuming its native conversation.
-pub fn native_terminal_launch(agent: &Agent) -> Result<(String, Vec<String>), String> {
-    let conversation = &agent.conversation_id;
-    if conversation.is_empty() || conversation.starts_with('-') || conversation.contains('\0') {
-        return Err("Send a chat message first to create a native CLI session".into());
-    }
-    let (program, flag) = match agent.backend.as_str() {
-        "claude" => ("claude", "--resume"),
-        "codex" => ("codex", "resume"),
-        "agy" => ("agy", "--conversation"),
-        "grok" => ("grok", "--resume"),
-        "muse" => ("muse", "resume"),
-        _ => return Err("This backend does not have a supported interactive CLI".into()),
-    };
-    Ok((program.into(), vec![flag.into(), conversation.clone()]))
+/// The command that opens an agent's terminal: this desktop's own binary
+/// as the bridge to the Host's `GET /terminal/<session>` (`--agent-terminal`),
+/// for the Host at `base`. The Host runs the agent's CLI, so the agent's
+/// conversation has one writer.
+pub fn agent_terminal_command(program_path: &str, session: &str, base: &str) -> Vec<String> {
+    vec![program_path.into(), "--agent-terminal".into(), session.into(), "--host".into(), base.into()]
 }
 
-/// How the default terminal is asked to run `program`: `xdg-terminal-exec`
+/// How the default terminal is asked to run `command`: `xdg-terminal-exec`
 /// with a working directory and title when installed, else
-/// `x-terminal-emulator -e`. The Host token never leaks into the CLI.
-pub fn terminal_command(
-    xdg_terminal_exec: bool,
-    session: &str,
-    title: &str,
-    directory: &str,
-    program_path: &str,
-    arguments: &[String],
-) -> (String, Vec<String>) {
-    let mut command: Vec<String> =
-        vec!["env".into(), "-u".into(), "CLARP_TOKEN".into(), format!("CLAUDE_PWA_SESSION={session}"), program_path.into()];
-    command.extend(arguments.iter().cloned());
+/// `x-terminal-emulator -e`.
+pub fn terminal_command(xdg_terminal_exec: bool, title: &str, directory: &str, command: &[String]) -> (String, Vec<String>) {
     if xdg_terminal_exec {
         let mut launch = vec![format!("--dir={directory}"), format!("--title={title}"), "--".into()];
-        launch.extend(command);
+        launch.extend(command.iter().cloned());
         ("xdg-terminal-exec".into(), launch)
     } else {
-        command.insert(0, "-e".into());
-        ("x-terminal-emulator".into(), command)
+        let mut launch = vec!["-e".to_owned()];
+        launch.extend(command.iter().cloned());
+        ("x-terminal-emulator".into(), launch)
     }
 }
 

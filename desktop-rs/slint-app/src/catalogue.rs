@@ -495,7 +495,7 @@ pub const ENTRIES: &[Entry] = &[
     e("new", "New session", "agent", "Opens the hub to start a new agent.", &["new agent", "start", "chat", "provider", "contact", "hub", "create"]),
     e("preview-versions", "Preview versions · update or roll back", "settings", "Installs another build of this app, newer or older.", &["previous installs", "rollback", "downgrade", "upgrade", "update", "version"]),
     e("new-contact", "Start an idle contact", "agent", "Starts one of your idle contacts in a new session.", &["new session", "hub", "contact", "wake", "resume"]),
-    e("agent-terminal", "Open agent in terminal", "agent", "Opens the agent's native CLI in a terminal.", &["terminal", "cli", "shell", "console", "native"]),
+    e("agent-terminal", "Open agent in terminal", "agent", "Opens the agent's CLI, run by its Host, in a terminal.", &["terminal", "cli", "shell", "console", "native"]),
     e("split-right", "Split right", "layout", "Opens a second pane to the right.", &["vertical split", "side by side", "pane", "columns", "divide"]),
     e("split-down", "Split down", "layout", "Opens a second pane below.", &["horizontal split", "stack", "pane", "rows", "divide"]),
     e("close-pane", "Close pane", "layout", "Closes the active pane.", &["remove pane", "unsplit", "merge", "pane"]),

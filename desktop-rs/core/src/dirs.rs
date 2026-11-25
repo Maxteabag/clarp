@@ -22,7 +22,8 @@ fn under(variable: &str, linux: &str, macos: &str) -> Option<PathBuf> {
         .or_else(|| home().map(|home| home.join(per_platform(linux, macos))))
 }
 
-fn home() -> Option<PathBuf> {
+/// The user's home folder (`HOME`).
+pub fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").filter(|home| !home.is_empty()).map(PathBuf::from)
 }
 

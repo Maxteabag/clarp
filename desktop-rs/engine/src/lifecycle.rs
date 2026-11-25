@@ -2,7 +2,7 @@
 //! lifecycle" and "past sessions, launch directories, paths, assignment"
 //! sections): the model catalog, launch defaults, idle contacts, creation
 //! and its wait for the roster, per-agent settings, contact assignment and
-//! the agent's native CLI in a terminal.
+//! the agent's terminal on its Host.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -51,6 +51,14 @@ pub fn default_terminal_launcher() -> TerminalLauncher {
         }
         process.args(&command.arguments).current_dir(&command.directory).stdin(std::process::Stdio::null()).spawn().map(drop)
     })
+}
+
+/// This desktop's own program, which bridges an agent's terminal to its
+/// Host (`--agent-terminal`). A binary replaced on disk since it started
+/// reads as `<path> (deleted)`: the path it was started from runs the new one.
+fn terminal_bridge() -> Option<String> {
+    let path = std::env::current_exe().ok()?.to_string_lossy().into_owned();
+    Some(path.strip_suffix(" (deleted)").map(str::to_owned).unwrap_or(path))
 }
 
 pub(crate) struct Launch {
@@ -643,7 +651,7 @@ impl Engine {
         self.api.post_json(&format!("agent-assignment:{session}"), "/agent-assign", json!({"session": session, "mode": mode, "name": name}), None);
     }
 
-    // ---- the native CLI --------------------------------------------------------------
+    // ---- the agent terminal ----------------------------------------------------------
 
     /// Replaces how terminal commands run (tests, other desktops).
     pub fn set_terminal_launcher(&mut self, launcher: TerminalLauncher) {
@@ -658,35 +666,27 @@ impl Engine {
         canonical.is_dir().then_some(canonical)
     }
 
-    /// Opens the agent's own CLI, resuming its conversation, in the default
-    /// terminal; only when this desktop shares the Host's filesystem.
+    /// Opens the agent's terminal in the default terminal: this desktop's
+    /// binary as the bridge to the Host's `GET /terminal/<session>`, where
+    /// the Host runs the agent's CLI on its conversation. The Host refuses it
+    /// while a turn of the agent runs and holds the agent's turns while it is
+    /// open, so the conversation has one writer; the bridge shows a refusal.
+    /// A peer's chat opens on its own Host.
     pub fn open_agent_terminal(&mut self, session: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.open_agent_terminal(local));
-        if !self.shared_filesystem() {
-            self.set_error("The native CLI requires this desktop and Host to share the local filesystem");
-            return;
-        }
         let Some(agent) = self.roster.find(session).cloned() else { return };
-        let (program, arguments) = match clarp_core::links::native_terminal_launch(&agent) {
-            Ok(launch) => launch,
-            Err(message) => {
-                self.set_error(&message);
-                return;
-            }
-        };
-        let Some(program_path) = clarp_core::links::find_executable(&program) else {
-            self.set_error(&format!("{program} is not installed on this desktop"));
+        let Some(bridge) = terminal_bridge() else {
+            self.set_error("Could not find this desktop's own program to open the terminal");
             return;
         };
-        let Some(directory) = self.local_agent_directory(session) else {
-            self.set_error("The agent directory is not available on this desktop");
-            return;
-        };
-        let directory = directory.to_string_lossy().into_owned();
-        let title = format!("{} — {program}", display_name(&agent));
+        let directory = self
+            .local_agent_directory(session)
+            .or_else(clarp_core::dirs::home)
+            .map_or_else(|| "/".to_owned(), |path| path.to_string_lossy().into_owned());
+        let title = format!("{} — {}", display_name(&agent), agent.backend);
+        let command = clarp_core::links::agent_terminal_command(&bridge, session, &self.base_url);
         let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
-        let (launcher, launch_arguments) =
-            clarp_core::links::terminal_command(xdg, session, &title, &directory, &program_path.to_string_lossy(), &arguments);
+        let (launcher, launch_arguments) = clarp_core::links::terminal_command(xdg, &title, &directory, &command);
         let command = TerminalCommand { program: launcher, arguments: launch_arguments, directory };
         if let Err(error) = (self.launch.terminal)(&command) {
             eprintln!("Engine: could not start {}: {error}", command.program);

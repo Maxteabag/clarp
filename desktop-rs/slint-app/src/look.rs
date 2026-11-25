@@ -583,15 +583,7 @@ pub(crate) fn edit_file(app: &App) -> bool {
             let script = format!("exec {editor} \"$1\"");
             let command: Vec<String> = vec!["sh".into(), "-c".into(), script, "sh".into(), file.clone()];
             let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
-            let (program, arguments) = if xdg {
-                let mut launch = vec![format!("--dir={folder}"), "--title=Clarp settings".into(), "--".into()];
-                launch.extend(command);
-                ("xdg-terminal-exec".to_owned(), launch)
-            } else {
-                let mut launch = vec!["-e".to_owned()];
-                launch.extend(command);
-                ("x-terminal-emulator".to_owned(), launch)
-            };
+            let (program, arguments) = clarp_core::links::terminal_command(xdg, "Clarp settings", &folder, &command);
             let launcher = clarp_engine::lifecycle::default_terminal_launcher();
             launcher(&clarp_engine::lifecycle::TerminalCommand { program: program.clone(), arguments, directory: folder })
                 .map_err(|e| format!("could not start {program}: {e}"))

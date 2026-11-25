@@ -25,6 +25,9 @@ Options:
   --preview-versions       Manage saved preview versions
   --pair <url> <code>      Pair with a Host using its one-time code, keep the device token
                            in the desktop keyring and the Host in the settings, then exit
+  --agent-terminal <session> [--host <url>]
+                           Open the agent's terminal on its Host (the app's Host without
+                           --host) in this terminal, without a window
 ";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
