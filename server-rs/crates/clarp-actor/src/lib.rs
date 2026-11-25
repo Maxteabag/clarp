@@ -1848,6 +1848,21 @@ impl Actor {
         }
     }
 
+    /// When those who watch are told a turn began: when it started, or when its message's row
+    /// stands where that is later. A row is later than the row above it in the conversation
+    /// (issue 798), so a message that waited for its turn can stand a millisecond after the
+    /// turn's start; a client that places the turn's working line by time puts it below that
+    /// message.
+    fn shown_start(&self, started_at_ms: i64, message_id: &str) -> i64 {
+        self.recorder
+            .log()
+            .find(message_id)
+            .ok()
+            .flatten()
+            .filter(|row| row.kind == kind::MESSAGE)
+            .map_or(started_at_ms, |row| row.ts_ms.max(started_at_ms))
+    }
+
     /// Brings what is shown of the turn in step with what the log says of it: a turn that
     /// holds the agent is begun for those who watch, one that holds it no longer is ended as
     /// it ended, and a turn that waits for an account says so.
@@ -1876,6 +1891,7 @@ impl Actor {
                 let audience = self
                     .audience_of(turn)
                     .unwrap_or(clarp_kernel::coordination::USER);
+                let started_at_ms = self.shown_start(started_at_ms, &live.message_id);
                 let events = self.shown.begin_turn(
                     &self.profile.session,
                     &conversation,
@@ -5496,6 +5512,7 @@ impl Actor {
             Some(Turn::Running(held)) => held.started_at_ms,
             _ => now_ms,
         };
+        let began = self.shown_start(began, &message.id);
         let conversation = self.shown_conversation();
         let session = self.profile.session.clone();
         let audience = self.audience_of(turn)?;
