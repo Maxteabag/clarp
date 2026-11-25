@@ -1350,3 +1350,46 @@ fn a_start_waits_for_a_lane_on_its_way_out_to_let_go() {
     drop(held);
     std::fs::remove_dir_all(&run).unwrap();
 }
+
+/// Issue 860. The order of a start in place of a lane on its way out whose owner holds its lock
+/// for about ten seconds: the first try finds the owner there, the one retry starts only after
+/// the owner has let go of its lock (its own disconnect, not a timer), and there is no third.
+#[test]
+fn the_one_retry_starts_after_an_owner_that_holds_ten_seconds_lets_go() {
+    let run = run_dir("ten-seconds");
+    let lane = Endpoint::of(Tool::Claude, &run, "a");
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.lock().unwrap();
+    let hold = std::time::Duration::from_secs(10);
+    let (sender, let_go) = std::sync::mpsc::channel();
+    let late = std::thread::spawn(move || {
+        std::thread::sleep(hold);
+        // Just before the lock goes: any try at or after this one may find it free.
+        let _ = sender.send(std::time::Instant::now());
+        drop(owner);
+    });
+    let began = std::time::Instant::now();
+    let tries = std::cell::RefCell::new(Vec::new());
+    let started = start_once_more(&lane, super::LEAVE_WAIT, || {
+        tries.borrow_mut().push(std::time::Instant::now());
+        if lane.released()? {
+            Ok("started")
+        } else {
+            Err(std::io::Error::other(
+                "the Claude lane owner has not disconnected",
+            ))
+        }
+    });
+    late.join().unwrap();
+    let released_at = let_go.recv().unwrap();
+    assert_eq!(started.unwrap(), "started");
+    let tries = tries.into_inner();
+    assert_eq!(tries.len(), 2, "one try, and one retry");
+    assert!(tries[0] < released_at, "the first try met the owner");
+    assert!(
+        tries[1] >= released_at,
+        "the retry came after the owner let go"
+    );
+    assert!(began.elapsed() < super::LEAVE_WAIT, "within the bound");
+    std::fs::remove_dir_all(&run).unwrap();
+}

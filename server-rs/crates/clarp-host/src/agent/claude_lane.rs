@@ -53,14 +53,11 @@ impl AsLane {
     /// Starts the turn's Claude Code as the lane, with what the turn would start it with
     /// (`order`), within the limits and the reserve, under the login there now: the lane reads
     /// it as it starts. The lane, once it is there and free; `None`: none started (no place, or
-    /// the start failed), and the turn runs in a process of its own.
+    /// the start failed), and the turn runs in a process of its own. A start that fails, which
+    /// may be one that met the old lane's owner still there (a lane on its way out, or one that
+    /// just refused for its login), is tried once more once that owner has let go, within
+    /// `LEAVE_WAIT` (issues 857 and 860), whichever way the turn came to start it.
     fn begin(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
-        self.warm(self.start(order, fit, mcp), fit)
-    }
-
-    /// The same in place of a lane that has just left for its login: a start that still finds
-    /// the old lane's owner there is tried once more once it has let go (issue 857).
-    fn begin_after_leaving(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
         let endpoint = self.start.lane.endpoint();
         let started = crate::lane::start_once_more(endpoint, crate::lane::LEAVE_WAIT, || {
             self.start(order, fit, mcp)
@@ -244,7 +241,7 @@ impl Worker {
                 {
                     let until = std::time::Instant::now() + crate::lane::LEAVE_WAIT;
                     if lane.endpoint().let_go_within(until, true).unwrap_or(false)
-                        && let Some(state) = as_lane.begin_after_leaving(&lane_order, &fit, &mcp)
+                        && let Some(state) = as_lane.begin(&lane_order, &fit, &mcp)
                     {
                         let Some(again) = offer(state) else {
                             return;
