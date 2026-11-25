@@ -97,9 +97,18 @@ waits is urgent, tell the user through their front desk. Requests work between a
 a peer server use `prompt`.
 
 A message from the user (or the Oracle) never waits behind a turn that is not
-the user's: on a Rust Host from contract 187 (feature `owner_preempts`), when it
-reaches an agent whose running turn answers another agent, a schedule, an
-automation or a goal's wake, that turn is stopped at once and the user's message
+the user's. When it reaches an agent whose running turn answers another agent,
+a schedule, an automation or a goal's wake, and the agent's tool can take it
+into that turn now (Claude Code, agy-acp, Codex on its chat lane), it is read
+into that turn on a Rust Host from contract 192 (feature `owner_steers`):
+nothing is cut. From then on the user sees the turn: what you write after
+reading their message is in their chat, until you answer them with
+`clarp-admin tell-user`, after which the rest is the agents' again. So answer
+the user, then finish the other agent's work and answer that agent as usual.
+
+Where the tool cannot take it (another backend, a Codex turn off its lane, a
+turn that is starting or ending), or on a Host from contract 187 before 192
+(feature `owner_preempts`), that turn is stopped at once and the user's message
 runs next. The agent then gets a Host message (origin `made-way`) that quotes
 what it was working on and asks it to take that up again. When you get one,
 finish that work, or do it if you had not started. If it came from another

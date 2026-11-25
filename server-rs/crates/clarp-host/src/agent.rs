@@ -3326,40 +3326,12 @@ impl Worker {
         let now = self.now_ms();
         // How the journal names this thread when a part of this request holds it long.
         let thread = self.thread_name();
-        // The owner's message never waits behind a turn that is not a person's (issue 839):
-        // another agent's, a trigger's, a goal's wake. Where no conversation fork answers it
-        // beside that turn, it is said direct: the turn makes way at once and the owner's
-        // starts, and the agent is left a note behind it to take the cut work up again.
-        let mut made_way = None;
-        if let Ask::Send {
-            message,
-            admission,
-            reservation: None,
-            marks,
-            ..
-        } = &mut ask
-            && *admission == Admission::Queue
-            && marks.coordination.is_none()
-            && let Some(actor) = self.actor.as_ref()
-            && let Some(goes) = actor.owner_goes_first(&message.origin)?
-            && !(Actor::fork_answers(message)
-                && actor.fork_beside()?.is_some()
-                && crate::conversation_forks::may_fork(
-                    &self.setup.record.backend,
-                    chat_view(&self.setup),
-                    &self.setup.record.agent_id,
-                    &self.setup.record.session,
-                ))
-        {
-            *admission = Admission::Direct;
-            made_way = goes.note.map(|note| (note, goes.coordination));
-        }
         // A tool whose running turn takes another message on its input (Claude Code, agy-acp)
         // is offered the user's. A Codex turn takes steered words only on its lane, and only
         // while the owner's setting runs chat turns there: with it off, a goal turn is not
         // steered, as before (review of 23 Nov 2026). The actor reads from the turn's spool
         // whether it can, and decides by the message's text.
-        let can_offer_steering = match self.setup.backend.steers() {
+        let mut can_offer_steering = match self.setup.backend.steers() {
             clarp_backend::Steers::Stdin => true,
             clarp_backend::Steers::Words => self.chat_lane(),
             clarp_backend::Steers::No => false,
@@ -3394,6 +3366,39 @@ impl Worker {
                     break;
                 }
             }
+        }
+        // The owner's message never waits behind a turn that is not a person's (issue 839):
+        // another agent's, a trigger's, a goal's wake. Where that turn takes it on its input
+        // now, it is steered in and nothing is cut: from its reading on, the turn is his and
+        // its words are shown in his chat (rule FU). Where it cannot be steered and no
+        // conversation fork answers it beside that turn, it is said direct: the turn makes way
+        // at once and the owner's starts, and the agent is left a note behind it to take the
+        // cut work up again.
+        let mut made_way = None;
+        if let Ask::Send {
+            message,
+            admission,
+            reservation: None,
+            marks,
+            ..
+        } = &mut ask
+            && *admission == Admission::Queue
+            && marks.coordination.is_none()
+            && let Some(actor) = self.actor.as_ref()
+            && let Some(goes) = actor.owner_goes_first(&message.origin)?
+            && !(can_offer_steering && actor.can_steer(message))
+            && !(Actor::fork_answers(message)
+                && actor.fork_beside()?.is_some()
+                && crate::conversation_forks::may_fork(
+                    &self.setup.record.backend,
+                    chat_view(&self.setup),
+                    &self.setup.record.agent_id,
+                    &self.setup.record.session,
+                ))
+        {
+            *admission = Admission::Direct;
+            made_way = goes.note.map(|note| (note, goes.coordination));
+            can_offer_steering = false;
         }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());

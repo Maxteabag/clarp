@@ -568,6 +568,40 @@ impl Actor {
         Ok(actions)
     }
 
+    /// Whether the live turn's tool takes these words on its input now, as the turn's spool
+    /// says: what [`Actor::steer_active`] asks of the turn before it writes anything.
+    fn takes_now(&self, uuid: &str, text: &str) -> bool {
+        let Some(live) = self.live.as_ref() else {
+            return false;
+        };
+        let can = self.backend.steers_message(text)
+            && live.steering.stream.can_join()
+            && !live.steering.input_skipped
+            && live.steering.prompt_uuid() != Some(uuid)
+            && !live.opening
+            && live.origin.name() != COMPACTION
+            && !text.trim().is_empty();
+        // A Codex lane takes steered words until its turn ends; a tool that steers on its
+        // input takes them once its process and session are known.
+        can && if self.backend.steers() == Steers::Words {
+            live.steering.lane_open
+        } else {
+            live.steering.owner.is_some() && self.recorder.agent().backend_session().is_some()
+        }
+    }
+
+    /// Whether the owner's message, sent now, would be steered into the live turn rather than
+    /// wait: the turn's tool takes it on its input now and the agent lets it in (issue 839).
+    /// A turn that is not the owner's makes way for his message only where this is false.
+    pub fn can_steer(&self, message: &Message) -> bool {
+        message
+            .trace_id
+            .as_deref()
+            .and_then(takeover::prompt_uuid)
+            .is_some_and(|uuid| self.takes_now(&uuid, &message.text))
+            && self.recorder.agent().live_takes_words()
+    }
+
     /// Reserve the already accepted row before handing its bytes to the tool's stdin. A restart
     /// replays echoes but never attempts an uncertain write a second time.
     pub fn steer_active(
@@ -577,41 +611,29 @@ impl Actor {
         text: &str,
         now_ms: i64,
     ) -> Result<Option<Action>, ActorError> {
+        if !self.takes_now(&uuid, text) {
+            return Ok(None);
+        }
         let Some(live) = self.live.as_ref() else {
             return Ok(None);
         };
         // A Codex lane takes steered words; a tool that steers on its input takes the message
         // there.
         let codex = self.backend.steers() == Steers::Words;
-        if !self.backend.steers_message(text)
-            || !live.steering.stream.can_join()
-            || live.steering.input_skipped
-            || live.steering.prompt_uuid() == Some(uuid.as_str())
-            || live.opening
-            || live.origin.name() == COMPACTION
-            || text.trim().is_empty()
-        {
-            return Ok(None);
-        }
         // A tool that keeps its own record of what it read (Claude): the process that reads
         // it, and where it says it did, for a restart. Any other (agy-acp, a Codex lane's turn
         // that said it takes steered words): its reading is in the spool alone.
-        let recovery = if codex {
-            if !live.steering.lane_open {
-                return Ok(None);
+        let recovery = match (
+            &live.steering.owner,
+            self.recorder.agent().backend_session(),
+        ) {
+            (Some(owner), Some(session)) if !codex && self.backend.records_reads() => {
+                Some(Recovery {
+                    owner: owner.clone(),
+                    session: session.to_owned(),
+                })
             }
-            None
-        } else {
-            let Some(owner) = live.steering.owner.clone() else {
-                return Ok(None);
-            };
-            let Some(session) = self.recorder.agent().backend_session() else {
-                return Ok(None);
-            };
-            self.backend.records_reads().then(|| Recovery {
-                owner,
-                session: session.to_owned(),
-            })
+            _ => None,
         };
         // The reference steers with team instructions and the inbox only. Its coordination
         // reminder belongs to a new attempt's protocol.

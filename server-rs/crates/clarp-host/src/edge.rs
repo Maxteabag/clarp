@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 191;
+pub const HOST_CONTRACT: u64 = 192;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -473,6 +473,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `/log` row that says why it failed, so an app tells a turn ended from outside from the
     // tool's error without reading words (issue 829).
     ("failure_kind", 191),
+    // The owner's send to an agent whose running turn is not a person's is read into that turn
+    // where its tool takes it now (Claude Code, agy-acp, a Codex turn on its lane): nothing is
+    // cut, and from its reading on the turn is the owner's in his chat. Only where it cannot be
+    // steered does the turn make way (`owner_preempts`, issue 839).
+    ("owner_steers", 192),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -3691,8 +3696,8 @@ async fn send_as(
     // while it waits. One sent with `queue_if_busy` was left for later: it goes through the
     // queue even when nothing is in its way, and when it does not come from a person, a Stop
     // holds it. A person's plain message never waits behind a turn that is not a person's:
-    // the agent's actor admits it direct, and that turn makes way (issue 839,
-    // `Agent::owner_goes_first`).
+    // the agent steers it into that turn where its tool takes it now, else admits it direct
+    // and that turn makes way (issue 839, `Agent::owner_goes_first`, `Actor::can_steer`).
     // A message from another agent of this Host never takes a running turn's place either:
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).

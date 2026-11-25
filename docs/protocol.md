@@ -1274,7 +1274,16 @@ Rules:
   message, a schedule, an automation or a goal's wake, a janitor; not the
   tool's compaction, and not a Codex native goal's turn, which a cut would
   pause), a user's or the Oracle's plain send (no
-  `queue_if_busy`) never waits behind it (Rust Host contract 187, feature
+  `queue_if_busy`) never waits behind it. Where the turn's tool can take it
+  now (Claude Code, agy-acp, a Codex turn on its chat lane), it is steered
+  into that turn as below and nothing is cut (Rust Host contract 192, feature
+  `owner_steers`): the send answers `queued: true`, its row gets `read_into`,
+  and from its reading on the turn is the user's in the chat (the live turn's
+  `audience` is `user`, and the rows it writes after the read are audience
+  `user`), until the agent answers the user in a note, after which the rest
+  is the agents' again. What it wrote for the other agent before the read
+  stays the agents'. No `made-way` message is left. Where the tool cannot
+  take it (contract 187, feature
   `owner_preempts`, issue 839): that turn is stopped at once, ending as
   stopped for a newer message, and the send runs next, ahead of everything
   that waits. Behind it the Host leaves the agent a message of origin
@@ -1289,8 +1298,9 @@ Rules:
   A turn that carries the user's own words (the user's turn, a front desk's
   relay) is not cut: there the rules below hold. Where the owner lets the
   agent answer through a conversation fork (feature `conversation_fork`), the
-  fork answers beside the running turn as before. On an older Host the send
-  waits or is steered as below.
+  fork answers beside the running turn as before. A Host from contract 187
+  before 192 cuts the turn whatever its tool; an older Host still lets the
+  send wait or steers it as below.
 - If the agent is busy, a user's send is steered into the running turn when
   its backend can take it. A Codex turn takes it at once, and its `/log` row
   follows at once. A Claude turn (Claude Code 2.1.321 or later) takes it while

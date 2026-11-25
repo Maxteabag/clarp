@@ -987,6 +987,22 @@ impl Agent {
         older
     }
 
+    /// Whether a message of the user's accepted now could be read into the live turn
+    /// ([`Command::Join`]), as far as the agent's state says: a process runs it, nothing ends
+    /// or moves it, no hold holds what waits, and none of the user's older words waits
+    /// unread. The owner's message steers into a turn that is not his only then; else that
+    /// turn makes way for it (issue 839).
+    pub fn live_takes_words(&self) -> bool {
+        self.moved.is_none()
+            && self.live.as_ref().is_some_and(Turn::has_process)
+            && self.stopping.is_none()
+            && self.selected_takeover.is_none()
+            && !self.paused
+            && !self.import_held
+            && self.stop_released.is_empty()
+            && self.older_words_waiting(TurnId(self.next_turn)).is_empty()
+    }
+
     /// A message goes into the prompt of the turn that is being started only as the next of
     /// [`Agent::waiting_together`], and only once the one before it was read: so the prompt
     /// holds the user's messages in the order they were said, and none twice.
@@ -3526,6 +3542,38 @@ mod tests {
         assert!(!a.agent.owner_goes_first(&Origin::User));
         // A free agent has nothing to make way.
         assert!(!Driven::new().agent.owner_goes_first(&Origin::User));
+    }
+
+    /// Peter, 25 Nov 2026: the owner's message is steered into a running turn that is not his
+    /// where that turn can read it now; only where it cannot does the turn make way.
+    #[test]
+    fn the_owners_words_steer_into_another_agents_turn_only_where_it_can_take_them() {
+        let peer = |message_seq| Command::Accept {
+            message_seq,
+            origin: Origin::Agent {
+                agent_id: "a-peer".into(),
+            },
+            admission: Admission::Later,
+            coordination: None,
+            user_word: false,
+        };
+        // Nothing runs: there is no turn to read them.
+        assert!(!Driven::new().agent.live_takes_words());
+        let mut a = Driven::new();
+        a.send(peer(10)).unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        assert!(a.agent.owner_goes_first(&Origin::User));
+        assert!(a.agent.live_takes_words());
+        // An older word of the owner's that waits unread goes in first, or the newer one waits:
+        // the turn makes way instead.
+        a.user(11);
+        assert!(!a.agent.live_takes_words());
+        // A turn on its way out reads nothing more.
+        let mut a = Driven::new();
+        a.send(peer(10)).unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(stop()).unwrap();
+        assert!(!a.agent.live_takes_words());
     }
 
     /// The owner's Stop after a message that went first ends that turn and holds the note
