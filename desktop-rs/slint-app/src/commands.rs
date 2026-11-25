@@ -313,6 +313,22 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
             return ran;
         }
     }
+    // The switcher's own key for message search (Ctrl+F, as bound) turns it
+    // into message search, with the words already typed: the key is not lost
+    // to the text field, and the words are not typed twice.
+    if state == "modal" && app.switcher.borrow().open && app.switcher.borrow().picker.is_empty() && !app.switcher.borrow().messages_only {
+        if keymap::action_for("main", &chord, &overrides(&app), facts(&app, &window)) == Some("search-messages") {
+            let query = app.switcher.borrow().query.clone();
+            run(&app, &window, "search-messages");
+            if !query.is_empty() {
+                app.switcher.borrow_mut().query = query.clone();
+                window.invoke_set_switcher_query(query.into());
+                refresh_switcher(&app, &window);
+            }
+            show_hints(&app, &window);
+            return true;
+        }
+    }
     if state == "hints" {
         let action = keymap::action_for(state, &chord, &overrides(&app), facts(&app, &window));
         let used = crate::link_hints::key(&window, action, &chord);
@@ -425,7 +441,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             open_switcher(app, window);
             app.switcher.borrow_mut().messages_only = true;
             window.set_switcher_placeholder("Search messages in every chat".into());
-            window.set_switcher_empty("No message matches".into());
+            window.set_switcher_empty(crate::search_view::EMPTY.into());
             window.set_switcher_hint("↑↓ move · Enter opens the chat at the message · Esc close".into());
             refresh_switcher(app, window);
         }
@@ -1025,6 +1041,14 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             app.engine.borrow_mut().quick_start_contact(&item.target, "", "", "");
             pump_now(app);
             restore = true;
+        }
+        // Message search stays open on its words while older messages load.
+        switcher::Kind::Command if item.target == crate::search_view::LOAD_OLDER => {
+            app.switcher.borrow_mut().open = true;
+            window.set_switcher_open(true);
+            crate::search_view::load_older(app);
+            refresh_switcher(app, window);
+            return;
         }
         // The picker keeps the keyboard in its search.
         switcher::Kind::Command if item.target == "choose-font" => {
