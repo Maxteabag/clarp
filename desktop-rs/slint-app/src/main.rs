@@ -60,6 +60,7 @@ mod profile_view;
 mod avatar_view;
 mod voice_view;
 mod font_view;
+mod font_warm;
 
 use view::{apply_theme, chat_row, initial, open_link};
 
@@ -685,6 +686,10 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // The fallback walk is for the window on screen; headless checks skip it.
+    if !headless {
+        font_warm::start(window.window());
+    }
     let settings = settings();
     let theme = std::env::args()
         .skip_while(|a| a != "--theme")
