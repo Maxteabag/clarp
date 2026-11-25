@@ -480,7 +480,7 @@ export component AppWindow inherits Window {
                 server-initial: root.server-initial;
                 select-surface(surface) => { root.surface-chosen(surface); }
                 toggle-muted => { root.toggle-muted(); }
-                open-switcher => { root.open-switcher(); }
+                open-message-search => { root.run-command("search-messages"); }
                 open-connection => { root.run-command("connection"); }
                 live: root.connection == "live";
             }

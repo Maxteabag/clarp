@@ -1617,7 +1617,7 @@ impl Engine {
         if self.voice_json(tag, object) || self.narrator_json(tag, object) {
             return;
         }
-        if self.host_status_json(tag, object) || self.stop_json(tag, object) {
+        if self.host_status_json(tag, object) || self.stop_json(tag, object) || self.host_search_json(tag, object) {
             return;
         }
         if tag.starts_with("tool-details:") {
@@ -1657,6 +1657,7 @@ impl Engine {
             self.roster_rows_server_info(object);
             self.form_events_server_info(object);
             self.stop_server_info(object);
+            self.search_server_info(object);
             self.artifact_summary_server_info(object);
             self.live_rewatch();
             self.sse.start();
@@ -1689,7 +1690,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {

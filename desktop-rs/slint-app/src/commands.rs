@@ -861,6 +861,7 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.picker.clear();
         state.messages_only = false;
     }
+    crate::search_view::forget_asked();
     window.set_switcher_note("".into());
     window.set_switcher_placeholder("Agent, contact, setting or command".into());
     window.set_switcher_empty("No matching agent or contact".into());
@@ -938,10 +939,13 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     let items = if !picker.is_empty() {
         switcher::picker(&picker, &crate::settings_view::choices(app, &picker), &query)
     } else if messages_only {
-        // Ctrl+F: messages, and what was searched.
-        let (items, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::LIMIT);
-        note = crate::search_view::note(&results);
-        items
+        // Ctrl+F: messages, and what was searched. A Host that searches
+        // is asked once the typing pauses.
+        crate::search_view::ask(app, &query);
+        let found = crate::search_view::found(&mut app.engine.borrow_mut(), &query);
+        note = found.note;
+        window.set_switcher_empty(found.empty.into());
+        found.items
     } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
@@ -1083,6 +1087,14 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             app.switcher.borrow_mut().open = true;
             window.set_switcher_open(true);
             crate::search_view::load_older(app);
+            refresh_switcher(app, window);
+            return;
+        }
+        // So does "Load more": the Hosts' next page comes in under it.
+        switcher::Kind::Command if item.target == crate::search_view::LOAD_MORE => {
+            app.switcher.borrow_mut().open = true;
+            window.set_switcher_open(true);
+            crate::search_view::load_more(app);
             refresh_switcher(app, window);
             return;
         }

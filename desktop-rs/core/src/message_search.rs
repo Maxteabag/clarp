@@ -1,8 +1,11 @@
 //! Message search over what this client holds: the loaded chats and the
-//! on-disk transcript cache (the Host has no search). One index per chat,
-//! updated row by row as rows arrive; a row is folded to lower case once,
-//! when it is new or changed. Results rank by how well they match, then by
-//! how recent they are.
+//! on-disk transcript cache, for a Host without message search. One index
+//! per chat, updated row by row as rows arrive; a row is folded to lower
+//! case once, when it is new or changed. Results rank by how well they
+//! match, then by how recent they are.
+//!
+//! A Host that lists `FEATURE` searches every chat itself (`GET /search`,
+//! docs/protocol.md): `HostPage` reads one page of its answer.
 
 use std::collections::HashMap;
 
@@ -256,5 +259,114 @@ fn push(segments: &mut Vec<Segment>, text: &str, mark: bool) {
     match segments.last_mut() {
         Some(last) if last.mark == mark => last.text.push_str(text),
         _ => segments.push(Segment { text: text.to_owned(), mark }),
+    }
+}
+
+// ---- the Host's message search (`GET /search`) --------------------------
+
+/// The feature a Host lists in `/server-info` when it answers `GET /search`.
+pub const FEATURE: &str = "message_search";
+
+/// One row the Host found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HostHit {
+    pub session: String,
+    pub agent_id: String,
+    /// The agent's name as the Host has it.
+    pub name: String,
+    /// The row's id in `GET /log` of `session`.
+    pub message_id: String,
+    pub role: String,
+    pub timestamp: String,
+    pub epoch_ms: i64,
+    pub revision: i64,
+    /// The matching stretch, each matched word its own marked piece.
+    pub snippet: Vec<Segment>,
+}
+
+/// One page of `GET /search`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct HostPage {
+    pub hits: Vec<HostHit>,
+    /// The cursor of the next page; None on the last.
+    pub next_before: Option<String>,
+    /// The Host is still reading older history into its index.
+    pub partial: bool,
+}
+
+impl HostPage {
+    pub fn from_json(object: &crate::json::Object) -> Self {
+        use crate::json::{array, boolean, integer, string};
+        let hits = array(object, "hits")
+            .iter()
+            .filter_map(serde_json::Value::as_object)
+            .filter_map(|hit| {
+                let (session, message_id) = (string(hit, "session"), string(hit, "message_id"));
+                if session.is_empty() || message_id.is_empty() {
+                    return None;
+                }
+                let timestamp = string(hit, "timestamp");
+                // The pieces as the Host cut them; the plain snippet when it
+                // sent none.
+                let mut snippet: Vec<Segment> = Vec::new();
+                for part in array(hit, "parts").iter().filter_map(serde_json::Value::as_object) {
+                    let text = string(part, "text");
+                    if !text.is_empty() {
+                        push(&mut snippet, &text, boolean(part, "match"));
+                    }
+                }
+                if snippet.is_empty() {
+                    let text = collapse(&string(hit, "snippet"));
+                    if !text.is_empty() {
+                        snippet.push(Segment { text, mark: false });
+                    }
+                }
+                Some(HostHit {
+                    agent_id: string(hit, "agent_id"),
+                    name: string(hit, "name"),
+                    role: string(hit, "role"),
+                    epoch_ms: crate::time_format::epoch_ms(&timestamp).unwrap_or(0),
+                    revision: integer(hit, "revision"),
+                    timestamp,
+                    session,
+                    message_id,
+                    snippet,
+                })
+            })
+            .collect();
+        let next_before = object.get("next_before").and_then(serde_json::Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
+        Self { hits, next_before, partial: boolean(object, "partial") }
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+
+    #[test]
+    fn a_host_page_reads_its_hits_cursor_and_partial() {
+        let page = serde_json::json!({
+            "q": "oslo",
+            "hits": [
+                {"session": "ada-1234", "agent_id": "a1", "name": "Ada", "message_id": "m7", "role": "user",
+                 "timestamp": "2026-11-25T10:02:03.000Z", "revision": 52428800, "snippet": "…Shall we meet in Oslo on Friday?",
+                 "parts": [{"text": "…Shall we meet in ", "match": false}, {"text": "Oslo", "match": true}, {"text": " on Friday?", "match": false}]},
+                {"session": "", "message_id": "x"},
+                {"session": "bo", "message_id": "m1", "role": "assistant", "snippet": "Oslo  again"}
+            ],
+            "next_before": "1807402480000000",
+            "partial": true
+        });
+        let page = HostPage::from_json(page.as_object().unwrap());
+        assert_eq!(page.hits.len(), 2, "a hit without a session is left out");
+        let hit = &page.hits[0];
+        assert_eq!((hit.session.as_str(), hit.message_id.as_str(), hit.name.as_str(), hit.role.as_str()), ("ada-1234", "m7", "Ada", "user"));
+        assert_eq!(hit.epoch_ms, crate::time_format::epoch_ms("2026-11-25T10:02:03.000Z").unwrap());
+        assert_eq!(hit.snippet.iter().filter(|s| s.mark).map(|s| s.text.as_str()).collect::<Vec<_>>(), ["Oslo"]);
+        assert_eq!(page.hits[1].snippet, [Segment { text: "Oslo again".into(), mark: false }], "no parts: the snippet, unmarked");
+        assert_eq!(page.next_before.as_deref(), Some("1807402480000000"));
+        assert!(page.partial);
+        let last = HostPage::from_json(serde_json::json!({"hits": [], "next_before": null}).as_object().unwrap());
+        assert_eq!((last.next_before, last.partial), (None, false));
     }
 }
