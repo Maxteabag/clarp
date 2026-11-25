@@ -429,6 +429,7 @@ impl Engine {
         shown.retain(|s| all_hosts::split(s).is_some_and(|(id, _)| id == server_id));
         let selected = self.selected.clone();
         let engine = &mut self.peers.list[index].engine;
+        engine.live.shown = shown.iter().filter_map(|s| all_hosts::split(s)).map(|(_, local)| local.to_owned()).collect();
         for session in &shown {
             if *session != selected {
                 engine.open_log(all_hosts::split(session).map_or("", |(_, l)| l));
