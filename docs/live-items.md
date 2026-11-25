@@ -215,6 +215,19 @@ reported there as `thinking` so older clients stay busy.
 `worked_ms = ended_at_ms - started_at_ms` once settled. Render a settled turn's
 work behind `Worked for 1m 12s · 6 tools`.
 
+`read_rows` (Rust Host contract 185, feature `live_read_rows`): the ids of the `/log` rows of the
+messages read into the turn as it ran, oldest first: a message steered into the running turn, or
+messages read together with the turn's own at its start. Absent while none was read. A `turn` op
+with the longer list follows each read, and the turn keeps the list as it goes on and ends. It
+holds the newest 20; where older ones were left out, `read_rows_more` is `true`.
+
+**Where the working line goes:** after the last row in `read_rows`. Where `read_rows` is absent,
+as before: after the turn's own message (the user row whose trace is the turn's `turn_id`),
+before the first row written after the turn began. A message that waits for the next turn is in
+no `read_rows`: the working line stays above it. `started_at_ms` is no earlier than the turn's own
+message's row (issue 798), so a client that places the working line by time puts it below that
+message.
+
 `audience` (Host contract 108) is `agents` when another agent's message started
 the turn, else `user` (docs/protocol.md, Provenance: coordination between
 agents). When the user steps into such a turn while it runs, a `turn` op with

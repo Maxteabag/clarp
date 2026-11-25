@@ -852,6 +852,19 @@ fn an_answer_given_before_a_steered_message_is_never_hidden_by_the_work_for_it()
             Some(json!("conversation")),
             "{mode}: in the conversation, while the tool runs"
         );
+        // The turn the follow-up was read into says so: an app puts its working line below
+        // the follow-up's row (issue 808).
+        if mode == "answered" {
+            let live = host.get(&format!("/live?session={session}"));
+            let read = live["turn"]["read_rows"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            assert!(
+                read.iter().any(|row| row == &json!(format!("u-{follow}"))),
+                "{mode}: {live}"
+            );
+        }
         std::fs::write(place.root.join(format!("release-{mode}")), "").unwrap();
         collect_answer(&host, session, last);
         wait_for("the follow-up's answer in the conversation", || {

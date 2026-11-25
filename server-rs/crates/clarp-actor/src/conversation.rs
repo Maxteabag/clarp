@@ -180,6 +180,11 @@ impl Which {
 /// How many items are read at a time when some of them are left out.
 const CHUNK: usize = 256;
 
+/// The rows of the messages read into a turn as it ran, oldest first (issue 808).
+pub(crate) fn read_rows_of(log: &dyn AgentLog, turn: u64) -> Result<Vec<String>, ActorError> {
+    Ok(find_anchors(log, turn, None, false)?.read_rows)
+}
+
 /// Rows that are conversation without needing to be a turn's anchor.
 pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
     conversation_in(entry, session_rows, false)

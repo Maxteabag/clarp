@@ -418,6 +418,9 @@ pub enum Glimpse {
     },
 }
 
+/// How many of the rows read into a turn it carries, the newest ([`Hub::read_rows`]).
+pub const READ_ROWS_KEPT: usize = 20;
+
 /// One agent's live items on the Host.
 #[derive(Debug, Clone)]
 pub struct Hub {
@@ -633,6 +636,46 @@ impl Hub {
             let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
             self.emit(vec![op], (false, ""), now, &mut out);
         }
+        out
+    }
+
+    /// Messages were read into the running turn (`rows`: their rows' ids, in the order they were
+    /// read): steered into it, or read with its own at its start. The turn carries them as
+    /// `read_rows`, oldest first, so a client puts the turn's working line after the last of
+    /// them (issue 808). It keeps the newest [`READ_ROWS_KEPT`]; where older ones were left out,
+    /// `read_rows_more` is true. Told again only when the list grows.
+    pub fn read_rows(&mut self, rows: &[String], now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        if !self.open(None) {
+            return out;
+        }
+        let Some(mut turn) = self.view.turn.clone() else {
+            return out;
+        };
+        let mut read: Vec<Value> = turn
+            .get("read_rows")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let before = read.len();
+        for row in rows.iter().filter(|row| !row.is_empty()) {
+            if !read.iter().any(|held| held.as_str() == Some(row.as_str())) {
+                read.push(json!(row));
+            }
+        }
+        if read.len() == before {
+            return out;
+        }
+        // Only the newest are needed to place the working line: a turn the user keeps writing
+        // into for hours would otherwise grow every op of its turn without end.
+        if read.len() > READ_ROWS_KEPT {
+            read.drain(..read.len() - READ_ROWS_KEPT);
+            turn.insert("read_rows_more".to_string(), json!(true));
+        }
+        turn.insert("read_rows".to_string(), Value::Array(read));
+        self.flush(now, &mut out);
+        let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
+        self.emit(vec![op], (false, ""), now, &mut out);
         out
     }
 

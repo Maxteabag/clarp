@@ -651,6 +651,12 @@ Rules:
     own session; the fork's first action (a relay, a note) may then have gone out as well.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
+- **Where a turn's working line goes (feature `live_read_rows`, Rust Host contract 185).** After
+  the last row in the live turn's `read_rows` (the messages read into the running turn, oldest
+  first; [Live items](live-items.md) §1.4). Where `read_rows` is absent, as before: after the
+  turn's own message, before the first row written after the turn began. A message steered into
+  a running turn is in `read_rows`, so the working line goes below it; a message that waits for
+  the next turn is not, so the working line stays above it.
 - **A message that waits enters the conversation where its turn starts (feature
   `waited_send_order`, Host contract 115).** A user row is written when the
   message reaches the agent: at once for a send that starts a turn or is steered into one; for

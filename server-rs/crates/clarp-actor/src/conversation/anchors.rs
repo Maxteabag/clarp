@@ -40,6 +40,9 @@ pub(super) struct TurnAnchors {
     /// The row that decided a reply was an answer, and that reply: a reader given the row is
     /// given the reply again, now in the conversation view.
     pub(super) decides: HashMap<String, String>,
+    /// The rows of the messages read into the turn as it ran, oldest first: steered into it,
+    /// or read with its own at its start.
+    pub(super) read_rows: Vec<String>,
 }
 
 impl TurnAnchors {
@@ -153,6 +156,7 @@ impl Walk {
                 && let Some(entry) = Entry::from_item(item).map_err(|why| corrupt(item, why))?
             {
                 self.call = None;
+                self.decided.read_rows.push(entry.id().to_owned());
                 self.decide(log, item.seq, entry.id())?;
             }
             return Ok(());

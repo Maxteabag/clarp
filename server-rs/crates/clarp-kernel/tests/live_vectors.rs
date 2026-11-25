@@ -480,3 +480,41 @@ fn a_message_is_an_answer_once_the_turn_decides_it_and_never_narration_after() {
         .into();
     assert_eq!(finals, expected);
 }
+
+/// Issue 808: a message read into the running turn (steered in, or read with its own at its
+/// start) is carried on the turn as `read_rows`, oldest first, so a client places the turn's
+/// working line below it. Told once per new row, and kept as the turn goes on and ends.
+#[test]
+fn a_turn_carries_the_rows_read_into_it() {
+    let mut hub = Hub::new("e1", "a1", "s1").growing();
+    let read = |hub: &mut Hub, now: i64| {
+        let (snapshot, _) = hub.snapshot(now).unwrap();
+        snapshot["turn"]["read_rows"].clone()
+    };
+    let _ = hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    assert_eq!(read(&mut hub, 11), Value::Null, "nothing read yet");
+    let told = hub.read_rows(&["u-2".to_string()], 20);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0]["ops"][0]["turn"]["read_rows"], json!(["u-2"]));
+    assert!(
+        hub.read_rows(&["u-2".to_string()], 21).is_empty(),
+        "told once"
+    );
+    let _ = hub.read_rows(&["u-3".to_string()], 30);
+    assert_eq!(read(&mut hub, 31), json!(["u-2", "u-3"]));
+    let call = ToolStart {
+        name: "Bash",
+        call_id: "c-1",
+        category: "shell",
+        label: "Bash",
+        command: None,
+        input_preview: None,
+    };
+    let _ = hub.tool_start("tool-1", &call, "running", Some("t-1"), 40);
+    assert_eq!(read(&mut hub, 41), json!(["u-2", "u-3"]));
+    let _ = hub.end_turn("completed", None, 50);
+    assert_eq!(read(&mut hub, 51), json!(["u-2", "u-3"]));
+    // A new turn reads nothing of the last one.
+    let _ = hub.begin_turn("s1", "c1", "t-2", Some(60), "user", 60);
+    assert_eq!(read(&mut hub, 61), Value::Null);
+}

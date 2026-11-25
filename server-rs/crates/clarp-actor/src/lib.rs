@@ -501,6 +501,8 @@ impl Waiting {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinedRead {
     pub turn: TurnId,
+    /// The id of the message's row in the conversation.
+    pub row: String,
     pub client_id: String,
     pub queue: QueueState,
     pub origin: Origin,
@@ -1900,6 +1902,12 @@ impl Actor {
                     audience,
                     now_ms,
                 );
+                self.shown_events.extend(events);
+                // What the turn read before it was shown: read with its own message at its
+                // start, or steered in already.
+                let read =
+                    conversation::read_rows_of(self.recorder.log(), turn.0).unwrap_or_default();
+                let events = self.shown.read_rows(&read, now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = Some((turn, name));
             }
@@ -5639,6 +5647,9 @@ impl Actor {
             }
             offset = read.next_offset;
         }
+        // What the turn read, those who watch it are told again: its working line goes below it.
+        let read = conversation::read_rows_of(self.recorder.log(), turn.0)?;
+        let _ = self.shown.read_rows(&read, now_ms);
         // One write to the log, so that every revision from here on is above every revision the
         // actor before this one gave to something it showed and did not store.
         let mut batch = self.recorder.batch();
@@ -6887,6 +6898,14 @@ impl Actor {
                             events: &mut self.shown_events,
                         };
                         live.said.read(own_turn, shown);
+                        // Those who watch the turn are told what it read: its working line goes
+                        // below the newest of them (issue 808).
+                        let read: Vec<String> = out.joined_reads[read_before..]
+                            .iter()
+                            .map(|read| read.row.clone())
+                            .collect();
+                        let events = self.shown.read_rows(&read, t);
+                        self.shown_events.extend(events);
                     }
                 }
                 // The turn ends for the user at its tool's own end line, while the process goes

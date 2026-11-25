@@ -526,6 +526,7 @@ pub(super) fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, 
     };
     out.joined_reads.push(JoinedRead {
         turn,
+        row: message.id.clone(),
         client_id: message.told_id().to_owned(),
         origin: message.origin.clone(),
         sender_agent_id: message
