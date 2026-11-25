@@ -6,8 +6,8 @@
 //!
 //! - its owner: the apps (a paired device), and the administrator's token presented without
 //!   an agent's turn;
-//! - itself, and every agent bound as it is (the same Codex home and the same provider: the
-//!   helpers and forks it makes are);
+//! - itself, and every agent bound as it is (the same Codex home and the same provider: its
+//!   forks, and the helpers made with it as their parent, are bound so);
 //! - the agents the owner lets read it, one by one (`readers` on its record). An agent asks
 //!   with `clarp-admin agent provider --reader`, and the owner answers on a card.
 //!
@@ -19,9 +19,11 @@
 //! The agents' own tools ask the same check ([`reader_of_call`]), as do the messages an agent
 //! sends ([`withheld_message`]) and the updates it gives its teams ([`withheld_update`]).
 //!
-//! What it does not stop: an agent on the same machine that reads the Host's configuration
-//! (its administrator token) or the agent's own files. The Host keeps its words out of what
-//! it hands to other agents; the machine's own files are the machine's.
+//! What it does not stop: anything run with the administrator's token and no turn reads as
+//! the owner (an agent's tool run outside a turn falls back to that token); an agent on the
+//! same machine that reads the Host's configuration (its administrator token) or the agent's
+//! own files. The Host keeps its words out of what it hands to other agents; the machine's
+//! own files are the machine's.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -54,7 +56,7 @@ pub enum Reader {
     },
     /// An agent's tool or script that cannot say whose turn it is.
     Unknown,
-    /// Another Host, or a page of another origin.
+    /// Another Host.
     Elsewhere,
 }
 
