@@ -193,37 +193,37 @@ fn fold_title(folded: &Folded, key: &str) -> String {
 #[test]
 fn grouped_the_work_before_a_steered_message_stays_above_it_while_running_settled_and_in_history() {
     let running = present(&live(false, false), &log_rows(false, false), &live_options(Mode::Grouped));
-    assert_eq!(live_order(&running, &log_rows(false, false)), [S1, &before(), S2, &working()], "the work so far, the message, Working");
-    assert_eq!(title(&running, &before()), "1 tool");
-    assert_eq!(title(&running, &working()), "Working");
+    assert_eq!(live_order(&running, &log_rows(false, false)), [S1, before().as_str(), S2, working().as_str()], "the work so far, the message, Working");
+    assert_eq!(title(&running, before().as_str()), "1 tool");
+    assert_eq!(title(&running, working().as_str()), "Working");
 
     let rows = log_rows(false, true);
     let settled = present(&live(false, true), &rows, &live_options(Mode::Grouped));
     let drawn = live_order(&settled, &rows);
-    assert_eq!(drawn, [S1, &before(), S2, ANSWER, S3], "settled: the work above the message, the answer below it");
-    assert_eq!(title(&settled, &before()), "Worked for 26s · 1 tool");
+    assert_eq!(drawn, [S1, before().as_str(), S2, ANSWER, S3], "settled: the work above the message, the answer below it");
+    assert_eq!(title(&settled, before().as_str()), "Worked for 26s · 1 tool");
 
     let folded = history(&rows, Mode::Grouped);
     assert_eq!(history_order(&rows, &folded), drawn, "history draws it as live did");
-    assert_eq!(fold_title(&folded, &before()), "Worked for 26s · 1 tool");
+    assert_eq!(fold_title(&folded, before().as_str()), "Worked for 26s · 1 tool");
 }
 
 #[test]
 fn grouped_work_after_the_steered_message_goes_below_it_in_every_state() {
     let running = present(&live(true, false), &log_rows(true, false), &live_options(Mode::Grouped));
-    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, &before(), S2, &working()]);
-    assert_eq!(title(&running, &before()), "1 tool");
-    assert_eq!(title(&running, &working()), "Working · 1 tool", "Working holds what runs after the message");
+    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, before().as_str(), S2, working().as_str()]);
+    assert_eq!(title(&running, before().as_str()), "1 tool");
+    assert_eq!(title(&running, working().as_str()), "Working · 1 tool", "Working holds what runs after the message");
 
     let rows = log_rows(true, true);
     let settled = present(&live(true, true), &rows, &live_options(Mode::Grouped));
     let drawn = live_order(&settled, &rows);
-    assert_eq!(drawn, [S1, &before(), S2, &working(), ANSWER, S3]);
-    assert_eq!((title(&settled, &before()), title(&settled, &working())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()), "the worked time on the last work row");
+    assert_eq!(drawn, [S1, before().as_str(), S2, working().as_str(), ANSWER, S3]);
+    assert_eq!((title(&settled, before().as_str()), title(&settled, working().as_str())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()), "the worked time on the last work row");
 
     let folded = history(&rows, Mode::Grouped);
     assert_eq!(history_order(&rows, &folded), drawn);
-    assert_eq!((fold_title(&folded, &before()), fold_title(&folded, &working())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()));
+    assert_eq!((fold_title(&folded, before().as_str()), fold_title(&folded, working().as_str())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()));
 }
 
 #[test]
@@ -240,15 +240,15 @@ fn always_visible_each_step_keeps_its_time_place_against_the_steered_message() {
         let folded = history(&rows, Mode::AlwaysVisible);
         assert_eq!(history_order(&rows, &folded), drawn, "history as live, echo {echo}");
         let at = |key: &str| drawn.iter().position(|k| k == key);
-        assert!(at(&before()) < at(S2) && at(S2) < at(ANSWER), "{drawn:?}");
+        assert!(at(before().as_str()).is_some() && at(before().as_str()) < at(S2) && at(S2) < at(ANSWER), "{drawn:?}");
     }
 }
 
 #[test]
 fn conversation_view_keeps_the_turn_whole_below_the_steered_message() {
     let running = present(&live(true, false), &log_rows(true, false), &live_options(Mode::Conversation));
-    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, S2, &working()], "one Running box below the message");
-    assert_eq!(title(&running, &working()), "Working · 2 tools");
+    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, S2, working().as_str()], "one Running box below the message");
+    assert_eq!(title(&running, working().as_str()), "Working · 2 tools");
 
     let rows = log_rows(true, true);
     let folded = history(&rows, Mode::Conversation);
@@ -262,6 +262,6 @@ fn conversation_view_keeps_the_turn_whole_below_the_steered_message() {
 
 #[test]
 fn a_part_key_names_its_turn() {
-    assert_eq!(clarp_core::chat_view::fold_turn(&before()), T);
-    assert_eq!(clarp_core::chat_view::fold_turn(&working()), T);
+    assert_eq!(clarp_core::chat_view::fold_turn(before().as_str()), T);
+    assert_eq!(clarp_core::chat_view::fold_turn(working().as_str()), T);
 }
