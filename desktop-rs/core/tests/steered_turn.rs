@@ -162,13 +162,39 @@ fn history_order(rows: &[Message], folded: &Folded) -> Vec<String> {
 }
 
 fn history(rows: &[Message], mode: Mode) -> Folded {
+    history_on(rows, mode, false)
+}
+
+/// History from a Host that does (`read_into` true) or does not name the
+/// turn a message was read into on its row (feature `read_into`, contract 189).
+fn history_on(rows: &[Message], mode: Mode, read_into: bool) -> Folded {
     let options = history_fold::Options {
         summaries: true,
         show_commentary: mode == Mode::AlwaysVisible,
         whole_turn: mode == Mode::Conversation,
+        read_into,
         ..history_fold::Options::default()
     };
     history_fold::present(rows, None, &options)
+}
+
+/// The rows as a `read_into` Host writes them: [s2] names the turn it was
+/// read into, `turn`.
+fn read_into(mut rows: Vec<Message>, turn: &str) -> Vec<Message> {
+    for row in rows.iter_mut().filter(|r| r.id == S2) {
+        *row = row_with_read_into(row, turn);
+    }
+    rows
+}
+
+fn row_with_read_into(row: &Message, turn: &str) -> Message {
+    let mut value = json!({"id": row.id, "role": row.role, "timestamp": row.timestamp, "trace_id": row.trace_id, "text": row.text});
+    value["read_into"] = json!({"trace_id": turn, "turn": 41});
+    self::row(value)
+}
+
+fn fold_keys(folded: &Folded) -> Vec<String> {
+    folded.folds.iter().map(|f| f.key.clone()).collect()
 }
 
 fn before() -> String {
@@ -264,4 +290,66 @@ fn conversation_view_keeps_the_turn_whole_below_the_steered_message() {
 fn a_part_key_names_its_turn() {
     assert_eq!(clarp_core::chat_view::fold_turn(before().as_str()), T);
     assert_eq!(clarp_core::chat_view::fold_turn(working().as_str()), T);
+}
+
+#[test]
+fn a_row_parses_read_into_as_its_turn_id() {
+    let rows = read_into(log_rows(false, false), T);
+    assert_eq!(rows.iter().find(|r| r.id == S2).map(|r| r.read_into.as_str()), Some(T));
+    assert!(rows.iter().filter(|r| r.id != S2).all(|r| r.read_into.is_empty()), "absent on every other row");
+}
+
+#[test]
+fn with_read_into_history_splits_at_the_row_read_into_the_turn_as_live_does() {
+    for echo in [false, true] {
+        let rows = read_into(log_rows(echo, true), T);
+        let settled = present(&live(echo, true), &rows, &live_options(Mode::Grouped));
+        let drawn = live_order(&settled, &rows);
+        let folded = history_on(&rows, Mode::Grouped, true);
+        assert_eq!(history_order(&rows, &folded), drawn, "history as live, echo {echo}");
+        assert!(fold_keys(&folded).contains(&before()), "the work before [s2] folds above it: {:?}", fold_keys(&folded));
+    }
+}
+
+#[test]
+fn with_read_into_a_message_stamped_inside_the_turn_without_it_does_not_split_it() {
+    // [s2] was written while the turn worked, yet the Host says it was not
+    // read into it (it waited, or a fork answered it): no cut.
+    for rows in [log_rows(true, true), read_into(log_rows(true, true), "another-turn")] {
+        let folded = history_on(&rows, Mode::Grouped, true);
+        assert_eq!(fold_keys(&folded), [working()], "the turn's work stays one piece");
+        let order = history_order(&rows, &folded);
+        let at = |key: &str| order.iter().position(|k| k == key);
+        assert!(at(working().as_str()) < at(S2), "the work stays above the message: {order:?}");
+    }
+}
+
+#[test]
+fn an_older_host_keeps_splitting_by_time() {
+    let rows = log_rows(true, true);
+    let folded = history_on(&rows, Mode::Grouped, false);
+    assert_eq!(fold_keys(&folded), [before(), working()], "a row written inside the turn's span cuts it");
+}
+
+#[test]
+fn with_read_into_a_turn_begun_without_a_trace_splits_at_its_turn_id() {
+    // The turn's own message was sent without a trace: its row says "",
+    // while the turn, its rows and read_into say `turn-<id>`.
+    const TT: &str = "turn-tt-codex-1795607109250-1";
+    let mut rows = read_into(log_rows(true, true), TT);
+    for row in rows.iter_mut() {
+        if row.id == S1 {
+            row.trace_id = String::new();
+        } else if row.trace_id == T {
+            row.trace_id = TT.to_owned();
+        }
+        if let Some(turn) = row.turn.as_mut() {
+            turn.insert("turn_id".into(), json!(TT));
+        }
+    }
+    let folded = history_on(&rows, Mode::Grouped, true);
+    let before = format!("live:fold:{TT}@{S2}");
+    let working = format!("live:fold:{TT}");
+    assert_eq!(fold_keys(&folded), [before.clone(), working.clone()]);
+    assert_eq!(history_order(&rows, &folded), [S1, before.as_str(), S2, working.as_str(), ANSWER, S3]);
 }

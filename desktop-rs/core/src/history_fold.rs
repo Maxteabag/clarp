@@ -42,6 +42,10 @@ pub struct Options<'a> {
     /// Conversation view: a turn's work stays one piece, never split at a
     /// message read into it (`live_present::Options::whole_turn`).
     pub whole_turn: bool,
+    /// The Host names the turn a message was read into on its row (feature
+    /// `read_into`, Rust Host contract 189): a turn splits exactly at its
+    /// rows whose `read_into` is the turn's id, never by time alone.
+    pub read_into: bool,
     /// A cached explanation of a `/log` tool call (never asks for one).
     pub explain: Option<&'a dyn Fn(&Object) -> String>,
 }
@@ -82,16 +86,20 @@ pub struct Folded {
 /// prompt, or the agent idle) and when it used a tool. The turn live items
 /// show is theirs. A turn the live view retired folds from its items, so it
 /// keeps its worked time, reasoning and keys; otherwise from `/log`. A user
-/// row written while the turn worked (a message steered into it) splits it:
-/// the work before it folds above it, the work after it below it, as the
-/// live turn showed it (#843).
+/// row read into the turn (a message steered into it) splits it: the work
+/// before it folds above it, the work after it below it, as the live turn
+/// showed it (#843). A Host with `read_into` says which rows those are; an
+/// older one leaves it to when they were written (#851).
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
     if !options.summaries {
         retain_unfiled_messages(rows, live, options, &mut folded);
         return folded;
     }
-    let prompts: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].role == "user").collect();
+    // A message read into another turn (`read_into`) started none: it is
+    // not a prompt, so the work after it stays its turn's, also where the
+    // turn's own message had no trace to match its rows by.
+    let prompts: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].role == "user" && !(options.read_into && !rows[i].read_into.is_empty())).collect();
     // Each agent row's turn: the prompt carrying its trace id, else the
     // last prompt written before it (the Host lands a turn's tool rows once
     // it is over, after a message sent meanwhile), else the one above it.
@@ -449,13 +457,31 @@ fn turn(
         let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
         when.get(id).or_else(|| when.get(call)).copied().or_else(|| item.get("started_at_ms").and_then(Value::as_i64))
     };
-    // A message written while the turn worked (after its first row, before
-    // its last) was read into it: the work splits there, as the live turn
-    // split it at the rows it read (`live_present::arrange_parts`).
+    // The work splits at each message read into the turn, as the live turn
+    // split it at the rows it read (`live_present::arrange_parts`). A Host
+    // with `read_into` names them: rows whose `read_into` is this turn's id
+    // as the live view gives it (`turn_id`, `turn-<id>` for a message sent
+    // without a trace, so never the prompt row's own empty trace). An older
+    // Host: messages written while the turn worked, after its first row and
+    // before its last.
+    let ids: HashSet<&str> = logged
+        .and_then(|t| t.get("turn_id")).and_then(Value::as_str)
+        .into_iter()
+        .chain([turn_id])
+        .chain(members.iter().map(|m| m.trace_id.as_str()))
+        .filter(|t| !t.is_empty())
+        .collect();
     let first = members.iter().filter_map(|m| ms(m)).min();
     let end = members.iter().filter_map(|m| ms(m)).max();
     let mut cuts: Vec<live_present::Cut> = match (first, end) {
-        (Some(first), Some(end)) if !options.whole_turn => rows
+        _ if options.whole_turn => Vec::new(),
+        _ if options.read_into => rows
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| r.role == "user" && Some(*i) != prompt && ids.contains(r.read_into.as_str()))
+            .filter_map(|(_, r)| Some(live_present::Cut { row: r.id.clone(), at_ms: ms(r)? }))
+            .collect(),
+        (Some(first), Some(end)) => rows
             .iter()
             .enumerate()
             .filter(|(i, r)| r.role == "user" && !r.pending && Some(*i) != prompt)

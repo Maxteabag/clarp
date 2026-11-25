@@ -201,6 +201,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
         explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
         veil: veils(engine, session),
         whole_turn: conversation_view(engine, session, rows),
+        read_into: engine.read_into(),
     };
     let mut folded = clarp_core::history_fold::present(rows, view, &options);
     if conversation_view(engine, session, rows) {

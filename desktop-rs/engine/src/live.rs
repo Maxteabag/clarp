@@ -45,6 +45,8 @@ pub(crate) struct Live {
     pub explanation_setting: bool,
     /// `/log` rows carry turn summaries (`log_turn_summary`).
     pub turn_summaries: bool,
+    /// A user row read into another turn names it (`read_into`, contract 189).
+    pub read_into: bool,
     /// A turn that did not complete says why on its end (`turn_end_reason`).
     pub turn_reasons: bool,
     /// The Host speaks an answer only when its send asks for it
@@ -74,6 +76,13 @@ impl Engine {
     /// (`log_turn_summary`, docs/live-items.md §9).
     pub fn log_turn_summary(&self) -> bool {
         self.live.turn_summaries
+    }
+
+    /// Whether a user row read into another turn names that turn
+    /// (`read_into`, Rust Host contract 189): history splits a turn at
+    /// exactly those rows.
+    pub fn read_into(&self) -> bool {
+        self.live.read_into
     }
 
     /// Asks the Host to speak the answer a send starts as the voice setting
@@ -164,6 +173,7 @@ impl Engine {
         let enabled = has("live_items");
         self.live.explanation_setting = has("tool_explanation_setting");
         self.live.turn_summaries = has("log_turn_summary");
+        self.live.read_into = has("read_into");
         self.live.turn_reasons = has(clarp_core::turn_reason::FEATURE);
         self.live.spoken_when_asked = has("spoken_when_asked");
         if enabled != self.live.enabled {
