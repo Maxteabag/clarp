@@ -136,6 +136,24 @@ fn wheel(delta_y: f32) {
     headless::wheel(geo.left + geo.width / 2.0, (geo.top + geo.bottom) / 2.0, delta_y);
 }
 
+/// Whether row `id`'s first line is at the viewport's top (its box starts
+/// within the row's top padding of it), and the numbers either way.
+fn at_top(id: &str) -> (bool, String) {
+    let geo = geometry();
+    match geo.find(id) {
+        Some((top, bottom)) => {
+            let from = top - geo.top;
+            ((-1.0..=16.0).contains(&from), format!("row {id} at {top:.1}..{bottom:.1}, {from:.1}px below the viewport's top {:.1} ({})", geo.top, geo.drawn()))
+        }
+        None => (false, format!("row {id} is not drawn ({})", geo.drawn())),
+    }
+}
+
+/// Whether the open pane shows the jump-to-latest dot (more below).
+fn news() -> bool {
+    app_now().active_view().is_some_and(|v| v.news)
+}
+
 const LOREM: &str = "The agent reads the failing test, finds the stale fixture and rewrites it so the suite runs green again. ";
 
 /// The streaming reply after `step` updates: paragraphs and code blocks.
@@ -388,7 +406,7 @@ pub(super) fn scroll_check(out: String) {
     use slint::platform::Key;
     let state = Rc::new(RefCell::new(State::default()));
     let s = || state.clone();
-    let (out1, out2, out3) = (out.clone(), out.clone(), out.clone());
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out.clone());
     const LONG: usize = 400;
     let streams: usize = 5;
     let stages: Vec<Stage> = vec![
@@ -634,7 +652,9 @@ pub(super) fn scroll_check(out: String) {
                 true
             }
         })),
-        // 8. Following: new rows and a growing streaming reply stay in view.
+        // 8. Following a streaming reply: it is followed until its first
+        // line reaches the top of the view; then the view holds there while
+        // it grows, and the dot says there is more below.
         ("follows a stream", Box::new({
             let state = s();
             move |_, _, _| {
@@ -642,8 +662,7 @@ pub(super) fn scroll_check(out: String) {
                 let step = st.step;
                 // Each update: wait for it to land, then measure.
                 if step > 0 {
-                    let landed = if step <= streams { holds("stream-2", &streamed(step - 1)) } else { has_row(&st.target) };
-                    if !landed {
+                    if !holds("stream-2", &streamed(step - 1)) {
                         return false;
                     }
                     if st.since.is_none() {
@@ -653,23 +672,94 @@ pub(super) fn scroll_check(out: String) {
                         return false;
                     }
                     let (visible, numbers) = last_row_visible();
-                    check(visible && report().follows, &format!("following, update {step} keeps the last row in view (follows {}): {numbers}", report().follows));
+                    let (top, placed) = at_top("stream-2");
+                    if st.still == 0 && report().follows {
+                        check(visible, &format!("following, update {step} keeps the reply's end in view: {numbers}"));
+                    } else {
+                        // Stopped: from now on the reply's first line stays at the top.
+                        st.still = 1;
+                        check(top && !report().follows, &format!("update {step}: following stopped with the reply's first line at the top (follows {}): {placed}", report().follows));
+                        check(news(), &format!("update {step}: the jump-to-latest dot says there is more below"));
+                    }
                 }
                 st.since = None;
                 st.step += 1;
                 let next = st.step;
                 if next <= streams {
                     upsert("scroll", json!([{"id": "stream-2", "role": "assistant", "text": streamed(next - 1)}]));
-                } else if next == streams + 1 {
+                    return false;
+                }
+                check(st.still == 1, &format!("a reply {:.0}px tall in a {:.0}px view stops being followed at its first line", row_height("stream-2"), { let g = geometry(); g.bottom - g.top }));
+                shot(&out4, "scroll-03-stopped-at-first-line");
+                st.step = 0;
+                st.still = 0;
+                true
+            }
+        })),
+        // Back at the end (End), a short reply is followed to its end.
+        ("short reply", Box::new(|app, _, _| {
+            app.to_latest();
+            true
+        })),
+        ("short reply arrives", Box::new({
+            let state = s();
+            move |_, _, elapsed| {
+                let mut st = state.borrow_mut();
+                if st.step == 0 {
+                    if elapsed < Duration::from_millis(500) {
+                        return false;
+                    }
+                    check(report().follows && report().at_end && !news(), &format!("End follows again and the news is read (follows {}, news {})", report().follows, news()));
                     upsert("scroll", json!([{"id": "scroll-user-2", "role": "user", "text": "Thanks, and the docs?"},
                                             {"id": "scroll-reply-2", "role": "assistant", "text": LOREM.repeat(4)}]));
-                    st.target = "scroll-reply-2".into();
-                } else {
-                    st.step = 0;
-                    return true;
+                    st.step = 1;
+                    return false;
                 }
-                false
+                if !has_row("scroll-reply-2") || elapsed < Duration::from_millis(1000) {
+                    return false;
+                }
+                let (visible, numbers) = last_row_visible();
+                check(visible && report().follows, &format!("a reply shorter than the view is followed to its end (follows {}): {numbers}", report().follows));
+                st.step = 0;
+                true
             }
+        })),
+        // A reply many views tall arriving whole: its first line ends at the top.
+        ("long reply arrives", Box::new(|_, _, _| {
+            upsert("scroll", json!([{"id": "scroll-long", "role": "assistant", "text": format!("{}\n\n{}", "First line of the long reply.", LOREM.repeat(80))}]));
+            true
+        })),
+        ("long reply read from its top", Box::new(|_, _, elapsed| {
+            if !has_row("scroll-long") || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let (top, placed) = at_top("scroll-long");
+            check(top && !report().follows && !report().at_end, &format!("a reply many views tall stops at its first line (follows {}, at end {}): {placed}", report().follows, report().at_end));
+            check(news(), "and the jump-to-latest dot says there is more below");
+            true
+        })),
+        // Opening the chat again lands on its newest message, as always.
+        ("away again", Box::new(|app, _, _| {
+            app.engine.borrow_mut().select("rachel");
+            crate::pump();
+            true
+        })),
+        ("back again", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().selected_session() != "rachel" || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            app.engine.borrow_mut().select("scroll");
+            crate::pump();
+            true
+        })),
+        ("opens at the newest", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let (visible, numbers) = last_row_visible();
+            check(visible && report().follows && report().at_end, &format!("the chat opened again lands on its newest message and follows (follows {}): {numbers}", report().follows));
+            app_now().focus_transcript();
+            true
         })),
         // 9. Page Down from the history reaches the true end.
         ("page up", Box::new({

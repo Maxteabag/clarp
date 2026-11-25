@@ -919,6 +919,16 @@ fn main() {
         scroll_journal::shot(&pane, shot);
     });
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {
+        // Following stopped at a new reply's first line: more of it below.
+        // (After this frame's callbacks: the panes may be borrowed now.)
+        if cause == "follow-stop" {
+            let pane = pane.to_string();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(app) = app() {
+                    app.news_below(&pane);
+                }
+            });
+        }
         scroll_journal::record(scroll_journal::Move { pane: pane.into(), cause: cause.into(), old, new, old_place, new_place, content, viewport, at_end, follow, rows });
     });
     window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer, top| {

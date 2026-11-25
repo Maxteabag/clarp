@@ -19,7 +19,9 @@
 //! movement is expected: while the chat follows its end, new content at
 //! the end slides the rows up, once, to the end. It does not count as a
 //! shift or toward the score, but its steps count toward a shake, so a
-//! slide that turns back is one.
+//! slide that turns back is one. The slide that ends following, with a new
+//! reply's first line at the top (`follow-stop`: the reply goes on growing
+//! below a view that holds still), is that slide too.
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
@@ -154,11 +156,11 @@ pub fn movement(before: &Frame, after: &Frame) -> Option<Step> {
     let arrived = b.rows > a.rows
         || b.content > a.content + 0.5
         || after.events.iter().any(|e| e == "height" || e == "live" || (e.starts_with("rows ") && !e.contains(" +0 ~0")));
-    let slide = b.follow
-        && !held_by_message
+    // Or the slide that stopped following at a new reply's first line.
+    let stopped = a.follow && after.events.iter().any(|e| e == "follow-stop");
+    let slide = !held_by_message
         && moved.iter().all(|m| m.0 < 0.0)
-        && at_end(b)
-        && (!at_end(a) || arrived || (anchors == 0 && a.follow));
+        && (stopped || (b.follow && at_end(b) && (!at_end(a) || arrived || (anchors == 0 && a.follow))));
     Some(Step { dy, fraction, counted: !slide })
 }
 
@@ -438,6 +440,26 @@ mod tests {
         let late = frame(32, pinned(4040.0, -60.0, 140.0), &["follow"]);
         assert_eq!(movement(&a, &short), None, "the last row grew below the viewport; nothing visible moved");
         assert_eq!(movement(&short, &late).map(|s| s.counted), Some(false));
+    }
+
+    /// Following stops with a new reply's first line at the top: the slide
+    /// up to it scores nothing; the reply growing below afterwards moves
+    /// nothing on screen.
+    #[test]
+    fn stopping_at_a_reply_first_line_is_the_slide() {
+        let a = frame(0, pinned(4000.0, -20.0, 300.0), &[]);
+        let mut stopped = Shot { offset: VIEW - 4100.0 + 80.0, follow: false, top_y: -110.0, bottom_y: VIEW - 300.0 - 90.0, bottom_h: 400.0, ..pinned(4100.0, -110.0, 400.0) };
+        stopped.bottom = "row-19".into();
+        let b = frame(16, stopped.clone(), &["rows -0 +0 ~1", "follow-stop"]);
+        let step = movement(&a, &b).expect("rows moved");
+        assert!(!step.counted, "the stop is the slide: {step:?}");
+        assert!(Motion::default().frame(&a, &b).is_empty());
+        // The reply grows below a view that holds still.
+        let grown = frame(32, Shot { content: 4300.0, bottom_h: 600.0, ..stopped }, &["live"]);
+        assert_eq!(movement(&b, &grown), None);
+        // The same move with no stop, nobody following after it, counts.
+        let b = frame(16, b.shot, &["rows -0 +0 ~1"]);
+        assert!(movement(&a, &b).is_some_and(|s| s.counted));
     }
 
     #[test]
