@@ -1525,8 +1525,8 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   - A message it sends to such an agent (`clarp-admin prompt`, a request's reply, a helper's
     report) arrives as "<name> sent you a message. Its words are withheld: …", and the send
     answers `words_withheld: true`. A delayed prompt it schedules (`--delay`) for another agent
-    goes out under its name when it is sent, whatever `--from` says; one to itself keeps
-    its `--origin`. `clarp-admin prompt --server` from
+    goes out under its name when it is sent, whatever `--from` says; one to itself on this
+    Host keeps its `--origin` (with `--server` it goes out under its name, and is refused). `clarp-admin prompt --server` from
     it (or naming it as the sender) is refused (409 `bound_conversation`). Its `<team>`
     updates reach such members' briefs (and a leader's tick) as "<name> posted an update
     (words withheld: …)"; an update whose sender or reader the Host cannot place is

@@ -154,16 +154,17 @@ pub(crate) async fn prompt(
                 );
             }
         };
-        let is_own = |named: Option<&str>, own: &crate::fleet::Member| {
-            named
-                .and_then(|named| app.anyone(python::strip(named)))
-                .is_some_and(|named| named.record.agent_id == own.record.agent_id)
-        };
-        let bound_sender = own.filter(|own| own.record.bound()).and_then(|own| {
-            let to_itself = is_own(parsed.option("--to"), &own);
-            let as_itself = is_own(from, &own);
-            (!to_itself && !as_itself).then(|| own.record.session.clone())
-        });
+        let named = |named: Option<&str>| named.and_then(|named| app.anyone(python::strip(named)));
+        let (to, sender) = (named(parsed.option("--to")), named(from));
+        let server = parsed
+            .option("--server")
+            .is_some_and(|server| !server.is_empty());
+        let bound_sender = delayed_sender(
+            own.as_ref().map(|own| &own.record),
+            to.as_ref().map(|to| &to.record),
+            sender.as_ref().map(|sender| &sender.record),
+            server,
+        );
         let stamped;
         let parsed = match bound_sender {
             Some(session) => {
@@ -329,6 +330,25 @@ pub(crate) async fn prompt(
             ),
         ),
     }
+}
+
+/// Whom a delayed prompt scheduled from a turn of `own` goes out as, where it is not as it was
+/// asked: an agent bound to a provider of its own sends its words under its own name, whatever
+/// `--from` says (`bound_privacy`). Its own timed wakeups (`--to` itself) stay as asked, so
+/// they stay automation, but only on this Host: with `--server`, `--to` names an agent of
+/// another Host, which may bear its name. `None`: as asked.
+fn delayed_sender(
+    own: Option<&crate::fleet::AgentRecord>,
+    to: Option<&crate::fleet::AgentRecord>,
+    from: Option<&crate::fleet::AgentRecord>,
+    server: bool,
+) -> Option<String> {
+    let own = own.filter(|own| own.bound())?;
+    let is_own = |named: Option<&crate::fleet::AgentRecord>| {
+        named.is_some_and(|named| named.agent_id == own.agent_id)
+    };
+    let to_itself = !server && is_own(to);
+    (!to_itself && !is_own(from)).then(|| own.session.clone())
 }
 
 fn parse_delay(value: &str) -> Result<i64, String> {
@@ -2672,6 +2692,33 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bound_agents_delayed_prompt_goes_out_under_its_name_except_its_own_wakeup_here() {
+        let agent = |session: &str, bound: bool| crate::fleet::AgentRecord {
+            agent_id: format!("id-{session}"),
+            session: session.to_string(),
+            backend: "codex".to_string(),
+            codex_home: if bound { "/homes/b" } else { "" }.to_string(),
+            codex_provider: if bound { "theirs" } else { "" }.to_string(),
+            ..crate::fleet::AgentRecord::default()
+        };
+        let (b, c) = (agent("b", true), agent("c", false));
+        let stamped = Some("b".to_string());
+        // To another agent: under its name, whatever --from names, here or elsewhere.
+        assert_eq!(delayed_sender(Some(&b), Some(&c), None, false), stamped);
+        assert_eq!(delayed_sender(Some(&b), Some(&c), Some(&c), false), stamped);
+        assert_eq!(delayed_sender(Some(&b), None, None, true), stamped);
+        // To itself on this Host: as asked, its --origin kept.
+        assert_eq!(delayed_sender(Some(&b), Some(&b), None, false), None);
+        // To "itself" on another Host: another Host's agent of that name, so under its name.
+        assert_eq!(delayed_sender(Some(&b), Some(&b), None, true), stamped);
+        // Sent as itself already, it needs nothing more (another Host refuses it when sent).
+        assert_eq!(delayed_sender(Some(&b), Some(&c), Some(&b), true), None);
+        // An agent that is not bound, or no turn, is as asked.
+        assert_eq!(delayed_sender(Some(&c), Some(&b), None, true), None);
+        assert_eq!(delayed_sender(None, Some(&c), None, true), None);
+    }
 
     #[test]
     fn admin_gap_paths_names_the_rust_installation() {
