@@ -191,15 +191,20 @@ fn every_shown_pane_and_the_selected_chat_stay_live_and_only_the_rest_is_capped(
     for session in ["b2", "b3", "b4", "b5", "b6"] {
         d.engine.select(session);
     }
-    d.until("the stream settles on the shown chats", |_| last_live(&host).len() == 8);
+    d.until("the stream settles on the shown chats", |_| last_live(&host).len() == 9);
     // Every shown pane and the selected chat keep their live view; of the
-    // chats browsed past, only the three opened last stay on the stream.
-    for session in ["p1", "p2", "p3", "p4", "b6", "b5", "b4", "b3"] {
+    // chats browsed past, only the four opened last stay on the stream.
+    for session in ["p1", "p2", "p3", "p4", "b6", "b5", "b4", "b3", "b2"] {
         assert!(d.engine.live_view(session).is_some(), "{session} keeps its live view");
         assert!(last_live(&host).iter().any(|s| s == session), "{session} is on the stream: {:?}", last_live(&host));
     }
-    for session in ["b1", "b2"] {
-        assert!(d.engine.live_view(session).is_none(), "{session} was let go");
+    assert!(d.engine.live_view("b1").is_none(), "b1 was let go");
+    // Opened again, it is watched again, and the one opened longest ago goes.
+    d.engine.select("b1");
+    d.until("b1 is watched again", |_| last_live(&host).iter().any(|s| s == "b1"));
+    assert!(d.engine.live_view("b2").is_none(), "b2 was let go");
+    for session in ["p1", "p2", "p3", "p4"] {
+        assert!(d.engine.live_view(session).is_some(), "{session} keeps its live view");
     }
 }
 
@@ -212,15 +217,13 @@ fn after_a_reconnect_the_selected_chat_and_the_ones_opened_last_stay_live() {
     for session in ["c1", "c2", "c3", "c4", "c5", "c6", "c2"] {
         d.engine.select(session);
     }
-    d.until("the stream carries four", |_| last_live(&host) == ["c2", "c4", "c5", "c6"]);
+    d.until("the stream carries five", |_| last_live(&host) == ["c2", "c3", "c4", "c5", "c6"]);
     let streams = events_queries(&host).len();
     // Six chats are loaded; reconnecting opens them again in the order they
     // were opened, never in the order they are stored in.
     d.engine.reconnect();
-    d.until("the stream is opened again", |_| events_queries(&host).len() > streams && last_live(&host).len() == 4);
-    assert_eq!(last_live(&host), ["c2", "c4", "c5", "c6"]);
+    d.until("the stream is opened again", |_| events_queries(&host).len() > streams && last_live(&host).len() == 5);
+    assert_eq!(last_live(&host), ["c2", "c3", "c4", "c5", "c6"]);
     assert!(d.engine.live_view("c2").is_some(), "the selected chat keeps its live view");
-    for session in ["c1", "c3"] {
-        assert!(d.engine.live_view(session).is_none(), "{session} was let go");
-    }
+    assert!(d.engine.live_view("c1").is_none(), "c1 was let go");
 }
