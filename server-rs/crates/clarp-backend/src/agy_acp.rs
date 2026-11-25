@@ -54,7 +54,8 @@ use clarp_child::MANAGED_AGY_ENV as MANAGED;
 
 /// The card's name.
 pub const ID: &str = "agy-acp";
-/// What the ids of this card's live items begin with.
+/// What the ids of this card's live items begin with. The turn follows it, since agy's own
+/// numbering of what it says starts again each turn ([`AcpInterpreter::shown`]).
 const SHOWN: &str = "aa";
 /// How long the driver has, after a Stop, to cancel the prompt and end agy before the shim
 /// ends the whole group: the cancel wait and agy's two chances to leave, with room.
@@ -297,6 +298,14 @@ pub struct AcpInterpreter {
 }
 
 impl AcpInterpreter {
+    /// The id of a live item of this turn: unique to the turn, so that a message, a thought
+    /// or a tool of one turn never takes the place of another turn's (seen on 25 Nov 2026: a
+    /// turn's answer took the previous turn's row, both `aa:m2`). The same on a replay of the
+    /// spool, since the turn is.
+    fn shown(&self, item: &str) -> String {
+        format!("{SHOWN}:{}:{item}", self.turn)
+    }
+
     pub fn new(turn: u64, name: &str) -> Self {
         Self {
             turn,
@@ -346,7 +355,7 @@ impl AcpInterpreter {
             && !text.trim().is_empty()
         {
             out.push(Signal::Glimpse(Glimpse::Done {
-                id: format!("{SHOWN}:m{number}"),
+                id: self.shown(&format!("m{number}")),
             }));
             out.push(Signal::Reply(Reply {
                 origin: Origin::User,
@@ -362,7 +371,7 @@ impl AcpInterpreter {
     fn close_thought(&mut self, out: &mut Vec<Signal>) {
         if let Some((number, _)) = self.thought.take() {
             out.push(Signal::Glimpse(Glimpse::Done {
-                id: format!("{SHOWN}:t{number}"),
+                id: self.shown(&format!("t{number}")),
             }));
         }
     }
@@ -623,7 +632,7 @@ impl AcpInterpreter {
             self.moved(Activity::Thinking, out);
             if !text.trim().is_empty() {
                 out.push(Signal::Glimpse(Glimpse::Reasoning {
-                    id: format!("{SHOWN}:t{number}"),
+                    id: self.shown(&format!("t{number}")),
                     text,
                 }));
             }
@@ -633,7 +642,7 @@ impl AcpInterpreter {
         self.moved(Activity::Responding, out);
         if !text.trim().is_empty() {
             out.push(Signal::Glimpse(Glimpse::Message {
-                id: format!("{SHOWN}:m{number}"),
+                id: self.shown(&format!("m{number}")),
                 text: text.clone(),
                 row: Some(reply.clone()),
             }));
@@ -687,7 +696,7 @@ impl AcpInterpreter {
             return;
         }
         let call_id = format!("c-{}-{raw}", self.name);
-        let shown = format!("{SHOWN}:{raw}");
+        let shown = self.shown(&raw);
         if !self.tools.contains_key(&raw) {
             let name = tool_name(update);
             let input = tool_input(&name, update);

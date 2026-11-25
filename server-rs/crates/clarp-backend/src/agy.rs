@@ -51,7 +51,8 @@ const PRINT_TIMEOUT: &str = "24h";
 /// What tells the tool's own hooks that this turn is the Host's, and not one somebody ran
 /// in a terminal.
 use clarp_child::MANAGED_AGY_ENV as MANAGED;
-/// What the ids of Antigravity's live items begin with.
+/// What the ids of Antigravity's live items begin with. The turn follows it: agy numbers the
+/// steps of a conversation, and a new conversation numbers them from 0 again.
 const SHOWN: &str = "ag";
 /// The tools of Antigravity under the names the conversation knows tools by.
 const TOOL_NAMES: [(&str, &str); 13] = [
@@ -664,7 +665,7 @@ impl AgyInterpreter {
                 said.push_str(piece);
                 let said = said.clone();
                 let reply = format!("r-{}-{step}", self.name);
-                let shown = format!("{SHOWN}:{step}");
+                let shown = format!("{SHOWN}:{}:{step}", self.turn);
                 if !said.trim().is_empty() && !piece.is_empty() {
                     out.push(Signal::Glimpse(Glimpse::Message {
                         id: shown.clone(),
@@ -720,7 +721,7 @@ impl AgyInterpreter {
         let name = tool_name(theirs);
         let input = tool_input(&name, &info["parameters"]);
         let call_id = format!("c-{}-{raw}", self.name);
-        let shown = format!("{SHOWN}:{raw}");
+        let shown = format!("{SHOWN}:{}:{raw}", self.turn);
         if !self.tools.contains_key(&raw) {
             let call = ToolCall {
                 origin: clarp_kernel::turn::Origin::User,

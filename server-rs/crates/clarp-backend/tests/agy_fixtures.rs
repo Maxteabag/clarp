@@ -442,3 +442,43 @@ fn what_the_stream_may_also_say() {
         "each step that says something is a message"
     );
 }
+
+/// The ids of the live items a turn of this number shows, reading these lines.
+fn live_ids(turn: u64, lines: &[&str]) -> Vec<String> {
+    let mut interpreter = AgyInterpreter::new(turn, "m1");
+    let mut out = Vec::new();
+    for (t, line) in (1..).zip(lines) {
+        let entry = Entry::Out((*line).to_string());
+        interpreter.on_record(&Record { t, entry }, &mut out);
+    }
+    let id = regex::Regex::new(r#"\bid: "([^"]*)""#).unwrap();
+    out.iter()
+        .filter(|signal| matches!(signal, Signal::Glimpse(_)))
+        .flat_map(|signal| {
+            let shown = format!("{signal:?}");
+            id.captures_iter(&shown)
+                .map(|found| found[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn the_live_items_of_two_turns_never_share_an_id() {
+    // agy numbers the steps of a conversation, and a new conversation numbers them from 0
+    // again: the turn tells two turns' items apart. A replay of the same turn names them alike.
+    let recorded = recorded("agy-1.5.10-tool.jsonl");
+    let lines: Vec<&str> = recorded.lines().collect();
+    let first = live_ids(301, &lines);
+    let second = live_ids(302, &lines);
+    assert!(!first.is_empty());
+    assert!(
+        first.iter().all(|id| id.starts_with("ag:301:")),
+        "{first:?}"
+    );
+    assert!(
+        first.iter().all(|id| !second.contains(id)),
+        "{first:?} {second:?}"
+    );
+    assert_eq!(live_ids(301, &lines), first);
+}

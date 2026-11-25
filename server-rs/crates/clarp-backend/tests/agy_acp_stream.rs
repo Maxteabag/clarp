@@ -661,3 +661,56 @@ fn a_reply_cut_for_a_message_is_no_stop_and_the_turn_answers_both() {
     assert_eq!(replies(&signals), ["1. Pho\n"]);
     assert_eq!(ended(&signals), &RunOutcome::Completed);
 }
+
+/// The ids of the live items a turn of this number shows, reading these lines.
+fn live_ids(turn: u64, lines: &[Value]) -> Vec<String> {
+    let mut interpreter = by_id("agy-acp")
+        .unwrap()
+        .interpreter(turn, &format!("t{turn}"));
+    let mut out = Vec::new();
+    for (t, line) in (1..).zip(lines) {
+        let entry = Entry::Out(line.to_string());
+        interpreter.on_record(&Record { t, entry }, &mut out);
+    }
+    let id = regex::Regex::new(r#"\bid: "([^"]*)""#).unwrap();
+    out.iter()
+        .filter(|signal| matches!(signal, Signal::Glimpse(_)))
+        .flat_map(|signal| {
+            let shown = format!("{signal:?}");
+            id.captures_iter(&shown)
+                .map(|found| found[1].to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[test]
+fn the_live_items_of_two_turns_never_share_an_id() {
+    // agy numbers what it says from the start each turn: without the turn, a turn's answer
+    // took the place of the turn before's (seen on 25 Nov 2026, both "aa:m2").
+    let lines = [
+        bound_as("primary"),
+        chunk("agent_thought_chunk", "Planning"),
+        chunk("agent_message_chunk", "First"),
+        update(json!({"sessionUpdate": "tool_call", "toolCallId": "call_7",
+                      "title": "ls", "kind": "execute", "status": "in_progress"})),
+        update(
+            json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_7",
+                      "status": "completed"}),
+        ),
+        chunk("agent_message_chunk", "Done"),
+        answer("primary", "end_turn"),
+        result(&["primary"]),
+    ];
+    let first = live_ids(302, &lines);
+    let second = live_ids(303, &lines);
+    for item in ["aa:302:t1", "aa:302:m2", "aa:302:call_7", "aa:302:m3"] {
+        assert!(first.iter().any(|id| id == item), "{item}: {first:?}");
+    }
+    assert!(
+        first.iter().all(|id| !second.contains(id)),
+        "{first:?} {second:?}"
+    );
+    // A replay of the spool names them as the turn did.
+    assert_eq!(live_ids(302, &lines), first);
+}
