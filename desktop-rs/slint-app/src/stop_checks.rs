@@ -4,8 +4,10 @@
 //! verified agent, a claimed user (an admin token), a paired user, an older
 //! Host and a Stop the runtime refused; Ctrl+. stops the first, the Stop
 //! command (Ctrl+K) the rest. Another device's or agent's Stop, read from
-//! the interrupted state's `user_stop` detail, shows the same line. A queue
-//! the Stop paused says so in the composer and the explorer.
+//! the interrupted state's `user_stop` detail, shows the same line. The line
+//! is plain: your own Stop leaves "Stopped" to the transcript and names the
+//! queue only when messages wait. A queue the Stop paused says so in the
+//! composer and the explorer.
 
 use std::time::Duration;
 
@@ -16,7 +18,7 @@ use slint::platform::Key;
 use super::{Stage, app_now, check, control, posts, report, run_stages, shot, view};
 use crate::headless;
 
-const THEO: &str = "Stopped by Theo (verified): Pebble busy with no process";
+const THEO: &str = "Stopped by Theo: Pebble busy with no process";
 
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -59,16 +61,21 @@ fn stop_by_command(name: &'static str) -> Stage {
     }))
 }
 
-/// The Host answered the `stops`th Stop and the composer says `expected`.
+/// The Host answered the `stops`th Stop and the composer says `expected`
+/// ("" when the transcript's own Stop line says it all).
 fn says(name: &'static str, stops: usize, expected: &'static str, out: String, shot_name: &'static str) -> Stage {
     (name, Box::new(move |_, _, elapsed| {
         let posted = posts("/stop");
-        if posted.len() < stops || notice().is_empty() || elapsed < Duration::from_millis(300) {
+        let settled = if expected.is_empty() { elapsed >= Duration::from_millis(1200) } else { !notice().is_empty() };
+        if posted.len() < stops || !settled || elapsed < Duration::from_millis(300) {
             return false;
         }
         check(posted[stops - 1]["body"]["session"] == "rachel", &format!("{name}: Stop is sent for Rachel"));
         check(notice() == expected, &format!("{name}: the chat says {expected:?}: {:?}", notice()));
         check(!notice().to_lowercase().contains("resume"), "and never promises a resume");
+        for word in ["claimed", "verified", "no goals paused", "Stopped by you"] {
+            check(!notice().contains(word), &format!("{name}: the line is plain, without {word:?}: {:?}", notice()));
+        }
         shot(&out, shot_name);
         true
     }))
@@ -94,17 +101,29 @@ pub fn stop_receipt_check(out: String) {
             headless::press_with(&[Key::Control], ".");
             true
         })),
-        says("verified agent", 1, "Stopped by Theo (verified): Pebble busy with no process · queue paused · 1 goal paused", out.clone(), "stop-01-verified-agent"),
+        says("verified agent", 1, "Stopped by Theo: Pebble busy with no process · 1 goal paused", out.clone(), "stop-01-verified-agent"),
         // ---- an admin token: the actor is the caller's claim; goals unknown
         working("claimed user working", json!({"ok": true, "terminated": 0, "stop_actor": "user", "stop_actor_verified": false,
             "stop_reason": "", "queue_paused": true})),
         stop_by_command("claimed user stop"),
-        says("claimed user", 2, "Stopped by you (claimed) · queue paused", out.clone(), "stop-02-claimed-user"),
+        // Nothing waits: the transcript's "Stopped" line says it all.
+        says("claimed user", 2, "", out.clone(), "stop-02-claimed-user"),
         // ---- a paired device: verified, and no goal was paused
         working("paired user working", json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
             "stop_reason": "", "queue_paused": true, "goals_paused": 0})),
+        // Two messages wait: the line says the queue is paused, and only that.
+        ("messages waiting", Box::new({
+            let mut asked = false;
+            move |app: &crate::App, _: &crate::AppWindow, _: Duration| {
+            if !std::mem::replace(&mut asked, true) {
+                let set = control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 2}}));
+                check(set.is_ok(), &format!("two messages wait for Rachel: {set:?}"));
+                return false;
+            }
+            app.engine.borrow().roster().find("rachel").is_some_and(|a| a.queued_turn_count == 2)
+        }})),
         stop_by_command("paired user stop"),
-        says("paired user", 3, "Stopped by you · queue paused · no goals paused", out.clone(), "stop-03-paired-user"),
+        says("paired user", 3, "Queue paused", out.clone(), "stop-03-paired-user"),
         // ---- an older Host (contract 60): every newer field unknown
         working("older host working", json!({"ok": true, "terminated": 1})),
         stop_by_command("older host stop"),

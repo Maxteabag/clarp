@@ -463,6 +463,16 @@ fn within(inner: &Rect, outer: &Rect) -> bool {
     inner.0 >= outer.0 - 1.0 && inner.0 + inner.2 <= outer.0 + outer.2 + 1.0 && inner.1 >= outer.1 - 1.0 && inner.1 + inner.3 <= outer.1 + outer.3 + 1.0
 }
 
+/// The first drawn element whose accessible label is `label`: its box.
+fn labelled(label: &str) -> Option<Rect> {
+    use i_slint_backend_testing::ElementQuery;
+    let (window, label) = (crate::window()?, label.to_owned());
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.size().width > 0.0 && e.accessible_label().is_some_and(|l| l == label.as_str()))
+        .find_first()
+        .map(|e| rect(&e))
+}
+
 /// The explorer row named `name`, as drawn.
 fn explorer_row(name: &str) -> Option<Rect> {
     use i_slint_backend_testing::{AccessibleRole, ElementQuery};

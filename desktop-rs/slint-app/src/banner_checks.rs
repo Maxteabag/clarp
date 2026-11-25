@@ -1,13 +1,19 @@
 //! `--check banner`: the error banner over the chat names its dismiss key,
 //! and that key (and the switcher's command) clears it, even when the
-//! failure also left an error on the conversation. Needs the fake Host.
+//! failure also left an error on the conversation. The banner floats over
+//! the chat: the chat's header stays where it was. A "not spoken" failure
+//! says nothing on a desktop where speech never worked, says it once per
+//! chat (not after every reply), again once a clip has played, and leaves
+//! with the chat. Needs the fake Host.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
 use slint::platform::Key;
 
-use super::{Stage, check, control, run_stages, shot};
+use super::{Rect, Stage, check, control, labelled, run_stages, shot};
 use crate::headless;
 
 fn fail_next_log() -> bool {
@@ -15,7 +21,7 @@ fn fail_next_log() -> bool {
 }
 
 pub fn banner_check(out: String) {
-    let out2 = out.clone();
+    let (out2, out3) = (out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -60,7 +66,92 @@ pub fn banner_check(out: String) {
             true
         })),
     ];
+    let mut stages = stages;
+    stages.extend(voice_stages(out3));
     run_stages(stages);
+}
+
+const NOT_SPOKEN: &str = "Not spoken: Cartesia Sonic is not set up on this Host.";
+
+fn tts_error() -> bool {
+    control("/__control/event", &json!({"type": "tts-error", "session": "rachel", "message": NOT_SPOKEN})).is_ok()
+}
+
+/// The chat's header: where the banner must not move it to.
+fn header() -> Option<Rect> {
+    labelled("Chat menu")
+}
+
+/// Sends `send` once, then after `settle` passes `then` the window.
+fn after(name: &'static str, send: fn() -> bool, settle: u64, then: impl Fn(&crate::AppWindow) + 'static) -> Stage {
+    let mut sent = false;
+    (name, Box::new(move |_, window, elapsed| {
+        if !std::mem::replace(&mut sent, true) {
+            check(send(), &format!("{name}: the Host's event is sent"));
+            return false;
+        }
+        if elapsed < Duration::from_millis(settle) {
+            return false;
+        }
+        then(window);
+        true
+    }))
+}
+
+fn voice_stages(out: String) -> Vec<Stage> {
+    let before: Rc<Cell<Option<Rect>>> = Rc::new(Cell::new(None));
+    let (b1, b2) = (before.clone(), before.clone());
+    vec![
+        after("speech never set up", tts_error, 900, move |window| {
+            check(window.get_error().is_empty(), &format!("speech never worked on this desktop: no banner: {:?}", window.get_error()));
+            b1.set(header());
+            check(b1.get().is_some(), "the chat's header is drawn");
+            let app = super::app_now();
+            app.engine.borrow_mut().settings_mut().set(clarp_engine::SPEECH_HEARD, true);
+        }),
+        after("speech set up, a reply not spoken", tts_error, 0, |_| {}),
+        ("banner shown", Box::new(move |_, window, elapsed| {
+            if window.get_error() != NOT_SPOKEN || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(labelled("Error banner").is_some(), "the banner is drawn");
+            check(header() == b2.get(), &format!("the banner floats: the chat's header stays put: {:?} then {:?}", b2.get(), header()));
+            shot(&out, "03-not-spoken-overlay");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("dismissed voice", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_error().is_empty(), &format!("Escape dismisses it: {:?}", window.get_error()));
+            true
+        })),
+        after("the next reply not spoken", tts_error, 900, |window| {
+            check(window.get_error().is_empty(), &format!("once per chat: the next reply says nothing: {:?}", window.get_error()));
+        }),
+        after("a clip plays", || control("/__control/event", &json!({"type": "audio", "clip_id": 51, "session": "rachel",
+            "url": "/clips/51/complete.mp3", "complete_url": "/clips/51/complete.mp3"})).is_ok(), 300, |_| {}),
+        after("speech fails again", tts_error, 0, |_| {}),
+        ("shown again", Box::new(|app, window, elapsed| {
+            if window.get_error() != NOT_SPOKEN {
+                check(elapsed < Duration::from_secs(5), "after a clip played, a new failure shows once more");
+                return elapsed >= Duration::from_secs(5);
+            }
+            app.engine.borrow_mut().select("mike");
+            crate::pump();
+            true
+        })),
+        ("chat changed", Box::new(|app, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            app.engine.borrow_mut().select("rachel");
+            crate::pump();
+            check(window.get_error().is_empty(), &format!("the banner leaves with its chat: {:?}", window.get_error()));
+            true
+        })),
+    ]
 }
 
 /// What another window would have saved: a layout showing `session`.
