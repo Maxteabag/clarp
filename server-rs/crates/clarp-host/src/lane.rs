@@ -170,7 +170,12 @@ static DEFAULT_MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
 
 /// The lanes' mode where the owner's config sets none, from the Host's start.
 pub(crate) fn set_default_mode(mode: Mode) {
-    let _ = DEFAULT_MODE.set(mode);
+    if DEFAULT_MODE.set(mode).is_err() {
+        eprintln!(
+            "clarp-host: the lanes' default mode was set already; {} is not taken",
+            mode.name()
+        );
+    }
 }
 
 /// What the machine's memory is now, from `/proc/meminfo`.

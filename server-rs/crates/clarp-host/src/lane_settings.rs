@@ -561,10 +561,20 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert!(write(&path, &[Wanted::Limit(&LIMITS[0], 4)]).unwrap());
         let text = std::fs::read_to_string(&path).unwrap();
+        // The count set is the owner's choice of fixed limits (issue 792): `lane_limits` is added
+        // among the top-level keys, and every other byte of the file, comments included, is kept.
+        let without: String = text
+            .lines()
+            .filter(|line| !line.starts_with("lane_limits"))
+            .map(|line| format!("{line}\n"))
+            .collect();
         assert_eq!(
-            text,
+            without,
             FILE.replace("codex_lane_most = 8", "codex_lane_most = 4")
         );
+        assert!(text.find("lane_limits = \"fixed\"").unwrap() < text.find("[server]").unwrap());
+        let read: toml::Table = text.parse().unwrap();
+        assert_eq!(Settings::of(Some(&read)).mode, Mode::Fixed);
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         // Nothing is left beside it.
