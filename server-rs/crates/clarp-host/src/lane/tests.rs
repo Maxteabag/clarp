@@ -1244,11 +1244,14 @@ fn a_look_at_an_owner_lock_does_not_make_a_lane_that_left_seem_there() {
     looking.try_lock_shared().unwrap();
     assert!(lane.released().unwrap(), "a look is no lane");
     drop(looking);
-    // The lane itself.
-    lock.try_lock().unwrap();
+    // The lane itself. A lock let go of may stay held for a moment by a child that another test
+    // of this process forks and has not yet replaced with its program, so the lane waits for
+    // it, and the last look is given that moment.
+    lock.lock().unwrap();
     assert!(!lane.released().unwrap());
     drop(lock);
-    assert!(lane.released().unwrap());
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    assert!(lane.released_by(until).unwrap());
     std::fs::remove_dir_all(&run).unwrap();
 }
 
@@ -1259,7 +1262,7 @@ fn a_start_after_a_lane_left_is_tried_once_more_once_its_owner_let_go() {
     let run = run_dir("once-more-start");
     let lane = Endpoint::of(Tool::Claude, &run, "a");
     let owner = File::create(owner_lock(lane.socket())).unwrap();
-    owner.try_lock().unwrap();
+    owner.lock().unwrap();
     // The owner lets go a moment after the first start found it there.
     let late = std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -1289,7 +1292,7 @@ fn a_start_after_a_lane_left_is_tried_once_more_once_its_owner_let_go() {
     assert_eq!(tries.get(), 2);
     // One whose owner does not let go within the bound is not tried again.
     let held = File::create(owner_lock(lane.socket())).unwrap();
-    held.try_lock().unwrap();
+    held.lock().unwrap();
     let tries = std::cell::Cell::new(0);
     let kept = start_once_more(&lane, std::time::Duration::from_millis(200), || {
         tries.set(tries.get() + 1);
