@@ -107,7 +107,8 @@ agent, answer them as usual (`reply` for a request, or `prompt`), because the
 cut turn told them nothing. As a sender, your message's turn can end as
 stopped for a newer message; do not send it again, because the recipient
 takes it up after the user. This does not happen behind the user's own turn,
-a front desk's relay of the user's words, or a compaction.
+a front desk's relay of the user's words, a Codex native goal's turn, or a
+compaction.
 
 Otherwise, a message from the user, or a front desk's relay of the user's words, that
 reaches an agent while its turn runs is read into that turn where the agent's

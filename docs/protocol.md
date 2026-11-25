@@ -1208,7 +1208,8 @@ Rules:
   send again.
 - If the agent is busy with a turn that is not a person's (another agent's
   message, a schedule, an automation or a goal's wake, a janitor; not the
-  tool's compaction), a user's or the Oracle's plain send (no
+  tool's compaction, and not a Codex native goal's turn, which a cut would
+  pause), a user's or the Oracle's plain send (no
   `queue_if_busy`) never waits behind it (Rust Host contract 187, feature
   `owner_preempts`, issue 839): that turn is stopped at once, ending as
   stopped for a newer message, and the send runs next, ahead of everything

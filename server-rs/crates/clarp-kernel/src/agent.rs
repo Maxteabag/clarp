@@ -892,8 +892,8 @@ impl Agent {
     /// once rather than wait behind it (issue 839): a person's message (the user's, or the
     /// Oracle's on the user's behalf) never waits behind a turn that is not a person's:
     /// another agent's message, a trigger, a goal's wake, a janitor. The user's own turn, one
-    /// that carries the user's word (a front desk's relay), and the tool's compaction or
-    /// summary for a move are not made to give way, and neither is a turn already on its way
+    /// that carries the user's word (a front desk's relay), a Codex native goal's turn, and the
+    /// tool's compaction or summary for a move are not made to give way, and neither is a turn already on its way
     /// out: the message waits for those, or is read into them, as before.
     pub fn owner_goes_first(&self, origin: &Origin) -> bool {
         let Some(live) = &self.live else {
@@ -901,6 +901,9 @@ impl Agent {
         };
         let housekeeping = matches!(live.origin(), Origin::Trigger { name }
             if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY);
+        // A Codex native goal's turn is the owner's own goal at work, and cutting it pauses
+        // that goal: the owner's message waits for it, as for his own turn.
+        let native_goal = matches!(live.origin(), Origin::NativeGoal);
         origin.is_user_send()
             && self.stopping.is_none()
             && self.moved.is_none()
@@ -908,6 +911,7 @@ impl Agent {
             && !self.live_user_word
             && !live.origin().is_user_send()
             && !housekeeping
+            && !native_goal
     }
 
     /// The Stop request's journaled time, while the turn's process is still being retired.
@@ -3516,6 +3520,10 @@ mod tests {
         let mut a = Driven::new();
         a.background(10);
         assert!(a.agent.owner_goes_first(&Origin::User));
+        // A Codex native goal's turn is the owner's goal at work: a cut would pause it.
+        let mut a = Driven::new();
+        a.send(from(Origin::NativeGoal, false)(10)).unwrap();
+        assert!(!a.agent.owner_goes_first(&Origin::User));
         // A free agent has nothing to make way.
         assert!(!Driven::new().agent.owner_goes_first(&Origin::User));
     }
