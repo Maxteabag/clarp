@@ -1110,13 +1110,19 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
             }
             let after = seen().unwrap_or_default();
             let lowest = st.lowest.clone().unwrap_or_default();
-            if following {
+            let journal: Vec<String> = crate::scroll_journal::logged().split_off(st.journal);
+            // A reply taller than most of the view is followed only until its
+            // first line reaches the top (#825): the reader stays there, the
+            // reply's first row at the top of the view.
+            let stopped = !after.follows && (after.first_id == "jump-reply" || after.first_id == "jump-live");
+            if following && stopped {
+                check(after.session == before.session && after.first > before.first, &format!("{label}: a long reply stops at its first line: before {}; after {} ({})", before.line(), after.line(), after.drawn));
+            } else if following {
                 check(after.at_end && after.follows, &format!("{label}: a reader at the end stays at the end: before {}; after {} ({})", before.line(), after.line(), after.drawn));
             } else {
                 check(after.last >= before.first, &format!("{label}: a reader one notch up stays within a viewport: before {}; after {} ({})", before.line(), after.line(), after.drawn));
             }
             check(st.above == 0, &format!("{label}: never more than a viewport up meanwhile ({} polls wholly above; highest place rows #{}..#{}, before #{}..#{})", st.above, lowest.first, lowest.last, before.first, before.last));
-            let journal: Vec<String> = crate::scroll_journal::logged().split_off(st.journal);
             if following {
                 check(!journal.iter().any(|c| c == "follow"), &format!("{label}: following, the scroll journal logs no pins (logged {journal:?})"));
             }
