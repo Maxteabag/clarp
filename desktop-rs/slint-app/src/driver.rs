@@ -95,6 +95,9 @@ mod explorer_checks;
 // ---- a narrow window: the panes stay inside it
 #[path = "narrow_checks.rs"]
 mod narrow_checks;
+// ---- the Host's kept processes in the settings (lane_settings)
+#[path = "lanes_checks.rs"]
+mod lanes_checks;
 // ---- native forms (render_spec) in the chat
 #[path = "render_spec_checks.rs"]
 mod render_spec_checks;
@@ -563,6 +566,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "stalled-turn" => stall_checks::stalled_turn_check(out),
+        "kept-processes" => lanes_checks::kept_processes_check(out),
         "all-hosts" => all_hosts_checks::all_hosts_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
         "explorer" => explorer_checks::explorer_check(out),

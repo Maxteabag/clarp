@@ -33,6 +33,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.extend(appearance());
     all.extend(voice());
     all.extend(host());
+    all.extend(super::lanes::register());
     all.extend(keyboard());
     // Every other preference (clarp_core::prefs) and the settings file.
     all.extend(super::prefs::register());

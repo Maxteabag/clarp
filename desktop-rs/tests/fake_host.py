@@ -208,6 +208,16 @@ tool_explanation_settings = {"enabled": True, "detail_level": 2}
 # Coordination between agents (feature hidden_coordination, Host contract
 # 120): off until a check turns it on; the Host's value, and each chat's own.
 coordination = {"on": False, "visibility": "hide", "overrides": {}}
+# The owner's settings of lanes (feature lane_settings, Rust Host contract
+# 178): off until /__control/lane-settings turns it on. `settings` are the
+# values the Host uses, `held` what the lanes hold now.
+LANE_RANGES = {"most": {"min": 1, "max": 32}, "memory_mb": {"min": 256, "max": 16384},
+               "idle_minutes": {"min": 1, "max": 240}}
+lanes = {"on": False,
+         "settings": {"codex_chat_lane": True, "claude_chat_lane": True, "most": 8, "memory_mb": 2200, "idle_minutes": 15},
+         "held": {"lanes": 8, "memory_mb": 1945, "unanswered": 0,
+                  "tools": {"codex": {"lanes": 0, "busy": 0, "memory_mb": 0},
+                            "claude": {"lanes": 8, "busy": 2, "memory_mb": 1945}}}}
 # Moving an agent to another backend (feature agent_backend_transit, Rust
 # Host contract 158): off until /__control/transit turns it on. `respond`
 # answers the next POST /agent-transit instead ({status, body}); `fail`
@@ -884,6 +894,39 @@ def render_view(row, capable, full):
     return out
 
 
+def lane_settings_answer():
+    return {**copy.deepcopy(lanes["settings"]), "ranges": copy.deepcopy(LANE_RANGES), "held": copy.deepcopy(lanes["held"])}
+
+
+def lane_settings_change(body):
+    """POST /lane-settings as the Host answers it: (status, body)."""
+    if not isinstance(body, dict):
+        return 400, {"ok": False, "code": "bad_json", "error": "the body must be a JSON object"}
+    known = [k for k in body if k in lanes["settings"] and body[k] is not None]
+    if not known:
+        return 400, {"ok": False, "code": "nothing_to_change", "error": "name a setting to change"}
+    changes = {}
+    for key in known:
+        value, now = body[key], lanes["settings"][key]
+        if value == now:
+            continue
+        if key.endswith("_chat_lane"):
+            if not isinstance(value, bool):
+                return 400, {"ok": False, "code": "wrong_type", "error": f"{key} must be true or false", "setting": key}
+        else:
+            span = LANE_RANGES[key]
+            if isinstance(value, bool) or not isinstance(value, int):
+                return 400, {"ok": False, "code": "wrong_type", "error": f"{key} must be a whole number", "setting": key, "range": span}
+            if not span["min"] <= value <= span["max"]:
+                return 400, {"ok": False, "code": "out_of_range", "error": f"{key} must be between {span['min']} and {span['max']}",
+                             "setting": key, "range": span}
+        changes[key] = value
+    if changes:
+        lanes["settings"].update(changes)
+        broadcast({"type": "lane-settings-updated", **lanes["settings"]})
+    return 200, lane_settings_answer()
+
+
 def broadcast(event):
     global event_id
     with state_lock:
@@ -1479,6 +1522,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("chat_view")
             if chat_view["fork"]:
                 features.append("conversation_fork")
+            if lanes["on"]:
+                features.append("lane_settings")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -1751,6 +1796,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, tool_explanation_settings)
         if url.path == "/coordination-settings":
             return self.reply(200, {"coordination_visibility": coordination["visibility"]})
+        if url.path == "/lane-settings":
+            if not lanes["on"]:
+                return self.reply(404, {"error": "not found"})
+            record({"method": "GET", "path": url.path})
+            return self.reply(200, lane_settings_answer())
         if url.path == "/events":
             inbox = queue.Queue()
             # `live=` (blank) asks for status ops only; no parameter, none.
@@ -2094,6 +2144,21 @@ class Handler(BaseHTTPRequestHandler):
                         agent["chat_view"] = value
             broadcast({"type": "agent-roster", "kind": "chat_view", "session": session, "chat_view": value})
             return self.reply(200, {"ok": True, "session": session, "chat_view": value})
+        if url.path == "/__control/lane-settings":
+            # Test control: the lane_settings feature on or off (read from
+            # /server-info on connecting), and what the lanes hold now.
+            lanes["on"] = bool(body.get("on", lanes["on"]))
+            if "held" in body:
+                lanes["held"] = body["held"]
+            if "settings" in body:
+                lanes["settings"].update(body["settings"])
+            return self.reply(200, {"ok": True})
+        if url.path == "/lane-settings":
+            if not lanes["on"]:
+                return self.reply(404, {"error": "not found"})
+            record({"method": "POST", "path": url.path, "body": body})
+            status, answer = lane_settings_change(body)
+            return self.reply(status, answer)
         if url.path == "/__control/coordination":
             # Test control: the hidden_coordination feature on or off (read
             # from /server-info on connecting).

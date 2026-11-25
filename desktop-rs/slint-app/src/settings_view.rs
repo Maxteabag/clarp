@@ -101,6 +101,9 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
                 info("Queue message", "Ctrl+Enter"),
             ]
         }
+        crate::catalogue::lanes::SECTION => {
+            crate::catalogue::lanes::information(app).iter().map(|(label, detail)| info(label, detail)).collect()
+        }
         "ABOUT" => vec![
             info("Desktop client", concat!(env!("CARGO_PKG_VERSION"), " preview (Slint)")),
             info("Host version", if engine.server_version().is_empty() { "Unknown" } else { engine.server_version() }),
@@ -182,6 +185,7 @@ pub fn open(app: &App, window: &AppWindow) {
     window.set_surface("settings".into());
     window.set_settings_query("".into());
     app.engine.borrow_mut().load_host_status();
+    app.engine.borrow_mut().load_lane_settings();
     show(app, window);
     window.invoke_focus_settings();
 }
