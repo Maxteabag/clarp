@@ -276,6 +276,16 @@ impl LiveView {
     /// then applies the events that came while it was outstanding and are
     /// newer than it; returns the effects those ask for ([`FETCH_LIVE`]).
     pub fn apply_snapshot(&mut self, snapshot: &Object) -> Vec<&'static str> {
+        // A snapshot of this epoch below the lseq held was taken before
+        // events this view already applied (two fetches crossed): it would
+        // put the view back, so only what waited for it goes on.
+        let epoch = snapshot.get("epoch").and_then(Value::as_str);
+        let stale = epoch.is_some() && epoch == self.epoch.as_deref()
+            && snapshot.get("lseq").and_then(Value::as_i64).zip(self.lseq).is_some_and(|(lseq, held)| lseq < held);
+        if stale {
+            self.awaiting_snapshot = false;
+            return self.apply_held_back();
+        }
         self.epoch = snapshot.get("epoch").and_then(Value::as_str).map(str::to_owned);
         self.lseq = snapshot.get("lseq").and_then(Value::as_i64);
         self.activity = snapshot.get("activity").and_then(Value::as_object).cloned().unwrap_or_else(idle);
@@ -306,9 +316,14 @@ impl LiveView {
         }
         self.awaiting_snapshot = false;
         self.generation += 1;
+        self.apply_held_back()
+    }
+
+    /// The events that waited for a snapshot, applied by §3's rules: one
+    /// that leaves a gap asks again, and the rest wait for that one.
+    fn apply_held_back(&mut self) -> Vec<&'static str> {
         let mut effects = Vec::new();
         for event in std::mem::take(&mut self.held_back) {
-            // One that leaves a gap asks again; the rest wait for that one.
             effects.extend(self.apply_event(&event));
         }
         effects
