@@ -60,3 +60,73 @@ fn without_the_feature_nothing_is_read_or_written() {
     assert!(host.requests("GET", "/lane-settings").is_empty());
     assert!(host.requests("POST", "/lane-settings").is_empty());
 }
+
+fn limits_of(e: &clarp_engine::Engine) -> Option<String> {
+    e.lane_settings().and_then(clarp_engine::lanes::limits).map(str::to_owned)
+}
+
+#[test]
+fn auto_limits_are_read_switched_and_a_fixed_limit_set_switches_to_fixed() {
+    let host = Host::start("lanes-auto");
+    host.control("/__control/lane-settings", json!({"on": true, "auto": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("the auto settings", |e| e.lane_auto_limits_offered() && limits_of(e).is_some());
+    assert_eq!(limits_of(&d.engine).as_deref(), Some("auto"));
+    let answer = d.engine.lane_settings().unwrap().clone();
+    assert_eq!(clarp_engine::lanes::number(&answer, "reserve_percent"), Some(20.0));
+    assert_eq!(clarp_engine::lanes::range(&answer, "reserve_percent"), Some((5.0, 50.0)));
+    assert_eq!(clarp_engine::lanes::range(&answer, "ceiling"), Some((1.0, 64.0)));
+    assert_eq!(clarp_engine::lanes::free_line(&answer), "15800 MB free · 6200 MB kept free · 9600 MB room for kept processes");
+
+    // The owner switches to fixed, and back.
+    d.engine.set_lane_setting("limits", json!("fixed"));
+    d.until("the switch posted", |_| !host.requests("POST", "/lane-settings").is_empty());
+    assert_eq!(host.requests("POST", "/lane-settings")[0]["body"], json!({"limits": "fixed"}));
+    d.until("fixed", |e| limits_of(e).as_deref() == Some("fixed"));
+    d.engine.set_lane_setting("limits", json!("auto"));
+    d.until("auto again", |e| limits_of(e).as_deref() == Some("auto") && host.requests("POST", "/lane-settings").len() == 2);
+
+    // An auto setting: posted alone, kept auto.
+    d.engine.set_lane_setting("ceiling", json!(30));
+    d.until("the ceiling", |e| e.lane_settings().and_then(|a| clarp_engine::lanes::number(a, "ceiling")) == Some(30.0));
+    assert_eq!(limits_of(&d.engine).as_deref(), Some("auto"));
+
+    // A refusal keeps the Host's sentence.
+    d.engine.set_lane_setting("reserve_percent", json!(60));
+    d.until("the refusal", |e| !e.lane_settings_error().is_empty());
+    assert_eq!(d.engine.lane_settings_error(), "reserve_percent must be between 5 and 50");
+    d.until("the Host's value back", |e| e.lane_settings().and_then(|a| clarp_engine::lanes::number(a, "reserve_percent")) == Some(20.0));
+
+    // A fixed limit set in auto: the request names only it, the Host switches to fixed.
+    d.engine.set_lane_setting("most", json!(10));
+    assert_eq!(limits_of(&d.engine).as_deref(), Some("fixed"), "shown fixed at once");
+    d.until("the most posted", |_| host.requests("POST", "/lane-settings").len() == 5);
+    assert_eq!(host.requests("POST", "/lane-settings")[4]["body"], json!({"most": 10}));
+    d.until("the Host's answer", |e| most_of(e) == Some(10.0) && e.lane_settings_error().is_empty());
+    assert_eq!(limits_of(&d.engine).as_deref(), Some("fixed"));
+
+    // The Host cannot read its memory: said so, never null.
+    host.control("/__control/lane-settings", json!({"free": {"available_mb": null, "reserve_mb": null, "room_mb": null}}));
+    host.control("/__control/event", json!({"type": "lane-settings-updated"}));
+    d.until("nulls read", |e| e.lane_settings().is_some_and(|a| a["held"]["available_mb"].is_null()));
+    let line = clarp_engine::lanes::free_line(d.engine.lane_settings().unwrap());
+    assert_eq!(line, "The Host cannot read its machine's memory, so it keeps the fixed limits");
+}
+
+#[test]
+fn without_auto_limits_no_limits_are_read() {
+    let host = Host::start("lanes-no-auto");
+    host.control("/__control/lane-settings", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("the settings", |e| e.lane_settings().is_some());
+    assert!(!d.engine.lane_auto_limits_offered());
+    assert_eq!(limits_of(&d.engine), None);
+    assert_eq!(clarp_engine::lanes::free_line(d.engine.lane_settings().unwrap()), "");
+    // A fixed limit set: no switch to fixed is posted or shown.
+    d.engine.set_lane_setting("most", json!(9));
+    d.until("the most", |e| most_of(e) == Some(9.0));
+    assert_eq!(host.requests("POST", "/lane-settings")[0]["body"], json!({"most": 9}));
+    assert_eq!(limits_of(&d.engine), None);
+}

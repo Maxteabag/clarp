@@ -438,7 +438,8 @@ impl Setting {
     }
 }
 
-fn with_unit(number: &str, unit: &str) -> String {
+/// A number's text with its unit, as the settings page shows it.
+pub fn with_unit(number: &str, unit: &str) -> String {
     match unit {
         "" => number.to_owned(),
         "%" => format!("{number}%"),

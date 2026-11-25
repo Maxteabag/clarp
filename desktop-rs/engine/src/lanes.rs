@@ -6,6 +6,13 @@
 //! on `lane-settings-updated`; a change is `POST /lane-settings`, whose
 //! answer replaces what is held. The connected Host only: a peer Host's
 //! lanes are not shown.
+//!
+//! Where the Host also lists `lane_auto_limits` (Rust Host contract 180)
+//! the answer carries `limits` ("auto" or "fixed"), the auto settings
+//! `reserve_percent` and `ceiling`, and in `held` what the machine has free
+//! (`available_mb`, `reserve_mb`, `room_mb`, each null where the Host cannot
+//! read its memory). In auto, `most` and `memory_mb` are the fixed limits:
+//! the Host switches to fixed when either is set.
 
 use clarp_core::json::Object;
 use serde_json::Value;
@@ -18,6 +25,16 @@ pub const FEATURE: &str = "lane_settings";
 pub const SWITCH_SUFFIX: &str = "_chat_lane";
 /// The numbers the owner sets, in the order they are shown.
 pub const NUMBERS: [&str; 3] = ["most", "memory_mb", "idle_minutes"];
+/// The feature in `/server-info` for limits that follow the free memory.
+pub const AUTO_FEATURE: &str = "lane_auto_limits";
+/// How the limits are set: `AUTO` or `FIXED`.
+pub const LIMITS: &str = "limits";
+pub const AUTO: &str = "auto";
+pub const FIXED: &str = "fixed";
+/// The numbers auto uses, in the order they are shown.
+pub const AUTO_NUMBERS: [&str; 2] = ["reserve_percent", "ceiling"];
+/// The numbers that are the fixed limits: setting one switches the Host to fixed.
+pub const FIXED_NUMBERS: [&str; 2] = ["most", "memory_mb"];
 
 const READ: &str = "lane-settings";
 /// A change's tag: `lane-settings-write:<n>`, the n-th change.
@@ -27,6 +44,8 @@ const WRITE: &str = "lane-settings-write:";
 pub(crate) struct Lanes {
     /// `lane_settings` was in the last `/server-info`.
     pub feature: bool,
+    /// `lane_auto_limits` was in it too.
+    pub auto: bool,
     /// The Host's last answer (settings, ranges and what is held).
     pub answer: Option<Object>,
     /// Why the last change or read did not go through, as the Host said it.
@@ -72,6 +91,37 @@ pub fn range(answer: &Object, key: &str) -> Option<(f64, f64)> {
     (min <= max).then_some((min, max))
 }
 
+/// How the limits are set in an answer: "auto" or "fixed" (None from a
+/// Host that does not say).
+pub fn limits(answer: &Object) -> Option<&str> {
+    answer.get(LIMITS).and_then(Value::as_str).filter(|mode| *mode == AUTO || *mode == FIXED)
+}
+
+/// What the machine has free, in one line: "15800 MB free · 6200 MB kept
+/// free · 9600 MB room for kept processes". A value the Host could not read
+/// is said so; when it could read none, one sentence says that it keeps the
+/// fixed limits. Empty when the answer has no such values at all.
+pub fn free_line(answer: &Object) -> String {
+    let Some(held) = answer.get("held").and_then(Value::as_object) else { return String::new() };
+    let parts = [("available_mb", "free"), ("reserve_mb", "kept free"), ("room_mb", "room for kept processes")];
+    if parts.iter().all(|(key, _)| !held.contains_key(*key)) {
+        return String::new();
+    }
+    let read: Vec<Option<i64>> = parts.iter().map(|(key, _)| held.get(*key).and_then(Value::as_f64).map(|mb| mb.round() as i64)).collect();
+    if read.iter().all(Option::is_none) {
+        return "The Host cannot read its machine's memory, so it keeps the fixed limits".to_owned();
+    }
+    parts
+        .iter()
+        .zip(read)
+        .map(|((_, what), mb)| match mb {
+            Some(mb) => format!("{mb} MB {what}"),
+            None => format!("{what}: not known"),
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// What the lanes hold now, in one line: "8 kept · 1945 MB · claude 8 (2
 /// busy) · codex 0", with the lanes that did not answer named apart.
 pub fn held_line(answer: &Object) -> String {
@@ -104,6 +154,11 @@ impl Engine {
         self.lanes.feature
     }
 
+    /// The connected Host's limits may follow its free memory (`lane_auto_limits`).
+    pub fn lane_auto_limits_offered(&self) -> bool {
+        self.lanes.feature && self.lanes.auto
+    }
+
     /// The Host's last answer, once it gave one.
     pub fn lane_settings(&self) -> Option<&Object> {
         self.lanes.answer.as_ref()
@@ -127,8 +182,13 @@ impl Engine {
         if !self.lanes.feature || key.is_empty() {
             return;
         }
+        let auto = self.lanes.auto;
         if let Some(answer) = self.lanes.answer.as_mut() {
             answer.insert(key.to_owned(), value.clone());
+            // The Host switches to fixed when a fixed limit is set; shown at once too.
+            if auto && FIXED_NUMBERS.contains(&key) && limits(answer) == Some(AUTO) {
+                answer.insert(LIMITS.to_owned(), Value::from(FIXED));
+            }
         }
         self.lanes.error.clear();
         self.lanes.writes += 1;
@@ -141,14 +201,13 @@ impl Engine {
 
     /// `/server-info` answered.
     pub(crate) fn lanes_server_info(&mut self, info: &Object) {
-        let has = info
-            .get("capabilities")
-            .and_then(|c| c.get("features"))
-            .and_then(Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)));
-        if has != self.lanes.feature {
+        let features = info.get("capabilities").and_then(|c| c.get("features")).and_then(Value::as_array);
+        let lists = |name: &str| features.is_some_and(|features| features.iter().any(|f| f.as_str() == Some(name)));
+        let (has, auto) = (lists(FEATURE), lists(AUTO_FEATURE));
+        if has != self.lanes.feature || auto != self.lanes.auto {
             self.lanes = Default::default();
             self.lanes.feature = has;
+            self.lanes.auto = auto;
             self.changes.push(Change::HostStatus);
         }
         self.load_lane_settings();
@@ -238,6 +297,33 @@ mod tests {
         assert_eq!(number(&a, "most"), Some(8.0));
         assert_eq!(range(&a, "memory_mb"), Some((256.0, 16384.0)));
         assert_eq!(range(&a, "nothing"), None);
+    }
+
+    #[test]
+    fn the_limits_are_auto_or_fixed_and_nothing_else() {
+        let mut a = answer();
+        assert_eq!(limits(&a), None);
+        a.insert("limits".into(), json!("auto"));
+        assert_eq!(limits(&a), Some("auto"));
+        a.insert("limits".into(), json!("dynamic"));
+        assert_eq!(limits(&a), None);
+    }
+
+    #[test]
+    fn the_free_line_says_what_the_machine_has_free_and_never_null() {
+        let mut a = answer();
+        assert_eq!(free_line(&a), "", "a Host without auto limits says nothing free");
+        a["held"]["available_mb"] = json!(15800);
+        a["held"]["reserve_mb"] = json!(6200);
+        a["held"]["room_mb"] = json!(9600);
+        assert_eq!(free_line(&a), "15800 MB free · 6200 MB kept free · 9600 MB room for kept processes");
+        a["held"]["room_mb"] = Value::Null;
+        assert_eq!(free_line(&a), "15800 MB free · 6200 MB kept free · room for kept processes: not known");
+        a["held"]["available_mb"] = Value::Null;
+        a["held"]["reserve_mb"] = Value::Null;
+        let line = free_line(&a);
+        assert_eq!(line, "The Host cannot read its machine's memory, so it keeps the fixed limits");
+        assert!(!line.contains("null"));
     }
 
     #[test]
