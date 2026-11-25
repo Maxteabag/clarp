@@ -60,6 +60,25 @@ const USUAL_SHELL: &str = "/bin/sh";
 /// What a janitor's terminal is refused with: the words of every control of a chat that
 /// names one.
 const LOOKED_AT_ONLY: &str = "Janitors are inspection-only. Use their Pause or Configure controls.";
+/// Why an agent's terminal is not opened while a turn of the agent runs: the terminal and the
+/// turn's tool would both write one conversation (issue #770).
+pub(crate) const TURN_RUNS: &str =
+    "A turn of this agent is running. Stop it or wait until it ends, then open the terminal.";
+/// The stable code of that refusal, in the `X-Clarp-Code` header beside the words, for an app
+/// that acts on it rather than showing the words.
+const TURN_RUNNING: &str = "agent_turn_running";
+
+/// The refusal of an agent's terminal while a turn of the agent runs (issue #770): 409 and the
+/// words in plain text, as the route's other refusals, which the apps show as they come; the
+/// code in a header, so no app has to read a new body.
+fn turn_running() -> Response {
+    let mut refused = line::refused(StatusCode::CONFLICT, TURN_RUNS);
+    refused.headers_mut().insert(
+        axum::http::HeaderName::from_static("x-clarp-code"),
+        axum::http::HeaderValue::from_static(TURN_RUNNING),
+    );
+    refused
+}
 
 /// What runs in a terminal, and where.
 struct Program {
@@ -349,15 +368,24 @@ async fn of_an_agent(
     };
     let lease = match member.agent.open_terminal().await {
         Ok(lease) => lease,
+        Err(why) if matches!(why.1, Some(clarp_kernel::agent::Refusal::AtWork)) => {
+            return turn_running();
+        }
         Err(why) => return ApiError::from(why).into_response(),
     };
     // With the terminal open no turn of the agent's starts; an idle lane leaves first, so the
-    // tool here is the conversation's one writer (issue 761). One that runs a turn stays.
+    // tool here is the conversation's one writer (issue 761). A lane that runs work of its own
+    // (a goal's turn the tool started by itself) stays, and the terminal is refused as during
+    // any turn (issue #770): the lease goes, and what waited for it goes on.
     let (run_dir, agent_id) = (facts.run_dir, member.record.agent_id.clone());
-    let _ = tokio::task::spawn_blocking(move || {
-        crate::lane::make_way_if_idle(&run_dir, &agent_id);
-    })
-    .await;
+    let made_way =
+        tokio::task::spawn_blocking(move || crate::lane::make_way_if_idle(&run_dir, &agent_id))
+            .await
+            .unwrap_or(false);
+    if !made_way {
+        drop(lease);
+        return turn_running();
+    }
     let program = Program {
         called: session.to_string(),
         argv,

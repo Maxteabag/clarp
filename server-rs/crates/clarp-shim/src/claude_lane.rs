@@ -91,6 +91,11 @@ pub struct Snapshot {
     /// the Host counts Claude's typical size until then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+    /// Whether the lane runs work now: a claim, or (Codex) a turn its tool started by itself or
+    /// a goal that may continue. None from a lane that does not say: the Host then never ends
+    /// it, only waits for it (issue #772).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working: Option<bool>,
 }
 
 #[cfg(test)]
@@ -126,12 +131,14 @@ mod tests {
             idle_ms: 5,
             claims: 3,
             memory_bytes: Some(250 << 20),
+            working: Some(false),
         };
         let status: Status =
             serde_json::from_value(serde_json::to_value(&snapshot).unwrap()).unwrap();
         assert_eq!(status.thread, "s");
         assert_eq!(status.options, "digest");
         assert_eq!(status.idle_ms, 5);
+        assert_eq!(status.working, Some(false));
         assert_eq!(status.memory_bytes, Some(250 << 20));
     }
 

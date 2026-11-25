@@ -219,10 +219,11 @@ impl Worker {
             .spawn(move || {
                 let hold = lane.hold();
                 let _held = claude::held(&hold);
-                // Bounded as the terminal's own wait for an idle lane is (`make_way_if_idle`).
-                match lane.retire_within(crate::lane::TERMINAL_WAIT) {
+                // Bounded as every retirement is: a lane that does not let go in time is ended
+                // by its process id.
+                match lane.retire_within(crate::lane::LEAVE_WAIT) {
                     Ok(true) => {}
-                    Ok(false) => eprintln!("claudeLaneEndFail: Claude Code did not exit in time"),
+                    Ok(false) => eprintln!("claudeLaneEndFail: the Claude lane did not let go"),
                     Err(error) => eprintln!("claudeLaneEndFail: {error}"),
                 }
             });

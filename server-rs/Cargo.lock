@@ -254,6 +254,7 @@ dependencies = [
  "regex",
  "ring",
  "rusqlite",
+ "rustix",
  "rustls",
  "serde",
  "serde_json",

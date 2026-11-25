@@ -111,6 +111,11 @@ pub struct Snapshot {
     /// is counted in these bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+    /// Whether the lane runs work now: a claim, or (Codex) a turn its tool started by itself or
+    /// a goal that may continue. None from a lane that does not say: the Host then never ends
+    /// it, only waits for it (issue #772).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working: Option<bool>,
 }
 
 /// The lane never hands a spontaneous start to an unclaimed actor slot.

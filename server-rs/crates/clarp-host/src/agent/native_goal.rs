@@ -673,6 +673,7 @@ impl Worker {
                         effort: None,
                         idle_ms: 0,
                         memory_bytes: None,
+                        working: None,
                     })
                 } else {
                     Err(error)

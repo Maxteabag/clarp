@@ -22,14 +22,16 @@
 
 pub(crate) mod claude;
 pub(crate) mod codex;
+mod holder;
+mod scope;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_lock};
+use clarp_shim::lane::{LOGIN_CHANGED, Lifecycle, Status, owner_group, owner_lock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -208,32 +210,34 @@ pub(crate) fn config_path() -> Option<PathBuf> {
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
 /// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
-/// exited: one writer per conversation. A lane that still runs a turn refuses, and the terminal
-/// opens as it did before lanes (the lead's decision of 25 Nov 2026: that two-writer case is
-/// older than lanes, and is issue #770). Blocking: it waits for the lane's tool to exit, for
-/// at most [`TERMINAL_WAIT`]. A lane that acknowledged but has not let go by then (its tool hangs
-/// on its way out) is said once in the Host's log, and the terminal opens as it did before lanes
-/// rather than holding the request and the agent's lease (review of 25 Nov 2026).
-pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
-    make_way_within(run, agent_id, TERMINAL_WAIT);
+/// exited: one writer per conversation. Blocking, for at most [`LEAVE_WAIT`]: an idle lane
+/// that has not let go by then (its tool hangs on its way out) is ended with its tool and said
+/// once in the Host's log, rather than holding the request and the agent's lease (reviews of
+/// 25 Nov 2026). False: a lane refused to leave because it runs work of its own, or was too
+/// slow to say what it does, and the terminal is refused as it is while any turn of the agent
+/// runs (issue #770).
+pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) -> bool {
+    make_way_within(run, agent_id, LEAVE_WAIT)
 }
 
-/// How long the terminal waits for an idle lane's tool to exit before it opens anyway.
-pub(crate) const TERMINAL_WAIT: Duration = Duration::from_secs(15);
+/// How long a turn or the terminal waits for a lane asked to leave to let go, before the lane
+/// is ended by its process id and the turn or terminal goes on without it (issue #772): no
+/// turn waits on a lane's exit without a bound.
+pub(crate) const LEAVE_WAIT: Duration = Duration::from_secs(15);
+/// How long a lane ended by its process id is given to have let go of its owner lock.
+const ENDED_WAIT: Duration = Duration::from_secs(2);
 /// How often a bounded wait looks at the owner lock again.
 const RELEASE_LOOK: Duration = Duration::from_millis(100);
 
-fn make_way_within(run: &Path, agent_id: &str, bound: Duration) {
+fn make_way_within(run: &Path, agent_id: &str, bound: Duration) -> bool {
+    // Every tool's lane is asked, also after one refused.
+    let mut made_way = true;
     for tool in Tool::ALL {
-        if let Ok(false) = Endpoint::of(tool, run, agent_id).retire_within(bound) {
-            eprintln!(
-                "clarp-host: the {} lane of agent {agent_id} did not let go within {} s; the \
-                 terminal opens beside it",
-                tool.name(),
-                bound.as_secs()
-            );
-        }
+        made_way &= Endpoint::of(tool, run, agent_id)
+            .retire_within(bound)
+            .is_ok();
     }
+    made_way
 }
 
 /// How long a turn the owner sent keeps an agent's lane his (the owner's rule of 25 Nov 2026).
@@ -371,12 +375,27 @@ impl Endpoint {
         room: Room,
         needed: bool,
     ) -> io::Result<Place> {
+        self.place_within(run, (thread, digest), kept, room, needed, LEAVE_WAIT)
+    }
+
+    /// [`Self::place`], waiting at most `bound` for a lane that must make way to let go.
+    fn place_within(
+        &self,
+        run: &Path,
+        (thread, digest): (Option<&str>, &str),
+        kept: impl FnOnce(&Status) -> bool,
+        room: Room,
+        needed: bool,
+        bound: Duration,
+    ) -> io::Result<Place> {
         if let Ok(state) = self.inspect() {
             let same_thread = state.thread == thread.unwrap_or_default();
             if same_thread && state.options == digest && !kept(&state) {
                 return Ok(Place::Kept);
             }
-            if self.retire().is_err() {
+            // A lane that does not let go in time has been ended with its tool, where it may
+            // be; the look at its owner lock below says whether it has gone.
+            if self.retire_within(bound).is_err() {
                 return if same_thread {
                     Ok(Place::Kept)
                 } else {
@@ -407,7 +426,7 @@ impl Endpoint {
 
     /// One request, and the state the lane answers with, read as `T`.
     pub(crate) fn ask<T: DeserializeOwned>(&self, request: &impl Serialize) -> io::Result<T> {
-        let stream = self.connect(request)?;
+        let stream = self.connect(request, RPC_TIMEOUT)?;
         replied(&mut BufReader::new(stream), self.tool)
     }
 
@@ -435,7 +454,7 @@ impl Endpoint {
         request: &impl Serialize,
         mut observe: impl FnMut(T) -> bool,
     ) -> io::Result<()> {
-        let stream = self.connect(request)?;
+        let stream = self.connect(request, RPC_TIMEOUT)?;
         let mut input = BufReader::new(stream);
         if !observe(replied(&mut input, self.tool)?) {
             return Ok(());
@@ -450,50 +469,167 @@ impl Endpoint {
         }
     }
 
-    /// Ask an idle lane to leave, and wait until it has: its owner lock is let go only after
-    /// its tool has been reaped. A lane that still runs work refuses.
+    /// Ask an idle lane to leave, and wait until it has, for at most [`LEAVE_WAIT`]: its owner
+    /// lock is let go only after its tool has been reaped. A lane that still runs work refuses;
+    /// one that has not let go by the bound is an error too, whether it was ended or not
+    /// ([`Self::retire_within`]).
     pub(crate) fn retire(&self) -> io::Result<()> {
-        if self.released()? {
-            return Ok(());
+        if self.retire_within(LEAVE_WAIT)? {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "the {} lane did not let go",
+                self.tool.name()
+            )))
         }
-        self.ask::<Status>(&Lifecycle::Retire)?;
-        self.wait_released()
     }
 
     /// Asks an idle lane to leave and waits at most `bound` for it to have gone: `true` once its
-    /// owner lock is free, `false` when the bound passed first. A lane that still runs work
-    /// refuses, which is an error. The wait is a short look at the lock, again and again,
-    /// because a lock cannot be waited for with a deadline; it ends at the bound in any case.
+    /// owner lock is free. It is asked what it does first, and never ended while it works: a
+    /// lane busy with a turn may be slow to answer (Codex loads a long conversation for up to
+    /// 25 s), and a slow answer is no sign of a lane on its way out (review of 25 Nov 2026).
+    /// - A lane that answers it works, or does not say, is asked to leave and may refuse, which
+    ///   is an error; one that is slow to answer is an error too. Either is waited for, never
+    ///   ended.
+    /// - A lane that said it was idle answers a retirement only once it has gone, so its answer
+    ///   is waited for within the bound; one that has not let go by then is ended with its tool
+    ///   ([`Self::let_go_within`]).
+    /// - A socket nobody listens on any more is a lane on its way out: it stops answering before
+    ///   it ends its tool. It too is ended once the bound has passed.
+    ///
+    /// `false`: the lane has not let go, and was not ended, or even that did not free it.
     pub(crate) fn retire_within(&self, bound: Duration) -> io::Result<bool> {
         if self.released()? {
             return Ok(true);
         }
-        self.ask::<Status>(&Lifecycle::Retire)?;
-        let until = std::time::Instant::now() + bound;
+        let until = Instant::now() + bound;
+        let asked = self
+            .connect(&Lifecycle::Inspect, bound)
+            .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool));
+        let idle = match asked {
+            Ok(state) => state.working == Some(false) && state.claim.is_none(),
+            Err(error) if gone(&error) => return self.let_go_within(until, true),
+            Err(error) => return Err(error),
+        };
+        let left = until.saturating_duration_since(Instant::now());
+        let retired = self
+            .connect(&Lifecycle::Retire, left)
+            .and_then(|stream| replied::<Status>(&mut BufReader::new(stream), self.tool));
+        match retired {
+            Ok(_) => {}
+            Err(error) if gone(&error) => {}
+            Err(error) if idle && unanswered(&error) => {}
+            Err(error) => return Err(error),
+        }
+        self.let_go_within(until, idle)
+    }
+
+    /// Waits until `until` for a lane on its way out to let go of its owner lock. One that has
+    /// not by then is ended with its tool, where `may_end` says it may be (it said it was idle,
+    /// or it stopped answering on its way out): by its own systemd scope ([`scope`]), which
+    /// holds the lane and every process it started; where it has none, by its tool's process
+    /// group and its own id. The lane's id is the lock's holder as the kernel names it
+    /// ([`holder`]), never the lock file's words alone, and never a name or a pattern. Said once
+    /// in the Host's log, and given a moment to be gone. `true`: the lock is free.
+    pub(crate) fn let_go_within(&self, until: Instant, may_end: bool) -> io::Result<bool> {
+        if self.released_by(until)? {
+            return Ok(true);
+        }
+        let name = self
+            .socket
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !may_end {
+            eprintln!(
+                "clarp-host: the {} lane {name} did not let go in time; it said it works, or \
+                 did not say, so it is left as it is",
+                self.tool.name()
+            );
+            return Ok(false);
+        }
+        // The lock's holder now, from the kernel: the lock file may still name the lane before
+        // this one, which wrote it before this one took the lock and wrote its own.
+        let lock = owner_lock(&self.socket);
+        let Some(pid) = holder::of(&lock).filter(|pid| may_signal(*pid)) else {
+            eprintln!(
+                "clarp-host: the {} lane {name} did not let go in time and no process of it \
+                 holds its lock; it is left as it is",
+                self.tool.name()
+            );
+            return self.released();
+        };
+        // A handle on that process, opened before the holder is looked at again: from here it
+        // names this process whatever its id comes to name, and the second look shows that it
+        // held the lock when the handle was opened.
+        let Ok(process) = handle_on(pid) else {
+            return self.released();
+        };
+        if holder::of(&lock) != Some(pid) {
+            return self.released();
+        }
+        // Its own scope ends the lane and its tool together, whatever their process groups: a
+        // tool that hangs may not read the end of its input, and with only the lane's process
+        // gone it would write the conversation beside the lane or turn that comes next. Where
+        // it has no scope of its own (started outside systemd), its tool's group goes first,
+        // while the lane is still that group leader's parent, then the lane. Its tool also ends
+        // with the lane by itself: the lane starts it with a death signal (`tool-child`).
+        let found = scope::of_process(pid);
+        // The scope was read by the id: had the process ended meanwhile, the id might have
+        // named a process of another lane's scope. Its handle says whether it still lives.
+        if process.as_ref().is_some_and(ended) {
+            return self.released();
+        }
+        let how = match found {
+            Some(unit) if scope::end(&unit) => {
+                format!("its scope {unit} is ended, its tool with it")
+            }
+            unended => {
+                let group = owner_group(&self.socket)
+                    .filter(|group| may_signal(*group) && holder::leads_for(*group, pid));
+                if let Some(group) = group {
+                    signal(group, true);
+                }
+                match &process {
+                    Some(handle) => {
+                        let _ = rustix::process::pidfd_send_signal(
+                            handle,
+                            rustix::process::Signal::KILL,
+                        );
+                    }
+                    None => signal(pid, false),
+                }
+                let tool = group.map_or_else(
+                    || "its tool leads no group of its own any more".to_owned(),
+                    |group| format!("its tool's process group {group}"),
+                );
+                let why = unended.map_or_else(
+                    || "it runs in no scope of its own".to_owned(),
+                    |unit| format!("its scope {unit} could not be ended"),
+                );
+                format!("{why}, so its process {pid} is ended, and {tool}")
+            }
+        };
+        eprintln!(
+            "clarp-host: the {} lane {name} did not let go in time; {how}",
+            self.tool.name()
+        );
+        self.released_by(Instant::now() + ENDED_WAIT)
+    }
+
+    /// Looks at the owner lock until it is free or `until` has passed. A lock cannot be waited
+    /// for with a deadline, so it is looked at again and again, for a bounded time.
+    fn released_by(&self, until: Instant) -> io::Result<bool> {
         loop {
             if self.released()? {
                 return Ok(true);
             }
-            let left = until.saturating_duration_since(std::time::Instant::now());
+            let left = until.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return Ok(false);
             }
             std::thread::sleep(left.min(RELEASE_LOOK));
         }
-    }
-
-    /// Waits for the lane's owner lock, which its process holds until it is gone.
-    pub(crate) fn wait_released(&self) -> io::Result<()> {
-        let file = match OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(owner_lock(&self.socket))
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        file.lock()
     }
 
     /// A retirement response only acknowledges the request. The process
@@ -515,9 +651,10 @@ impl Endpoint {
         }
     }
 
-    fn connect(&self, request: &impl Serialize) -> io::Result<UnixStream> {
+    /// One request sent, its answer to be read within `wait`.
+    fn connect(&self, request: &impl Serialize, wait: Duration) -> io::Result<UnixStream> {
         let mut stream = UnixStream::connect(&self.socket)?;
-        stream.set_read_timeout(Some(RPC_TIMEOUT))?;
+        stream.set_read_timeout(Some(wait.max(Duration::from_millis(1))))?;
         stream.set_write_timeout(Some(RPC_TIMEOUT))?;
         serde_json::to_writer(&mut stream, request).map_err(io::Error::other)?;
         stream.write_all(b"\n")?;
@@ -529,7 +666,9 @@ impl Endpoint {
 /// it reached the tool (its `spool` is not there): the login changed and the lane left, or an
 /// idle lane left between the look and the offer (its own idle time, another agent's room). A
 /// lane that refused for its login is on its way out and is waited for; any other may still be
-/// there, and is looked at again by `again` rather than waited for.
+/// there, and is looked at again by `again` rather than waited for. The wait is bounded as a
+/// retirement's is: one that does not let go in time is ended by its process id, and `again`
+/// finds out whether it has gone.
 pub(crate) fn once_more<T>(
     first: io::Result<T>,
     spool: &Path,
@@ -539,7 +678,7 @@ pub(crate) fn once_more<T>(
     match first {
         Err(error) if !spool.try_exists().unwrap_or(true) => {
             if error.kind() == io::ErrorKind::PermissionDenied {
-                lane.wait_released()?;
+                lane.let_go_within(Instant::now() + LEAVE_WAIT, true)?;
             }
             again()
         }
@@ -742,6 +881,78 @@ fn line(input: &mut impl BufRead, tool: Tool) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(line)
+}
+
+/// A socket nobody listens on any more, or a connection closed without an answer: what a lane
+/// on its way out gives, which is no refusal. A lane stops answering before it ends its tool.
+fn gone(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::NotFound
+            | io::ErrorKind::ConnectionRefused
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::BrokenPipe
+    )
+}
+
+/// An answer that did not come in time: from a lane that said it was idle, one on its way out
+/// (its answer to a retirement comes only once it has gone); from any other, perhaps a busy one.
+fn unanswered(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
+}
+
+/// Whether an id may be signalled: never one that would reach more than one process or group by
+/// itself (0, 1), nor this Host's own process or group.
+fn may_signal(id: u32) -> bool {
+    id > 1
+        && id != std::process::id()
+        && i32::try_from(id).is_ok_and(|raw| raw != nix::unistd::getpgrp().as_raw())
+}
+
+/// A handle on the process `pid` (`pidfd`), through which it is signalled whatever its id comes
+/// to name. `Err`: the process is gone. `Ok(None)`: this kernel has no handles on processes.
+fn handle_on(pid: u32) -> io::Result<Option<std::os::fd::OwnedFd>> {
+    let Ok(raw) = i32::try_from(pid) else {
+        return Ok(None);
+    };
+    let Some(id) = rustix::process::Pid::from_raw(raw) else {
+        return Ok(None);
+    };
+    match rustix::process::pidfd_open(id, rustix::process::PidfdFlags::empty()) {
+        Ok(handle) => Ok(Some(handle)),
+        Err(error) if error == rustix::io::Errno::SRCH => Err(io::Error::from(error)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Whether the process a handle (`pidfd`) is on has ended: its handle is readable then.
+fn ended(process: &std::os::fd::OwnedFd) -> bool {
+    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+    use std::os::fd::AsFd;
+    let mut looked = [PollFd::new(process.as_fd(), PollFlags::POLLIN)];
+    let ready = poll(&mut looked, PollTimeout::ZERO);
+    ready.is_ok_and(|ready| ready > 0)
+}
+
+/// Ends with SIGKILL a lane's tool's process `group` (whose leader was checked to be the lane's
+/// child, and keeps its id until the lane reaps it), or, on a kernel without handles on
+/// processes, the lane's process `id`, which the kernel named as its lock's holder right before.
+/// The lane's process is otherwise signalled through its handle (`pidfd`).
+fn signal(id: u32, group: bool) {
+    let Ok(raw) = i32::try_from(id) else {
+        return;
+    };
+    let target = nix::unistd::Pid::from_raw(raw);
+    let kill = nix::sys::signal::Signal::SIGKILL;
+    let _ = if group {
+        nix::sys::signal::killpg(target, kill)
+    } else {
+        nix::sys::signal::kill(target, kill)
+    };
 }
 
 #[cfg(test)]

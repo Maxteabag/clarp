@@ -82,13 +82,29 @@ fn records(spool: &Path) -> Vec<Record> {
 }
 
 fn ask(socket: &Path, request: &Request) -> Reply {
-    let mut stream = UnixStream::connect(socket).unwrap();
+    ask_in("", socket, request)
+}
+
+/// One request and its reply. A reply that does not come names the request and the `case` it
+/// was asked in, so a failure points at its step.
+fn ask_in(case: &str, socket: &Path, request: &Request) -> Reply {
+    let mut stream = UnixStream::connect(socket)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} could not connect: {error}"));
     let mut line = serde_json::to_string(request).unwrap();
     line.push('\n');
-    stream.write_all(line.as_bytes()).unwrap();
+    stream
+        .write_all(line.as_bytes())
+        .unwrap_or_else(|error| panic!("{case}: {request:?} could not be sent: {error}"));
     let mut reply = String::new();
-    BufReader::new(stream).read_line(&mut reply).unwrap();
-    serde_json::from_str(&reply).unwrap()
+    BufReader::new(stream)
+        .read_line(&mut reply)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} got no reply: {error}"));
+    assert!(
+        !reply.is_empty(),
+        "{case}: {request:?} got no reply: the shim closed the connection"
+    );
+    serde_json::from_str(&reply)
+        .unwrap_or_else(|error| panic!("{case}: {request:?} got {reply:?}: {error}"))
 }
 
 fn outs(records: &[Record]) -> Vec<&str> {
@@ -1676,6 +1692,33 @@ time.sleep(300)'"#;
     ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
+/// The input that lets the tool end is answered, though the shim ends with the tool at once:
+/// the shim answers every request that reached it before it ends (issue #778). Asked many
+/// times, as the race it closes was seen once in many runs.
+#[test]
+fn the_input_that_ends_the_tool_is_answered_before_the_shim_ends() {
+    for round in 0..20 {
+        let name = format!("last-input-{round}");
+        let marker = dir_of(&name).join("ready");
+        let script = format!(
+            ": > '{}'; read line; printf 'read:%s\\n' \"$line\"",
+            marker.display()
+        );
+        let mut running = start(&name, &script);
+        wait_for("the tool to wait for input", || marker.exists());
+        let reply = ask_in(
+            &name,
+            &running.socket,
+            &Request::Stdin {
+                data: "the last line\n".to_string(),
+            },
+        );
+        assert!(reply.ok, "{name}: {reply:?}");
+        ends(&mut running.shim);
+        std::fs::remove_dir_all(&running.dir).unwrap();
+    }
+}
+
 #[test]
 fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
     const NEXT: u64 = 42;
@@ -1705,13 +1748,18 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         let mut fence = spool_len(&running.spool);
         if case != "unheld" {
             let ms = if case == "expired" { 500 } else { 2_000 };
-            let held = hold(&running.socket, ms).held.unwrap();
+            let held = ask_in(case, &running.socket, &Request::Hold { ms })
+                .held
+                .unwrap();
             fence = held.spool;
             if case == "partial" {
                 assert_eq!(held.partial_out, 7);
             }
             if case == "released" {
-                assert_eq!(release(&running.socket).let_go, Some(true));
+                assert_eq!(
+                    ask_in(case, &running.socket, &Request::Release).let_go,
+                    Some(true)
+                );
             }
             if case == "expired" {
                 wait_for("the shim to auto-release the held tool", || {
@@ -1722,7 +1770,8 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             }
             if case == "late-hook" {
                 assert!(
-                    ask(
+                    ask_in(
+                        case,
                         &running.socket,
                         &Request::Hook {
                             name: "late".to_string(),
@@ -1734,7 +1783,8 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
             }
         }
 
-        let reply = ask(
+        let reply = ask_in(
+            case,
             &running.socket,
             &Request::ConsumeHold {
                 fence,
@@ -1744,9 +1794,10 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         assert_eq!(reply.killed, Some(case == "current"), "{case}: {reply:?}");
         if case != "current" {
             // A refusal leaves the existing tool able to take input.
-            release(&running.socket);
+            ask_in(case, &running.socket, &Request::Release);
             assert!(
-                ask(
+                ask_in(
+                    case,
                     &running.socket,
                     &Request::Stdin {
                         data: "still here\n".to_string()
@@ -1793,4 +1844,75 @@ fn guarded_consume_ends_only_a_current_quiet_hold_at_its_fence() {
         }
         std::fs::remove_dir_all(&running.dir).unwrap();
     }
+}
+
+/// Whether the process `pid` is gone, or ended and only waits to be reaped.
+fn is_gone(pid: u32) -> bool {
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return true;
+    };
+    stat.rsplit_once(')')
+        .is_some_and(|(_, after)| after.trim_start().starts_with('Z'))
+}
+
+/// A lane's tool started through `tool-child` ends with the lane's process, however that ends
+/// (issue #772): here a tool that ignores SIGTERM and the end of its input, as a hung one does,
+/// in a group of its own, under a lane that is killed.
+#[test]
+fn a_lanes_tool_ends_with_the_lane_however_the_lane_ends() {
+    let dir = dir_of("tool-child");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ready = dir.join("tool");
+    let lane_process = r#"
+import os, subprocess, sys, time
+shim, ready = sys.argv[1], sys.argv[2]
+tool = subprocess.Popen([shim, "tool-child", str(os.getpid()), "--",
+                         "sh", "-c", "trap '' TERM; exec sleep 600"],
+                        stdin=subprocess.PIPE, start_new_session=True)
+with open(ready + ".part", "w") as said:
+    said.write(str(tool.pid))
+os.rename(ready + ".part", ready)
+time.sleep(600)
+"#;
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    let world = clarp_sealed::sealed(&clarp_sealed::runner(), &dir, &[], &[]);
+    let mut lane = clarp_sealed::command("python3", world)
+        .args(["-c", lane_process, env!("CARGO_BIN_EXE_clarp-shim")])
+        .arg(&ready)
+        .spawn()
+        .unwrap();
+    wait_for("the lane's tool", || ready.exists());
+    let tool: u32 = std::fs::read_to_string(&ready)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    // The tool is what `tool-child` became in place: the same process, now the program.
+    wait_for("the tool to run in place", || {
+        std::fs::read_to_string(format!("/proc/{tool}/comm"))
+            .is_ok_and(|name| name.trim() == "sleep")
+    });
+    lane.kill().unwrap();
+    lane.wait().unwrap();
+    wait_for("the tool to end with its lane", || is_gone(tool));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A tool is never started for a lane that is not its parent (one that has already ended):
+/// nothing would end it with that lane.
+#[test]
+fn a_tool_is_not_started_for_a_lane_that_is_not_its_parent() {
+    let dir = dir_of("tool-child-orphan");
+    std::fs::create_dir_all(&dir).unwrap();
+    let ran = dir.join("ran");
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    let world = clarp_sealed::sealed(&clarp_sealed::runner(), &dir, &[], &[]);
+    let status = clarp_sealed::command(env!("CARGO_BIN_EXE_clarp-shim"), world)
+        .args(["tool-child", "1", "--", "touch"])
+        .arg(&ran)
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(1));
+    assert!(!ran.exists());
+    std::fs::remove_dir_all(&dir).unwrap();
 }

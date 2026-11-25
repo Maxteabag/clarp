@@ -132,6 +132,47 @@ of them is not done.
     locks because a tool may refuse a second process at once instead of waiting: Muse fails
     `muse exec` on a session that a `muse serve` holds. A lane that still runs a turn refuses to
     leave, and the other process must not go ahead.
+  - **No turn waits on a lane's exit without a bound, and no lane that works is ended**
+    (issue #772). Every retirement (a turn's `place`, an exec turn making way, a terminal,
+    `once_more` after a changed login) waits at most 15 s (`LEAVE_WAIT`) for the lane's owner
+    lock.
+    - **Asked first.** The lane is asked what it does (`Inspect`, whose `working` says whether
+      it runs a claim, or for Codex a turn its tool began or a goal that may continue). A lane
+      that works, or does not say (an older shim), or is slow to answer, is asked to leave and
+      waited for, and never ended: a busy Codex lane can take 25 s to load a long conversation.
+      A lane answers a retirement only once it has gone, so a lane that said it was idle and
+      has neither answered nor let go by the bound is on its way out. So is one whose socket
+      nobody listens on any more: a lane removes its socket as soon as it stops serving, before
+      it ends its tool.
+    - **Ended with its tool.** Such a lane is ended with its tool, logged once, and the turn
+      goes on without it: a new lane, or its own process. A tool that hangs may not read the
+      end of its input, and with only the lane gone it would write the conversation beside the
+      next lane or turn, and hold memory outside the budget. Three things end it:
+      - **its own systemd scope.** The launcher starts every lane in a scope of its own
+        (`clarp-claude-lane-*.scope`, `clarp-codex-goal-*.scope`), a cgroup, so `systemctl
+        --user kill --signal=SIGKILL` on it ends the lane and every process it started,
+        whatever their groups, with no window in which a name means another process. The unit
+        is read from the lane's process (`/proc/<pid>/cgroup`), so it is known after a Host
+        restart too; only a lane scope that is not the Host's own unit is ended;
+      - **where it has no scope** (a lane started outside systemd, as in tests): its tool's
+        process group, which the lane writes into its owner lock beside its own id
+        (`<pid> <group>`), signalled only while that group's leader is still the lane's child,
+        then the lane's process;
+      - **a death signal on the tool.** The lane starts its tool through `clarp-shim
+        tool-child <lane pid> -- <program>`, which sets `PR_SET_PDEATHSIG` (SIGKILL), checks
+        the lane is still its parent, and becomes the tool in place (`execvp`). The tool so ends
+        with its lane however the lane ends. It is set there, not in a `pre_exec` of the lane,
+        because that is `unsafe` and the workspace forbids it; it fires when the starting
+        thread ends, and both lanes start their tool on their main thread.
+    - **Whose process.** The lane's id is the holder of its owner lock as the kernel names it
+      (`/proc/locks`), never the lock file's words alone: a new lane takes the lock before it
+      writes its id, so the file may still name the lane before it. A handle on that process
+      (`pidfd_open`, through `rustix`, as the workspace has no `unsafe`) is opened, the holder is
+      looked at again, and the lane is signalled through the handle (`pidfd_send_signal`), so a
+      process whose id came free and was given again is never signalled. The lane's scope is
+      read by its id, so the handle is looked at after that read too: a process that ended
+      meanwhile is left, as its id may name a process of another lane's scope. Only a kernel
+      without process handles falls back to the id alone, right after the second look.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails
@@ -154,10 +195,15 @@ of them is not done.
     - Status forks are a Clarp skill, not a route of this Host.
     - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
       retired and waited for until its tool has exited, and the terminal then opens as before
-      (the lead's decision of 25 Nov 2026). The wait is bounded at 15 s: a lane whose tool hangs
-      on its way out is said once in the Host's log, and the terminal opens beside it rather
-      than holding the request and the agent's lease. While a turn runs, the terminal opens as
-      before, with no refusal; that two-writer case is older than lanes and is issue #770.
+      (the lead's decision of 25 Nov 2026). The wait is bounded as every retirement is
+      (above), so the terminal never holds the request and the agent's lease on a lane's exit.
+      While a turn of the agent may run its tool (it starts or runs, and does not wait for a
+      terminal already open), or a lane refuses to leave because it runs work of its own, the
+      terminal is refused: 409 with words that say to stop the turn or wait for its end, in
+      plain text like the route's other refusals, and the code `agent_turn_running` in the
+      header `X-Clarp-Code` (issue #770). This holds for every tool's terminal, since it is
+      asked of the agent's turns and of every tool's lane. A turn between two attempts has no
+      tool running: the terminal opens, and the next attempt waits for it.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an
   attempt is offered to a new lane, and only once (`lane::once_more`).

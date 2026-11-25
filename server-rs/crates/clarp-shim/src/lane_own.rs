@@ -107,7 +107,8 @@ pub(super) fn lock_exclusive(path: &Path) -> io::Result<File> {
 }
 
 /// The lane's owner lock, held by its process until its tool has been reaped: the Host knows a
-/// lane has left by this lock being free. Its socket's parent is made first.
+/// lane has left by this lock being free. Its socket's parent is made first, and the process's
+/// id is written into it; [`name_tool`] adds its tool's group once the tool runs.
 pub(super) fn hold_owner(socket: &Path) -> io::Result<File> {
     if let Some(parent) = socket.parent() {
         fs::create_dir_all(parent)?;
@@ -120,7 +121,28 @@ pub(super) fn hold_owner(socket: &Path) -> io::Result<File> {
         .mode(0o600)
         .open(owner_lock(socket))?;
     lock.try_lock().map_err(io::Error::other)?;
+    // Its own id, written once the lock is held: the Host ends a lane that does not let go
+    // when asked by this id and no other (issue #772).
+    write_ids(&lock, None)?;
     Ok(lock)
+}
+
+/// Names the process group of the tool the lane started, beside the lane's own id in its owner
+/// lock: the Host ends that group too when the lane does not let go (issue #772), since a tool
+/// that hangs may not read the end of its input, and would write the conversation beside the
+/// lane that comes next.
+pub(super) fn name_tool(lock: &File, group: u32) -> io::Result<()> {
+    write_ids(lock, Some(group))
+}
+
+fn write_ids(lock: &File, group: Option<u32>) -> io::Result<()> {
+    use std::os::unix::fs::FileExt;
+    let ids = match group {
+        Some(group) => format!("{} {group}\n", std::process::id()),
+        None => format!("{}\n", std::process::id()),
+    };
+    lock.set_len(0)?;
+    lock.write_all_at(ids.as_bytes(), 0)
 }
 
 /// How long the lane has been without a claim, and when it leaves for it.
@@ -171,9 +193,33 @@ impl Idle {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{Idle, Own};
+    use super::{Idle, Own, hold_owner, name_tool};
+    use clarp_shim::lane::{owner_group, owner_pid};
     use serde_json::json;
     use std::time::Duration;
+
+    #[test]
+    fn the_owner_lock_names_the_lane_and_then_its_tools_group() {
+        let dir = std::env::temp_dir().join(format!("lane-owner-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let socket = dir.join("a-cxg.sock");
+        let lock = hold_owner(&socket).unwrap();
+        let me = std::process::id();
+        assert_eq!((owner_pid(&socket), owner_group(&socket)), (Some(me), None));
+        // Written whole over what was there, a longer id included.
+        name_tool(&lock, 4_194_303).unwrap();
+        assert_eq!(
+            (owner_pid(&socket), owner_group(&socket)),
+            (Some(me), Some(4_194_303))
+        );
+        name_tool(&lock, 7).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(clarp_shim::lane::owner_lock(&socket)).unwrap(),
+            format!("{me} 7\n")
+        );
+        drop(lock);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn the_lanes_own_options_are_taken_out_and_the_tools_left() {
