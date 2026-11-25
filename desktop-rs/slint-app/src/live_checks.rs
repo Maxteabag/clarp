@@ -674,7 +674,9 @@ pub fn live_check(out: String) {
             check(probe_titles() == ["Worked for 16s · 1 tool", "Ran sleep 60"], &format!("the real settled turn folds after its rows took the tools over: {:?}", probe_titles()));
             let failed = live_row(&format!("live:{REAL_FAILED}")).unwrap_or_default();
             check(failed.live.status == "failed" && failed.live.meta == "exit 1 · 0.0s", &format!("the failed tool stays in view: {:?} {:?}", failed.live.status, failed.live.meta));
-            check(failed.live.secondary == "Pause execution for 60 seconds.", &format!("with its explanation: {:?}", failed.live.secondary));
+            // The runtime refused it: its reason, in plain words, replaces the explanation (#813).
+            check(failed.live.secondary.starts_with("Blocked: standalone sleep 60.") && !failed.live.secondary.contains("tool_use_error"), &format!("with the reason it was refused: {:?}", failed.live.secondary));
+            check(!failed.live.expandable, "a refused tool has no output box to open");
             let shown = rows(&crate::window().expect("window"));
             check(shown.last().is_some_and(|r| r.id == REAL_ANSWER_ROW), "the answer, its durable row, closes the turn");
             check(shown.iter().all(|r| r.id != "msg-9dc44519ed4e93bcff29" && r.id != "msg-d28c2b3f8a1150792e60"), "the tool rows are not shown again as activity");
@@ -682,11 +684,13 @@ pub fn live_check(out: String) {
             check(fold.live.expandable && !fold.live.expanded, "the fold is closed");
             shot(&out8, "live-07-real-folded");
             app_now().focus_transcript();
-            *app.artifact_cursor.borrow_mut() = format!("live:{REAL_FAILED}");
+            app.artifact_cursor.borrow_mut().clear();
             true
         })),
-        ("real on the failed tool", Box::new(move |app, _window, elapsed| {
-            if crate::artifacts_view::selected(app).as_deref() != Some(&format!("live:{REAL_FAILED}")) || elapsed < Duration::from_millis(300) {
+        ("real past the refused tool", Box::new(move |_app, _window, elapsed| {
+            // The refused tool opens nothing, so it is no card: K from none
+            // goes to the lowest card on screen, the fold.
+            if elapsed < Duration::from_millis(300) {
                 return false;
             }
             headless::press("k");
@@ -696,7 +700,7 @@ pub fn live_check(out: String) {
             if app.artifact_cursor.borrow().as_str() != REAL_FOLD {
                 return false;
             }
-            check(true, "K from the failed tool reaches the fold");
+            check(true, "K reaches the fold past the refused tool");
             headless::press("o");
             true
         })),
