@@ -21,6 +21,7 @@ impl Lane {
             effort: self.effort.clone(),
             idle_ms: self.idle.ms(claimed),
             memory_bytes: self.memory,
+            working: Some(!matches!(self.slot, Slot::Free)),
         }
     }
 

@@ -71,6 +71,11 @@ pub struct Snapshot {
     pub idle_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+    /// Whether the lane runs work now: a turn claimed or being bound, a lingering one included
+    /// (its claim lasts until `turn/completed`). An idle lane says `false`, so the Host may end it
+    /// with its tool where it does not let go in time (issue #772).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working: Option<bool>,
 }
 
 /// A UUIDv7, which every MSP command names itself by (`commandId`): the millisecond, then
@@ -128,12 +133,15 @@ mod tests {
             effort: None,
             idle_ms: 42,
             memory_bytes: Some(300),
+            working: Some(false),
         };
         let status: Status =
             serde_json::from_value(serde_json::to_value(&snapshot).unwrap()).unwrap();
         assert_eq!(status.thread, "s");
         assert_eq!(status.options, "digest");
         assert_eq!(status.memory_bytes, Some(300));
+        // An idle lane says it runs no work: the Host may end it if it hangs (#772).
+        assert_eq!(status.working, Some(false));
         assert_eq!(status.idle_ms, 42);
     }
 
