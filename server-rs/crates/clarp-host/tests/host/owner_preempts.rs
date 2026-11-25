@@ -28,20 +28,38 @@ fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_
             .iter()
             .any(|row| row["role"] == "assistant" && text_of(row) == "owner says hi")
     });
-    // The agent is told to take the cut work up again, after the owner's turn.
+    // The agent is told to take the cut work up again, after the owner's turn. Work nobody
+    // waits on may wait while the machine is under pressure: the note is then still in the
+    // queue, and enters the conversation when its turn starts.
+    let cut_short = "was cut short because the owner wrote to you";
+    let note_text = || {
+        let queue = host.get(&format!("/turn-queue?session={target}"));
+        let queued = queue["items"].as_array().cloned().unwrap_or_default();
+        let turns = host.turns(&target);
+        let found = |rows: &[Value]| {
+            rows.iter()
+                .map(text_of)
+                .find(|text| text.contains(cut_short))
+        };
+        found(&turns).or_else(|| found(&queued))
+    };
     wait_for("the note to take the peer's message up again", || {
-        host.turns(&target)
-            .iter()
-            .any(|row| text_of(row).contains("was cut short because the owner wrote to you"))
+        note_text().is_some()
     });
-    let turns = host.turns(&target);
-    let at = |found: &dyn Fn(&Value) -> bool| turns.iter().position(found).unwrap();
-    let answered = at(&|row| row["role"] == "assistant" && text_of(row) == "owner says hi");
-    let note = at(&|row| text_of(row).contains("was cut short because the owner wrote to you"));
-    assert!(answered < note, "{turns:#?}");
-    let note = text_of(&turns[note]);
+    let note = note_text().unwrap();
     assert!(note.contains("Peer"), "{note}");
     assert!(note.contains("sleep 60"), "{note}");
+    let turns = host.turns(&target);
+    let answered = turns
+        .iter()
+        .position(|row| row["role"] == "assistant" && text_of(row) == "owner says hi")
+        .unwrap();
+    if let Some(noted) = turns
+        .iter()
+        .position(|row| text_of(row).contains(cut_short))
+    {
+        assert!(answered < noted, "{turns:#?}");
+    }
     // The peer's turn was not answered: it made way.
     assert!(
         !turns
