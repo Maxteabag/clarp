@@ -20,7 +20,7 @@ claude_account_switch_command = ["not", "carried"]
 def carried(config_text, tmp_path):
     """What install-host keeps of an existing config: its own heredoc, run on it."""
     script = (TOOLS / "install-host").read_text()
-    body = re.search(r"carried_config=\"\$\(python3 - \"\$own_config\" <<'PYTHON'\n(.*?)\nPYTHON\n", script, re.S)[1]
+    body = re.search(r"carried_config=\"\$\(python3 - \"\$config_file\" <<'PYTHON'\n(.*?)\nPYTHON\n", script, re.S)[1]
     config = tmp_path / "config.toml"
     config.write_text(config_text)
     return subprocess.run([sys.executable, "-c", body, str(config)], capture_output=True, text=True, check=True).stdout
