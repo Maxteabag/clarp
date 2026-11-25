@@ -591,9 +591,12 @@ Rules:
   process and the Host was not asked to stop it, the turn fails with the kind
   `ended_from_outside` (`agent-state` `detail.reason`), and its reason is "The turn's process
   was ended from outside (SIGTERM)", naming the signal, in place of what the tool wrote as it
-  was ended (Claude Code's "claude reported an error"). It is never tried again, and it is not
-  counted against the agent's backend. A Stop through the Host still ends the turn as
-  `interrupted`.
+  was ended (Claude Code's "claude reported an error", an OpenCode turn's `interrupted`). Only a
+  failure that says nothing more than that the process went is replaced; one the Host handles
+  itself (`usage_limit`, `auth`, `connection`, …) keeps its kind, so its account switch or retry
+  still happens. It is never tried again, and it is not counted against the agent's backend. A
+  Stop through the Host still ends the turn as `interrupted`. A turn on a kept lane (the chat
+  lanes, the Codex goal lane) is not covered yet (issue 850).
 - **A conversation too long for its model is a failure of its own (Rust Host contract 166,
   feature `prompt_too_long`).** Such a turn fails with the kind `prompt_too_long`, and its
   reason is "This conversation is too long for the model. Compact it or start a new one",

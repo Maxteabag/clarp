@@ -64,6 +64,15 @@ pub fn ended_from_outside(signal: &str) -> String {
     )
 }
 
+/// Whether a failure of this kind says nothing more than that the process went: what a tool
+/// writes as a signal ends it (an error with no words, a bad exit, an interruption). Only such
+/// a failure is told as ended from outside when a signal from outside came first; one with
+/// handling of its own (a usage limit, a sign-in, a dropped connection) keeps its kind, so its
+/// account switch or retry still happens.
+pub fn yields_to_outside(kind: &str) -> bool {
+    matches!(kind, UNKNOWN | RUNNER_EXIT | INTERRUPTED | CLEAN)
+}
+
 /// The sentence of a turn ended from outside, without its mark. `None` for any other words.
 pub fn outside_sentence(said: &str) -> Option<&str> {
     said.trim()

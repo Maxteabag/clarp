@@ -49,6 +49,7 @@ mod lingering;
 pub mod native_goal;
 mod native_goal_reservation;
 mod orphan;
+mod outside;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -6806,17 +6807,11 @@ impl Actor {
                             };
                             // Ended from outside the Host, which was not asked to stop it: not
                             // the tool's failure, whatever it wrote as it went (issue 829).
-                            let outcome = match &live.outside {
-                                Some(signal)
-                                    if outcome != RunOutcome::Completed
-                                        && batch.agent().stopping().is_none() =>
-                                {
-                                    RunOutcome::Failed {
-                                        reason: failures::ended_from_outside(signal),
-                                    }
-                                }
-                                _ => outcome,
-                            };
+                            let outcome = outside::settled(
+                                outcome,
+                                live.outside.as_deref(),
+                                batch.agent().stopping().is_some(),
+                            );
                             if steering::recover_reads(
                                 &mut batch,
                                 self.backend.as_ref(),
