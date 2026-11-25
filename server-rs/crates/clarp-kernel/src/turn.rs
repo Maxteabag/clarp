@@ -1053,6 +1053,28 @@ impl Turn {
         }
     }
 
+    /// Who asked for the turn.
+    pub fn origin(&self) -> &Origin {
+        match self {
+            Self::Queued(t) => &t.origin,
+            Self::Starting(t) => &t.origin,
+            Self::Running(t) => &t.origin,
+            Self::Parked(t) => &t.origin,
+            Self::Settled(t) => &t.origin,
+        }
+    }
+
+    /// The position in the agent's log of the message the turn answers.
+    pub fn message_seq(&self) -> u64 {
+        match self {
+            Self::Queued(t) => t.message_seq,
+            Self::Starting(t) => t.message_seq,
+            Self::Running(t) => t.message_seq,
+            Self::Parked(t) => t.message_seq,
+            Self::Settled(t) => t.message_seq,
+        }
+    }
+
     pub fn state_name(&self) -> &'static str {
         match self {
             Self::Queued(_) => "queued",

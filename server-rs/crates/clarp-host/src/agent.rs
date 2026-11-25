@@ -1796,6 +1796,16 @@ struct Stall {
     since: Option<i64>,
 }
 
+/// The view the owner reads this agent's chat in, by the setting kept with the queue.
+fn chat_view(setup: &Setup) -> clarp_kernel::chat_view::View {
+    setup
+        .hub
+        .queue_directory()
+        .as_deref()
+        .map(|directory| crate::chat_view::preference(directory, &setup.record.agent_id))
+        .unwrap_or_default()
+}
+
 /// The id of the message a goal's owner is woken with, from the wake's own id: it is a
 /// message to the agent like any other.
 fn wake_message_id(request_id: &str) -> String {
@@ -3138,7 +3148,7 @@ impl Worker {
                 }
             }
         }
-        let ask = match ask {
+        let mut ask = match ask {
             Ask::OpenTerminal { answer } => {
                 if let Some(actor) = self.actor.as_ref()
                     && let Err(why) = actor.require_here()
@@ -3258,6 +3268,34 @@ impl Worker {
             other => other,
         };
         let now = self.now_ms();
+        // The owner's message never waits behind a turn that is not a person's (issue 839):
+        // another agent's, a trigger's, a goal's wake. Where no conversation fork answers it
+        // beside that turn, it is said direct: the turn makes way at once and the owner's
+        // starts, and the agent is left a note behind it to take the cut work up again.
+        let mut made_way = None;
+        if let Ask::Send {
+            message,
+            admission,
+            reservation: None,
+            marks,
+            ..
+        } = &mut ask
+            && *admission == Admission::Queue
+            && marks.coordination.is_none()
+            && let Some(actor) = self.actor.as_ref()
+            && let Some(goes) = actor.owner_goes_first(&message.origin)?
+            && !(Actor::fork_answers(message)
+                && actor.fork_beside()?.is_some()
+                && crate::conversation_forks::may_fork(
+                    &self.setup.record.backend,
+                    chat_view(&self.setup),
+                    &self.setup.record.agent_id,
+                    &self.setup.record.session,
+                ))
+        {
+            *admission = Admission::Direct;
+            made_way = goes.note;
+        }
         // A tool whose running turn takes another message on its input (Claude Code, agy-acp)
         // is offered the user's. A Codex turn takes steered words only on its lane, and only
         // while the owner's setting runs chat turns there: with it off, a goal turn is not
@@ -3421,6 +3459,9 @@ impl Worker {
                         Ok((sent, out)) => (Ok(sent), out),
                         Err(taken) => (Err(taken), Outputs::default()),
                     });
+                if !matches!(&sent, Ok((Ok(sent), _)) if !sent.duplicate && sent.turn.is_some()) {
+                    made_way = None;
+                }
                 if let Ok((Ok(sent), out)) = &mut sent
                     && !sent.duplicate
                     && let Some(turn) = sent.turn
@@ -3437,17 +3478,7 @@ impl Worker {
                         && direct_user
                         && crate::conversation_forks::may_fork(
                             &self.setup.record.backend,
-                            self.setup
-                                .hub
-                                .queue_directory()
-                                .as_deref()
-                                .map(|directory| {
-                                    crate::chat_view::preference(
-                                        directory,
-                                        &self.setup.record.agent_id,
-                                    )
-                                })
-                                .unwrap_or_default(),
+                            chat_view(&self.setup),
                             &self.setup.record.agent_id,
                             &self.setup.record.session,
                         ) {
@@ -4192,6 +4223,20 @@ impl Worker {
         };
         // What follows from a command is done and published before its answer is given.
         self.after(out);
+        // The note behind the owner's message that went first: work nobody sits waiting for,
+        // which a Stop of the owner's holds like the rest.
+        if let Some(note) = made_way
+            && let Some(actor) = self.actor.as_mut()
+        {
+            match actor.send(&note, Admission::Background, now) {
+                Ok((_, noted)) => self.after(noted),
+                Err(error) => eprintln!(
+                    "clarp-host: agent {}: the note to take up a turn that made way was not \
+                     left: {error}",
+                    self.setup.record.session
+                ),
+            }
+        }
         if let Some(actor) = self.actor.as_mut()
             && let Some(held) = actor.settle_moved_wait(now)?
         {

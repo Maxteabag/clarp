@@ -67,7 +67,7 @@ has_reminder = bool(separator) and context.startswith(
     opening + "Coordination: this turn answers a message from another agent")
 if has_reminder:
     text = request
-assert has_reminder == (text in ("case-mixed", "case-relayed"))
+assert has_reminder == (text == "case-relayed")
 with (root / "launches").open("a") as rows:
     rows.write(text + "\n")
 if text == "case-race":
@@ -84,10 +84,6 @@ if mode == "desk":
     release("release-desk")
     answer("desk-finished", first)
     raise SystemExit(0)
-if mode == "mixed":
-    say("assistant", message={"id": "msg_before_steer", "role": "assistant",
-        "content": [{"type": "text", "text": "before-steer"}]})
-    say("stream_event", event={"type": "message_stop"})
 if mode == "answered":
     # The first message is answered whole; the follow-up comes after that answer, and the
     # work it asks for begins with a tool.
@@ -205,12 +201,9 @@ elif mode == "ledger":
         "type": "queued_command", "source_uuid": more[0][0]}}) + "\n")
     answer("read-in-the-session-file", first, more[0][0])
 else:
-    if mode != "mixed":
-        returned(tool)
+    returned(tool)
     for uid, _ in more:
         echo(uid)
-    if mode == "mixed":
-        returned(tool)
     (root / ("echoed-" + mode)).touch()
     release("answer-" + mode)
     answer("joined-" + mode, first, *(uid for uid, _ in more))
@@ -268,8 +261,7 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
     };
 
     for mode in [
-        "race", "task", "double", "unread", "stop", "restart", "mixed", "relayed", "large",
-        "ledger",
+        "race", "task", "double", "unread", "stop", "restart", "relayed", "large", "ledger",
     ] {
         let session = format!("steer-{mode}");
         let made = host.post(
@@ -291,7 +283,9 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
             None
         };
         let case = format!("case-{mode}");
-        let first = if matches!(mode, "mixed" | "relayed") {
+        // The user's own message never reaches another agent's turn this way: it takes that
+        // turn's place (issue 839, `owner_preempts.rs`). A front desk's relay of it does.
+        let first = if mode == "relayed" {
             host.post(
                 "/send",
                 json!({
@@ -308,12 +302,9 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
         wait_for("the tool in the live projection", || {
             host.state(&session) == "tool"
         });
-        let hidden = matches!(mode, "mixed" | "relayed").then(|| {
+        let hidden = (mode == "relayed").then(|| {
             let filtered = host.get(&format!("/log?session={session}&coordination=hide"));
             assert_eq!(filtered["turns"], json!([]), "{filtered}");
-            if mode == "mixed" {
-                assert_eq!(filtered["hidden_after"]["messages"], 2, "{filtered}");
-            }
             let page = host.get(&format!("/log?session={session}"));
             let first = page["turns"]
                 .as_array()
@@ -451,46 +442,13 @@ fn a_claude_follow_up_enters_at_the_echo_and_is_answered_once() {
                 let followup_id = format!("u-add-{mode}-0");
                 let followup = rows.iter().find(|row| row["id"] == followup_id).unwrap();
                 assert!(rows.iter().all(|row| row["id"] != "u-first"), "{delta}");
-                if mode == "mixed" {
-                    assert_eq!(followup["hidden_before"]["messages"], 2, "{delta}");
-                } else {
-                    assert_eq!(followup["origin"], "agent");
-                    assert_eq!(followup["sender_name"], "Desk");
-                }
+                assert_eq!(followup["origin"], "agent");
+                assert_eq!(followup["sender_name"], "Desk");
             }
             mark(&format!("answer-{mode}"));
             collect_answer(&host, &session, &format!("joined-{mode}"));
         }
         wait_for("the agent to finish", || host.state(&session) == "done");
-        if mode == "mixed" {
-            let all = host.get(&format!("/log?session={session}&coordination=show"));
-            let rows = all["turns"].as_array().unwrap();
-            let first = rows.iter().find(|row| row["id"] == "u-first").unwrap();
-            assert_eq!(first["audience"], "agents");
-            assert_eq!(first["origin"], "agent");
-            assert_eq!(first["sender_name"], "sender");
-            let early = rows
-                .iter()
-                .find(|row| row["text"] == "before-steer")
-                .unwrap();
-            assert_eq!(early["audience"], "agents");
-            assert!(
-                rows.iter()
-                    .filter(|row| row["tool_name"] == "Bash")
-                    .all(|row| row["audience"] == "agents"),
-                "{all}"
-            );
-            let visible = host.get(&format!("/log?session={session}&coordination=hide"));
-            let rows = visible["turns"].as_array().unwrap();
-            assert_eq!(rows.len(), 2, "{visible}");
-            assert_eq!(rows[0]["id"], "u-add-mixed-0");
-            assert_eq!(rows[0]["hidden_before"]["messages"], 2);
-            assert_eq!(rows[1]["text"], "joined-mixed");
-            assert!(
-                rows.iter().all(|row| row["audience"] == "user"),
-                "{visible}"
-            );
-        }
         assert_eq!(ids(&host, &session), expected);
         assert_eq!(launches().lines().filter(|text| *text == case).count(), 1);
         let mut revision = 0;
@@ -1093,7 +1051,18 @@ def release(name):
             raise SystemExit("stand-in release expired")
         time.sleep(.02)
 
-first, _ = prompt()
+first, text = prompt()
+if text == "case-desk":
+    # The front desk: its turn relays the user's words, and ends when told.
+    (root / "desk-token").write_text(os.environ["CLARP_PROVIDER_TURN"])
+    say("system", subtype="init")
+    say("user", isReplay=True, uuid=first, message={"role": "user", "content": []})
+    release("release-desk")
+    say("assistant", message={"id": "msg_desk", "role": "assistant",
+        "content": [{"type": "text", "text": "desk-finished"}]})
+    say("result", subtype="success", is_error=False, result="desk-finished",
+        user_message_uuids=[first])
+    raise SystemExit(0)
 (root / "fu-token").write_text(os.environ["CLARP_PROVIDER_TURN"])
 say("system", subtype="init")
 say("user", isReplay=True, uuid=first, message={"role": "user", "content": []})
@@ -1114,8 +1083,9 @@ say("result", subtype="success", is_error=False, result="after-note",
     user_message_uuids=[first, followup])
 "#;
 
-/// Rule FU. The user writes into a turn the agent runs for another agent, and the
-/// agent answers the user in a note. What it says after the note is the agents' again: it is
+/// Rule FU. The user's words, relayed by the front desk, reach a turn the agent runs for
+/// another agent, and the agent answers the user in a note. (The user's own message takes such
+/// a turn's place instead, issue 839.) What it says after the note is the agents' again: it is
 /// hidden from the user while it is written and after the turn ends alike. Before, the reply
 /// was shown while the turn ran and hidden once it ended: the user's chat lost the message it
 /// had just shown.
@@ -1129,9 +1099,16 @@ fn a_reply_after_the_note_that_answered_the_user_is_never_shown_then_hidden() {
         ("HOME", home.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
     ];
-    let host = place.start_in("", &[], &world);
+    let owners = place.root.join("owner.toml");
+    std::fs::write(&owners, "[agents]\nfront_desk_sessions = ['desk']\n").unwrap();
+    let host = place.start_in("", &["--speech-keys", owners.to_str().unwrap()], &world);
     let sender = host.new_agent("sender");
     let session = "steer-fu";
+    host.post(
+        "/agents",
+        json!({"name": "Desk", "session": "desk", "backend": "claude"}),
+    );
+    host.send("desk", "case-desk", "desk-owner");
     host.post(
         "/agents",
         json!({"name": session, "session": session, "backend": "claude"}),
@@ -1149,7 +1126,23 @@ fn a_reply_after_the_note_that_answered_the_user_is_never_shown_then_hidden() {
     wait_for("the tool in the live projection", || {
         host.state(session) == "tool"
     });
-    host.send(session, "a question of the user's", "steer");
+    wait_for("the desk's turn", || place.root.join("desk-token").exists());
+    let desk = std::fs::read_to_string(place.root.join("desk-token")).unwrap();
+    let body =
+        json!({"session": session, "text": "a question of the user's", "client_msg_id": "steer"});
+    let relayed = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/send",
+        &[
+            ("Content-Type", "application/json"),
+            ("X-Clarp-Turn", &desk),
+        ],
+        body.to_string().as_bytes(),
+    );
+    assert_eq!(relayed.status, 200);
+    std::fs::write(place.root.join("release-desk"), "").unwrap();
     wait_for("the follow-up read into the turn", || {
         at("fu-echoed").exists()
     });

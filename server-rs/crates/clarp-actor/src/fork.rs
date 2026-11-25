@@ -377,6 +377,34 @@ impl Actor {
         (running.turn.0 == turn).then(|| running.message.trace_id.clone().unwrap_or_default())
     }
 
+    /// The agent's own turn beside which a fork could answer the user now: one whose tool
+    /// runs and works for other agents, of an agent whose tool is Claude Code, with a session
+    /// to copy and a fork that did not break. `None`: no fork answers now.
+    pub fn fork_beside(&self) -> Result<Option<TurnId>, ActorError> {
+        if self.backend.id() != "claude" {
+            return Ok(None);
+        }
+        let agent = self.recorder.agent();
+        let Some(live) = agent.live().filter(|live| live.has_process()) else {
+            return Ok(None);
+        };
+        if agent.stopping().is_some() || agent.backend_session().is_none() {
+            return Ok(None);
+        }
+        if self.audience_of(live.id())? != clarp_kernel::coordination::AGENTS {
+            return Ok(None);
+        }
+        let broken = self.fork.record.as_ref().is_some_and(|record| {
+            record.broken && matches!(record.state, State::Open | State::Offered { .. })
+        });
+        Ok((!broken).then_some(live.id()))
+    }
+
+    /// Whether a fork can answer this message: words, and not said in a call.
+    pub fn fork_answers(message: &Message) -> bool {
+        message.call.is_none() && !message.text.trim().is_empty()
+    }
+
     /// Whether a message of the user's that waits is taken by the agent's fork, which answers
     /// it at once: only while the agent's own turn works for other agents, and only for an
     /// agent whose tool is Claude Code. The Host decides beforehand whether the agent may fork
@@ -384,29 +412,20 @@ impl Actor {
     /// what it would have been without a fork.
     pub fn fork_take(&mut self, turn: TurnId, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
         let no = || Ok((false, Outputs::default()));
-        if self.backend.id() != "claude" {
-            return no();
-        }
-        let agent = self.recorder.agent();
-        let Some(live) = agent.live().filter(|live| live.has_process()) else {
+        let Some(main) = self.fork_beside()? else {
             return no();
         };
-        let main = live.id();
-        if agent.stopping().is_some() || agent.backend_session().is_none() {
-            return no();
-        }
-        let Some(message_seq) = agent
+        let Some(message_seq) = self
+            .recorder
+            .agent()
             .waiting()
             .find(|waiting| waiting.id == turn)
             .map(|waiting| waiting.message_seq)
         else {
             return no();
         };
-        if self.audience_of(main)? != clarp_kernel::coordination::AGENTS {
-            return no();
-        }
         let message = self.message_at(message_seq)?;
-        if message.call.is_some() || message.text.trim().is_empty() {
+        if !Self::fork_answers(&message) {
             return no();
         }
         let mut record = match self.fork.record.clone() {

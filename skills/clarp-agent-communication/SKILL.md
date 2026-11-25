@@ -96,7 +96,20 @@ says `paused: true`. Do not resume a queue the user stopped yourself; if what
 waits is urgent, tell the user through their front desk. Requests work between agents on this Host; for
 a peer server use `prompt`.
 
-A message from the user, or a front desk's relay of the user's words, that
+A message from the user (or the Oracle) never waits behind a turn that is not
+the user's: on a Rust Host from contract 187 (feature `owner_preempts`), when it
+reaches an agent whose running turn answers another agent, a schedule, an
+automation or a goal's wake, that turn is stopped at once and the user's message
+runs next. The agent then gets a Host message (origin `made-way`) that quotes
+what it was working on and asks it to take that up again. When you get one,
+finish that work, or do it if you had not started. If it came from another
+agent, answer them as usual (`reply` for a request, or `prompt`), because the
+cut turn told them nothing. As a sender, your message's turn can end as
+stopped for a newer message; do not send it again, because the recipient
+takes it up after the user. This does not happen behind the user's own turn,
+a front desk's relay of the user's words, or a compaction.
+
+Otherwise, a message from the user, or a front desk's relay of the user's words, that
 reaches an agent while its turn runs is read into that turn where the agent's
 tool can take it: Claude Code on the Rust Host, and Codex on a Rust Host whose
 owner turned the `codex_chat_lane` setting on (off by default; see

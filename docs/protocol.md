@@ -1206,6 +1206,22 @@ Rules:
   refused with 409 and the text body `client_msg_id is held by another
   agent`, with nothing written (Host contract 129). Mint a new id once and
   send again.
+- If the agent is busy with a turn that is not a person's (another agent's
+  message, a schedule, an automation or a goal's wake, a janitor; not the
+  tool's compaction), a user's or the Oracle's plain send (no
+  `queue_if_busy`) never waits behind it (Rust Host contract 187, feature
+  `owner_preempts`, issue 839): that turn is stopped at once, ending as
+  stopped for a newer message, and the send runs next, ahead of everything
+  that waits. Behind it the Host leaves the agent a message of origin
+  `made-way` (`u-made-way-<turn>`) that quotes the cut message and asks the
+  agent to take that work up again. It runs after what already waits, and a
+  Stop holds it like other background work. A heartbeat, a leader's tick,
+  dreaming or a watcher come again by themselves and get no such message.
+  A turn that carries the user's own words (the user's turn, a front desk's
+  relay) is not cut: there the rules below hold. Where the owner lets the
+  agent answer through a conversation fork (feature `conversation_fork`), the
+  fork answers beside the running turn as before. On an older Host the send
+  waits or is steered as below.
 - If the agent is busy, a user's send is steered into the running turn when
   its backend can take it. A Codex turn takes it at once, and its `/log` row
   follows at once. A Claude turn (Claude Code 2.1.321 or later) takes it while
@@ -1224,8 +1240,10 @@ Rules:
   `queue-updated` event follows, as for a send with `queue_if_busy`. A send
   that waits is a queue item until its turn starts and only then a `/log` row
   (Host contract 115, feature `waited_send_order`).
-  A send of another origin (a schedule, an automation, the Oracle) waits in the
-  same way: no send ends a running turn; only the user's Stop does. A message
+  A send of another origin (a schedule, an automation) waits in the
+  same way: no send of theirs ends a running turn; only the user's Stop does,
+  and, from contract 187, a person's send to a turn that is not a person's
+  (above). A message
   from another agent (`origin: "agent"` with a `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
   hold its backlog. The user's next fresh message (a plain user or Oracle send,

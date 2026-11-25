@@ -441,6 +441,9 @@ pub struct Agent {
     /// The live turn's tool has begun its work, in any attempt of it: it wrote words of its
     /// answer or used a tool. Such a turn is not given again from nothing.
     live_worked: bool,
+    /// The live turn carries the user's word: a front desk's relay of it, or the user's own
+    /// message given back. Such a turn is the user's, whoever sent it.
+    live_user_word: bool,
     selected_takeover: Option<crate::takeover::Selection>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
@@ -535,6 +538,7 @@ impl Default for Agent {
             live_takeover: None,
             live_resumed_session: false,
             live_worked: false,
+            live_user_word: false,
             selected_takeover: None,
             unheld: BTreeSet::new(),
             stop_released: BTreeSet::new(),
@@ -872,6 +876,28 @@ impl Agent {
     /// Who asked the live turn to stop, while it has not gone yet.
     pub fn stopping(&self) -> Option<&Control> {
         self.stopping.as_ref()
+    }
+
+    /// Whether a message from `origin`, said to the agent now, takes the live turn's place at
+    /// once rather than wait behind it (issue 839): a person's message (the user's, or the
+    /// Oracle's on the user's behalf) never waits behind a turn that is not a person's:
+    /// another agent's message, a trigger, a goal's wake, a janitor. The user's own turn, one
+    /// that carries the user's word (a front desk's relay), and the tool's compaction or
+    /// summary for a move are not made to give way, and neither is a turn already on its way
+    /// out: the message waits for those, or is read into them, as before.
+    pub fn owner_goes_first(&self, origin: &Origin) -> bool {
+        let Some(live) = &self.live else {
+            return false;
+        };
+        let housekeeping = matches!(live.origin(), Origin::Trigger { name }
+            if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY);
+        origin.is_user_send()
+            && self.stopping.is_none()
+            && self.moved.is_none()
+            && !self.import_held
+            && !self.live_user_word
+            && !live.origin().is_user_send()
+            && !housekeeping
     }
 
     /// The Stop request's journaled time, while the turn's process is still being retired.
@@ -1954,6 +1980,7 @@ impl Agent {
                         }
                     }
                     self.live_worked = false;
+                    self.live_user_word = false;
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -2024,6 +2051,7 @@ impl Agent {
         }
         self.unheld.remove(&turn);
         self.stop_released.remove(&turn);
+        let user_word = queued.user_word;
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
                 for gathered in self.gathered.remove(&turn).unwrap_or_default() {
@@ -2036,6 +2064,7 @@ impl Agent {
                 if let TurnEvent::Started { at_ms, takeover } = change {
                     self.live_resumed_session = self.backend_session.is_some();
                     self.live_worked = false;
+                    self.live_user_word = user_word;
                     self.live_takeover.clone_from(takeover);
                     if let Some(start) = takeover {
                         self.bind_session(Some(&start.session));
@@ -3314,6 +3343,134 @@ mod tests {
         );
         assert!(!a.agent.is_paused());
         assert!(matches!(a.history.last(), Some(AgentEvent::Resumed { by, .. }) if by == DRAINED));
+    }
+
+    /// Issue 839: the owner's message never waits behind a turn that is not a person's. The
+    /// Host admits it direct where the kernel says it goes first: the other turn makes way at
+    /// once and the owner's turn starts; behind the owner's own turn it waits as before.
+    #[test]
+    fn the_owners_message_goes_ahead_of_a_turn_that_is_not_a_persons() {
+        let from = |origin: Origin, user_word: bool| {
+            move |message_seq| Command::Accept {
+                message_seq,
+                origin: origin.clone(),
+                admission: Admission::Later,
+                coordination: None,
+                user_word,
+            }
+        };
+        let peer = from(
+            Origin::Agent {
+                agent_id: "a-peer".into(),
+            },
+            false,
+        );
+        let mut a = Driven::new();
+        a.send(peer(10)).unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        assert!(a.agent.owner_goes_first(&Origin::User));
+        assert!(a.agent.owner_goes_first(&Origin::Trigger {
+            name: "oracle".into()
+        }));
+        // Another agent's message, or the Host's own, still waits its turn.
+        assert!(!a.agent.owner_goes_first(&Origin::Agent {
+            agent_id: "a-other".into()
+        }));
+        assert!(!a.agent.owner_goes_first(&Origin::Trigger {
+            name: "schedule".into()
+        }));
+        a.send(peer(11)).unwrap();
+        assert_eq!(
+            a.direct(12),
+            vec![Effect::StopTurn { turn: TurnId(1) }],
+            "the other agent's turn is told to make way"
+        );
+        // Once it is on its way out, a second message of the owner's makes nothing go again.
+        assert!(!a.agent.owner_goes_first(&Origin::User));
+        // The Host leaves the agent a note to take the cut work up again, behind the owner.
+        a.background(13);
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }],
+            "the owner's turn starts as soon as the other is gone"
+        );
+        assert!(a.history.iter().any(|event| matches!(
+            event,
+            AgentEvent::Turn { turn: TurnId(1), change: TurnEvent::Settled { outcome: Outcome::Stopped { by, .. }, .. } }
+                if *by == preempted_by(TurnId(3))
+        )));
+        assert_eq!(
+            a.waiting(),
+            vec![2, 4],
+            "the rest wait in order, the note last"
+        );
+        // Behind the owner's own turn the owner's next message waits as before.
+        assert!(!a.agent.owner_goes_first(&Origin::User));
+        a.finish(3);
+        a.finish(2);
+        assert_eq!(a.started, vec![TurnId(1), TurnId(3), TurnId(2), TurnId(4)]);
+
+        // A turn that carries the owner's word (a front desk's relay) is the owner's.
+        let mut a = Driven::new();
+        a.send(from(
+            Origin::Agent {
+                agent_id: "a-desk".into(),
+            },
+            true,
+        )(10))
+            .unwrap();
+        assert!(!a.agent.owner_goes_first(&Origin::User));
+        // So is the owner's own turn, and a compaction is left to finish.
+        let mut a = Driven::new();
+        a.user(10);
+        assert!(!a.agent.owner_goes_first(&Origin::User));
+        let mut a = Driven::new();
+        a.send(from(
+            Origin::Trigger {
+                name: COMPACTION.into(),
+            },
+            false,
+        )(10))
+            .unwrap();
+        assert!(!a.agent.owner_goes_first(&Origin::User));
+        // A trigger's turn (a schedule, a goal's wake, a janitor) makes way like a peer's.
+        let mut a = Driven::new();
+        a.background(10);
+        assert!(a.agent.owner_goes_first(&Origin::User));
+        // A free agent has nothing to make way.
+        assert!(!Driven::new().agent.owner_goes_first(&Origin::User));
+    }
+
+    /// The owner's Stop after a message that went first ends that turn and holds the note
+    /// the Host left behind it, as any Stop holds background work.
+    #[test]
+    fn the_owners_stop_after_going_first_holds_the_note() {
+        let mut a = Driven::new();
+        a.send(Command::Accept {
+            message_seq: 10,
+            origin: Origin::Agent {
+                agent_id: "a-peer".into(),
+            },
+            admission: Admission::Later,
+            coordination: None,
+            user_word: false,
+        })
+        .unwrap();
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.direct(11);
+        a.background(12);
+        a.finish(1);
+        assert_eq!(a.live(), Some(2));
+        a.send(Command::Stop {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        assert_eq!(a.finish(2), vec![], "nothing runs after the owner's Stop");
+        assert!(a.agent.is_paused());
+        assert!(a.agent.holds(TurnId(3)));
     }
 
     #[test]

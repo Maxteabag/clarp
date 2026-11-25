@@ -378,6 +378,16 @@ pub struct Sent {
     pub queue: QueueState,
 }
 
+/// A message of the owner's goes ahead of the agent's live turn
+/// ([`Actor::owner_goes_first`]): the note to leave behind it, where one is left.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoesFirst {
+    pub note: Option<Message>,
+}
+
+/// What the Host files the note under that takes up a turn the owner's message cut short.
+pub const MADE_WAY: &str = "made-way";
+
 /// What became of the turn a message was sent for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TurnFate {
@@ -2191,6 +2201,59 @@ impl Actor {
         }
         let moved = self.moved().cloned();
         Ok((clarp_kernel::agent_moves::Receipt { changed, moved }, out))
+    }
+
+    /// Whether a message from `origin` said to the agent now goes ahead of its live turn
+    /// ([`clarp_kernel::agent::Agent::owner_goes_first`]), and if so what the agent is told
+    /// after it: a note, behind the owner's message, to take the turn that made way up again.
+    /// A routine wake (a heartbeat, a leader's tick, a watcher, dreaming) comes again by
+    /// itself and leaves none.
+    pub fn owner_goes_first(&self, origin: &Origin) -> Result<Option<GoesFirst>, ActorError> {
+        let agent = self.recorder.agent();
+        let Some(live) = agent.live().filter(|_| agent.owner_goes_first(origin)) else {
+            return Ok(None);
+        };
+        let cut = live.origin();
+        if matches!(
+            cut.name(),
+            "heartbeat" | "leader_tick" | "dreaming" | "watcher"
+        ) {
+            return Ok(Some(GoesFirst { note: None }));
+        }
+        let message = self.message_at(live.message_seq())?;
+        let what = match (cut, &message.sender) {
+            (Origin::Agent { .. }, Some(sender)) => {
+                let name = [&sender.name, &sender.session, &sender.agent_id]
+                    .into_iter()
+                    .find(|name| !name.trim().is_empty())
+                    .map_or("another agent", |name| name.as_str());
+                format!("the message from {name}")
+            }
+            (Origin::Agent { .. }, None) => "another agent's message".to_owned(),
+            _ if clarp_kernel::turn::message_automation_kind(cut.name(), &message.id)
+                == clarp_kernel::turn::GOAL_WAKE =>
+            {
+                "your goal's wake".to_owned()
+            }
+            _ => format!("the {} message", cut.name()),
+        };
+        let said = clarp_kernel::python::first(message.text.trim(), 600);
+        let text = format!(
+            "Your turn on {what} was cut short because the owner wrote to you, and the \
+             owner's message went first. Take that work up again now: finish what you had \
+             begun, or do it if you had not begun. It said: \u{ab}{said}\u{bb}"
+        );
+        Ok(Some(GoesFirst {
+            note: Some(Message {
+                id: format!("u-made-way-{}", live.id().0),
+                text,
+                origin: Origin::Trigger {
+                    name: MADE_WAY.to_owned(),
+                },
+                unminted: true,
+                ..Message::default()
+            }),
+        }))
     }
 
     pub fn launch_pending(&self, turn: TurnId, attempt: u32) -> bool {

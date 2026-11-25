@@ -157,6 +157,8 @@ mod plan_closed;
 mod provider_tasks;
 #[path = "host/question_cards.rs"]
 mod question_cards;
+#[path = "host/owner_preempts.rs"]
+mod owner_preempts;
 #[path = "host/queue_provenance.rs"]
 mod queue_provenance;
 #[path = "host/queue_together.rs"]
