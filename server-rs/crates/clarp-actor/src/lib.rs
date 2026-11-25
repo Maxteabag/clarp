@@ -1907,7 +1907,9 @@ impl Actor {
             if let Some(turn) = shown {
                 let (status, error) = self.ended_as(turn);
                 let kept = self.kept_tools(turn);
-                let events = self.shown.end_turn_kept(status, error.as_ref(), kept, now_ms);
+                let events = self
+                    .shown
+                    .end_turn_kept(status, error.as_ref(), kept, now_ms);
                 self.shown_events.extend(events);
                 self.shown_turn = None;
             }
