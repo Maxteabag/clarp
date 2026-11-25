@@ -404,6 +404,17 @@ pub struct Message {
     pub tool_details_available: bool,
 }
 
+/// A row the desktop never draws: one the Host marks automated, or the note
+/// the Host leaves an agent after cutting its turn for the owner's message
+/// (origin `made-way`, id `u-made-way-<turn>`), which is for the agent, not
+/// for the person reading the chat, whether or not the Host marks it.
+pub fn automated_row(object: &Object) -> bool {
+    json::boolean(object, "automated")
+        || json::boolean(object, "is_automated")
+        || json::string(object, "origin") == "made-way"
+        || json::string(object, "id").starts_with("u-made-way-")
+}
+
 impl Message {
     pub fn from_json(object: &Object) -> Self {
         let s = |key| json::string(object, key);
@@ -438,7 +449,7 @@ impl Message {
             category,
             revision: json::integer(object, "revision"),
             activity_count: json::integer(object, "activity_count") as i32,
-            automated: json::boolean(object, "automated") || json::boolean(object, "is_automated"),
+            automated: automated_row(object),
             tool_details_available: json::boolean(object, "tool_details_available"),
             delivery_failed: json::boolean(object, "delivery_failed"),
             send_state: send_state(object),

@@ -255,7 +255,7 @@ impl Conversation {
         // row the Host marked automated later) is left out, and a row held
         // from before it was marked goes.
         let all = json::array(response, "turns");
-        let automated = |row: &Value| row.get("automated").and_then(Value::as_bool) == Some(true) || row.get("is_automated").and_then(Value::as_bool) == Some(true);
+        let automated = |row: &Value| row.as_object().is_some_and(crate::protocol::automated_row);
         let marked: std::collections::HashSet<String> =
             all.iter().filter(|row| automated(row)).filter_map(|row| row.get("id").and_then(Value::as_str)).map(str::to_owned).collect();
         if !marked.is_empty() {
