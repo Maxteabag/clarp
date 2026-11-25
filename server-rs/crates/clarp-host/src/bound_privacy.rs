@@ -220,7 +220,8 @@ impl Withheld {
         if key.ends_with("_at") || key.ends_with("_ms") || key == "timestamp" || key == "ts" {
             return true;
         }
-        (kept_key(key) || key.ends_with("state") || key.ends_with("status")) && is_token(text)
+        let named = key.ends_with("session") || key.ends_with("state") || key.ends_with("status");
+        (kept_key(key) || named) && is_token(text)
     }
 
     /// The same SSE frame with every event of a withheld agent blanked.
@@ -253,13 +254,33 @@ impl Withheld {
 }
 
 /// The keys that say whose an object is.
+/// An object is the agent's that says it is from it, for it, about it or done by it: its own
+/// rows, what was sent or routed to it, what it delegated or was delegated, what it asked and
+/// answered. Its parent, leader, janitor or focus name another agent's place, not its words.
 const WHOSE: &[&str] = &[
     "session",
     "agent_id",
     "agent_session",
     "source_agent_id",
+    "source_session",
     "sender_agent_id",
+    "sender_session",
     "requester_agent_id",
+    "requested_session",
+    "target_agent_id",
+    "target_session",
+    "delegate_agent_id",
+    "delegate_session",
+    "principal_agent_id",
+    "principal_session",
+    "owner_agent_id",
+    "owner_session",
+    "answer_session",
+    "reply_to_agent_id",
+    "reply_to_session",
+    "actor_agent_id",
+    "actor_session",
+    "helper_session",
 ];
 
 /// The keys a name is under: kept where it is an agent's name, as every name is shown.
