@@ -142,6 +142,11 @@ pub struct Config {
     /// the file of the keys of speech is read by a Host that is only being tried too, and
     /// that Host is not to push with its owner's key because the file happens to name it.
     pub push_keys: Option<PathBuf>,
+    /// The file of the Hosts this one is paired with (`--peers`), which the installer names
+    /// for the installed Host. `None`: it has no peers. A Host started by hand for a test
+    /// once read the installed Host's file by itself and listed the agents of the real peer
+    /// Hosts (23 Nov 2026, issue 741): a Host knows peers only where it is told the file.
+    pub peers: Option<PathBuf>,
     /// The directory that holds the pictures this Host ships for its agents (`avatars/` in
     /// it). `None`: it ships none, and its agents are shown without a face.
     pub static_dir: Option<PathBuf>,
@@ -218,14 +223,15 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
-[--push-keys FILE]
+[--push-keys FILE] [--peers FILE]
 [--static DIR] [--relay-config FILE] [--relay-also FILE ...]
 The administrator's token is read from CLARP_HOST_TOKEN. Additional administrator tokens can
 be listed in CLARP_HOST_TOKEN_ALIASES, separated by commas. The tools use the primary token
 to derive their own credential. This Host's push relay credential is read from CLARP_PUSH_CREDENTIAL. The key of an engine that listens
 over the network is looked up in the file --speech-keys names, then in ELEVEN_API_KEY. A ring is
 pushed to a phone as an incoming call only where --push-keys names the file that has the owner's
-key at the push service ([apns] key_path, key_id, team_id).
+key at the push service ([apns] key_path, key_id, team_id). The Hosts this one is paired with
+are read from and written to the file --peers names; a Host started without it has no peers.
 CLARP_HEARTBEATS_DISABLED=1 turns the heartbeat of every agent off.";
 
 /// The home of whoever runs this Host.
@@ -475,6 +481,7 @@ impl Config {
         let mut speech_language = "en".to_string();
         let mut speech_keys = None;
         let mut push_keys = None;
+        let mut peers = None;
         let mut static_dir = None;
         let mut relay_config = None;
         let mut relay_also = Vec::new();
@@ -594,6 +601,7 @@ impl Config {
                 "--speech-language" => speech_language = value("a language")?,
                 "--speech-keys" => speech_keys = Some(PathBuf::from(value("a file")?)),
                 "--push-keys" => push_keys = Some(PathBuf::from(value("a file")?)),
+                "--peers" => peers = Some(PathBuf::from(value("a file")?)),
                 "--static" => static_dir = Some(PathBuf::from(value("a directory")?)),
                 "--relay-config" => relay_config = Some(PathBuf::from(value("a file")?)),
                 "--relay-also" => relay_also.push(PathBuf::from(value("a file")?)),
@@ -762,6 +770,7 @@ impl Config {
             live_model_min_client: live_model_min_client_of(owners.as_ref()),
             speech_keys,
             push_keys,
+            peers,
             static_dir,
             transcription_engine,
             scribe_endpoint,
@@ -800,6 +809,16 @@ mod tests {
 
     fn parse(args: &[&str]) -> Result<Config, String> {
         Config::from_args(args.iter().map(|arg| (*arg).to_string()))
+    }
+
+    #[test]
+    fn a_host_has_peers_only_from_the_file_it_is_named() {
+        assert_eq!(parse(&[]).unwrap().peers, None);
+        assert_eq!(
+            parse(&["--peers", "/fixture/peers.json"]).unwrap().peers,
+            Some(PathBuf::from("/fixture/peers.json"))
+        );
+        assert!(parse(&["--peers"]).is_err());
     }
 
     #[test]

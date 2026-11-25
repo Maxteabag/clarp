@@ -6,13 +6,9 @@ const PEER_TOKEN: &str = "cld_fixture-peer-token-kept-on-the-host-only";
 const CODE: &str = "clp_fixture-one-time-peer-code";
 
 fn start(place: &Place, extras: &[(&str, &str)]) -> (Host, PathBuf) {
-    let xdg = place.root.join("xdg");
-    let mut env = vec![("XDG_CONFIG_HOME", xdg.to_str().unwrap())];
-    env.extend_from_slice(extras);
-    (
-        place.start_in(ADMIN, &[], &env),
-        xdg.join("clarp-host/peers.json"),
-    )
+    let file = place.root.join("peers/peers.json");
+    let host = place.start_in(ADMIN, &["--peers", file.to_str().unwrap()], extras);
+    (host, file)
 }
 
 fn add(host: &Host, name: &str, url: &str, id: &str) -> Value {

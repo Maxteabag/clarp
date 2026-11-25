@@ -36,8 +36,19 @@ pub enum Failed {
     Down(String),
 }
 
-fn registry_path() -> PathBuf {
-    crate::config::host_config_dir().join("peers.json")
+/// The file of this Host's peers, as it was started (`--peers`). `None`: it has no peers, and
+/// reads no file for them: a Host started by hand for a test with no file named never reaches
+/// the installed Host's peers (issue 741).
+fn registry_path(app: &App) -> Option<PathBuf> {
+    app.config.peers.clone()
+}
+
+/// Why a peer cannot be named or forgotten on a Host that keeps none.
+fn none_kept() -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "this Host was started without --peers: it keeps no peers",
+    )
 }
 
 fn public(name: &str, peer: &Peer) -> Value {
@@ -82,8 +93,11 @@ async fn list(
 
 /// What an agent can read about its Host's peers, through the same projection as the owner.
 pub(crate) async fn list_public(app: &App) -> Result<Vec<Value>, ApiError> {
+    let Some(path) = registry_path(app) else {
+        return Ok(Vec::new());
+    };
     let legacy = app.fleet.directory().legacy_peers.clone();
-    let peers = tokio::task::spawn_blocking(move || registry::read(&registry_path(), &legacy))
+    let peers = tokio::task::spawn_blocking(move || registry::read(&path, &legacy))
         .await
         .map_err(|_| registry_failed())?
         .map_err(|_| registry_failed())?;
@@ -121,9 +135,10 @@ async fn add(
     let shown = public(name, &peer);
     let stored = serde_json::to_value(peer).map_err(|_| registry_failed())?;
     let name = name.to_string();
+    let path = registry_path(&app).ok_or_else(none_kept)?;
     let legacy = app.fleet.directory().legacy_peers.clone();
     tokio::task::spawn_blocking(move || {
-        registry::edit(&registry_path(), &legacy, |peers| {
+        registry::edit(&path, &legacy, |peers| {
             peers.insert(name, stored)
         })
     })
@@ -140,10 +155,11 @@ async fn remove(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     owner_only(&principal)?;
+    let path = registry_path(&app).ok_or_else(none_kept)?;
     let legacy = app.fleet.directory().legacy_peers.clone();
     let removed = name.clone();
     let known = tokio::task::spawn_blocking(move || {
-        registry::edit(&registry_path(), &legacy, |peers| {
+        registry::edit(&path, &legacy, |peers| {
             peers.remove(&removed).is_some()
         })
     })
@@ -217,8 +233,15 @@ pub(crate) fn reported(reply: &Map<String, Value>, key: &str) -> Option<String> 
 }
 
 impl SnapshotCache {
-    fn refresh(&mut self, legacy: &BTreeMap<String, Peer>) -> Result<Value, ApiError> {
-        let registry = registry::read(&registry_path(), legacy).map_err(|_| registry_failed())?;
+    fn refresh(
+        &mut self,
+        path: Option<&std::path::Path>,
+        legacy: &BTreeMap<String, Peer>,
+    ) -> Result<Value, ApiError> {
+        let registry = match path {
+            Some(path) => registry::read(path, legacy).map_err(|_| registry_failed())?,
+            None => Map::new(),
+        };
         let peers: BTreeMap<_, _> = registry
             .into_iter()
             .filter_map(|(name, value)| {
@@ -298,9 +321,10 @@ async fn snapshot(
     {
         return Ok(Json(answer.clone()));
     }
+    let path = registry_path(&app);
     let legacy = app.fleet.directory().legacy_peers.clone();
     // The refresh owns the lock even if the requesting browser disconnects.
-    tokio::task::spawn_blocking(move || cache.refresh(&legacy).map(Json))
+    tokio::task::spawn_blocking(move || cache.refresh(path.as_deref(), &legacy).map(Json))
         .await
         .map_err(|_| registry_failed())?
 }
@@ -356,10 +380,13 @@ pub(crate) fn exchange_code(url: &str, code: &str, device_name: &str) -> Result<
 
 /// Hands a message to the Host the owner named: that Host's own `POST /send`.
 pub(crate) async fn send(app: &App, name: &str, payload: Value) -> Result<Value, Failed> {
+    let Some(path) = registry_path(app) else {
+        return Err(Failed::Unknown(name.to_string()));
+    };
     let legacy = app.fleet.directory().legacy_peers.clone();
     let name = name.to_string();
     tokio::task::spawn_blocking(move || {
-        let mut peers = registry::read(&registry_path(), &legacy)
+        let mut peers = registry::read(&path, &legacy)
             .map_err(|_| Failed::Down("the peer registry could not be read".to_string()))?;
         let peer = peers
             .remove(&name)

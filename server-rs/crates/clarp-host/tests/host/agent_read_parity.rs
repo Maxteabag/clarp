@@ -8,7 +8,8 @@ use super::*;
 fn agent_read_parity_peers_list_uses_only_public_fields() {
     let place = Place::new("tool-peers-list");
     let admin = "fixture-admin";
-    let host = place.start_with_token(admin);
+    let peers = place.root.join("peers.json");
+    let host = place.start_with(admin, &["--peers", peers.to_str().unwrap()]);
     let token = "private-fixture-peer-token";
     let peer = json!({
         "name": "work", "url": "https://work.invalid", "token": token, "server_id": "work-host",

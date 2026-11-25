@@ -131,6 +131,8 @@ mod network_wait;
 mod pairing_identity;
 #[path = "host/peer_snapshot.rs"]
 mod peer_snapshot;
+#[path = "host/peers_named.rs"]
+mod peers_named;
 #[path = "host/pictures.rs"]
 mod pictures;
 #[path = "host/plan_closed.rs"]
@@ -5418,7 +5420,8 @@ fn only_a_person_moves_the_focus_and_a_named_sender_is_who_a_message_is_from() {
 #[test]
 fn an_agent_writes_to_another_agent_with_its_own_tool() {
     let place = Place::new("message");
-    let host = place.start();
+    let peers = place.root.join("peers.json");
+    let host = place.start_with("", &["--peers", peers.to_str().unwrap()]);
     let (asker, worker) = (host.new_agent("Asker"), host.new_agent("Worker"));
     let dir = place.root.clone();
     let events = host.listen();

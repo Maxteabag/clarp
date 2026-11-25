@@ -112,6 +112,9 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
         !install(&[]).contains("--contact-pictures"),
         "off where nothing was said"
     );
+    // The installed Host is named the file of its peers: it reads none by itself (issue 741).
+    let peers = home.join(".config/clarp-host/peers.json");
+    assert!(install(&[]).contains(&format!(" --peers \"{}\"", peers.display())));
     assert!(install(&["--contact-pictures", "on"]).contains(" --contact-pictures"));
     assert!(told("contact-pictures=on"));
     assert!(

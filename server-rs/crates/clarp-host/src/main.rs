@@ -617,6 +617,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if config.peers.is_none() {
+        eprintln!("clarp-host: started without --peers: this Host has no peers");
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

@@ -896,7 +896,9 @@ Environment="CLARP_CACHE_DIR=$share/cache"
 Environment="CLAUDE_PWA_LOG_DIR=$share/logs"
 Environment="CLAUDE_PWA_DB=$share/data/no-python-state.sqlite"
 ${arenas:+Environment="MALLOC_ARENA_MAX=$arenas"}
-ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed
+# The Hosts this one is paired with are read only from the file --peers names: a Host started
+# without it has none (issue 741).
+ExecStart=$share/bin/clarp-host --data $share/data --listen $listen --launcher systemd --name "$name" --accounts $accounts$ask_usage${seats_tool:+ --seats-tool "$seats_tool"}$skills${push_relay:+ --push-relay $push_relay}$speech$faces$relayed --peers "$config/peers.json"
 Restart=on-failure
 RestartSec=2
 
