@@ -208,6 +208,17 @@ def test_a_goal_whose_next_work_is_past_one_argument_still_takes_the_wake(goal_e
     assert goal['checkpoint']['next_work'].startswith(long + '\n\nWhen woken by render-long')
 
 
+def test_a_goal_tool_from_before_the_dash_still_takes_a_small_checkpoint(goal_env):
+    """A clarp-goal that reads "-" as JSON text, as one did before issue 768, still stores
+    the wake of a goal whose body fits in one argument."""
+    plan, launch = goal_env
+    old = _goal_helper(launch.tmp, '  [ "$4" = - ] && { echo "Expecting value" >&2; exit 1; }')
+    out = launch('render-old-tool', '--goal', plan['plan_id'], extra_env={'CLARP_GOAL': old})
+    assert out.returncode == 0, out.stderr
+    from lib import task_plans
+    assert task_plans.get(plan['plan_id'])['goal']['continuation']['dependency_key'] == 'render-old-tool'
+
+
 def test_a_goal_waiting_on_another_kind_of_dependency_keeps_it(goal_env):
     from lib import task_plans
     plan, launch = goal_env
