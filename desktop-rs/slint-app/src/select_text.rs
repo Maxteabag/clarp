@@ -15,6 +15,11 @@ fn readable(m: &Message) -> String {
         Some(receipt) => format!("{}\n{}", receipt.question, receipt.outcome.label()),
         // A reply copies its written form only.
         None if m.display_text.is_empty() && m.role == "user" => m.text.clone(),
+        // Its spoken part is a summary beside the reply, never its text
+        // (#823); a reply that is only spoken copies its spoken words.
+        None if m.role == "assistant" && clarp_core::text::carries_speech(&m.text) => {
+            clarp_core::text::reply_parts(&m.text, m.kind == "live").1
+        }
         None => m.display_text.clone(),
     }
 }
