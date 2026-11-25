@@ -94,7 +94,8 @@ pub fn resize_frame(cols: u16, rows: u16) -> String {
 
 /// The Host's sentence in a refusal: a plain-text body as it is, or the
 /// `error` (else `message`) of a JSON body, a string or an object's own
-/// `message`, `error` or `detail`. Without one, the status says it.
+/// `message`, `error` or `detail`; any other body as text. Without one, the
+/// status says it.
 pub fn refusal_sentence(status: u16, reason: &str, body: &[u8]) -> String {
     let text = String::from_utf8_lossy(body);
     let text = text.trim();
@@ -112,7 +113,8 @@ pub fn refusal_sentence(status: u16, reason: &str, body: &[u8]) -> String {
         if let Some(words) = said(object.get("error")).or_else(|| said(object.get("message"))) {
             return words;
         }
-    } else if !text.is_empty() && !text.starts_with('<') {
+    }
+    if !text.is_empty() && !text.starts_with('<') {
         return text.chars().take(2000).collect();
     }
     let reason = reason.trim();
@@ -421,7 +423,9 @@ mod tests {
         assert_eq!(refusal_sentence(409, "Conflict", json.as_bytes()), turn, "an empty error passes to the message");
         assert_eq!(refusal_sentence(423, "Locked", b""), "The Host refused the terminal (423 Locked).");
         assert_eq!(refusal_sentence(502, "", b"<html>bad gateway</html>"), "The Host refused the terminal (502).");
-        assert_eq!(refusal_sentence(409, "Conflict", b"{\"retryable\": true}"), "The Host refused the terminal (409 Conflict).");
+        assert_eq!(refusal_sentence(409, "Conflict", b"{\"retryable\": true}"), "{\"retryable\": true}", "JSON without a sentence, as text");
+        let running = r#"{"error":"A turn of this agent is running. Stop it or wait until it ends, then open the terminal.","code":"agent_turn_running"}"#;
+        assert_eq!(refusal_sentence(409, "Conflict", running.as_bytes()), "A turn of this agent is running. Stop it or wait until it ends, then open the terminal.");
     }
 
     #[test]
