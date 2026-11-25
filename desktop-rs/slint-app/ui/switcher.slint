@@ -127,9 +127,14 @@ export component Switcher inherits Rectangle {
                             padding-left: 12px;
                             padding-right: 12px;
                             spacing: 10px;
+                            // Marks the interface font draws itself: a mark it
+                            // lacks has the first row that shows it search every
+                            // font on the machine, and the window stood still
+                            // for a second after the first letter typed into
+                            // message search (#852).
                             Text {
                                 font-size: ChromeText.body;
-                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : row.kind == "message" ? "❞" : row.kind == "host" ? "⇄" : "›";
+                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : row.kind == "message" ? "“" : row.kind == "host" ? "↔" : "›";
                                 color: row.kind == "agent" ? Palette.success : Palette.faint;
                                 vertical-alignment: center;
                                 width: 12px;
