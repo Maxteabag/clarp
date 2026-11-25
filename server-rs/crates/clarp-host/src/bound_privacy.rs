@@ -592,10 +592,12 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
     let Some(withheld) = Withheld::of(&app, &reader) else {
         return next.run(request).await;
     };
+    // Owned: the body a request holds may not be shared across what the guard waits for.
+    let uri = request.uri().clone();
     match class {
         NoWords => next.run(request).await,
         OwnerOnly(names) => {
-            if named(&app, &request, names, &withheld).await == About::Readable {
+            if named(&app, &uri, names, &withheld).await == About::Readable {
                 return next.run(request).await;
             }
             owner_only()
@@ -606,7 +608,7 @@ pub async fn guard(State(app): State<App>, request: Request, next: Next) -> Resp
             Response::from_parts(parts, sse_filtered(body, Arc::new(withheld)))
         }
         Words(names) => {
-            let about = named(&app, &request, names, &withheld).await;
+            let about = named(&app, &uri, names, &withheld).await;
             if let About::Withheld(persona) = &about {
                 return refused(persona);
             }
@@ -638,14 +640,18 @@ fn owner_only() -> Response {
 
 /// Which agents a request names: one whose words are withheld from the reader, by its name,
 /// before any other.
-async fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) -> About {
-    let query = request.uri().query().unwrap_or("");
+async fn named(
+    app: &App,
+    uri: &axum::http::Uri,
+    names: Names,
+    withheld: &Withheld,
+) -> About {
+    let query = uri.query().unwrap_or("");
     let mut asked: Vec<String> = url::form_urlencoded::parse(query.as_bytes())
         .filter(|(key, _)| names != Nobody && (key == "session" || key == "agent_id"))
         .map(|(_, value)| value.trim().to_string())
         .collect();
-    let segments: Vec<String> = request
-        .uri()
+    let segments: Vec<String> = uri
         .path()
         .trim_start_matches('/')
         .split('/')
