@@ -447,6 +447,9 @@ async fn serve(config: Config) -> Result<(), String> {
         sign_ins: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
+        search: Arc::new(clarp_host::search::Desk::new(
+            config.data_dir.join(clarp_host::search::FILE),
+        )),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
@@ -553,6 +556,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
     clarp_host::experience_watch::run(&app);
+    // And the conversations are kept searchable, their history read in the background.
+    clarp_host::search::run(&app);
     // And a handoff of the Oracle's that a phone does not get on with is not waited for.
     clarp_host::oracle::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.

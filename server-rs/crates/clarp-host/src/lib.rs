@@ -116,6 +116,7 @@ pub mod roster_fields;
 pub mod router;
 pub mod schedules;
 pub mod screens;
+pub mod search;
 pub mod seats;
 mod takeover;
 pub mod teams;

@@ -133,6 +133,8 @@ mod managed_skills;
 mod mcp_selection;
 #[path = "host/media_manage.rs"]
 mod media_manage;
+#[path = "host/message_search.rs"]
+mod message_search;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/muse_chat_lane.rs"]

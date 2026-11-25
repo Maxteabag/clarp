@@ -1,6 +1,6 @@
 ---
 name: clarp-sessions
-description: Resolve Clarp agent personas, session slugs, backends, and working directories, show or switch an agent's model, and move an agent to another backend with its conversation. Use before targeting another agent, diagnosing session state, or when asked to change your own or another agent's model or backend.
+description: Resolve Clarp agent personas, session slugs, backends, and working directories, find a past conversation or message by what was said in it, show or switch an agent's model, and move an agent to another backend with its conversation. Use before targeting another agent, when looking for something said in an earlier chat, diagnosing session state, or when asked to change your own or another agent's model or backend.
 ---
 
 # Clarp Sessions
@@ -13,6 +13,32 @@ clarp-admin sessions
 
 Use the `session` slug for Clarp API requests. Do not guess a session from a
 persona when more than one row could match.
+
+## Find a past conversation by what was said
+
+On a Rust Host that lists feature `message_search` in `GET /server-info`
+(contract 196), search every conversation you may read by its words:
+
+```bash
+clarp-admin search oslo friday                  # every chat, newest first
+clarp-admin search kontoret --session lena-1a3f # one agent's chat
+clarp-admin search oslo --limit 50 --before CURSOR  # the next page
+```
+
+It prints JSON: `hits` (each with `session`, `name`, `message_id`, `role`,
+`timestamp` and a `snippet`), `next_before` (the cursor of the next page,
+`null` on the last) and `partial`. Every word must be in the row, matched as the
+start of a word, without case or accents. Messages, replies and notes are
+searched; tool output and the Host's notices are not. `message_id` is the row's
+`id` in `GET /log?session=<session>`. `partial: true` means the Host is still
+reading older history into its index: what is older may be missing, so say so
+or ask again later. An agent bound to a model provider of its own is not
+searched for you unless you may read it, and naming it with `--session` is
+refused (`bound_conversation`).
+
+Apps call `GET /search?q=WORDS[&session=][&limit=][&before=]` with the same
+answer. A Python Host and Rust Hosts before contract 196 have no search: read
+`GET /log` of the likely agents instead.
 
 ## Show or switch a model
 

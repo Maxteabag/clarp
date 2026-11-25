@@ -1135,6 +1135,69 @@ answers; it lived only in that agent's own chat. Private user chats with either
 agent are never included, and the projection never moves or relays transcript
 rows. Sending into a pair conversation is not supported.
 
+### Find a message in any chat: `GET /search` (feature `message_search`, Rust Host contract 196)
+
+`GET /search?q=<words>[&session=<one agent>][&limit=N][&before=<cursor>]` finds the rows of
+every conversation the caller may read that have all of the words in `q`, newest first. A Host
+that lists `message_search` in `GET /server-info` has it; an older Host answers 404, and a
+client then searches only what it has loaded.
+
+- `q`: the words as typed. Each is matched as the start of a word of the row, without case and
+  without accents (`pa` finds "på", `møte` finds "møtet", `oslo` finds "Oslofjorden"); `ø` and
+  `æ` are letters of their own. Every word must be in the row. Quotes and the search engine's
+  own operators are read as plain words. A `q` with no letter or digit is refused, 400 `q is
+  required` or `nothing to search for in q`.
+- `session`: only that agent's conversation (its session or its id). An agent the Host does not
+  have finds nothing.
+- `limit`: hits per page, 20 by default, at most 100.
+- `before`: the `next_before` of the page before. A cursor the Host never gave is refused, 400.
+
+```json
+{
+  "q": "oslo",
+  "hits": [
+    {
+      "session": "ada-1234", "agent_id": "…", "name": "Ada",
+      "message_id": "…", "role": "user",
+      "timestamp": "2026-11-25T10:02:03.000Z", "revision": 52428800,
+      "snippet": "…Shall we meet in Oslo on Friday?",
+      "parts": [{"text": "…Shall we meet in ", "match": false},
+                {"text": "Oslo", "match": true},
+                {"text": " on Friday?", "match": false}]
+    }
+  ],
+  "next_before": "1764064923000.41",
+  "partial": false
+}
+```
+
+- `message_id` is the row's `id` in `GET /log` of that `session`: open the chat and scroll to
+  it (page back with `before` until it is loaded).
+- `role` is `user` or `assistant` (an agent's note is `assistant`). The rows searched are what
+  a person or an agent said: messages, replies and notes, also those an agent brought from
+  another Host. Tool cards and the Host's notices are not searched. A reply still being written
+  is found once it has settled, within a few seconds.
+- `snippet` is the matching stretch of the row, `…` where it was cut; `parts` is the same text
+  in pieces, each matched word its own piece with `match: true`. Draw `parts`: no offsets to
+  count.
+- `next_before` is `null` on the last page.
+- `partial: true`: the Host is still reading older history into its index (after an update
+  that brings search, or after its index was thrown away). What it has read is answered; older
+  rows of an agent may be missing. Ask again later for the rest.
+
+The index is kept by the Host as rows change, in a file of its own beside its data
+(`search.db`); it is never built by reading the logs at a request. A row whose words change
+(a revision) is found by its new words only. A removed agent, an agent moved to another Host,
+and a conversation that began again are never found again, from the moment they are.
+
+Who finds what is decided at each request, as `GET /log` decides it (feature `bound_privacy`):
+the words of an agent bound to a provider of its own are not searched for a reader who may not
+read them (another agent, another Host, a tool that cannot say whose turn it is), and a
+`session` that names such an agent is refused, 403 `bound_conversation`. A device paired with
+limited access searches as it reads `/log`. The agents' tools token (`CLARP_TOOL_TOKEN`) is
+refused, as on `/log`; an agent searches with `clarp-admin search WORDS... [--session S]
+[--limit N] [--before CURSOR]`, which answers the same JSON as the reader of its turn.
+
 ### 3. Stay in sync: `GET /events` (SSE)
 
 The Rust Host advertises `agent_state` (feature number 156) in

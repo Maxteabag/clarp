@@ -1,4 +1,4 @@
-		usage: clarp-admin [-h] {experience,leader-decision,janitor,trigger,controller-action,setup,skills,transcription,doctor,url,paths,explanations,sessions,oracle,call,onboard,pair,push,network,voice,tts,backup,update,rollback,uninstall,agent,stop,repair,prompt,tell-user,request,reply,bookkeeping,model,client-log,peers,repos,location,calendar,schedule,persona,portrait} ...
+		usage: clarp-admin [-h] {experience,leader-decision,janitor,trigger,controller-action,setup,skills,transcription,doctor,url,paths,explanations,sessions,oracle,call,onboard,pair,push,network,voice,tts,backup,update,rollback,uninstall,agent,stop,repair,prompt,tell-user,request,reply,bookkeeping,model,client-log,search,peers,repos,location,calendar,schedule,persona,portrait} ...
 janitor		usage: clarp-admin janitor [-h] {list,templates,inspect,runs,configure,attach,enable,pause,remove,release,export,reset-defaults,create,run-context,review,outcome,migrate-pilot} ...
 janitor list		usage: clarp-admin janitor list [-h]
 janitor templates		usage: clarp-admin janitor templates [-h]
@@ -134,6 +134,7 @@ bookkeeping enable	--principal --delegate --reason	usage: clarp-admin bookkeepin
 bookkeeping stop	--delegation --reason	usage: clarp-admin bookkeeping stop [-h] --delegation DELEGATION --reason REASON
 bookkeeping status	--session	usage: clarp-admin bookkeeping status [-h] --session SESSION
 model	--effort --session	usage: clarp-admin model [-h] [--effort EFFORT] [--session SESSION] [model]
+search	--session --limit --before	usage: clarp-admin search [-h] [--session SESSION] [--limit LIMIT] [--before BEFORE] words [words ...]
 client-log	--device --since --level --event --limit	usage: clarp-admin client-log [-h] [--device DEVICE] [--since SINCE] [--level LEVEL] [--event EVENT] [--limit LIMIT]
 peers		usage: clarp-admin peers [-h] {list,add,remove} ...
 peers list		usage: clarp-admin peers list [-h]

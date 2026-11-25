@@ -2903,6 +2903,9 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
             }
         }
         Some((command, _)) if command == "sessions" => sessions(app),
+        Some((command, rest)) if command == "search" => {
+            crate::search::tool(app, call, rest, owner_token).await
+        }
         Some((command, rest)) if command == "paths" => match parse(rest, &[], &[], &[]) {
             Ok(_) => paths(&app.config.data_dir),
             Err(why) => ToolAnswer::said(2, why),

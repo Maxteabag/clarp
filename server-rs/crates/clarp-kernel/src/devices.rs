@@ -503,6 +503,7 @@ const LIMITED_GETS: &[&str] = &[
     "/status",
     "/agents/snapshot",
     "/log",
+    "/search",
     "/message-tool-details",
     "/turn-queue",
     "/location",

@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 195;
+pub const HOST_CONTRACT: u64 = 196;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -489,6 +489,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // message, in the prompt it started with) or `steer` (as it ran). A message read at the
     // start splits none of the turn's work (issue 859).
     ("read_into_at", 195),
+    // `GET /search?q=` (and `clarp-admin search`): the rows of every conversation the caller
+    // may read that have the words, newest first, paged, from an index kept as rows change,
+    // `partial` while older history is still being read into it (issue 803).
+    ("message_search", 196),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -618,6 +622,8 @@ pub struct App {
     pub door: Arc<Door>,
     /// The relay a phone reaches this Host through, when it has one.
     pub connector: Arc<crate::connector::Connector>,
+    /// The index the conversations are searched in (`GET /search`).
+    pub search: Arc<crate::search::Desk>,
 }
 
 /// What the door keeps count of.
@@ -858,6 +864,7 @@ pub fn router(app: App) -> Router {
         // A whole conversation arrives in one request.
         .route("/agents/import", post(import_agent))
         .route("/log", get(log))
+        .route("/search", get(crate::search::route))
         .route("/events", get(events))
         .route("/send", post(send))
         .route("/agent-moved", post(crate::agent_moved::set))
