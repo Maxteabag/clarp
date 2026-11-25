@@ -2,15 +2,24 @@
 //! its own server while the lane starts beside it, and the turns after run on the lane's kept
 //! server: no new server, each turn its own identity, a Stop that keeps the server, a turn
 //! that lives through a Host restart, a server that dies under a turn, and a changed
-//! configuration that starts a new lane.
+//! configuration that starts a new lane. Issue 784: words sent while a lane turn runs are read
+//! into it; words it has not read when it ends, or is stopped, run as a turn of their own.
 
 use super::*;
 
 /// A stand-in `opencode serve`, for the per-turn driver and the lane alike. Sessions are kept
 /// in a file beside it, as OpenCode keeps them in its database, so a lane's server sees the
 /// session another server made. A word `ask-<x>` is answered `said-ask-<x>` at once; `hold-<x>`
-/// once the file `release-<x>` exists, unless the session is aborted first; `die-<x>` ends the
-/// server under the turn. What it was asked is noted in files beside it.
+/// once the file `release-<x>` exists, unless the session is aborted first; a prompt of several
+/// such words (messages given to a turn together) is answered word by word; `die-<x>` ends the
+/// server under the turn. A prompt that names its `messageID` is a steer: it is stored, and read
+/// at the turn's next step, where an answer names it as its parent and says `said-<word>`, unless
+/// its word is `late-<x>`, which the turn never reads, or `race-<x>`, which reached it as its run
+/// ended: as OpenCode does, it starts a run of its own for that right after the run's idle, so
+/// that idle is stale when the lane reads it, and it refuses to delete a message while a run goes
+/// on. It tells the sessions that run (`/session/status`) and a session's answers, each with the
+/// message it answers. While the file `slow-delete` exists a delete takes two seconds. What it
+/// was asked is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
 import base64, json, os, queue, re, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +40,11 @@ listeners = []
 lock = threading.Lock()
 aborted = threading.Event()
 count = [0]
+# The steers stored and not read yet: their message and their word.
+stored = []
+running = [False]
+# The message each answer answers, in order.
+parents = []
 
 def sessions():
     return sessions_file.read_text().split() if sessions_file.exists() else []
@@ -46,10 +60,16 @@ def part(sid, mid, **fields):
 def status(sid, kind):
     return {"type": "session.status", "properties": {"sessionID": sid, "status": {"type": kind}}}
 
-def run(sid, word):
+def idle(sid):
+    running[0] = False
+    emit(status(sid, "idle"))
+
+def step(sid, word, parent):
+    """One step of the turn, answering `word`: False when the session was aborted in it."""
     count[0] += 1
     mid = f"msg_{pid}_{count[0]}"
-    emit(status(sid, "busy"))
+    parents.append(parent)
+    emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "assistant", "parentID": parent}}})
     emit(part(sid, mid, id=mid + "s", type="step-start"))
     if word.startswith("die-"):
         note("died", word)
@@ -59,12 +79,38 @@ def run(sid, word):
         end = time.monotonic() + 60
         while not (root / ("release-" + word[5:])).exists() and time.monotonic() < end:
             if aborted.wait(0.02):
-                emit(status(sid, "idle"))
-                return
+                return False
     emit(part(sid, mid, id=mid + "t", type="text", text="said-" + word, time={"end": 1}))
     emit(part(sid, mid, id=mid + "f", type="step-finish", reason="stop", cost=0, tokens={"input": 1, "output": 1}))
     note("answered", word)
+    return True
+
+def run(sid, words):
+    emit(status(sid, "busy"))
+    # Messages the Host gives a turn together are answered one after another.
+    for word in words:
+        if not step(sid, word, f"msg_user_{pid}"):
+            return idle(sid)
+    # The words stored meanwhile are read at the next step, which answers them.
+    while True:
+        with lock:
+            ready = [s for s in stored if not s[1].startswith(("late-", "race-"))]
+            if not ready:
+                break
+            stored.remove(ready[0])
+        if not step(sid, ready[0][1], ready[0][0]):
+            return idle(sid)
+    with lock:
+        racing = [s for s in stored if s[1].startswith("race-")]
+        for s in racing:
+            stored.remove(s)
+    # The run ends; words that came as it ended start a run of their own at once.
     emit(status(sid, "idle"))
+    for message, word in racing:
+        emit(status(sid, "busy"))
+        time.sleep(0.3)
+        step(sid, word, message)
+    idle(sid)
 
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -92,6 +138,10 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"healthy": True, "version": version})
         if path == "/session":
             return self._json(200, [{"id": s} for s in sessions()])
+        if path == "/session/status":
+            return self._json(200, {s: {"type": "busy"} for s in sessions()} if running[0] else {})
+        if path.startswith("/session/") and path.endswith("/message"):
+            return self._json(200, [{"info": {"role": "assistant", "parentID": p}} for p in parents[-50:]])
         if path == "/event":
             q = queue.Queue()
             with lock:
@@ -134,16 +184,44 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            word = re.search(r"\b(?:ask|hold|die)-[a-z0-9]+", text).group(0)
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race)-[a-z0-9]+", text)))
+            word = words[0]
+            if "messageID" in body:
+                note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
+                with lock:
+                    stored.append((body["messageID"], word))
+                self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
+                return
             token_file = os.environ.get("CLARP_PROVIDER_TURN_FILE", "")
             token = os.environ.get("CLARP_PROVIDER_TURN") or (Path(token_file).read_text() if token_file else "")
-            note("turns", f"{pid} {sid} {word}")
+            for each in words:
+                note("turns", f"{pid} {sid} {each}")
             note("tokens", token)
             aborted.clear()
-            threading.Thread(target=run, args=(sid, word), daemon=True).start()
+            running[0] = True
+            threading.Thread(target=run, args=(sid, words), daemon=True).start()
             self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
             return
         self._json(200, True)
+    def do_DELETE(self):
+        if not self._auth():
+            return
+        parts = self.path.split("?")[0].split("/")
+        if len(parts) != 5 or parts[3] != "message":
+            return self._json(404, {})
+        note("deleting", parts[4])
+        if (root / "slow-delete").exists():
+            time.sleep(2)
+        if running[0]:
+            return self._json(409, {"name": "SessionBusyError"})
+        with lock:
+            found = [s for s in stored if s[0] == parts[4]]
+            for s in found:
+                stored.remove(s)
+        if not found:
+            return self._json(404, {"name": "NotFoundError"})
+        note("deleted", parts[4])
+        return self._json(200, True)
 
 server = ThreadingHTTPServer(("127.0.0.1", 0), H)
 print(f"opencode server listening on http://127.0.0.1:{server.server_address[1]}", flush=True)
@@ -225,6 +303,68 @@ impl World {
             .to_owned();
         self.place.root.join("run").join(format!("{id}-ocl.sock"))
     }
+}
+
+/// The lane lines of each of the agent's turn spools that are there now: the agent is told by its
+/// lane's socket (`<agent>-ocl.sock`).
+fn lane_lines(world: &World, socket: &std::path::Path) -> Vec<Vec<Value>> {
+    let name = socket.file_name().unwrap().to_string_lossy();
+    let agent = name.strip_suffix("-ocl.sock").unwrap();
+    let spools = world
+        .place
+        .root
+        .join("data/agents")
+        .join(agent)
+        .join("spool");
+    std::fs::read_dir(spools)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|file| file.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| {
+            text.lines()
+                .filter_map(|row| serde_json::from_str::<Value>(row).ok())
+                .filter(|row| row["s"] == "out")
+                .filter_map(|row| serde_json::from_str::<Value>(row["d"].as_str()?).ok())
+                .filter(|line| {
+                    line["type"]
+                        .as_str()
+                        .is_some_and(|kind| kind.starts_with("steer.") || kind.starts_with("turn."))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The steers the server stored: its pid, the message the lane named, the word, and whether the
+/// session was busy then.
+fn steers(world: &World) -> Vec<Vec<String>> {
+    world
+        .lines("steered")
+        .iter()
+        .map(|line| line.split(' ').map(str::to_owned).collect())
+        .collect()
+}
+
+/// The words each prompt of a turn of its own asked, in order.
+fn prompted(world: &World) -> Vec<String> {
+    world
+        .lines("turns")
+        .iter()
+        .map(|line| line.rsplit(' ').next().unwrap_or_default().to_owned())
+        .collect()
+}
+
+/// A message the lane named in OpenCode's ascending form: `msg_`, twelve hex digits, fourteen
+/// letters and digits.
+fn lane_named(message: &str) -> bool {
+    message.strip_prefix("msg_").is_some_and(|rest| {
+        rest.len() == 26
+            && rest[..12].bytes().all(|b| b.is_ascii_hexdigit())
+            && rest[12..].bytes().all(|b| b.is_ascii_alphanumeric())
+    })
 }
 
 /// What a lane answers one request with, or `None` when no lane answers on the socket.
@@ -621,4 +761,299 @@ fn a_changed_login_with_no_place_for_a_lane_runs_the_turn_on_its_own_server() {
     assert_ne!(own, lane, "the turn ran on its own server");
     assert_eq!(cold(&host), cold_before + 1);
     assert!(lane_state(&socket).is_none(), "no lane started");
+}
+
+/// Issue 784. A message sent while a turn runs on its own server waits for a turn of its own, as
+/// before. One sent while a lane turn runs its tool is posted to the busy session, read at the
+/// turn's next step and answered there: one turn, the answer after the message, and the
+/// steering evidence the apps read for a Codex lane.
+#[test]
+fn a_message_sent_while_a_lane_turn_runs_is_read_into_it_and_answered_there() {
+    let world = world("opencode-lane-steer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "steer", "opencode");
+
+    // The first turn runs on its own server, which takes no steered words: the message sent
+    // meanwhile waits, and runs as a turn of its own once the first is over.
+    host.send("steer", "hold-own", "own");
+    wait_for("the first turn", || {
+        world.place.root.join("holding-own").exists()
+    });
+    let sent = host.send("steer", "ask-next", "next");
+    assert_eq!(sent["queued"], true, "{sent}");
+    std::fs::write(world.place.root.join("release-own"), "").unwrap();
+    wait_for("both answered", || {
+        answers(&host, "steer", "said-hold-own") == 1
+            && answers(&host, "steer", "said-ask-next") == 1
+    });
+    wait_for("those turns to end", || host.state("steer") == "done");
+    // Never read into the turn on its own server: no steer, no reading of it in that turn, and
+    // it is the prompt of a turn of its own, after the first, answered once.
+    assert!(steers(&world).is_empty(), "{:?}", steers(&world));
+    assert_eq!(prompted(&world), ["hold-own", "ask-next"]);
+    let rows = host.turns("steer");
+    let row = |id: &str| rows.iter().find(|row| row["id"] == id).cloned().unwrap();
+    let (own, next) = (row("u-own"), row("u-next"));
+    assert!(next.get("read_into").is_none(), "{next}");
+    assert_ne!(own["trace_id"], next["trace_id"], "{own} {next}");
+    let said: Vec<String> = host
+        .conversation("steer")
+        .into_iter()
+        .map(|(_, text)| text)
+        .collect();
+    assert_eq!(
+        said,
+        ["hold-own", "said-hold-own", "ask-next", "said-ask-next"]
+    );
+    lane_ready(&socket);
+    let lane_pid = lane_state(&socket).unwrap()["pid"].to_string();
+
+    // A lane turn runs its tool; the message sent meanwhile goes to the busy session.
+    host.send("steer", "hold-tool", "tool");
+    wait_for("the lane turn's tool", || {
+        world.place.root.join("holding-tool").exists()
+    });
+    let sent = host.send("steer", "hold-more", "more");
+    assert_eq!(sent["queued"], true, "{sent}");
+    wait_for("the steer", || !steers(&world).is_empty());
+    let steer = steers(&world)[0].clone();
+    assert_eq!(steer[0], lane_pid, "{steer:?}");
+    assert!(lane_named(&steer[1]), "{steer:?}");
+    assert_eq!(steer[2..], ["hold-more", "busy"], "{steer:?}");
+    // Stored, not read yet: the message is no row of the conversation.
+    assert!(
+        !host.turns("steer").iter().any(|row| row["id"] == "u-more"),
+        "{:?}",
+        host.turns("steer")
+    );
+
+    // The tool ends; the next step names the message as the one it answers, and holds.
+    std::fs::write(world.place.root.join("release-tool"), "").unwrap();
+    wait_for("the steered words' own step", || {
+        world.place.root.join("holding-more").exists()
+    });
+    wait_for("the steered words read into the turn", || {
+        host.turns("steer").iter().any(|row| row["id"] == "u-more")
+    });
+    let live = host.get("/live?session=steer");
+    let read = live["turn"]["read_rows"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(read.iter().any(|row| row == "u-more"), "{live}");
+    let rows = host.turns("steer");
+    let row = rows.iter().find(|row| row["id"] == "u-more").unwrap();
+    assert_eq!(
+        row["read_into"]["trace_id"], live["turn"]["turn_id"],
+        "{row}"
+    );
+    assert!(row["read_into"]["turn"].is_u64(), "{row}");
+    let lines = lane_lines(&world, &socket)
+        .into_iter()
+        .find(|lines| lines.iter().any(|line| line["type"] == "steer.read"))
+        .unwrap();
+    let kinds: Vec<&str> = lines.iter().map(|l| l["type"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["steer.open", "steer.read"], "{lines:?}");
+    assert!(
+        lines[1]["id"].as_str().is_some_and(|id| !id.is_empty()),
+        "{lines:?}"
+    );
+
+    std::fs::write(world.place.root.join("release-more"), "").unwrap();
+    wait_for("the answer to the steered words", || {
+        answers(&host, "steer", "said-hold-more") == 1
+    });
+    wait_for("the turn to end", || host.state("steer") == "done");
+    // One turn: the steered words were never a prompt of their own, and their answer came after
+    // them, after what the turn said before it read them.
+    assert_eq!(prompted(&world), ["hold-own", "ask-next", "hold-tool"]);
+    let said: Vec<String> = host
+        .conversation("steer")
+        .into_iter()
+        .map(|(_, text)| text)
+        .filter(|text| text.contains("-tool") || text.contains("-more"))
+        .collect();
+    assert_eq!(
+        said,
+        ["hold-tool", "said-hold-tool", "hold-more", "said-hold-more"]
+    );
+    assert!(world.lines("deleted").is_empty());
+
+    // The lane is kept for the next turn.
+    asked(&host, "steer", "ask-after");
+    assert_eq!(world.servers().last().unwrap(), &lane_pid);
+    assert_eq!(answers(&host, "steer", "said-ask-next"), 1);
+}
+
+/// Issue 784. Words the lane turn stored but never read run as a turn of their own: those it
+/// took after its last step, and those a Stop caught. The lane takes them out of the session
+/// first, so OpenCode never meets them twice.
+#[test]
+fn steered_words_a_lane_turn_never_read_run_as_a_turn_of_their_own() {
+    let world = world("opencode-lane-unread-steer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "late", "opencode");
+    asked(&host, "late", "ask-first");
+    lane_ready(&socket);
+
+    // Stored after the turn's last step: the turn ends without them.
+    host.send("late", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    let sent = host.send("late", "late-b", "b");
+    assert_eq!(sent["queued"], true, "{sent}");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let late = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the unread words answered in a turn of their own", || {
+        answers(&host, "late", "said-late-b") == 1
+    });
+    wait_for("that turn to end", || host.state("late") == "done");
+    assert_eq!(world.lines("deleted"), [late.as_str()]);
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "late-b"]);
+    assert_eq!(answers(&host, "late", "said-hold-a"), 1);
+
+    // Caught by a Stop: OpenCode aborts the turn before its next step, and the words are taken
+    // out of the session and run on their own.
+    host.send("late", "hold-c", "c");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-c").exists()
+    });
+    let sent = host.send("late", "ask-d", "d");
+    assert_eq!(sent["queued"], true, "{sent}");
+    wait_for("the steer", || steers(&world).len() == 2);
+    let caught = steers(&world)[1][1].clone();
+    host.post("/stop", json!({"session": "late"}));
+    wait_for("the turn to end interrupted", || {
+        world.lines("deleted").len() == 2
+    });
+    assert_eq!(world.lines("deleted")[1], caught);
+    // A Stop holds what waits until the user's next message; then both run, each once.
+    asked(&host, "late", "ask-e");
+    wait_for("the caught words answered", || {
+        answers(&host, "late", "said-ask-d") == 1
+    });
+    wait_for("the last turn to end", || host.state("late") == "done");
+    assert_eq!(answers(&host, "late", "said-hold-c"), 0);
+    assert_eq!(answers(&host, "late", "said-ask-e"), 1);
+    let own = prompted(&world);
+    assert_eq!(own.iter().filter(|w| *w == "ask-d").count(), 1, "{own:?}");
+    assert_eq!(steers(&world).len(), 2);
+}
+
+/// Issue 784. Words that reach OpenCode as its run ends start a run of their own there (OpenCode
+/// 1.18: `effect/runner.ts` starts a run for a prompt that finds the session idle), right after
+/// the run's idle: the idle the lane reads is stale. The lane asks the session, finds it running
+/// again, and keeps the turn open: the words are read into it and answered there, once, and
+/// nothing is deleted.
+#[test]
+fn a_stale_idle_keeps_the_turn_open_for_words_opencode_runs_again() {
+    let world = world("opencode-lane-race-steer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "racer", "opencode");
+    asked(&host, "racer", "ask-first");
+    lane_ready(&socket);
+
+    host.send("racer", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    let sent = host.send("racer", "race-b", "b");
+    assert_eq!(sent["queued"], true, "{sent}");
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the words answered in the turn", || {
+        answers(&host, "racer", "said-race-b") == 1
+    });
+    wait_for("the turn to end", || host.state("racer") == "done");
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    let rows = host.turns("racer");
+    let row = rows.iter().find(|row| row["id"] == "u-b").unwrap();
+    assert!(row["read_into"]["turn"].is_u64(), "{row}");
+    let said: Vec<String> = host
+        .conversation("racer")
+        .into_iter()
+        .map(|(_, text)| text)
+        .filter(|text| text.ends_with("-a") || text.ends_with("-b"))
+        .collect();
+    assert_eq!(said, ["hold-a", "said-hold-a", "race-b", "said-race-b"]);
+    asked(&host, "racer", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "ask-after"]);
+    assert_eq!(answers(&host, "racer", "said-race-b"), 1);
+    assert_eq!(
+        world
+            .lines("answered")
+            .iter()
+            .filter(|w| *w == "race-b")
+            .count(),
+        1
+    );
+}
+
+/// Issue 784. A message the Host gives the turn after OpenCode's run went idle, while the lane
+/// still ends that turn, is refused by the lane: it runs as a turn of its own, once.
+#[test]
+fn a_steer_the_lane_refuses_after_the_idle_runs_as_its_own_turn_once() {
+    let world = world("opencode-lane-refused-steer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "after", "opencode");
+    asked(&host, "after", "ask-first");
+    lane_ready(&socket);
+
+    // Words the turn never reads hold the lane in its delete, after the idle, for two seconds.
+    std::fs::write(world.place.root.join("slow-delete"), "").unwrap();
+    host.send("after", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("after", "late-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the lane in its delete", || {
+        !world.lines("deleting").is_empty()
+    });
+
+    // The Host still sees the turn run and gives it the message; the lane has ended the turn.
+    let sent = host.send("after", "ask-c", "c");
+    assert_eq!(sent["queued"], true, "{sent}");
+    let status = || {
+        host.get("/turn-queue?session=after")["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == "c")
+            .and_then(|row| row["status"].as_str().map(str::to_owned))
+    };
+    assert_eq!(
+        status().as_deref(),
+        Some("started"),
+        "given to the running turn"
+    );
+    wait_for("both answered", || {
+        answers(&host, "after", "said-late-b") == 1 && answers(&host, "after", "said-ask-c") == 1
+    });
+    wait_for("the last turn to end", || host.state("after") == "done");
+    assert_eq!(steers(&world).len(), 1, "{:?}", steers(&world));
+    let own = prompted(&world);
+    assert_eq!(own.iter().filter(|w| *w == "ask-c").count(), 1, "{own:?}");
+    assert_eq!(own.iter().filter(|w| *w == "late-b").count(), 1, "{own:?}");
+    let rows = host.turns("after");
+    // Never read into the turn as a steer: it waited, and the next turn took it at its start
+    // (with the words that turn never read, which waited too).
+    let row = rows.iter().find(|row| row["id"] == "u-c").unwrap();
+    assert_ne!(row["read_into"]["at"], "steer", "{row}");
+    assert_eq!(answers(&host, "after", "said-ask-c"), 1);
 }

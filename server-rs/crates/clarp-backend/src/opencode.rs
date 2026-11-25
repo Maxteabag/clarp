@@ -34,6 +34,11 @@ impl Backend for OpenCode {
     fn efforts(&self) -> &'static [&'static str] {
         rules::EFFORTS
     }
+    /// As words for a turn of the agent's kept `opencode serve`, which says on its lane when it
+    /// takes them (issue 784). A turn on its own server never says so, and takes none.
+    fn steers(&self) -> crate::Steers {
+        crate::Steers::Words
+    }
     fn message_most(&self) -> Option<usize> {
         (!live()).then_some(60 * 1024)
     }
@@ -438,7 +443,12 @@ impl Stream {
         let id = word(p, "id");
         match kind {
             "step-start" => self.step(out),
-            "step-finish" => self.usage(p),
+            // A step's words are written when it finishes, before anything of the next: a
+            // message read into the turn between two steps (issue 784) comes after them.
+            "step-finish" => {
+                self.usage(p);
+                self.flush(out);
+            }
             "tool" => self.tool(p, t, out),
             "reasoning" => {
                 self.types.insert(id.into(), kind.into());
@@ -514,7 +524,10 @@ impl Stream {
                 }
             }
             "step_start" => self.step(out),
-            "step_finish" => self.usage(part),
+            "step_finish" => {
+                self.usage(part);
+                self.flush(out);
+            }
             "reasoning" => out.push(Signal::Moved(Activity::Thinking)),
             "tool_use" | "tool_start" | "tool.running" => {
                 self.tool(if part.is_object() { part } else { v }, t, out)

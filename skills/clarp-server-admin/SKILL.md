@@ -474,7 +474,11 @@ any turn whose configuration changed, runs on its own server while the lane star
 A lane is `<run>/<agent>-ocl.sock`; its `inspect` shows the session, the serve's pid and version,
 and its memory. It runs the Host's `CLARP_OPENCODE_PROGRAM` and keeps only a 1.x serve. A change
 in the words of the agent's `opencode.json`, the global OpenCode configuration or `auth.json`
-starts a new lane. Steered words wait for their own turn on this lane for now.
+starts a new lane. A message sent while a lane turn runs is read into that turn, as on a Codex
+lane (issue 784): OpenCode reads it at its next step and answers it in the same turn. Words it
+has not read when the turn ends, or a Stop ends it, run as a turn of their own, unless OpenCode
+begins them by itself as the turn ends (then the turn stays open, and they are answered in it);
+a turn on its own server takes none.
 
 ## Docker Container Administration
 

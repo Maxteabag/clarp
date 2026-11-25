@@ -46,8 +46,8 @@ pub enum Steers {
     /// The tool says on its output when it read the message and which result answers it
     /// (`clarp_kernel::steering`): Claude Code, and the agy-acp driver.
     Stdin,
-    /// As words for a turn of a Codex lane, which says on its lane when it takes them. Only
-    /// while the owner's setting runs chat turns on the lane.
+    /// As words for a turn of a lane (Codex, Muse, OpenCode), which says on its spool when it
+    /// takes them and which it read. Only while the owner's setting runs chat turns on the lane.
     Words,
 }
 

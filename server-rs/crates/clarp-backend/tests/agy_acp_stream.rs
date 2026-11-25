@@ -355,7 +355,7 @@ fn prompted(tokens_in: u64, tokens_out: u64) -> Value {
 }
 
 #[test]
-fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_as_words_in_codex_and_muse()
+fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_as_words_on_the_lanes()
  {
     for (id, steers) in [
         ("claude", Steers::Stdin),
@@ -364,8 +364,8 @@ fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_a
         ("agy", Steers::No),
         ("grok", Steers::No),
         ("muse", Steers::Words),
-        ("opencode", Steers::No),
-        ("deepseek", Steers::No),
+        ("opencode", Steers::Words),
+        ("deepseek", Steers::Words),
         ("scripted", Steers::No),
     ] {
         let backend = by_id(id).unwrap();

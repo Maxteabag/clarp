@@ -108,8 +108,9 @@ impl Client {
     }
 
     fn url(&self, path: &str) -> String {
+        let joined = if path.contains('?') { '&' } else { '?' };
         format!(
-            "{}{path}?directory={}",
+            "{}{path}{joined}directory={}",
             self.base,
             component(&self.directory)
         )
@@ -167,6 +168,15 @@ impl Client {
                 .with_body(serde_json::to_vec(body)?);
         }
         Self::json(req)
+    }
+
+    /// Asks the server to delete what `path` names; its answer's status, whatever it is.
+    pub(crate) fn delete(&self, path: &str, seconds: u64) -> Result<i32> {
+        let reply = self
+            .request(minreq::Method::Delete, path)
+            .with_timeout(seconds)
+            .send()?;
+        Ok(reply.status_code)
     }
 
     pub(crate) fn subscribe(&self) -> Result<mpsc::Receiver<Value>> {

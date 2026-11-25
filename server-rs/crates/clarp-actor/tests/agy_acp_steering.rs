@@ -2,7 +2,8 @@
 //! a busy Claude agent does: the actor against a world that plays the shim and the agy-acp
 //! driver, which prints what Antigravity said and the steering evidence
 //! (`clarp_kernel::steering`): an echo when it took a message, a result naming what each
-//! answer covers.
+//! answer covers. The world plays an OpenCode lane's turn too, which says on its spool which
+//! steered words it read (`steer.read`).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
@@ -113,13 +114,15 @@ impl World {
                         let now = self.tick();
                         asked.push(actor.spool_changed(now).unwrap());
                     }
-                    Action::Steer { input, .. } => {
-                        let Steering::Stdin(line) = input else {
-                            panic!("agy-acp is steered on its input: {input:?}");
-                        };
-                        assert!(line.ends_with('\n'), "one line");
-                        self.steered.push(serde_json::from_str(&line).unwrap());
-                    }
+                    Action::Steer { input, .. } => match input {
+                        Steering::Stdin(line) => {
+                            assert!(line.ends_with('\n'), "one line");
+                            self.steered.push(serde_json::from_str(&line).unwrap());
+                        }
+                        Steering::Words { id, text } => {
+                            self.steered.push(json!({"words": id, "text": text}));
+                        }
+                    },
                     Action::Stop { turn, .. } => self.stopped.push(turn.0),
                     Action::Follow { .. } | Action::FollowExit { .. } => {}
                     Action::Fork(_) | Action::ForkFollow { .. } => panic!("agy-acp has no fork"),
@@ -749,4 +752,48 @@ fn a_message_whose_driver_died_before_it_was_taken_runs_as_its_own_turn_after_a_
             .any(|(text, turn, _)| text == "Half an ans" && *turn == 1),
         "what was said before is kept"
     );
+}
+
+/// Issue 784. A lane may say it read words under an id the Host never gave the turn (OpenCode
+/// stored words whose post timed out). The actor reads nothing into the turn for it: the message
+/// the Host did give it stays unread, and runs as a turn of its own after.
+#[test]
+fn a_lanes_reading_of_an_id_the_host_never_gave_is_ignored() {
+    let mut world = World::new("unknown-read");
+    world.backend = clarp_backend::by_id("opencode").unwrap();
+    let mut actor = world.open();
+    let now = world.tick();
+    let first = Message {
+        id: "u-1".into(),
+        text: "go".into(),
+        origin: Origin::User,
+        trace_id: Some("trace-1".into()),
+        ..Message::default()
+    };
+    let (_, out) = actor.send(&first, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.took, [1]);
+    world.says(1, &json!({"type": "session", "sessionID": "ses_a"}));
+    world.says(1, &json!({"type": "steer.open"}));
+    world.hint(&mut actor);
+
+    let turn = world.send_while_running(&mut actor, "2", "more");
+    let given = takeover::prompt_uuid("trace-2").unwrap();
+    assert_eq!(world.steered, [json!({"words": given, "text": "more"})]);
+    world.says(1, &json!({"type": "steer.read", "id": "never-given"}));
+    world.says(1, &json!({"type": "steer.read", "id": ""}));
+    world.hint(&mut actor);
+    assert!(world.joined.is_empty(), "{:?}", world.joined.len());
+    assert_eq!(messages(&actor), ["u-1"]);
+
+    world.says(1, &json!({"type": "turn.completed"}));
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(
+        world.took,
+        [1, turn.0],
+        "the message the turn never read runs on its own"
+    );
+    assert_eq!(messages(&actor), ["u-1", "u-2"]);
+    assert!(world.joined.is_empty());
 }

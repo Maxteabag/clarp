@@ -1284,9 +1284,10 @@ Rules:
   tool's compaction, and not a Codex native goal's turn, which a cut would
   pause), a user's or the Oracle's plain send (no
   `queue_if_busy`) never waits behind it. Where the turn's tool can take it
-  now (Claude Code, agy-acp, a Codex turn on its chat lane), it is steered
+  now (Claude Code, agy-acp, a Codex, Muse or OpenCode turn on its chat lane), it is steered
   into that turn as below and nothing is cut (Rust Host contract 192, feature
-  `owner_steers`): the send answers `queued: true`, its row gets `read_into`,
+  `owner_steers`; from issue 784 it reaches an OpenCode or DeepSeek turn on its chat lane too,
+  with no new contract number): the send answers `queued: true`, its row gets `read_into`,
   and from its reading on the turn is the user's in the chat (the live turn's
   `audience` is `user`, and the rows it writes after the read are audience
   `user`), until the agent answers the user in a note, after which the rest
@@ -1312,7 +1313,13 @@ Rules:
   send wait or steers it as below.
 - If the agent is busy, a user's send is steered into the running turn when
   its backend can take it. A Codex turn takes it at once, and its `/log` row
-  follows at once. A Claude turn (Claude Code 2.1.321 or later) takes it while
+  follows at once. An OpenCode or DeepSeek turn on its chat lane (issue 784) takes it at once
+  too, and its `/log` row follows when OpenCode reads it, at its next step after the running
+  tool, answering it in the same turn; words still unread when that turn ends, or is stopped,
+  run as a turn of their own, except words OpenCode begins by itself as the turn ends: the turn
+  stays open for them, and they are read into it and answered there. A send that reaches the lane after
+  its turn ended is refused there and runs as a turn of its own. A turn on its own server takes
+  none. A Claude turn (Claude Code 2.1.321 or later) takes it while
   the turn has not ended: the follow-up is written to the running CLI, which
   reads it at its next boundary, after the running or next tool call, inside
   the same turn, or right after the turn's result, answering it in the same
@@ -1335,7 +1342,7 @@ Rules:
   same way: no send of theirs ends a running turn; only the user's Stop does,
   and, from contract 187, a person's send to a turn that is not a person's
   (above). A message
-  from another agent (`origin: "agent"` with a `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
+  from another agent (`origin: "agent"` with a `sender`) never preempts: it steers a steerable turn (Codex, or Muse or OpenCode on its chat lane) and otherwise
   queues as if `queue_if_busy` were true. `/stop` pauses the queue to
   hold its backlog. The user's next fresh message (a plain user or Oracle send,
   whether it starts a turn or is taken as a follow-up or a steer) ends the

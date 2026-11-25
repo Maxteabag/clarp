@@ -4,7 +4,14 @@
 //! record goes to the claim's spool in the lines today's per-turn driver prints. What every lane
 //! keeps for itself (its options, locks, turn file, idle clock, login and sockets) is in the
 //! `lane_*` modules.
+//!
+//! A turn takes the user's steered words while it runs (issue 784): they are posted to the busy
+//! session as a message the lane names, which OpenCode reads at its next step and answers in the
+//! same busy period. They are read when an answer that names that message starts. Words still
+//! unread when the turn ends, by its idle or a Stop, are taken out of the session again: the
+//! Host runs them as a turn of their own.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -47,8 +54,10 @@ pub(super) enum Input {
     Follow((u64, u32), UnixStream),
     /// A Stop on the attempt's socket, with how long OpenCode has to end the turn itself.
     Stop((u64, u32), u64, UnixStream),
-    /// Steered words, which this lane does not take yet: refused, they wait for their own turn.
-    Steer(UnixStream),
+    /// Steered words for the attempt, under the id their reading is told by.
+    Steer((u64, u32), String, String, UnixStream),
+    /// Lines for a tool's input, which this lane never takes.
+    Refuse(UnixStream),
 }
 
 impl Input {
@@ -60,8 +69,8 @@ impl Input {
         match ask {
             TurnAsk::Follow => Self::Follow(attempt, stream),
             TurnAsk::Stop(grace_ms) => Self::Stop(attempt, grace_ms, stream),
-            // Steered words, and lines for a tool's input, which this lane never accepts.
-            TurnAsk::Steer(..) | TurnAsk::Stdin(_) => Self::Steer(stream),
+            TurnAsk::Steer(id, text) => Self::Steer(attempt, id, text, stream),
+            TurnAsk::Stdin(_) => Self::Refuse(stream),
         }
     }
 }
@@ -118,6 +127,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         model: None,
         effort: None,
         memory: None,
+        ids: MessageIds::default(),
         input,
         send,
         retire_reply: None,
@@ -270,6 +280,53 @@ struct Turn {
     follow: Follow,
     /// A Stop asked for its end: the idle that follows ends it as stopped.
     stopping: bool,
+    /// The steered words posted to the session: the message the lane named them, then the id
+    /// the Host steered them under.
+    steered: BTreeMap<String, String>,
+}
+
+impl Turn {
+    /// The steered messages whose reading is not written, with the ids the Host steered them
+    /// under.
+    fn unread(&self) -> Vec<(String, String)> {
+        self.steered
+            .iter()
+            .filter(|(_, id)| !self.spool.was_read(id))
+            .map(|(message, id)| (message.clone(), id.clone()))
+            .collect()
+    }
+}
+
+/// Names the messages the lane posts, in OpenCode's ascending form: `msg_`, twelve hex digits of
+/// the time in milliseconds times 4096 plus a count within that millisecond, then fourteen
+/// letters and digits at random. OpenCode orders a session's messages by their ids, so steered
+/// words sort after what the turn said before them, as a message OpenCode named would.
+#[derive(Default)]
+struct MessageIds {
+    ms: i64,
+    count: u64,
+}
+
+impl MessageIds {
+    const LETTERS: &'static [u8] =
+        b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    fn next(&mut self, now_ms: i64) -> io::Result<String> {
+        if now_ms != self.ms {
+            self.ms = now_ms;
+            self.count = 0;
+        }
+        self.count += 1;
+        let ms = u64::try_from(now_ms).unwrap_or_default();
+        let stamp = ms.wrapping_mul(0x1000).wrapping_add(self.count) & 0xFFFF_FFFF_FFFF;
+        let mut random = [0u8; 14];
+        File::open("/dev/urandom")?.read_exact(&mut random)?;
+        let tail: String = random
+            .iter()
+            .map(|b| Self::LETTERS[usize::from(*b) % Self::LETTERS.len()] as char)
+            .collect();
+        Ok(format!("msg_{stamp:012x}{tail}"))
+    }
 }
 
 struct Lane {
@@ -292,6 +349,7 @@ struct Lane {
     model: Option<String>,
     effort: Option<String>,
     memory: Option<u64>,
+    ids: MessageIds,
     input: Receiver<Input>,
     send: SyncSender<Input>,
     retire_reply: Option<UnixStream>,
@@ -420,13 +478,15 @@ impl Lane {
                     self.stop(attempt, grace);
                     let _ = write(&mut stream, &Reply::ok(None));
                 }
-                Some(Input::Steer(mut stream)) => {
-                    // Steered words wait for a turn of their own until the steering evidence
-                    // is wired for this lane.
-                    let _ = write(
-                        &mut stream,
-                        &Reply::failed("the OpenCode lane takes no steered words yet"),
-                    );
+                Some(Input::Steer(attempt, id, text, mut stream)) => {
+                    let reply = match self.steer(attempt, &id, &text) {
+                        Ok(()) => Reply::ok(None),
+                        Err(error) => Reply::failed(error.to_string()),
+                    };
+                    let _ = write(&mut stream, &reply);
+                }
+                Some(Input::Refuse(mut stream)) => {
+                    let _ = write(&mut stream, &Reply::failed("Unsupported lane turn request"));
                 }
                 Some(Input::ServeGone | Input::EventsGone) | None => {
                     return Err(io::Error::other(SERVER_GONE));
@@ -555,6 +615,7 @@ impl Lane {
             spool,
             follow: Follow::new(&self.thread),
             stopping: false,
+            steered: BTreeMap::new(),
         });
         // A turn the lane lost (its Stop's grace ran out on the Host's side) may still run.
         if self.session_busy {
@@ -576,8 +637,130 @@ impl Lane {
         }
         if let Err(error) = posted {
             self.end(Some(1), None, Some(&error.to_string()));
+            return Ok(());
+        }
+        // The prompt is with OpenCode: the turn takes steered words from now until it ends.
+        let opened = self.turn.as_mut().map_or(Ok(()), |turn| {
+            turn.spool.steer_open(now)?;
+            turn.spool.sync()
+        });
+        if let Err(error) = opened {
+            self.end(Some(1), None, Some(&error.to_string()));
         }
         Ok(())
+    }
+
+    /// More of the user's words for the running turn: posted to the busy session as a message
+    /// the lane names, which OpenCode stores at once and reads at its next step. Refused while a
+    /// Stop ends the turn or once it ended; then they wait for a turn of their own.
+    fn steer(&mut self, attempt: (u64, u32), id: &str, text: &str) -> io::Result<()> {
+        if !self.holds(attempt) {
+            return Err(io::Error::other(
+                "the OpenCode lane does not run this attempt",
+            ));
+        }
+        if self.turn.as_ref().is_some_and(|turn| turn.stopping) || self.stop_deadline.is_some() {
+            return Err(io::Error::other("the turn is being stopped"));
+        }
+        if id.is_empty() || text.trim().is_empty() {
+            return Err(io::Error::other("steered words need an id and a text"));
+        }
+        let message = self.ids.next(super::now_ms())?;
+        let mut posted = body(
+            text,
+            self.model.as_deref().unwrap_or(""),
+            self.effort.as_deref().unwrap_or(""),
+        );
+        posted["messageID"] = json!(message);
+        let result = self.serve.client.post(
+            &format!(
+                "/session/{}/prompt_async",
+                crate::opencode_http::component(&self.thread)
+            ),
+            Some(&posted),
+            30,
+        );
+        // Kept even when the answer did not come back: OpenCode may have stored the words, and
+        // their reading, or their removal at the turn's end, is then still told.
+        if let Some(turn) = self.turn.as_mut() {
+            turn.steered.insert(message, id.to_owned());
+        }
+        result
+            .map(|_| ())
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+
+    /// Whether OpenCode runs the session now, by its own status list (idle sessions are not in
+    /// it). Unknown when the list cannot be read.
+    fn session_runs(&self) -> Option<bool> {
+        let list = self.serve.client.get("/session/status", 10).ok()?;
+        Some(matches!(
+            list[&self.thread]["type"].as_str(),
+            Some("busy" | "retry")
+        ))
+    }
+
+    /// Whether OpenCode answered any of these messages already, by the session's last messages:
+    /// an answer names the message it answers (`parentID`). Unknown is no.
+    fn answered(&self, messages: &[(String, String)]) -> bool {
+        let path = format!(
+            "/session/{}/message?limit=50",
+            crate::opencode_http::component(&self.thread)
+        );
+        let Ok(list) = self.serve.client.get(&path, 10) else {
+            return false;
+        };
+        list.as_array().into_iter().flatten().any(|message| {
+            message["info"]["role"] == "assistant"
+                && messages
+                    .iter()
+                    .any(|(steered, _)| message["info"]["parentID"] == steered.as_str())
+        })
+    }
+
+    /// At the idle that ends the turn: the steered words OpenCode stored and has not read are
+    /// taken out of the session, so the Host runs them as a turn of their own and OpenCode never
+    /// meets them twice. False: the session runs again, and the turn stays open until that ends.
+    ///
+    /// OpenCode 1.18 starts no run by itself for words stored while its run went on: such a
+    /// prompt only waits for that run (`effect/runner.ts`, `ensureRunning`). But words that
+    /// reach it after that run ended start a run of their own, which can come after the idle
+    /// the lane is reading now: then the session is busy again, or has even answered them
+    /// already with that answer still on its way to the lane, and the words are this turn's.
+    /// A delete the session refuses as busy (409) says the same. A Stop's idle comes after an
+    /// abort, and takes the words back as they are. Words not taken back otherwise count as
+    /// read, so that the Host never runs them a second time.
+    fn take_back_unread(&mut self, stopping: bool) -> io::Result<bool> {
+        let unread = match self.turn.as_ref() {
+            Some(turn) => turn.unread(),
+            None => return Ok(true),
+        };
+        if unread.is_empty() {
+            return Ok(true);
+        }
+        if !stopping && (self.session_runs() == Some(true) || self.answered(&unread)) {
+            return Ok(false);
+        }
+        for (message, id) in unread {
+            let path = format!(
+                "/session/{}/message/{}",
+                crate::opencode_http::component(&self.thread),
+                crate::opencode_http::component(&message)
+            );
+            match self.serve.client.delete(&path, 10) {
+                Ok(200..=299) => {}
+                Ok(409) if !stopping => return Ok(false),
+                answer => {
+                    eprintln!(
+                        "clarp-shim: OpenCode lane: steered words were not taken back ({answer:?}), and count as read"
+                    );
+                    if let Some(turn) = self.turn.as_mut() {
+                        turn.spool.steer_read(&id, super::now_ms())?;
+                    }
+                }
+            }
+        }
+        Ok(true)
     }
 
     fn event(&mut self, event: &Value) {
@@ -594,6 +777,21 @@ impl Lane {
         let Some(turn) = self.turn.as_mut() else {
             return;
         };
+        // Steered words are read when an answer that names their message starts: written, and
+        // durable, before anything of that answer.
+        let info = &props["info"];
+        if event["type"] == "message.updated"
+            && info["sessionID"].as_str() == Some(&self.thread)
+            && info["role"] == "assistant"
+            && let Some(id) = info["parentID"]
+                .as_str()
+                .and_then(|parent| turn.steered.get(parent))
+                .cloned()
+            && let Err(error) = turn.spool.steer_read(&id, super::now_ms())
+        {
+            self.end(Some(1), None, Some(&error.to_string()));
+            return;
+        }
         let mut lines = Vec::new();
         let seen = turn.follow.see(&self.serve.client, event, &mut |line| {
             lines.push(line.to_string());
@@ -607,6 +805,14 @@ impl Lane {
         if let Err(error) = written {
             self.end(Some(1), None, Some(&error.to_string()));
             return;
+        }
+        if matches!(seen, Ok(true)) {
+            match self.take_back_unread(stopping) {
+                Ok(true) => {}
+                // The session runs the steered words: the turn goes on to its next idle.
+                Ok(false) => return self.hint(),
+                Err(error) => return self.end(Some(1), None, Some(&error.to_string())),
+            }
         }
         match seen {
             Ok(true) if stopping => self.end(None, Some(nix::libc::SIGINT), None),
@@ -644,6 +850,15 @@ impl Lane {
             if let Some(error) = error {
                 turn.spool.err(error, now)?;
             }
+            // How the turn ended is how the steered words read into it ended; a stopped turn
+            // says nothing, and they ended with it.
+            match (code, signal) {
+                (_, Some(_)) => {}
+                (Some(0), None) => turn.spool.turn_completed(now)?,
+                _ => turn
+                    .spool
+                    .turn_failed(error.unwrap_or("the OpenCode turn failed"), now)?,
+            }
             turn.spool.exit(code, signal, now)
         };
         if let Err(error) = ended() {
@@ -656,5 +871,28 @@ impl Lane {
         self.login.release();
         self.idle.reset();
         self.weigh();
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::MessageIds;
+
+    #[test]
+    fn the_lanes_messages_are_named_in_opencodes_ascending_form() {
+        let mut ids = MessageIds::default();
+        let first = ids.next(1_795_619_200_256).unwrap();
+        let same = ids.next(1_795_619_200_256).unwrap();
+        let later = ids.next(1_795_619_200_257).unwrap();
+        // A message OpenCode named in that millisecond, first of it (`msg_2133e9d00001...`).
+        assert_eq!(&first[..16], "msg_2133e9d00001", "{first}");
+        assert_eq!(&same[..16], "msg_2133e9d00002", "{same}");
+        assert_eq!(&later[..16], "msg_2133e9d01001", "{later}");
+        for id in [&first, &same, &later] {
+            assert_eq!(id.len(), 30, "{id}");
+            assert!(id[16..].bytes().all(|b| b.is_ascii_alphanumeric()), "{id}");
+        }
+        assert!(first[..16] < same[..16] && same[..16] < later[..16]);
     }
 }

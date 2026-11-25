@@ -63,7 +63,7 @@ rules('clarp-shim/src/opencode.rs','host',[
 PLANTS.append(('clarp-shim/src/opencode_http.rs', 'host', 'a resumed session id can change', 'result["id"].as_str() != Some(old)', 'result["id"].as_str().is_none()'))
 PLANTS.append(('clarp-shim/src/opencode_follow.rs', 'host', 'the wrong permission is submitted', '"reply":"once"', '"reply":"always"'))
 PLANTS.append(('clarp-shim/src/opencode_follow.rs', 'host', 'the requested effort is lost', 'body["variant"] = json!(effort)', 'body["variant"] = Value::Null'))
-PLANTS.append(('clarp-shim/src/opencode_http.rs', 'host', 'the working directory is sent under another key', '?directory={}', '?cwd={}'))
+PLANTS.append(('clarp-shim/src/opencode_http.rs', 'host', 'the working directory is sent under another key', '{joined}directory={}', '{joined}cwd={}'))
 rules('clarp-backend/src/history/opencode.rs','history',[
     ('successful tools remain running', '_ => "ok",', '_ => "running",'),
     ('tool failures are successful', '"error" => "error",', '"error" => "ok",'),
@@ -198,5 +198,16 @@ PLANTS.append((LANE_HOST, 'lane_host', 'a lane started otherwise takes the turn'
 PLANTS.append((LANE_SHIM, 'lane_host', 'a stopped lane turn reads as completed',
                'Ok(true) if stopping => self.end(None, Some(nix::libc::SIGINT), None),',
                'Ok(true) if stopping => self.end(Some(0), None, None),'))
+# Steered words on the OpenCode lane (issue 784).
+rules(LANE_SHIM, 'lane_host', [
+    ('a lane turn never says it takes steered words', 'turn.spool.steer_open(now)?;', ''),
+    ('steered words are read by an answer to the user message before them', 'info["role"] == "assistant"', 'info["role"] == "user"'),
+    ('steered words go under a message OpenCode names', 'posted["messageID"] = json!(message);', ''),
+    ('unread steered words stay in the session', 'match self.serve.client.delete(&path, 10) {', 'match crate::opencode_http::Result::<i32>::Ok(500) {'),
+    ('words not taken back run again', 'turn.spool.steer_read(&id, super::now_ms())?;', 'let _ = &id;'),
+    ('a stale idle ends the turn under words OpenCode runs again', 'if !stopping && (self.session_runs() == Some(true) || self.answered(&unread)) {', 'if false {'),
+])
+PLANTS.append(('clarp-backend/src/opencode.rs', 'lane_host', "a step's words wait for the next step, after words read between them",
+               '                self.usage(p);\n                self.flush(out);\n', '                self.usage(p);\n'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

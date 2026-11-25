@@ -381,3 +381,95 @@ fn a_text_part_told_whole_after_its_call_began_is_no_second_reply() {
         "one live message for the words"
     );
 }
+
+/// Issue 784. A step's words are written when the step finishes, before anything of the next
+/// step: a message the lane reads into the turn between two steps (its `steer.read`, at the next
+/// answer's start) comes after the answer before it. Told whole again after that, the same words
+/// are no second reply.
+#[test]
+fn a_steps_words_are_written_when_it_finishes_before_the_next_step() {
+    let part = |part: Value| {
+        json!({"type": "message.part.updated", "properties": {"sessionID": "s", "part": part}})
+            .to_string()
+    };
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "finished");
+    let mut signals = Vec::new();
+    let mut feed = |line: String, signals: &mut Vec<Signal>| {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            signals,
+        );
+    };
+    let replies = |signals: &[Signal]| -> Vec<String> {
+        signals
+            .iter()
+            .filter_map(|signal| match signal {
+                Signal::Reply(reply) if !reply.text.is_empty() => Some(reply.text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    feed(
+        part(json!({"id": "s1", "messageID": "m1", "type": "step-start"})),
+        &mut signals,
+    );
+    feed(
+        part(json!({"id": "t1", "messageID": "m1", "type": "text", "text": "first answer"})),
+        &mut signals,
+    );
+    assert!(replies(&signals).is_empty(), "still being written");
+    feed(
+        part(json!({"id": "f1", "messageID": "m1", "type": "step-finish", "reason": "stop"})),
+        &mut signals,
+    );
+    assert_eq!(
+        replies(&signals),
+        ["first answer"],
+        "written as its step finished"
+    );
+    // The next answer starts (the lane reads the steered words here), and the finished part is
+    // told whole again: nothing new.
+    feed(
+        json!({"type": "message.updated", "properties": {"info": {"id": "m2", "sessionID": "s",
+            "role": "assistant", "parentID": "u2"}}})
+        .to_string(),
+        &mut signals,
+    );
+    feed(
+        r#"{"type":"steer.read","id":"u2"}"#.to_owned(),
+        &mut signals,
+    );
+    feed(
+        part(
+            json!({"id": "t1", "messageID": "m1", "type": "text", "text": "first answer",
+            "time": {"end": 2}}),
+        ),
+        &mut signals,
+    );
+    feed(
+        part(json!({"id": "s2", "messageID": "m2", "type": "step-start"})),
+        &mut signals,
+    );
+    feed(
+        part(json!({"id": "t2", "messageID": "m2", "type": "text", "text": "second answer"})),
+        &mut signals,
+    );
+    feed(
+        part(json!({"id": "f2", "messageID": "m2", "type": "step-finish", "reason": "stop"})),
+        &mut signals,
+    );
+    interpreter.on_record(
+        &Record {
+            t: 2,
+            entry: Entry::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        },
+        &mut signals,
+    );
+    assert_eq!(replies(&signals), ["first answer", "second answer"]);
+}

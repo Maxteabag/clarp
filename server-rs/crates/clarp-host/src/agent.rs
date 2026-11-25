@@ -3300,10 +3300,10 @@ impl Worker {
         // How the journal names this thread when a part of this request holds it long.
         let thread = self.thread_name();
         // A tool whose running turn takes another message on its input (Claude Code, agy-acp)
-        // is offered the user's. A Codex turn takes steered words only on its lane, and only
-        // while the owner's setting runs chat turns there: with it off, a goal turn is not
-        // steered, as before (review of 23 Nov 2026). The actor reads from the turn's spool
-        // whether it can, and decides by the message's text.
+        // is offered the user's. A Codex, Muse or OpenCode turn takes steered words only on its
+        // lane, and only while the owner's setting runs chat turns there: with it off, a goal
+        // turn is not steered, as before (review of 23 Nov 2026). The actor reads from the
+        // turn's spool whether it can, and decides by the message's text.
         let mut can_offer_steering = match self.setup.backend.steers() {
             clarp_backend::Steers::Stdin => true,
             clarp_backend::Steers::Words => self.chat_lane(),

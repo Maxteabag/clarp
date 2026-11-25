@@ -351,6 +351,10 @@ process, right after that answer. Muse does so 0.08-0.4 s after the answer, with
   read after a `result`. The follow-up gets its own turn and its own reply. It is neither counted
   as the first turn nor dropped.
 - **Codex** reads every steered word inside its running turn and never does this.
+- **OpenCode** starts no run of its own for words stored while its run goes on (a prompt then
+  only waits for that run), so its lane takes back unread words at the turn's end, as Muse's
+  does. Words that reach it after the run ended do start one; the lane keeps the turn open for
+  it (in "OpenCode's lane").
 - **Muse's driver does not let it happen** (issue 762, the build). At the end of the turn, and
   at a Stop, every steered message Muse accepted and did not read is taken back from it
   (`turn/unqueue`; one Muse already began is interrupted with `retract` as it begins). The
@@ -492,8 +496,16 @@ serve would be one point of failure for every such agent.
 - **Death.** A serve that exits under a turn fails that turn ("OpenCode server stopped before the
   turn finished"), and the lane leaves; the next turn runs on its own serve while a new lane
   starts.
-- **Steered words** wait for a turn of their own on this lane for now; the read and settle lines
-  for OpenCode come with the generic steering lines of the Claude driver.
+- **Steered words** (issue 784) go to the busy session with `prompt_async`, under a message id
+  the lane makes in OpenCode's ascending form. The lane writes `steer.open` once the turn's
+  prompt is posted, and `steer.read` when an answer whose `parentID` is that message starts;
+  OpenCode reads it at its next step and answers it in the same busy period. At the idle that ends
+  the turn, words still unread are deleted from the session, and the actor runs them as a turn of
+  their own, unless the session runs again or already answered them (words that reached
+  OpenCode after its run ended start a run of their own, so that idle is stale): then the turn
+  stays open until the next idle. A delete refused as busy keeps it open too; any other failed
+  delete counts the words as read. A Stop deletes them after its abort. Words sent after the
+  lane ended the turn are refused and wait for a turn of their own.
 
 ## What step 2 (Claude) must handle: what assumes a fresh Claude process per turn
 
