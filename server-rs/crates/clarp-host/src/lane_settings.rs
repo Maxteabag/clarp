@@ -1,5 +1,6 @@
 //! The owner's settings of lanes from his apps (issue 779): `GET /lane-settings` says each tool's
-//! switch, the two limits all lanes share, the idle time, and what the lanes hold now;
+//! switch, how the limits all lanes share are set (auto from the free memory, or fixed; issue
+//! 792) and their values, the idle time, and what the lanes and the machine hold now;
 //! `POST /lane-settings` changes any of them. They stay where the Host has always read them, the
 //! top-level keys of its own `config.toml` ([`crate::lane::Settings`]), so `install-host` carries
 //! them and an edit by hand still works. A change is written into that file with every other
@@ -16,7 +17,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde_json::{Map, Value, json};
 
 use crate::edge::{ApiError, App};
-use crate::lane::{self, Holding, MIB, Settings, Tool};
+use crate::lane::{self, Holding, MIB, Memory, Mode, Settings, Tool};
 
 /// The kind of the event every app is told a change by: it reads `GET /lane-settings` again.
 pub(crate) const CHANGED: &str = "lane-settings-updated";
@@ -43,9 +44,20 @@ fn idle_now(settings: &Settings) -> i64 {
     i64::try_from(settings.idle_ms / 60_000).unwrap_or(i64::MAX)
 }
 
+fn reserve_now(settings: &Settings) -> i64 {
+    i64::try_from(settings.reserve_percent).unwrap_or(i64::MAX)
+}
+
+fn ceiling_now(settings: &Settings) -> i64 {
+    i64::try_from(settings.ceiling).unwrap_or(i64::MAX)
+}
+
+/// How the limits are set, as the apps name it, and the values it may be set to.
+const MODE: &str = "limits";
+
 /// The limits the owner may set from an app. The file may hold others (an edit by hand); the
 /// Host uses what it holds, and an app is refused only a value it changes to.
-static LIMITS: [Limit; 3] = [
+static LIMITS: [Limit; 5] = [
     Limit {
         name: "most",
         key: lane::MOST,
@@ -67,6 +79,20 @@ static LIMITS: [Limit; 3] = [
         max: 240,
         now: idle_now,
     },
+    Limit {
+        name: "reserve_percent",
+        key: lane::RESERVE_PERCENT,
+        min: 5,
+        max: 50,
+        now: reserve_now,
+    },
+    Limit {
+        name: "ceiling",
+        key: lane::CEILING,
+        min: 1,
+        max: 64,
+        now: ceiling_now,
+    },
 ];
 
 /// A value a request names, of the right kind; whether it is a change, and within its range,
@@ -75,6 +101,7 @@ static LIMITS: [Limit; 3] = [
 enum Wanted {
     Switch(Tool, bool),
     Limit(&'static Limit, i64),
+    Mode(Mode),
 }
 
 /// A change to write: the keys of the file and their new values, in the order they are named.
@@ -93,10 +120,11 @@ fn range(limit: &Limit) -> Value {
     json!({"min": limit.min, "max": limit.max})
 }
 
-/// The settings as the Host uses them now, and what the lanes hold.
-fn told(settings: &Settings, holding: &Holding) -> Value {
+/// The settings as the Host uses them now, and what the lanes and the machine hold.
+fn told(settings: &Settings, holding: &Holding, memory: Option<Memory>) -> Value {
     let mb = |bytes: u64| bytes.saturating_add(MIB / 2) / MIB;
     let mut answer = Map::new();
+    answer.insert(MODE.to_owned(), json!(settings.mode.name()));
     let mut ranges = Map::new();
     for limit in &LIMITS {
         answer.insert(limit.name.to_owned(), json!((limit.now)(settings)));
@@ -114,10 +142,22 @@ fn told(settings: &Settings, holding: &Holding) -> Value {
         lanes += held.lanes;
         bytes = bytes.saturating_add(held.bytes);
     }
+    // What the machine has free, what auto keeps free of new lanes, and what is left for them.
+    let free = memory.map(|memory| {
+        let reserve = settings.reserve_of(memory);
+        (
+            mb(memory.available),
+            mb(reserve),
+            mb(memory.available.saturating_sub(reserve)),
+        )
+    });
     answer.insert(
         "held".to_owned(),
         json!({"lanes": lanes, "memory_mb": mb(bytes), "unanswered": holding.unanswered,
-               "tools": tools}),
+               "tools": tools,
+               "available_mb": free.map(|free| free.0),
+               "reserve_mb": free.map(|free| free.1),
+               "room_mb": free.map(|free| free.2)}),
     );
     Value::Object(answer)
 }
@@ -127,11 +167,12 @@ fn told(settings: &Settings, holding: &Holding) -> Value {
 async fn now(app: &App) -> Result<Value, ApiError> {
     let deadline = tokio::time::Instant::now() + lane::HELD_LOOK;
     let run = app.config.run_dir.clone();
-    let (settings, lanes) =
-        tokio::task::spawn_blocking(move || (Settings::read(), lane::lanes_in(&run)))
-            .await
-            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "lanes unread"))?;
-    Ok(told(&settings, &lane::held(lanes, deadline).await))
+    let (settings, lanes, memory) = tokio::task::spawn_blocking(move || {
+        (Settings::read(), lane::lanes_in(&run), Memory::read())
+    })
+    .await
+    .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "lanes unread"))?;
+    Ok(told(&settings, &lane::held(lanes, deadline).await, memory))
 }
 
 /// `GET /lane-settings`: the owner's apps, and an agent's own tools, may read it.
@@ -239,6 +280,20 @@ fn asked(body: &[u8]) -> Result<Vec<Wanted>, ApiError> {
             }
         }
     }
+    match named(MODE) {
+        None => {}
+        Some(value) => match value.as_str().and_then(Mode::named) {
+            Some(mode) => wanted.push(Wanted::Mode(mode)),
+            None => {
+                return Err(refused(
+                    StatusCode::BAD_REQUEST,
+                    "wrong_type",
+                    format!("{MODE} must be \"auto\" or \"fixed\""),
+                    json!({"setting": MODE}),
+                ));
+            }
+        },
+    }
     for limit in &LIMITS {
         let Some(value) = named(limit.name) else {
             continue;
@@ -257,6 +312,7 @@ fn asked(body: &[u8]) -> Result<Vec<Wanted>, ApiError> {
         let names: Vec<&str> = Tool::ALL
             .iter()
             .map(|tool| tool.switch())
+            .chain([MODE])
             .chain(LIMITS.iter().map(|limit| limit.name))
             .collect();
         return Err(refused(
@@ -311,6 +367,9 @@ fn change_of(text: &str, wanted: &[Wanted]) -> Result<Change, Unwritten> {
                     return Err(Unwritten::OutOfRange(limit));
                 }
                 change.push((limit.key, (*number).into()));
+            }
+            Wanted::Mode(mode) if now.mode != *mode => {
+                change.push((lane::LIMITS, mode.name().into()));
             }
             _ => {}
         }
@@ -587,6 +646,7 @@ mod tests {
         let read = told(
             &Settings::of(Some(&by_hand.parse().unwrap())),
             &Holding::default(),
+            None,
         );
         assert_eq!(read["most"], 64);
         let mut sent = read.clone();
@@ -626,19 +686,29 @@ mod tests {
             ],
             unanswered: 1,
         };
-        let answer = told(&Settings::of(Some(&read)), &holding);
+        // A machine of 10,000 MiB with 3,000 free: auto keeps 2,000 (20%) free of new lanes.
+        let memory = Memory {
+            available: 3_000 * MIB,
+            total: 10_000 * MIB,
+        };
+        let answer = told(&Settings::of(Some(&read)), &holding, Some(memory));
         assert_eq!(
             answer,
             json!({
                 "codex_chat_lane": false,
                 "claude_chat_lane": true,
+                "limits": "auto",
                 "most": 5,
                 "memory_mb": 2200,
                 "idle_minutes": 15,
+                "reserve_percent": 20,
+                "ceiling": 24,
                 "ranges": {
                     "most": {"min": 1, "max": 32},
                     "memory_mb": {"min": 256, "max": 16384},
                     "idle_minutes": {"min": 1, "max": 240},
+                    "reserve_percent": {"min": 5, "max": 50},
+                    "ceiling": {"min": 1, "max": 64},
                 },
                 "held": {
                     "lanes": 2,
@@ -648,8 +718,50 @@ mod tests {
                         "codex": {"lanes": 2, "busy": 1, "memory_mb": 300},
                         "claude": {"lanes": 0, "busy": 0, "memory_mb": 0},
                     },
+                    "available_mb": 3000,
+                    "reserve_mb": 2000,
+                    "room_mb": 1000,
                 },
             })
         );
+        // Where the machine's memory cannot be read, the Host says so by nothing.
+        let answer = told(&Settings::of(Some(&read)), &holding, None);
+        assert_eq!(answer["held"]["available_mb"], Value::Null);
+        assert_eq!(answer["held"]["room_mb"], Value::Null);
+    }
+
+    #[test]
+    fn the_limits_are_set_auto_or_fixed_by_name_and_only_a_change_is_written() {
+        assert_eq!(
+            keys_changed(FILE, json!({"limits": "fixed"})).unwrap(),
+            ["lane_limits"]
+        );
+        assert!(
+            keys_changed(FILE, json!({"limits": "auto"}))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            keys_changed(FILE, json!({"reserve_percent": 25, "ceiling": 16})).unwrap(),
+            ["lane_reserve_percent", "lane_ceiling"]
+        );
+        for (body, name) in [
+            (json!({"reserve_percent": 4}), "reserve_percent"),
+            (json!({"reserve_percent": 51}), "reserve_percent"),
+            (json!({"ceiling": 65}), "ceiling"),
+        ] {
+            match keys_changed(FILE, body.clone()) {
+                Err(Unwritten::OutOfRange(limit)) => assert_eq!(limit.name, name, "{body}"),
+                other => panic!("{body}: {other:?}"),
+            }
+        }
+        for body in [json!({"limits": "dynamic"}), json!({"limits": 1})] {
+            let error = asked(body.to_string().as_bytes()).unwrap_err();
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{body}");
+            assert_eq!(error.message(), "limits must be \"auto\" or \"fixed\"");
+        }
+        let text = changed(FILE, &change(&[("lane_limits", "fixed".into())])).unwrap();
+        let read: toml::Table = text.parse().unwrap();
+        assert_eq!(Settings::of(Some(&read)).mode, Mode::Fixed);
     }
 }

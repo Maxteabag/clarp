@@ -445,6 +445,8 @@ async fn serve(config: Config) -> Result<(), String> {
         let app = app.clone();
         tokio::spawn(async move { clarp_host::pictures::interrupted(&app).await });
     }
+    // Idle lanes leave while memory is short.
+    clarp_host::watch_lane_pressure(&app);
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
     clarp_host::experience_watch::run(&app);

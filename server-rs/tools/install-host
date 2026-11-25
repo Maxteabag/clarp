@@ -840,16 +840,19 @@ except (OSError, UnicodeError, ValueError):
     config = {}
 # One kind per switch; a bool is not taken for a number (Python counts it as one).
 for name, kind in (("codex_chat_lane", bool), ("claude_chat_lane", bool), ("codex_lane_idle_minutes", int),
-                   ("codex_lane_most", int), ("lane_memory_mb", int)):
+                   ("codex_lane_most", int), ("lane_memory_mb", int), ("lane_limits", str),
+                   ("lane_reserve_percent", int), ("lane_ceiling", int)):
     if name not in config:
         continue
     item = config[name]
-    if kind is bool and isinstance(item, bool):
+    if kind is str and item in ("auto", "fixed"):
+        print(f'{name} = "{item}"')
+    elif kind is bool and isinstance(item, bool):
         print(f"{name} = {'true' if item else 'false'}")
     elif kind is int and isinstance(item, int) and not isinstance(item, bool):
         print(f"{name} = {item}")
     else:
-        wanted = "true or false" if kind is bool else "a whole number"
+        wanted = {bool: "true or false", int: "a whole number", str: '"auto" or "fixed"'}[kind]
         print(f"install-host: {name} in {sys.argv[1]} is not {wanted}; it is not kept", file=sys.stderr)
 PYTHON
 )"

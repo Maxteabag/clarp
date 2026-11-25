@@ -49,8 +49,11 @@ unless switched on:
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 claude_chat_lane = true       # Claude chat turns after the first run on a kept Claude Code (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
-codex_lane_most = 8           # live lanes this Host keeps, of every tool (the default)
-lane_memory_mb = 2200         # what they may hold together, in MiB of PSS (the default)
+lane_limits = "auto"          # the limits follow the free memory (the default), or "fixed"
+lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes (the default)
+lane_ceiling = 24             # auto: the most lanes, whatever is free (the default)
+codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool (the default)
+lane_memory_mb = 2200         # fixed: what they may hold together, in MiB of PSS (the default)
 ```
 
 The owner changes them from his apps too (issue 779, feature `lane_settings`): `POST
@@ -62,7 +65,23 @@ as before.
   OpenCode come with their drivers.
 - **The idle time and the count are shared by every tool's lanes.** They keep the names they
   had when Codex had the only lane, so an installed config means exactly what it meant.
-- **Two limits, both always on** (the lead's decision of 25 Nov 2026). A lane starts only when
+- **The limits follow the machine's memory unless fixed** (the owner's decision of 25 Nov 2026,
+  issue 792; `lane_limits`, `"auto"` unless set):
+  - **In auto**, a lane starts while the memory the machine has free (`MemAvailable` in
+    `/proc/meminfo`, read at each start: one file read, no polling), less the new lane's typical
+    size, stays at or above `lane_reserve_percent` of its memory (20 unless set), and the lanes
+    with it are at most `lane_ceiling` (24 unless set). Each idle lane that leaves gives back
+    what it weighed. A machine with memory to spare keeps more lanes, and a busy one fewer, with
+    no number to tune.
+  - **Between starts**, the Host has the kernel tell it of memory pressure (a trigger on
+    `/proc/pressure/memory`: tasks waiting for memory 10% of two seconds) and then sends idle
+    lanes away, in the order below, until what is free is above the reserve. Its own thread
+    waits on the trigger; nothing is polled. A kernel without the file, or one that refuses
+    the trigger, is said once in the log, and lanes still keep the reserve as they start.
+  - **A machine whose memory cannot be read** keeps the fixed limits.
+  - `codex_lane_most` and `lane_memory_mb` are not used in auto, and are kept for
+    `lane_limits = "fixed"`.
+- **Fixed: two limits, both on** (the lead's decision of 25 Nov 2026). A lane starts only when
   both allow it:
   - **a count**, `codex_lane_most`, 8 unless set: live lanes of every tool, the one about to
     start included, with its meaning unchanged;

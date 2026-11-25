@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 179;
+pub const HOST_CONTRACT: u64 = 180;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -423,6 +423,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // token only, in the Host's `config.toml`, and every app is told
     // (`lane-settings-updated`, issue 779).
     ("lane_settings", 178),
+    // The lanes' limits follow the memory the machine has free (issue 792): `GET /lane-settings`
+    // says `limits` (`"auto"`, the default, or `"fixed"`), `reserve_percent`, `ceiling`, and in
+    // `held` what the machine has free, what auto keeps free of new lanes and what is left
+    // (`available_mb`, `reserve_mb`, `room_mb`); `POST` sets any of them.
+    ("lane_auto_limits", 180),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

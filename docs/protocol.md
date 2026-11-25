@@ -1931,6 +1931,23 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
   longest leaves first. `idle_minutes`: a lane with no turn leaves after this long.
 - These are the values the Host uses now (its defaults where the owner set none). A Host
   configured by hand may hold a value outside `ranges`; show it as it is.
+- From Rust Host contract 180 (feature `lane_auto_limits`, issue 792) the limits follow the
+  machine's memory by default:
+  - `limits`: `"auto"` (the default) or `"fixed"`.
+  - In auto, a lane starts while the memory the machine has free (`MemAvailable`), less the new
+    lane's typical size, stays at or above `reserve_percent` of its memory (20 unless set, range
+    5-50), up to `ceiling` lanes (24 unless set, range 1-64). Idle lanes leave first, as they do
+    for the fixed limits, and each one that leaves gives back what it weighed. Idle lanes also
+    leave when the kernel reports memory pressure between starts. `most` and `memory_mb` are
+    then not used, and are kept for `"fixed"`.
+  - In fixed, `most` and `memory_mb` bound the lanes as before.
+  - `held` gains `available_mb` (what the machine has free now), `reserve_mb` (what auto keeps
+    free) and `room_mb` (what is left for lanes), each `null` where the Host cannot read its
+    machine's memory. In auto, a machine whose memory cannot be read keeps the fixed limits.
+  - `POST` takes `limits` (`"auto"` or `"fixed"`, else `400` `wrong_type`), `reserve_percent` and
+    `ceiling` as it takes the other limits. They are the top-level keys `lane_limits`,
+    `lane_reserve_percent` and `lane_ceiling` of the Host's `config.toml`.
+  - Show the auto settings, and what is free, only where the Host lists the feature.
 - `held`: the lanes that run now, from each lane's own reading of its memory. `busy` counts those
   that hold a turn. A lane that has not weighed itself yet counts at its tool's typical size, as
   the budget counts it. The lanes are asked all at once, and the Host waits for them at most about

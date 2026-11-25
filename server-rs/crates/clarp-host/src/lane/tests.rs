@@ -10,8 +10,8 @@ use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
 use super::{
-    Endpoint, Place, Room, Settings, Tool, held, lanes_in, make_room, make_way_within,
-    mark_owners_turn, mark_owners_view, once_more, replied,
+    Endpoint, Free, Memory, Mode, Place, Room, Settings, Tool, held, lanes_in, make_room,
+    make_way_within, mark_owners_turn, mark_owners_view, once_more, replied, shed,
 };
 
 fn of(text: &str) -> Settings {
@@ -25,6 +25,7 @@ const CODEX_LANE: u64 = 270 * MIB;
 const ROOMY: Room = Room {
     most: usize::MAX,
     budget: u64::MAX,
+    free: None,
 };
 
 /// Only the count limits.
@@ -32,6 +33,7 @@ fn counted(most: usize) -> Room {
     Room {
         most,
         budget: u64::MAX,
+        free: None,
     }
 }
 
@@ -40,6 +42,7 @@ fn in_bytes(budget: u64) -> Room {
     Room {
         most: usize::MAX,
         budget,
+        free: None,
     }
 }
 
@@ -50,6 +53,9 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
         idle_ms: 15 * 60_000,
         most: 8,
         budget: 2_200 * MIB,
+        mode: Mode::Auto,
+        reserve_percent: 20,
+        ceiling: 24,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);
@@ -65,14 +71,17 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
             idle_ms: 120_000,
             most: 3,
             budget: 3_000 * MIB,
+            ..default
         }
     );
     assert!(set.chat(Tool::Codex));
+    // Where the machine's memory cannot be read, auto keeps the fixed limits.
     assert_eq!(
-        set.room(),
+        set.room_with(None),
         Room {
             most: 3,
-            budget: 3_000 * MIB
+            budget: 3_000 * MIB,
+            free: None,
         }
     );
     // Each tool's switch is its own.
@@ -407,7 +416,7 @@ fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
         })
         .collect();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    make_room(&run, &own, Settings::of(None).room(), false);
+    make_room(&run, &own, Settings::of(None).room_with(None), false);
     let left = |lanes: &[FakeLane]| -> Vec<usize> {
         lanes
             .iter()
@@ -434,6 +443,7 @@ fn a_lane_starts_only_within_both_limits_and_the_tighter_one_decides() {
         Room {
             most: 8,
             budget: 600 * MIB,
+            free: None,
         },
         false,
     );
@@ -456,7 +466,7 @@ fn under_the_defaults_heavy_lanes_stop_by_their_bytes_before_the_count() {
         })
         .collect();
     let own = Endpoint::of(Tool::Codex, &run, "new");
-    make_room(&run, &own, Settings::of(None).room(), false);
+    make_room(&run, &own, Settings::of(None).room_with(None), false);
     let left: Vec<usize> = lanes
         .iter()
         .enumerate()
@@ -768,7 +778,7 @@ fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
     let busy: Vec<FakeLane> = (0..8u64)
         .map(|n| FakeLane::start(&run, &format!("b{n}"), status("t", "d", 0, true)))
         .collect();
-    let defaults = Settings::of(None).room();
+    let defaults = Settings::of(None).room_with(None);
     // A chat turn's lane is optional: it is not started, and nothing is asked to leave.
     let chat = Endpoint::of(Tool::Codex, &run, "chat");
     let place = chat
@@ -818,7 +828,7 @@ fn a_start_that_cannot_be_made_room_for_sends_nothing_away_unless_it_is_needed()
         "idle",
         status("t", "d", 60_000, false),
     ));
-    let room = Settings::of(None).room();
+    let room = Settings::of(None).room_with(None);
     let chat = Endpoint::of(Tool::Codex, &run, "chat");
     let place = chat
         .place(&run, Some("t"), "d", |_| false, room, false)
@@ -869,7 +879,7 @@ fn a_lane_of_the_agents_own_never_takes_an_owners_place() {
     let run = run_dir("owners-kept");
     let lanes = eight(&run, 2, &[2, 3, 4, 5, 6, 7]);
     let helper = Endpoint::of(Tool::Codex, &run, "helper");
-    let room = Settings::of(None).room();
+    let room = Settings::of(None).room_with(None);
     let place = helper
         .place(&run, Some("t"), "d", |_| false, room, false)
         .unwrap();
@@ -886,7 +896,7 @@ fn the_owners_turn_sends_an_idle_helper_lane_away_before_an_idle_lane_of_his() {
     let lanes = eight(&run, 7, &[]);
     mark_owners_turn(&run, "his");
     let his = Endpoint::of(Tool::Codex, &run, "his");
-    let room = Settings::of(None).room();
+    let room = Settings::of(None).room_with(None);
     let place = his
         .place(&run, Some("t"), "d", |_| false, room, false)
         .unwrap();
@@ -917,5 +927,143 @@ fn the_owners_turn_sends_an_idle_helper_lane_away_before_an_idle_lane_of_his() {
         .unwrap();
     assert_eq!(place, Place::Free);
     assert_eq!(retired(&lanes), [7]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// A machine of 10 GiB with `available` MiB free: auto keeps 2 GiB (20%) free.
+fn machine(available: u64) -> Memory {
+    Memory {
+        available: available * MIB,
+        total: 10_240 * MIB,
+    }
+}
+
+/// `n` idle Codex lanes that weighed 110 MiB each, the one idle longest first, and two busy ones.
+fn idle_and_busy(run: &Path, n: u64) -> (Vec<FakeLane>, Vec<FakeLane>) {
+    let idle = (0..n)
+        .map(|at| {
+            let mut said = status("t", "d", 100_000 - at, false);
+            said["memory_bytes"] = json!(110 * MIB);
+            FakeLane::start(run, &format!("i{at}"), said)
+        })
+        .collect();
+    let busy = (0..2u64)
+        .map(|at| {
+            let mut said = status("t", "d", 0, true);
+            said["memory_bytes"] = json!(500 * MIB);
+            FakeLane::start(run, &format!("w{at}"), said)
+        })
+        .collect();
+    (idle, busy)
+}
+
+#[test]
+fn the_limits_are_auto_from_the_free_memory_unless_the_owner_fixes_them() {
+    let default = Settings::of(None);
+    assert_eq!(default.mode, Mode::Auto);
+    let text = "MemTotal:       16303836 kB\nMemFree:  1000 kB\nMemAvailable:    9011696 kB\n";
+    let memory = Memory::of(text).unwrap();
+    assert_eq!(memory.total, 16_303_836 * 1024);
+    assert_eq!(memory.available, 9_011_696 * 1024);
+    assert_eq!(Memory::of("MemTotal: 1 kB\n"), None);
+    // Auto: the ceiling counts, the budget does not, and a fifth of the machine stays free.
+    assert_eq!(
+        default.room_with(Some(machine(4_000))),
+        Room {
+            most: 24,
+            budget: u64::MAX,
+            free: Some(Free {
+                available: 4_000 * MIB,
+                reserve: 10_240 * MIB / 100 * 20,
+            }),
+        }
+    );
+    let tuned = of("lane_reserve_percent = 30\nlane_ceiling = 10\n");
+    assert_eq!(tuned.room_with(Some(machine(4_000))).most, 10);
+    assert_eq!(tuned.reserve_of(machine(4_000)), 10_240 * MIB / 100 * 30);
+    // Fixed: the count and the budget as before, whatever is free.
+    let fixed = of("lane_limits = \"fixed\"\ncodex_lane_most = 12\nlane_memory_mb = 3000\n");
+    assert_eq!(fixed.mode, Mode::Fixed);
+    assert_eq!(
+        fixed.room_with(Some(machine(100))),
+        Room {
+            most: 12,
+            budget: 3_000 * MIB,
+            free: None,
+        }
+    );
+    // A word the Host does not know is no setting.
+    assert_eq!(of("lane_limits = \"some\"\n").mode, Mode::Auto);
+}
+
+#[test]
+fn in_auto_idle_lanes_leave_until_what_is_free_after_the_new_one_stays_above_the_reserve() {
+    // 2,048 MiB must stay free; 2,200 are, and the new lane counts at 270: 118 MiB short, so
+    // two idle lanes of 110 leave, the two idle the longest, and no busy one.
+    let run = run_dir("auto-reserve");
+    let (idle, busy) = idle_and_busy(&run, 5);
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    let room = Settings::of(None).room_with(Some(machine(2_200)));
+    assert!(make_room(&run, &own, room, false));
+    assert_eq!(retired(&idle), [0, 1]);
+    assert!(retired(&busy).is_empty());
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // With plenty free, the ceiling binds: two idle lanes, two busy ones and the new one under
+    // a ceiling of three send both idle ones away; the busy ones count, and stay.
+    let run = run_dir("auto-ceiling");
+    let (idle, busy) = idle_and_busy(&run, 2);
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    let room = of("lane_ceiling = 3\n").room_with(Some(machine(9_000)));
+    assert!(make_room(&run, &own, room, false));
+    assert_eq!(retired(&idle), [0, 1]);
+    assert!(retired(&busy).is_empty());
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // When even every idle lane leaving would not be enough, a chat lane sends none away and
+    // does not start; a goal's lane sends them away and starts.
+    let run = run_dir("auto-short");
+    let (idle, _busy) = idle_and_busy(&run, 2);
+    let room = Settings::of(None).room_with(Some(machine(1_500)));
+    let chat = Endpoint::of(Tool::Codex, &run, "chat");
+    let place = chat
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    assert!(retired(&idle).is_empty());
+    let goal = Endpoint::of(Tool::Codex, &run, "goal");
+    let place = goal
+        .place(&run, Some("t"), "d", |_| false, room, true)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(retired(&idle), [0, 1]);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_machine_short_of_memory_sheds_idle_lanes_in_order_and_never_a_busy_one() {
+    let run = run_dir("shed");
+    let (idle, busy) = idle_and_busy(&run, 4);
+    let settings = Settings::of(None);
+    // Above the reserve: nothing leaves.
+    assert_eq!(shed(&run, &settings, Some(machine(3_000))), 0);
+    assert!(retired(&idle).is_empty());
+    // 2,000 free of the 2,048 kept: one idle lane of 110 brings it back.
+    assert_eq!(shed(&run, &settings, Some(machine(2_000))), 1);
+    assert_eq!(retired(&idle), [0]);
+    // Far below: every idle lane leaves, and the busy ones stay.
+    assert_eq!(shed(&run, &settings, Some(machine(500))), 3);
+    assert_eq!(retired(&idle), [0, 1, 2, 3]);
+    assert!(retired(&busy).is_empty());
+    std::fs::remove_dir_all(&run).unwrap();
+    // Fixed limits, or a machine whose memory cannot be read, shed nothing.
+    let run = run_dir("shed-fixed");
+    let (idle, _busy) = idle_and_busy(&run, 2);
+    assert_eq!(
+        shed(&run, &of("lane_limits = \"fixed\"\n"), Some(machine(100))),
+        0
+    );
+    assert_eq!(shed(&run, &settings, None), 0);
+    assert!(retired(&idle).is_empty());
     std::fs::remove_dir_all(&run).unwrap();
 }

@@ -165,6 +165,18 @@ pub fn tool_token(administrators: &str) -> String {
     ))
 }
 
+/// Idle lanes leave while the kernel says memory is short, between the starts that make their
+/// own room (issue 792). Started once, with the Host.
+pub fn watch_lane_pressure(app: &edge::App) {
+    let run = app.config.run_dir.clone();
+    if let Err(why) = std::thread::Builder::new()
+        .name("lane-pressure".into())
+        .spawn(move || lane::watch_pressure(&run))
+    {
+        eprintln!("clarp-host: lanes are not told of memory pressure: {why}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

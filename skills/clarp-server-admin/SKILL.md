@@ -295,8 +295,13 @@ chat turns after the first can run on one kept `claude -p --input-format stream-
 instead of a new `claude -p --resume` per message. It is off unless the owner sets it, and
 switching it on for the owner's agents is his decision. A top-level key of the Rust Host's own
 `~/.config/clarp-host/config.toml`, read at each turn; the idle time
-(`codex_lane_idle_minutes`), the count of lanes (`codex_lane_most`, 8) and the memory budget
-(`lane_memory_mb`, 2,200 MB) are shared by every lane:
+(`codex_lane_idle_minutes`) and the limits are shared by every lane. The limits follow the
+machine's free memory unless fixed (`lane_limits = "auto"`, the default): a lane starts while
+`MemAvailable`, less the new lane, stays above `lane_reserve_percent` (20) of the memory, up to
+`lane_ceiling` (24) lanes, and idle lanes leave on memory pressure (feature `lane_auto_limits`,
+Rust Host contract 180; the apps read and set these through `/lane-settings`). With `lane_limits = "fixed"`,
+the count of lanes (`codex_lane_most`, 8) and the memory budget (`lane_memory_mb`, 2,200 MB)
+bound them instead:
 
 ```toml
 claude_chat_lane = true       # off by default; false rolls back to a process per turn

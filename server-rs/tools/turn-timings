@@ -1285,6 +1285,9 @@ def lane_settings(args) -> dict:
         out["codex_lane_most"] = str(args.lane_most)
     if args.lane_memory_mb is not None:
         out["lane_memory_mb"] = str(args.lane_memory_mb)
+    # A count or a budget given is a fixed limit: auto, the default, would not use them.
+    if args.lane_most is not None or args.lane_memory_mb is not None:
+        out["lane_limits"] = '"fixed"'
     return out
 
 

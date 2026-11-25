@@ -6,8 +6,9 @@
 //!   lanes and the memory budget shared by all ([`Settings`]);
 //! - where a lane listens, and how it is asked, watched, retired and known to have left
 //!   ([`Endpoint`]);
-//! - the registry: room is made across every tool's lanes within two limits, a count and a
-//!   memory budget in bytes, the longest idle leaving first;
+//! - the registry: room is made across every tool's lanes, by default from the memory the
+//!   machine has free ([`Memory`], issue 792), else within a fixed count and memory budget, the
+//!   longest idle leaving first;
 //! - whether a running lane is used as it is or retired and started again: another thread,
 //!   other options (model, prompt, provider, ...), or what its driver says it kept;
 //! - the turn-identity file its tools read the running turn from ([`TURN_FILE_ENV`]);
@@ -122,14 +123,102 @@ const MEMORY_MB_DEFAULT: u64 = 2_200;
 /// 25 Nov 2026). Idle Codex lanes measure 83-142 MiB of PSS, so the budget alone would keep
 /// 15-20 of them; the count keeps the eight the owner agreed to.
 pub(crate) const MOST: &str = "codex_lane_most";
+/// How the limits are set: `"auto"` (the default) from the memory the machine has free, or
+/// `"fixed"` by [`MOST`] and [`MEMORY_MB`] as before (the owner's decision of 25 Nov 2026,
+/// issue 792).
+pub(crate) const LIMITS: &str = "lane_limits";
+/// In auto: the share of the machine's memory, in percent, kept free of new lanes.
+pub(crate) const RESERVE_PERCENT: &str = "lane_reserve_percent";
+const RESERVE_PERCENT_DEFAULT: u64 = 20;
+/// In auto: the most lanes this Host keeps, whatever memory is free.
+pub(crate) const CEILING: &str = "lane_ceiling";
+const CEILING_DEFAULT: usize = 24;
 
-/// The two limits all lanes of a Host are kept within, whatever their tools.
+/// How the limits of lanes are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mode {
+    /// From the memory the machine has free when a lane starts: a lane starts while what is
+    /// free after it stays above the reserve, up to the ceiling.
+    Auto,
+    /// By the count and the memory budget the owner set.
+    Fixed,
+}
+
+impl Mode {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Fixed => "fixed",
+        }
+    }
+
+    pub(crate) fn named(name: &str) -> Option<Self> {
+        [Self::Auto, Self::Fixed]
+            .into_iter()
+            .find(|mode| mode.name() == name)
+    }
+}
+
+/// What the machine's memory is now, from `/proc/meminfo`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Memory {
+    /// `MemAvailable`: what new processes can have without the machine swapping.
+    pub available: u64,
+    /// `MemTotal`.
+    pub total: u64,
+}
+
+impl Memory {
+    /// Read now: a file read, no process started. `None` where it cannot be read.
+    pub(crate) fn read() -> Option<Self> {
+        Self::of(&std::fs::read_to_string("/proc/meminfo").ok()?)
+    }
+
+    /// Of the text of `/proc/meminfo`, which counts in kB.
+    pub(crate) fn of(text: &str) -> Option<Self> {
+        let field = |name: &str| {
+            text.lines()
+                .find_map(|line| line.strip_prefix(name)?.strip_prefix(':'))
+                .and_then(|rest| rest.split_whitespace().next()?.parse::<u64>().ok())
+                .map(|kb| kb.saturating_mul(1024))
+        };
+        Some(Self {
+            available: field("MemAvailable")?,
+            total: field("MemTotal")?,
+        })
+    }
+}
+
+/// What must stay free of lanes, in auto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Free {
+    /// What the machine had free when the room was read.
+    pub available: u64,
+    /// What must stay free after a lane starts.
+    pub reserve: u64,
+}
+
+/// The limits all lanes of a Host are kept within, whatever their tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Room {
     /// Live lanes, the one about to start included.
     pub most: usize,
     /// Bytes they may hold together.
     pub budget: u64,
+    /// In auto: what the machine must keep free. A lane that leaves gives back what it weighed.
+    pub free: Option<Free>,
+}
+
+impl Room {
+    /// Whether `live` lanes holding `held` bytes fit, a new one of `new` bytes among them, once
+    /// lanes that weighed `freed` bytes together have left.
+    fn fits(&self, live: usize, held: u64, new: u64, freed: u64) -> bool {
+        live <= self.most
+            && held <= self.budget
+            && self.free.is_none_or(|free| {
+                free.available.saturating_add(freed) >= free.reserve.saturating_add(new)
+            })
+    }
 }
 
 /// The owner's settings of lanes, in this Host's `config.toml`, read anew at each use so they
@@ -139,9 +228,12 @@ pub(crate) struct Room {
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// claude_chat_lane = true       # Claude chat turns run on a kept Claude Code (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
-/// codex_lane_most = 8           # live lanes this Host keeps, of every tool
-/// lane_memory_mb = 2200         # and what they may hold together (PSS); a lane starts only
-///                               # when both allow it, the longest idle one leaving first
+/// lane_limits = "auto"          # from the memory free (default), or "fixed" by the two below
+/// lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes
+/// lane_ceiling = 24             # auto: the most lanes, whatever is free
+/// codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool
+/// lane_memory_mb = 2200         # fixed: and what they may hold together (PSS); a lane starts
+///                               # only when both allow it, the longest idle one leaving first
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
@@ -152,6 +244,11 @@ pub(crate) struct Settings {
     pub most: usize,
     /// Bytes all lanes of this Host may hold together.
     pub budget: u64,
+    pub mode: Mode,
+    /// In auto: percent of the machine's memory kept free of new lanes.
+    pub reserve_percent: u64,
+    /// In auto: the most lanes, whatever is free.
+    pub ceiling: usize,
 }
 
 impl Settings {
@@ -181,15 +278,53 @@ impl Settings {
                 .filter(|mb| *mb > 0)
                 .unwrap_or(MEMORY_MB_DEFAULT)
                 .saturating_mul(MIB),
+            mode: file
+                .and_then(|file| file.get(LIMITS))
+                .and_then(toml::Value::as_str)
+                .and_then(Mode::named)
+                .unwrap_or(Mode::Auto),
+            reserve_percent: u64::try_from(number(
+                RESERVE_PERCENT,
+                i64::try_from(RESERVE_PERCENT_DEFAULT).unwrap_or(20),
+            ))
+            .unwrap_or(RESERVE_PERCENT_DEFAULT)
+            .min(90),
+            ceiling: usize::try_from(number(
+                CEILING,
+                i64::try_from(CEILING_DEFAULT).unwrap_or(24),
+            ))
+            .unwrap_or(CEILING_DEFAULT),
         }
     }
 
-    /// The limits a new lane is started within.
+    /// The limits a new lane is started within, the machine's memory read now.
     pub(crate) fn room(&self) -> Room {
-        Room {
-            most: self.most,
-            budget: self.budget,
+        self.room_with(Memory::read())
+    }
+
+    /// The limits with the machine's memory as `memory` says. In auto, a machine whose memory
+    /// cannot be read keeps the fixed limits.
+    pub(crate) fn room_with(&self, memory: Option<Memory>) -> Room {
+        match (self.mode, memory) {
+            (Mode::Auto, Some(memory)) => Room {
+                most: self.ceiling,
+                budget: u64::MAX,
+                free: Some(Free {
+                    available: memory.available,
+                    reserve: self.reserve_of(memory),
+                }),
+            },
+            _ => Room {
+                most: self.most,
+                budget: self.budget,
+                free: None,
+            },
         }
+    }
+
+    /// What auto keeps free of new lanes on a machine with `memory`.
+    pub(crate) fn reserve_of(&self, memory: Memory) -> u64 {
+        memory.total / 100 * self.reserve_percent
     }
 
     /// Whether the owner runs this tool's chat turns on lanes.
@@ -686,8 +821,10 @@ pub(crate) fn once_more<T>(
     }
 }
 
-/// Keeps this Host's lanes, of every tool, the one about to start (`own`) included, within both
-/// limits of `room`: at most `room.most` of them, holding at most `room.budget` bytes together.
+/// Keeps this Host's lanes, of every tool, the one about to start (`own`) included, within the
+/// limits of `room`: at most `room.most` of them, holding at most `room.budget` bytes together,
+/// and in auto with the machine's free memory, less the new lane's typical size, at or above the
+/// reserve, each lane that leaves giving back what it weighed (issue 792).
 /// A lane counts at what it weighed itself (`Status::memory_bytes`), or at its tool's typical
 /// size where it has not said one or said nothing (its `/proc` could not be read); the one about
 /// to start at its typical size. The idle lanes that held no turn the longest are asked to leave
@@ -706,23 +843,13 @@ pub(crate) fn once_more<T>(
 /// lane starts whatever the answer, so it sends away what it may, toward the limits.
 fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
     let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
-    let mut idle = Vec::new();
-    let mut live = 1usize;
-    let mut held = own.tool.typical_bytes();
-    for (lane, state) in answering(run, &own.socket) {
-        let memory = weight(&lane, &state);
-        live += 1;
-        held = held.saturating_add(memory);
-        if state.claim.is_none() && state.available {
-            let his = lane.agent().is_some_and(|agent| owners(run, agent));
-            if for_owner || !his {
-                idle.push((his, state.idle_ms, memory, lane));
-            }
-        }
-    }
-    idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
-    let fits = |live: usize, held: u64| live <= room.most && held <= room.budget;
-    // What the lanes would be once those that may leave had, in order, until both limits hold.
+    let new = own.tool.typical_bytes();
+    let (mut live, mut held, idle) = idle_in_order(run, &own.socket, for_owner);
+    live += 1;
+    held = held.saturating_add(new);
+    let start = held;
+    let fits = |live: usize, held: u64| room.fits(live, held, new, start - held);
+    // What the lanes would be once those that may leave had, in order, until the limits hold.
     let (mut would_live, mut would_hold) = (live, held);
     for (_, _, memory, _) in &idle {
         if fits(would_live, would_hold) {
@@ -744,6 +871,103 @@ fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
         }
     }
     fits(live, held)
+}
+
+/// An idle lane that may be asked to leave: whether it is the owner's, how long it has been
+/// idle, what it weighed, and where it listens.
+type Leaving = (bool, u64, u64, Endpoint);
+
+/// The lanes of the run folder but `skip`: how many answer and what they weigh together, and of
+/// them the idle ones that may leave, in the order they leave (the owner's rule of 25 Nov 2026):
+/// the agents' own first, then his, each longest idle first. His are among them only `for_owner`.
+fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> (usize, u64, Vec<Leaving>) {
+    let mut idle = Vec::new();
+    let (mut live, mut held) = (0usize, 0u64);
+    for (lane, state) in answering(run, skip) {
+        let memory = weight(&lane, &state);
+        live += 1;
+        held = held.saturating_add(memory);
+        if state.claim.is_none() && state.available {
+            let his = lane.agent().is_some_and(|agent| owners(run, agent));
+            if for_owner || !his {
+                idle.push((his, state.idle_ms, memory, lane));
+            }
+        }
+    }
+    idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
+    (live, held, idle)
+}
+
+/// In auto, with less free than the reserve: idle lanes leave, in the order room is made (the
+/// agents' own, then the owner's, each longest idle first), until what they weighed brings the
+/// machine back above it. A lane that runs work never leaves. How many left. Blocking.
+pub(crate) fn shed(run: &Path, settings: &Settings, memory: Option<Memory>) -> usize {
+    let Some(memory) = memory.filter(|_| settings.mode == Mode::Auto) else {
+        return 0;
+    };
+    let reserve = settings.reserve_of(memory);
+    if memory.available >= reserve {
+        return 0;
+    }
+    let (_, _, idle) = idle_in_order(run, Path::new(""), true);
+    let (mut freed, mut left) = (0u64, 0usize);
+    for (_, _, weighed, lane) in idle {
+        if memory.available.saturating_add(freed) >= reserve {
+            break;
+        }
+        if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
+            freed = freed.saturating_add(weighed);
+            left += 1;
+        }
+    }
+    left
+}
+
+/// The kernel's memory pressure as a trigger (`/proc/pressure/memory`): told when tasks waited
+/// for memory 10% of two seconds, the shortest window a process that is not root may ask for.
+const PRESSURE: &[u8] = b"some 200000 2000000\0";
+
+/// Sheds idle lanes when the kernel says memory is short: a lane that starts makes its own room,
+/// but between starts a machine can run short with nothing starting. Its own thread waits on the
+/// kernel's trigger, never a timer. Where the kernel has no pressure file or refuses the trigger,
+/// it says so once and ends: lanes still keep within the reserve at each start. Blocking.
+pub(crate) fn watch_pressure(run: &Path) {
+    use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
+    use std::os::fd::AsFd;
+    let opened = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/proc/pressure/memory")
+        .and_then(|mut file| file.write_all(PRESSURE).map(|()| file));
+    let trigger = match opened {
+        Ok(trigger) => trigger,
+        Err(why) => {
+            eprintln!(
+                "clarp-host: lanes are not told of memory pressure ({why}); they keep within the reserve as they start"
+            );
+            return;
+        }
+    };
+    loop {
+        let mut told = [PollFd::new(trigger.as_fd(), PollFlags::POLLPRI)];
+        match poll(&mut told, PollTimeout::NONE) {
+            Ok(_) => {}
+            Err(nix::errno::Errno::EINTR) => continue,
+            Err(why) => {
+                eprintln!("clarp-host: the memory pressure trigger failed: {why}");
+                return;
+            }
+        }
+        let said = told[0].revents().unwrap_or(PollFlags::empty());
+        if said.intersects(PollFlags::POLLERR | PollFlags::POLLNVAL) {
+            eprintln!("clarp-host: the memory pressure trigger ended ({said:?})");
+            return;
+        }
+        let left = shed(run, &Settings::read(), Memory::read());
+        if left > 0 {
+            eprintln!("clarp-host: memory was short: {left} idle lane(s) asked to leave");
+        }
+    }
 }
 
 /// Every lane in the run folder but `skip` that answers what it is, with its answer. A socket
