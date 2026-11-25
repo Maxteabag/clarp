@@ -623,6 +623,10 @@ fn a_live_message_with_a_less_than_sign_keeps_streaming() {
             Some("t-1"),
             20 + at * 10,
         );
-        assert_eq!(shown(&mut hub, 25 + at * 10), *expected, "after {written:?}");
+        assert_eq!(
+            shown(&mut hub, 25 + at * 10),
+            *expected,
+            "after {written:?}"
+        );
     }
 }
