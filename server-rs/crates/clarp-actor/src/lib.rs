@@ -1604,7 +1604,9 @@ impl Actor {
         })?;
         // What was over long ago is in the log and nowhere else.
         speech.forget_before(now_ms - KEPT_FOR_MS);
-        let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
+        // Those who watch a turn are shown its answers only once they are decided: what was
+        // shown as an answer never turns into narration (issue 771).
+        let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session).growing();
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
             launch_defaults,
@@ -5585,6 +5587,11 @@ impl Actor {
             }
             offset = read.next_offset;
         }
+        // What the conversation has decided were answers in this turn so far, those who watch
+        // it are shown as answers again: a Host that started again takes none of them back.
+        for answer in conversation::answers_of(self.recorder.log(), turn.0)? {
+            let _ = self.shown.close_answer(&answer, now_ms);
+        }
         // One write to the log, so that every revision from here on is above every revision the
         // actor before this one gave to something it showed and did not store.
         let mut batch = self.recorder.batch();
@@ -6741,7 +6748,8 @@ impl Actor {
                                     live.said.clear();
                                 }
                                 for answer in live.said.drain(..) {
-                                    self.shown.close_answer(&answer);
+                                    let events = self.shown.close_answer(&answer, t);
+                                    self.shown_events.extend(events);
                                 }
                             }
                             if !reply.text.trim().is_empty() {
@@ -6842,8 +6850,9 @@ impl Actor {
                     if out.joined_reads.len() > read_before && (separate_now || !live.said_worked) {
                         live.said.clear();
                         live.said_worked = false;
-                        // Those who watch the turn keep them as answers too.
-                        self.shown.close_answers();
+                        // Those who watch the turn are shown them as answers too.
+                        let events = self.shown.close_answers(t);
+                        self.shown_events.extend(events);
                     }
                 }
                 // The turn ends for the user at its tool's own end line, while the process goes

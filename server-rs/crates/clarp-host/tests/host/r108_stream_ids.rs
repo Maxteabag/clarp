@@ -185,7 +185,9 @@ fn claude_text_blocks_grow_one_item_and_one_durable_reply() {
     assert_eq!(grouped["id"], first["id"]);
     assert_eq!(grouped["status"], "completed");
     assert_eq!(grouped["text"], "First.\n\nSecond.\n\nThird.");
-    assert_eq!(grouped["phase"], "commentary");
+    // The turn's newest words, a call after them or not, are its answer at its end, as the
+    // conversation settles it: those who watch it are shown so (issue 771).
+    assert_eq!(grouped["phase"], "final");
     for item in messages {
         let rows = host.turns(agent);
         let durable: Vec<_> = rows

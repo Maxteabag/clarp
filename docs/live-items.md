@@ -64,7 +64,16 @@ Per kind:
 **message**: assistant text.
 - `text`: the display text so far (same transformations as the `/log` row:
   hidden blocks stripped, an incomplete `<speak>`/`<team>` tag held back).
-- `phase`: `commentary` (narration between tools) or `final` (the answer).
+- `phase`: `commentary` (narration between tools, or words the turn has not yet
+  decided on) or `final` (an answer). On the Rust Host, a message only grows into an
+  answer and never turns back into narration (issue 771). It streams as `commentary`, and
+  becomes `final` when the turn decides it is an answer, as the conversation's rows decide:
+  when the turn's next words come with no work between, when a message is read into the
+  turn, or when the turn ends with it as its newest words. A tool call or a changed plan
+  after it leaves it `commentary`. So an answer appears in a Conversation view drawn from
+  live items once it is decided, not while it streams; a Session view shows it streaming as
+  before. An older Host starts every message `final` and turns it into `commentary` at the
+  next tool.
 - `row_id`: the `/log` message id that carries this text. It is stable: the live
   row is finalized in place, so the same id appears in `/log` when the turn is
   imported. In a Claude message of several blocks, each text block's item names

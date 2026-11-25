@@ -24,7 +24,7 @@
 //! again builds the view of a running turn from that turn's own records, under a new epoch,
 //! and a client that sees the epoch change asks for the snapshot.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use clarp_speech::listen::{is_space, strip};
 use serde_json::{Map, Value, json};
@@ -443,9 +443,15 @@ pub struct Hub {
     account_wait: Option<String>,
     /// What the tool says while it asks a provider again that would not answer.
     provider_retry: Option<String>,
-    /// The answers a message of the user's, read into the running turn, closed: no tool that
-    /// comes after makes them narration, which the conversation does not show.
-    answered: HashSet<String>,
+    /// The messages only grow into answers ([`Hub::growing`]): a message is not an answer
+    /// (`commentary`) until the turn decides it is one, and is then `final` for good. Else,
+    /// as the recorded streams of the live layer have it, a message is `final` from its
+    /// start and the next tool makes it narration.
+    grows: bool,
+    /// The newest message no work came after: an answer if the turn decides so.
+    pending: Option<String>,
+    /// The newest message since the last that was decided: the turn's end decides it.
+    last_words: Option<String>,
 }
 
 impl Hub {
@@ -465,8 +471,21 @@ impl Hub {
             explore_group: None,
             account_wait: None,
             provider_retry: None,
-            answered: HashSet::new(),
+            grows: false,
+            pending: None,
+            last_words: None,
         }
+    }
+
+    /// A hub whose messages only grow into answers, as the conversation's rows do (issue
+    /// 771): what a client was shown as an answer never turns into narration. A message
+    /// streams as `commentary` and becomes `final` when the turn decides it is an answer:
+    /// other words come after it with no work between ([`Hub::close_answer`]), a message is
+    /// read into the turn ([`Hub::close_answers`]), or the turn ends with it as its newest
+    /// words. A tool, or a plan that changes, after it leaves it narration.
+    pub fn growing(mut self) -> Self {
+        self.grows = true;
+        self
     }
 
     // --- reads ---
@@ -567,7 +586,9 @@ impl Hub {
             // Another conversation: its events count from one again.
             let epoch = self.epoch.clone();
             let agent_id = self.agent_id.clone();
+            let grows = self.grows;
             *self = Self::new(&epoch, &agent_id, session);
+            self.grows = grows;
             self.view.apply_snapshot(&json!({
                 "epoch": self.epoch, "lseq": 0, "activity": idle(), "turn": null, "items": [],
             }));
@@ -581,10 +602,12 @@ impl Hub {
         if running.as_deref() == Some(turn_id) {
             return out;
         }
-        self.answered.clear();
+        // The turn that never settled ends first, and decides its newest words as its end does.
         if running.is_some() {
             self.end(("interrupted", None), now, &mut out);
         }
+        self.pending = None;
+        self.last_words = None;
         self.flush(now, &mut out);
         self.explore_group = None;
         self.account_wait = None;
@@ -627,6 +650,12 @@ impl Hub {
             return;
         }
         self.flush(now, out);
+        // The turn's newest words since its last answer are its answer at its end, as the
+        // conversation settles it.
+        if let Some(words) = self.last_words.take() {
+            self.promote(&[words], now, out);
+        }
+        self.pending = None;
         let settle = if status == "completed" {
             "completed"
         } else {
@@ -668,24 +697,27 @@ impl Hub {
         out
     }
 
-    /// A message of the user's was read into the running turn: what the turn said before it
-    /// answered what came before, and stays an answer whatever work follows for the new one.
-    pub fn close_answers(&mut self) {
-        let answers: Vec<String> = self
-            .view
-            .items()
-            .into_iter()
-            .filter(|item| {
-                text_of(&item["kind"]) == "message" && text_of(&item["phase"]) == "final"
-            })
-            .map(|item| text_of(&item["id"]).to_string())
-            .collect();
-        self.answered.extend(answers);
+    /// A message was read into the running turn: what the turn said before it with no work
+    /// after it answered what came before ([`Hub::growing`]), and is an answer from now on.
+    ///
+    /// Only words that are whole: a message still being written when another is read in is
+    /// decided later, as the conversation decides the row it becomes.
+    pub fn close_answers(&mut self, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        let whole = self
+            .pending
+            .as_ref()
+            .is_some_and(|id| self.view.items.get(id).is_some_and(|item| !unsettled(item)));
+        if whole && let Some(words) = self.pending.take() {
+            self.promote(&[words], now, &mut out);
+        }
+        out
     }
 
     /// The conversation decided that the message written into this row was an answer: other
-    /// words came after it with no work between. It stays an answer whatever work follows.
-    pub fn close_answer(&mut self, row: &str) {
+    /// words came after it with no work between ([`Hub::growing`]). It is one from now on.
+    pub fn close_answer(&mut self, row: &str, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
         let answers: Vec<String> = self
             .view
             .items()
@@ -693,7 +725,38 @@ impl Hub {
             .filter(|item| text_of(&item["kind"]) == "message" && text_of(&item["row_id"]) == row)
             .map(|item| text_of(&item["id"]).to_string())
             .collect();
-        self.answered.extend(answers);
+        self.promote(&answers, now, &mut out);
+        out
+    }
+
+    /// These messages are answers: `final`, for good. Only a hub whose messages grow into
+    /// answers promotes; one that is not leaves its messages as they are.
+    fn promote(&mut self, messages: &[String], now: i64, out: &mut Vec<Value>) {
+        if !self.grows || !self.open(None) {
+            return;
+        }
+        for id in messages {
+            if self.pending.as_deref() == Some(id) {
+                self.pending = None;
+            }
+            if self.last_words.as_deref() == Some(id) {
+                self.last_words = None;
+            }
+        }
+        let ops: Vec<Value> = messages
+            .iter()
+            .filter(|id| {
+                self.view.items.get(id.as_str()).is_some_and(|item| {
+                    text_of(&item["kind"]) == "message" && text_of(&item["phase"]) != "final"
+                })
+            })
+            .map(|id| self.upsert_op(id, "message", json!({"phase": "final"})))
+            .collect();
+        if ops.is_empty() {
+            return;
+        }
+        self.flush(now, out);
+        self.emit(ops, (false, ""), now, out);
     }
 
     /// The tool asks the provider again, after a refusal (`headline` says which try and why),
@@ -776,6 +839,16 @@ impl Hub {
                 // One plan to a turn, replaced whole each time it is told.
                 let held = self.view.turn.as_ref().and_then(|turn| turn.get("turn_id"));
                 let id = format!("{prefix}:{}:plan", held.map_or("", text_of));
+                // A plan that changes is work: what was said before it was said along the
+                // way. One told again with the same steps is not.
+                let changed = self
+                    .view
+                    .items
+                    .get(&id)
+                    .is_none_or(|item| &item["plan"]["steps"] != steps);
+                if changed && self.open(turn_id) {
+                    self.pending = None;
+                }
                 let fields = json!({"plan": {"steps": steps}});
                 self.item(&id, "plan", &fields, turn_id, now)
             }
@@ -808,7 +881,13 @@ impl Hub {
         now: i64,
     ) -> Vec<Value> {
         let (phase, row) = first;
-        let made = json!({"phase": phase.filter(|phase| !phase.is_empty()).unwrap_or("final"), "row_id": row});
+        // In a hub whose messages grow into answers, none is an answer before the turn says.
+        let phase = if self.grows {
+            "commentary"
+        } else {
+            phase.filter(|phase| !phase.is_empty()).unwrap_or("final")
+        };
+        let made = json!({"phase": phase, "row_id": row});
         let mut out = Vec::new();
         self.grow_text((id, "message"), text, &made, turn_id, now, &mut out);
         out
@@ -899,19 +978,23 @@ impl Hub {
                 tool["explain"] = Value::Null;
                 tool["output"] = Value::Null;
                 tool["diff"] = Value::Null;
-                // What was said before a tool call was narration, not the answer, unless a
-                // message of the user's read into the turn since closed it as an answer.
-                let said: Vec<String> = self
-                    .view
-                    .items()
-                    .into_iter()
-                    .filter(|item| {
-                        text_of(&item["kind"]) == "message"
-                            && text_of(&item["phase"]) == "final"
-                            && !self.answered.contains(text_of(&item["id"]))
-                    })
-                    .map(|item| text_of(&item["id"]).to_string())
-                    .collect();
+                // What was said before a tool call was narration, not the answer. A hub whose
+                // messages grow into answers sends nothing for it: they never were answers, and
+                // one that was decided stays one.
+                self.pending = None;
+                let said: Vec<String> = if self.grows {
+                    Vec::new()
+                } else {
+                    self.view
+                        .items()
+                        .into_iter()
+                        .filter(|item| {
+                            text_of(&item["kind"]) == "message"
+                                && text_of(&item["phase"]) == "final"
+                        })
+                        .map(|item| text_of(&item["id"]).to_string())
+                        .collect()
+                };
                 for message in said.iter().rev() {
                     ops.push(self.upsert_op(message, "message", json!({"phase": "commentary"})));
                 }
@@ -1115,6 +1198,10 @@ impl Hub {
             self.flush(now, out);
             // A message, or thinking, ends a run of tools that look at things.
             self.explore_group = None;
+            if kind == "message" {
+                self.pending = Some(id.to_string());
+                self.last_words = Some(id.to_string());
+            }
             let mut fields = made.clone();
             fields["text"] = json!(text);
             let op = self.new_op(id, kind, fields, now);

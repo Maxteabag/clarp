@@ -180,6 +180,11 @@ impl Which {
 /// How many items are read at a time when some of them are left out.
 const CHUNK: usize = 256;
 
+/// The replies of a running turn the conversation has decided are answers so far, oldest first.
+pub(crate) fn answers_of(log: &dyn AgentLog, turn: u64) -> Result<Vec<String>, ActorError> {
+    Ok(find_anchors(log, turn, None, false)?.ids())
+}
+
 /// Rows that are conversation without needing to be a turn's anchor.
 pub fn is_conversation(entry: &Entry, session_rows: Option<usize>) -> bool {
     conversation_in(entry, session_rows, false)

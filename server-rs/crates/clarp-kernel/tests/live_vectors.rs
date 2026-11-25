@@ -359,9 +359,14 @@ fn a_provider_asked_again_is_shown_until_it_answers() {
     assert_eq!(line(&mut hub, 1_021)["state"], "interrupted");
 }
 
+/// Issue 771: in a hub whose messages grow into answers, nothing a client was shown as an
+/// answer turns into narration. A message is `commentary` until the turn decides it is an
+/// answer: other words after it (`close_answer`), a message read into the turn
+/// (`close_answers`), or the turn's end with it as the newest words. Work after it (a tool, or
+/// a plan that changes) leaves it narration.
 #[test]
-fn an_answer_a_read_message_closed_stays_an_answer_whatever_work_follows() {
-    let mut hub = Hub::new("e1", "a1", "s1");
+fn a_message_is_an_answer_once_the_turn_decides_it_and_never_narration_after() {
+    let mut hub = Hub::new("e1", "a1", "s1").growing();
     let call = |id| ToolStart {
         name: "Bash",
         call_id: id,
@@ -379,30 +384,99 @@ fn an_answer_a_read_message_closed_stays_an_answer_whatever_work_follows() {
             .find(|item| item["id"] == id)
             .map(|item| item["phase"].clone())
     };
-    let _ = hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
-    let _ = hub.message_text("said", "Looking", (None, None), Some("t-1"), 20);
-    let _ = hub.tool_start("tool-1", &call("c-1"), "running", Some("t-1"), 30);
-    assert_eq!(
-        phase(&mut hub, "said", 31),
-        Some(json!("commentary")),
-        "words before a call are said along the way"
-    );
-    let _ = hub.done("tool-1", "completed", None, Some("t-1"), 40);
-    let _ = hub.message_text("answer", "Here it is", (None, None), Some("t-1"), 50);
-    hub.close_answers();
-    let _ = hub.tool_start("tool-2", &call("c-2"), "running", Some("t-1"), 60);
-    assert_eq!(
-        phase(&mut hub, "answer", 61),
-        Some(json!("final")),
-        "a message read after it closed it as an answer"
-    );
-    let _ = hub.end_turn("completed", None, 70);
-    let _ = hub.begin_turn("s1", "c1", "t-2", Some(80), "user", 80);
-    let _ = hub.message_text("answer", "Looking again", (None, None), Some("t-2"), 90);
-    let _ = hub.tool_start("tool-3", &call("c-3"), "running", Some("t-2"), 100);
-    assert_eq!(
-        phase(&mut hub, "answer", 101),
-        Some(json!("commentary")),
-        "a new turn holds no answers of the one before"
-    );
+    let mut sent = Vec::new();
+    sent.extend(hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10));
+    // Words that a call follows: never an answer.
+    sent.extend(hub.message_text(
+        "said",
+        "Looking",
+        (Some("final"), Some("r-said")),
+        Some("t-1"),
+        20,
+    ));
+    assert_eq!(phase(&mut hub, "said", 21), Some(json!("commentary")));
+    sent.extend(hub.tool_start("tool-1", &call("c-1"), "running", Some("t-1"), 30));
+    sent.extend(hub.done("tool-1", "completed", None, Some("t-1"), 40));
+    assert_eq!(phase(&mut hub, "said", 41), Some(json!("commentary")));
+    // Words a message read into the turn decides: an answer, whatever work follows.
+    sent.extend(hub.message_text(
+        "answer",
+        "Here it is",
+        (None, Some("r-answer")),
+        Some("t-1"),
+        50,
+    ));
+    assert_eq!(phase(&mut hub, "answer", 51), Some(json!("commentary")));
+    // Still being written: a message read in now does not decide it.
+    sent.extend(hub.close_answers(51));
+    assert_eq!(phase(&mut hub, "answer", 51), Some(json!("commentary")));
+    sent.extend(hub.done("answer", "completed", None, Some("t-1"), 51));
+    sent.extend(hub.close_answers(52));
+    assert_eq!(phase(&mut hub, "answer", 53), Some(json!("final")));
+    sent.extend(hub.tool_start("tool-2", &call("c-2"), "running", Some("t-1"), 60));
+    assert_eq!(phase(&mut hub, "answer", 61), Some(json!("final")));
+    // Words after words: the first is decided by the second's row.
+    sent.extend(hub.message_text("one", "One", (None, Some("r-one")), Some("t-1"), 70));
+    sent.extend(hub.message_text("two", "Two", (None, Some("r-two")), Some("t-1"), 80));
+    sent.extend(hub.close_answer("r-one", 81));
+    assert_eq!(phase(&mut hub, "one", 82), Some(json!("final")));
+    assert_eq!(phase(&mut hub, "two", 82), Some(json!("commentary")));
+    // A plan that changes is work; one told again with the same steps is not.
+    let plan = |steps: &str| clarp_kernel::live::Glimpse::Plan {
+        prefix: "p".into(),
+        steps: json!([{"text": steps, "status": "pending"}]),
+    };
+    sent.extend(hub.show(&plan("run the tests"), Some("t-1"), 90));
+    sent.extend(hub.close_answers(91));
+    assert_eq!(phase(&mut hub, "two", 92), Some(json!("commentary")));
+    sent.extend(hub.message_text("three", "Three", (None, Some("r-three")), Some("t-1"), 100));
+    sent.extend(hub.done("three", "completed", None, Some("t-1"), 100));
+    sent.extend(hub.show(&plan("run the tests"), Some("t-1"), 101));
+    sent.extend(hub.close_answers(102));
+    assert_eq!(phase(&mut hub, "three", 103), Some(json!("final")));
+    // The turn's end decides its newest words since its last answer.
+    sent.extend(hub.message_text("last", "Done", (None, Some("r-last")), Some("t-1"), 110));
+    sent.extend(hub.end_turn("completed", None, 120));
+    assert_eq!(phase(&mut hub, "last", 121), Some(json!("final")));
+    // A new turn holds no decision of the one before.
+    sent.extend(hub.begin_turn("s1", "c1", "t-2", Some(130), "user", 130));
+    sent.extend(hub.message_text(
+        "again",
+        "Looking again",
+        (None, Some("r-again")),
+        Some("t-2"),
+        140,
+    ));
+    sent.extend(hub.tool_start("tool-3", &call("c-3"), "running", Some("t-2"), 150));
+    assert_eq!(phase(&mut hub, "again", 151), Some(json!("commentary")));
+    // A turn begun over one that never settled ends that one first, which decides its
+    // newest words as an end does: the events say so (the new turn shows only its own items).
+    sent.extend(hub.message_text(
+        "left",
+        "Left open",
+        (None, Some("r-left")),
+        Some("t-2"),
+        160,
+    ));
+    sent.extend(hub.begin_turn("s1", "c1", "t-3", Some(170), "user", 170));
+    // No event ever told a message it is narration after it was an answer, nor was a message
+    // told final before it was decided.
+    let mut finals = std::collections::BTreeSet::new();
+    for event in &sent {
+        for op in event["ops"].as_array().into_iter().flatten() {
+            let phase = op["item"]["phase"].as_str();
+            let id = op["id"].as_str().unwrap_or_default().to_owned();
+            match phase {
+                Some("final") => {
+                    finals.insert(id);
+                }
+                Some(_) => assert!(!finals.contains(&id), "{id} left the answers: {op}"),
+                None => {}
+            }
+        }
+    }
+    let expected: std::collections::BTreeSet<String> = ["answer", "one", "three", "last", "left"]
+        .map(str::to_owned)
+        .into();
+    assert_eq!(finals, expected);
 }

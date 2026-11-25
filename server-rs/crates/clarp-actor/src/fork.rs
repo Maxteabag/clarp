@@ -113,6 +113,9 @@ struct Asked {
     /// The fork's replies that no tool work has followed yet.
     #[serde(default)]
     open: Vec<String>,
+    /// The newest of `open` called tools: it announced work, and is no answer.
+    #[serde(default)]
+    open_worked: bool,
     /// For the note: what the user said, what the fork answered last, what it did.
     #[serde(default)]
     said: String,
@@ -456,6 +459,7 @@ impl Actor {
             offset: 0,
             last_row: String::new(),
             open: Vec::new(),
+            open_worked: false,
             said: shortened(&message.text),
             replied: String::new(),
             did: Vec::new(),
@@ -662,9 +666,26 @@ impl Actor {
                             reply.text = kept(std::mem::take(&mut reply.text), &reply.origin);
                             if !reply.tools.is_empty() {
                                 follow(&mut batch, &mut asked.open, turn, t)?;
+                            } else if !reply.text.trim().is_empty() {
+                                // Words after words: those before were an answer, as in the
+                                // agent's own turn, and those who watch are shown so. Words
+                                // whose own message called tools were said along the way.
+                                if asked.open_worked {
+                                    asked.open.clear();
+                                }
+                                let shown =
+                                    self.fork.shown.as_mut().filter(|shown| shown.turn == turn);
+                                if let Some(shown) = shown {
+                                    for answer in &asked.open {
+                                        let events = shown.hub.close_answer(answer, t);
+                                        shown.events.extend(events);
+                                    }
+                                }
+                                asked.open.clear();
                             }
                             if !reply.text.trim().is_empty() {
                                 asked.open.push(reply.id.clone());
+                                asked.open_worked = !reply.tools.is_empty();
                                 asked.replied = shortened(&reply.text);
                             }
                             if message.speak {
@@ -1108,7 +1129,8 @@ impl Actor {
                 &self.profile.epoch,
                 &self.profile.agent_id,
                 &self.profile.session,
-            );
+            )
+            .growing();
             // Its first events are numbered from one: nobody is sent them. The first event a
             // client is sent is numbered past the agent's own hub, and sends it to the snapshot.
             let _ = hub.begin_turn(
