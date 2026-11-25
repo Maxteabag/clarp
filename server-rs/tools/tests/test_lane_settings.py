@@ -11,7 +11,7 @@ SCRIPT = (TOOLS / "install-host").read_text()
 
 def run_carry(config_text, tmp_path):
     """install-host's heredoc for top-level keys, run on a config: what it keeps, and what it says."""
-    body = re.search(r"carried_top=\"\$\(python3 - \"\$own_config\" <<'PYTHON'\n(.*?)\nPYTHON\n", SCRIPT, re.S)[1]
+    body = re.search(r"carried_top=\"\$\(python3 - \"\$config_file\" <<'PYTHON'\n(.*?)\nPYTHON\n", SCRIPT, re.S)[1]
     config = tmp_path / "config.toml"
     config.write_text(config_text)
     return subprocess.run([sys.executable, "-c", body, str(config)], capture_output=True, text=True, check=True)
@@ -24,7 +24,7 @@ def carried_top(config_text, tmp_path):
 
 def written(carried):
     """The config file install-host writes, with these carried top-level lines."""
-    body = re.search(r"\(umask 077; cat > \"\$config/config.toml\" <<EOF\n(.*?)\nEOF\n", SCRIPT, re.S)[1]
+    body = re.search(r"\(umask 077; \{\ncat <<EOF\n(.*?)\nEOF\n", SCRIPT, re.S)[1]
     shell = "cat <<EOF\n" + body + "\nEOF\n"
     env = {"carried_top": carried, "address": "127.0.0.1", "port": "7690", "token": "t", "PATH": "/usr/bin:/bin"}
     return subprocess.run(["bash", "-c", shell], capture_output=True, text=True, check=True, env=env).stdout
