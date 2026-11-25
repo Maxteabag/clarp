@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use crate::{App, AppWindow};
 
+pub mod lanes;
 mod prefs;
 mod settings;
 pub use settings::COORDINATION_LINE;
@@ -145,11 +146,14 @@ pub struct Setting {
     /// How `reset` puts it back when its default is not one value (a font
     /// size back to the theme's own): runs instead of applying `default`.
     pub reset_to: Option<Run>,
+    /// A number's range read at run time (from its Host), instead of its
+    /// own `min` and `max` while it says one.
+    pub range: Option<Getter<Option<(f64, f64)>>>,
 }
 
 impl Setting {
     fn with(entry: Entry, section: &'static str, control: Control) -> Self {
-        Setting { entry, section, control, default: None, shown: None, label: None, detail: None, reset_to: None }
+        Setting { entry, section, control, default: None, shown: None, label: None, detail: None, reset_to: None, range: None }
     }
 
     pub fn toggle(entry: Entry, section: &'static str, get: impl Fn(&App) -> bool + 'static, set: impl Fn(&Rc<App>, &AppWindow, bool) + 'static) -> Self {
@@ -227,6 +231,16 @@ impl Setting {
     /// Resets by running `reset` (when the default is not one fixed value).
     pub fn reset_with(self, reset: impl Fn(&Rc<App>, &AppWindow) + 'static) -> Self {
         Setting { reset_to: Some(Rc::new(reset)), ..self }
+    }
+
+    /// A number's range as something else says it now (its Host).
+    pub fn range_from(self, range: impl Fn(&App) -> Option<(f64, f64)> + 'static) -> Self {
+        Setting { range: Some(Rc::new(range)), ..self }
+    }
+
+    /// A number's range now: the one read at run time, else its own.
+    fn bounds(&self, app: &App, min: f64, max: f64) -> (f64, f64) {
+        self.range.as_ref().and_then(|range| range(app)).unwrap_or((min, max))
     }
 
     pub fn when(self, shown: impl Fn(&App) -> bool + 'static) -> Self {
@@ -334,7 +348,9 @@ impl Setting {
     pub fn options(&self, app: &App) -> Vec<Choice> {
         match &self.control {
             Control::Choice { options, .. } => options(app),
-            Control::Number { get, min, max, step, unit, .. } => steps(*min, *max, *step, get(app))
+            Control::Number { get, min, max, step, unit, .. } => {
+                let (min, max) = self.bounds(app, *min, *max);
+                steps(min, max, *step, get(app))
                 .into_iter()
                 .map(|value| {
                     let text = number_text(value, *step);
@@ -345,7 +361,8 @@ impl Setting {
                         _ => choice,
                     }
                 })
-                .collect(),
+                .collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -368,7 +385,10 @@ impl Setting {
                 set(app, window, value);
             }
             Control::Number { set, min, max, .. } => match value.trim().parse::<f64>() {
-                Ok(number) if number.is_finite() => set(app, window, number.clamp(*min, *max)),
+                Ok(number) if number.is_finite() => {
+                    let (min, max) = self.bounds(app, *min, *max);
+                    set(app, window, number.clamp(min, max))
+                }
                 _ => return false,
             },
             Control::Action { .. } => return false,
@@ -409,7 +429,8 @@ impl Setting {
                 set(app, window, &next.value);
             }
             Control::Number { get, set, min, max, step, .. } => {
-                let next = stepped(get(app), delta, *min, *max, *step);
+                let (min, max) = self.bounds(app, *min, *max);
+                let next = stepped(get(app), delta, min, max, *step);
                 set(app, window, next);
             }
             Control::Action { run } => run(app, window),
@@ -450,6 +471,7 @@ pub const SECTIONS: &[&str] = &[
     "NOTIFICATIONS",
     "BEHAVIOUR",
     "HOST",
+    "KEPT PROCESSES",
     "HOST STATUS",
     "KEYBOARD",
     "ALL SETTINGS",

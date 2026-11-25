@@ -27,6 +27,7 @@ mod composer;
 mod connection;
 mod chat_view;
 mod coordination;
+pub mod lanes;
 mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
 mod voice;
@@ -271,6 +272,7 @@ pub struct Engine {
     catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     coordination: coordination::Coordination,
+    lanes: lanes::Lanes,
     transits: transit::Transits,
     chat_view: chat_view::ChatView,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
@@ -426,6 +428,7 @@ impl Engine {
             catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
             coordination: coordination::Coordination::default(),
+            lanes: lanes::Lanes::default(),
             transits: transit::Transits::default(),
             chat_view: chat_view::ChatView::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
@@ -905,6 +908,7 @@ impl Engine {
         self.reset_transient_state();
         // The features are read again from /server-info.
         self.reset_live();
+        self.reset_lanes();
         self.reset_form_events();
         self.reset_artifact_summary();
         self.reset_render_specs();
@@ -1608,7 +1612,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) {
+        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) {
             return;
         }
         if tag == "server-info" {
@@ -1628,6 +1632,7 @@ impl Engine {
             self.live_server_info(object);
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
             self.coordination_server_info(object);
+            self.lanes_server_info(object);
             self.transit_server_info(object);
             self.chat_view_server_info(object);
             self.form_events_server_info(object);
@@ -1666,7 +1671,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
@@ -1824,6 +1829,7 @@ impl Engine {
                 self.refresh_pair_conversations_for(&session);
             }
             "live" => self.live_event(event),
+            "lane-settings-updated" => self.lanes_event(),
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));
                 self.stop_state_event(&session, event);
