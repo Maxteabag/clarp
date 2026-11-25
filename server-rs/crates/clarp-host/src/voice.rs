@@ -323,7 +323,14 @@ impl Mouth {
                          answered aloud where its sender asks, until it can"
                     );
                 }
-                return true;
+                // What an app chose for the Host's speech is kept apart from that file, and
+                // still holds: speech turned off from an app stays off. An agent's own entry
+                // that turns it off is in the file, and is not known until the file reads.
+                let mut chosen = Table::new();
+                let directory = mouth.fleet.directory();
+                owner::apply_speech_settings(&mut chosen, |key| directory.setting(key));
+                let view = speech_view(&chosen, &|_| false, None);
+                return !voice_profile::speech_off(&view, speaker(&record));
             }
             mouth.unreadable_told.store(false, Ordering::Release);
             let owners = mouth.owners();

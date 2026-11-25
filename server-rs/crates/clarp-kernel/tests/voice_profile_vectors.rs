@@ -212,6 +212,7 @@ fn an_agent_is_unspeakable_only_where_its_speech_is_off_or_no_engine_is_set_up()
         let unspeakable = voice_profile::unspeakable(&view, agent);
         let order = speaking_order(&view, agent);
         let off = matches!(&order, Err(unheard) if unheard.reason == voice_profile::PROVIDER_OFF);
+        assert_eq!(voice_profile::speech_off(&view, agent), off, "{}", case["name"]);
         assert_eq!(unspeakable, off || view.keys.is_empty(), "{}", case["name"]);
         if unspeakable {
             assert!(order.is_err(), "{}: nothing can speak it", case["name"]);

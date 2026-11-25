@@ -321,7 +321,13 @@ pub fn speech(view: &HostView, agent: Agent<'_>) -> Speech {
 /// as the outcome of every reply. On a Host with an engine set up, an agent that still cannot
 /// be heard (its own engine has no key, no voice for it, a failure) is told so with the reply.
 pub fn unspeakable(view: &HostView, agent: Agent<'_>) -> bool {
-    off(view, &view.voices.route(agent.who)) || view.keys.is_empty()
+    speech_off(view, agent) || view.keys.is_empty()
+}
+
+/// Whether this agent's speech is off: the Host's provider is none, or its own entry turns it
+/// off.
+pub fn speech_off(view: &HostView, agent: Agent<'_>) -> bool {
+    off(view, &view.voices.route(agent.who))
 }
 
 /// Why nothing of an agent's clip can be said, and by which provider it would have been.
