@@ -223,8 +223,6 @@ mod transcription_agent;
 mod transcription_errors;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
-#[path = "host/turn_pressure.rs"]
-mod turn_pressure;
 #[path = "host/voice_events.rs"]
 mod voice_events;
 #[path = "host/voice_maps.rs"]
@@ -395,12 +393,6 @@ impl Place {
         self.start_in(token, more, &[])
     }
 
-    /// The folder of the pressure files the Hosts of this place read, as the kernel's
-    /// `/proc/pressure`: none are there until a test writes them.
-    fn pressure(&self) -> PathBuf {
-        self.root.join("pressure")
-    }
-
     /// The file whose presence tells the Hosts of this place that the machine has no network.
     fn network_down(&self) -> PathBuf {
         self.root.join("network-down")
@@ -474,10 +466,6 @@ impl Place {
                     .flatten(),
             )
             .arg("--no-lane-pressure")
-            // Nor its pressure: a test's Host reads the pressure files of its place, which are not
-            // there until a test writes them (`Place::pressure`).
-            .arg("--pressure-dir")
-            .arg(self.pressure())
             .args(more)
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)

@@ -56,7 +56,6 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
         mode: Mode::Auto,
         reserve_percent: 20,
         ceiling: 24,
-        pressure: crate::pressure::Thresholds::DEFAULT,
     };
     assert_eq!(Settings::of(None), default);
     assert_eq!(of(""), default);

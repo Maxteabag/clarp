@@ -251,15 +251,6 @@ pub(crate) struct Room {
 }
 
 impl Room {
-    /// Room for no new lane: a lane that runs is used as it is, and none starts. What a turn
-    /// nobody waits on is given while the machine is under pressure (`crate::pressure`); never
-    /// with a lane that is `needed`, which would send idle lanes away to fit in it.
-    pub(crate) const NONE: Self = Self {
-        most: 0,
-        budget: 0,
-        free: None,
-    };
-
     /// Whether `live` lanes holding `held` bytes fit, a new one of `new` bytes among them, once
     /// lanes that weighed `freed` bytes together have left.
     fn fits(&self, live: usize, held: u64, new: u64, freed: u64) -> bool {
@@ -287,9 +278,6 @@ impl Room {
 /// codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool
 /// lane_memory_mb = 2200         # fixed: and what they may hold together (PSS); a lane starts
 ///                               # only when both allow it, the longest idle one leaving first
-/// pressure_cpu_percent = 60     # the machine is under pressure from cpu some avg60 (5-95) ...
-/// pressure_io_percent = 30      # ... or io some avg60 ...
-/// pressure_memory_percent = 10  # ... or memory full avg10 (`crate::pressure`)
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Settings {
@@ -305,9 +293,6 @@ pub(crate) struct Settings {
     pub reserve_percent: u64,
     /// Read and told; it bounds nothing ([`CEILING`]).
     pub ceiling: usize,
-    /// When the machine is under pressure: no optional lane starts, and the turns nobody waits
-    /// on wait ([`crate::pressure`]).
-    pub pressure: crate::pressure::Thresholds,
 }
 
 impl Settings {
@@ -353,7 +338,6 @@ impl Settings {
                 i64::try_from(CEILING_DEFAULT).unwrap_or(24),
             ))
             .unwrap_or(CEILING_DEFAULT),
-            pressure: crate::pressure::Thresholds::of(file),
         }
     }
 
@@ -529,9 +513,6 @@ pub(crate) enum Want {
     /// A chat turn's lane: it starts within the limits, else its turn runs in a process of its
     /// own (`Place::Full`).
     Optional,
-    /// A lane that runs already, and none new: a turn nobody waits on while the machine is under
-    /// pressure (`crate::pressure`). Its turn runs in a process of its own where none runs.
-    Running,
 }
 
 /// A lane that would start past both limits and that no turn needs: none is started (issue 786).

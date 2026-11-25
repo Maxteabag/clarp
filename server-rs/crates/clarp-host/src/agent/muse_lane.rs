@@ -48,9 +48,6 @@ pub(super) struct Beside {
     /// The session exec runs: the one a lane would take.
     session: Option<String>,
     tx: std::sync::mpsc::Sender<Ask>,
-    /// A new lane may start beside the turn: not for a turn nobody waits on while the machine
-    /// is under pressure (`crate::pressure`).
-    new_lane: bool,
 }
 
 impl Beside {
@@ -82,9 +79,6 @@ impl Beside {
         &self,
         launcher: &crate::launcher::Launcher,
     ) -> Option<std::thread::JoinHandle<()>> {
-        if !self.new_lane {
-            return None;
-        }
         let session = self.switched_on()?.to_owned();
         let (lane, profile, launcher) = (self.lane.clone(), self.profile.clone(), launcher.clone());
         std::thread::Builder::new()
@@ -126,7 +120,6 @@ impl Worker {
             profile: self.setup.profile.clone(),
             session: order.named_session.clone(),
             tx: self.tx.clone(),
-            new_lane: self.may_start_lane(),
         })
     }
 
@@ -201,14 +194,13 @@ impl Worker {
         let lane = self.muse_lane();
         let profile = self.setup.profile.clone();
         // A lane may start for this turn, or take its session: only once a turn has named the
-        // session (a conversation's first turn names it on exec, as Muse opens no other), and not
-        // for a turn nobody waits on while the machine is under pressure.
+        // session (a conversation's first turn names it on exec, as Muse opens no other).
         let named = self
             .actor
             .as_ref()
             .and_then(|actor| actor.status().backend_session)
             .is_some_and(|session| order.named_session.as_deref() == Some(session.as_str()));
-        let launcher = (named && self.may_start_lane()).then(|| self.setup.launcher.clone());
+        let launcher = named.then(|| self.setup.launcher.clone());
         let token = self
             .setup
             .turns

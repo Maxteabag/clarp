@@ -105,10 +105,7 @@ impl Lane {
             thread,
             &digest,
             kept,
-            match want {
-                crate::lane::Want::Running => crate::lane::Room::NONE,
-                _ => settings.room(),
-            },
+            settings.room(),
             want == crate::lane::Want::Needed,
         )?;
         match place {

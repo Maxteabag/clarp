@@ -326,27 +326,22 @@ fn waiting_for_network(live: &LiveStatus) -> Option<String> {
         .then(|| failures::NETWORK_WAIT.to_string())
 }
 
-/// What a live turn that waits for an account, for the network, or for the machine (its launch
-/// held while the machine is under pressure) says it waits for: when it waits for one. The apps
-/// show them alike: the turn keeps its place, and makes no progress until what it waits for is
-/// there.
+/// What a live turn that waits for an account, or for the network, says it waits for: when
+/// it waits for one. The apps show both alike: the turn keeps its place, and makes no
+/// progress until what it waits for is there. No turn waits for the machine's pressure (the
+/// owner, 25 Nov 2026).
 fn waiting_for(live: &LiveStatus, backend: &str) -> Option<String> {
-    live.waits_for_the_machine
-        .clone()
-        .or_else(|| waiting_for_network(live))
-        .or_else(|| waiting_for_account(live, backend))
+    waiting_for_network(live).or_else(|| waiting_for_account(live, backend))
 }
 
 /// What a `limited` turn waits for, as a word an app can key on rather than read the words
-/// (`waits_for`): `"machine"` (its start held while the machine is under pressure), `"network"`
-/// (this machine's network is gone) or `"quota"` (an account with usage left, or one that serves
-/// its model). The words say the same for a person; only a quota wait is a usage limit. Absent
-/// where the turn is not limited, and on Hosts from before issue 834: such an app treats
-/// `limited` as before.
+/// (`waits_for`): `"network"` (this machine's network is gone) or `"quota"` (an account with
+/// usage left, or one that serves its model). The words say the same for a person; only a quota
+/// wait is a usage limit. Absent where the turn is not limited, and on Hosts from before issue
+/// 834: such an app treats `limited` as before. Hosts of contracts 188 to 193 also said
+/// `"machine"`, for a start held for the machine's pressure; none is held for it from 194.
 pub(crate) fn waits_for(live: &LiveStatus, backend: &str) -> Option<&'static str> {
-    if live.waits_for_the_machine.is_some() {
-        Some("machine")
-    } else if waiting_for_network(live).is_some() {
+    if waiting_for_network(live).is_some() {
         Some("network")
     } else {
         waiting_for_account(live, backend).map(|_| "quota")
@@ -2522,7 +2517,6 @@ mod tests {
                 waits_for_its_model: None,
                 failed_attempts: 0,
                 waits_for_the_network: false,
-                waits_for_the_machine: None,
                 network_retry_at_ms: None,
             }),
             last: last.map(|outcome| Settled {

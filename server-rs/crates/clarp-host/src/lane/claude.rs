@@ -6,9 +6,8 @@
 //! No turn waits for a cold lane: a turn with no lane there for its conversation starts its
 //! Claude Code as the lane ([`Lane::start`]), and runs on it; starting the lane is the turn's
 //! start, so nothing is started twice (issue 833). Where no lane may start (no place within the
-//! limits, or a turn nobody waits on while the machine is under pressure), the turn runs in a
-//! process of its own as before, and once that process is gone a lane may be started for the
-//! next turn ([`Lane::warm`]).
+//! limits), the turn runs in a process of its own as before, and once that process is gone a lane
+//! may be started for the next turn ([`Lane::warm`]).
 //!
 //! A turn that a kept process cannot run keeps a process of its own: an opening of a call, a
 //! takeover or rewind (`--resume-session-at`), a turn that only reads (its edit guard is the

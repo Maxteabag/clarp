@@ -3,8 +3,8 @@
 //! that is there for its conversation, started as the turn would start Claude Code, or, where
 //! none is, starts its Claude Code as the lane and runs on that (issue 833): a queued turn, and
 //! an idle agent's first, start one process and keep it. A turn for which no lane may start
-//! (no place, or one nobody waits on under the machine's pressure) runs in a process of its
-//! own, and a lane may be started once that process is gone. A turn the lane refused because
+//! (no place) runs in a process of its own, and a lane may be started once that process is
+//! gone. A turn the lane refused because
 //! the login changed (a seat switch: the lane leaves, and nothing of the turn reached Claude Code)
 //! starts the lane anew under the current login the same way, once, and runs on it (issue 849).
 
@@ -152,12 +152,11 @@ impl Worker {
         let token = self.setup.turns.token(&agent_id, order.turn.0);
         let mcp: Mcp = (self.setup.mcp_strict, self.setup.record.mcp_servers.clone());
         let lane = self.claude_lane();
-        // Where no lane is there for it, the turn starts its Claude Code as the lane: unless no
-        // lane may start for it now (a turn nobody waits on, under the machine's pressure).
-        let as_lane = self.may_start_lane().then(|| AsLane {
+        // Where no lane is there for it, the turn starts its Claude Code as the lane.
+        let as_lane = AsLane {
             start: self.claude_lane_start(),
             launcher: self.setup.launcher.clone(),
-        });
+        };
         let (versions, runtime) = (self.setup.versions.clone(), self.setup.runtime.clone());
         let tx = self.tx.clone();
         let (turn, attempt) = (order.turn, order.attempt);
@@ -176,9 +175,7 @@ impl Worker {
                 let state = match lane.warm(&fit) {
                     Some(state) => Some(state),
                     // None there: the turn's own Claude Code starts as the lane.
-                    None => as_lane
-                        .as_ref()
-                        .and_then(|as_lane| as_lane.begin(&lane_order, &fit, &mcp)),
+                    None => as_lane.begin(&lane_order, &fit, &mcp),
                 };
                 let Some(state) = state else {
                     drop(held);
@@ -220,7 +217,7 @@ impl Worker {
                 // reaching Claude Code: the lane is on its way out. Once it has gone, the turn
                 // starts its Claude Code as the lane under the login there now, still within the
                 // hold, and runs on it; once, never again for this attempt.
-                if let (Err(error), Some(as_lane)) = (&submitted, &as_lane)
+                if let Err(error) = &submitted
                     && crate::lane::LoginChanged::is(error)
                     && !reached()
                 {

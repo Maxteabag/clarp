@@ -304,15 +304,7 @@ impl Worker {
         // A chat turn's lane is optional: with every place running work, the turn runs in a
         // process of its own instead (issue 786).
         let needed = private || self.native.owns();
-        // A chat turn nobody waits on starts no lane while the machine is under pressure: it
-        // uses one that runs, else runs in a process of its own.
-        let want = if needed {
-            Want::Needed
-        } else if self.may_start_lane() {
-            Want::Optional
-        } else {
-            Want::Running
-        };
+        let want = if needed { Want::Needed } else { Want::Optional };
         let back = (!needed).then(|| order.clone());
         let wanted = match &submission {
             Submission::Prompt { model, effort } => Some((model.clone(), effort.clone())),

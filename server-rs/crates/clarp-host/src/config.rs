@@ -89,10 +89,6 @@ pub struct Config {
     /// Whether idle lanes are shed on the kernel's memory pressure (`--no-lane-pressure` turns it
     /// off: a test's Host, so the test machine's pressure never ends a test's lane).
     pub lane_pressure: bool,
-    /// Where the kernel's pressure files are read (`--pressure-dir`, `/proc/pressure` unless
-    /// said): a test's Host names a folder of its own, so the test machine's pressure never holds
-    /// a test's turn (`crate::pressure`).
-    pub pressure_dir: PathBuf,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
     pub stalled_turn_ms: i64,
@@ -235,7 +231,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
 [--accounts none|follow|select] [--seats-tool PROGRAM] \
-[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] [--network-down-file FILE] [--lane-limits-default auto|fixed] [--no-lane-pressure] [--pressure-dir DIR] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] [--network-down-file FILE] [--lane-limits-default auto|fixed] [--no-lane-pressure] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -501,7 +497,6 @@ impl Config {
         let mut network_down_file = None;
         let mut lane_limits_default = None;
         let mut lane_pressure = true;
-        let mut pressure_dir = PathBuf::from("/proc/pressure");
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
         let mut heartbeats_checked_every_ms = 60_000;
@@ -581,7 +576,6 @@ impl Config {
                     lane_limits_default = Some(named);
                 }
                 "--no-lane-pressure" => lane_pressure = false,
-                "--pressure-dir" => pressure_dir = PathBuf::from(value("a folder")?),
                 "--logins-checked-every-ms" => {
                     logins_checked_every_ms = value("a number of milliseconds")?
                         .parse()
@@ -798,7 +792,6 @@ impl Config {
             network_down_file,
             lane_limits_default,
             lane_pressure,
-            pressure_dir,
             jobs_checked_every_ms,
             stalled_turn_ms: crate::experience_watch::stalled_after_ms(
                 config_dir.as_ref().map(|dir| dir.join(CONFIG_FILE)),

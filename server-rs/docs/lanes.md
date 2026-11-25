@@ -56,9 +56,6 @@ lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new 
 lane_ceiling = 24             # read and told, never written, and bounds nothing: auto has no count
 codex_lane_most = 8           # fixed: live lanes this Host keeps, of every tool (the default)
 lane_memory_mb = 2200         # fixed: what they may hold together, in MiB of PSS (the default)
-pressure_cpu_percent = 60     # the machine is under pressure from cpu some avg60 (the default) ...
-pressure_io_percent = 30      # ... or io some avg60 ...
-pressure_memory_percent = 10  # ... or memory full avg10: no chat lane starts meanwhile
 ```
 
 The owner changes them from his apps too (issue 779, feature `lane_settings`): `POST
@@ -97,51 +94,15 @@ as before.
   - **A test's Host** runs fixed (`--lane-limits-default fixed`, which the host harness passes
     unless a test asks for auto) and sheds nothing on pressure (`--no-lane-pressure`), so its
     lanes never follow the test machine's memory.
-- **Under pressure the work waits, not the processes** (feature `turn_pressure_admission`,
-  `src/pressure.rs`): the machine is under pressure once io `some` avg60, cpu `some` avg60 or
-  memory `full` avg10 in `/proc/pressure` reaches its threshold (`pressure_io_percent` 30,
-  `pressure_cpu_percent` 60, `pressure_memory_percent` 10), and calm only once each is below 80%
-  of its own. A turn nobody waits on waits in `Agent::carry_out` before any lane or process is
-  chosen for it, so it neither runs on a live lane nor starts cold. Let go while the pressure
-  lasts (at its ten minutes), it may use a lane that runs and starts none (`lane::Want::Running`,
-  `Room::NONE`; Claude's and Muse's lanes after an exec turn are not started either). The owner's
-  turns start lanes at any time, and a native goal's lane (`Want::Needed`) still starts. What
-  another agent sends or forks from one of the owner's running turns is his for one hop
-  (`Message::owner_relayed`, set in `coordination::made` and by the fork routes): it neither
-  waits nor is kept from a lane; what that turn sends on is no longer his.
+- **No turn waits for the machine's pressure** (the owner's decision of 25 Nov 2026). Contracts
+  186 to 193 held the turns nobody waited on while io, cpu or memory pressure was high (feature
+  `turn_pressure_admission`, `src/pressure.rs`), and from 188 showed them waiting for the
+  machine. From 194 every turn starts when it is its turn, and a lane may start for any turn
+  within the limits above. What keeps the memory safe is the reserve: a lane starts only while
+  `MemAvailable` stays above it, and idle lanes leave when it falls below, at a lane's start and
+  on the kernel's memory-pressure trigger (`lane::watch_pressure`); no turn waits for it.
   `/lane-settings` tells the live lanes (`live`) apart from the turns that started a tool anew in
-  the last hour (`cold_starts_last_hour`).
-- **Whose CPU pressure counts.** io and memory are the machine's (`/proc/pressure/io`,
-  `memory`): every process stalls on them. The CPU figure is the Host's own cgroup's (the
-  `cpu.pressure` of the cgroup `/proc/self/cgroup` names in its `0::` line), and the machine's
-  `/proc/pressure/cpu` where that cannot be read. The agents' turns run in scopes of their
-  own, outside it: measured on the owner's EliteBook at 09:33 on 25 Nov 2026 (load 39, renders
-  in turns), cpu `some` avg10 was 76% for the machine, 77% for `app.slice`, 15% for the Host's
-  cgroup and 0.06% for the owner's own session. The machine's figure measures the agents' work
-  and would hold new work for hours. `/lane-settings` says which was read
-  (`pressure.cpu_source`: `"host-cgroup"` or `"system"`). A test's Host reads `host-cpu` and
-  `cpu` in its own pressure folder.
-- **A Host outside systemd reads the machine's CPU.** Its own cgroup is a Host-only one only
-  where it runs as its own service and starts its turns in scopes of their own (`--launcher
-  systemd`, as `install-host` installs it). Started from a terminal its cgroup is that terminal's
-  session, shared with everything started there; in a container `0::/` is the container's root;
-  and with `--launcher direct` its turns run inside its cgroup. There the cgroup's figure would
-  measure the agents' work as the machine's does, so the Host reads `/proc/pressure/cpu`
-  (`cpu_source` `"system"`), and a render in a turn can hold new work for as long as it runs.
-- **A held turn says so.** While it waits, the turn shows "Waiting for the machine (io 45%)" as a
-  turn that waits for the network shows its words (`docs/protocol.md`): `limited`, naming the
-  reading that is high (the highest of several, as a whole percent). The gate tells each waiting
-  turn new words when its next look changes the shown percent, and nothing otherwise; the words
-  go when the turn starts or is stopped, and an agent removed while it waits leaves the gate at
-  once.
-- **A turn that would run on a warm lane waits too.** A warm lane saves only the start; what the
-  gate guards against is the turn's own work (its builds, its reads, a compaction), which a turn
-  does on a lane as in a process of its own.
-- **The gate is for new work.** Pressure holds turns that have not started; it does not slow or
-  stop work that already runs. A turn that is running when the pressure rises goes on as it is,
-  with everything it starts: one helper's checksum of 52 GB inside a running turn made the
-  owner's machine stall on its disk (25 Nov 2026), and no gate at a turn's start can catch that. A test's Host reads the pressure files of its own place
-  (`--pressure-dir`), which are not there unless a test writes them.
+  the last hour (`cold_starts_last_hour`, `src/cold_starts.rs`; feature `lanes_live`).
 - **Fixed: two limits, both on** (the lead's decision of 25 Nov 2026). A lane starts only when
   both allow it:
   - **a count**, `codex_lane_most`, 8 unless set: live lanes of every tool, the one about to

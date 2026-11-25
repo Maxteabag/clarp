@@ -37,12 +37,6 @@ pub struct Made {
     pub housekeeping: bool,
     /// The caller named the send's trace itself (else the Host names one).
     pub trace_named: bool,
-    /// The turn whose token the send presents is one of the owner's own, running now (his
-    /// message, or the Oracle's with his words): what it sends another agent is his for this
-    /// one hop ([`clarp_kernel::conversation::Message::owner_relayed`]). Never from a request's
-    /// body; a turn started by such a message is no owner's turn, so the mark goes no further.
-    #[serde(skip)]
-    pub owner_relayed: bool,
 }
 
 /// A refusal of the kernel's rules, as the client is told it.
@@ -84,12 +78,7 @@ pub(crate) async fn made(
     trace_named: bool,
     owner_token: bool,
 ) -> Result<Made, ApiError> {
-    let claimed = token_of(app, token).await?;
-    let owner_relayed = !peer
-        && claimed
-            .as_ref()
-            .is_some_and(|(agent_id, turn)| owners_turn(app, agent_id, *turn));
-    let turn = claimed.map(|(agent_id, _)| {
+    let turn = token_of(app, token).await?.map(|(agent_id, _)| {
         let session = session_of(app, &agent_id);
         (agent_id, session)
     });
@@ -100,34 +89,7 @@ pub(crate) async fn made(
         owner_token,
         internal_sender: None,
         housekeeping: false,
-        owner_relayed,
     })
-}
-
-/// Whether the turn a presented token names is one of the owner's own, running now: what it
-/// opens (a fork) is his for one hop. A token that cannot be read is no owner's turn.
-pub(crate) async fn relayed_by(app: &App, token: Option<&str>) -> bool {
-    token_of(app, token)
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|(agent_id, turn)| owners_turn(app, &agent_id, turn))
-}
-
-/// Whether `turn` of the agent `agent_id` is running now and is one of the owner's own: his
-/// message, or the Oracle's with his words. A turn that was relayed from one is not.
-pub(crate) fn owners_turn(app: &App, agent_id: &str, turn: u64) -> bool {
-    session_of(app, agent_id)
-        .and_then(|session| app.member(&session))
-        .is_some_and(|member| {
-            member
-                .agent
-                .view()
-                .status
-                .live
-                .as_ref()
-                .is_some_and(|live| live.turn.0 == turn && live.origin.is_user_send())
-        })
 }
 
 pub(crate) async fn front_desk_word(app: &App, made: &Made) -> bool {

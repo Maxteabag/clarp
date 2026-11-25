@@ -1,7 +1,7 @@
 //! The owner's settings of lanes from his apps (issue 779): `GET /lane-settings` says each tool's
 //! switch, how the limits all lanes share are set (auto from the free memory, or fixed; issue
 //! 792) and their values, the idle time, and what the lanes and the machine hold now, with the
-//! machine's pressure, its thresholds and the turns that wait for it (`crate::pressure`);
+//! lanes that live and the turns that started their tool anew in the last hour;
 //! `POST /lane-settings` changes any of them. They stay where the Host has always read them, the
 //! top-level keys of its own `config.toml` ([`crate::lane::Settings`]), so `install-host` carries
 //! them and an edit by hand still works. A change is written into that file with every other
@@ -17,9 +17,9 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use serde_json::{Map, Value, json};
 
+use crate::cold_starts::Counted;
 use crate::edge::{ApiError, App};
 use crate::lane::{self, Holding, MIB, Memory, Mode, Settings, Tool};
-use crate::pressure::{self, ColdStarts, Look, Resource, Stall};
 
 /// The kind of the event every app is told a change by: it reads `GET /lane-settings` again.
 pub(crate) const CHANGED: &str = "lane-settings-updated";
@@ -54,24 +54,12 @@ fn ceiling_now(settings: &Settings) -> i64 {
     i64::try_from(settings.ceiling).unwrap_or(i64::MAX)
 }
 
-fn pressure_cpu_now(settings: &Settings) -> i64 {
-    i64::from(settings.pressure.cpu)
-}
-
-fn pressure_io_now(settings: &Settings) -> i64 {
-    i64::from(settings.pressure.io)
-}
-
-fn pressure_memory_now(settings: &Settings) -> i64 {
-    i64::from(settings.pressure.memory)
-}
-
 /// How the limits are set, as the apps name it, and the values it may be set to.
 const MODE: &str = "limits";
 
 /// The limits the owner may set from an app. The file may hold others (an edit by hand); the
 /// Host uses what it holds, and an app is refused only a value it changes to.
-static LIMITS: [Limit; 8] = [
+static LIMITS: [Limit; 5] = [
     Limit {
         name: "most",
         key: lane::MOST,
@@ -107,27 +95,6 @@ static LIMITS: [Limit; 8] = [
         max: 64,
         now: ceiling_now,
     },
-    Limit {
-        name: pressure::CPU,
-        key: pressure::CPU,
-        min: pressure::LEAST as i64,
-        max: pressure::MOST as i64,
-        now: pressure_cpu_now,
-    },
-    Limit {
-        name: pressure::IO,
-        key: pressure::IO,
-        min: pressure::LEAST as i64,
-        max: pressure::MOST as i64,
-        now: pressure_io_now,
-    },
-    Limit {
-        name: pressure::MEMORY,
-        key: pressure::MEMORY,
-        min: pressure::LEAST as i64,
-        max: pressure::MOST as i64,
-        now: pressure_memory_now,
-    },
 ];
 
 /// A value a request names, of the right kind; whether it is a change, and within its range,
@@ -155,39 +122,8 @@ fn range(limit: &Limit) -> Value {
     json!({"min": limit.min, "max": limit.max})
 }
 
-/// One pressure file as the apps are told it: `null` where the machine has none.
-fn resource(resource: Option<Resource>) -> Value {
-    let stall = |stall: Stall| json!({"avg10": stall.avg10, "avg60": stall.avg60});
-    resource.map_or(
-        Value::Null,
-        |resource| json!({"some": stall(resource.some), "full": resource.full.map(stall)}),
-    )
-}
-
-/// The machine's pressure read now, whether it holds turns, and by what thresholds.
-fn pressure_told(look: &Look) -> Value {
-    json!({
-        "cpu": resource(look.reading.cpu),
-        "cpu_source": look.reading.cpu_source.name(),
-        "io": resource(look.reading.io),
-        "memory": resource(look.reading.memory),
-        "high": look.high,
-        "thresholds": {
-            "cpu_some_avg60": look.thresholds.cpu,
-            "io_some_avg60": look.thresholds.io,
-            "memory_full_avg10": look.thresholds.memory,
-        },
-    })
-}
-
 /// The settings as the Host uses them now, and what the lanes and the machine hold.
-fn told(
-    settings: &Settings,
-    holding: &Holding,
-    memory: Option<Memory>,
-    look: &Look,
-    cold: &ColdStarts,
-) -> Value {
+fn told(settings: &Settings, holding: &Holding, memory: Option<Memory>, cold: &Counted) -> Value {
     let mb = |bytes: u64| bytes.saturating_add(MIB / 2) / MIB;
     let mut answer = Map::new();
     answer.insert(MODE.to_owned(), json!(settings.mode.name()));
@@ -246,8 +182,6 @@ fn told(
         "cold_starts_last_hour".to_owned(),
         json!({"total": cold.total, "tools": cold.tools}),
     );
-    answer.insert("pressure".to_owned(), pressure_told(look));
-    answer.insert("held_for_pressure".to_owned(), json!(look.waiting));
     Value::Object(answer)
 }
 
@@ -256,13 +190,13 @@ fn told(
 async fn now(app: &App) -> Result<Value, ApiError> {
     let deadline = tokio::time::Instant::now() + lane::HELD_LOOK;
     let run = app.config.run_dir.clone();
-    let gate = app.pressure.clone();
-    let (settings, lanes, memory, (look, cold)) = tokio::task::spawn_blocking(move || {
+    let cold = app.cold_starts.clone();
+    let (settings, lanes, memory, cold) = tokio::task::spawn_blocking(move || {
         (
             Settings::read(),
             lane::lanes_in(&run),
             Memory::read(),
-            (gate.look(), gate.cold_starts()),
+            cold.counted(),
         )
     })
     .await
@@ -271,7 +205,6 @@ async fn now(app: &App) -> Result<Value, ApiError> {
         &settings,
         &lane::held(lanes, deadline).await,
         memory,
-        &look,
         &cold,
     ))
 }
@@ -345,12 +278,7 @@ pub(crate) async fn set(
                 // What is read of the machine now is not a setting: an app reads it anew.
                 if !matches!(
                     key.as_str(),
-                    "held"
-                        | "ranges"
-                        | "pressure"
-                        | "held_for_pressure"
-                        | "live"
-                        | "cold_starts_last_hour"
+                    "held" | "ranges" | "live" | "cold_starts_last_hour"
                 ) {
                     event.insert(key.clone(), value.clone());
                 }
@@ -583,16 +511,6 @@ fn changed(text: &str, change: &Change) -> Result<String, Unwritten> {
 mod tests {
     use super::*;
 
-    /// A calm machine with nothing waiting, its pressure files read.
-    fn calm() -> Look {
-        Look {
-            reading: pressure::Reading::default(),
-            high: false,
-            thresholds: pressure::Thresholds::DEFAULT,
-            waiting: 0,
-        }
-    }
-
     fn change(pairs: &[(&'static str, toml_edit::Value)]) -> Change {
         pairs.to_vec()
     }
@@ -666,13 +584,7 @@ mod tests {
         assert!(settings.chat(Tool::Muse) && settings.chat(Tool::Codex));
         assert!(!settings.chat(Tool::Claude));
         assert!(text.find("muse_chat_lane = true").unwrap() < text.find("[server]").unwrap());
-        let answer = told(
-            &settings,
-            &Holding::default(),
-            None,
-            &calm(),
-            &ColdStarts::default(),
-        );
+        let answer = told(&settings, &Holding::default(), None, &Counted::default());
         assert_eq!(answer["muse_chat_lane"], true);
         assert_eq!(
             answer["held"]["tools"]["muse"],
@@ -819,8 +731,7 @@ mod tests {
             &Settings::of(Some(&by_hand.parse().unwrap())),
             &Holding::default(),
             None,
-            &calm(),
-            &ColdStarts::default(),
+            &Counted::default(),
         );
         assert_eq!(read["most"], 64);
         let mut sent = read.clone();
@@ -871,8 +782,7 @@ mod tests {
             &Settings::of(Some(&read)),
             &holding,
             Some(memory),
-            &calm(),
-            &ColdStarts::default(),
+            &Counted::default(),
         );
         assert_eq!(
             answer,
@@ -887,18 +797,12 @@ mod tests {
                 "idle_minutes": 15,
                 "reserve_percent": 20,
                 "ceiling": 24,
-                "pressure_cpu_percent": 60,
-                "pressure_io_percent": 30,
-                "pressure_memory_percent": 10,
                 "ranges": {
                     "most": {"min": 1, "max": 32},
                     "memory_mb": {"min": 256, "max": 16384},
                     "idle_minutes": {"min": 1, "max": 240},
                     "reserve_percent": {"min": 5, "max": 50},
                     "ceiling": {"min": 1, "max": 64},
-                    "pressure_cpu_percent": {"min": 5, "max": 95},
-                    "pressure_io_percent": {"min": 5, "max": 95},
-                    "pressure_memory_percent": {"min": 5, "max": 95},
                 },
                 "held": {
                     "lanes": 2,
@@ -914,19 +818,6 @@ mod tests {
                     "reserve_mb": 2000,
                     "room_mb": 1000,
                 },
-                "pressure": {
-                    "cpu": null,
-                    "cpu_source": "system",
-                    "io": null,
-                    "memory": null,
-                    "high": false,
-                    "thresholds": {
-                        "cpu_some_avg60": 60,
-                        "io_some_avg60": 30,
-                        "memory_full_avg10": 10,
-                    },
-                },
-                "held_for_pressure": 0,
                 "live": {
                     "lanes": 2,
                     "busy": 1,
@@ -946,8 +837,7 @@ mod tests {
             &Settings::of(Some(&read)),
             &holding,
             None,
-            &calm(),
-            &ColdStarts::default(),
+            &Counted::default(),
         );
         assert_eq!(answer["held"]["available_mb"], Value::Null);
         assert_eq!(answer["held"]["room_mb"], Value::Null);
@@ -1019,81 +909,41 @@ mod tests {
     }
 
     #[test]
-    fn the_answer_says_the_pressure_read_now_and_the_turns_that_wait_for_it() {
-        let stall = |avg10: f64, avg60: f64| pressure::Stall { avg10, avg60 };
-        let look = Look {
-            reading: pressure::Reading {
-                cpu: Some(Resource {
-                    some: stall(70.5, 61.25),
-                    full: None,
-                }),
-                cpu_source: pressure::CpuSource::HostCgroup,
-                io: Some(Resource {
-                    some: stall(55.0, 41.0),
-                    full: Some(stall(30.0, 20.5)),
-                }),
-                memory: None,
-            },
-            high: true,
-            thresholds: pressure::Thresholds {
-                cpu: 60,
-                io: 40,
-                memory: 10,
-            },
-            waiting: 3,
-        };
-        let cold = ColdStarts {
+    fn the_answer_counts_the_cold_starts_of_the_last_hour_and_says_nothing_of_pressure() {
+        let cold = Counted {
             total: 3,
             tools: [("claude".to_owned(), 2), ("scripted".to_owned(), 1)].into(),
         };
-        let answer = told(&Settings::of(None), &Holding::default(), None, &look, &cold);
+        let answer = told(&Settings::of(None), &Holding::default(), None, &cold);
         assert_eq!(
             answer["cold_starts_last_hour"],
             json!({"total": 3, "tools": {"claude": 2, "scripted": 1}})
         );
-        assert_eq!(
-            answer["pressure"],
-            json!({
-                "cpu": {"some": {"avg10": 70.5, "avg60": 61.25}, "full": null},
-                "cpu_source": "host-cgroup",
-                "io": {"some": {"avg10": 55.0, "avg60": 41.0},
-                       "full": {"avg10": 30.0, "avg60": 20.5}},
-                "memory": null,
-                "high": true,
-                "thresholds": {"cpu_some_avg60": 60, "io_some_avg60": 40, "memory_full_avg10": 10},
-            })
-        );
-        assert_eq!(answer["held_for_pressure"], 3);
+        // No turn waits for the machine's pressure (the owner, 25 Nov 2026): nothing of it is told.
+        for gone in ["pressure", "held_for_pressure", "pressure_io_percent"] {
+            assert!(answer.get(gone).is_none(), "{gone}: {answer}");
+        }
     }
 
     #[test]
-    fn the_pressure_thresholds_are_set_within_their_range() {
+    fn the_old_pressure_thresholds_are_no_settings() {
+        // An app built when the Host held turns for the machine's pressure may send its
+        // thresholds: alone they name no setting, as any unknown key, and beside a setting they
+        // are passed over and nothing of them is written.
+        let alone = asked(
+            br#"{"pressure_io_percent": 40, "pressure_cpu_percent": 60,
+                 "pressure_memory_percent": 5}"#,
+        )
+        .unwrap_err();
+        assert_eq!(alone.status(), StatusCode::BAD_REQUEST);
+        assert!(alone.message().starts_with("name one of codex_chat_lane"));
         assert_eq!(
             keys_changed(
                 FILE,
-                json!({"pressure_io_percent": 40, "pressure_cpu_percent": 60,
-                       "pressure_memory_percent": 5})
+                json!({"pressure_io_percent": 40, "claude_chat_lane": true})
             )
             .unwrap(),
-            ["pressure_io_percent", "pressure_memory_percent"]
+            ["claude_chat_lane"]
         );
-        for (body, name) in [
-            (json!({"pressure_io_percent": 4}), "pressure_io_percent"),
-            (json!({"pressure_cpu_percent": 96}), "pressure_cpu_percent"),
-            (
-                json!({"pressure_memory_percent": 0}),
-                "pressure_memory_percent",
-            ),
-        ] {
-            match keys_changed(FILE, body.clone()) {
-                Err(Unwritten::OutOfRange(limit)) => assert_eq!(limit.name, name, "{body}"),
-                other => panic!("{body}: {other:?}"),
-            }
-        }
-        let text = changed(FILE, &change(&[("pressure_io_percent", 45i64.into())])).unwrap();
-        let read: toml::Table = text.parse().unwrap();
-        assert_eq!(Settings::of(Some(&read)).pressure.io, 45);
-        // A threshold is no fixed lane limit: the mode stays as it was.
-        assert_eq!(Settings::of(Some(&read)).mode, Mode::Auto);
     }
 }

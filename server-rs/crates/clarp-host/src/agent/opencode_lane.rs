@@ -130,13 +130,7 @@ impl Worker {
                 .flatten(),
             launcher: self.setup.launcher.clone(),
             profile: self.setup.profile.clone(),
-            // A turn nobody waits on while the machine is under pressure starts no lane: it
-            // uses one that runs already, as the Claude and Muse lanes do (issue 186).
-            want: if self.may_start_lane() {
-                crate::lane::Want::Optional
-            } else {
-                crate::lane::Want::Running
-            },
+            want: crate::lane::Want::Optional,
         })
     }
 }

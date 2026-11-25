@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 193;
+pub const HOST_CONTRACT: u64 = 194;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -444,21 +444,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The live turn carries `read_rows`: the rows of the messages read into it as it ran, so a
     // client puts its working line below a message steered into it (issue 808).
     ("live_read_rows", 185),
-    // Turns nobody waits on wait while the machine is under pressure (`crate::pressure`):
-    // `GET /lane-settings` says `pressure` (the cpu, io and memory figures read now, `high` and
-    // the thresholds) and `held_for_pressure`; `POST` sets `pressure_cpu_percent`,
-    // `pressure_io_percent` and `pressure_memory_percent` (5-95). The owner's turns, and the
-    // Oracle's with his words, never wait; a waiting turn neither runs on a live lane nor starts
-    // cold, and one let go under pressure starts no lane. It also says `live` (the lanes that
-    // live, per tool) and `cold_starts_last_hour`; auto lane limits have no count any more.
-    ("turn_pressure_admission", 186),
     // A person's send never waits behind a turn that is not a person's: that turn makes way at
     // once, and the agent is left a note to take it up again (issue 839).
     ("owner_preempts", 187),
     // A `limited` turn says what it waits for, as a word an app keys on rather than its words:
-    // `waits_for` `"machine"` (its start held for the machine's pressure), `"network"` or
-    // `"quota"` (the only usage limit), in `live_activity`, `agent-activity` and `agent-state`'s
-    // `detail` (issue 834).
+    // `waits_for` `"network"` or `"quota"` (the only usage limit), in `live_activity`,
+    // `agent-activity` and `agent-state`'s `detail` (issue 834). Hosts of contracts 188 to 193
+    // also said `"machine"`, for a start held for the machine's pressure; no turn is held for it
+    // from 194 (`lanes_live`).
     ("waits_for", 188),
     // A message's `/log` row read into a turn other than its own carries `read_into`, that
     // turn's trace (its `turn_id`) and number, from its first revision: the row alone tells a
@@ -486,6 +479,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // writes beside `config.toml`. A call with the administrator's token from no app and no
     // turn is named in the Host's log, as is one in the owner's mode (`X-Clarp-Owner-Mode`).
     ("tools_owner_free", 193),
+    // `GET /lane-settings` says `live` (the lanes that live, per tool, busy and idle) and
+    // `cold_starts_last_hour` (the turns that started their tool anew, per tool), as it has since
+    // 186, and nothing of the machine's pressure: no turn waits for it (the owner, 25 Nov 2026).
+    // `turn_pressure_admission`, its thresholds and `held_for_pressure` are gone.
+    ("lanes_live", 194),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -597,8 +595,8 @@ pub struct App {
     /// The Quota keeper: when it looks next, and its receipts.
     pub label_checker: Arc<crate::label_checker::Desk>,
     pub quota_keeper: Arc<crate::quota_keeper::Desk>,
-    /// The gate of turns by the machine's pressure, which every agent shares.
-    pub pressure: Arc<crate::pressure::Gate>,
+    /// The turns that started their tool anew in the last hour, which every agent counts in.
+    pub cold_starts: Arc<crate::cold_starts::ColdStarts>,
     /// The audio bookkeeper: what was seen of clips, written down or not yet.
     pub audio: Arc<crate::audio::Desk>,
     /// What the tools said is left of their accounts.
@@ -3498,17 +3496,15 @@ pub(crate) async fn send_from(
 /// of a fork. It is a message like any other, but for this: no app gave it an id, and the
 /// apps are told of it under none.
 pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
-    send_own_made(app, request, &crate::coordination::Made::default()).await
-}
-
-/// [`send_own`], as `made` says it was made: a fork's task opened from a turn of the owner's
-/// carries his mark for the one hop ([`crate::coordination::Made::owner_relayed`]).
-pub(crate) async fn send_own_made(
-    app: &App,
-    request: SendRequest,
-    made: &crate::coordination::Made,
-) -> Result<SendResponse, ApiError> {
-    send_as(app, request, true, None, made, None).await
+    send_as(
+        app,
+        request,
+        true,
+        None,
+        &crate::coordination::Made::default(),
+        None,
+    )
+    .await
 }
 
 /// Delivers a due schedule, keeping the prompt and reply in Session view.
@@ -3804,8 +3800,6 @@ async fn send_as(
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
-        // Sent by another agent from a turn of the owner's: his for this one hop.
-        owner_relayed: made.owner_relayed && caller != member.record.agent_id,
         id,
         marked,
         unminted: own,

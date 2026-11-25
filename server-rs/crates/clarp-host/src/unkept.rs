@@ -511,7 +511,7 @@ pub(crate) mod at_the_port {
                 keeper: Arc::default(),
                 label_checker: Arc::default(),
                 quota_keeper: Arc::default(),
-                pressure: crate::pressure::shared(),
+                cold_starts: crate::cold_starts::shared(),
                 audio: Arc::default(),
                 limits: Arc::default(),
                 pools: Vec::new(),

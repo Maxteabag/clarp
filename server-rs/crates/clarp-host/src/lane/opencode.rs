@@ -149,12 +149,7 @@ impl Lane {
             Some(session),
             &start.digest,
             |_| false,
-            // A turn nobody waits on while the machine is under pressure uses a lane that runs
-            // already and starts none (`Want::Running`, issue 186).
-            match want {
-                super::Want::Running => super::Room::NONE,
-                _ => settings.room(),
-            },
+            settings.room(),
             // No turn needs this lane: a turn runs on its own server without one.
             want == super::Want::Needed,
         )?;

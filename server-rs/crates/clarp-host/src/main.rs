@@ -177,15 +177,10 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::child_environment();
     let config = Arc::new(config);
     let clock = host_clock();
-    // Turns nobody waits on wait while the machine is under pressure; the lanes ask it too.
-    let pressure =
-        // The Host's own CPU is its cgroup's only where its turns run in scopes of their own.
-        clarp_host::pressure::Gate::new(
-            Some(config.pressure_dir.clone()),
-            clock.clone(),
-            config.launcher == "systemd",
-        );
-    clarp_host::pressure::install(pressure.clone());
+    // The turns that start their tool anew, counted for the apps; the agents the fleet opens
+    // count in it too.
+    let cold_starts = clarp_host::cold_starts::ColdStarts::new(clock.clone());
+    clarp_host::cold_starts::install(cold_starts.clone());
     let (engine, tables) = engines(&config.engine)
         .ok_or_else(|| format!("there is no engine named `{}`", config.engine))?;
     let engine = slow_disk(engine);
@@ -438,7 +433,7 @@ async fn serve(config: Config) -> Result<(), String> {
         oracle: Arc::default(),
         keeper: Arc::default(),
         quota_keeper: Arc::default(),
-        pressure,
+        cold_starts,
         label_checker: Arc::default(),
         audio: Arc::default(),
         limits,
