@@ -939,7 +939,10 @@ impl Hub {
         };
         let made = json!({"phase": phase, "row_id": row});
         let mut out = Vec::new();
-        self.grow_text((id, "message"), text, &made, turn_id, now, &mut out);
+        // As its row will show it: no hidden block, and no half-written tag at its end
+        // (issue 824). The item and the row never disagree.
+        let shown = clarp_speech::markup::growing_display(text);
+        self.grow_text((id, "message"), &shown, &made, turn_id, now, &mut out);
         out
     }
 

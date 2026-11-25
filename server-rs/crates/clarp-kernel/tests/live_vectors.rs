@@ -537,4 +537,52 @@ fn a_turn_carries_the_rows_read_into_it() {
         .last()
         .cloned();
     assert_eq!(last, Some(json!("u-r25")));
+
+/// A live message is shown as its row will be (issue 824): a hidden block never shows, not even
+/// while it is still being written, and half a tag at its end waits until it is whole. What is
+/// text stays text.
+#[test]
+fn a_live_message_never_shows_a_hidden_block_or_half_a_tag() {
+    let mut hub = Hub::new("e1", "a1", "s1");
+    let shown = |hub: &mut Hub, now: i64| {
+        let (snapshot, _) = hub.snapshot(now).unwrap();
+        snapshot["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == "said")
+            .map(|item| item["text"].as_str().unwrap_or("").to_string())
+            .unwrap_or_default()
+    };
+    hub.begin_turn("s1", "c1", "t-1", Some(5), "user", 10);
+    let steps = [
+        ("The answer", "The answer"),
+        ("The answer <oai-mem-cit", "The answer "),
+        ("The answer <oai-mem-citation>secret notes", "The answer "),
+        (
+            "The answer <oai-mem-citation>secret notes</oai-mem-citation> and <spe",
+            "The answer  and ",
+        ),
+        (
+            "The answer <oai-mem-citation>secret notes</oai-mem-citation> and <speak>more</speak>",
+            "The answer  and <speak>more</speak>",
+        ),
+        (
+            "The answer <oai-mem-citation>secret notes</oai-mem-citation> and <speak>more</speak> x < 5",
+            "The answer  and <speak>more</speak> x < 5",
+        ),
+    ];
+    for (at, (written, expected)) in steps.iter().enumerate() {
+        let at = i64::try_from(at).unwrap();
+        hub.message_text(
+            "said",
+            written,
+            (Some("final"), Some("r-said")),
+            Some("t-1"),
+            20 + at * 10,
+        );
+        let text = shown(&mut hub, 25 + at * 10);
+        assert_eq!(text, *expected, "after {written:?}");
+        assert!(!text.contains("secret") && !text.contains("oai-mem"), "{text}");
+    }
 }

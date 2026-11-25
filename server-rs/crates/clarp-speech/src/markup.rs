@@ -50,6 +50,7 @@ macro_rules! patterns {
 patterns! {
     HIDDEN_BLOCK = r"(?is)<oai-mem-citation\b[^>]*>.*?</oai-mem-citation>|<environment_context\b[^>]*>.*?</environment_context>";
     HIDDEN_OPEN_TAIL = r"(?is)<(?:oai-mem-citation|environment_context)\b[^>]*>.*$";
+    TAG_BEING_WRITTEN = r"<(?:/?[A-Za-z][\w:-]*(?:\s[^<>]*)?|/)?$";
     SPEAK_TAG = r"(?i)</?speak\b[^>]*>";
     VOX_TAG = r"(?i)</?vox\b[^>]*>";
     SSML = r"(?i)</?(?:break|speed|volume|emotion)\b[^>]*/?>";
@@ -98,6 +99,18 @@ fn replace_emotion_tags(text: &str, with: &str) -> String {
 pub fn strip_hidden_blocks(text: &str) -> String {
     let closed = HIDDEN_BLOCK.replace_all(text, "");
     HIDDEN_OPEN_TAIL.replace_all(&closed, "").into_owned()
+}
+
+/// The text of a message still being written, as its row will show it: the hidden blocks taken
+/// out ([`strip_hidden_blocks`], one still arriving too), and a tag at its end that is not whole
+/// yet held back until it is, so that neither a hidden block nor half a tag is ever shown live
+/// (issue 824). A `<` followed by a space or a digit is text, and stays.
+pub fn growing_display(text: &str) -> String {
+    let shown = strip_hidden_blocks(text);
+    match TAG_BEING_WRITTEN.find(&shown) {
+        Some(tag) => shown[..tag.start()].to_string(),
+        None => shown,
+    }
 }
 
 /// Hides team messages from users, including an open tail in a streaming reply.
@@ -269,16 +282,16 @@ fn drop_vox_for_display(text: &str) -> String {
     s.into_iter().collect()
 }
 
-/// The inner text of each closed `<speak>…</speak>` block, in order and as written.
-/// `attributes` also takes an opening tag with attributes (`<speak lang="en">`); without it
-/// only a bare `<speak>` counts. A turn's spoken blocks are read without attributes, as the
-/// Python Host reads them.
 /// What a reply says in writing: its text without its `<speak>` blocks, a block still arriving
 /// included. Empty for a reply that is only spoken.
 pub fn written_part(text: &str) -> String {
     SPEAK_REGION.replace_all(text, "").into_owned()
 }
 
+/// The inner text of each closed `<speak>…</speak>` block, in order and as written.
+/// `attributes` also takes an opening tag with attributes (`<speak lang="en">`); without it
+/// only a bare `<speak>` counts. A turn's spoken blocks are read without attributes, as the
+/// Python Host reads them.
 pub fn speak_blocks(text: &str, attributes: bool) -> Vec<String> {
     let blocks = if attributes {
         &*SPEAK_BLOCK_ATTR
@@ -481,6 +494,24 @@ pub fn spoken_pieces(reply: &str) -> Vec<(String, bool)> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_growing_message_hides_what_its_row_hides_and_waits_for_a_whole_tag() {
+        assert_eq!(growing_display("Plain text."), "Plain text.");
+        assert_eq!(growing_display("Now <"), "Now ");
+        assert_eq!(growing_display("Now <spe"), "Now ");
+        assert_eq!(growing_display("Now </spea"), "Now ");
+        assert_eq!(growing_display("Now <speak lang=\"e"), "Now ");
+        assert_eq!(growing_display("Now <speak>"), "Now <speak>");
+        assert_eq!(growing_display("Done <oai-mem-citation>notes"), "Done ");
+        assert_eq!(
+            growing_display("Done <oai-mem-citation>n</oai-mem-citation>."),
+            "Done ."
+        );
+        // A `<` that is text, not a tag, stays.
+        assert_eq!(growing_display("x < 5"), "x < 5");
+        assert_eq!(growing_display("a <3"), "a <3");
+    }
 
     #[test]
     fn the_written_part_of_a_reply_is_what_is_outside_its_spoken_blocks() {

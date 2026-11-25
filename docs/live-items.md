@@ -63,7 +63,8 @@ Per kind:
 
 **message**: assistant text.
 - `text`: the display text so far (same transformations as the `/log` row:
-  hidden blocks stripped, an incomplete `<speak>`/`<team>` tag held back).
+  hidden blocks stripped, also one still being written, and a tag at the end that is not
+  whole yet held back until it is; voice and team markup stay, as on the row).
 - `phase`: `commentary` (narration between tools, or words the turn has not yet
   decided on) or `final` (an answer). On the Rust Host, a message only grows into an
   answer and never turns back into narration (issue 771). It streams as `commentary`, and
