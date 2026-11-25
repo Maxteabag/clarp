@@ -803,8 +803,8 @@ afterwards (a relaunch as an agent, a janitor), so a row that entered its Conver
 leaves it: in every read, also the whole log, and with the helper's default coordination
 visibility (`show`, source `helper`) under a global `hide`. Agent turns from before the agent became a helper join its Conversation view then. A helper's chat that moved to
 this Host keeps them too: a prompt it brought along (an imported user row of origin `agent`) is
-`conversation` in it, and a chat that was a helper's says so in its row of
-`GET /agents/snapshot` (`helper_chat: true`, present only then; feature `helper_chat`, contract 177), which a move takes along, so it
+`conversation` in it, and a chat that is or was a helper's says so in its row of
+`GET /agents/snapshot` (`helper_chat: true`, present only then, for a helper's own chat as well; feature `helper_chat`, contract 177), which a move takes along, so it
 stays a helper's chat on the new Host whatever the agent's role is.
 Every other chat keeps agent turns out of the Conversation view as above, and `view=session` is
 unchanged.

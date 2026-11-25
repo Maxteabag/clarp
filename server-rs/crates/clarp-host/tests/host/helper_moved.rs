@@ -109,13 +109,19 @@ fn a_helpers_chat_that_moved_here_keeps_the_turns_other_agents_gave_it() {
             "{session}: {chat}"
         );
     }
-    // What a move takes of it says that it was a helper's.
-    let dee = host.get("/agents/snapshot")["agents"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|agent| agent["session"] == "dee")
-        .cloned()
-        .unwrap();
+    // What a move takes of it says that it was a helper's, and a helper's own row says that it
+    // is one, so an app can tell a helper's chat by this field alone.
+    let rows = host.get("/agents/snapshot")["agents"].clone();
+    let row = |session: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    let dee = row("dee");
     assert_eq!(dee["helper_chat"], true, "{dee}");
+    let hal = row("hal");
+    assert_eq!(hal["helper_chat"], true, "{hal}");
 }

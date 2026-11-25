@@ -2156,10 +2156,11 @@ pub fn summary(
         "background_jobs": { "count": 0, "sub_agents": 0 },
     });
     own_provider_fields(&mut row, record);
-    // A chat that was a helper's says so, only where it was one: an agent that moves to
-    // another Host takes it with it, so the turns other agents gave it stay its conversation
-    // there (issue 777).
-    if record.helper_chat {
+    // A chat that is or was a helper's says so, only there: a helper's own chat, and one whose
+    // agent is a helper no more. An app can tell a helper's chat by this field alone, and an
+    // agent that moves to another Host takes it with it, so the turns other agents gave it stay
+    // its conversation there (issue 777).
+    if record.is_helper_chat() {
         row["helper_chat"] = json!(true);
     }
     row
