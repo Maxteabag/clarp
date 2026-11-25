@@ -177,21 +177,9 @@ fn threads(run: &Path) -> PathBuf {
 
 /// A turn of a process of its own takes its conversation's lock shared, and is refused while
 /// a lane holds it: one writer per conversation.
+/// The layer's lock ([`super::guard_exec`]); a Claude turn's program is never the shim itself.
 pub(crate) fn guard_turn(order: &mut ShimOrder, run: &Path, session: &str) -> io::Result<()> {
-    let dir = threads(run);
-    std::fs::create_dir_all(&dir)?;
-    let lock = clarp_shim::lane::thread_lock(&dir, session);
-    let program = std::mem::replace(&mut order.program, "flock".into());
-    let args = std::mem::take(&mut order.args);
-    order.args = vec![
-        "--shared".into(),
-        "--nonblock".into(),
-        "--no-fork".into(),
-        lock.to_string_lossy().into_owned(),
-        program,
-    ];
-    order.args.extend(args);
-    Ok(())
+    super::guard_exec(order, &threads(run), session, Path::new("clarp-shim"))
 }
 
 impl Lane {

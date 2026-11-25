@@ -69,7 +69,7 @@ PLANTS = [
 
     # Who is held at all.
     (MAIN, 'served', 'the driver is known by another word', 'const SERVED: [&str; 2] = ["opencode-turn", clarp_acp::agy::DRIVER];', 'const SERVED: [&str; 2] = ["opencode", clarp_acp::agy::DRIVER];'),
-    (MAIN, 'served', 'the driver is known by its last word', '            .first()\n            .is_some_and(|word| SERVED.contains(&word.as_str())),', '            .last()\n            .is_some_and(|word| SERVED.contains(&word.as_str())),'),
+    (MAIN, 'served', 'the driver is known by its last word', '    } else {\n        args.first()\n    };', '    } else {\n        args.last()\n    };'),
     (MAIN, 'served', 'a served tool is held', '        if self.served {\n', '        if !self.served && self.pid == 0 {\n'),
     (MAIN, 'served', 'a served tool is refused in other words', 'refused("a served tool cannot be held")', 'refused("served")'),
     (MAIN, 'gone', 'a tool that is gone is held', '            if self.leader_exited.load(Ordering::SeqCst) {\n                return refused("the tool is gone");', '            if self.pid == 0 {\n                return refused("the tool is gone");'),

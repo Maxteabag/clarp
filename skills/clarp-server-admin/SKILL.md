@@ -383,7 +383,8 @@ to. An agent may read them, on a Rust Host whose `GET /server-info` lists `lane_
 curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" "$CLARP_SERVER_URL/lane-settings"
 ```
 
-It answers each tool's switch (`codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`), `most`, `memory_mb`,
+It answers each tool's switch (`codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`,
+`opencode_chat_lane`), `most`, `memory_mb`,
 `idle_minutes`, their `ranges`, and `held`: the lanes that run now, in total and per tool
 (`lanes`, `busy`, `memory_mb`), from each lane's own memory reading, with `unanswered` for lanes
 that did not answer within about two seconds. Reading it starts no lane.
@@ -425,6 +426,24 @@ tool's lanes. A Muse lane weighs about 255-300 MB.
 - A lane is `<run>/<agent>-mus.sock`. Its `inspect` shows the session, whether it
   holds it (`loaded`), the claim and the model it gave Muse. A lane turn's Clarp
   tools read their turn's identity from `CLARP_PROVIDER_TURN_FILE`.
+
+## OpenCode and DeepSeek chat turns on a lane (Rust Host)
+
+On a Rust Host built from issue 763 on, an OpenCode or DeepSeek agent's chat turns can run on
+one kept `opencode serve` per agent instead of a new server per turn (about 1.4 s less before
+each turn's first output). One top-level key in the same `config.toml`, read at each turn:
+
+```toml
+opencode_chat_lane = true     # off by default; false rolls back to a server per turn
+```
+
+The idle time and the limits are shared with every tool's lanes (above); a kept OpenCode serve
+weighs about 590 MB. The owner switches it from his apps too (`POST /lane-settings`). An agent's first turn, and
+any turn whose configuration changed, runs on its own server while the lane starts beside it.
+A lane is `<run>/<agent>-ocl.sock`; its `inspect` shows the session, the serve's pid and version,
+and its memory. It runs the Host's `CLARP_OPENCODE_PROGRAM` and keeps only a 1.x serve. A change
+in the words of the agent's `opencode.json`, the global OpenCode configuration or `auth.json`
+starts a new lane. Steered words wait for their own turn on this lane for now.
 
 ## Docker Container Administration
 

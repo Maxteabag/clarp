@@ -44,7 +44,7 @@ PLANTS = [
     (MAIN, 'stop', 'the abort wait continues after leader exit', '                    !self.leader_exited.load(Ordering::SeqCst)\n', '                    true\n'),
     ('clarp-shim/src/opencode.rs', 'served', 'a shim-directed abort is mistaken for a completed turn',
      'let _ = kill(Pid::this(), Signal::SIGTERM);', 'std::process::exit(0);'),
-    ('clarp-shim/src/opencode.rs', 'served', 'the loopback JSON request loses its body',
+    ('clarp-shim/src/opencode_http.rs', 'served', 'the loopback JSON request loses its body',
      '.with_body(serde_json::to_vec(body)?)', '.with_body(Vec::new())'),
 
     (MAIN, 'plain', 'observing the leader implicitly cancels its background work',
@@ -56,16 +56,16 @@ PLANTS = [
      'to_spool.send(ToSpool::Last(entry, done))', 'to_spool.send(ToSpool::Now(entry, done))'),
     (MAIN, 'plain', 'the shim reaps and leaves while its group awaits escalation',
      '.wait_while(stage, |s| matches!(s, StopStage::Asked))', '.wait_while(stage, |_| false)'),
-    ('clarp-shim/src/opencode.rs', 'served', 'loopback requests omit their per-turn credentials',
+    ('clarp-shim/src/opencode_http.rs', 'served', 'loopback requests omit their per-turn credentials',
      '.with_header("Authorization", &self.auth)', '.with_header("Authorization", "unknown")'),
-    ('clarp-shim/src/opencode.rs', 'served', 'event lines are never decoded',
+    ('clarp-shim/src/opencode_http.rs', 'served', 'event lines are never decoded',
      'payload.strip_prefix(b"data:")','payload.strip_prefix(b"other:")'),
 
-    ('clarp-shim/src/opencode.rs', 'http', 'redirects leave the loopback endpoint',
+    ('clarp-shim/src/opencode_http.rs', 'http', 'redirects leave the loopback endpoint',
      '.with_follow_redirects(false)', '.with_follow_redirects(true)'),
-    ('clarp-shim/src/opencode.rs', 'http', 'a refused connection status is accepted',
+    ('clarp-shim/src/opencode_http.rs', 'http', 'a refused connection status is accepted',
      '!(200..300).contains(&reply.status_code)', 'reply.status_code >= 500'),
-    ('clarp-shim/src/opencode.rs', 'http', 'a short successful JSON prefix is accepted as the complete body',
+    ('clarp-shim/src/opencode_http.rs', 'http', 'a short successful JSON prefix is accepted as the complete body',
      'n != bytes.len() as u64','n < bytes.len() as u64'),
 
 ]

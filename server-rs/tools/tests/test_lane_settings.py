@@ -68,3 +68,9 @@ def test_the_shared_memory_budget_is_kept_too(tmp_path):
     config = "lane_memory_mb = 4096\n[server]\n"
     assert tomllib.loads(carried_top(config, tmp_path)) == {"lane_memory_mb": 4096}
     assert "install-host: lane_memory_mb in " in run_carry("lane_memory_mb = true\n", tmp_path).stderr
+
+
+def test_the_opencode_switch_is_kept_too(tmp_path):
+    config = "opencode_chat_lane = true\n[server]\n"
+    assert tomllib.loads(carried_top(config, tmp_path)) == {"opencode_chat_lane": True}
+    assert "install-host: opencode_chat_lane in " in run_carry("opencode_chat_lane = 1\n", tmp_path).stderr

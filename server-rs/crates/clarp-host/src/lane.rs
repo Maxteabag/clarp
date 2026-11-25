@@ -25,6 +25,7 @@ pub(crate) mod claude;
 pub(crate) mod codex;
 mod holder;
 pub(crate) mod muse;
+pub(crate) mod opencode;
 mod scope;
 
 use std::fs::OpenOptions;
@@ -50,10 +51,12 @@ pub(crate) enum Tool {
     Codex,
     Claude,
     Muse,
+    /// OpenCode's `serve`, for agents of `opencode` and of `deepseek` (issue 763).
+    OpenCode,
 }
 
 impl Tool {
-    pub(crate) const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Muse];
+    pub(crate) const ALL: [Self; 4] = [Self::Codex, Self::Claude, Self::Muse, Self::OpenCode];
 
     /// The tool of an agent's backend, where that tool has a lane.
     pub(crate) fn of(backend: &str) -> Option<Self> {
@@ -61,6 +64,7 @@ impl Tool {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
             "muse" => Some(Self::Muse),
+            "opencode" | "deepseek" => Some(Self::OpenCode),
             _ => None,
         }
     }
@@ -71,6 +75,7 @@ impl Tool {
             Self::Codex => "codex_chat_lane",
             Self::Claude => "claude_chat_lane",
             Self::Muse => "muse_chat_lane",
+            Self::OpenCode => "opencode_chat_lane",
         }
     }
 
@@ -80,6 +85,7 @@ impl Tool {
             Self::Codex => "-cxg.sock",
             Self::Claude => "-cll.sock",
             Self::Muse => "-mus.sock",
+            Self::OpenCode => clarp_shim::opencode_lane::SOCKET_SUFFIX,
         }
     }
 
@@ -89,6 +95,7 @@ impl Tool {
             Self::Codex => "codex",
             Self::Claude => "claude",
             Self::Muse => "muse",
+            Self::OpenCode => "opencode",
         }
     }
 
@@ -98,6 +105,7 @@ impl Tool {
             Self::Codex => "Codex",
             Self::Claude => "Claude",
             Self::Muse => "Muse",
+            Self::OpenCode => "OpenCode",
         }
     }
 
@@ -113,6 +121,8 @@ impl Tool {
             // An idle `muse serve` with its session, measured on Muse 1.4.25 (issue 762):
             // 255 MiB of PSS idle, 294-300 MiB after a few turns.
             Self::Muse => 300 * MIB,
+            // An `opencode serve` after a turn or two: 571-590 MiB of PSS (issue 763).
+            Self::OpenCode => 590 * MIB,
         }
     }
 }
@@ -268,6 +278,8 @@ impl Room {
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// claude_chat_lane = true       # Claude chat turns run on a kept Claude Code (default false)
 /// muse_chat_lane = true         # Muse chat turns run on the agent's lane (default false)
+/// opencode_chat_lane = true     # OpenCode and DeepSeek chat turns run on the agent's kept
+///                               # `opencode serve` (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
 /// lane_limits = "auto"          # from the memory free (default), or "fixed" by the two below
 /// lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes
@@ -461,6 +473,35 @@ fn owners(run: &Path, agent_id: &str) -> bool {
             .is_ok_and(|at| at.elapsed().is_ok_and(|age| age <= within))
     };
     fresh("owner-turn", OWNERS_TURN) || fresh("owner-view", OWNERS_VIEW)
+}
+
+/// A turn of its own process holds its conversation's lock (under `locks`, named by `thread`)
+/// shared for its whole life: `flock --shared --nonblock --no-fork LOCK` before its program. A
+/// lane holds the same lock exclusive for as long as its tool lives, so the conversation never
+/// has two writers; a turn that finds it held fails at once. `shim` is the launcher's own shim,
+/// named here for a program given as `clarp-shim`, which the launcher would otherwise name.
+pub(crate) fn guard_exec(
+    order: &mut clarp_actor::ShimOrder,
+    locks: &Path,
+    thread: &str,
+    shim: &Path,
+) -> io::Result<()> {
+    std::fs::create_dir_all(locks)?;
+    let lock = clarp_shim::lane::thread_lock(locks, thread);
+    if order.program == "clarp-shim" {
+        order.program = shim.to_string_lossy().into_owned();
+    }
+    let program = std::mem::replace(&mut order.program, "flock".into());
+    let args = std::mem::take(&mut order.args);
+    order.args = vec![
+        "--shared".into(),
+        "--nonblock".into(),
+        "--no-fork".into(),
+        lock.to_string_lossy().into_owned(),
+        program,
+    ];
+    order.args.extend(args);
+    Ok(())
 }
 
 /// Where an agent's lane keeps the identity of its running turn.

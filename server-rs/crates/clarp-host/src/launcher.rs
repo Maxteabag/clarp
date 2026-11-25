@@ -94,6 +94,13 @@ impl Launcher {
         Some(serde_json::json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":command,"timeout":3}]}]}}).to_string())
     }
 
+    /// The shim this launcher starts.
+    pub(crate) fn shim(&self) -> &Path {
+        match self {
+            Self::Direct { shim } | Self::SystemdScope { shim } => shim,
+        }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::Direct { .. } => "direct",

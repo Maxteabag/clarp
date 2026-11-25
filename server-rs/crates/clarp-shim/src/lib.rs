@@ -14,6 +14,7 @@ pub mod lane;
 pub mod lane_spool;
 pub mod muse_lane;
 pub mod muse_turn;
+pub mod opencode_lane;
 
 /// The environment variable that tells a hook where its shim listens.
 pub const SOCKET_ENV: &str = "CLARP_SHIM_SOCKET";

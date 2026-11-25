@@ -175,6 +175,7 @@ pub struct DelegationState {
 mod claude_lane;
 mod muse_lane;
 mod native_goal;
+mod opencode_lane;
 
 enum Ask {
     /// What the launch of a Claude lane's turn asks of the agent's thread.
@@ -204,6 +205,9 @@ enum Ask {
     MuseTake,
     /// The Muse lane's take of the session answered.
     MuseTaken,
+    /// The OpenCode lane refused an attempt before anything reached OpenCode: it runs on its
+    /// own server.
+    OpenCodeOwnServer(Box<ShimOrder>),
     SetMove {
         to: Option<clarp_kernel::agent_moves::Target>,
         answer: Answer<clarp_kernel::agent_moves::Receipt>,
@@ -610,6 +614,7 @@ impl Ask {
             Self::NativeGoalWatchLost => "NativeGoalWatchLost",
             Self::NativeGoalReconciled(..) => "NativeGoalReconciled",
             Self::NativeGoalRetired { .. } => "NativeGoalRetired",
+            Self::OpenCodeOwnServer(..) => "OpenCodeOwnServer",
             Self::SetMove { .. } => "SetMove",
             Self::LaunchPermit { .. } => "LaunchPermit",
             Self::RefreshTelling => "RefreshTelling",
@@ -1640,6 +1645,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         claude_bypass: None,
         codex_bypass: None,
         muse: muse_lane::State::default(),
+        opencode: opencode_lane::OpenCode::default(),
         setup,
         actor: None,
         tx: tx.clone(),
@@ -1717,6 +1723,8 @@ struct Worker {
     codex_bypass: Option<(TurnId, u32)>,
     /// The attempt the Muse lane gave back: it runs on exec.
     muse: muse_lane::State,
+    /// The agent's OpenCode lane, for an agent of OpenCode or DeepSeek (issue 763).
+    opencode: opencode_lane::OpenCode,
     setup: Setup,
     actor: Option<Actor>,
     /// The way to this thread, for the turns' threads.
@@ -3130,6 +3138,10 @@ impl Worker {
                 self.muse_missed(order);
                 return Ok(());
             }
+            Ask::OpenCodeOwnServer(order) => {
+                self.opencode_own_server(order);
+                return Ok(());
+            }
             other => other,
         };
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
@@ -3413,7 +3425,8 @@ impl Worker {
             | Ask::CodexLaneFull(_)
             | Ask::MuseMissed(_)
             | Ask::MuseTake
-            | Ask::MuseTaken => unreachable!("lane asks handled above"),
+            | Ask::MuseTaken
+            | Ask::OpenCodeOwnServer(_) => unreachable!("lane asks handled above"),
             Ask::SetMove { to, answer } => {
                 let held = self
                     .held
@@ -4835,6 +4848,13 @@ impl Worker {
                 self.launch_on_muse_lane(order);
                 return;
             }
+            // An OpenCode turn runs on the agent's kept server when it is ready now.
+            Action::Launch(order) if order.opening.is_none() && self.opencode_lane() => {
+                match self.opencode_on_lane(order) {
+                    Some(order) => Action::Launch(order),
+                    None => return,
+                }
+            }
             other => other,
         };
         let tx = self.tx.clone();
@@ -4845,10 +4865,35 @@ impl Worker {
                         .actor
                         .as_ref()
                         .and_then(|actor| actor.status().backend_session)
-                    && let Err(error) = crate::lane::codex::guard_exec(
+                    && let Err(error) = crate::lane::guard_exec(
                         &mut order,
-                        &self.setup.profile.run_dir,
+                        &crate::lane::codex::locks(&self.setup.profile.run_dir),
                         &thread,
+                        self.setup.launcher.shim(),
+                    )
+                {
+                    tell(
+                        &tx,
+                        order.turn,
+                        order.attempt,
+                        Told::Failed(error.to_string()),
+                    );
+                    return;
+                }
+                // An OpenCode turn on its own server holds its session's lock shared, so the
+                // agent's lane never takes the session while this server may write it.
+                let opencode = self.opencode_beside(&order);
+                let opencode_session = opencode
+                    .as_ref()
+                    .and_then(|_| crate::lane::opencode::Words::of(&order).ok())
+                    .map(|words| words.session)
+                    .filter(|session| !session.is_empty());
+                if let Some(session) = &opencode_session
+                    && let Err(error) = crate::lane::guard_exec(
+                        &mut order,
+                        &crate::lane::opencode::locks(&self.setup.profile.run_dir),
+                        session,
+                        self.setup.launcher.shim(),
                     )
                 {
                     tell(
@@ -5063,6 +5108,11 @@ impl Worker {
                                     }
                                 }
                             }
+                        }
+                        if let Some(opencode) = opencode {
+                            let session = opencode_session.unwrap_or_default();
+                            opencode.make_way(&session);
+                            opencode.start(session);
                         }
                         if launch_permitted(&tx, turn, attempt) {
                             launcher.launch_and_follow(&order, &starting, &|told| {
@@ -6428,7 +6478,8 @@ fn refuse_for(
                 // An agent that is gone runs no attempt.
                 | Ask::MuseMissed(_)
                 | Ask::MuseTake
-                | Ask::MuseTaken,
+                | Ask::MuseTaken
+                | Ask::OpenCodeOwnServer(_),
             ) => {}
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),

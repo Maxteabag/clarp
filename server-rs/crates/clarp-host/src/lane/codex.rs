@@ -16,32 +16,9 @@ use sha2::{Digest, Sha256};
 
 use super::{Endpoint, Place, Settings, TURN_FILE_ENV, Tool};
 
-fn thread_lock(run: &Path, thread: &str) -> io::Result<PathBuf> {
-    let locks = run.join("codex-threads");
-    std::fs::create_dir_all(&locks)?;
-    Ok(clarp_shim::codex_lane::thread_lock(&locks, thread))
-}
-
-/// Regular exec keeps a read lease. A lane requires the exclusive lease and
-/// holds it until its app-server has exited, even when another agent has
-/// taken up the same native thread.
-pub(crate) fn guard_exec(
-    order: &mut clarp_actor::ShimOrder,
-    run: &Path,
-    thread: &str,
-) -> io::Result<()> {
-    let lock = thread_lock(run, thread)?;
-    let program = std::mem::replace(&mut order.program, "flock".into());
-    let args = std::mem::take(&mut order.args);
-    order.args = vec![
-        "--shared".into(),
-        "--nonblock".into(),
-        "--no-fork".into(),
-        lock.to_string_lossy().into_owned(),
-        program,
-    ];
-    order.args.extend(args);
-    Ok(())
+/// Where a Codex agent's threads are locked, in the run folder.
+pub(crate) fn locks(run: &Path) -> PathBuf {
+    run.join("codex-threads")
 }
 
 #[derive(Clone)]
@@ -194,7 +171,7 @@ impl Lane {
             "{:x}",
             Sha256::digest(format!("{resume}{own_home}").as_bytes())
         );
-        let locks = profile.run_dir.join("codex-threads");
+        let locks = locks(&profile.run_dir);
         std::fs::create_dir_all(&locks)?;
         if let Some(thread) = thread {
             resume["threadId"] = json!(thread);

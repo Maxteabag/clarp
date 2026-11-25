@@ -49,6 +49,7 @@ unless switched on:
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 claude_chat_lane = true       # Claude chat turns after the first run on a kept Claude Code (default false)
 muse_chat_lane = true         # Muse chat turns run on lanes (default false)
+opencode_chat_lane = true     # OpenCode and DeepSeek chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
 lane_limits = "auto"          # the limits follow the free memory (the default), or "fixed"
 lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes (the default)
@@ -65,8 +66,9 @@ The owner changes them from his apps too (issue 779, feature `lane_settings`): `
 /lane-settings` says them with what the lanes hold now (`docs/protocol.md`). An edit by hand works
 as before.
 
-- **One switch per tool.** `codex_chat_lane`, `claude_chat_lane` and `muse_chat_lane`. The
-  switch for OpenCode comes with its driver.
+- **One switch per tool.** `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane` and
+  `opencode_chat_lane` (one switch for the `opencode` and `deepseek` backends, which run one
+  program on one session store).
 - **The idle time and the count are shared by every tool's lanes.** They keep the names they
   had when Codex had the only lane, so an installed config means exactly what it meant.
 - **The limits follow the machine's memory unless fixed** (the owner's decision of 25 Nov 2026,
@@ -394,8 +396,8 @@ process, right after that answer. Muse does so 0.08-0.4 s after the answer, with
 ## Fallback: a process per turn
 
 Every tool without a lane, and every tool whose switch is off, runs a process per turn exactly
-as D2 says. Today that is Muse, OpenCode, Antigravity and Grok, Codex with `codex_chat_lane` off
-and Claude with `claude_chat_lane` off. A Codex agent then holds the shared thread lock for each `codex exec`
+as D2 says. Today that is Antigravity and Grok, and Codex, Claude, Muse, OpenCode and DeepSeek
+with their switches off. A Codex agent then holds the shared thread lock for each `codex exec`
 turn, so a goal's lane and an exec turn never write one thread together.
 
 Some turns always run per turn, even with the switch on:
@@ -412,7 +414,9 @@ reuse-or-restart rule, `once_more`, the turn file) and the shim's `lane.rs` (the
 `lane_own.rs`, `lane_login.rs`, `lane_socket.rs` and `lane_memory.rs`. Its drivers are Codex's
 app-server (`lane/codex.rs` in the Host, `codex_lane_runtime.rs` in the shim) and Claude Code's
 stream-json (`lane/claude.rs` and `agent/claude_lane.rs` in the Host, `claude_lane.rs` and
-`claude_lane_runtime.rs` in the shim).
+`claude_lane_runtime.rs` in the shim), and OpenCode's serve (`lane/opencode.rs` and
+`agent/opencode_lane.rs` in the Host, `opencode_lane_runtime.rs` in the shim; see "OpenCode's
+lane" below).
 
 No trait or hook is built for drivers that do not exist yet (REBUILD.md section 5). Each
 driver's pull request adds what it needs, next to what Codex has, and moves into the layer what
@@ -460,18 +464,56 @@ two drivers then share. Named here so that nothing is forgotten:
     synced before anything reaches the tool, then each line the driver calls, the lane lines,
     and one end);
   - forks on the lane (`session/fork`) wait until Muse forks exist in Clarp.
-- **OpenCode** (`opencode serve`, issue 763):
-  - its switch;
-  - a spawn with a death signal and a process group of its own, since its serve does not end
-    with its input;
-  - a neutral claim spool writer for its copied event lines;
-  - its account read from `auth.json`;
-  - content hashes of its config files in the digest;
-  - its end of claim at `session.idle`;
-  - the lane taking the lock exclusive only after the per-turn serve is gone.
+- **OpenCode** (`opencode serve`, issue 763): built, below.
 
 Every driver runs its claims in the lane process, as Codex does. No kept process is lent to a
 separate per-turn driver.
+
+## OpenCode's lane
+
+Issue 763. One `opencode serve` per agent, for agents of `opencode` and `deepseek`, while
+`opencode_chat_lane` is on. Per agent, never shared by agents: a serve's tools inherit its
+environment (the agent's session name, its turn file, `OPENCODE_PERMISSION`), and one shared
+serve would be one point of failure for every such agent.
+
+- **The process.** `clarp-shim opencode-lane SOCKET PROGRAM OPTIONS`, started through the
+  launcher's lane command, in a scope of its own. It makes a password, starts the serve on
+  127.0.0.1 with it in the serve's environment only, and keeps the HTTP client itself: the
+  password never leaves the lane process. The serve runs in a process group of its own, under
+  `setpriv --pdeathsig TERM` where `setpriv` is there, so a lane that is killed takes it along
+  (the workspace forbids the unsafe `pre_exec` that would say it otherwise).
+- **The program** is the Host's resolved one (`CLARP_OPENCODE_PROGRAM`, the owner's 1.18.33 pin),
+  made absolute by the Host: the lane never looks it up on PATH. At start the lane asks the
+  serve's `/global/health` and leaves when its version is not of the 1.x line (2.x cannot read
+  Clarp's sessions).
+- **Ready with no session.** The lane warms the agent's directory (`GET /session`), opens the
+  event stream, weighs itself, and says `ready`.
+- **The hand-over.** A turn on its own serve runs under `flock --shared` on the session's lock
+  (`<run>/opencode-sessions/`). The lane takes that lock exclusive with its first claim, without
+  waiting: while it is held the claim is refused before its spool exists, and the same attempt
+  runs on its own serve at once. A lane that holds the session lets it go (retired) before a turn
+  that must run on its own serve.
+- **The lock is taken whether or not the switch is on.** Every OpenCode or DeepSeek turn that
+  names a session runs under that `flock --shared --nonblock`, as Codex's exec turns do, so a
+  lane left from when the switch was on can never write beside it. The Host needs `flock`
+  (util-linux) for these turns.
+- **A turn on the lane.** The Host gives it only when the lane answers within 0.5 s, is free, was
+  started with the same digest, and holds this session or none. The lane makes the spool, writes
+  the session line and the same event lines `opencode-turn` prints, answers permissions and
+  questions as it does, and ends the claim at `session.idle`.
+- **Stop** is `POST /session/:id/abort`; the idle that follows ends the turn as stopped and the
+  serve stays. A serve that does not go idle within the Stop's grace is killed with its group and
+  the lane leaves.
+- **Restart.** The digest is computed at each turn's start: the program's path and (for a wrapper
+  up to 1 MiB) its words, the agent's folder, the environment the serve inherits, and the
+  contents (never sizes or times) of `opencode.json` and `opencode.jsonc` from the agent's
+  folder up to its worktree's root, `.opencode/` there, the global configuration and `auth.json`.
+  A different digest runs the turn on its own serve and starts a new lane beside it.
+- **Death.** A serve that exits under a turn fails that turn ("OpenCode server stopped before the
+  turn finished"), and the lane leaves; the next turn runs on its own serve while a new lane
+  starts.
+- **Steered words** wait for a turn of their own on this lane for now; the read and settle lines
+  for OpenCode come with the generic steering lines of the Claude driver.
 
 ## What step 2 (Claude) must handle: what assumes a fresh Claude process per turn
 

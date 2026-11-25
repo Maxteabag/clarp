@@ -36,6 +36,7 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert_eq!(read["codex_chat_lane"], false, "{read}");
     assert_eq!(read["claude_chat_lane"], false, "{read}");
     assert_eq!(read["muse_chat_lane"], false, "{read}");
+    assert_eq!(read["opencode_chat_lane"], false, "{read}");
     assert_eq!(read["most"], 6, "{read}");
     assert_eq!(read["memory_mb"], 2200, "{read}");
     assert_eq!(read["idle_minutes"], 15, "{read}");
@@ -52,6 +53,7 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     );
     assert_eq!(read["held"]["lanes"], 0, "{read}");
     assert_eq!(read["held"]["tools"]["codex"]["lanes"], 0, "{read}");
+    assert_eq!(read["held"]["tools"]["opencode"]["lanes"], 0, "{read}");
 
     // An agent's tools read it, and may not change it; nor may a request that names a turn.
     let tools = clarp_host::tool_token(token);
@@ -107,6 +109,11 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
             json!({"muse_chat_lane": "on"}),
             "wrong_type",
             "muse_chat_lane must be true or false",
+        ),
+        (
+            json!({"opencode_chat_lane": "yes"}),
+            "wrong_type",
+            "opencode_chat_lane must be true or false",
         ),
     ] {
         let (status, answer) = host.ask("POST", "/lane-settings", Some(&body));
@@ -178,6 +185,7 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert!(codex["memory_mb"].as_u64().unwrap() > 0, "{read}");
     assert_eq!(read["held"]["tools"]["claude"]["lanes"], 0, "{read}");
     assert_eq!(read["held"]["tools"]["muse"]["lanes"], 0, "{read}");
+    assert_eq!(read["held"]["tools"]["opencode"]["lanes"], 0, "{read}");
 
     // A key the file did not have is added where the Host reads it.
     let changed = host.post("/lane-settings", json!({"memory_mb": 3000}));
@@ -197,6 +205,24 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert_eq!(sent_back["idle_minutes"], 15, "{sent_back}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
     assert!(!text.contains("codex_lane_idle_minutes"), "{text}");
+
+    // OpenCode's switch (issue 763) is one of them: written where the Host reads it, said back,
+    // and told to the apps.
+    let changed = host.post("/lane-settings", json!({"opencode_chat_lane": true}));
+    assert_eq!(changed["opencode_chat_lane"], true, "{changed}");
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        written.find("opencode_chat_lane = true").unwrap() < written.find("[server]").unwrap(),
+        "{written}"
+    );
+    assert_eq!(host.get("/lane-settings")["opencode_chat_lane"], true);
+    wait_for("OpenCode's switch told to the apps", || {
+        events.lock().unwrap().iter().any(|event| {
+            event["type"] == "lane-settings-updated" && event["opencode_chat_lane"] == true
+        })
+    });
+    let changed = host.post("/lane-settings", json!({"opencode_chat_lane": false}));
+    assert_eq!(changed["opencode_chat_lane"], false, "{changed}");
 }
 
 /// Issue 834. `lane_ceiling` bounds nothing since contract 186: a file that carries one (the live

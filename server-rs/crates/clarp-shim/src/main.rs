@@ -29,6 +29,9 @@ mod lane_own;
 mod lane_socket;
 mod muse_lane_runtime;
 mod opencode;
+mod opencode_follow;
+mod opencode_http;
+mod opencode_lane_runtime;
 mod tool_child;
 
 use std::io::{ErrorKind, Read, Write};
@@ -69,6 +72,24 @@ const HOLD_RETRY_WINDOW: Duration = Duration::from_millis(10);
 /// The drivers a served tool is run through: the shim's own program, with one of these words
 /// first.
 const SERVED: [&str; 2] = ["opencode-turn", clarp_acp::agy::DRIVER];
+
+/// Whether the tool is run through one of the shim's own drivers ([`SERVED`]): its first word,
+/// or the program's first word under the `flock --shared --nonblock --no-fork LOCK` an OpenCode
+/// turn's session lock puts before it (issue 763).
+fn served(program: &str, args: &[String]) -> bool {
+    let first = if Path::new(program)
+        .file_name()
+        .is_some_and(|name| name == "flock")
+        && args
+            .get(..3)
+            .is_some_and(|flags| flags == ["--shared", "--nonblock", "--no-fork"])
+    {
+        args.get(5)
+    } else {
+        args.first()
+    };
+    first.is_some_and(|word| SERVED.contains(&word.as_str()))
+}
 const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";
 
 struct Args {
@@ -1424,10 +1445,7 @@ fn run(args: Args) -> Result<u8, String> {
         input,
         printed,
         errors,
-        served: args
-            .program_args
-            .first()
-            .is_some_and(|word| SERVED.contains(&word.as_str())),
+        served: served(&args.program, &args.program_args),
         proc: PathBuf::from("/proc"),
         hold: Mutex::default(),
         hold_changed: Condvar::new(),
@@ -1583,6 +1601,16 @@ fn main() -> ExitCode {
             }
         };
     }
+    if argv.peek().is_some_and(|word| word == "opencode-lane") {
+        argv.next();
+        return match opencode_lane_runtime::from_args(argv) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("clarp-shim: OpenCode lane: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if argv.peek().is_some_and(|word| word == "opencode-turn") {
         argv.next();
         return match opencode::run(&argv.next().unwrap_or_else(|| "opencode".into())) {
@@ -1622,6 +1650,33 @@ fn main() -> ExitCode {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_served_driver_is_known_under_the_session_lock_too() {
+        let words = |list: &[&str]| list.iter().map(|w| (*w).to_string()).collect::<Vec<_>>();
+        assert!(served(
+            "/s/clarp-shim",
+            &words(&["opencode-turn", "opencode"])
+        ));
+        let locked = words(&[
+            "--shared",
+            "--nonblock",
+            "--no-fork",
+            "/run/opencode-sessions/x.lock",
+            "/s/clarp-shim",
+            "opencode-turn",
+            "opencode",
+        ]);
+        assert!(served("flock", &locked));
+        assert!(served("/usr/bin/flock", &locked));
+        // A lock around another tool, or another program, is no served driver.
+        assert!(!served(
+            "flock",
+            &words(&["--shared", "--nonblock", "--no-fork", "/l", "codex", "exec"])
+        ));
+        assert!(!served("codex", &locked));
+        assert!(!served("opencode", &words(&["run", "opencode-turn"])));
+    }
 
     /// A `Control` as `run` makes it, for a stand-in tool: a `sleep` in a process group of its
     /// own, so that what is signalled reaches nothing else. The pipes are the test's: nothing

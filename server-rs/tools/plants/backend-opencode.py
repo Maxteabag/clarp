@@ -57,13 +57,13 @@ rules('clarp-shim/src/opencode.rs','host',[
     ('the server binds to an unusable loopback address', '"--hostname", "127.0.0.1"', '"--hostname", "127.0.0.2"'),
     ('prompts go to another path', '{session}/prompt_async', '{session}/bad_prompt'),
     ('the abort goes to another path', '{path}/abort', '{path}/stop'),
-    ('a resumed session id can change', 'result["id"].as_str() != Some(old)', 'result["id"].as_str().is_none()'),
-    ('the wrong permission is submitted', '"reply":"once"', '"reply":"always"'),
-    ('the requested effort is lost', 'body["variant"] = request["effort"].clone()', 'body["variant"] = Value::Null'),
     ('native session names are omitted', '"sessionID":sid', '"missing":sid'),
-    ('the working directory is sent under another key', '?directory={}', '?cwd={}'),
     ('the fallback resumes no session', 'req["session"].as_str().unwrap_or("")', '""'),
 ])
+PLANTS.append(('clarp-shim/src/opencode_http.rs', 'host', 'a resumed session id can change', 'result["id"].as_str() != Some(old)', 'result["id"].as_str().is_none()'))
+PLANTS.append(('clarp-shim/src/opencode_follow.rs', 'host', 'the wrong permission is submitted', '"reply":"once"', '"reply":"always"'))
+PLANTS.append(('clarp-shim/src/opencode_follow.rs', 'host', 'the requested effort is lost', 'body["variant"] = json!(effort)', 'body["variant"] = Value::Null'))
+PLANTS.append(('clarp-shim/src/opencode_http.rs', 'host', 'the working directory is sent under another key', '?directory={}', '?cwd={}'))
 rules('clarp-backend/src/history/opencode.rs','history',[
     ('successful tools remain running', '_ => "ok",', '_ => "running",'),
     ('tool failures are successful', '"error" => "error",', '"error" => "ok",'),
@@ -124,7 +124,10 @@ PLANTS.append((HISTORY, "history", 'history rule changed: if Some(i) != last', '
 PLANTS.append((HISTORY, "history", 'history rule changed: role == "assistant" && !failed', 'role == "assistant" && !failed', 'role == "assistant" && failed'))
 RUNS['port']=['test','-p','clarp-shim','--bin','clarp-shim','announcements_are_loopback_only_bounded_and_complete']
 DRIVER='clarp-shim/src/opencode.rs'
-rules(DRIVER,'port',[
+# The server's HTTP side and a turn's events, which the per-turn driver and the lane share (issue 763).
+HTTP='clarp-shim/src/opencode_http.rs'
+FOLLOW='clarp-shim/src/opencode_follow.rs'
+rules(HTTP,'port',[
     ('a zero TCP port is used', '.filter(|n| *n != 0)', '.filter(|_| true)'),
     ('a port parsed at end of file is lost','chain((n == 0).then_some', 'chain((n != 0).then_some'),
     ('an oversized token is accepted','&& token.len() <= 8192','&& true'),
@@ -146,17 +149,19 @@ rules(HISTORY,'host',[
 PLANTS.append(('clarp-shim/src/main.rs', 'stop', 'an uncooperative descendant survives an early driver exit',
                'Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);',
                'if !self.leader_exited.load(Ordering::SeqCst) { Self::signal(self.pid, &self.to_spool, Signal::SIGKILL); }'))
-rules(DRIVER, 'host', [
+rules(HTTP, 'host', [
     ('a new session has no permissions set', '"permission":rules', '"ignored":rules'),
     ('a resumed session is created afresh', 'if old.is_empty()', 'if !old.is_empty()'),
-    ('child permission prompts stay unanswered', 'sessions.insert(id.to_string());', 'sessions.remove(id);'),
+])
+rules(FOLLOW, 'host', [
+    ('child permission prompts stay unanswered', 'self.sessions.insert(id.to_string());', 'self.sessions.remove(id);'),
     ('a question is sent to the permission route', 'if kind == "permission.asked"', 'if kind == "question.asked"'),
-    ('a permission of another session is approved', 'if props["sessionID"]\n                    .as_str()\n                    .is_some_and(|id| sessions.contains(id))',
+    ('a permission of another session is approved', 'if props["sessionID"]\n                    .as_str()\n                    .is_some_and(|id| self.sessions.contains(id))',
         'if props["sessionID"].is_string()'),
-    ('an idle before the first step ends the turn', '"session.idle" if mine && busy => break', '"session.idle" if mine => break'),
-    ('main session events are mistaken for foreign events', 'let mine = props["sessionID"].as_str() == Some(&sid)', 'let mine = props["sessionID"].as_str() != Some(&sid)'),
+    ('an idle before the first step ends the turn', '"session.idle" if mine && self.busy => return Ok(true)', '"session.idle" if mine => return Ok(true)'),
+    ('main session events are mistaken for foreign events', 'let mine = props["sessionID"].as_str() == Some(&self.sid)', 'let mine = props["sessionID"].as_str() != Some(&self.sid)'),
     ('the model pair goes under another key', 'body["model"] = model', 'body["other"] = model'),
-    ('the prompt is sent as a non-text part', '"parts":[{"type":"text"', '"parts":[{"type":"other"'),
+    ('the prompt is sent as a non-text part', '"parts":[{"type":"text","text":text}]', '"parts":[{"type":"other","text":text}]'),
 ])
 rules('clarp-host/src/logins/opencode.rs','host',[
     ('a picker model is grouped under another key','model["model_provider"] = json!(provider)','model["provider"] = json!(provider)'),
@@ -178,5 +183,20 @@ RUNS['spool_end'] = ['test','-p','clarp-shim','--bin','clarp-shim','the_last_spo
 rules(MAIN,'spool_end',[
     ('a queued kill is written after the final record', 'let last = matches!(&message, ToSpool::Last(..));', 'let last = false;'),
 ])
+# The OpenCode lane: one kept serve per agent (issue 763).
+RUNS.update(lane_digest=['test', '-p', 'clarp-host', '--lib', 'lane::opencode'],
+            lane_lib=['test', '-p', 'clarp-shim', '--lib', 'opencode_lane'],
+            lane_host=['test', '--test', 'host', '--test', 'shim', '--', 'opencode_chat_lane'])
+LANE_HOST = 'clarp-host/src/lane/opencode.rs'
+LANE_SHIM = 'clarp-shim/src/opencode_lane_runtime.rs'
+PLANTS.append((LANE_HOST, 'lane_digest', 'a moved pin keeps the old lane',
+               'put("program-content", &program_identity(&program));', ''))
+PLANTS.append(('clarp-shim/src/opencode_lane.rs', 'lane_lib', 'a 2.x server is kept',
+               "version.split('.').next() == Some(\"1\")", 'true'))
+PLANTS.append((LANE_HOST, 'lane_host', 'a lane started otherwise takes the turn',
+               '            && state.options == digest\n', ''))
+PLANTS.append((LANE_SHIM, 'lane_host', 'a stopped lane turn reads as completed',
+               'Ok(true) if stopping => self.end(None, Some(nix::libc::SIGINT), None),',
+               'Ok(true) if stopping => self.end(Some(0), None, None),'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

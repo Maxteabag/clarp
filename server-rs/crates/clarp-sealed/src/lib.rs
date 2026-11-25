@@ -238,6 +238,9 @@ pub const NOT_READ: &[&str] = &[
     "GET",
     "INGRID",
     "LS",
+    // Looked up in an OpenCode turn's own environment, which names the file the lane's server
+    // reads (issue 763); never read from the Host's.
+    "OPENCODE_CONFIG",
     "POST",
     "SIGINT",
     "SIGKILL",

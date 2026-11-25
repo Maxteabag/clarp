@@ -1213,7 +1213,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
 | `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only, and only to a Live-capable client: an iPhone's VoIP registration or an Android phone's push row declares `agent_live_v1`); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
-| `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `most`, `memory_mb`, `idle_minutes`; from contract 186 also `pressure_cpu_percent`, `pressure_io_percent`, `pressure_memory_percent` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
+| `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `opencode_chat_lane`, `most`, `memory_mb`, `idle_minutes`; from contract 186 also `pressure_cpu_percent`, `pressure_io_percent`, `pressure_memory_percent` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
@@ -2172,6 +2172,7 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
   "codex_chat_lane": true,
   "claude_chat_lane": false,
   "muse_chat_lane": false,
+  "opencode_chat_lane": false,
   "most": 8,
   "memory_mb": 2200,
   "idle_minutes": 15,
@@ -2187,14 +2188,16 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
     "tools": {
       "codex": {"lanes": 1, "busy": 0, "memory_mb": 140},
       "claude": {"lanes": 1, "busy": 1, "memory_mb": 272},
-      "muse": {"lanes": 0, "busy": 0, "memory_mb": 0}
+      "muse": {"lanes": 0, "busy": 0, "memory_mb": 0},
+      "opencode": {"lanes": 0, "busy": 0, "memory_mb": 0}
     }
   }
 }
 ```
 
-- `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`: whether that
-  tool's chat turns run on lanes (off unless set).
+- `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `opencode_chat_lane`: whether that
+  tool's chat turns run on lanes (off unless set). `opencode_chat_lane` covers the `opencode` and
+  `deepseek` backends, which run one program.
 - `most`: how many lanes the Host keeps, of every tool together. `memory_mb`: what they may hold
   together, in MiB of proportional set size. A lane starts only when both allow it; the one idle
   longest leaves first. `idle_minutes`: a lane with no turn leaves after this long.
@@ -2277,7 +2280,8 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
   two seconds together. A lane that has not answered by then is left out of `lanes` and
   `memory_mb` and counted in `unanswered`. Reading this never starts a lane.
 
-`POST /lane-settings` takes any of `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane` (booleans), `most`,
+`POST /lane-settings` takes any of `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`,
+`opencode_chat_lane` (booleans), `most`,
 `memory_mb`, `idle_minutes` (whole numbers within `ranges`), and answers as `GET` does after the
 change. A key that is missing or `null` is left as it is. Other keys (`held`, `ranges`) are
 ignored. A value equal to the one the Host uses now is no change: it is not checked against its
@@ -2297,7 +2301,8 @@ nothing. Refusals have a `code`:
 - `500` `config_unwritable`.
 
 The settings are the top-level keys of the Host's own `config.toml` (`codex_chat_lane`,
-`claude_chat_lane`, `muse_chat_lane`, `codex_lane_most`, `lane_memory_mb`, `codex_lane_idle_minutes`). A change is
+`claude_chat_lane`, `muse_chat_lane`, `opencode_chat_lane`, `codex_lane_most`, `lane_memory_mb`,
+`codex_lane_idle_minutes`). A change is
 written into that file, with every other line, table and comment of it kept, and replaces the
 file in one rename. It takes effect at each tool's next turn: a lane switched off leaves before its
 agent's next turn, and a lower limit applies when the next lane starts. When something changed,

@@ -140,6 +140,10 @@ const EXEMPT: &[(&str, &str)] = &[
         "Only the shim binary's main declares this module and runs the OpenCode driver; it is absent from the linked protocol library.",
     ),
     (
+        "crates/clarp-shim/src/opencode_lane_runtime.rs",
+        "Only the standalone OpenCode lane shim starts this server. The Host already prepared its environment, including the assigned agent session and no per-turn token.",
+    ),
+    (
         "crates/clarp-shim/src/agy_acp.rs",
         "Only the shim binary's main declares this module and runs the Antigravity ACP driver; it is absent from the linked protocol library. The Host already prepared the turn's environment, including the agent session and turn token the shared constructor would clear.",
     ),

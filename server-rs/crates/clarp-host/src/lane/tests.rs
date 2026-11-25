@@ -49,7 +49,7 @@ fn in_bytes(budget: u64) -> Room {
 #[test]
 fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_owner_says() {
     let default = Settings {
-        chat: [false, false, false],
+        chat: [false, false, false, false],
         idle_ms: 15 * 60_000,
         most: 8,
         budget: 2_200 * MIB,
@@ -63,13 +63,14 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
     assert!(!default.chat(Tool::Codex));
     assert!(!default.chat(Tool::Claude));
     assert!(!default.chat(Tool::Muse));
+    assert!(!default.chat(Tool::OpenCode));
     let set = of(
         "codex_chat_lane = true\ncodex_lane_idle_minutes = 2\ncodex_lane_most = 3\nlane_memory_mb = 3000\n",
     );
     assert_eq!(
         set,
         Settings {
-            chat: [true, false, false],
+            chat: [true, false, false, false],
             idle_ms: 120_000,
             most: 3,
             budget: 3_000 * MIB,
@@ -80,6 +81,9 @@ fn the_lane_settings_are_off_fifteen_minutes_eight_lanes_and_2200_mb_unless_the_
     // Each tool has its own switch.
     let muse = of("muse_chat_lane = true\n");
     assert!(muse.chat(Tool::Muse) && !muse.chat(Tool::Codex));
+    assert!(!set.chat(Tool::OpenCode));
+    let opencode = of("opencode_chat_lane = true\n");
+    assert!(opencode.chat(Tool::OpenCode) && !opencode.chat(Tool::Codex));
     // Where the machine's memory cannot be read, auto keeps the fixed limits.
     assert_eq!(
         set.room_with(None),
@@ -128,6 +132,13 @@ fn every_tool_with_a_lane_has_its_own_switch_and_socket_name() {
     assert_eq!(
         Endpoint::found(PathBuf::from("/run/clarp/a1-mus.sock")),
         Some(muse)
+    );
+    // DeepSeek runs through OpenCode: one program, one session store, one lane.
+    assert_eq!(Tool::of("opencode"), Some(Tool::OpenCode));
+    assert_eq!(Tool::of("deepseek"), Some(Tool::OpenCode));
+    assert_eq!(
+        Endpoint::of(Tool::OpenCode, run, "a1").socket(),
+        Path::new("/run/clarp/a1-ocl.sock")
     );
 }
 

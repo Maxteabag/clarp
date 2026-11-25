@@ -106,10 +106,13 @@ BACKENDS = ("codex", "claude", "agy")
 # A row is a backend, or a backend run another way: `codex-lane` is Codex with the Host's
 # `codex_chat_lane` on, so its chat turns run on the agent's long-lived app-server lane;
 # `claude-lane` is Claude with `claude_chat_lane` on, so its turns after the first run on a kept
-# Claude Code.
-TOOL_OF = {"codex-lane": "codex", "claude-lane": "claude"}
-SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}, "claude-lane": {"claude_chat_lane": "true"}}
-LANE_SOCKETS = ("-cxg.sock", "-cll.sock")
+# Claude Code; `opencode-lane` and `deepseek-lane` are OpenCode and DeepSeek with
+# `opencode_chat_lane` on, so their turns after the first run on the agent's kept `opencode serve`
+# (issue 763).
+TOOL_OF = {"codex-lane": "codex", "claude-lane": "claude", "opencode-lane": "opencode", "deepseek-lane": "deepseek"}
+SETTINGS_OF = {"codex-lane": {"codex_chat_lane": "true"}, "claude-lane": {"claude_chat_lane": "true"},
+               "opencode-lane": {"opencode_chat_lane": "true"}, "deepseek-lane": {"opencode_chat_lane": "true"}}
+LANE_SOCKETS = ("-cxg.sock", "-cll.sock", "-ocl.sock")
 CASES = ("plain", "tool", "steer", "stop")
 # Cheap and low by default. Claude is on Sonnet: hard rule 8 of REBUILD.md.
 MODELS = {"codex": "gpt-6-luna", "codex-lane": "gpt-6-luna", "claude": "sonnet", "claude-lane": "sonnet",
