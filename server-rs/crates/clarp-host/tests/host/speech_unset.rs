@@ -29,7 +29,11 @@ fn on_a_host_with_no_speech_set_up_a_reply_is_not_spoken_and_not_reported_unspok
     assert_eq!(host.get("/voice-catalog")["voice_available"], false);
 
     // The app has its speaker on and asks for the answer aloud; the agent marks a part.
-    host.send_aloud(&session, "Looking. <speak>The build is green.</speak>", "m1");
+    host.send_aloud(
+        &session,
+        "Looking. <speak>The build is green.</speak>",
+        "m1",
+    );
     wait_for("the answer", || {
         host.conversation(&session)
             .iter()

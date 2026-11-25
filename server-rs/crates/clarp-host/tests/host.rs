@@ -23568,8 +23568,20 @@ fn an_agents_tool_is_told_who_the_agent_is_whose_turn_it_is_and_how_to_speak() {
     ]
     .concat();
     program(&claude, &script);
-    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
-    let host = place.start_in("", &[], &world);
+    // An engine of speech is set up, its stand-in on this machine: a turn asked aloud is told
+    // how to speak only where something could speak it (issue 802).
+    let voice = cartesia_stand_in(vec![7; 2000]);
+    let owners = place.root.join("speech.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\n",
+    )
+    .unwrap();
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+    ];
+    let host = place.start_in("", &["--speech-keys", owners.to_str().unwrap()], &world);
     // What the tool was last started with as who the agent is, and what it was last handed:
     // the user's words, and what the Host says after them.
     let last = || -> (String, String, String) {

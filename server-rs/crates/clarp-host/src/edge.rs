@@ -3553,8 +3553,8 @@ async fn send_as(
     // call. And never where nothing on this Host could speak the agent: such a turn is not
     // framed as spoken, and its reply is not reported as not spoken (issue 802); the agent's
     // profile says once that speech is not set up.
-    let speak = request.synthesize_audio.unwrap_or(spoken_unasked)
-        && app.mouth.can_speak(&member.record);
+    let speak =
+        request.synthesize_audio.unwrap_or(spoken_unasked) && app.mouth.can_speak(&member.record);
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
@@ -4792,6 +4792,13 @@ mod tests {
 
         let place = crate::unkept::at_the_port::place("spoken-when-asked");
         let app = place.app().await;
+        // An engine of speech is set up: what the app asks decides (issue 802 below).
+        let owners = app.config.speech_keys.clone().unwrap();
+        std::fs::write(
+            &owners,
+            "[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\n",
+        )
+        .unwrap();
         let cases = [
             ("unsaid", None, None, None, false),
             ("asked", Some(true), None, None, true),
@@ -4837,6 +4844,33 @@ mod tests {
             };
             assert_eq!(message.speak, spoken, "{id}");
         }
+        // With no engine set up, nothing could speak the agent: a send that asks for its
+        // answer aloud is not framed as spoken (issue 802).
+        std::fs::remove_file(&owners).unwrap();
+        let record = app
+            .fleet
+            .create(CreateAgentRequest {
+                name: "Listener unset".into(),
+                backend: Some("scripted".into()),
+                ..CreateAgentRequest::default()
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let request = SendRequest {
+            session: record.session.clone(),
+            text: "words".into(),
+            client_msg_id: Some("unset".into()),
+            synthesize_audio: Some(true),
+            ..SendRequest::default()
+        };
+        send_message(&app, request).await.unwrap();
+        let member = app.member(&record.session).unwrap();
+        let row = member.agent.row("u-unset".to_string()).await.unwrap();
+        let Some(Entry::Message(message)) = row.map(|row| row.entry) else {
+            panic!("the message is in the conversation")
+        };
+        assert!(!message.speak);
     }
 
     #[tokio::test]
