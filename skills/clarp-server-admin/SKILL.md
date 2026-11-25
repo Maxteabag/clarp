@@ -312,8 +312,9 @@ its `inspect` shows the session, the claim, `claims` and `idle_ms`. Turning the 
 rollback: the lane leaves before the agent's next turn.
 
 Who keeps a lane place when all are taken (every tool's lanes, the owner's rule of 25 Nov 2026):
-the owner's agents first. A lane is the owner's when its agent had a turn the owner sent in the
-last 30 minutes, or its chat is open on one of his devices; every other lane (helpers, janitors,
+the owner's agents first. A lane is the owner's when its agent had a turn the owner sent (the
+Oracle's included) that started or ended in the last 30 minutes, or its chat is on screen or among
+the few opened last in one of his apps; every other lane (helpers, janitors,
 one agent asking another) is the agents' own. Idle lanes of the agents' own leave first, then idle
 lanes of the owner's, longest idle first; a busy lane never leaves. A lane of the agents' own never
 takes an owner's place: when only his are idle it does not start, and its agent runs each turn as

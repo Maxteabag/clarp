@@ -9,6 +9,11 @@ use serde_json::Value;
 
 use crate::{Change, Engine};
 
+/// Chats kept on the stream: the one open and the few opened before it,
+/// as the web app keeps them. A chat further back is let go, so the Host
+/// does not count it as open on the owner's device (`docs/lanes.md`).
+const MAX_WATCHED: usize = 4;
+
 pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
@@ -20,6 +25,8 @@ pub(crate) struct Live {
     pub enabled: bool,
     /// Per session: its view (created when the chat opens).
     pub views: std::collections::HashMap<String, LiveView>,
+    /// The sessions of `views`, the one opened last at the back.
+    pub opened: std::collections::VecDeque<String>,
     /// The `live=` value the event stream was last opened with.
     pub subscribed: Option<String>,
     /// The stream dropped since it last connected: events were missed.
@@ -150,6 +157,7 @@ impl Engine {
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
+            self.live.opened.clear();
         }
         if enabled && self.live.explanation_setting {
             self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
@@ -175,6 +183,14 @@ impl Engine {
         if fresh || (view.lseq().is_none() && !view.awaiting_snapshot()) {
             self.request_live(session);
         }
+        self.live.opened.retain(|s| s != session);
+        self.live.opened.push_back(session.to_owned());
+        while self.live.opened.len() > MAX_WATCHED {
+            let Some(gone) = self.live.opened.pop_front() else { break };
+            self.live.views.remove(&gone);
+            self.live.heard.remove(&gone);
+            self.live.joining.remove(&gone);
+        }
         self.sync_live_subscription(true);
     }
 
@@ -190,8 +206,8 @@ impl Engine {
         self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
     }
 
-    /// The open and cached chats, as `/events?live=` names them; `live=`
-    /// alone (status ops only) before any chat opened.
+    /// The open chat and the few opened before it, as `/events?live=`
+    /// names them; `live=` alone (status ops only) before any chat opened.
     fn live_sessions(&self) -> String {
         let mut sessions: Vec<&str> = self.live.views.keys().map(String::as_str).collect();
         sessions.sort_unstable();

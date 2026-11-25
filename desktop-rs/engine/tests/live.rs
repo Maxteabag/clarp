@@ -171,3 +171,24 @@ fn a_flag_without_live_events_keeps_the_old_activity() {
     host.control("/__control/live-replay", json!({"fixture": "turn-full"}));
     d.until("live takes over", |e| e.live_active("rachel"));
 }
+
+#[test]
+fn the_stream_carries_the_open_chat_and_the_few_opened_before_it() {
+    let host = Host::start("live-few");
+    host.control("/__control/live", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    for session in ["c1", "c2", "c3", "c4", "c5"] {
+        d.engine.select(session);
+    }
+    // The one opened first is let go: the Host would count every chat named
+    // here as open on the owner's device (docs/lanes.md).
+    d.until("the stream asks for the last four", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("c2,c3,c4,c5"))));
+    assert!(d.engine.live_view("c1").is_none());
+    assert!(d.engine.live_view("c5").is_some());
+    // Opening one of them again only moves it to the front of the four.
+    let streams = events_queries(&host).len();
+    d.engine.select("c2");
+    d.settle(std::time::Duration::from_millis(300));
+    assert_eq!(events_queries(&host).len(), streams, "the same four need no new stream");
+}

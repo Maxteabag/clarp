@@ -90,14 +90,21 @@ as before.
 - **With every place busy, an optional lane does not start** (issue 786). Where no idle lane
   is left to leave and the limits still do not hold, a chat turn's lane is not started: a
   Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread
-  and runs in a process of its own. A native goal's lane is needed: it starts past the limits
-  and counts, so the next optional lane waits for a free place.
+  and runs in a process of its own. Nothing is asked to leave for a lane that will not start:
+  which idle lanes would leave is reckoned first, and none leaves unless that is enough. A
+  native goal's lane is needed: it sends away what idle lanes it may, starts past the limits
+  and counts, so the next optional lane is not started either, and that agent's turns run per
+  turn, until a place is free.
 - **The owner's agents come first** (his rule of 25 Nov 2026). A lane is the owner's when its
-  agent had a turn of origin user in the last 30 minutes, or a chat of it is open on one of his
-  devices (a connection watches it live, `/events?live=`). Every other lane is the agents' own:
+  agent had a turn the owner sent (the Oracle's included) that started or ended in the last 30
+  minutes, or a chat of it is open on one of his devices: one of his apps, by a paired device's
+  token or the Host's own, watches it live (`/events?live=`); an agent's tool token never counts.
+  The apps name only the chats on screen and the few opened last there, never every chat opened
+  since they started, so a chat left long ago stops counting. Every other lane is the agents' own:
   helpers, janitors, one agent asking another. Both are kept as file times in the run folder
-  (`<agent>-owner-turn.mark`, set when such a turn starts; `<agent>-owner-view.mark`, set every
-  15 s while the chat is watched, counted for 60 s), so room is decided without asking any
+  (`<agent>-owner-turn.mark`, set when such a turn starts and when it ends;
+  `<agent>-owner-view.mark`, set every 15 s while the chat is watched, counted for 60 s), so
+  room is decided without asking any
   agent's thread. When room is needed, idle lanes of the agents' own leave first, longest idle
   first, then idle lanes of the owner's, longest idle first; a busy lane never leaves. A lane for
   an agent of the owner's may send any idle lane away. A lane of the agents' own may send away
