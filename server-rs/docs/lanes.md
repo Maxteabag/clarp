@@ -87,6 +87,11 @@ as before.
 - **Room is made before a lane starts.** The idle lanes leave, longest idle first, until both
   limits hold with the new one included. A lane that runs a turn, or whose work may continue
   (an active goal), refuses to leave and counts.
+- **With every place busy, an optional lane does not start** (issue 786). Where no idle lane
+  is left to leave and the limits still do not hold, a chat turn's lane is not started: a
+  Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread
+  and runs in a process of its own. A native goal's lane is needed: it starts past the limits
+  and counts, so the next optional lane waits for a free place.
 - **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
   that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
   at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on
