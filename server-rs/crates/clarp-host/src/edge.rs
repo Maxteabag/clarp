@@ -1479,7 +1479,12 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                         let peer = peer.map(|peer| peer.0);
                         let method = request.method().to_string();
                         let port = app.config.listen.port();
-                        let written = path.clone();
+                        // The router's own route, never the raw path: a path may carry what a
+                        // caller put in it, a token too.
+                        let written = request.extensions().get::<MatchedPath>().map_or_else(
+                            || "/unmatched".to_owned(),
+                            |route| route.as_str().to_owned(),
+                        );
                         // The program a caller says it is tells pollers of one route apart.
                         let agent = request
                             .headers()

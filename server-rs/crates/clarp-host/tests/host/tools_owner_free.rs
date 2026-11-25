@@ -234,6 +234,16 @@ fn the_host_names_who_uses_the_owners_token_and_never_the_token() {
 
     // A request with the owner's token, from no app and no turn: one line, with its route.
     host.get("/agents/snapshot");
+    // The router's route is written, never the path a caller sent, which may carry a token.
+    let odd = fetch(
+        &host,
+        admin,
+        "GET",
+        "/agents/snapshot&token=SECRET_PATH_MARKER",
+        &[],
+        b"",
+    );
+    assert_ne!(odd.status, 0);
     // An app's own request is not counted.
     let app = fetch(
         &host,
@@ -272,5 +282,9 @@ fn the_host_names_who_uses_the_owners_token_and_never_the_token() {
     );
     assert!(!heard.contains("tool clarp-admin sessions"), "{heard}");
     assert!(!heard.contains(admin), "a token was written: {heard}");
+    assert!(
+        !heard.contains("SECRET_PATH_MARKER"),
+        "a path was written: {heard}"
+    );
     assert!(!heard.contains(&tools), "a token was written: {heard}");
 }

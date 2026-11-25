@@ -59,7 +59,8 @@ pub(crate) fn seen(headers: &HeaderMap, primary_in_header: bool) -> Seen {
 }
 
 /// The line for a request to a route, where it is one to write; the caller's process found by
-/// its connection. Never a token: only the method, the route and what the machine says of the
+/// its connection. Never a token: only the method, the router's own route (`/agents/{session}`,
+/// never the raw path, which may carry what a caller put in it) and what the machine says of the
 /// process.
 pub(crate) fn route_line(
     seen: Seen,

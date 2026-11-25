@@ -16746,7 +16746,8 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     );
     assert_eq!(said("script_token"), tools, "{seen}");
 
-    // That token opens the tools, from this machine, and nothing the apps read or do.
+    // That token opens the tools, from this machine, and nothing the apps read or do but the
+    // fleet's reads an agent is given (#795, `tools_owner_free`).
     let by_hand = place
         .host_command()
         .args(["tool", "clarp-admin", "sessions"])
@@ -16763,7 +16764,6 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     );
     let log = format!("/log?session={agent}");
     for (method, path) in [
-        ("GET", "/agents/snapshot"),
         ("GET", log.as_str()),
         ("POST", "/send"),
         ("POST", "/agents"),
@@ -16774,8 +16774,10 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         let (status, refused) = host.ask_as(&tools, method, path, None);
         assert_eq!(status, 403, "{method} {path}: {refused}");
     }
-    let (_, refused) = host.ask_as(&tools, "GET", "/agents/snapshot", None);
+    let (_, refused) = host.ask_as(&tools, "GET", &log, None);
     assert_eq!(refused["error"], "an agent's tools may ask for tools only");
+    let (status, read) = host.ask_as(&tools, "GET", "/agents/snapshot", None);
+    assert_eq!(status, 200, "{read}");
     // But for what an agent asks of its user's phone by a script of its own: an event for
     // the calendar. Nothing beside it, and not by another way of asking.
     let event = json!({ "session": agent, "title": "T", "start": "s", "end": "e" });
