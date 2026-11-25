@@ -537,6 +537,7 @@ fn a_turn_carries_the_rows_read_into_it() {
         .last()
         .cloned();
     assert_eq!(last, Some(json!("u-r25")));
+}
 
 /// A live message is shown as its row will be (issue 824): a hidden block never shows, not even
 /// while it is still being written, and half a tag at its end waits until it is whole. What is
