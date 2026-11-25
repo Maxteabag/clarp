@@ -142,12 +142,20 @@ pub fn filter(rows: Vec<SettingRow>, query: &str) -> Vec<SettingRow> {
         return rows;
     }
     // Settings before the information rows (the keys listed under KEYBOARD).
+    // A line under a group (indented: Kept processes' per-tool and
+    // per-reading lines) is found by its group's title too, so "pressure"
+    // or "cold" shows the group's lines, not its title row alone.
+    let mut group = String::new();
     let mut scored: Vec<(bool, u32, usize, SettingRow)> = rows
         .into_iter()
         .filter(|row| row.kind != "section")
         .filter_map(|row| {
+            let line = row.kind == "info" && row.label.starts_with(crate::catalogue::lanes::TOOL_INDENT);
+            if !line {
+                group = if row.kind == "info" { row.label.to_string() } else { String::new() };
+            }
             let aliases = crate::catalogue::find(&row.id).map_or(&[][..], |e| e.aliases);
-            let words = format!("{} {}", row.description, row.detail);
+            let words = if line { format!("{} {} {group}", row.description, row.detail) } else { format!("{} {}", row.description, row.detail) };
             let score = crate::catalogue::score(query, &row.label, aliases, &words)?;
             Some((actionable(&row), score, crate::catalogue::order(&row.id), row))
         })
