@@ -59,6 +59,10 @@ const USUAL_SHELL: &str = "/bin/sh";
 
 /// What a janitor's terminal is refused with: the words of every control of a chat that
 /// names one.
+/// Why an agent's terminal is not opened while a turn of the agent runs: the terminal and the
+/// turn's tool would both write one conversation (issue #770).
+pub(crate) const TURN_RUNS: &str =
+    "A turn of this agent is running. Stop it or wait until it ends, then open the terminal.";
 const LOOKED_AT_ONLY: &str = "Janitors are inspection-only. Use their Pause or Configure controls.";
 
 /// What runs in a terminal, and where.
@@ -352,12 +356,18 @@ async fn of_an_agent(
         Err(why) => return ApiError::from(why).into_response(),
     };
     // With the terminal open no turn of the agent's starts; an idle lane leaves first, so the
-    // tool here is the conversation's one writer (issue 761). One that runs a turn stays.
+    // tool here is the conversation's one writer (issue 761). A lane that runs work of its own
+    // (a goal's turn the tool started by itself) stays, and the terminal is refused as during
+    // any turn (issue #770): the lease goes, and what waited for it goes on.
     let (run_dir, agent_id) = (facts.run_dir, member.record.agent_id.clone());
-    let _ = tokio::task::spawn_blocking(move || {
-        crate::lane::make_way_if_idle(&run_dir, &agent_id);
-    })
-    .await;
+    let made_way =
+        tokio::task::spawn_blocking(move || crate::lane::make_way_if_idle(&run_dir, &agent_id))
+            .await
+            .unwrap_or(false);
+    if !made_way {
+        drop(lease);
+        return ApiError::from(crate::agent::Unavailable::turn_runs()).into_response();
+    }
     let program = Program {
         called: session.to_string(),
         argv,

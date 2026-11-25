@@ -680,6 +680,16 @@ impl ApiError {
         }
     }
 
+    /// A refusal a client tells apart by its stable `code`, beside `error` in words.
+    pub(crate) fn coded(status: StatusCode, error: impl Into<String>, code: &str) -> Self {
+        let error = error.into();
+        let body = json!({ "error": error, "code": code });
+        Self {
+            body: ErrorBody::Custom(Box::new(body)),
+            ..Self::new(status, error)
+        }
+    }
+
     /// The status this error is answered with.
     pub(crate) fn status(&self) -> StatusCode {
         self.status
@@ -713,6 +723,9 @@ pub(crate) fn body_text<'a>(
     }
 }
 
+/// The code of a refusal given because a turn of the agent runs.
+pub(crate) const TURN_RUNNING: &str = "agent_turn_running";
+
 impl From<Unavailable> for ApiError {
     fn from(unavailable: Unavailable) -> Self {
         use clarp_kernel::agent::Refusal;
@@ -724,6 +737,11 @@ impl From<Unavailable> for ApiError {
                 "ok": false, "error": unavailable.0,
                 "detail": format!("already moved to {} ({})", mark.to.host, mark.to.id), "moved": mark,
             }),
+            // A turn of the agent runs: what would write its conversation beside it is
+            // refused, in words and by a code (issue #770).
+            Some(Refusal::AtWork) => {
+                return Self::coded(StatusCode::CONFLICT, unavailable.0, TURN_RUNNING);
+            }
             _ => return Self::new(StatusCode::SERVICE_UNAVAILABLE, unavailable.0),
         };
         Self {

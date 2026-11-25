@@ -558,7 +558,11 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     said["hangs"] = json!(true);
     let hanging = FakeLane::start(&run, "agent", said);
     let started = std::time::Instant::now();
-    make_way_within(&run, "agent", std::time::Duration::from_millis(300));
+    assert!(make_way_within(
+        &run,
+        "agent",
+        std::time::Duration::from_millis(300)
+    ));
     let waited = started.elapsed();
     // Asked to leave, waited for at most the bound, and the terminal goes on.
     assert_eq!(hanging.asked(), ["retire"]);
@@ -570,9 +574,22 @@ fn the_terminal_opens_after_the_bound_when_an_idle_lane_never_lets_go() {
     assert!(!hanging.endpoint.released().unwrap());
     // An idle lane that lets go is waited for until it has, and no longer.
     let leaving = FakeLane::start(&run, "other", status("t", "d", 50, false));
-    make_way_within(&run, "other", std::time::Duration::from_secs(5));
+    assert!(make_way_within(
+        &run,
+        "other",
+        std::time::Duration::from_secs(5)
+    ));
     assert_eq!(leaving.asked(), ["retire"]);
     assert!(leaving.endpoint.released().unwrap());
+    // A lane that runs work of its own refuses to leave, and the terminal is refused.
+    let busy = FakeLane::start(&run, "busy", status("t", "d", 0, true));
+    assert!(!make_way_within(
+        &run,
+        "busy",
+        std::time::Duration::from_secs(5)
+    ));
+    assert_eq!(busy.asked(), ["retire"]);
+    assert!(!busy.endpoint.released().unwrap());
     std::fs::remove_dir_all(&run).unwrap();
 }
 

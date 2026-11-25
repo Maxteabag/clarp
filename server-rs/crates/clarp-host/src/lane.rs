@@ -208,14 +208,13 @@ pub(crate) fn config_path() -> Option<PathBuf> {
 
 /// Before the agent's tool is opened by hand on its conversation (`GET /terminal/<session>`),
 /// an idle lane of the agent's, of any tool, is retired and waited for until its tool has
-/// exited: one writer per conversation. A lane that still runs a turn refuses, and the terminal
-/// opens as it did before lanes (the lead's decision of 25 Nov 2026: that two-writer case is
-/// older than lanes, and is issue #770). Blocking, for at most [`LEAVE_WAIT`]: a lane that has
-/// not let go by then (its tool hangs on its way out) is ended by its own process id, said
-/// once in the Host's log, and the terminal opens rather than holding the request and the
-/// agent's lease (reviews of 25 Nov 2026).
-pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) {
-    make_way_within(run, agent_id, LEAVE_WAIT);
+/// exited: one writer per conversation. Blocking, for at most [`LEAVE_WAIT`]: a lane that has
+/// not let go by then (its tool hangs on its way out) is ended by its own process id and said
+/// once in the Host's log, rather than holding the request and the agent's lease (reviews of
+/// 25 Nov 2026). False: a lane refused to leave because it runs work of its own, and the
+/// terminal is refused as it is while any turn of the agent runs (issue #770).
+pub(crate) fn make_way_if_idle(run: &Path, agent_id: &str) -> bool {
+    make_way_within(run, agent_id, LEAVE_WAIT)
 }
 
 /// How long a turn or the terminal waits for a lane asked to leave to let go, before the lane
@@ -227,10 +226,15 @@ const ENDED_WAIT: Duration = Duration::from_secs(2);
 /// How often a bounded wait looks at the owner lock again.
 const RELEASE_LOOK: Duration = Duration::from_millis(100);
 
-fn make_way_within(run: &Path, agent_id: &str, bound: Duration) {
+fn make_way_within(run: &Path, agent_id: &str, bound: Duration) -> bool {
+    // Every tool's lane is asked, also after one refused.
+    let mut made_way = true;
     for tool in Tool::ALL {
-        let _ = Endpoint::of(tool, run, agent_id).retire_within(bound);
+        made_way &= Endpoint::of(tool, run, agent_id)
+            .retire_within(bound)
+            .is_ok();
     }
+    made_way
 }
 
 /// How long a turn the owner sent keeps an agent's lane his (the owner's rule of 25 Nov 2026).

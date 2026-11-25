@@ -164,9 +164,14 @@ of them is not done.
     - Status forks are a Clarp skill, not a route of this Host.
     - The agent terminal (`GET /terminal/<session>`): when the agent is idle, its lane is
       retired and waited for until its tool has exited, and the terminal then opens as before
-      (the lead's decision of 25 Nov 2026). The wait is bounded as every retirement is (below),
-      so the terminal never holds the request and the agent's lease on a lane's exit. While a turn runs, the terminal opens as
-      before, with no refusal; that two-writer case is older than lanes and is issue #770.
+      (the lead's decision of 25 Nov 2026). The wait is bounded as every retirement is
+      (above), so the terminal never holds the request and the agent's lease on a lane's exit.
+      While a turn of the agent may run its tool (it starts or runs, and does not wait for a
+      terminal already open), or a lane refuses to leave because it runs work of its own, the
+      terminal is refused: 409, `code` `agent_turn_running`, and words that say to stop the
+      turn or wait for its end (issue #770). This holds for every tool's terminal, since it is
+      asked of the agent's turns and of every tool's lane. A turn between two attempts has no
+      tool running: the terminal opens, and the next attempt waits for it.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
   anything. An attempt whose spool is not there reached nothing of the tool. Only such an
   attempt is offered to a new lane, and only once (`lane::once_more`).

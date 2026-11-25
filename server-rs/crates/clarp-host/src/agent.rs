@@ -79,6 +79,14 @@ impl Unavailable {
         Self(why, None)
     }
 
+    /// A terminal asked for while a turn of the agent runs (issue #770).
+    pub fn turn_runs() -> Self {
+        Self(
+            crate::terminal::TURN_RUNS.to_string(),
+            Some(clarp_kernel::agent::Refusal::AtWork),
+        )
+    }
+
     fn move_refusal(why: clarp_kernel::agent::Refusal) -> Self {
         Self(why.to_string(), Some(why))
     }
@@ -2999,6 +3007,14 @@ impl Worker {
                     let _ = answer.send(Err(unavailable(&why)));
                     return Ok(());
                 }
+                // The terminal takes up the tool's own conversation: while a turn's tool may
+                // write it, the terminal is refused rather than opened as a second writer
+                // (issue #770). Asked here, in the agent's thread, so no turn starts between
+                // the look and the terminal counted as open.
+                if self.turn_runs() {
+                    let _ = answer.send(Err(Unavailable::turn_runs()));
+                    return Ok(());
+                }
                 let result = self.terminal(true);
                 let _ = answer.send(
                     result
@@ -4004,6 +4020,19 @@ impl Worker {
         }
         owed();
         Ok(())
+    }
+
+    /// Whether a turn's tool may run now: a turn starts or runs, and its launch does not wait
+    /// for a terminal already open. A turn between two attempts has no tool running, and its
+    /// next attempt waits for the terminal as any launch does.
+    fn turn_runs(&self) -> bool {
+        self.behind_terminal.is_none()
+            && self.actor.as_ref().is_some_and(|actor| {
+                actor
+                    .status()
+                    .live
+                    .is_some_and(|live| live.parked.is_none())
+            })
     }
 
     /// A terminal on the agent's own tool was opened, or closed. When one is closed, the
