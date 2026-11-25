@@ -577,7 +577,13 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
         .collect();
     let bens = events
         .iter()
-        .find(|event| event["kind"] == "helper-state" && event["session"] == "slice")
+        .find(|event| {
+            // A stream without a cursor is given the last minutes first: the move to `done`
+            // came before.
+            event["kind"] == "helper-state"
+                && event["session"] == "slice"
+                && event["fields"]["helper_state"] == "running"
+        })
         .unwrap_or_else(|| panic!("Ben hears of the helper's move: {heard}"));
     let owners = owners.lock().unwrap().clone();
     let full = owners
