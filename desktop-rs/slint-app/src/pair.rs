@@ -88,6 +88,9 @@ fn pair(parsed: Result<(String, String), String>, mut settings: clarp_core::sett
         "the device token is not kept (CLARP_KEYRING=off)".into()
     };
     settings.set("connection/baseUrl", url.clone());
+    // Added to the saved Hosts, so pairing a second Host keeps the first
+    // one there and the app connects to both (#837).
+    clarp_core::hosts::remember(&mut settings, &url, "");
     let saved = match settings.path() {
         Some(path) => {
             let reread = clarp_core::settings::Settings::at(path);
