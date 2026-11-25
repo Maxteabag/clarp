@@ -98,7 +98,12 @@ impl Worker {
             // The lane under the login there now, in place of the turn's own server: the one
             // there, idle, leaves first within LEAVE_WAIT (`place`). Whether it is ready.
             let begin = || {
-                match lane.start(&launcher, &profile, &start, &session, Want::Optional) {
+                // In place of a lane that has just left: a start that still finds its owner there
+                // is tried once more once it has let go.
+                let started = crate::lane::start_once_more(lane.endpoint(), LEAVE_WAIT, || {
+                    lane.start(&launcher, &profile, &start, &session, Want::Optional)
+                });
+                match started {
                     Ok(Some(mut child)) => {
                         let _ = std::thread::Builder::new()
                             .name("opencode-lane-reaper".into())

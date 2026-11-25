@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use super::{
     Endpoint, Free, LoginChanged, Memory, Mode, Place, Room, Settings, Tool, held, lanes_in,
     make_room, make_way_within, mark_owners_turn, mark_owners_view, once_more, replied, shed,
+    start_once_more,
 };
 
 fn of(text: &str) -> Settings {
@@ -1228,4 +1229,76 @@ fn a_permission_error_is_no_changed_login() {
     assert!(LoginChanged::is(&std::io::Error::other(LoginChanged(
         "login".into()
     ))));
+}
+
+/// Issue 857. The Host's own looks at a lane's owner lock never refuse each other: one thread
+/// looking while another looks still sees a lane that has left as gone. A lane that holds it is
+/// there for every look.
+#[test]
+fn a_look_at_an_owner_lock_does_not_make_a_lane_that_left_seem_there() {
+    let run = run_dir("looks");
+    let lane = Endpoint::of(Tool::Claude, &run, "a");
+    let lock = File::create(owner_lock(lane.socket())).unwrap();
+    // Another thread of the Host looking at this moment.
+    let looking = File::open(owner_lock(lane.socket())).unwrap();
+    looking.try_lock_shared().unwrap();
+    assert!(lane.released().unwrap(), "a look is no lane");
+    drop(looking);
+    // The lane itself.
+    lock.try_lock().unwrap();
+    assert!(!lane.released().unwrap());
+    drop(lock);
+    assert!(lane.released().unwrap());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+/// Issue 857. A start in place of a lane that has just left, which still found its owner there,
+/// is tried once more once the owner has let go, and never a third time.
+#[test]
+fn a_start_after_a_lane_left_is_tried_once_more_once_its_owner_let_go() {
+    let run = run_dir("once-more-start");
+    let lane = Endpoint::of(Tool::Claude, &run, "a");
+    let owner = File::create(owner_lock(lane.socket())).unwrap();
+    owner.try_lock().unwrap();
+    // The owner lets go a moment after the first start found it there.
+    let late = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        drop(owner);
+    });
+    let tries = std::cell::Cell::new(0);
+    let started = start_once_more(&lane, std::time::Duration::from_secs(5), || {
+        tries.set(tries.get() + 1);
+        if lane.released()? {
+            Ok("started")
+        } else {
+            Err(std::io::Error::other(
+                "the Claude lane owner has not disconnected",
+            ))
+        }
+    });
+    late.join().unwrap();
+    assert_eq!(started.unwrap(), "started");
+    assert_eq!(tries.get(), 2);
+    // A start that fails again is not tried a third time.
+    let tries = std::cell::Cell::new(0);
+    let failed = start_once_more(&lane, std::time::Duration::from_secs(1), || {
+        tries.set(tries.get() + 1);
+        Err::<(), _>(std::io::Error::other("did not start"))
+    });
+    assert!(failed.is_err());
+    assert_eq!(tries.get(), 2);
+    // One whose owner does not let go within the bound is not tried again.
+    let held = File::create(owner_lock(lane.socket())).unwrap();
+    held.try_lock().unwrap();
+    let tries = std::cell::Cell::new(0);
+    let kept = start_once_more(&lane, std::time::Duration::from_millis(200), || {
+        tries.set(tries.get() + 1);
+        Err::<(), _>(std::io::Error::other(
+            "the Claude lane owner has not disconnected",
+        ))
+    });
+    assert!(kept.is_err());
+    assert_eq!(tries.get(), 1);
+    drop(held);
+    std::fs::remove_dir_all(&run).unwrap();
 }

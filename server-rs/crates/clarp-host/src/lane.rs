@@ -877,6 +877,12 @@ impl Endpoint {
 
     /// A retirement response only acknowledges the request. The process
     /// releases the owner lock after reaping its tool.
+    ///
+    /// The look takes the lock shared, for a moment: the lane holds it exclusive, so a lane that
+    /// is there still refuses it, while two of the Host's own looks never refuse each other. A
+    /// look that took it exclusive made a lane that had left seem there to another thread looking
+    /// at the same moment (on a seat switch, while other agents' lanes made room), and a turn's
+    /// start of the next lane failed for it (issue 857).
     pub(crate) fn released(&self) -> io::Result<bool> {
         let file = match OpenOptions::new()
             .read(true)
@@ -887,7 +893,7 @@ impl Endpoint {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
             Err(error) => return Err(error),
         };
-        match file.try_lock() {
+        match file.try_lock_shared() {
             Ok(()) => Ok(true),
             Err(std::fs::TryLockError::WouldBlock) => Ok(false),
             Err(std::fs::TryLockError::Error(error)) => Err(error),
@@ -902,6 +908,31 @@ impl Endpoint {
         serde_json::to_writer(&mut stream, request).map_err(io::Error::other)?;
         stream.write_all(b"\n")?;
         Ok(stream)
+    }
+}
+
+/// Starts a lane in place of one that has just left (refused for its login, or idle and of
+/// another login): a start that fails, which may be one that still found the old lane's owner
+/// there a moment after it was seen gone, is tried once more once that owner has let go within
+/// `bound`. Never more than twice (issue 857).
+pub(crate) fn start_once_more<T>(
+    lane: &Endpoint,
+    bound: Duration,
+    mut start: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    match start() {
+        Err(first) => {
+            if lane.released_by(Instant::now() + bound).unwrap_or(false) {
+                eprintln!(
+                    "clarp-host: a {} lane start is tried once more: {first}",
+                    lane.tool.name()
+                );
+                start()
+            } else {
+                Err(first)
+            }
+        }
+        started => started,
     }
 }
 

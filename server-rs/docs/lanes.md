@@ -324,6 +324,10 @@ session.
   for the lane to let go (within `LEAVE_WAIT`) and then does what a turn with no lane there does:
   a Claude turn starts its own Claude Code as the lane, still within the lane's start hold, and a
   Muse turn has a new lane take the session. The new lane reads the login there now as it starts.
+  A start that still finds the old lane's owner there a moment after it was seen gone is tried
+  once more once the owner has let go, within `LEAVE_WAIT` (issue 857: one seat switch saw it, as
+  other agents' lanes made room). The Host's own looks at an owner lock take it shared, so two of
+  them never make a lane that has left seem there to each other.
   It is tried once for the attempt, never again; where the start gets no place, fails, or no lane
   may start for the turn (one nobody waits on under pressure), the turn runs per turn as before.
   Codex already did so: its chat turns and goals offer a refused attempt to a new lane once

@@ -55,19 +55,40 @@ impl AsLane {
     /// it as it starts. The lane, once it is there and free; `None`: none started (no place, or
     /// the start failed), and the turn runs in a process of its own.
     fn begin(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
+        self.warm(self.start(order, fit, mcp), fit)
+    }
+
+    /// The same in place of a lane that has just left for its login: a start that still finds
+    /// the old lane's owner there is tried once more once it has let go (issue 857).
+    fn begin_after_leaving(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> Option<Snapshot> {
+        let endpoint = self.start.lane.endpoint();
+        let started = crate::lane::start_once_more(endpoint, crate::lane::LEAVE_WAIT, || {
+            self.start(order, fit, mcp)
+        });
+        self.warm(started, fit)
+    }
+
+    /// Whether a lane was started: `false` where none was (no place within the limits).
+    fn start(&self, order: &ShimOrder, fit: &Fit, mcp: &Mcp) -> std::io::Result<bool> {
         let start = &self.start;
-        match start
+        let child = start
             .lane
-            .start(&self.launcher, &start.run, order, fit, mcp, &start.login)
-        {
-            Ok(Some(child)) => reap(Some(child)),
-            Ok(None) => return None,
+            .start(&self.launcher, &start.run, order, fit, mcp, &start.login)?;
+        let started = child.is_some();
+        reap(child);
+        Ok(started)
+    }
+
+    /// The lane a start made, once it is there and free.
+    fn warm(&self, started: std::io::Result<bool>, fit: &Fit) -> Option<Snapshot> {
+        match started {
+            Ok(true) => self.start.lane.warm(fit),
+            Ok(false) => None,
             Err(error) => {
                 eprintln!("claudeLaneStartFail: {error}");
-                return None;
+                None
             }
         }
-        start.lane.warm(fit)
     }
 }
 
@@ -223,7 +244,7 @@ impl Worker {
                 {
                     let until = std::time::Instant::now() + crate::lane::LEAVE_WAIT;
                     if lane.endpoint().let_go_within(until, true).unwrap_or(false)
-                        && let Some(state) = as_lane.begin(&lane_order, &fit, &mcp)
+                        && let Some(state) = as_lane.begin_after_leaving(&lane_order, &fit, &mcp)
                     {
                         let Some(again) = offer(state) else {
                             return;
