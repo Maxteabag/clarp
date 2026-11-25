@@ -556,8 +556,10 @@ fn a_streaming_message_never_shows_voice_markup() {
     view.apply_event(done.as_object().unwrap());
     let p = present(&view, &[], &options(&[], 1759480005000));
     let message = p.entries.iter().find(|e| e.kind == Kind::Message).unwrap();
-    assert_eq!(message.text, clarp_core::text::cleaned_display_text(&full, false));
-    assert_eq!(message.text, "Sure Here it is, the plan step one and two.");
+    // The spoken part is the summary line, the rest the written text (#823).
+    assert_eq!((message.spoken_text.clone(), message.text.clone()), clarp_core::text::reply_parts(&full, false));
+    assert_eq!(message.spoken_text, "Here it is, the plan step one and two.");
+    assert_eq!(message.text, "Sure");
 }
 
 /// A stale live turn (tests/fixtures/live-real-stale-turn.json): GET /live

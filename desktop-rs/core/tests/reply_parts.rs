@@ -61,7 +61,7 @@ fn an_unfinished_speak_while_streaming_is_spoken_so_far() {
 
 #[test]
 fn fillers_and_pauses_inside_the_spoken_part_are_cleaned() {
-    let (spoken, written) = parts("<speak><vox>Um,</vox> sure <break time=\"300ms\"/> here it is.</speak>\nThe answer.", false);
-    assert_eq!(spoken, "Sure, here it is.");
+    let (spoken, written) = parts("<speak>Sure <break time=\"300ms\"/> here it is, <vox>um</vox>, the plan.</speak>\nThe answer.", false);
+    assert_eq!(spoken, "Sure, here it is, the plan.");
     assert_eq!(written, "The answer.");
 }
