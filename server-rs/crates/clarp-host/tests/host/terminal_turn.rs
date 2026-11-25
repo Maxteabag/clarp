@@ -40,22 +40,25 @@ fn an_agents_terminal_is_refused_while_a_turn_of_it_runs_and_opens_after() {
     let path = format!("/terminal/{agent}");
 
     // A turn's tool writes the conversation: the terminal, a second writer, is refused in
-    // words the terminal shows and by a code, and nothing of it is started.
+    // words the terminal shows, and nothing of it is started.
     host.send(&agent, "hold on", "m1");
     wait_for("the turn's tool to start", || started.exists());
     let refused = asked_for_a_socket(&host, ADMIN, &path);
+    // In the route's own form, as its other refusals: the words as plain text, which the apps
+    // show as they come, and the stable code in a header for an app that acts on it.
     assert_eq!(
         (
             refused.status,
-            serde_json::from_slice::<Value>(&refused.body).unwrap()
+            refused.text().as_str(),
+            refused.header("content-type"),
+            refused.header("x-clarp-code"),
         ),
         (
             409,
-            json!({
-                "error": "A turn of this agent is running. Stop it or wait until it ends, \
-                          then open the terminal.",
-                "code": "agent_turn_running",
-            })
+            "A turn of this agent is running. Stop it or wait until it ends, then open the \
+             terminal.",
+            "text/plain",
+            "agent_turn_running",
         )
     );
     // The refusal held nothing: the turn goes on and ends as ever.

@@ -197,8 +197,9 @@ of them is not done.
       (above), so the terminal never holds the request and the agent's lease on a lane's exit.
       While a turn of the agent may run its tool (it starts or runs, and does not wait for a
       terminal already open), or a lane refuses to leave because it runs work of its own, the
-      terminal is refused: 409, `code` `agent_turn_running`, and words that say to stop the
-      turn or wait for its end (issue #770). This holds for every tool's terminal, since it is
+      terminal is refused: 409 with words that say to stop the turn or wait for its end, in
+      plain text like the route's other refusals, and the code `agent_turn_running` in the
+      header `X-Clarp-Code` (issue #770). This holds for every tool's terminal, since it is
       asked of the agent's turns and of every tool's lane. A turn between two attempts has no
       tool running: the terminal opens, and the next attempt waits for it.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool
