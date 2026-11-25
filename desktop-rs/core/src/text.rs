@@ -321,6 +321,48 @@ pub fn cleaned_display_text(text: &str, streaming: bool) -> String {
     text.trim().to_owned()
 }
 
+/// A reply split into what the Host speaks and what it writes (#823): the
+/// cleaned words of its `<speak>` block(s), drawn as a quiet summary line,
+/// and the cleaned text outside them, drawn as the reply's Markdown. A reply
+/// that is only spoken has no summary: its spoken words are its text. A
+/// reply with no speech is all written. While a reply streams, a speak block
+/// that has not closed yet runs to the end of what has arrived.
+pub fn reply_parts(text: &str, streaming: bool) -> (String, String) {
+    static SPEAK_BLOCK: LazyLock<Regex> = LazyLock::new(|| re(r"(?is)<speak\b[^>]*>(.*?)(?:</speak\s*>|$)"));
+    if !carries_speech(text) {
+        return (String::new(), cleaned_display_text(text, streaming));
+    }
+    let mut spoken: Vec<String> = Vec::new();
+    let mut rest = String::with_capacity(text.len());
+    let mut last = 0;
+    for caps in SPEAK_BLOCK.captures_iter(text).filter_map(Result::ok) {
+        let (Some(whole), Some(words)) = (caps.get(0), caps.get(1)) else { continue };
+        rest.push_str(&text[last..whole.start()]);
+        // A block inside a line leaves a space so the words around it stay
+        // apart; one on its own line leaves nothing (a heading after it
+        // stays a heading).
+        let before = text[..whole.start()].chars().next_back();
+        let after = text[whole.end()..].chars().next();
+        if before.is_some_and(|c| c != '\n') && after.is_some_and(|c| c != '\n') {
+            rest.push(' ');
+        }
+        last = whole.end();
+        // Only the block still arriving can have an unfinished tag inside it.
+        let words = cleaned_display_text(words.as_str(), streaming && whole.end() == text.len());
+        if !words.is_empty() {
+            spoken.push(words);
+        }
+    }
+    rest.push_str(&text[last..]);
+    let spoken = spoken.join(" ");
+    let written = cleaned_display_text(&rest, streaming);
+    if written.is_empty() {
+        (String::new(), spoken)
+    } else {
+        (spoken, written)
+    }
+}
+
 /// One line of plain text for a sidebar preview: markdown tables, headings,
 /// quotes, list markers, emphasis, code fences and link syntax are removed so
 /// a reply that opens with a table reads as words, not pipes and dashes.

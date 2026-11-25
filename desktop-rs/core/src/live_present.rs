@@ -64,8 +64,11 @@ pub struct Entry {
     pub lines: Vec<String>,
     /// What `lines` leaves out ("+808 lines").
     pub more: String,
-    /// A message's Markdown.
+    /// A message's Markdown: its written part (#823).
     pub text: String,
+    /// A message's spoken part, drawn as a quiet summary line above its
+    /// Markdown; empty when it has none or is only spoken (#823).
+    pub spoken_text: String,
     pub phase: String,
     /// A message that carried speech (a `<speak>` block the user heard):
     /// commentary that did stays in view, above the work row (#653).
@@ -577,10 +580,10 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
     match text(item, "kind") {
         "message" => {
             entry.kind = Kind::Message;
-            // The written reply only, as `/log` rows show it: no voice
-            // markup, and while it streams no tag that is still arriving.
+            // As `/log` rows show it: no voice markup, while it streams no
+            // tag that is still arriving, and the spoken gist apart (#823).
             let streaming = matches!(status.as_str(), "running" | "pending" | "");
-            entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
+            (entry.spoken_text, entry.text) = crate::text::reply_parts(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
             entry.spoken = item.get("spoken").and_then(Value::as_bool).unwrap_or(false)
                 || crate::text::has_speech(text(item, "text"));

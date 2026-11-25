@@ -351,8 +351,8 @@ fn turn(
     let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0, fold_running: false, hide_settled: options.hide_settled, show_commentary: options.show_commentary, veil: options.veil };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
         // The row's text as written says whether it was spoken (a `<speak>` block); the
-        // shown text has the markup taken out.
-        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id,
+        // entry takes the markup out and keeps the spoken gist apart (#823).
+        let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.text, "row_id": row.id,
             "spoken": crate::text::has_speech(&row.text)});
         let item = item.as_object().cloned().unwrap_or_default();
         let mut entry = live_present::item_entry(&item, &live_options);

@@ -109,6 +109,9 @@ export struct MessageRow {
     id: string,
     // user, assistant, activity, system (a line the Host wrote itself)
     author: string,
+    // A reply's spoken part, a quiet summary line above its written part
+    // ("" for none, or a reply that is only spoken: #823).
+    spoken: string,
     blocks: [MessageBlock],
     stamp: string,
     meta: string,
@@ -929,6 +932,16 @@ component TranscriptRow inherits HorizontalLayout {
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
+            }
+            if root.message.spoken != "": Text {
+                text: root.message.spoken;
+                color: Palette.muted;
+                font-size: ChatText.label;
+                font-family: Palette.body-family;
+                wrap: word-wrap;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "spoken:" + root.message.id;
+                accessible-label: self.text;
             }
             for block in root.message.blocks: Block {
                 block: block;
