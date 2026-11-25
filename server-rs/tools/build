@@ -42,9 +42,17 @@ set -euo pipefail
 # owner's machines. The VM is untrusted: it gets source only, never a secret (skill: buildbox). Its ssh login uses
 # the master that `buildbox-cargo status` opens. CLARP_BUILD_HOST still names another host when one is needed.
 HOST="${CLARP_BUILD_HOST:-ecit-buildbox}"
+case "$HOST" in
+    xps15|xps) echo "The XPS is retired (25 Nov 2026): Rust builds on the build VM, the default CLARP_BUILD_HOST=ecit-buildbox" >&2; exit 1 ;;
+esac
 if [ "$HOST" = ecit-buildbox ]; then
     JOBS="${CLARP_BUILD_JOBS:-12}"
-    if command -v buildbox-cargo >/dev/null 2>&1; then buildbox-cargo status >/dev/null 2>&1 || true; fi
+    # The VM's /build is encrypted and locked after each reboot: unlock it (a no-op when it is open), then open the
+    # ssh master that the BatchMode logins below reuse.
+    if command -v buildbox-cargo >/dev/null 2>&1; then
+        buildbox-cargo unlock >/dev/null 2>&1 || true
+        buildbox-cargo status >/dev/null 2>&1 || true
+    fi
 else
     JOBS="${CLARP_BUILD_JOBS:-6}"
 fi
