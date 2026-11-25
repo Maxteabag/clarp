@@ -67,7 +67,7 @@ use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolReader};
 pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
-use said::{Shown, Unfollowed};
+use said::{Shown, Unfollowed, unfollowed, unfollowed_at_start};
 
 pub mod conversation;
 pub mod deliveries;
@@ -1378,58 +1378,6 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
         });
     }
     Some(Entry::TurnEnd(end))
-}
-
-/// The newest reply of what a turn has put into the conversation that said something and that
-/// no tool work or other words have followed, as the log has it (at most one). An attempt before
-/// the one that runs may have said them, and an actor before this one.
-fn unfollowed(log: &dyn AgentLog, turn: TurnId) -> Result<(Vec<String>, bool), ActorError> {
-    const AT_A_TIME: usize = 32;
-    let corrupt = |error: serde_json::Error| {
-        ActorError::Corrupt(format!("a row of turn {} cannot be read: {error}", turn.0))
-    };
-    let mut said = Vec::new();
-    // Whether the newest of them carried tool calls.
-    let mut newest_worked = None;
-    let mut before = Seq::MAX;
-    'reading: loop {
-        let chunk = log.read_before(before, kind::ROWS, AT_A_TIME)?;
-        let Some(oldest) = chunk.first() else {
-            break;
-        };
-        before = oldest.seq;
-        for item in chunk.iter().rev() {
-            match Entry::from_item(item).map_err(corrupt)? {
-                Some(Entry::Reply(reply)) if reply.turn == turn.0 => {
-                    let worked = !reply.tools.is_empty();
-                    if !reply.text.trim().is_empty() {
-                        // Work no row says (a plan's update) already followed these words.
-                        if log.find(&Commentary::id_of(&reply.id))?.is_some() {
-                            break 'reading;
-                        }
-                        // What was said before the newest words was decided when they were
-                        // written: an answer when they came without work, else along the way.
-                        said.push(reply.id);
-                        newest_worked.get_or_insert(worked);
-                        break 'reading;
-                    }
-                    if worked {
-                        // What came before this was told when this was written.
-                        break 'reading;
-                    }
-                }
-                // A word of the Host about the turn is neither said by the agent nor work.
-                Some(Entry::Notice(notice)) if notice.turn == Some(turn.0) => {}
-                // A call that is a row, the turn's own message, or what was there before it.
-                _ => break 'reading,
-            }
-        }
-        if chunk.len() < AT_A_TIME {
-            break;
-        }
-    }
-    said.reverse();
-    Ok((said, newest_worked.unwrap_or(false)))
 }
 
 /// Writes that tool work followed these replies: what they said was said along the way.
@@ -5491,10 +5439,16 @@ impl Actor {
         };
         let mut steering = steering::State::for_prompt(self.backend.steers(), uuid);
         steering.mixed = conversation::mixed(self.recorder.log(), turn.0)?;
-        // What the turn said is followed by the rules the live turn followed it by: a plan
-        // already told is not new after the restart, and an answer a message read into the
-        // turn closed stays closed, also for those who watch.
-        let mut said = Unfollowed::default();
+        // What the turn said is followed by the rules the live turn followed it by, from what
+        // it was given at the attempt's start: a plan already told is not new after the
+        // restart, and an answer a message read into the turn closed stays closed, also for
+        // those who watch.
+        let mut said = Unfollowed::from_log(unfollowed_at_start(
+            self.recorder.log(),
+            turn,
+            attempt,
+            message_seq,
+        )?);
         // What promoting answers sends while the replay runs is for nobody, as what it shows.
         let mut unsent = Vec::new();
         let mut offset = 0;
@@ -5665,8 +5619,6 @@ impl Actor {
         // asked.
         let told_speech = launched || steering.joined_told;
         let input_skipped = steering.input_skipped;
-        // What the turn said is where the replay left it, by the rules the live turn applies.
-        let said = said.or_log(|| unfollowed(self.recorder.log(), turn))?;
         self.live = Some(LiveTurn {
             steering,
             opening: opening_message(&message),

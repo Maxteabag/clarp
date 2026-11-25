@@ -5,7 +5,11 @@
 //! does not write again what the log holds already. The agent's fork follows its own turns by
 //! the same rules, and keeps their state in its record in the log.
 
+use clarp_kernel::conversation::{Commentary, Entry};
+use clarp_kernel::journal::{SpoolCursor, kind};
 use clarp_kernel::live::Hub;
+use clarp_kernel::turn::TurnId;
+use clarp_ports::log::{AgentLog, Kinds, Seq};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -34,10 +38,6 @@ pub(super) struct Unfollowed {
     /// closes its list so when the task is complete, after its last words) is no work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plan: Option<Value>,
-    /// What this attempt said or did decided what was said before it: from here on it does
-    /// not matter what an attempt before this one left. Only a replay asks.
-    #[serde(skip)]
-    decided: bool,
 }
 
 impl Unfollowed {
@@ -49,23 +49,6 @@ impl Unfollowed {
             worked,
             ..Self::default()
         }
-    }
-
-    /// The state the replay of an attempt's spool came to. Where that attempt decided nothing
-    /// of what was said before it, what was said before it is the log's, as when it began.
-    pub(super) fn or_log(
-        self,
-        log: impl FnOnce() -> Result<(Vec<String>, bool), ActorError>,
-    ) -> Result<Self, ActorError> {
-        if self.decided {
-            return Ok(self);
-        }
-        let (replies, worked) = log()?;
-        Ok(Self {
-            replies,
-            worked,
-            ..self
-        })
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -100,14 +83,12 @@ impl Unfollowed {
                         shown.events.extend(events);
                     }
                 }
-                self.decided = true;
             }
             Vec::new()
         };
         if words {
             self.replies.push(id.to_owned());
             self.worked = calls;
-            self.decided = true;
         }
         followed
     }
@@ -116,7 +97,6 @@ impl Unfollowed {
     /// makes said along the way.
     pub(super) fn work(&mut self) -> Vec<String> {
         self.worked = false;
-        self.decided = true;
         std::mem::take(&mut self.replies)
     }
 
@@ -142,10 +122,183 @@ impl Unfollowed {
         if own_turn || !self.worked {
             self.replies.clear();
             self.worked = false;
-            self.decided = true;
             // Those who watch the turn are shown them as answers too.
             let events = shown.hub.close_answers(shown.now);
             shown.events.extend(events);
         }
+    }
+}
+
+/// The newest reply of what a turn has put into the conversation that said something and that
+/// no tool work or other words have followed, as the log has it (at most one). An attempt before
+/// the one that runs may have said them, and an actor before this one.
+pub(super) fn unfollowed(
+    log: &dyn AgentLog,
+    turn: TurnId,
+) -> Result<(Vec<String>, bool), ActorError> {
+    unfollowed_before(log, turn, Seq::MAX)
+}
+
+/// The same, as the log stood when the attempt that runs began: what the live turn was given
+/// at its start. The first attempt begins where the turn does, with nothing of the turn said
+/// before it. Each attempt after it begins with a cursor of the turn's spool at its beginning,
+/// in the write that tried the turn again or gave it back; it is looked for no further back
+/// than the turn's message.
+pub(super) fn unfollowed_at_start(
+    log: &dyn AgentLog,
+    turn: TurnId,
+    attempt: u32,
+    message_seq: Seq,
+) -> Result<(Vec<String>, bool), ActorError> {
+    const AT_A_TIME: usize = 256;
+    if attempt <= 1 {
+        return Ok((Vec::new(), false));
+    }
+    let mut before = Seq::MAX;
+    while before > message_seq {
+        let chunk = log.read_before(before, Kinds::only(kind::SPOOL_CURSOR), AT_A_TIME)?;
+        for item in chunk.iter().rev().take_while(|item| item.seq > message_seq) {
+            let cursor: SpoolCursor = serde_json::from_slice(&item.body).map_err(|error| {
+                ActorError::Corrupt(format!("a spool cursor cannot be read: {error}"))
+            })?;
+            if cursor.turn == turn && cursor.offset == 0 {
+                return unfollowed_before(log, turn, item.seq);
+            }
+        }
+        match chunk.first() {
+            Some(oldest) if chunk.len() == AT_A_TIME => before = oldest.seq,
+            _ => break,
+        }
+    }
+    // No cursor says where the attempt began: as for a log written before attempts were
+    // marked so, what the log says now stands.
+    unfollowed(log, turn)
+}
+
+/// [`unfollowed`], of what the log holds before `before`.
+fn unfollowed_before(
+    log: &dyn AgentLog,
+    turn: TurnId,
+    mut before: Seq,
+) -> Result<(Vec<String>, bool), ActorError> {
+    const AT_A_TIME: usize = 32;
+    let corrupt = |error: serde_json::Error| {
+        ActorError::Corrupt(format!("a row of turn {} cannot be read: {error}", turn.0))
+    };
+    let mut said = Vec::new();
+    // Whether the newest of them carried tool calls.
+    let mut newest_worked = None;
+    'reading: loop {
+        let chunk = log.read_before(before, kind::ROWS, AT_A_TIME)?;
+        let Some(oldest) = chunk.first() else {
+            break;
+        };
+        before = oldest.seq;
+        for item in chunk.iter().rev() {
+            match Entry::from_item(item).map_err(corrupt)? {
+                Some(Entry::Reply(reply)) if reply.turn == turn.0 => {
+                    let worked = !reply.tools.is_empty();
+                    if !reply.text.trim().is_empty() {
+                        // Work no row says (a plan's update) already followed these words.
+                        if log.find(&Commentary::id_of(&reply.id))?.is_some() {
+                            break 'reading;
+                        }
+                        // What was said before the newest words was decided when they were
+                        // written: an answer when they came without work, else along the way.
+                        said.push(reply.id);
+                        newest_worked.get_or_insert(worked);
+                        break 'reading;
+                    }
+                    if worked {
+                        // What came before this was told when this was written.
+                        break 'reading;
+                    }
+                }
+                // A word of the Host about the turn is neither said by the agent nor work.
+                Some(Entry::Notice(notice)) if notice.turn == Some(turn.0) => {}
+                // A call that is a row, the turn's own message, or what was there before it.
+                _ => break 'reading,
+            }
+        }
+        if chunk.len() < AT_A_TIME {
+            break;
+        }
+    }
+    said.reverse();
+    Ok((said, newest_worked.unwrap_or(false)))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::path::Path;
+
+    use clarp_kernel::conversation::{Message, Reply};
+    use clarp_ports::log::{LogEngine, NewItem};
+
+    use super::*;
+
+    fn row(entry: &Entry, at: i64) -> NewItem {
+        entry.to_item(at).unwrap()
+    }
+
+    fn cursor(turn: TurnId, offset: u64, at: i64) -> NewItem {
+        let body = serde_json::to_vec(&SpoolCursor { turn, offset }).unwrap();
+        NewItem::new(kind::SPOOL_CURSOR, at, body).in_turn(turn.0)
+    }
+
+    /// A retried attempt is given what the turn said before it, as the log stood at its start:
+    /// the replay of that attempt after a restart starts from the same, though a message read
+    /// into the turn since stands newest in the log.
+    #[test]
+    fn a_retried_attempt_starts_from_what_was_said_before_it() {
+        let mut log = clarp_store_mem::MemEngine::new()
+            .open(
+                Path::new("/agents/seeded"),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let turn = TurnId(3);
+        let message = Message {
+            id: "m-3".into(),
+            text: "go".into(),
+            ..Message::default()
+        };
+        let message_seq = log.append(&[row(&Entry::Message(message), 1)]).unwrap();
+        // The first attempt announced a call, and was tried again before the call's work.
+        let announced = Reply {
+            id: "r-announced".into(),
+            turn: turn.0,
+            text: "Looking.".into(),
+            tools: vec!["call-1".into()],
+            ..Reply::default()
+        };
+        log.append(&[
+            cursor(turn, 40, 2),
+            row(&Entry::Reply(announced), 2),
+            cursor(turn, 80, 3),
+        ])
+        .unwrap();
+        log.append(&[cursor(turn, 0, 4)]).unwrap();
+        // The second attempt read a message into the turn.
+        let read = Message {
+            id: "m-4".into(),
+            text: "and this".into(),
+            ..Message::default()
+        };
+        log.append(&[row(&Entry::Message(read), 5), cursor(turn, 30, 5)])
+            .unwrap();
+
+        assert_eq!(
+            unfollowed_at_start(&*log, turn, 2, message_seq).unwrap(),
+            (vec!["r-announced".to_owned()], true)
+        );
+        // What the log says now is not what the attempt began with.
+        assert_eq!(unfollowed(&*log, turn).unwrap(), (Vec::new(), false));
+        // A first attempt begins with nothing of its turn said.
+        assert_eq!(
+            unfollowed_at_start(&*log, turn, 1, message_seq).unwrap(),
+            (Vec::new(), false)
+        );
     }
 }

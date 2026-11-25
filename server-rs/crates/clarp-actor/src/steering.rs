@@ -195,8 +195,11 @@ impl State {
     }
 
     /// Follows a line of the spool that the actor before this one read already, to be where it
-    /// was. Returns whether the tool read a message into the turn there, as the live turn saw it:
-    /// once for each message.
+    /// was. Returns whether the tool read a message into the turn there, as the live turn saw it.
+    /// The live turn counts a read where the message still waited (`Stage::Pending`) and its
+    /// read was recorded: so the replay counts the first echo of each message whose read the
+    /// agent holds. A turn's joins are cleared when it waits for its next attempt, so a read the
+    /// agent holds is this attempt's.
     pub(super) fn replay(
         &mut self,
         event: &Value,
@@ -207,33 +210,30 @@ impl State {
     ) -> Result<bool, ActorError> {
         match self.stream.observe(event) {
             Observation::Echo(uuid) => {
-                let follow = agent
+                let Some((&turn, follow)) = agent
                     .joins()
                     .iter()
-                    .find(|(_, follow)| follow.join.uuid == uuid);
-                match follow {
-                    Some((_, follow)) if self.parent.is_none() => {
-                        let message = message_at(log, follow.message_seq)?;
-                        self.joined_told |= message.speak;
-                        if message.origin.is_user_send() {
-                            self.joined_speech = Some(message.speak);
-                        } else {
-                            self.joined_asked |= message.speak;
-                        }
-                    }
-                    Some((turn, follow)) if self.separate.is_none() => {
-                        self.separate(*turn, message_at(log, follow.message_seq)?);
-                    }
-                    _ => {}
-                }
-                let Some((&turn, _)) = follow else {
+                    .find(|(_, follow)| follow.join.uuid == uuid)
+                else {
                     return Ok(false);
                 };
-                let first = !self.replayed_reads.contains(&turn);
-                if first {
-                    self.replayed_reads.push(turn);
+                // Where the live turn read nothing, the replay reads nothing either.
+                if follow.stage == Stage::Pending || self.replayed_reads.contains(&turn) {
+                    return Ok(false);
                 }
-                return Ok(first);
+                self.replayed_reads.push(turn);
+                let message = message_at(log, follow.message_seq)?;
+                if self.parent.is_none() {
+                    self.joined_told |= message.speak;
+                    if message.origin.is_user_send() {
+                        self.joined_speech = Some(message.speak);
+                    } else {
+                        self.joined_asked |= message.speak;
+                    }
+                } else if self.separate.is_none() {
+                    self.separate(turn, message);
+                }
+                return Ok(true);
             }
             Observation::Result { prompts, failed } if !prompts.is_empty() => {
                 if self
