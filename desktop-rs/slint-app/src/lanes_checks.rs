@@ -212,6 +212,10 @@ pub fn kept_processes_check(out: String) {
                 ("    Memory", "0% stalled, last 10 seconds · holds at 10%"),
             ]);
             check(groups == expected, &format!("live processes, cold starts and pressure: {groups:?}"));
+            // The page brings the last of the readings into view for the shot.
+            if let Some(index) = window.get_setting_rows().iter().position(|r| r.kind == "info" && r.label == "    Memory") {
+                window.set_setting_current(index as i32);
+            }
             shot(&out4, "kept-processes-04-pressure");
             change("kept-pressure-cpu", 1);
             true
