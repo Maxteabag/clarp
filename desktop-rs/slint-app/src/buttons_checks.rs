@@ -204,9 +204,10 @@ pub fn buttons_check(out: String) {
             true
         })),
         ("finished", Box::new(move |app, _, elapsed| {
-            let settled = conversation_text(app, "reply").contains("Part 11") && !app.engine.borrow().roster().find("rachel").is_some_and(|a| a.busy);
+            let settled = conversation_text(app, "reply").contains("Part 11");
             if !settled {
-                check(elapsed < Duration::from_secs(5), "the finished reply settles");
+                let busy = app.engine.borrow().roster().find("rachel").is_some_and(|a| a.busy);
+                check(elapsed < Duration::from_secs(5), &format!("the finished reply settles at its full length (busy {busy}, {} chars)", conversation_text(app, "reply").len()));
                 return elapsed >= Duration::from_secs(5);
             }
             // Seconds after it finished, the reader still up: the dot stays.
