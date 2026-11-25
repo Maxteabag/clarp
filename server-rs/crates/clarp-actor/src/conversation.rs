@@ -742,6 +742,17 @@ impl<'a> Reader<'a> {
         Ok(&self.anchors[&turn])
     }
 
+    /// The turn's id as the live view names it, from the message it began for: written at
+    /// its start, so the same for good, also once a newer message's turn replaced it and it
+    /// has no anchors (a row's content changes only with its revision).
+    fn turn_id(&mut self, turn: u64) -> Result<Option<String>, ActorError> {
+        if let Some(id) = &self.anchors(turn)?.turn_id {
+            return Ok(Some(id.clone()));
+        }
+        let end = self.end(turn)?.map(|(_, seq)| *seq);
+        Ok(find_anchors(self.log, turn, end, self.helper)?.turn_id)
+    }
+
     /// The anchor with this id, when the row is one of its turn's.
     fn anchor_of(&mut self, turn: u64, id: &str) -> Result<Option<&Anchor>, ActorError> {
         Ok(self.anchors(turn)?.of(id))
@@ -931,14 +942,10 @@ impl<'a> Reader<'a> {
         if matches!(row.entry, Entry::Message(_))
             && let Some(into) = read_into_turn(self.log, item)?
         {
-            row.read_into = self
-                .anchors(into)?
-                .turn_id
-                .clone()
-                .map(|trace_id| ReadInto {
-                    trace_id,
-                    turn: into,
-                });
+            row.read_into = self.turn_id(into)?.map(|trace_id| ReadInto {
+                trace_id,
+                turn: into,
+            });
         }
         let split = if let Some(turn) = row.turn_number {
             let audience = self.mark(turn)?;

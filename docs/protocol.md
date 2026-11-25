@@ -683,9 +683,10 @@ Rules:
   `read_into` is on the row's first revision: a client that fetches `/log` on
   `transcript-updated` before the live `turn` op with `read_rows` arrives already knows the
   row belongs above the turn's working line. Absent on every other row: a message that started
-  its own turn, one that waits (it has no row yet), a message a conversation fork answered
-  (the fork's turn is its own), and a message read into a turn that a newer message's turn
-  then replaced (that turn's end has `status` `replaced`). Rows written before contract 189 carry it too where the Host's
+  its own turn, one that waits (it has no row yet), and a message a conversation fork answered
+  (the fork's turn is its own). A row keeps `read_into` however that turn ends, also when a
+  newer message's turn replaces it (its end's `status` `replaced`): the message was read into
+  it, and a row's content changes only with its revision. Rows written before contract 189 carry it too where the Host's
   log holds the join. Place a row whose `read_into.trace_id` is the running turn's `turn_id`
   above that turn's working line, as `read_rows` would. The field is absent, never null, on a
   row that was not read into another turn, so a client tells "not read into" from "an older
@@ -1373,7 +1374,7 @@ order: the queue's started notice for the new turn (top-level `trace_id` of the 
 the previous turn's `agent-state` `done` (`detail.trace_id` of the previous turn) with its
 `agent-activity`, then the new turn's `agent-state` `thinking` (`detail.trace_id` of the new
 turn) with its `agent-activity`. A client tells the turns apart by these traces, never by the
-kind alone: a `done` ends only the turn its trace names. The order is older than contract 188
+kind alone: a `done` ends only the turn its trace names. The order is older than contract 189
 and the apps follow it; it is documented, not changed.
 
 A routed send (`hands_free: true`, or `POST /orchestrator/route-delegation`, which

@@ -1056,6 +1056,57 @@ mod tests {
     }
 
     #[test]
+    fn a_message_read_into_a_turn_later_replaced_keeps_its_link_and_its_revision() {
+        // The message was read into the turn: a newer message's turn replacing it later
+        // changes neither what its row says nor the row's revision.
+        let mut recorder = open();
+        let turn = start(&mut recorder);
+        read_in(&mut recorder, turn, "u-more");
+        let row = |recorder: &Recorder| {
+            tail(
+                recorder.log(),
+                &[],
+                span(recorder),
+                100,
+                super::super::Which::All,
+            )
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|row| row.entry.id() == "u-more")
+            .unwrap()
+        };
+        let before = row(&recorder);
+        let into = before.read_into.clone().unwrap();
+        assert_eq!((into.trace_id.as_str(), into.turn), ("turn-ask", turn.0));
+        let mut batch = recorder.batch();
+        batch
+            .command(
+                Command::TurnEnded {
+                    turn,
+                    outcome: RunOutcome::Completed,
+                },
+                400,
+            )
+            .unwrap();
+        let mut replaced = TurnEnd::of(batch.agent().last().unwrap(), "u-ask").unwrap();
+        replaced.status = "replaced".into();
+        batch.item(Entry::TurnEnd(replaced).to_item(400).unwrap());
+        batch.commit().unwrap();
+        for after in [row(&recorder), {
+            let which = Which::chat(true);
+            let page = tail(recorder.log(), &[], span(&recorder), 100, which).unwrap();
+            page.entries
+                .into_iter()
+                .find(|row| row.entry.id() == "u-more")
+                .unwrap()
+        }] {
+            assert_eq!(after.read_into, before.read_into);
+            assert_eq!(after.revision, before.revision);
+        }
+    }
+
+    #[test]
     fn messages_read_with_the_turns_own_at_its_start_name_the_turn_by_its_trace() {
         let mut recorder = open();
         let running = start(&mut recorder);
