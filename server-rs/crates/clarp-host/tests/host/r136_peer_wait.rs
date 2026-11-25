@@ -65,6 +65,7 @@ fn end_request(place: &Place, agent_id: &str, message_id: &str, ran: bool) {
             code: Notice::TURN_FAILED.to_owned(),
             text: clarp_kernel::launch_refused::notice(8, &reason),
             trace_id: None,
+            kind: None,
         });
         batch.item(marker.to_item(now).unwrap());
     }

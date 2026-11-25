@@ -1202,6 +1202,7 @@ fn ending_notice(
         code: code.to_string(),
         text: clarp_kernel::conversation::interrupted_sentence(reason),
         trace_id,
+        kind: None,
     })
 }
 
@@ -1306,6 +1307,7 @@ fn never_run(turn: TurnId, message_id: &str, text: String, trace_id: Option<Stri
         code: Notice::TURN_FAILED.to_string(),
         text,
         trace_id,
+        kind: None,
     })
 }
 
@@ -1328,6 +1330,7 @@ fn failure_marker(failed: Failure<'_>) -> Option<Entry> {
         code: Notice::TURN_FAILED.to_string(),
         text: told.row,
         trace_id: failed.trace_id,
+        kind: (!failed.kind.is_empty()).then(|| failed.kind.to_owned()),
     }))
 }
 
@@ -4193,6 +4196,7 @@ impl Actor {
             code: code.to_string(),
             text: text.to_string(),
             trace_id: None,
+            kind: None,
         });
         let mut batch = self.recorder.batch();
         batch.item(written(&notice, now_ms)?);
@@ -4580,6 +4584,7 @@ impl Actor {
                 code: Notice::TRANSIT.to_string(),
                 text: notice.to_string(),
                 trace_id: None,
+                kind: None,
             });
             batch.item(written(&said, now_ms)?);
         }

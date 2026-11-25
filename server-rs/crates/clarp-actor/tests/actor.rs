@@ -6577,6 +6577,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             limits: None,
             note_count: 0,
             reason: None,
+            kind: None,
         });
         items.push(end.to_item(at).unwrap());
         let settled = TurnEvent::Settled {

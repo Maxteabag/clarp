@@ -111,6 +111,19 @@ fn a_turn_ended_from_outside_says_so_and_a_stop_is_still_a_stop() {
     });
     let end = closing(&host, session, "id-HOLD-829-a");
     assert_eq!(end["turn"]["status"], "failed", "{end}");
+    // Its kind is on the turn's end and on the row that says why it failed, so an app needs
+    // no words to tell it (`failure_kind`).
+    assert_eq!(end["turn"]["kind"], "ended_from_outside", "{end}");
+    let rows = host.turns(session);
+    let failed = rows
+        .iter()
+        .find(|row| row["id"] == "marker-u-id-HOLD-829-a")
+        .unwrap_or_else(|| panic!("no failure row: {rows:?}"));
+    assert_eq!(failed["failure_kind"], "ended_from_outside", "{failed}");
+    assert!(
+        failed["kind"].is_null(),
+        "the row's own kind is untouched: {failed}"
+    );
     let said = host
         .turns(session)
         .iter()
@@ -133,6 +146,10 @@ fn a_turn_ended_from_outside_says_so_and_a_stop_is_still_a_stop() {
     });
     let end = closing(&host, session, "id-HOLD-829-b");
     assert_eq!(end["turn"]["status"], "interrupted", "{end}");
+    assert!(
+        end["turn"].get("kind").is_none(),
+        "a stop has no kind: {end}"
+    );
     let rows = host.turns(session);
     let at = rows
         .iter()

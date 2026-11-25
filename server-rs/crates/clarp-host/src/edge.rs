@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 190;
+pub const HOST_CONTRACT: u64 = 191;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -468,6 +468,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `ended_from_outside`, in the Host's words with the signal, never as the tool's failure,
     // never tried again (issue 829).
     ("ended_from_outside", 190),
+    // A failed turn names its failure's kind (`ended_from_outside`, `usage_limit`, `auth`, ...)
+    // as `kind` on the `turn` object of the row that closes it, and as `failure_kind` on the
+    // `/log` row that says why it failed, so an app tells a turn ended from outside from the
+    // tool's error without reading words (issue 829).
+    ("failure_kind", 191),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

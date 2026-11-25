@@ -564,7 +564,9 @@ history alone:
 - Once the turn has ended, its last row carries `turn`, shaped like
   `GET /live`'s: `{turn_id, status: completed|failed|interrupted,
   started_at_ms, ended_at_ms, worked_ms, tool_count}`, plus `note_count` when the
-  turn wrote notes to the user (`POST /agent-notes`). A running turn has no
+  turn wrote notes to the user (`POST /agent-notes`), `reason` when it did not complete
+  (contract 162) and `kind`, its failure's kind, when it failed (Rust Host contract 191,
+  feature `failure_kind`; [the protocol](protocol.md#2-load-a-chat-get-log)). A running turn has no
   `turn` on any row. The summary moves if later rows of the turn are imported.
 - Tools (`tools[].status`) and display cells an interrupted turn left
   `running` or `recorded` read `interrupted`.

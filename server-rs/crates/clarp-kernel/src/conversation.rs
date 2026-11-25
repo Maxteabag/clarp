@@ -247,6 +247,11 @@ pub struct Notice {
     /// The trace of the turn it is about, when it is about one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
+    /// On the row that says why a turn failed: the failure's kind (`ended_from_outside`,
+    /// `usage_limit`, `auth`, `connection`, ...), as the turn's end keeps it. Absent where the
+    /// Host keeps none, and on a row written before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 impl Notice {
@@ -349,6 +354,12 @@ pub struct TurnEnd {
     /// turn that completed, and in an end written before it was kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The kind of a failed turn's failure (`ended_from_outside`, `usage_limit`, `auth`,
+    /// `connection`, ...), so a reader tells a turn ended from outside from the tool's error
+    /// without reading words. Absent for a turn that did not fail, and in an end written
+    /// before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 /// What the Host says of an interrupted turn: a move is told as a move is, anything else in
@@ -444,6 +455,10 @@ impl TurnEnd {
             limits: None,
             note_count: 0,
             reason: end_reason(&settled.outcome, ""),
+            kind: match &settled.outcome {
+                Outcome::Failed { kind, .. } if !kind.is_empty() => Some(kind.clone()),
+                _ => None,
+            },
         })
     }
 }
@@ -823,6 +838,7 @@ mod tests {
                 code: "usage-limit".to_string(),
                 text: "The usage limit was reached.".to_string(),
                 trace_id: None,
+                kind: None,
             }),
             Entry::Imported(Imported {
                 id: "live-abc".to_string(),
@@ -849,6 +865,7 @@ mod tests {
                 limits: None,
                 note_count: 0,
                 reason: None,
+                kind: None,
             }),
         ];
         for (seq, entry) in entries.iter().enumerate() {

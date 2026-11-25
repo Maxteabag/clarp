@@ -346,6 +346,7 @@ impl AcpInterpreter {
             code: code.to_string(),
             text,
             trace_id: None,
+            kind: None,
         }));
     }
 

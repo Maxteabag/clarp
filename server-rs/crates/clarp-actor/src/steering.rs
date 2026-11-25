@@ -426,6 +426,8 @@ impl State {
                             .to_string(),
                     ),
                 },
+                // The failure was the other turn's: its kind is on that turn's end.
+                kind: None,
             };
             batch.item(written(&Entry::TurnEnd(end), now_ms)?);
         }

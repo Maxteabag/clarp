@@ -610,6 +610,14 @@ Rules:
   user is told it, who stopped it and why, what interrupted it, or that a newer message's
   turn replaced it. It is absent on a completed turn and on ends written before contract
   162. It adds no row: an automated turn that fails stays quiet in the chat.
+  From Rust Host contract 191 (feature `failure_kind`), a turn whose `status` is `failed`
+  also carries `turn.kind`: its failure's kind, the word `agent-state` `detail.reason` says
+  (`ended_from_outside`, `usage_limit`, `auth`, `connection`, `prompt_too_long`, ...). The row
+  that says why it failed (origin `system`, id `marker-<message id>`) carries the same word as
+  `failure_kind`; its own `kind`, the sort of row, is unchanged. Key a style on these rather
+  than on the words: a turn ended from outside the Host (`ended_from_outside`) is no failure of
+  the agent's tool. They are absent where the Host keeps no kind (a turn that did not fail, a
+  message that was never run) and on rows written before contract 191.
 - **Pages read back with `before` can share rows; merge them by `id`.** A page holds each
   row once, with its newest version, at its place in the conversation. A row that was written
   again after its place (a tool call that ended after later rows were written, a row the Host

@@ -862,6 +862,12 @@ impl Actor {
                                 Some(clarp_kernel::conversation::interrupted_sentence(reason))
                             }
                         },
+                        kind: match &outcome {
+                            RunOutcome::Failed { reason } => {
+                                Some(failures::classify_error(reason).to_owned())
+                            }
+                            _ => None,
+                        },
                     };
                     batch.item(written(&Entry::TurnEnd(end), now_ms)?);
                     self.fork.ended = Some((turn, status, failed.map(str::to_owned)));

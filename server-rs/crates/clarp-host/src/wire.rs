@@ -1523,6 +1523,11 @@ fn turn_end(end: &TurnEnd) -> Value {
     if let Some(reason) = end.reason.as_deref().filter(|_| end.status != "completed") {
         summary["reason"] = json!(reason);
     }
+    // The kind of a failed turn's failure (`failure_kind`), so an app tells a turn ended from
+    // outside from the tool's error without reading the words.
+    if let Some(kind) = end.kind.as_deref().filter(|_| end.status == "failed") {
+        summary["kind"] = json!(kind);
+    }
     summary
 }
 
@@ -1778,6 +1783,11 @@ pub fn row(version: &Versioned) -> Value {
             row["origin"] = json!("system");
             row["text"] = json!(notice.text);
             row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());
+            // The failure's kind (`failure_kind`), as the turn's end has it in `turn.kind`. Not
+            // the row's `kind`, which says what sort of row it is.
+            if let Some(kind) = &notice.kind {
+                row["failure_kind"] = json!(kind);
+            }
         }
         Entry::Notice(notice) => {
             row["kind"] = json!("notice");
@@ -2648,6 +2658,7 @@ mod tests {
             limits: None,
             note_count: 0,
             reason: None,
+            kind: None,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -2945,6 +2956,7 @@ mod tests {
             limits: None,
             note_count: 0,
             reason: None,
+            kind: None,
         }
     }
 
@@ -3575,6 +3587,7 @@ mod tests {
             limits: None,
             note_count: 0,
             reason: None,
+            kind: None,
         };
         let asked = |origin: Origin| {
             let message = Message {
