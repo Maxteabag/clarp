@@ -35,11 +35,6 @@ on:
 permissions:
   contents: write
 
-# A newer push makes a running build moot: an install only wants the latest.
-concurrency:
-  group: host-release-${{ inputs.release || github.ref }}
-  cancel-in-progress: true
-
 env:
   # Only main publishes host-builds by itself: a branch publishes to a release of its own.
   RELEASE: ${{ inputs.release || (github.ref == 'refs/heads/main' && 'host-builds' || 'host-builds-test') }}
@@ -49,15 +44,25 @@ jobs:
     strategy:
       matrix:
         include:
-          # 22.04: the binaries need the glibc of the machine they run on or newer, and 22.04's
-          # (2.35) is older than that of every distribution still supported.
+          # 22.04: the binaries need glibc 2.34 or newer on the machine they run on, which the
+          # current Debian, Ubuntu, Fedora and RHEL 9 have (RHEL 8 and Amazon Linux 2 do not).
           - arch: x86_64
             runner: ubuntu-22.04
           - arch: aarch64
             runner: ubuntu-22.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    # A newer push makes a running build moot: an install only wants the latest. Cancelling a
+    # build here skips its publish.
+    concurrency:
+      group: host-release-build-${{ matrix.arch }}-${{ inputs.release || github.ref }}
+      cancel-in-progress: true
     steps:
+      - name: Only main publishes host-builds
+        if: env.RELEASE == 'host-builds' && github.ref != 'refs/heads/main'
+        run: |
+          echo "host-builds is main's release; name another one (-f release=...) to publish from $GITHUB_REF" >&2
+          exit 1
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -85,6 +90,11 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # A publish that has started finishes: cancelled in the middle of its uploads, it would leave
+    # the release with assets of two commits, which the installer refuses, until the next one.
+    concurrency:
+      group: host-release-publish-${{ inputs.release || github.ref }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -118,4 +128,6 @@ jobs:
           else
             gh release create "$RELEASE" --prerelease --title "Host builds" --notes "$notes" --target "$GITHUB_SHA"
           fi
+          # The release's tag names the commit its assets were built from.
+          git push --force origin "$GITHUB_SHA:refs/tags/$RELEASE"
           gh release upload "$RELEASE" assets/* --clobber

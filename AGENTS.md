@@ -80,7 +80,9 @@ Ever."
 - A change lands once it builds and a reviewer has read it. Review is by reading.
 - No workflow starts by itself on a push or pull request; they run only when
   someone starts them ("Run workflow", or `gh workflow run`). Main's
-  `desktop.yml` still publishes the desktop binary: that is a release, not a test.
+  `desktop.yml` still publishes the desktop binary, and main's `host-release.yml`
+  the Host's Linux builds (the `host-builds` pre-release that
+  `server-rs/tools/install-from-release` installs): those are releases, not tests.
 - When the owner of the work considers it complete, run the one final pass
   (`server-rs/tools/final-pass`, with the tests of what changed), fix what it
   finds, and only then install it on Peter's Hosts, which are live.

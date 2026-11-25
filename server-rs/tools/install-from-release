@@ -11,9 +11,12 @@
 # Every option given to it is passed on to install-host, whose comment lists them; run again, it
 # updates the Host in place and keeps what the installation was told before.
 #
-# It needs Linux with a systemd user session (the Host runs as a systemd user unit), curl and
-# python3. It never asks for a password and never uses sudo: what it cannot do as its user, it says,
-# and stops.
+# The sums come from the same release as the files: they catch a torn or corrupt download, not a
+# replaced release. What vouches for the files is GitHub's HTTPS and the repository.
+#
+# It needs Linux with glibc 2.34 or newer (the builds are made on Ubuntu 22.04), a systemd user
+# session (the Host runs as a systemd user unit), curl and python3. It never asks for a password and
+# never uses sudo: what it cannot do as its user, it says, and stops.
 #
 # CLARP_RELEASE names another release to install from (default: host-builds), CLARP_RELEASE_REPO
 # another repository (default: Maxteabag/clarp).
@@ -38,6 +41,16 @@ main() {
         aarch64|arm64) arch=aarch64 ;;
         *) say "There is no build of the Clarp Host for $(uname -m); there are builds for x86_64 and aarch64."; exit 1 ;;
     esac
+    local glibc
+    glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | sed -n 's/^glibc //p')"
+    if [ -z "$glibc" ]; then
+        say "The Clarp Host's builds need glibc, and this system's C library is another one (musl, as on Alpine)."
+        exit 1
+    fi
+    if [ "$(printf '%s\n' 2.34 "$glibc" | sort -V | head -1)" != 2.34 ]; then
+        say "The Clarp Host's builds need glibc 2.34 or newer, and this system has $glibc."
+        exit 1
+    fi
     if [ "$(id -u)" = 0 ]; then
         say "Run this as the user the Host is to run as, not as root: the Host runs its agents as that user."
         exit 1
@@ -77,7 +90,8 @@ main() {
     local sums="$work/download/sums-wanted"
     : > "$sums"
     for asset in "${assets[@]}"; do
-        if ! grep -E "^[0-9a-f]{64}  \\*?$asset\$" "$work/download/SHA256SUMS" >> "$sums"; then
+        if ! awk -v name="$asset" '$2 == name || $2 == "*" name { print; found = 1 } END { exit !found }' \
+            "$work/download/SHA256SUMS" >> "$sums"; then
             say "the release's SHA256SUMS does not name $asset; it may be being replaced: try again in a few minutes"
             exit 1
         fi

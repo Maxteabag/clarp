@@ -20,7 +20,7 @@ toolchain paths.
 
 ## Install a Host on a new machine
 
-On Linux with systemd (x86_64 or aarch64), as the user the Host is to run as,
+On Linux with systemd and glibc 2.34+ (x86_64 or aarch64), as the user the Host is to run as,
 in that user's login session:
 
 ```bash

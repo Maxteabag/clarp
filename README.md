@@ -63,7 +63,7 @@ was removed from the repository; git history keeps it.
 
 ## Install
 
-On Linux with systemd, as the user the Host is to run as:
+On Linux with systemd and glibc 2.34 or newer, as the user the Host is to run as:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash
@@ -74,6 +74,8 @@ main for x86_64 and aarch64), checks it against its `SHA256SUMS`, and installs a
 systemd user unit with the skills of the same commit. It needs a systemd user session, `curl` and
 `python3`, and never uses sudo. Options after `bash -s --` go to `install-host` (for example
 `| bash -s -- --name Studio`); run it again to update. macOS is not supported yet.
+The sums come from the same release as the files, so they guard against a corrupt or torn
+download, not against tampering.
 
 From a checkout, with binaries built on a build machine:
 
