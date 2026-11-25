@@ -3917,7 +3917,24 @@ impl Fleet {
             &effort,
             &file,
         )?;
-        let (codex_home, codex_provider, cloud_speech) = bound_as(&request, &backend, None)?;
+        // A helper of an agent bound to a provider of its own is given its words: it is bound
+        // as its parent is (as a fork of it is), unless the request binds it itself.
+        let inherits = request.codex_home.is_none() && request.codex_provider.is_none();
+        let (codex_home, codex_provider, cloud_speech) = match parent.filter(|p| p.bound()) {
+            Some(bound) if inherits => {
+                if backend != "codex" {
+                    let why = format!(
+                        "{} is bound to a model provider of its own, and its helpers run on \
+                         Codex on that provider: make it with backend codex.",
+                        bound.persona
+                    );
+                    return Err(Told::new(409, "own_provider", why).into());
+                }
+                let cloud_speech = request.cloud_speech.or(bound.cloud_speech);
+                (bound.codex_home.clone(), bound.codex_provider.clone(), cloud_speech)
+            }
+            _ => bound_as(&request, &backend, None)?,
+        };
         let voice_id = self.assigned_voice(
             &file,
             &owner,

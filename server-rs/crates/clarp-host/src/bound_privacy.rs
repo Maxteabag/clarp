@@ -849,6 +849,10 @@ pub fn withheld_update(sender: &AgentRecord, reader: &AgentRecord) -> Option<Str
     Some("posted an update (words withheld: bound to a model provider of its own)".to_string())
 }
 
+/// What a team member is given of an update whose sender, or whose reader, the Host cannot
+/// place: it is withheld, since it cannot be said who may read it.
+pub const UNPLACED_UPDATE: &str = "posted an update (words withheld: its sender could not be placed)";
+
 // ---- the agents' own tools ------------------------------------------------------------------
 
 /// The exit code a tool's read of a withheld agent's words ends with (`EX_NOPERM`).
