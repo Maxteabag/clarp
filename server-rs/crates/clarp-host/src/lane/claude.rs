@@ -239,8 +239,11 @@ impl Lane {
             &fit.digest,
             |_| false,
             settings.room(),
+            false,
         )?;
-        if place == Place::Kept {
+        // Kept: the lane wanted is there. Full: every place runs work, so none is started and
+        // the agent's turns run in processes of their own until a place is free (issue 786).
+        if matches!(place, Place::Kept | Place::Full) {
             return Ok(None);
         }
         let mut lane_order = order.clone();

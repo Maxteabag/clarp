@@ -230,19 +230,19 @@ fn room_is_made_by_the_longest_idle_lane_and_a_busy_one_counts() {
 fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     let run = run_dir("place");
     let same = FakeLane::start(&run, "a", status("t", "d", 5, false));
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, ROOMY);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| false, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Kept);
     assert_eq!(same.asked(), ["inspect"]);
 
     // What the driver says the tool kept from an earlier turn starts it again.
-    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, ROOMY);
+    let place = same.endpoint.place(&run, Some("t"), "d", |_| true, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(same.asked(), ["inspect", "inspect", "retire"]);
 
     let other = FakeLane::start(&run, "b", status("t", "old", 5, false));
     let place = other
         .endpoint
-        .place(&run, Some("t"), "new", |_| false, ROOMY);
+        .place(&run, Some("t"), "new", |_| false, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Free);
     assert_eq!(other.asked(), ["inspect", "retire"]);
     assert!(other.endpoint.released().unwrap());
@@ -251,11 +251,11 @@ fn a_running_lane_is_kept_for_its_thread_and_options_and_otherwise_makes_way() {
     let busy = FakeLane::start(&run, "c", status("t", "old", 0, true));
     let place = busy
         .endpoint
-        .place(&run, Some("t"), "new", |_| false, ROOMY);
+        .place(&run, Some("t"), "new", |_| false, ROOMY, false);
     assert_eq!(place.unwrap(), Place::Kept);
     let refused = busy
         .endpoint
-        .place(&run, Some("u"), "new", |_| false, ROOMY);
+        .place(&run, Some("u"), "new", |_| false, ROOMY, false);
     assert_eq!(
         refused.unwrap_err().to_string(),
         "the Codex lane owns another thread"
@@ -521,5 +521,44 @@ async fn what_the_lanes_hold_is_asked_of_all_at_once_within_one_deadline() {
     assert_eq!(holding.tools[0].bytes, 100 * MIB + CODEX_LANE);
     assert_eq!(holding.tools[1], super::Held::default());
     drop(silent);
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn with_every_place_busy_a_chat_lane_is_not_started_and_a_goals_lane_is() {
+    // Eight lanes, each running a turn: no place can be made (issue 786).
+    let run = run_dir("full");
+    let busy: Vec<FakeLane> = (0..8u64)
+        .map(|n| FakeLane::start(&run, &format!("b{n}"), status("t", "d", 0, true)))
+        .collect();
+    let defaults = Settings::of(None).room();
+    // A chat turn's lane is optional: it is not started, and nothing is asked to leave.
+    let chat = Endpoint::of(Tool::Codex, &run, "chat");
+    let place = chat
+        .place(&run, Some("t"), "d", |_| false, defaults, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    assert!(busy.iter().all(|lane| lane.asked() == ["inspect"]));
+    // A native goal needs its lane: it starts past the limits, and counts.
+    let goal = Endpoint::of(Tool::Codex, &run, "goal");
+    let place = goal
+        .place(&run, Some("t"), "d", |_| false, defaults, true)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // Once one of the eight is idle, the next start takes its place: the idle one leaves.
+    let run = run_dir("full-then-idle");
+    let mut lanes: Vec<FakeLane> = (0..7u64)
+        .map(|n| FakeLane::start(&run, &format!("b{n}"), status("t", "d", 0, true)))
+        .collect();
+    lanes.push(FakeLane::start(&run, "idle", status("t", "d", 60_000, false)));
+    let next = Endpoint::of(Tool::Codex, &run, "next");
+    let place = next
+        .place(&run, Some("t"), "d", |_| false, defaults, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    assert_eq!(lanes[7].asked(), ["inspect", "retire"]);
+    assert!(lanes[..7].iter().all(|lane| lane.asked() == ["inspect"]));
     std::fs::remove_dir_all(&run).unwrap();
 }

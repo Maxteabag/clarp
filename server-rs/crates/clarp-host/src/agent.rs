@@ -168,6 +168,9 @@ mod native_goal;
 enum Ask {
     /// What the launch of a Claude lane's turn asks of the agent's thread.
     ClaudeLane(claude_lane::Ask),
+    /// A Codex chat turn found no lane place free and reached no lane: it runs in a process of
+    /// its own (issue 786).
+    CodexLaneFull(Box<ShimOrder>),
     NativeGoal {
         action: clarp_shim::codex_lane::GoalAction,
         objective: String,
@@ -1510,6 +1513,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let worker = Worker {
         native: native_goal::Native::default(),
         claude_bypass: None,
+        codex_bypass: None,
         setup,
         actor: None,
         tx: tx.clone(),
@@ -1581,6 +1585,8 @@ struct Worker {
     native: native_goal::Native,
     /// The attempt the Claude lane did not take: it runs in a process of its own.
     claude_bypass: Option<(TurnId, u32)>,
+    /// The Codex chat attempt that found no lane place free: it runs in a process of its own.
+    codex_bypass: Option<(TurnId, u32)>,
     setup: Setup,
     actor: Option<Actor>,
     /// The way to this thread, for the turns' threads.
@@ -2908,6 +2914,15 @@ impl Worker {
                 self.claude_lane_ask(ask);
                 return Ok(());
             }
+            Ask::CodexLaneFull(order) => {
+                self.codex_bypass = Some((order.turn, order.attempt));
+                if self.terminals > 0 {
+                    self.behind_terminal = Some(order);
+                } else {
+                    self.carry_out_now(Action::Launch(order));
+                }
+                return Ok(());
+            }
             // A Claude lane runs on the login it started with: it leaves once idle, and the
             // next turn starts on the new login (review of #774). The actor is told as before.
             Ask::LoginChanged => {
@@ -3147,7 +3162,8 @@ impl Worker {
             | Ask::NativeGoalWatchLost
             | Ask::NativeGoalReconciled(_)
             | Ask::NativeGoalRetired { .. }
-            | Ask::ClaudeLane(_) => unreachable!("lane asks handled above"),
+            | Ask::ClaudeLane(_)
+            | Ask::CodexLaneFull(_) => unreachable!("lane asks handled above"),
             Ask::SetMove { to, answer } => {
                 let held = self
                     .held
@@ -4278,7 +4294,8 @@ impl Worker {
                 if self.native.owns()
                     || (self.setup.record.backend == "codex"
                         && self.chat_lane()
-                        && order.opening.is_none()) =>
+                        && order.opening.is_none()
+                        && self.codex_bypass != Some((order.turn, order.attempt))) =>
             {
                 self.launch_on_native_lane(order);
                 return;
@@ -5799,7 +5816,8 @@ fn refuse_for(
                 | Ask::NativeGoalReconciled(_)
                 | Ask::NativeGoalRetired { .. }
                 // Its answer is dropped: the launch that asked takes that as a no.
-                | Ask::ClaudeLane(_),
+                | Ask::ClaudeLane(_)
+                | Ask::CodexLaneFull(_),
             ) => {}
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),

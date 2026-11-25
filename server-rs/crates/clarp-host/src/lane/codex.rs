@@ -101,6 +101,7 @@ impl Lane {
         login: &Login,
         thread: Option<&str>,
         turn: Option<(&Option<String>, &Option<String>)>,
+        needed: bool,
     ) -> io::Result<Option<Child>> {
         // A lane bound to a provider starts on that provider's configuration or not at all.
         crate::fleet::admitted(&login.own).map_err(io::Error::other)?;
@@ -122,11 +123,20 @@ impl Lane {
                     || (effort.is_none() && state.effort.is_some())
             })
         };
-        let place =
-            self.endpoint
-                .place(&profile.run_dir, thread, &digest, kept, settings.room())?;
-        if place == Place::Kept {
-            return Ok(None);
+        let place = self.endpoint.place(
+            &profile.run_dir,
+            thread,
+            &digest,
+            kept,
+            settings.room(),
+            needed,
+        )?;
+        match place {
+            Place::Kept => return Ok(None),
+            // Every place runs work and no goal needs this lane: the chat turn runs in a
+            // process of its own instead (issue 786).
+            Place::Full => return Err(crate::lane::NoPlace::error()),
+            Place::Free => {}
         }
         let config = profile
             .dir
