@@ -24,6 +24,7 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
 mod holder;
+pub(crate) mod muse;
 mod scope;
 
 use std::fs::OpenOptions;
@@ -48,16 +49,18 @@ pub(crate) const TURN_FILE_ENV: &str = "CLARP_PROVIDER_TURN_FILE";
 pub(crate) enum Tool {
     Codex,
     Claude,
+    Muse,
 }
 
 impl Tool {
-    pub(crate) const ALL: [Self; 2] = [Self::Codex, Self::Claude];
+    pub(crate) const ALL: [Self; 3] = [Self::Codex, Self::Claude, Self::Muse];
 
     /// The tool of an agent's backend, where that tool has a lane.
     pub(crate) fn of(backend: &str) -> Option<Self> {
         match backend {
             "codex" => Some(Self::Codex),
             "claude" => Some(Self::Claude),
+            "muse" => Some(Self::Muse),
             _ => None,
         }
     }
@@ -67,6 +70,7 @@ impl Tool {
         match self {
             Self::Codex => "codex_chat_lane",
             Self::Claude => "claude_chat_lane",
+            Self::Muse => "muse_chat_lane",
         }
     }
 
@@ -75,6 +79,7 @@ impl Tool {
         match self {
             Self::Codex => "-cxg.sock",
             Self::Claude => "-cll.sock",
+            Self::Muse => "-mus.sock",
         }
     }
 
@@ -83,6 +88,7 @@ impl Tool {
         match self {
             Self::Codex => "codex",
             Self::Claude => "claude",
+            Self::Muse => "muse",
         }
     }
 
@@ -91,6 +97,7 @@ impl Tool {
         match self {
             Self::Codex => "Codex",
             Self::Claude => "Claude",
+            Self::Muse => "Muse",
         }
     }
 
@@ -103,6 +110,9 @@ impl Tool {
             // A kept Claude Code on Sonnet with no MCP server weighed 159 MiB after a turn
             // (24 Nov 2026); an agent's MCP servers and the shim add to it.
             Self::Claude => 300 * MIB,
+            // An idle `muse serve` with its session, measured on Muse 1.4.25 (issue 762):
+            // 255 MiB of PSS idle, 294-300 MiB after a few turns.
+            Self::Muse => 300 * MIB,
         }
     }
 }
@@ -246,6 +256,7 @@ impl Room {
 /// ```toml
 /// codex_chat_lane = true        # Codex chat turns run on the agent's lane (default false)
 /// claude_chat_lane = true       # Claude chat turns run on a kept Claude Code (default false)
+/// muse_chat_lane = true         # Muse chat turns run on the agent's lane (default false)
 /// codex_lane_idle_minutes = 15  # a lane with no turn and no goal leaves after this long
 /// lane_limits = "auto"          # from the memory free (default), or "fixed" by the two below
 /// lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes

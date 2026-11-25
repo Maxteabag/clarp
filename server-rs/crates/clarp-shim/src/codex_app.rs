@@ -32,8 +32,12 @@ pub enum Frame {
 
 pub struct AppServer {
     child: Child,
-    input: BufWriter<ChildStdin>,
+    /// None once closed: the child reads its end of input.
+    input: Option<BufWriter<ChildStdin>>,
     next_id: u64,
+    /// Each frame names its protocol version (`"jsonrpc": "2.0"`): Muse's `serve` refuses a
+    /// frame without it, and Codex's app-server is spoken to as it always was.
+    jsonrpc: bool,
     /// Codex was ended and reaped: its pid may belong to another process now.
     ended: bool,
 }
@@ -42,6 +46,18 @@ impl AppServer {
     /// The caller configures the command's cwd, environment and stderr as
     /// it would for the thread's ordinary Codex launcher.
     pub fn spawn(command: &mut Command) -> io::Result<(Self, Receiver<io::Result<Frame>>)> {
+        Self::spawn_as(command, false)
+    }
+
+    /// The same, for a server that wants every frame to name `"jsonrpc": "2.0"` (Muse's MSP).
+    pub fn spawn_jsonrpc(command: &mut Command) -> io::Result<(Self, Receiver<io::Result<Frame>>)> {
+        Self::spawn_as(command, true)
+    }
+
+    fn spawn_as(
+        command: &mut Command,
+        jsonrpc: bool,
+    ) -> io::Result<(Self, Receiver<io::Result<Frame>>)> {
         // A group of its own: what Codex started for a turn can be ended with it when it does
         // not answer a Stop, and nothing of the supervisor's goes with it.
         let mut child = command
@@ -57,8 +73,9 @@ impl AppServer {
         let (send, frames) = mpsc::sync_channel(64);
         let server = Self {
             child,
-            input: BufWriter::new(input),
+            input: Some(BufWriter::new(input)),
             next_id: 1,
+            jsonrpc,
             ended: false,
         };
         std::thread::Builder::new()
@@ -142,6 +159,33 @@ impl AppServer {
         self.send(&json!({"method": "initialized", "params": {}}))
     }
 
+    /// A notification of the client's, with no reply.
+    pub fn notify(&mut self, method: &str, params: Option<Value>) -> io::Result<()> {
+        let mut message = json!({"method": method});
+        if let Some(params) = params {
+            message["params"] = params;
+        }
+        self.send(&message)
+    }
+
+    /// Ends the server's input, which a server that reads it to its end takes as its cue to
+    /// leave in order, and waits at most `within` for it to be gone before it is ended where it
+    /// stands. The wait is a look every 50 ms: a child cannot be waited for with a deadline.
+    pub fn close(&mut self, within: std::time::Duration) {
+        self.input = None;
+        let until = std::time::Instant::now() + within;
+        while std::time::Instant::now() < until {
+            // Gone and reaped: its pid may be another process's by now, so nothing is sent to
+            // it or its group (a server that left in order took what it started with it).
+            if let Ok(Some(_)) = self.child.try_wait() {
+                self.ended = true;
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        self.end();
+    }
+
     pub fn next_request(&self) -> u64 {
         self.next_id
     }
@@ -162,9 +206,21 @@ impl AppServer {
     }
 
     fn send(&mut self, message: &Value) -> io::Result<()> {
-        serde_json::to_writer(&mut self.input, message).map_err(io::Error::other)?;
-        self.input.write_all(b"\n")?;
-        self.input.flush()
+        let Some(input) = self.input.as_mut() else {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "the server's input is closed",
+            ));
+        };
+        if self.jsonrpc {
+            let mut framed = message.clone();
+            framed["jsonrpc"] = json!("2.0");
+            serde_json::to_writer(&mut *input, &framed).map_err(io::Error::other)?;
+        } else {
+            serde_json::to_writer(&mut *input, message).map_err(io::Error::other)?;
+        }
+        input.write_all(b"\n")?;
+        input.flush()
     }
 }
 

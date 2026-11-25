@@ -133,6 +133,8 @@ mod mcp_selection;
 mod media_manage;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
+#[path = "host/muse_chat_lane.rs"]
+mod muse_chat_lane;
 #[path = "host/native_agent_goal.rs"]
 mod native_agent_goal;
 #[path = "host/native_goal_folder.rs"]

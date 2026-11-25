@@ -27,6 +27,7 @@ mod lane_login;
 mod lane_memory;
 mod lane_own;
 mod lane_socket;
+mod muse_lane_runtime;
 mod opencode;
 mod tool_child;
 
@@ -1549,6 +1550,16 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("clarp-shim: Claude lane: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if argv.peek().is_some_and(|word| word == "muse-lane") {
+        argv.next();
+        return match muse_lane_runtime::from_args(argv) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("clarp-shim: Muse lane: {error}");
                 ExitCode::FAILURE
             }
         };

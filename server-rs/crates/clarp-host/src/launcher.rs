@@ -137,9 +137,25 @@ impl Launcher {
         options: &Path,
         cwd: &Path,
     ) -> Command {
-        let mut command = self.shim_command(&format!("clarp-codex-goal-{}", ids::hex(4)));
+        let unit = format!("clarp-codex-goal-{}", ids::hex(4));
+        self.lane_command(&unit, "codex-goal-lane", socket, program, options, cwd)
+    }
+
+    /// The command that starts a lane process of the shim's `subcommand` (`codex-goal-lane`,
+    /// `opencode-lane`), in a scope of its own named `unit` that outlives the turn that started
+    /// it.
+    pub(crate) fn lane_command(
+        &self,
+        unit: &str,
+        subcommand: &str,
+        socket: &Path,
+        program: &str,
+        options: &Path,
+        cwd: &Path,
+    ) -> Command {
+        let mut command = self.shim_command(unit);
         command
-            .args(["codex-goal-lane"])
+            .arg(subcommand)
             .arg(socket)
             .arg(program)
             .arg(options)

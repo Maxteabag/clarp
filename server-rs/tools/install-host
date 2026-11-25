@@ -839,7 +839,8 @@ try:
 except (OSError, UnicodeError, ValueError):
     config = {}
 # One kind per switch; a bool is not taken for a number (Python counts it as one).
-for name, kind in (("codex_chat_lane", bool), ("claude_chat_lane", bool), ("codex_lane_idle_minutes", int),
+for name, kind in (("codex_chat_lane", bool), ("claude_chat_lane", bool), ("muse_chat_lane", bool),
+                   ("codex_lane_idle_minutes", int),
                    ("codex_lane_most", int), ("lane_memory_mb", int), ("lane_limits", str),
                    ("lane_reserve_percent", int), ("lane_ceiling", int)):
     if name not in config:

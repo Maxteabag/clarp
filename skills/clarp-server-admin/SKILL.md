@@ -355,13 +355,47 @@ to. An agent may read them, on a Rust Host whose `GET /server-info` lists `lane_
 curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" "$CLARP_SERVER_URL/lane-settings"
 ```
 
-It answers each tool's switch (`codex_chat_lane`, `claude_chat_lane`), `most`, `memory_mb`,
+It answers each tool's switch (`codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`), `most`, `memory_mb`,
 `idle_minutes`, their `ranges`, and `held`: the lanes that run now, in total and per tool
 (`lanes`, `busy`, `memory_mb`), from each lane's own memory reading, with `unanswered` for lanes
 that did not answer within about two seconds. Reading it starts no lane.
 `POST /lane-settings` is refused to an agent's token (`403`) and to any request that carries a
 turn's `X-Clarp-Turn`. The shapes are in the Host's `docs/protocol.md`, "The owner's settings of
 lanes".
+
+## Muse chat turns on a lane (Rust Host, not built into any release yet)
+
+On a Rust Host built with issue 762's Muse lane (check that `clarp-host` knows
+`muse_chat_lane` before you rely on it), a Muse agent's chat turns can run on one
+kept `muse serve` per agent (MSP over stdio, under the shim) instead of a
+`muse exec` per message. It is off unless the owner sets, in the same
+`config.toml`:
+
+```toml
+muse_chat_lane = true         # off by default; false rolls back to exec
+```
+
+The idle time (`codex_lane_idle_minutes`), the count (`codex_lane_most`) and the
+memory budget (`lane_memory_mb`, PSS of all lanes together) are shared with every
+tool's lanes. A Muse lane weighs about 255-300 MB.
+
+- A conversation's first turn runs on exec, which names the session. The lane
+  starts beside it without the session and takes it once exec has exited and no
+  turn runs, so no turn waits for a cold lane. The turns after run on the lane.
+- A message sent while a lane turn runs is steered into it (`turn/steer`) and
+  enters the conversation when Muse reads it. Words Muse has not read when the
+  turn ends, or when a Stop comes, are taken back and run as a turn of their own.
+- Stop interrupts the turn (`turn/interrupt`) and keeps the lane.
+- Muse refuses a second process on a session it holds. Before any exec of the
+  agent's session (the switch turned off, an opening turn), the lane leaves,
+  waited for at most 15 s; a lane that does not let go fails that turn in words.
+  A terminal on the agent and a move do the same.
+- Muse's reminder agents are off on the lane as on exec, as the owner chose
+  (decision-d4c9cad82138ed99698f3691), until the lane's switch-on card asks him
+  again. Were they on, a lane turn would still end for the user at its answer.
+- A lane is `<run>/<agent>-mus.sock`. Its `inspect` shows the session, whether it
+  holds it (`loaded`), the claim and the model it gave Muse. A lane turn's Clarp
+  tools read their turn's identity from `CLARP_PROVIDER_TURN_FILE`.
 
 ## Docker Container Administration
 

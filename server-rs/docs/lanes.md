@@ -48,6 +48,7 @@ unless switched on:
 ```toml
 codex_chat_lane = true        # Codex chat turns run on lanes (default false)
 claude_chat_lane = true       # Claude chat turns after the first run on a kept Claude Code (default false)
+muse_chat_lane = true         # Muse chat turns run on lanes (default false)
 codex_lane_idle_minutes = 15  # a lane with no turn and no work that may continue leaves after this
 lane_limits = "auto"          # the limits follow the free memory (the default), or "fixed"
 lane_reserve_percent = 20     # auto: of the machine's memory, kept free of new lanes (the default)
@@ -61,8 +62,8 @@ The owner changes them from his apps too (issue 779, feature `lane_settings`): `
 /lane-settings` says them with what the lanes hold now (`docs/protocol.md`). An edit by hand works
 as before.
 
-- **One switch per tool.** `codex_chat_lane` and `claude_chat_lane`. The switches for Muse and
-  OpenCode come with their drivers.
+- **One switch per tool.** `codex_chat_lane`, `claude_chat_lane` and `muse_chat_lane`. The
+  switch for OpenCode comes with its driver.
 - **The idle time and the count are shared by every tool's lanes.** They keep the names they
   had when Codex had the only lane, so an installed config means exactly what it meant.
 - **The limits follow the machine's memory unless fixed** (the owner's decision of 25 Nov 2026,
@@ -307,6 +308,13 @@ process, right after that answer. Muse does so 0.08-0.4 s after the answer, with
   read after a `result`. The follow-up gets its own turn and its own reply. It is neither counted
   as the first turn nor dropped.
 - **Codex** reads every steered word inside its running turn and never does this.
+- **Muse's driver does not let it happen** (issue 762, the build). At the end of the turn, and
+  at a Stop, every steered message Muse accepted and did not read is taken back from it
+  (`turn/unqueue`; one Muse already began is interrupted with `retract` as it begins). The
+  message is then unread, and the actor runs it as a turn of its own on the same lane, which is
+  what it already does with words a turn never read. The result for the user is the same as a
+  follow-up turn, a fraction of a second later, and the actor needs no separate-read line for
+  Muse.
 
 ## Fallback: a process per turn
 
@@ -344,15 +352,39 @@ two drivers then share. Named here so that nothing is forgotten:
   - no `guard_turn` login lock held for the process's life;
   - the MCP config file kept for the lane's life;
   - its follow-up turn after a `result`.
-- **Muse** (`muse serve` over MSP, issue 762):
-  - its switch;
-  - "warm, no session" and the hand-over after exec;
+- **Muse** (`muse serve` over MSP, issue 762; `lane/muse.rs` and `agent/muse_lane.rs` in the
+  Host, `muse_lane_runtime.rs`, `muse_lane_turns.rs`, `muse_lane.rs` and `muse_turn.rs` in the
+  shim):
+  - its switch, `muse_chat_lane`;
+  - "warm, no session" and the hand-over: an exec turn's thread starts the lane beside exec on a
+    thread of its own (exec never waits for it), and once exec's process is gone asks the agent's
+    thread whether the lane takes the session. The agent's thread is the one place that decides:
+    it lets the lane `take` only while no turn runs, no terminal is open and the agent is not
+    moving, and holds every launch of the agent until the take answers. Muse's own
+    `.session.lock` is the one-writer lock, so no thread lock is added;
   - a model change applied in place (`session/setModel`) rather than a restart;
-  - its follow-up turn and its separate-read line;
-  - attempts it cannot take (an opening, a first turn under a new id, a fork, a takeover) left
-    to exec;
-  - forks on the lane (`session/fork`);
-  - the retire-and-wait rule for every other touch of a session.
+  - steered words Muse did not read taken back at the turn's end and at a Stop (above), so no
+    follow-up turn and no separate-read line;
+  - attempts it cannot take (an opening, a turn with no lane holding its session ready) left to
+    exec, which never waits for it;
+  - before any exec of the session, a lane that holds it leaves, waited for at most 15 s
+    (`retire_within`); one that does not let go fails the attempt in words, and a lane that runs a
+    turn is never ended for it; the terminal and a move do the same;
+  - Muse's reminder agents are off on the lane as on exec: exec passes `--disable-reminders`, and
+    serve is started with `-c run.reminder_roster=[]`, its form of it, named in the lane's options
+    (so a lane started with them on has another digest and is replaced at its next turn). The owner's answer on
+    decision-d4c9cad82138ed99698f3691 was "Muse reminders off now, a kept-running lane later", and
+    the lane follows it until its switch-on card asks him again, with the hold they cost. With
+    them on, serve holds `turn/completed` 1.7-3.9 s after the answer, so the lane writes
+    `turn.answered` at `turn/foregroundCompleted` and the Muse reader gives `Signal::Answered`: the
+    turn ends for the user at its answer and its claim lingers until `turn/completed`. With them
+    off, Muse sends no `foregroundCompleted` and the turn ends at `turn/completed`, at once. A turn that read a steered
+    message ends at `turn/completed`, since the actor settles that message at the turn's end;
+  - its turn spool written in exec's lines, so the Host's one Muse reader takes both, through
+    the layer's neutral claim spool (`clarp_shim::lane_spool::ClaimSpool`: made exclusively and
+    synced before anything reaches the tool, then each line the driver calls, the lane lines,
+    and one end);
+  - forks on the lane (`session/fork`) wait until Muse forks exist in Clarp.
 - **OpenCode** (`opencode serve`, issue 763):
   - its switch;
   - a spawn with a death signal and a process group of its own, since its serve does not end

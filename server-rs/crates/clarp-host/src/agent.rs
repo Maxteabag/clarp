@@ -171,6 +171,7 @@ pub struct DelegationState {
 }
 
 mod claude_lane;
+mod muse_lane;
 mod native_goal;
 
 enum Ask {
@@ -195,6 +196,12 @@ enum Ask {
         thread: String,
         released: bool,
     },
+    /// The Muse lane did not take this attempt, and nothing of it reached Muse: it runs on exec.
+    MuseMissed(Box<ShimOrder>),
+    /// An exec turn of a Muse agent is gone: the lane may take the session.
+    MuseTake,
+    /// The Muse lane's take of the session answered.
+    MuseTaken,
     SetMove {
         to: Option<clarp_kernel::agent_moves::Target>,
         answer: Answer<clarp_kernel::agent_moves::Receipt>,
@@ -580,6 +587,9 @@ impl Ask {
         match self {
             Self::ClaudeLane(..) => "ClaudeLane",
             Self::CodexLaneFull(..) => "CodexLaneFull",
+            Self::MuseMissed(..) => "MuseMissed",
+            Self::MuseTake => "MuseTake",
+            Self::MuseTaken => "MuseTaken",
             Self::NativeGoal { .. } => "NativeGoal",
             Self::NativeGoalReply { .. } => "NativeGoalReply",
             Self::NativeGoalSeen(..) => "NativeGoalSeen",
@@ -1611,6 +1621,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         native: native_goal::Native::default(),
         claude_bypass: None,
         codex_bypass: None,
+        muse: muse_lane::State::default(),
         setup,
         actor: None,
         tx: tx.clone(),
@@ -1684,6 +1695,8 @@ struct Worker {
     claude_bypass: Option<(TurnId, u32)>,
     /// The Codex chat attempt that found no lane place free: it runs in a process of its own.
     codex_bypass: Option<(TurnId, u32)>,
+    /// The attempt the Muse lane gave back: it runs on exec.
+    muse: muse_lane::State,
     setup: Setup,
     actor: Option<Actor>,
     /// The way to this thread, for the turns' threads.
@@ -3034,6 +3047,18 @@ impl Worker {
                 self.end_claude_lane();
                 Ask::LoginChanged
             }
+            Ask::MuseTake => {
+                self.muse_take();
+                return Ok(());
+            }
+            Ask::MuseTaken => {
+                self.muse_taken();
+                return Ok(());
+            }
+            Ask::MuseMissed(order) => {
+                self.muse_missed(order);
+                return Ok(());
+            }
             other => other,
         };
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
@@ -3276,7 +3301,10 @@ impl Worker {
             | Ask::NativeGoalReconciled(_)
             | Ask::NativeGoalRetired { .. }
             | Ask::ClaudeLane(_)
-            | Ask::CodexLaneFull(_) => unreachable!("lane asks handled above"),
+            | Ask::CodexLaneFull(_)
+            | Ask::MuseMissed(_)
+            | Ask::MuseTake
+            | Ask::MuseTaken => unreachable!("lane asks handled above"),
             Ask::SetMove { to, answer } => {
                 let held = self
                     .held
@@ -3301,6 +3329,7 @@ impl Worker {
                     // The conversation goes to another Host: a lane kept for it here leaves.
                     if receipt.moved.is_some() {
                         self.end_claude_lane();
+                        self.end_muse_lane();
                     }
                     self.setup
                         .hub
@@ -4158,6 +4187,7 @@ impl Worker {
             // The terminal resumes the conversation itself: a lane kept for it leaves first.
             if self.terminals == 0 {
                 self.end_claude_lane();
+                self.end_muse_lane();
             }
             self.terminals += 1;
             return Ok(());
@@ -4434,6 +4464,16 @@ impl Worker {
             crate::lane::mark_owners_turn(&self.setup.profile.run_dir, &self.setup.record.agent_id);
         }
         let action = match action {
+            // Who holds a Muse agent's session next is decided on this thread: while its lane
+            // takes the session, a launch waits for the take, and a Stop ends it where it waits.
+            Action::Stop { turn, .. } if self.muse_stopped_waiting(turn) => return,
+            Action::Launch(order) => match self.muse_holds(order) {
+                Some(order) => Action::Launch(order),
+                None => return,
+            },
+            other => other,
+        };
+        let action = match action {
             // An opening turn keeps its own gated launch.
             Action::Launch(order)
                 if self.native.owns()
@@ -4448,6 +4488,11 @@ impl Worker {
             // A Claude turn runs on the agent's kept Claude Code, where one is there for it.
             Action::Launch(order) if self.claude_lane_turn(&order) => {
                 self.launch_on_claude_lane(order);
+                return;
+            }
+            // A Muse chat turn runs on the agent's kept `muse serve`, where one holds its session.
+            Action::Launch(order) if self.muse_lane_turn(&order) => {
+                self.launch_on_muse_lane(order);
                 return;
             }
             other => other,
@@ -4511,6 +4556,9 @@ impl Worker {
                 // A lane left from when chat turns ran on it, or from before the agent moved to
                 // another tool, holds the thread: it leaves first, once idle.
                 let lane = self.lane();
+                // A Muse lane that holds the session leaves before exec runs it, and one starts
+                // beside the turn to take the session after it.
+                let muse = self.muse_beside(&order);
                 let claude_mcp = (self.setup.record.backend == "claude")
                     .then(|| (self.setup.mcp_strict, self.setup.record.mcp_servers.clone()));
                 // While the owner runs Claude turns on kept processes, this turn's process takes
@@ -4549,6 +4597,18 @@ impl Worker {
                         if let Some(kept) = &claude_kept {
                             let _ = kept.retire();
                         }
+                        // A Muse lane that holds the session lets go first, within its bound; the
+                        // lane for the next turn starts beside this one, which does not wait for it.
+                        let muse_warming = match &muse {
+                            Some(muse) => {
+                                if let Err(why) = muse.make_way() {
+                                    tell(&tx, turn, attempt, Told::Failed(why));
+                                    return;
+                                }
+                                muse.warm(&launcher)
+                            }
+                            None => None,
+                        };
                         runtime.block_on(launcher::gate_steering(&mut order, &versions));
                         // What a lane for the next turn is started with: this turn's order as
                         // its process would be started, before it is wrapped for it.
@@ -4667,6 +4727,11 @@ impl Worker {
                             if let Some((start, lane_order, fit, mcp)) = warm {
                                 start.warm(&launcher, &lane_order, &fit, &mcp);
                             }
+                        }
+                        // Exec's process is gone: the agent's thread decides whether the lane takes
+                        // the session.
+                        if let Some(muse) = &muse {
+                            muse.after(muse_warming);
                         }
                     })
             }
@@ -6005,7 +6070,11 @@ fn refuse_for(
                 | Ask::NativeGoalRetired { .. }
                 // Its answer is dropped: the launch that asked takes that as a no.
                 | Ask::ClaudeLane(_)
-                | Ask::CodexLaneFull(_),
+                | Ask::CodexLaneFull(_)
+                // An agent that is gone runs no attempt.
+                | Ask::MuseMissed(_)
+                | Ask::MuseTake
+                | Ask::MuseTaken,
             ) => {}
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::ClaimLine { answer }) => drop(answer.send(Err(refusal()))),

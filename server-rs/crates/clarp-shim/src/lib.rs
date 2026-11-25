@@ -11,6 +11,9 @@ pub mod codex_app;
 pub mod codex_lane;
 pub mod codex_turn;
 pub mod lane;
+pub mod lane_spool;
+pub mod muse_lane;
+pub mod muse_turn;
 
 /// The environment variable that tells a hook where its shim listens.
 pub const SOCKET_ENV: &str = "CLARP_SHIM_SOCKET";
