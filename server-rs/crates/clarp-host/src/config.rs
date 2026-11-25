@@ -82,6 +82,13 @@ pub struct Config {
     /// A file whose presence says that this machine has no network (`--network-down-file`),
     /// in place of a check of the network: what a test holds. Absent: the network is checked.
     pub network_down_file: Option<PathBuf>,
+    /// The lanes' limits where the owner's config sets none (`--lane-limits-default auto|fixed`):
+    /// auto unless said; a test's Host runs fixed, so its lanes do not follow the test machine's
+    /// free memory (issue 792).
+    pub lane_limits_default: Option<String>,
+    /// Whether idle lanes are shed on the kernel's memory pressure (`--no-lane-pressure` turns it
+    /// off: a test's Host, so the test machine's pressure never ends a test's lane).
+    pub lane_pressure: bool,
     /// How often an agent with running background jobs looks whether somebody still runs them.
     pub jobs_checked_every_ms: u64,
     pub stalled_turn_ms: i64,
@@ -224,7 +231,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
 [--accounts none|follow|select] [--seats-tool PROGRAM] \
-[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] [--network-down-file FILE] \
+[--skills DIR] [--skills-other-releases DIR] [--skills-chosen-before FILE] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] [--network-down-file FILE] [--lane-limits-default auto|fixed] [--no-lane-pressure] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -488,6 +495,8 @@ impl Config {
         let (mut skills, mut skills_other_releases, mut skills_chosen_before) = (None, None, None);
         let mut logins_checked_every_ms = 5_000;
         let mut network_down_file = None;
+        let mut lane_limits_default = None;
+        let mut lane_pressure = true;
         let mut jobs_checked_every_ms = 30_000;
         let mut schedules_checked_every_ms = 15_000;
         let mut heartbeats_checked_every_ms = 60_000;
@@ -557,6 +566,16 @@ impl Config {
                 "--network-down-file" => {
                     network_down_file = Some(PathBuf::from(value("a file")?));
                 }
+                "--lane-limits-default" => {
+                    let named = value("auto or fixed")?;
+                    if crate::lane::Mode::named(&named).is_none() {
+                        return Err(format!(
+                            "--lane-limits-default takes auto or fixed, not {named}"
+                        ));
+                    }
+                    lane_limits_default = Some(named);
+                }
+                "--no-lane-pressure" => lane_pressure = false,
                 "--logins-checked-every-ms" => {
                     logins_checked_every_ms = value("a number of milliseconds")?
                         .parse()
@@ -771,6 +790,8 @@ impl Config {
             skills_chosen_before,
             logins_checked_every_ms,
             network_down_file,
+            lane_limits_default,
+            lane_pressure,
             jobs_checked_every_ms,
             stalled_turn_ms: crate::experience_watch::stalled_after_ms(
                 config_dir.as_ref().map(|dir| dir.join(CONFIG_FILE)),

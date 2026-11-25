@@ -298,7 +298,8 @@ switching it on for the owner's agents is his decision. A top-level key of the R
 (`codex_lane_idle_minutes`) and the limits are shared by every lane. The limits follow the
 machine's free memory unless fixed (`lane_limits = "auto"`, the default): a lane starts while
 `MemAvailable`, less the new lane, stays above `lane_reserve_percent` (20) of the memory, up to
-`lane_ceiling` (24) lanes, and idle lanes leave on memory pressure (feature `lane_auto_limits`,
+`lane_ceiling` (24) lanes, and idle lanes leave on memory pressure. Setting the count or the budget
+from an app switches the Host to fixed with that value (feature `lane_auto_limits`,
 Rust Host contract 180; the apps read and set these through `/lane-settings`). With `lane_limits = "fixed"`,
 the count of lanes (`codex_lane_most`, 8) and the memory budget (`lane_memory_mb`, 2,200 MB)
 bound them instead:

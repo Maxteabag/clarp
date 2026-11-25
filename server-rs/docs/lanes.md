@@ -78,9 +78,18 @@ as before.
     lanes away, in the order below, until what is free is above the reserve. Its own thread
     waits on the trigger; nothing is polled. A kernel without the file, or one that refuses
     the trigger, is said once in the log, and lanes still keep the reserve as they start.
+  - **A burst of starts** cannot overshoot the reserve: a lane that has not weighed itself yet,
+    or started less than a minute ago (its socket's time), counts against what is free at its
+    tool's typical size beyond what it weighed, since Codex loads the conversation on its first
+    turn.
   - **A machine whose memory cannot be read** keeps the fixed limits.
   - `codex_lane_most` and `lane_memory_mb` are not used in auto, and are kept for
-    `lane_limits = "fixed"`.
+    `lane_limits = "fixed"`. Setting either from an app (`POST /lane-settings`, an old app too)
+    switches the Host to fixed with that value, unless the request names `limits`: the owner's
+    count or budget is his choice of fixed limits.
+  - **A test's Host** runs fixed (`--lane-limits-default fixed`, which the host harness passes
+    unless a test asks for auto) and sheds nothing on pressure (`--no-lane-pressure`), so its
+    lanes never follow the test machine's memory.
 - **Fixed: two limits, both on** (the lead's decision of 25 Nov 2026). A lane starts only when
   both allow it:
   - **a count**, `codex_lane_most`, 8 unless set: live lanes of every tool, the one about to

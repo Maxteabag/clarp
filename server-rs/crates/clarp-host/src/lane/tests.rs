@@ -938,20 +938,41 @@ fn machine(available: u64) -> Memory {
     }
 }
 
-/// `n` idle Codex lanes that weighed 110 MiB each, the one idle longest first, and two busy ones.
+/// A lane started two minutes ago: no longer taken to grow beyond what it weighed.
+fn aged(lane: FakeLane) -> FakeLane {
+    use nix::sys::stat::{UtimensatFlags, utimensat};
+    use nix::sys::time::TimeSpec;
+    let then = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .saturating_sub(std::time::Duration::from_secs(120));
+    let then = TimeSpec::from_duration(then);
+    utimensat(
+        None,
+        lane.endpoint.socket(),
+        &then,
+        &then,
+        UtimensatFlags::NoFollowSymlink,
+    )
+    .unwrap();
+    lane
+}
+
+/// `n` idle Codex lanes that weighed 110 MiB each, the one idle longest first, and two busy ones,
+/// all started two minutes ago.
 fn idle_and_busy(run: &Path, n: u64) -> (Vec<FakeLane>, Vec<FakeLane>) {
     let idle = (0..n)
         .map(|at| {
             let mut said = status("t", "d", 100_000 - at, false);
             said["memory_bytes"] = json!(110 * MIB);
-            FakeLane::start(run, &format!("i{at}"), said)
+            aged(FakeLane::start(run, &format!("i{at}"), said))
         })
         .collect();
     let busy = (0..2u64)
         .map(|at| {
             let mut said = status("t", "d", 0, true);
             said["memory_bytes"] = json!(500 * MIB);
-            FakeLane::start(run, &format!("w{at}"), said)
+            aged(FakeLane::start(run, &format!("w{at}"), said))
         })
         .collect();
     (idle, busy)
@@ -1066,4 +1087,49 @@ fn a_machine_short_of_memory_sheds_idle_lanes_in_order_and_never_a_busy_one() {
     assert_eq!(shed(&run, &settings, None), 0);
     assert!(retired(&idle).is_empty());
     std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn lanes_started_moments_ago_count_at_their_typical_size_until_they_have_grown() {
+    // 2,048 MiB kept free, 2,600 free, and the new lane counts at 270: it fits (2,318). But two
+    // lanes started seconds ago, which weighed 100 MiB each before their first turn, may still
+    // grow to 270 each: 340 MiB of what looks free is theirs, and a chat lane does not start.
+    let run = run_dir("young");
+    let young: Vec<FakeLane> = (0..2u64)
+        .map(|at| {
+            let mut said = status("t", "d", 0, true);
+            said["memory_bytes"] = json!(100 * MIB);
+            FakeLane::start(&run, &format!("y{at}"), said)
+        })
+        .collect();
+    let room = Settings::of(None).room_with(Some(machine(2_600)));
+    let chat = Endpoint::of(Tool::Codex, &run, "chat");
+    let place = chat
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    // A minute on, they have weighed what they hold: the same free memory lets the lane start.
+    let _old: Vec<FakeLane> = young.into_iter().map(aged).collect();
+    let place = chat
+        .place(&run, Some("t"), "d", |_| false, room, false)
+        .unwrap();
+    assert_eq!(place, Place::Free);
+    // A lane that has not weighed itself at all counts at its typical size however old it is.
+    let run2 = run_dir("unweighed");
+    let _unweighed = aged(FakeLane::start(&run2, "u", status("t", "d", 0, true)));
+    let chat2 = Endpoint::of(Tool::Codex, &run2, "chat");
+    let tight = Settings::of(None).room_with(Some(machine(2_400)));
+    let place = chat2
+        .place(&run2, Some("t"), "d", |_| false, tight, false)
+        .unwrap();
+    assert_eq!(place, Place::Full);
+    std::fs::remove_dir_all(&run).unwrap();
+    std::fs::remove_dir_all(&run2).unwrap();
+}
+
+#[test]
+fn the_reserve_is_kept_between_five_and_fifty_percent_however_it_was_written() {
+    assert_eq!(of("lane_reserve_percent = 70\n").reserve_percent, 50);
+    assert_eq!(of("lane_reserve_percent = 2\n").reserve_percent, 5);
+    assert_eq!(of("lane_reserve_percent = 30\n").reserve_percent, 30);
 }

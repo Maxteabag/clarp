@@ -632,6 +632,7 @@ fn main() -> ExitCode {
         eprintln!("clarp-host: {why}");
         return ExitCode::from(2);
     }
+    clarp_host::set_lane_limits_default(config.lane_limits_default.as_deref());
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

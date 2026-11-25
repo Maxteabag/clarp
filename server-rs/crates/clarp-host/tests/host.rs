@@ -435,6 +435,15 @@ impl Place {
             // this file in place (`Place::network_down`).
             .arg("--network-down-file")
             .arg(self.network_down())
+            // Nor does it follow the test machine's memory: its lanes run the limits fixed unless
+            // a test asks for auto, and the machine's pressure never sheds a test's lane.
+            .args(
+                (!more.contains(&"--lane-limits-default"))
+                    .then_some(["--lane-limits-default", "fixed"])
+                    .into_iter()
+                    .flatten(),
+            )
+            .arg("--no-lane-pressure")
             .args(more)
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)

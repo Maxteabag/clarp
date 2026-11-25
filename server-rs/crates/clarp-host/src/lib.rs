@@ -165,9 +165,20 @@ pub fn tool_token(administrators: &str) -> String {
     ))
 }
 
-/// Idle lanes leave while the kernel says memory is short, between the starts that make their
-/// own room (issue 792). Started once, with the Host.
+/// The lanes' mode where the owner's config sets none, from `--lane-limits-default`: set before
+/// anything can start a lane (issue 792).
+pub fn set_lane_limits_default(name: Option<&str>) {
+    if let Some(mode) = name.and_then(lane::Mode::named) {
+        lane::set_default_mode(mode);
+    }
+}
+
+/// Idle lanes leave while the kernel says memory is short, between the starts that make their own
+/// room, unless `--no-lane-pressure` (issue 792). Started once, with the Host.
 pub fn watch_lane_pressure(app: &edge::App) {
+    if !app.config.lane_pressure {
+        return;
+    }
     let run = app.config.run_dir.clone();
     if let Err(why) = std::thread::Builder::new()
         .name("lane-pressure".into())

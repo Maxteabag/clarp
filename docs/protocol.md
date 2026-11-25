@@ -1938,8 +1938,13 @@ own tools (`CLARP_AUTH_TOKEN` in a turn) may read them. A limited device may do 
     lane's typical size, stays at or above `reserve_percent` of its memory (20 unless set, range
     5-50), up to `ceiling` lanes (24 unless set, range 1-64). Idle lanes leave first, as they do
     for the fixed limits, and each one that leaves gives back what it weighed. Idle lanes also
-    leave when the kernel reports memory pressure between starts. `most` and `memory_mb` are
-    then not used, and are kept for `"fixed"`.
+    leave when the kernel reports memory pressure between starts. A lane started in the last
+    minute, or one that has not weighed itself, is counted at its tool's typical size until it
+    has grown, so a burst of starts cannot overshoot the reserve. `most` and `memory_mb` are not
+    used in auto, and are kept for `"fixed"`.
+  - A `POST` that changes `most` or `memory_mb` switches the Host to `"fixed"` with that value,
+    unless the same request names `limits`: the owner setting a count or a budget chose fixed
+    limits. An app that only knows `lane_settings` (contract 178) needs no change for it.
   - In fixed, `most` and `memory_mb` bound the lanes as before.
   - `held` gains `available_mb` (what the machine has free now), `reserve_mb` (what auto keeps
     free) and `room_mb` (what is left for lanes), each `null` where the Host cannot read its

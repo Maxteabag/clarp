@@ -157,6 +157,20 @@ impl Mode {
             .into_iter()
             .find(|mode| mode.name() == name)
     }
+
+    /// The mode where the owner's config sets none: auto, unless the Host was started with
+    /// `--lane-limits-default` (a test's Host runs fixed).
+    fn default() -> Self {
+        DEFAULT_MODE.get().copied().unwrap_or(Self::Auto)
+    }
+}
+
+/// Set once at the Host's start from `--lane-limits-default`.
+static DEFAULT_MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
+
+/// The lanes' mode where the owner's config sets none, from the Host's start.
+pub(crate) fn set_default_mode(mode: Mode) {
+    let _ = DEFAULT_MODE.set(mode);
 }
 
 /// What the machine's memory is now, from `/proc/meminfo`.
@@ -282,13 +296,13 @@ impl Settings {
                 .and_then(|file| file.get(LIMITS))
                 .and_then(toml::Value::as_str)
                 .and_then(Mode::named)
-                .unwrap_or(Mode::Auto),
+                .unwrap_or_else(Mode::default),
             reserve_percent: u64::try_from(number(
                 RESERVE_PERCENT,
                 i64::try_from(RESERVE_PERCENT_DEFAULT).unwrap_or(20),
             ))
             .unwrap_or(RESERVE_PERCENT_DEFAULT)
-            .min(90),
+            .clamp(5, 50),
             ceiling: usize::try_from(number(
                 CEILING,
                 i64::try_from(CEILING_DEFAULT).unwrap_or(24),
@@ -844,7 +858,15 @@ pub(crate) fn once_more<T>(
 fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
     let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
     let new = own.tool.typical_bytes();
-    let (mut live, mut held, idle) = idle_in_order(run, &own.socket, for_owner);
+    let (mut live, mut held, growing, idle) = idle_in_order(run, &own.socket, for_owner);
+    // What lanes started moments ago will still take is not free, whatever the machine says now.
+    let room = Room {
+        free: room.free.map(|free| Free {
+            available: free.available.saturating_sub(growing),
+            ..free
+        }),
+        ..room
+    };
     live += 1;
     held = held.saturating_add(new);
     let start = held;
@@ -877,16 +899,39 @@ fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
 /// idle, what it weighed, and where it listens.
 type Leaving = (bool, u64, u64, Endpoint);
 
+/// How long after its start a lane is still taken to grow: Codex loads the conversation on its
+/// first turn, which a weighing before it does not show.
+const YOUNG: Duration = Duration::from_secs(60);
+
+/// What a lane that has not weighed itself yet, or is younger than [`YOUNG`], may still grow to:
+/// its tool's typical size beyond what it said, never below 0. Counted against what the machine
+/// has free, so a burst of starts, each reading the same free memory, cannot overshoot the reserve
+/// (review of 25 Nov 2026).
+fn still_to_grow(lane: &Endpoint, state: &Status) -> u64 {
+    let said = state.memory_bytes.unwrap_or(0);
+    let young = std::fs::metadata(&lane.socket)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|made| made.elapsed().ok())
+        .is_none_or(|age| age < YOUNG);
+    if said == 0 || young {
+        lane.tool.typical_bytes().saturating_sub(said)
+    } else {
+        0
+    }
+}
+
 /// The lanes of the run folder but `skip`: how many answer and what they weigh together, and of
 /// them the idle ones that may leave, in the order they leave (the owner's rule of 25 Nov 2026):
 /// the agents' own first, then his, each longest idle first. His are among them only `for_owner`.
-fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> (usize, u64, Vec<Leaving>) {
+fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> (usize, u64, u64, Vec<Leaving>) {
     let mut idle = Vec::new();
-    let (mut live, mut held) = (0usize, 0u64);
+    let (mut live, mut held, mut growing) = (0usize, 0u64, 0u64);
     for (lane, state) in answering(run, skip) {
         let memory = weight(&lane, &state);
         live += 1;
         held = held.saturating_add(memory);
+        growing = growing.saturating_add(still_to_grow(&lane, &state));
         if state.claim.is_none() && state.available {
             let his = lane.agent().is_some_and(|agent| owners(run, agent));
             if for_owner || !his {
@@ -895,7 +940,7 @@ fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> (usize, u64, Vec<L
         }
     }
     idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
-    (live, held, idle)
+    (live, held, growing, idle)
 }
 
 /// In auto, with less free than the reserve: idle lanes leave, in the order room is made (the
@@ -909,7 +954,7 @@ pub(crate) fn shed(run: &Path, settings: &Settings, memory: Option<Memory>) -> u
     if memory.available >= reserve {
         return 0;
     }
-    let (_, _, idle) = idle_in_order(run, Path::new(""), true);
+    let (_, _, _, idle) = idle_in_order(run, Path::new(""), true);
     let (mut freed, mut left) = (0u64, 0usize);
     for (_, _, weighed, lane) in idle {
         if memory.available.saturating_add(freed) >= reserve {

@@ -38,8 +38,9 @@ fn the_owner_changes_the_lane_settings_from_an_app_and_the_next_turn_runs_by_the
     assert_eq!(read["most"], 6, "{read}");
     assert_eq!(read["memory_mb"], 2200, "{read}");
     assert_eq!(read["idle_minutes"], 15, "{read}");
-    // The limits are auto by default: what the machine has free, and what is kept free of lanes.
-    assert_eq!(read["limits"], "auto", "{read}");
+    // A test's Host runs the limits fixed (the harness says so: its lanes must not follow the
+    // test machine's free memory), and still says what the machine has free and what auto keeps.
+    assert_eq!(read["limits"], "fixed", "{read}");
     assert_eq!(read["reserve_percent"], 20, "{read}");
     assert_eq!(read["ceiling"], 24, "{read}");
     assert!(read["held"]["available_mb"].as_u64().is_some(), "{read}");

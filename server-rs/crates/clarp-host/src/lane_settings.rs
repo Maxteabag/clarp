@@ -374,6 +374,17 @@ fn change_of(text: &str, wanted: &[Wanted]) -> Result<Change, Unwritten> {
             _ => {}
         }
     }
+    // The owner setting a count or a budget is his choice of fixed limits: in auto they would do
+    // nothing, so an app that sets them, an old one too, switches the Host to fixed with them
+    // (the lead's decision of 25 Nov 2026 on issue 792). A request that names `limits` itself
+    // says which.
+    let sets_a_fixed_limit = change
+        .iter()
+        .any(|(key, _)| *key == lane::MOST || *key == lane::MEMORY_MB);
+    let names_the_mode = wanted.iter().any(|w| matches!(w, Wanted::Mode(_)));
+    if sets_a_fixed_limit && !names_the_mode && now.mode != Mode::Fixed {
+        change.push((lane::LIMITS, Mode::Fixed.name().into()));
+    }
     Ok(change)
 }
 
@@ -633,7 +644,8 @@ mod tests {
             [
                 "codex_lane_most",
                 "lane_memory_mb",
-                "codex_lane_idle_minutes"
+                "codex_lane_idle_minutes",
+                "lane_limits"
             ]
         );
     }
@@ -760,6 +772,26 @@ mod tests {
             assert_eq!(error.status(), StatusCode::BAD_REQUEST, "{body}");
             assert_eq!(error.message(), "limits must be \"auto\" or \"fixed\"");
         }
+        // A count or a budget set from any app, an old one too, is the owner's choice of fixed
+        // limits; naming the mode as well says which, and a value that does not change is no choice.
+        assert_eq!(
+            keys_changed(FILE, json!({"most": 4})).unwrap(),
+            ["codex_lane_most", "lane_limits"]
+        );
+        assert_eq!(
+            keys_changed(FILE, json!({"memory_mb": 3000})).unwrap(),
+            ["lane_memory_mb", "lane_limits"]
+        );
+        assert_eq!(
+            keys_changed(FILE, json!({"most": 4, "limits": "auto"})).unwrap(),
+            ["codex_lane_most"]
+        );
+        assert!(keys_changed(FILE, json!({"most": 8})).unwrap().is_empty());
+        let fixed = "lane_limits = \"fixed\"\ncodex_lane_most = 8\n";
+        assert_eq!(
+            keys_changed(fixed, json!({"most": 4})).unwrap(),
+            ["codex_lane_most"]
+        );
         let text = changed(FILE, &change(&[("lane_limits", "fixed".into())])).unwrap();
         let read: toml::Table = text.parse().unwrap();
         assert_eq!(Settings::of(Some(&read)).mode, Mode::Fixed);
