@@ -22,6 +22,18 @@ pub struct Report {
     pub top: i32,
 }
 
+impl Report {
+    /// The reader is at the end of the chat and follows it: they scrolled,
+    /// jumped or keyed their way there (each of which sets `follows` from
+    /// where the chat then is), or never left. The chat being at its end
+    /// alone is not enough: rows handed over or measured again below a
+    /// reader scrolled up can bring the end into view for a frame without
+    /// the reader going anywhere.
+    pub fn reading_the_end(&self) -> bool {
+        self.at_end && self.follows
+    }
+}
+
 /// How many of a chat's latest rows get their tool calls explained.
 const NARRATED_ROWS: usize = 40;
 
@@ -547,7 +559,7 @@ impl App {
         };
         let old = std::mem::replace(&mut panes[index].report, report);
         // Back at the end, the news is read.
-        if report.at_end && panes[index].view.news {
+        if report.reading_the_end() && panes[index].view.news {
             panes[index].view.news = false;
             let view = self.pane_view(&panes[index]);
             panes[index].view = view.clone();
@@ -950,10 +962,11 @@ impl App {
         }
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         let (removed, inserted, updated) = sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
-        // The latest row changed while the reader is scrolled up: news.
+        // The latest row changed while the reader does not follow the end
+        // (scrolled up, whether or not the end shows for a frame): news.
         // Older rows read in at the top leave the latest row as it was.
         let tail = pane.shown.last().map(|s| (s.3.clone(), s.2.clone()));
-        if pane.tail.is_some() && tail != pane.tail && !pane.report.at_end {
+        if pane.tail.is_some() && tail != pane.tail && !pane.report.follows {
             pane.view.news = true;
         }
         pane.tail = tail;

@@ -461,6 +461,19 @@ export component Pane inherits Rectangle {
     TouchArea {
         clicked => { ChatMenu.open = ""; root.activate(); }
     }
+    // Folded, the composer is a line 16px high: a click that misses it by
+    // a little (in the chat frame's bottom margin, the pane's padding under
+    // it) still gives it the keyboard, rather than leaving Normal mode to
+    // take the letters typed next as its keys. Under everything else, so
+    // the chat, its rows and the working row's Stop keep their own clicks.
+    if composer-box.folded && root.pane.session != "" && !root.pane.pair: TouchArea {
+        x: composer-box.absolute-position.x - root.absolute-position.x;
+        y: composer-box.absolute-position.y - root.absolute-position.y - Frame.bottom - 2px;
+        width: composer-box.width;
+        height: root.height - self.y;
+        mouse-cursor: text;
+        clicked => { composer.focus(); }
+    }
     VerticalLayout {
         padding: 2px;
         // [c] Chat and [i] Insert: the pane's two keyboard regions, framed
