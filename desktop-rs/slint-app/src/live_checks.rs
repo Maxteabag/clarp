@@ -193,7 +193,7 @@ pub fn live_check(out: String) {
     let stale: Rc<RefCell<(usize, usize)>> = Rc::default();
     let (stale1, stale2) = (stale.clone(), stale.clone());
     let out17 = out.clone();
-    let (out18, out19, out20, out21) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let (out18, out19, out20, out21, out22) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     let place: Rc<RefCell<Option<(String, f32)>>> = Rc::default();
     let (place1, place2) = (place.clone(), place.clone());
     let theme_before: Rc<RefCell<String>> = Rc::default();
@@ -930,6 +930,23 @@ pub fn live_check(out: String) {
             let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL, ANCHOR_QUEUED]);
             check(in_order(&order), &format!("the queued message is below the running turn: {order:?}"));
             shot(&out13, "live-12-anchor-queued");
+            // The message is steered into the running turn (live_read_rows,
+            // Rust Host contract 185): the turn names it in read_rows.
+            let started = ANCHOR_STARTED;
+            control("/__control/live-event", &json!({"session": "anchor", "event": {"conv": "c-probe", "server_now_ms": started + 12_000, "ops": [
+                {"op": "turn", "conv": "c-probe", "turn": {"turn_id": ANCHOR_TURN, "status": "running", "started_at_ms": started, "ended_at_ms": null, "worked_ms": null, "tool_count": 1,
+                    "read_rows": [ANCHOR_QUEUED]}},
+            ]}}))
+            .is_ok()
+        })),
+        ("anchor steered", Box::new(move |app, _window, elapsed| {
+            let read = app.engine.borrow().live_view("anchor").and_then(|v| v.turn()).is_some_and(|t| t.get("read_rows").is_some());
+            if !read || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_QUEUED, ANCHOR_TOOL]);
+            check(in_order(&order), &format!("a message read into the running turn sits above its working line: {order:?}"));
+            shot(&out22, "live-12b-anchor-steered");
             // A stale live turn: GET /live kept the first turn running while
             // two newer prompts started turns of their own in /log.
             control("/__control/live-load", &json!({"session": "stale", "fixture": "live-real-stale-turn.json", "agent_id": "agent-stale"})).is_ok()

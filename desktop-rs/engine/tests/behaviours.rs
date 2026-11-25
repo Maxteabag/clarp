@@ -143,6 +143,44 @@ fn a_stop_says_what_the_host_committed_and_who_stopped_it() {
     assert!(d.engine.stop_notice("rachel").is_empty());
 }
 
+#[test]
+fn a_host_that_tells_the_stop_in_a_sentence_is_shown_its_sentence() {
+    let host = Host::start("stop-text");
+    host.control("/__control/stop-text", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    host.control("/__control/stop", json!({"respond": {"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
+        "queue_paused": true, "goals_paused": 0, "text": "Stopped. 1 message waits; send one to go on."}}));
+    d.engine.stop_session("rachel");
+    d.until("the receipt", |e| !e.stop_notice("rachel").is_empty());
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped. 1 message waits; send one to go on.");
+    // A Stop from elsewhere: the detail's sentence.
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now()}));
+    d.until("cleared", |e| e.stop_notice("rachel").is_empty());
+    let detail = json!({"source": "user_stop", "stop_actor": "agent:theo-97e5", "stop_actor_verified": true,
+        "stop_reason": "Pebble busy", "stop_text": "Stopped. You can keep chatting."});
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "interrupted", "ts": chrono_now() + 1, "detail": detail}));
+    d.until("the detail's sentence", |e| e.stop_notice("rachel") == "Stopped. You can keep chatting.");
+    // An app that missed the state event learns it from the activity.
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now() + 2}));
+    d.until("cleared again", |e| e.stop_notice("rachel").is_empty());
+    host.control("/__control/event", json!({"type": "agent-activity", "session": "rachel", "state": "interrupted", "status": "idle",
+        "stop_actor": "user", "stop_text": "Stopped. The message that waits goes on next."}));
+    d.until("the activity's sentence", |e| e.stop_notice("rachel") == "Stopped. The message that waits goes on next.");
+}
+
+#[test]
+fn a_host_without_the_sentence_keeps_the_desktops_own_line() {
+    let host = Host::start("stop-no-text");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    host.control("/__control/stop", json!({"respond": {"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
+        "stop_reason": "", "queue_paused": true, "goals_paused": 2, "text": "Stopped. You can keep chatting."}}));
+    d.engine.stop_session("rachel");
+    d.until("the receipt", |e| !e.stop_notice("rachel").is_empty());
+    assert_eq!(d.engine.stop_notice("rachel"), "2 goals paused");
+}
+
 fn chrono_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }

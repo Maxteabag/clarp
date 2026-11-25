@@ -199,6 +199,10 @@ turn_summaries = False
 # A turn that did not complete says why on its end (feature turn_end_reason,
 # Rust Host contract 162): off until /__control/turn-reason turns it on.
 turn_reasons = False
+# The Host tells a Stop in one sentence (feature stop_receipt_text, Rust Host
+# contract 184): off until /__control/stop-text turns it on. /stop answers and
+# events carry text/stop_text as their fixtures give them.
+stop_receipt_text = False
 # The Host speaks an answer only when its send asks for it (feature
 # spoken_when_asked, contract 173): off until /__control/spoken-when-asked.
 spoken_when_asked = False
@@ -1568,6 +1572,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("log_turn_summary")
             if turn_reasons:
                 features.append("turn_end_reason")
+            if stop_receipt_text:
+                features.append("stop_receipt_text")
             if spoken_when_asked:
                 features.append("spoken_when_asked")
             if coordination["on"]:
@@ -2301,6 +2307,12 @@ class Handler(BaseHTTPRequestHandler):
             # /server-info on connecting).
             global spoken_when_asked
             spoken_when_asked = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/stop-text":
+            # Test control: the stop_receipt_text feature on or off (read from
+            # /server-info on connecting).
+            global stop_receipt_text
+            stop_receipt_text = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/turn-reason":
             # Test control: the turn_end_reason feature on or off (read from

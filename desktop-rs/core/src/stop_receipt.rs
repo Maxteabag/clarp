@@ -15,6 +15,11 @@
 //! transcript already says it was stopped, so the line names only what is
 //! worth knowing beyond that (messages left waiting, goals paused) and is
 //! empty otherwise.
+//!
+//! A Host that lists `stop_receipt_text` (Rust Host contract 184) tells the
+//! Stop in one sentence of its own: `text` on the `/stop` answer, `stop_text`
+//! in the Stop's detail. Where it does, the chat shows that sentence in place
+//! of the line built here; the fields stay read for what acts on them.
 
 use serde_json::Value;
 
@@ -38,7 +43,12 @@ pub struct StopReceipt {
     pub reason: Option<String>,
     pub queue_paused: Option<bool>,
     pub goals_paused: Option<u64>,
+    /// The Host's own sentence for the Stop (feature `stop_receipt_text`).
+    pub text: Option<String>,
 }
+
+/// The Host tells a Stop in one sentence (Rust Host contract 184).
+pub const FEATURE: &str = "stop_receipt_text";
 
 /// What the chat says: a line, or (the Stop changed nothing) an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +76,15 @@ impl StopReceipt {
             reason: text(object, "stop_reason"),
             queue_paused: flag(object, "queue_paused"),
             goals_paused: object.get("goals_paused").and_then(Value::as_u64),
+            text: text(object, if origin == Origin::Response { "text" } else { "stop_text" }),
         }
+    }
+
+    /// A Host without the feature: its sentence (if any field looks like
+    /// one) is not shown, and the line is built here as before.
+    pub fn without_host_text(mut self) -> Self {
+        self.text = None;
+        self
     }
 
     /// `POST /stop`'s answer. A field of the wrong type is unknown too.
@@ -128,6 +146,9 @@ impl StopReceipt {
             if self.from_newer_host() && !self.effects_known() && self.terminated == Some(0) {
                 return Said::Error("Stop did not take effect".into());
             }
+        }
+        if let Some(text) = &self.text {
+            return Said::Line(text.clone());
         }
         let mut parts = Vec::new();
         if !self.by_you() {

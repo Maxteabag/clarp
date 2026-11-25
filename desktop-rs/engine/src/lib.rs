@@ -1650,6 +1650,7 @@ impl Engine {
             self.transit_server_info(object);
             self.chat_view_server_info(object);
             self.form_events_server_info(object);
+            self.stop_server_info(object);
             self.artifact_summary_server_info(object);
             self.live_rewatch();
             self.sse.start();
@@ -1877,6 +1878,7 @@ impl Engine {
             }
             "agent-activity" => {
                 self.mutate_roster(|r| r.apply_activity_event(event));
+                self.stop_activity_event(&session, event);
                 let mut status =
                     event.get("activity_status").and_then(Value::as_str).map_or_else(|| json::string(event, "status"), str::to_owned);
                 if status.is_empty() && clarp_core::protocol::is_busy_state(&json::string(event, "state")) {

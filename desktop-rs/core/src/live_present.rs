@@ -128,6 +128,10 @@ pub struct Presented {
     pub started_at_ms: Option<i64>,
     /// The turn's own durable rows: they never push its place.
     pub own_rows: HashSet<String>,
+    /// The `/log` rows of the messages read into the turn as it ran, oldest
+    /// first (`read_rows`, feature `live_read_rows`, Rust Host contract
+    /// 185): its working line goes below the last of them.
+    pub read_rows: Vec<String>,
 }
 
 impl Presented {
@@ -146,21 +150,39 @@ impl Presented {
     /// turn's place, and below every row not its own written before the
     /// entry began. A turn the Host never settled (its agent died) whose
     /// items go on under newer prompts splits at them.
+    ///
+    /// The turn's working line (its running work row, Running box or a step
+    /// that runs) goes below the last message read into the turn
+    /// (`read_rows`): a message steered into a running turn sits above
+    /// Working, and what follows the line stays below it. What the turn did
+    /// before that message keeps its place above it.
     pub fn anchors(&self, rows: &[&Message]) -> Vec<usize> {
         let mut at = self.anchor(rows);
-        if self.started_at_ms.is_none() {
-            return vec![at; self.entries.len()];
-        }
+        let read = self.below_read(rows);
         self.entries
             .iter()
             .map(|entry| {
-                if let Some(began) = entry.started_at_ms {
+                if self.started_at_ms.is_some()
+                    && let Some(began) = entry.started_at_ms
+                {
                     let earlier = rows.iter().rposition(|r| self.pushes(r) && written(r).is_some_and(|ms| ms <= began));
                     at = at.max(earlier.map_or(0, |i| i + 1));
+                }
+                if working(entry)
+                    && let Some(read) = read
+                {
+                    at = at.max(read);
                 }
                 at
             })
             .collect()
+    }
+
+    /// Just below the last shown row read into the turn; None where none
+    /// was read (or none of them is shown).
+    fn below_read(&self, rows: &[&Message]) -> Option<usize> {
+        let read: HashSet<&str> = self.read_rows.iter().map(String::as_str).collect();
+        rows.iter().rposition(|r| read.contains(r.id.as_str())).map(|i| i + 1)
     }
 
     /// A row that pushes the turn's place: not its own and sent. The turn's
@@ -173,6 +195,12 @@ impl Presented {
         let traced = !self.turn_id.is_empty() && row.trace_id == self.turn_id;
         !traced || (row.role == "assistant" && row.phase == "final" && row.kind != "live")
     }
+}
+
+/// The turn's working line: its work row or Running box while the turn runs,
+/// or a step still running (no work row folds it). A message is never one.
+fn working(entry: &Entry) -> bool {
+    entry.kind != Kind::Message && matches!(entry.status.as_str(), "running" | "pending" | crate::chat_view::STALLED)
 }
 
 /// A row's Host time; rows without one (unsent ones) never push the turn.
@@ -396,6 +424,11 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     presented.hidden_rows.extend(folded_rows);
     presented.turn_id = turn_id;
     presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
+    presented.read_rows = turn
+        .and_then(|t| t.get("read_rows"))
+        .and_then(Value::as_array)
+        .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default();
     presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
     presented
 }
