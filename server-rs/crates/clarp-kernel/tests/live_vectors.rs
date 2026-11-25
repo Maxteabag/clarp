@@ -517,4 +517,12 @@ fn a_turn_carries_the_rows_read_into_it() {
     // A new turn reads nothing of the last one.
     let _ = hub.begin_turn("s1", "c1", "t-2", Some(60), "user", 60);
     assert_eq!(read(&mut hub, 61), Value::Null);
+    // A turn the user keeps writing into carries the newest of what it read, and says so.
+    let rows: Vec<String> = (0..25).map(|n| format!("u-r{n}")).collect();
+    let _ = hub.read_rows(&rows, 70);
+    let (snapshot, _) = hub.snapshot(71).unwrap();
+    let kept: Vec<String> = (5..25).map(|n| format!("u-r{n}")).collect();
+    assert_eq!(snapshot["turn"]["read_rows"], json!(kept));
+    assert_eq!(kept.len(), clarp_kernel::live::READ_ROWS_KEPT);
+    assert_eq!(snapshot["turn"]["read_rows_more"], json!(true));
 }
