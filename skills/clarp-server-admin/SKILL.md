@@ -311,6 +311,14 @@ start work that must outlive it with `clarp-background-jobs`. A lane is `<run>/<
 its `inspect` shows the session, the claim, `claims` and `idle_ms`. Turning the key off is the
 rollback: the lane leaves before the agent's next turn.
 
+Who keeps a lane place when all are taken (every tool's lanes, the owner's rule of 25 Nov 2026):
+the owner's agents first. A lane is the owner's when its agent had a turn the owner sent in the
+last 30 minutes, or its chat is open on one of his devices; every other lane (helpers, janitors,
+one agent asking another) is the agents' own. Idle lanes of the agents' own leave first, then idle
+lanes of the owner's, longest idle first; a busy lane never leaves. A lane of the agents' own never
+takes an owner's place: when only his are idle it does not start, and its agent runs each turn as
+a process of its own, which is no slower than before lanes. A Codex goal's lane always starts.
+
 ## Reading the lane settings (Rust Host, feature `lane_settings`)
 
 Only the owner changes the lane settings. Today he does that by editing the keys above in the Host's
