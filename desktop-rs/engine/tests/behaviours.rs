@@ -115,7 +115,7 @@ fn a_stop_says_what_the_host_committed_and_who_stopped_it() {
         "stop_actor_verified": true, "stop_reason": "Pebble busy with no process", "queue_paused": true, "goals_paused": 1}}));
     d.engine.stop_session("rachel");
     d.until("the receipt", |e| !e.stop_notice("rachel").is_empty());
-    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo (verified): Pebble busy with no process · queue paused · 1 goal paused");
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo: Pebble busy with no process · 1 goal paused", "nothing waits: the queue is not named");
     // Its own state row, trailing the answer, does not replace the effects.
     let detail = json!({"source": "user_stop", "message": "Turn stopped", "stop_actor": "agent:theo-97e5", "stop_actor_verified": true, "stop_reason": "Pebble busy with no process"});
     host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "interrupted", "ts": chrono_now(), "detail": detail}));
@@ -126,7 +126,7 @@ fn a_stop_says_what_the_host_committed_and_who_stopped_it() {
     d.until("cleared", |e| e.stop_notice("rachel").is_empty());
     host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "interrupted", "ts": chrono_now() + 1, "detail": detail}));
     d.until("the detail's line", |e| !e.stop_notice("rachel").is_empty());
-    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo (verified): Pebble busy with no process");
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo: Pebble busy with no process");
     // An older Host: the effects are unknown, not "not paused".
     host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now() + 2}));
     d.until("cleared again", |e| e.stop_notice("rachel").is_empty());

@@ -344,8 +344,12 @@ export component Composer inherits FocusScope {
         }
         // While the agent works: Stop, as its key does.
         if root.busy && root.active: VerticalLayout {
+            // As tall as the editor: a button never makes the composer taller.
+            height: editor.height;
             alignment: end;
             TipButton {
+                width: Math.min(32px, editor.height);
+                height: Math.min(32px, editor.height);
                 icon: @image-url("icons/stop.svg");
                 label: "Stop";
                 tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
@@ -356,8 +360,12 @@ export component Composer inherits FocusScope {
         }
         // With something to send: Send, as Enter does.
         if root.sendable && root.active: VerticalLayout {
+            // As tall as the editor: a button never makes the composer taller.
+            height: editor.height;
             alignment: end;
             TipButton {
+                width: Math.min(32px, editor.height);
+                height: Math.min(32px, editor.height);
                 icon: @image-url("icons/send.svg");
                 label: "Send";
                 tip: "Send · " + ComposerKeys.send;
