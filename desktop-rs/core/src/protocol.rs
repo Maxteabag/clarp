@@ -493,7 +493,15 @@ pub struct Message {
     pub activity: bool,
     pub automated: bool,
     pub tool_details_available: bool,
+    /// Why a failed turn failed, on its failure notice row (`failure_kind`,
+    /// Rust Host contract 191): `ended_from_outside`, `usage_limit`, `auth`,
+    /// `connection`, …; empty where the Host keeps none.
+    pub failure_kind: String,
 }
+
+/// A failure that was no fault of the tool: its process was killed by a
+/// signal the Host did not send (`failure_kind`, Rust Host contract 191).
+pub const ENDED_FROM_OUTSIDE: &str = "ended_from_outside";
 
 /// A row the desktop never draws: one the Host marks automated, or the note
 /// the Host leaves an agent after cutting its turn for the owner's message
@@ -543,6 +551,7 @@ impl Message {
             activity_count: json::integer(object, "activity_count") as i32,
             automated: automated_row(object),
             tool_details_available: json::boolean(object, "tool_details_available"),
+            failure_kind: s("failure_kind"),
             delivery_failed: json::boolean(object, "delivery_failed"),
             send_state: send_state(object),
             tools: json::array(object, "tools"),

@@ -856,7 +856,7 @@ pub fn message_to_json(message: &Message) -> Value {
         "sender_session": message.sender_session, "reply_to_agent_id": message.reply_to_agent_id,
         "reply_to_name": message.reply_to_name, "reply_to_session": message.reply_to_session,
         "delivery": message.delivery, "trace_id": message.trace_id, "category": message.category,
-        "automated": message.automated, "activity_count": message.activity_count,
+        "automated": message.automated, "activity_count": message.activity_count, "failure_kind": message.failure_kind,
         "tool_details_available": message.tool_details_available,
         "delivery_failed": message.delivery_failed, "tools": message.tools,
         "display_cells": message.display_cells, "hidden_before": message.hidden_before,
