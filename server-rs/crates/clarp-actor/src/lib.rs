@@ -472,6 +472,9 @@ pub struct QueueState {
     pub paused: bool,
     /// Grows with every change of the two above.
     pub revision: u64,
+    /// A message of the owner's sent now would be read into the running turn, rather than
+    /// wait until it is done (issue 867): as the live turn last said.
+    pub steerable: bool,
 }
 
 /// How the id of the Host's row on a change of the agent's backend begins
@@ -487,6 +490,20 @@ pub enum ByHand {
     NotWaiting,
     /// A turn of the agent runs: nothing is sent past it.
     AtWork,
+}
+
+/// What became of a waiting message its user had take over the running turn (issue 867).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakenOver {
+    /// The running turn was told to stop for it, and it runs next; or nothing ran, and its
+    /// turn has begun.
+    Done,
+    /// It does not wait: it ran, was taken back, never was, or is being read into the turn.
+    NotWaiting,
+    /// It is not the owner's own message.
+    NotTheOwners,
+    /// The running turn is not one a waiting message may cut.
+    Uncuttable,
 }
 
 /// How far a queue item has gone before its conversation row is written.
@@ -993,6 +1010,9 @@ pub struct Actor {
     shown_turn: Option<(TurnId, String)>,
     /// The events of it that nobody has taken yet.
     shown_events: Vec<serde_json::Value>,
+    /// Whether a message of the owner's sent now would be read into the running turn, as the
+    /// live turn was last told ([`Actor::tell_steerable`]).
+    steerable: bool,
     /// How many notes for the user the newest turn that left one has left: its number and the
     /// count, kept as they are written, for its end ([`TurnEnd::note_count`]).
     turn_notes: (u64, u32),
@@ -1668,6 +1688,7 @@ impl Actor {
             shown,
             shown_turn: None,
             shown_events: Vec::new(),
+            steerable: false,
             profile,
             backend,
             recorder,
@@ -2960,6 +2981,7 @@ impl Actor {
             listed,
             paused: agent.is_paused(),
             revision: agent.queue_revision(),
+            steerable: self.steerable && agent.live().is_some(),
         }
     }
 
@@ -4743,6 +4765,54 @@ impl Actor {
         };
         self.carry_out(effects, &mut out, now_ms)?;
         Ok((ByHand::Sent, out))
+    }
+
+    /// The owner's waiting message takes over the running turn (issue 867): that turn ends as
+    /// stopped for a newer message, as one said direct ends it (`owner_preempts`), and this one
+    /// runs next. The queue is not held. Answered with the note to leave behind it where the
+    /// cut turn was not a person's ([`Actor::owner_goes_first`]).
+    pub fn take_over(
+        &mut self,
+        turn: TurnId,
+        by: &str,
+        now_ms: i64,
+    ) -> Result<(TakenOver, Option<GoesFirst>, Outputs), ActorError> {
+        let origin = self
+            .recorder
+            .agent()
+            .waiting()
+            .find(|waiting| waiting.id == turn)
+            .map(|waiting| waiting.origin.clone());
+        let goes = match &origin {
+            Some(origin) => self.owner_goes_first(origin)?,
+            None => None,
+        };
+        let command = Command::TakeOver {
+            turn,
+            by: by.to_string(),
+        };
+        let refused = |taken| Ok((taken, None, Outputs::default()));
+        let effects = match self.recorder.handle(command, now_ms) {
+            Ok(effects) => effects,
+            Err(JournalError::Refused(Refusal::NotTheOwners(_))) => {
+                return refused(TakenOver::NotTheOwners);
+            }
+            Err(JournalError::Refused(Refusal::Uncuttable)) => {
+                return refused(TakenOver::Uncuttable);
+            }
+            Err(JournalError::Refused(_)) => return refused(TakenOver::NotWaiting),
+            Err(error) => return Err(error.into()),
+        };
+        let mut out = Outputs {
+            changed: Changed {
+                status: !effects.is_empty(),
+                queue: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        self.carry_out(effects, &mut out, now_ms)?;
+        Ok((TakenOver::Done, goes, out))
     }
 
     /// A command a client asked for, which the agent may refuse. Returns whether it was done.

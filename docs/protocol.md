@@ -1569,6 +1569,25 @@ the message the answer becomes for the agent is spoken only when it is `true`; a
 Older Hosts ignore the field: on Send now and reword they use the item's flag, and on a
 resolve the answer is not spoken.
 
+**A waiting message takes over the running turn** (Rust Host contract 197, feature
+`turn_take_over`, issue 867). `POST /turn-queue/<id>/take-over` (no body) has one of the
+owner's waiting messages (origin `user` or `oracle`) take over: the running turn ends as
+stopped for a newer message, exactly as when the owner's message is said direct
+(`owner_preempts`), and that message runs next, at once, in the same conversation, so the model
+sees what the cut turn did. The queue is not held (a plain Stop holds it); what else waits
+goes on after it, and a cut turn's messages it had not begun to answer wait behind it. A Stop
+sent after the take-over holds the message with the rest. Where the cut turn was not a
+person's (another agent's, a schedule's), the agent is left the same note to take that work up
+again. With no turn running it runs at once, as a Send now. Answers `200 {"ok": true,
+"session", "taken_over": true}`; `404 queued message not found` for an id that does not wait,
+or names a message already being read into the turn; `409 only the owner's own message can
+take over a turn`; `409 the running turn cannot be taken over; stop it instead` while the turn
+is a Codex native goal's own or the tool's compaction. `queue-updated` and the turn's end
+follow as for a Stop. Whether to offer it: the live turn's `steerable` ([Live
+items](live-items.md) §1.4), also on `GET /turn-queue` as `steerable` (a message sent now is
+read into the running turn): offer it on the owner's waiting messages while a turn runs and
+`steerable` is not `true`. An older Host has neither: offer nothing.
+
 **The user's word goes first** (feature `queue_user_first`). An agent takes one
 queued item each time a turn ends. An item that carries the user's own word is
 taken before the others: a send whose origin the Host resolved as `user` or

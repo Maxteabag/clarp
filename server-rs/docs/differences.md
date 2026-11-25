@@ -788,6 +788,9 @@ A Stop is told in one sentence for people on the Rust Host (contract 184, featur
 agent's activity (snapshot and `agent-activity`) while the Stop is its latest state and in the
 `detail` of the Stop's `agent-state` event. The retired Python reference says a Stop only in its
 fields (`queue_paused`, `goals_paused`, `stop_actor`), which the apps showed as they were.
+A waiting message of the owner's can take over the running turn on the Rust Host (contract 197,
+feature `turn_take_over`, issue 867): `POST /turn-queue/<id>/take-over`, and `steerable` on the
+live turn and on the answer to `GET /turn-queue`. The retired Python reference has neither.
 
 Conversation forks (issue 718, contract 153, feature `conversation_fork`) are available
 on the Rust Host only, for the agents its owner names in `[conversation_forks] agents` of the

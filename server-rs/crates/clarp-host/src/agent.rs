@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile,
-    QueueState, Sent, ShimOrder, Status, TurnFate, Waiting,
+    QueueState, Sent, ShimOrder, Status, TakenOver, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -357,6 +357,12 @@ enum Ask {
         speak: Option<bool>,
         answer: Answer<ByHand>,
     },
+    /// The owner's waiting message takes over the running turn (issue 867).
+    TakeOver {
+        turn: TurnId,
+        by: String,
+        answer: Answer<TakenOver>,
+    },
     /// Change the words of a message that waits outside the conversation.
     Reword {
         turn: TurnId,
@@ -632,6 +638,7 @@ impl Ask {
             Self::TakeUp { .. } => "TakeUp",
             Self::Withdraw { .. } => "Withdraw",
             Self::SendNow { .. } => "SendNow",
+            Self::TakeOver { .. } => "TakeOver",
             Self::Reword { .. } => "Reword",
             Self::Note { .. } => "Note",
             Self::KeeperEvents { .. } => "KeeperEvents",
@@ -1147,6 +1154,12 @@ impl AgentHandle {
         .await
     }
 
+    /// The owner's waiting message takes over the running turn: that turn ends as stopped for
+    /// it, and it runs next. The queue is not held (issue 867).
+    pub async fn take_over(&self, turn: TurnId, by: String) -> Result<TakenOver, Unavailable> {
+        self.ask(|answer| Ask::TakeOver { turn, by, answer }).await
+    }
+
     /// Changes the words of a message that waits outside the conversation, and with `speak`
     /// whether it is answered aloud.
     pub async fn reword(
@@ -1646,6 +1659,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         launches: launcher::Launches::default(),
         let_go_by_hand: false,
         queue_edit: None,
+        lane_word: None,
         takeover_wait: VecDeque::new(),
         newest: None,
         listed_preview: None,
@@ -1739,6 +1753,10 @@ struct Worker {
     let_go_by_hand: bool,
     /// The edit or withdrawal committed by the request this worker is handling.
     queue_edit: Option<QueueEdit>,
+    /// Whether the owner's setting runs the chat turns of this agent's tool on its lane, as it
+    /// was read for the running turn: a lane's turn is told whether it can be steered by it
+    /// (issue 867), and the file is read once a turn for that, not at every window.
+    lane_word: Option<(TurnId, bool)>,
     /// Commands that could change the selected turns while a consume verdict is uncertain.
     takeover_wait: VecDeque<Ask>,
     /// The newest row of the conversation.
@@ -2209,10 +2227,34 @@ impl Worker {
     /// woke on its own.
     fn tell_shown(&mut self) {
         let now = self.now_ms();
+        let view = self.view.borrow().clone();
+        // Whether the running turn can take a message of the owner's now (issue 867), on the
+        // same terms as a send offers one to it: a tool that steers on its input always, a
+        // lane's tool while the owner's setting runs its chat turns there.
+        let offered = match self.setup.backend.steers() {
+            clarp_backend::Steers::Stdin => true,
+            clarp_backend::Steers::No => false,
+            clarp_backend::Steers::Words => {
+                let live = view.status.live.as_ref().map(|live| live.turn);
+                let asks = self
+                    .actor
+                    .as_ref()
+                    .is_some_and(Actor::steering_needs_the_lane_setting);
+                match (live, self.lane_word) {
+                    (Some(turn), Some((read_for, on))) if read_for == turn => on,
+                    (Some(turn), _) if asks => {
+                        let on = self.chat_lane();
+                        self.lane_word = Some((turn, on));
+                        on
+                    }
+                    _ => false,
+                }
+            }
+        };
         let Some(actor) = self.actor.as_mut() else {
             return;
         };
-        let view = self.view.borrow().clone();
+        actor.tell_steerable(offered, now);
         let trace = view
             .status
             .live
@@ -3147,6 +3189,7 @@ impl Worker {
                     | Ask::Withdraw { .. }
                     | Ask::Reword { .. }
                     | Ask::SendNow { .. }
+                    | Ask::TakeOver { .. }
                     | Ask::Send {
                         admission: Admission::Direct,
                         ..
@@ -3891,6 +3934,20 @@ impl Worker {
                     self.queue_edit = Some(QueueEdit::Changed);
                 }
                 answered(sent, answer)?
+            }
+            Ask::TakeOver { turn, by, answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                let taken = actor.take_over(turn, &by, now).map(|(taken, goes, out)| {
+                    // A turn that was not a person's leaves the agent a note to take its work
+                    // up again, as when the owner's message is said direct.
+                    made_way =
+                        goes.and_then(|goes| goes.note.map(|note| (note, goes.coordination)));
+                    (taken, out)
+                });
+                answered(taken, answer)?
             }
             Ask::Reword {
                 turn,
@@ -6215,6 +6272,7 @@ fn refuse_for(
             Ok(Ask::ChangeTool { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TakeOver { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Reword { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Note { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {

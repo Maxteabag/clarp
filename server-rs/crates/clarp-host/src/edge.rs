@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::conversation::Which;
-use clarp_actor::{ByHand, ImportedRow};
+use clarp_actor::{ByHand, ImportedRow, TakenOver};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::contacts::{self, Launch};
@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 196;
+pub const HOST_CONTRACT: u64 = 197;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -493,6 +493,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // may read that have the words, newest first, paged, from an index kept as rows change,
     // `partial` while older history is still being read into it (issue 803).
     ("message_search", 196),
+    // The live turn says whether a message of the owner's sent now is read into it
+    // (`steerable`, also on `GET /turn-queue`), and `POST /turn-queue/<id>/take-over` has one
+    // of the owner's waiting messages take over a turn that cannot be steered: the turn ends as
+    // stopped for a newer message and that message runs next; the queue is not held (issue 867).
+    ("turn_take_over", 197),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -891,6 +896,7 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue/resume", post(resume))
         .route("/turn-queue/{id}", delete(take_back).put(reword))
         .route("/turn-queue/{id}/send", post(send_by_hand))
+        .route("/turn-queue/{id}/take-over", post(take_over))
         .route("/pairing/identity", get(pairing_identity))
         .route("/pairing/exchange", post(pairing_exchange))
         .route("/pairing/issue", post(pairing_issue))
@@ -4328,6 +4334,8 @@ async fn queue(
         "items": items,
         "paused": state.paused,
         "revision": state.revision,
+        // A message of the owner's sent now is read into the running turn (issue 867).
+        "steerable": state.steerable,
     })))
 }
 
@@ -4527,6 +4535,40 @@ async fn send_by_hand(
         ByHand::AtWork => Err(ApiError::new(
             StatusCode::CONFLICT,
             "agent is still working",
+        )),
+    }
+}
+
+/// `POST /turn-queue/<id>/take-over`: its user has one waiting message of theirs take over
+/// the running turn (issue 867). That turn ends as stopped, for a newer message, and the
+/// message runs next, at once, in the same conversation. The queue is not held, as a Stop
+/// holds it; what else waits goes on after it. With no turn running it runs now, as one sent
+/// by hand. A message already being read into the turn cannot take it over.
+async fn take_over(State(app): State<App>, Path(id): Path<String>) -> Result<Response, ApiError> {
+    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting());
+    };
+    match member
+        .agent
+        .take_over(waiting.turn, "user".to_string())
+        .await?
+    {
+        TakenOver::Done => {
+            let answer = json!({
+                "ok": true,
+                "session": member.record.session,
+                "taken_over": true,
+            });
+            Ok(Json(answer).into_response())
+        }
+        TakenOver::NotWaiting => Err(not_waiting()),
+        TakenOver::NotTheOwners => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "only the owner's own message can take over a turn",
+        )),
+        TakenOver::Uncuttable => Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "the running turn cannot be taken over; stop it instead",
         )),
     }
 }

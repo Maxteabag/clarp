@@ -211,6 +211,8 @@ mod stop_events;
 mod stop_resume;
 #[path = "host/stop_text.rs"]
 mod stop_text;
+#[path = "host/take_over.rs"]
+mod take_over;
 #[path = "host/takeover_b.rs"]
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]

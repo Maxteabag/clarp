@@ -649,6 +649,26 @@ impl Hub {
         out
     }
 
+    /// Whether a message of the owner's sent now would be read into the running turn rather
+    /// than wait until it is done (issue 867): the turn carries it as `steerable` once it is
+    /// true, and is told again whenever it changes. A turn that never said it is not.
+    pub fn set_turn_steerable(&mut self, steerable: bool, now: i64) -> Vec<Value> {
+        let mut out = Vec::new();
+        if self.has_open_turn()
+            && let Some(mut turn) = self.view.turn.clone()
+            && turn
+                .get("steerable")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                != steerable
+        {
+            turn.insert("steerable".to_owned(), json!(steerable));
+            let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
+            self.emit(vec![op], (false, ""), now, &mut out);
+        }
+        out
+    }
+
     /// Messages were read into the running turn (`rows`: their rows' ids, in the order they were
     /// read): steered into it, or read with its own at its start. The turn carries them as
     /// `read_rows`, oldest first, so a client puts the turn's working line after the last of

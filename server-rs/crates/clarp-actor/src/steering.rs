@@ -527,6 +527,7 @@ pub(super) fn queue_started(batch: &Batch<'_>, out: &mut Outputs, turn: TurnId, 
         listed,
         paused: agent.is_paused(),
         revision: agent.queue_revision(),
+        ..QueueState::default()
     };
     out.joined_reads.push(JoinedRead {
         turn,
@@ -573,16 +574,26 @@ impl Actor {
     /// Whether the live turn's tool takes these words on its input now, as the turn's spool
     /// says: what [`Actor::steer_active`] asks of the turn before it writes anything.
     fn takes_now(&self, uuid: &str, text: &str) -> bool {
+        self.backend.steers_message(text)
+            && !text.trim().is_empty()
+            && self
+                .live
+                .as_ref()
+                .is_some_and(|live| live.steering.prompt_uuid() != Some(uuid))
+            && self.turn_takes_words()
+    }
+
+    /// Whether the live turn's tool takes steered words on its input now, whatever they say:
+    /// what [`Actor::takes_now`] asks of the turn beside the message itself.
+    fn turn_takes_words(&self) -> bool {
         let Some(live) = self.live.as_ref() else {
             return false;
         };
-        let can = self.backend.steers_message(text)
+        let can = self.backend.steers() != Steers::No
             && live.steering.stream.can_join()
             && !live.steering.input_skipped
-            && live.steering.prompt_uuid() != Some(uuid)
             && !live.opening
-            && live.origin.name() != COMPACTION
-            && !text.trim().is_empty();
+            && live.origin.name() != COMPACTION;
         // A lane takes steered words until its turn ends; a tool that steers on its
         // input takes them once its process and session are known.
         can && if self.backend.steers() == Steers::Words {
@@ -590,6 +601,28 @@ impl Actor {
         } else {
             live.steering.owner.is_some() && self.recorder.agent().backend_session().is_some()
         }
+    }
+
+    /// Whether a message of the owner's sent now would be read into the running turn rather
+    /// than wait until it is done (`steerable` on the live turn, issue 867): its tool takes
+    /// steered words now and the agent lets them in. `offered`: whether the Host offers this
+    /// tool's turns steered words at all (a lane's tool only while the owner's setting runs
+    /// its chat turns there). The live turn is told when the answer changes.
+    pub fn tell_steerable(&mut self, offered: bool, now_ms: i64) {
+        // The turn that runs is the one shown first, so that it is the one told.
+        self.show_turn(now_ms);
+        let steerable =
+            offered && self.turn_takes_words() && self.recorder.agent().live_takes_words();
+        self.steerable = steerable;
+        let events = self.shown.set_turn_steerable(steerable, now_ms);
+        self.shown_events.extend(events);
+    }
+
+    /// Whether the Host must say if it offers this tool's turns steered words for
+    /// [`Actor::tell_steerable`]: only a lane's tool depends on the owner's setting, and only
+    /// while its turn could take them.
+    pub fn steering_needs_the_lane_setting(&self) -> bool {
+        self.backend.steers() == Steers::Words && self.turn_takes_words()
     }
 
     /// Whether the owner's message, sent now, would be steered into the live turn rather than

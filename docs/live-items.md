@@ -231,6 +231,14 @@ Messages read at the start are in `read_rows` from the turn's first `turn` op. A
 `read_rows` rather than objects in it, so a client that reads `read_rows` as row ids reads it as
 before. Absent where `read_rows` is.
 
+`steerable` (Rust Host contract 197, feature `turn_take_over`, issue 867): `true` while a message
+of the owner's sent now would be read into the running turn; absent or `false` while it would wait
+until the turn is done (the tool cannot be steered, as on Grok or on a lane's tool with its chat
+lane off; or not yet, before the tool's process and session are known; or not any more, once the
+turn is stopping or the queue is held). A `turn` op follows each change. Draw the composer's hint
+by it: "read into the running turn", or "waits until the turn is done", with the waiting message's
+take-over action ([the protocol](protocol.md#5-stop-post-stop)) in the second case.
+
 The rows themselves say it too (Rust Host contract 189, feature `read_into`): a `/log`
 message row read into a turn other than its own carries `read_into`, `{trace_id, turn, at}`, whose
 `trace_id` is that turn's `turn_id`, from the row's first revision, so a client that reads `/log` before this op arrives places the

@@ -106,6 +106,11 @@ pub enum Command {
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
     /// hand. Only when no turn runs.
     SendNow { turn: TurnId, by: String },
+    /// The owner's waiting message takes over (issue 867): the live turn ends as stopped for
+    /// it, as for a newer message of the owner's said direct (`owner_preempts`), and it runs
+    /// the moment that turn is over, ahead of everything, held by nothing. Nothing is paused.
+    /// With no turn running it runs at once, as one sent by hand.
+    TakeOver { turn: TurnId, by: String },
     /// The words of a waiting message were written anew, at `message_seq`: its turn answers
     /// those. It keeps its place among what waits.
     Reword { turn: TurnId, message_seq: u64 },
@@ -379,6 +384,12 @@ pub enum Refusal {
     TakeoverStale,
     /// Messages wait for the agent: what changes under them would answer them otherwise.
     Waiting,
+    /// Only a message of the owner's own (the user's, or the Oracle's for the user) takes over
+    /// the live turn.
+    NotTheOwners(TurnId),
+    /// The live turn is not one a waiting message may cut: a native goal's own turn (a Stop
+    /// pauses its goal first), or the tool's compaction or its summary for a move.
+    Uncuttable,
 }
 
 impl std::fmt::Display for Refusal {
@@ -401,6 +412,8 @@ impl std::fmt::Display for Refusal {
             }
             Self::TakeoverStale => write!(f, "the selected turn can no longer be taken over"),
             Self::Waiting => write!(f, "messages wait for the agent"),
+            Self::NotTheOwners(turn) => write!(f, "turn {} is not the owner's message", turn.0),
+            Self::Uncuttable => write!(f, "the live turn cannot be cut by a waiting message"),
         }
     }
 }
@@ -455,6 +468,11 @@ pub struct Agent {
     /// message given back. Such a turn is the user's, whoever sent it.
     live_user_word: bool,
     selected_takeover: Option<crate::takeover::Selection>,
+    /// The owner's waiting message that took over the live turn (issue 867), and who asked:
+    /// sent by hand while that turn ran. When the turn is over it is sent by hand once more,
+    /// so that it runs next, ahead of what the cut turn gives back. A Stop after it holds it
+    /// with the rest, and ends this.
+    taking_over: Option<(TurnId, String)>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
     unheld: BTreeSet<TurnId>,
@@ -550,6 +568,7 @@ impl Default for Agent {
             live_worked: false,
             live_user_word: false,
             selected_takeover: None,
+            taking_over: None,
             unheld: BTreeSet::new(),
             stop_released: BTreeSet::new(),
             last: None,
@@ -1242,6 +1261,43 @@ impl Agent {
                     at_ms: now_ms,
                 });
             }
+            Command::TakeOver { turn, by } => {
+                work.agent.require_here()?;
+                let agent = &work.agent;
+                let Some(queued) = agent.mailbox.iter().find(|queued| queued.id == turn) else {
+                    return Err(Refusal::NotWaiting(turn));
+                };
+                // One already offered to the live turn's input, or chosen to take its place by
+                // the tool's own takeover, is on its way into that turn: it cannot cut it.
+                let offered = agent.joins.contains_key(&turn)
+                    || agent
+                        .selected_takeover
+                        .as_ref()
+                        .is_some_and(|selected| selected.into == turn);
+                if agent.import_held || offered {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                if !queued.origin.is_user_send() {
+                    return Err(Refusal::NotTheOwners(turn));
+                }
+                if agent.live.as_ref().is_some_and(|live| {
+                    matches!(live.origin(), Origin::NativeGoal)
+                        || matches!(live.origin(), Origin::Trigger { name }
+                            if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY)
+                }) {
+                    return Err(Refusal::Uncuttable);
+                }
+                // Recorded as a send by hand, which an older build replays the same way.
+                work.record(AgentEvent::SentNow {
+                    turn,
+                    by,
+                    at_ms: now_ms,
+                });
+                // The live turn makes way, as for a direct message of the owner's: stopped by
+                // a newer message, so the queue is not held. One already on its way out is
+                // left to it.
+                work.stop_live(Control::by(preempted_by(turn)), now_ms);
+            }
             Command::Stop { by } | Command::StopAndStartWaiting { by } => {
                 let release_waiting = start_waiting && by.actor == crate::control::USER;
                 work.stop_live(by.clone(), now_ms);
@@ -1703,6 +1759,8 @@ impl Agent {
                 }
                 self.unheld.clear();
                 self.stop_released.clear();
+                // A Stop after a take-over holds the message that took over with the rest.
+                self.taking_over = None;
             }
             AgentEvent::StopReleasedWaiting { turns } => {
                 self.unheld.extend(turns);
@@ -1730,7 +1788,7 @@ impl Agent {
                 // What waits changed: a client that orders queue news by the revision asks again.
                 self.queue_revision += 1;
             }
-            AgentEvent::SentNow { turn, .. } => {
+            AgentEvent::SentNow { turn, by, .. } => {
                 let Some(at) = self.mailbox.iter().position(|queued| queued.id == *turn) else {
                     return Err(IllegalTransition {
                         turn: *turn,
@@ -1743,6 +1801,10 @@ impl Agent {
                     self.mailbox.push_front(queued);
                 }
                 self.unheld.insert(*turn);
+                // Sent by hand while a turn runs: it took that turn over (issue 867).
+                if self.live.is_some() {
+                    self.taking_over = Some((*turn, by.clone()));
+                }
                 // Taken out of its place by hand, the queue changed; and it changes once
                 // more when the turn starts. The Python Host counts a message sent by hand
                 // so (it is claimed, then started), and a client orders queue news by this.
@@ -2092,6 +2154,9 @@ impl Agent {
         }
         self.unheld.remove(&turn);
         self.stop_released.remove(&turn);
+        if self.taking_over.as_ref().is_some_and(|(id, _)| *id == turn) {
+            self.taking_over = None;
+        }
         let user_word = queued.user_word;
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
@@ -2241,6 +2306,20 @@ impl Work {
         // an import pause. New decisions must never start one before the handoff.
         if self.agent.live.is_some() || self.agent.import_held {
             return;
+        }
+        // The message that took over the turn that just ended runs next: sent by hand once
+        // more, ahead of what that turn gave back, unless it was in this same step.
+        if let Some((turn, by)) = self.agent.taking_over.clone()
+            && self.agent.mailbox.iter().any(|queued| queued.id == turn)
+            && !self.decision.events.iter().any(
+                |event| matches!(event, AgentEvent::SentNow { turn: sent, .. } if *sent == turn),
+            )
+        {
+            self.record(AgentEvent::SentNow {
+                turn,
+                by,
+                at_ms: now_ms,
+            });
         }
         let Some(next) = self.agent.next_to_run() else {
             return;
@@ -3309,6 +3388,156 @@ mod tests {
         Command::Stop {
             by: Control::by("peter"),
         }
+    }
+
+    fn take_over(turn: u64) -> Command {
+        Command::TakeOver {
+            turn: TurnId(turn),
+            by: "user".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_owners_waiting_message_takes_over_the_live_turn_and_runs_next_once() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.user(11);
+        a.user(12);
+        let revision = a.agent.queue_revision();
+        assert_eq!(
+            a.send(take_over(3)).unwrap(),
+            vec![Effect::StopTurn { turn: TurnId(1) }],
+            "the live turn is told to make way"
+        );
+        assert!(!a.agent.is_paused(), "a take-over holds nothing");
+        assert_eq!(a.waiting(), vec![3, 2], "ahead of what waits");
+        assert!(a.agent.queue_revision() > revision);
+        // The old process goes: the turn ended as stopped for the newer message, and the
+        // message that took it over runs at once.
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(3),
+                message_seq: 12
+            }]
+        );
+        assert!(a.history.iter().any(|event| matches!(
+            event,
+            AgentEvent::Turn { turn: TurnId(1), change: TurnEvent::Settled { outcome: Outcome::Stopped { by, .. }, .. } }
+                if *by == preempted_by(TurnId(3))
+        )));
+        assert!(!a.agent.is_paused());
+        assert_eq!(a.agent.taking_over, None);
+        // What else waited goes on by itself, in its order.
+        assert_eq!(
+            a.finish(3),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        a.finish(2);
+        assert_eq!(
+            a.started,
+            vec![TurnId(1), TurnId(3), TurnId(2)],
+            "every message ran exactly once"
+        );
+    }
+
+    #[test]
+    fn a_message_that_took_over_runs_ahead_of_what_the_cut_turn_gives_back() {
+        let mut a = two_gathered();
+        a.user(14);
+        assert_eq!(
+            a.send(take_over(5)).unwrap(),
+            vec![Effect::StopTurn { turn: TurnId(2) }]
+        );
+        a.send(Command::TurnEnded {
+            turn: TurnId(2),
+            outcome: RunOutcome::Interrupted {
+                reason: "stopped".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(a.live(), Some(5), "the message that took over runs first");
+        assert_eq!(
+            a.waiting(),
+            vec![3, 4],
+            "what the cut turn had not begun waits behind it"
+        );
+        assert!(!a.agent.is_paused());
+        // A build that knows only a send by hand replays the same history the same way: the
+        // message is sent by hand again in the step that starts it.
+        let sent = a
+            .history
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    AgentEvent::SentNow {
+                        turn: TurnId(5),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(sent, 2);
+    }
+
+    #[test]
+    fn only_the_owners_message_that_still_waits_takes_over() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.background(11);
+        a.user(12);
+        assert_eq!(a.send(take_over(9)), Err(Refusal::NotWaiting(TurnId(9))));
+        assert_eq!(
+            a.send(take_over(1)),
+            Err(Refusal::NotWaiting(TurnId(1))),
+            "it runs"
+        );
+        assert_eq!(
+            a.send(take_over(2)),
+            Err(Refusal::NotTheOwners(TurnId(2))),
+            "a schedule's message does not cut a turn"
+        );
+        // One offered to the live turn's input is on its way into it.
+        a.send(Command::Join {
+            turn: TurnId(3),
+            join: Join {
+                into: TurnId(1),
+                uuid: "steered-3".into(),
+                recovery: None,
+                together: false,
+            },
+        })
+        .unwrap();
+        assert_eq!(a.send(take_over(3)), Err(Refusal::NotWaiting(TurnId(3))));
+        assert!(a.agent.stopping.is_none(), "nothing was cut");
+    }
+
+    #[test]
+    fn a_stop_after_a_take_over_holds_the_message_and_with_nothing_running_it_runs_at_once() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.user(11);
+        a.send(take_over(2)).unwrap();
+        // The user's Stop comes after it: the message is held with the rest.
+        a.send(stop()).unwrap();
+        assert_eq!(a.finish(1), vec![], "held");
+        assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
+        // Nothing runs now: taking over runs it at once, as a send by hand, and the hold stays.
+        assert_eq!(
+            a.send(take_over(2)).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert!(a.agent.is_paused());
     }
 
     #[test]
