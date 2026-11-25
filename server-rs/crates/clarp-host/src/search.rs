@@ -342,12 +342,13 @@ impl Indexer {
             }
             // History, one page, when the last is far enough behind.
             let paced = self.paced_from.map(|from| from + PACE);
-            if !self.reread && paced.is_none_or(|at| at <= now) {
-                if let Some(agent_id) = self.next_history() {
-                    self.paced_from = Some(Instant::now());
-                    self.history(&agent_id).await;
-                    continue;
-                }
+            if !self.reread
+                && paced.is_none_or(|at| at <= now)
+                && let Some(agent_id) = self.next_history()
+            {
+                self.paced_from = Some(Instant::now());
+                self.history(&agent_id).await;
+                continue;
             }
             // Nothing to do now: wait for the hub, the next change that is due, or the pace.
             let wake = self
