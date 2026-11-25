@@ -1,41 +1,82 @@
 //! Issue 839: the owner's message never waits behind a turn that is not a person's.
 use super::*;
 
+/// A Claude Code stand-in: the peer's work runs until it is stopped, whatever else its prompt
+/// carries; anything else is answered at once with its last line.
+const CLAUDE: &str = r#"#!/usr/bin/env python3
+import json, pathlib, sys, time
+
+if "--version" in sys.argv:
+    print("2.1.321 (Claude Code)")
+    raise SystemExit(0)
+
+root = pathlib.Path(__file__).resolve().parent
+flag = "--resume" if "--resume" in sys.argv else "--session-id"
+session = sys.argv[sys.argv.index(flag) + 1]
+
+def say(kind, **fields):
+    print(json.dumps({"type": kind, "session_id": session, **fields}), flush=True)
+
+record = json.loads(sys.stdin.readline())
+uid = record["uuid"]
+text = record["message"]["content"][0]["text"]
+say("system", subtype="init")
+say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
+if "work for the peer" in text:
+    (root / "peer-working").touch()
+    time.sleep(120)
+    raise SystemExit(0)
+answer = "answered: " + text.strip().splitlines()[-1]
+say("assistant", message={"id": "msg_" + uid, "role": "assistant",
+    "content": [{"type": "text", "text": answer}]})
+say("result", subtype="success", is_error=False, result=answer, user_message_uuids=[uid])
+"#;
+
 #[test]
 fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_up() {
     let place = Place::new("owner-preempts");
-    let host = place.start();
-    let target = host.new_agent("Desk");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    let home = place.root.join("home");
+    let world = [
+        ("HOME", home.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let target = "desk";
+    host.post(
+        "/agents",
+        json!({"name": "Desk", "session": target, "backend": "claude"}),
+    );
     let peer = host.new_agent("Peer");
     let peer_id = row_id(&host, &peer);
     let sent = host.post(
         "/send",
         json!({
-            "session": target, "text": "sleep 60", "client_msg_id": "from-peer",
+            "session": target, "text": "work for the peer", "client_msg_id": "from-peer",
             "origin": "agent", "sender": peer_id,
         }),
     );
     assert_eq!(sent["queued"], false, "{sent}");
-    wait_for("the peer's turn to run", || {
-        host.state(&target) == "thinking"
+    wait_for("the peer's turn at work", || {
+        place.root.join("peer-working").exists()
     });
 
-    host.send(&target, "owner says hi", "owner");
+    host.send(target, "owner says hi", "owner");
     let text_of = |row: &Value| row["text"].as_str().unwrap_or("").to_owned();
-    // Far sooner than the peer's turn would have ended by itself.
+    // Long before the peer's work would have ended by itself.
+    let answered =
+        |row: &Value| row["role"] == "assistant" && text_of(row) == "answered: owner says hi";
     wait_for("the owner's answer", || {
-        host.turns(&target)
-            .iter()
-            .any(|row| row["role"] == "assistant" && text_of(row) == "owner says hi")
+        host.turns(target).iter().any(answered)
     });
-    // The agent is told to take the cut work up again, after the owner's turn. Work nobody
-    // waits on may wait while the machine is under pressure: the note is then still in the
-    // queue, and enters the conversation when its turn starts.
+    // The agent is told to take the cut work up again, after the owner's turn: in the
+    // conversation once its turn starts, in the queue until then.
     let cut_short = "was cut short because the owner wrote to you";
     let note_text = || {
         let queue = host.get(&format!("/turn-queue?session={target}"));
         let queued = queue["items"].as_array().cloned().unwrap_or_default();
-        let turns = host.turns(&target);
+        let turns = host.turns(target);
         let found = |rows: &[Value]| {
             rows.iter()
                 .map(text_of)
@@ -48,25 +89,15 @@ fn the_owners_message_ends_another_agents_turn_and_the_agent_is_told_to_take_it_
     });
     let note = note_text().unwrap();
     assert!(note.contains("Peer"), "{note}");
-    assert!(note.contains("sleep 60"), "{note}");
-    let turns = host.turns(&target);
-    let answered = turns
-        .iter()
-        .position(|row| row["role"] == "assistant" && text_of(row) == "owner says hi")
-        .unwrap();
+    assert!(note.contains("work for the peer"), "{note}");
+    let turns = host.turns(target);
+    let owner = turns.iter().position(answered).unwrap();
     if let Some(noted) = turns
         .iter()
         .position(|row| text_of(row).contains(cut_short))
     {
-        assert!(answered < noted, "{turns:#?}");
+        assert!(owner < noted, "{turns:#?}");
     }
-    // The peer's turn was not answered: it made way.
-    assert!(
-        !turns
-            .iter()
-            .any(|row| row["role"] == "assistant" && text_of(row) == "sleep 60"),
-        "{turns:#?}"
-    );
 }
 
 #[test]
