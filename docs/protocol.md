@@ -1745,7 +1745,8 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
 - **`agent_row` (contract 183).** `GET /agents/{session}` answers one agent's row (or a
   janitor's), exactly as `GET /agents/snapshot` has it, put away or not: about 3 kB in place of
   the whole list. A session the Host does not have is 404 `{"error": "agent_not_found",
-  "message"}`. A limited device may read it as it reads the snapshot. Read it, in place of the
+  "message"}`. A limited device is refused it (403), as it is every route its scope does not
+  list: it reads the snapshot. Read it, in place of the
   snapshot, for an event of these kinds, whose change stays in that agent's row:
   `portrait-selected`, `agent-moved`, `stale-work`, `coordination-changed` with a `session`,
   `agent-transit` without `fields`, and a carried kind about a row the app does not hold (one

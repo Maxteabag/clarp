@@ -666,8 +666,8 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
                 .or_else(|| line.strip_prefix("data:"))
         })
         .filter_map(|data| serde_json::from_str::<Value>(data).ok())
-        .filter(|event| event["type"] == "transcript-updated" && event["session"] == ada)
-        .last()
+        .rev()
+        .find(|event| event["type"] == "transcript-updated" && event["session"] == ada)
         .unwrap_or_else(|| panic!("Ben hears that Ada's conversation changed: {heard}"));
     assert_eq!(
         told["conversation_id"], rows_ada["conversation_id"],

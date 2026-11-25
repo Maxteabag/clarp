@@ -5146,7 +5146,7 @@ mod tests {
         for (method, path, kept_out) in [
             (Method::GET, "/log", false),
             (Method::GET, "/agents/snapshot", false),
-            (Method::GET, "/agents/echo", false),
+            (Method::GET, "/agents/echo", true),
             (Method::GET, "/agents/archived", true),
             (Method::POST, "/send", false),
             (Method::POST, "/select", false),

@@ -585,12 +585,7 @@ pub fn limited_refused(method: &str, path: &str) -> bool {
         if path.starts_with("/artifacts/") && path.trim_end_matches('/').ends_with("/export") {
             return true;
         }
-        // One agent's row of the snapshot it may read (`GET /agents/<session>`).
-        let one_row = path
-            .strip_prefix("/agents/")
-            .is_some_and(|one| !one.is_empty() && !one.contains('/') && one != "archived");
-        return !one_row
-            && !LIMITED_GETS.contains(&path)
+        return !LIMITED_GETS.contains(&path)
             && !LIMITED_GET_PREFIXES
                 .iter()
                 .any(|prefix| path.starts_with(*prefix));
