@@ -131,3 +131,41 @@ fn without_auto_limits_no_limits_are_read() {
     d.until("the Host's answer", |e| most_of(e) == Some(9.0));
     assert_eq!(limits_of(&d.engine), None);
 }
+
+#[test]
+fn pressure_is_read_where_the_host_lists_it_and_a_threshold_keeps_auto() {
+    let host = Host::start("lanes-pressure");
+    host.control("/__control/lane-settings", json!({"on": true, "auto": true, "pressure": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("the pressure", |e| e.lane_pressure_offered() && e.lane_settings().is_some_and(|a| a.contains_key("pressure")));
+    let answer = d.engine.lane_settings().unwrap().clone();
+    assert_eq!(clarp_engine::lanes::range(&answer, "pressure_io_percent"), Some((5.0, 95.0)));
+    assert_eq!(clarp_engine::lanes::live_group(&answer).unwrap().summary, "8 · 2 busy · 6 idle · 1945 MB");
+    assert_eq!(clarp_engine::lanes::cold_starts_group(&answer).unwrap().summary, "5");
+    assert_eq!(clarp_engine::lanes::pressure_group(&answer).unwrap().summary, "High · 2 turns held");
+
+    // A threshold is posted alone and does not switch to fixed.
+    d.engine.set_lane_setting("pressure_io_percent", json!(40));
+    d.until("the threshold posted", |_| !host.requests("POST", "/lane-settings").is_empty());
+    assert_eq!(host.requests("POST", "/lane-settings")[0]["body"], json!({"pressure_io_percent": 40}));
+    d.until("the answer", |e| e.lane_settings().and_then(|a| clarp_engine::lanes::number(a, "pressure_io_percent")) == Some(40.0));
+    assert_eq!(limits_of(&d.engine).as_deref(), Some("auto"));
+
+    // The event reads what loads the machine again.
+    host.control("/__control/lane-settings", json!({"pressure_status": {"held_for_pressure": 0}}));
+    host.control("/__control/event", json!({"type": "lane-settings-updated", "pressure_io_percent": 40}));
+    d.until("held again", |e| e.lane_settings().is_some_and(|a| a["held_for_pressure"] == 0));
+}
+
+#[test]
+fn without_the_pressure_feature_nothing_of_it_is_shown() {
+    let host = Host::start("lanes-no-pressure");
+    host.control("/__control/lane-settings", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("the settings", |e| e.lane_settings().is_some());
+    assert!(!d.engine.lane_pressure_offered());
+    let answer = d.engine.lane_settings().unwrap();
+    assert!(clarp_engine::lanes::live_group(answer).is_none() && clarp_engine::lanes::pressure_group(answer).is_none());
+}
