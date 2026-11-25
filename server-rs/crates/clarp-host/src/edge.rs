@@ -3548,6 +3548,13 @@ async fn send_as(
         }
         _ => false,
     };
+    // Answered aloud only when the app asks for it: it does when its user has voice on. A send
+    // that says nothing is answered in text, whoever sent it, but for a person's words in a
+    // call. And never where nothing on this Host could speak the agent: such a turn is not
+    // framed as spoken, and its reply is not reported as not spoken (issue 802); the agent's
+    // profile says once that speech is not set up.
+    let speak = request.synthesize_audio.unwrap_or(spoken_unasked)
+        && app.mouth.can_speak(&member.record);
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
@@ -3559,10 +3566,7 @@ async fn send_as(
         trace_id: Some(trace_id.clone()),
         sender,
         client: request.client.as_deref().and_then(client_name),
-        // Answered aloud only when the app asks for it: it does when its user has voice on.
-        // A send that says nothing is answered in text, whoever sent it, but for a person's
-        // words in a call.
-        speak: request.synthesize_audio.unwrap_or(spoken_unasked),
+        speak,
         unheard,
         // An agent the user spoke to in a call, not long ago, is told who else is in the
         // call and what was said since it last spoke.
@@ -4183,6 +4187,8 @@ async fn reword(
             "a goal's check-in is the Host's own and cannot be edited",
         ));
     }
+    // Not aloud where nothing on this Host could speak the agent (issue 802).
+    let speak = speak.map(|asked| asked && app.mouth.can_speak(&member.record));
     match member
         .agent
         .reword(waiting.turn, text.to_string(), speak)
@@ -4230,6 +4236,8 @@ async fn send_by_hand(
     let Some((member, waiting)) = waiting_named(&app, &id).await? else {
         return Err(not_waiting());
     };
+    // Not aloud where nothing on this Host could speak the agent (issue 802).
+    let speak = speak.map(|asked| asked && app.mouth.can_speak(&member.record));
     match member
         .agent
         .send_now(waiting.turn, "user".to_string(), speak)

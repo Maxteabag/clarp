@@ -175,6 +175,8 @@ mod render_spec_export;
 mod router_phrases;
 #[path = "host/source_trace.rs"]
 mod source_trace;
+#[path = "host/speech_unset.rs"]
+mod speech_unset;
 #[path = "host/spoken_when_asked.rs"]
 mod spoken_when_asked;
 #[path = "host/stand_ins.rs"]

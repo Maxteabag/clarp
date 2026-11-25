@@ -314,6 +314,16 @@ pub fn speech(view: &HostView, agent: Agent<'_>) -> Speech {
     primary
 }
 
+/// Whether nothing on this Host could speak this agent at all: its speech is off, or the Host
+/// has no engine of speech set up (issue 802). Its turns are then not framed as spoken, and
+/// that speech is not set up is said once, where the Host reports its speech (the catalogue's
+/// `voice_available`, each engine's `available`, the profile's `silent_reason`), rather than
+/// as the outcome of every reply. On a Host with an engine set up, an agent that still cannot
+/// be heard (its own engine has no key, no voice for it, a failure) is told so with the reply.
+pub fn unspeakable(view: &HostView, agent: Agent<'_>) -> bool {
+    off(view, &view.voices.route(agent.who)) || view.keys.is_empty()
+}
+
 /// Why nothing of an agent's clip can be said, and by which provider it would have been.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unheard {

@@ -301,6 +301,14 @@ impl Mouth {
             .unwrap_or(Some("google_id_unverifiable"))
     }
 
+    /// Whether this agent's turns can be answered aloud: not where nothing on this Host could
+    /// speak it, its speech off or no engine it would be spoken by set up
+    /// ([`voice_profile::unspeakable`], issue 802).
+    pub(crate) fn can_speak(&self, record: &AgentRecord) -> bool {
+        let owners = self.owners();
+        !voice_profile::unspeakable(&self.speech_view(&owners), speaker(record))
+    }
+
     /// Whether an engine that speaks has its key.
     pub(crate) fn has_key(&self, provider: &str, owners: &Table) -> bool {
         if provider == "google" {

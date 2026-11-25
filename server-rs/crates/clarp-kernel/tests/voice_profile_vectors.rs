@@ -198,6 +198,37 @@ fn the_speaker_hands_over_what_the_profile_shows_and_nothing_when_it_is_silent()
     assert_eq!((spoken, silent), (SPOKEN, SILENT));
 }
 
+/// An agent is unspeakable, and its turns are not framed as spoken, exactly where its speech
+/// is off or the Host has no engine set up (issue 802). Such an agent is never handed to an
+/// engine; one on a Host with an engine set up that is still silent is told so per reply.
+#[test]
+fn an_agent_is_unspeakable_only_where_its_speech_is_off_or_no_engine_is_set_up() {
+    let vectors = vectors();
+    let labels = labels(&vectors);
+    let (mut unset, mut told_per_reply) = (0, 0);
+    for case in vectors["speech"].as_array().unwrap() {
+        let view = host(&case["view"], &labels);
+        let agent = agent(&case["agent"]);
+        let unspeakable = voice_profile::unspeakable(&view, agent);
+        let order = speaking_order(&view, agent);
+        let off = matches!(&order, Err(unheard) if unheard.reason == voice_profile::PROVIDER_OFF);
+        assert_eq!(
+            unspeakable,
+            off || view.keys.is_empty(),
+            "{}",
+            case["name"]
+        );
+        if unspeakable {
+            assert!(order.is_err(), "{}: nothing can speak it", case["name"]);
+            unset += usize::from(!off);
+        } else if order.is_err() {
+            told_per_reply += 1;
+        }
+    }
+    assert!(unset > 0, "the vectors hold a Host with no engine set up");
+    assert!(told_per_reply > 0, "and an agent silent on a Host that has one");
+}
+
 const SPOKEN: usize = 412;
 const SILENT: usize = 169;
 
