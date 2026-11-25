@@ -2349,10 +2349,12 @@ fn sidebar_check(out: String) {
         ("turn timer", Box::new(move |_, window, _| {
             let Some(mike) = window.get_chats().iter().find(|r| r.session == "mike") else { return false };
             let stamp = mike.stamp.to_string();
-            if !mike.busy || !stamp.starts_with("1m ") {
+            // "working 1m 05s": the row says it is a running time.
+            let Some(time) = stamp.strip_prefix("working ").filter(|t| t.starts_with("1m ")) else { return false };
+            if !mike.busy {
                 return false;
             }
-            let shape = stamp.len() == 6 && stamp.ends_with('s') && stamp[3..5].chars().all(|c| c.is_ascii_digit());
+            let shape = time.len() == 6 && time.ends_with('s') && time[3..5].chars().all(|c| c.is_ascii_digit());
             check(shape, &format!("a working row shows its turn's running time where the last message's time was: {stamp}"));
             check(mike.activity == "Thinking", &format!("the status text stays as it is: {}", mike.activity));
             TURN_STAMP.with(|t| *t.borrow_mut() = stamp);
