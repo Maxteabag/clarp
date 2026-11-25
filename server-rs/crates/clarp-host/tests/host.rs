@@ -73,6 +73,8 @@ mod enter_at_start;
 mod folder_missing;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
+#[path = "host/goal_stdin.rs"]
+mod goal_stdin;
 #[path = "host/harness.rs"]
 mod harness;
 #[path = "host/harness_providers.rs"]

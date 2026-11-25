@@ -177,6 +177,11 @@ clarp-goal read PLAN_ID working-notes.md
 clarp-goal read PLAN_ID working-notes.md 1
 ```
 
+A JSON argument given as `-` is read from standard input (one `-` per call;
+`... | clarp-goal document PLAN_ID PLAN_REVISION -`), because one argument holds
+at most 128 KiB; still keep `progress` and `next_work` short and put the history
+in a document like this one.
+
 For JSON, use `format:"json"` and put any JSON value in `content`.
 `document_revision:0` creates; later writes require the exact current revision.
 A checkpoint may include a `documents` array of these same records, atomically

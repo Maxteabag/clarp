@@ -1220,6 +1220,20 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
         };
     };
     let argv: Vec<String> = args.collect();
+    let argv = match from_stdin(&name, argv, || {
+        use std::io::Read as _;
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text).map(|_| text)
+    }) {
+        Ok(argv) => argv,
+        Err(why) => {
+            return ToolOutcome {
+                exit: 2,
+                stdout: String::new(),
+                stderr: format!("{name}: {why}. Nothing was done.\n"),
+            };
+        }
+    };
     // Job monitors stop their workers on exit 1. Only a valid Host answer may name
     // a terminal or superseded job. A failure to get that answer leaves it unknown.
     let job_active = name == "clarp-agent-bg" && argv.get(1).is_some_and(|arg| arg == "job-active");
@@ -1441,6 +1455,30 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
             stderr: answer["stderr"].as_str().unwrap_or("").to_string(),
         };
     }
+}
+
+/// The goal tool's argument that is exactly `-`, replaced by what was piped into the tool.
+/// Linux holds one argument to 128 KiB, and a goal's stored texts can grow past that (issue
+/// 768): read here, in the tool's own process, the body goes to the Host over HTTP whole. One
+/// `-` a call, since one standard input fills one argument. Other tools keep `-` as it was
+/// given: for some of them it is a word of their own.
+fn from_stdin(
+    name: &str,
+    mut argv: Vec<String>,
+    read: impl FnOnce() -> std::io::Result<String>,
+) -> Result<Vec<String>, String> {
+    if !matches!(name, "clarp-goal" | "clarp-agent-tasks") {
+        return Ok(argv);
+    }
+    let mut dashes = argv.iter().enumerate().filter(|(_, arg)| *arg == "-");
+    let Some((at, _)) = dashes.next() else {
+        return Ok(argv);
+    };
+    if dashes.next().is_some() {
+        return Err("only one argument may be - (read from standard input)".to_string());
+    }
+    argv[at] = read().map_err(|why| format!("cannot read standard input: {why}"))?;
+    Ok(argv)
 }
 
 /// How long a wait for a card's answer asks again a Host that does not answer: a release
@@ -1720,6 +1758,39 @@ pub fn network(mut args: impl Iterator<Item = String>, token: &str) -> Result<St
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_goal_tools_dash_is_what_was_piped_in_once_a_call() {
+        let args = |list: &[&str]| {
+            list.iter()
+                .map(|arg| (*arg).to_string())
+                .collect::<Vec<_>>()
+        };
+        let piped = || Ok("{\"progress\":\"p\"}\n".to_string());
+        assert_eq!(
+            from_stdin("clarp-goal", args(&["checkpoint", "p1", "3", "-"]), piped),
+            Ok(args(&["checkpoint", "p1", "3", "{\"progress\":\"p\"}\n"]))
+        );
+        assert_eq!(
+            from_stdin("clarp-agent-tasks", args(&["subgoal", "p1", "add", "-"]), piped),
+            Ok(args(&["subgoal", "p1", "add", "{\"progress\":\"p\"}\n"]))
+        );
+        let unread = || -> std::io::Result<String> { panic!("nothing is read without a dash") };
+        assert_eq!(
+            from_stdin("clarp-goal", args(&["get", "p1"]), unread),
+            Ok(args(&["get", "p1"]))
+        );
+        assert_eq!(
+            from_stdin("clarp-admin", args(&["agent", "fork", "--spec", "-"]), unread),
+            Ok(args(&["agent", "fork", "--spec", "-"])),
+            "another tool keeps its dash"
+        );
+        let twice = from_stdin("clarp-goal", args(&["act", "p1", "-", "x", "-"]), unread);
+        assert!(twice.is_err_and(|why| why.contains("only one")));
+        let broken = || Err(std::io::ErrorKind::InvalidData.into());
+        let failed = from_stdin("clarp-goal", args(&["checkpoint", "p1", "3", "-"]), broken);
+        assert!(failed.is_err_and(|why| why.contains("standard input")));
+    }
 
     #[test]
     fn a_wait_for_a_card_is_asked_again_through_a_restart_and_nothing_else_is() {

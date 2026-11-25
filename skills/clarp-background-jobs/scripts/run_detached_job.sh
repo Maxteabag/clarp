@@ -367,7 +367,9 @@ if [ -n "$goal" ]; then
   for attempt in 1 2 3; do
     body=$(goal_check "$goal" body "$job_id" "$handle" "$log" "$due" 2>&1) || { error=$body; break; }
     rev=$(printf '%s\n' "$body" | head -n 1)
-    error=$("${GOAL[@]}" checkpoint "$goal" "$rev" "$(printf '%s\n' "$body" | tail -n +2)" 2>&1 >/dev/null) && { error=""; break; }
+    # The body goes on standard input ("-"): as one argument, a goal whose stored texts
+    # passed 128 KiB could never be launched for (issue 768).
+    error=$(printf '%s\n' "$body" | tail -n +2 | "${GOAL[@]}" checkpoint "$goal" "$rev" - 2>&1 >/dev/null) && { error=""; break; }
     case $error in *"plan changed"*) sleep "$attempt";; *) break;; esac
   done
   [ -z "$error" ] || not_started "the goal dependency was not stored: $error"

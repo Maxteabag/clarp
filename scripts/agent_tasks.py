@@ -31,6 +31,15 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(usage, file=sys.stderr)
         return 2
+    # An argument that is exactly "-" is read from standard input: one argument holds at
+    # most 128 KiB on Linux, and a goal's stored texts can grow past that (issue 768).
+    dashes = [at for at, arg in enumerate(argv) if at and arg == "-"]
+    if len(dashes) > 1:
+        print("agent_tasks: only one argument may be - (read from standard input)", file=sys.stderr)
+        return 2
+    if dashes:
+        argv = [*argv]
+        argv[dashes[0]] = sys.stdin.read()
     from lib import goal_ledger
 
     try:

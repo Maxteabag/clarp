@@ -193,6 +193,21 @@ def test_goal_dependency_is_attached_without_losing_the_goals_own_plan(goal_env)
     assert task_plans.get(pid)['goal']['continuation']['dependency_key'] == 'render-a'
 
 
+def test_a_goal_whose_next_work_is_past_one_argument_still_takes_the_wake(goal_env):
+    """Linux holds one argument to 128 KiB; the launcher pipes the checkpoint (issue 768)."""
+    from lib import task_plans
+    plan, launch = goal_env
+    pid = plan['plan_id']
+    long = 'n' * (250 * 1024)
+    task_plans._goal_mutate(pid, revision=plan['revision'], action='checkpoint', data={
+        'progress': 'Long history', 'next_work': long})
+    out = launch('render-long', '--goal', pid)
+    assert out.returncode == 0, out.stderr
+    goal = task_plans.get(pid)['goal']
+    assert goal['continuation']['dependency_key'] == 'render-long'
+    assert goal['checkpoint']['next_work'].startswith(long + '\n\nWhen woken by render-long')
+
+
 def test_a_goal_waiting_on_another_kind_of_dependency_keeps_it(goal_env):
     from lib import task_plans
     plan, launch = goal_env
