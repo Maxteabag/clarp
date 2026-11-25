@@ -10,8 +10,8 @@ use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
 use super::{
-    Endpoint, Free, Memory, Mode, Place, Room, Settings, Tool, held, lanes_in, make_room,
-    make_way_within, mark_owners_turn, mark_owners_view, once_more, replied, shed,
+    Endpoint, Free, LoginChanged, Memory, Mode, Place, Room, Settings, Tool, held, lanes_in,
+    make_room, make_way_within, mark_owners_turn, mark_owners_view, once_more, replied, shed,
 };
 
 fn of(text: &str) -> Settings {
@@ -306,12 +306,7 @@ fn an_attempt_that_reached_nothing_is_offered_once_more() {
     let run = run_dir("again");
     let lane = Endpoint::of(Tool::Codex, &run, "a");
     let spool = run.join("spool");
-    let login = || {
-        Err::<u8, _>(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "login",
-        ))
-    };
+    let login = || Err::<u8, _>(std::io::Error::other(LoginChanged("login".into())));
     // No spool: nothing reached the tool, and the lane that left is not waited on forever.
     assert_eq!(once_more(login(), &spool, &lane, || Ok(2)).unwrap(), 2);
     assert_eq!(
@@ -321,27 +316,27 @@ fn an_attempt_that_reached_nothing_is_offered_once_more() {
     // A spool: the tool may have it, and it is never offered again.
     std::fs::write(&spool, "").unwrap();
     let kept = once_more(login(), &spool, &lane, || panic!("offered twice"));
-    assert_eq!(
-        kept.unwrap_err().kind(),
-        std::io::ErrorKind::PermissionDenied
-    );
+    assert!(LoginChanged::is(&kept.unwrap_err()));
     assert_eq!(once_more(Ok(1), &spool, &lane, || Ok(2)).unwrap(), 1);
     std::fs::remove_dir_all(&run).unwrap();
 }
 
 #[test]
-fn a_changed_login_is_told_by_its_kind_and_a_reply_without_state_by_its_words() {
+fn a_changed_login_is_told_by_its_type_and_a_reply_without_state_by_its_words() {
     let read = |line: Value| {
         let text = format!("{line}\n");
         replied::<Status>(&mut text.as_bytes(), Tool::Codex)
     };
     let changed =
-        read(json!({"ok": false, "error": "the Codex login changed", "code": LOGIN_CHANGED}));
-    assert_eq!(
-        changed.unwrap_err().kind(),
-        std::io::ErrorKind::PermissionDenied
-    );
+        read(json!({"ok": false, "error": "the Codex login changed", "code": LOGIN_CHANGED}))
+            .unwrap_err();
+    assert!(LoginChanged::is(&changed));
+    assert_eq!(changed.to_string(), "the Codex login changed");
+    // Another refusal of the lane's, with a code of its own or none, is no changed login.
+    let other = read(json!({"ok": false, "error": "busy", "code": "lane-busy"})).unwrap_err();
+    assert!(!LoginChanged::is(&other));
     let empty = read(json!({"ok": true})).unwrap_err();
+    assert!(!LoginChanged::is(&empty));
     assert_eq!(empty.kind(), std::io::ErrorKind::Other);
     assert_eq!(empty.to_string(), "Codex lane supplied no state");
     let cut = replied::<Status>(&mut &b"{\"ok\":true"[..], Tool::Codex).unwrap_err();
@@ -1219,4 +1214,19 @@ fn no_two_tests_share_a_run_folder() {
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), all, "a run folder is named twice: {names:?}");
+}
+
+/// Issue 854. A permission error, as the lane's socket may give one (EACCES), has the kind a
+/// changed login once had, and is no changed login: a turn never waits for a lane to let go for
+/// it, nor starts a new one.
+#[test]
+fn a_permission_error_is_no_changed_login() {
+    let denied = std::io::Error::from_raw_os_error(13);
+    assert_eq!(denied.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(!LoginChanged::is(&denied));
+    let said = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "login");
+    assert!(!LoginChanged::is(&said));
+    assert!(LoginChanged::is(&std::io::Error::other(LoginChanged(
+        "login".into()
+    ))));
 }

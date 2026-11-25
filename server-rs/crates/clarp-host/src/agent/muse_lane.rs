@@ -257,7 +257,7 @@ impl Worker {
             // takes the session, as for a turn no lane holds, and the attempt is offered to it;
             // once, never again (issue 849).
             if let Err(error) = &submitted
-                && error.kind() == std::io::ErrorKind::PermissionDenied
+                && crate::lane::LoginChanged::is(error)
                 && launcher.is_some()
                 && !reached()
             {

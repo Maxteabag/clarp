@@ -247,8 +247,8 @@ impl Lane {
     }
 
     /// The actor and login pool have both admitted this attempt. `token` is the turn's
-    /// identity for the Clarp tools it calls. A refusal for a changed login has the kind
-    /// `PermissionDenied`: the lane has left, and nothing of the attempt reached Codex.
+    /// identity for the Clarp tools it calls. A refusal for a changed login is a
+    /// [`crate::lane::LoginChanged`]: the lane has left, and nothing of the attempt reached Codex.
     pub(crate) fn submit(
         &self,
         order: clarp_actor::ShimOrder,

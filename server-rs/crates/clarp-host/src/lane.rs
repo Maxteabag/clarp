@@ -557,6 +557,30 @@ impl NoPlace {
     }
 }
 
+/// A lane's refusal of a claim because the tool's login changed since it started
+/// ([`LOGIN_CHANGED`]): the lane has left, and nothing of the attempt reached the tool. Told by
+/// its type alone, never by an error's kind: a permission error on the lane's socket is no
+/// changed login (issue 854).
+#[derive(Debug)]
+pub(crate) struct LoginChanged(String);
+
+impl std::fmt::Display for LoginChanged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for LoginChanged {}
+
+impl LoginChanged {
+    /// Whether `error` is this refusal, as a lane's answer returns it.
+    pub(crate) fn is(error: &io::Error) -> bool {
+        error
+            .get_ref()
+            .is_some_and(|inner| inner.is::<LoginChanged>())
+    }
+}
+
 /// An agent's lane of one tool, as the Host reaches it: its control socket in the run folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Endpoint {
@@ -915,7 +939,7 @@ pub(crate) fn once_more<T>(
 ) -> io::Result<T> {
     match first {
         Err(error) if !spool.try_exists().unwrap_or(true) => {
-            if error.kind() == io::ErrorKind::PermissionDenied {
+            if LoginChanged::is(&error) {
                 lane.let_go_within(Instant::now() + LEAVE_WAIT, true)?;
             }
             again()
@@ -1210,22 +1234,20 @@ struct Reply<T> {
     code: Option<String>,
 }
 
-/// A refusal for a changed login has the kind `PermissionDenied`: the lane has left, and
-/// nothing of the attempt reached the tool.
+/// A refusal for a changed login is a [`LoginChanged`]: the lane has left, and nothing of the
+/// attempt reached the tool.
 fn replied<T: DeserializeOwned>(input: &mut impl BufRead, tool: Tool) -> io::Result<T> {
     let reply: Reply<T> = serde_json::from_slice(&line(input, tool)?).map_err(io::Error::other)?;
-    let kind = if reply.code.as_deref() == Some(LOGIN_CHANGED) {
-        io::ErrorKind::PermissionDenied
-    } else {
-        io::ErrorKind::Other
-    };
+    let login_changed = reply.code.as_deref() == Some(LOGIN_CHANGED);
     reply.state.ok_or_else(|| {
-        io::Error::new(
-            kind,
-            reply
-                .error
-                .unwrap_or_else(|| format!("{} lane supplied no state", tool.name())),
-        )
+        let words = reply
+            .error
+            .unwrap_or_else(|| format!("{} lane supplied no state", tool.name()));
+        if login_changed {
+            io::Error::other(LoginChanged(words))
+        } else {
+            io::Error::other(words)
+        }
     })
 }
 

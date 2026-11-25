@@ -221,7 +221,7 @@ impl Worker {
                 // starts its Claude Code as the lane under the login there now, still within the
                 // hold, and runs on it; once, never again for this attempt.
                 if let (Err(error), Some(as_lane)) = (&submitted, &as_lane)
-                    && error.kind() == std::io::ErrorKind::PermissionDenied
+                    && crate::lane::LoginChanged::is(error)
                     && !reached()
                 {
                     let until = std::time::Instant::now() + crate::lane::LEAVE_WAIT;

@@ -308,7 +308,7 @@ impl Lane {
     }
 
     /// Gives the lane this attempt. `token` is the turn's identity for the Clarp tools it calls.
-    /// A refusal for a changed login has the kind `PermissionDenied`: the lane has left, and
+    /// A refusal for a changed login is a [`crate::lane::LoginChanged`]: the lane has left, and
     /// nothing of the attempt reached Claude Code.
     pub(crate) fn submit(&self, order: &ShimOrder, token: Option<String>) -> io::Result<Snapshot> {
         let text = std::fs::read_to_string(&order.stdin_file)?;
