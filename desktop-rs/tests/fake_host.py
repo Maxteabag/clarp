@@ -245,7 +245,7 @@ lanes_auto = {"on": False,
 # never carries.
 LANE_PRESSURE_RANGES = {"pressure_cpu_percent": {"min": 5, "max": 95}, "pressure_io_percent": {"min": 5, "max": 95},
                         "pressure_memory_percent": {"min": 5, "max": 95}}
-lanes_pressure = {"on": False,
+lanes_pressure = {"on": False, "live": False,
                   "settings": {"pressure_cpu_percent": 60, "pressure_io_percent": 30, "pressure_memory_percent": 10},
                   "status": {"pressure": {"cpu_source": "host-cgroup",
                                           "cpu": {"some": {"avg10": 70.2, "avg60": 64.5}, "full": None},
@@ -950,6 +950,10 @@ def lane_settings_answer():
     if lanes_auto["on"]:
         answer["ranges"].update(copy.deepcopy(LANE_AUTO_RANGES))
         answer["held"].update(copy.deepcopy(lanes_auto["free"]))
+    if lanes_pressure["live"] and not lanes_pressure["on"]:
+        # lanes_live (contract 194): the live lanes and cold starts, no pressure.
+        status = lanes_pressure["status"]
+        answer.update({k: copy.deepcopy(status[k]) for k in ("live", "cold_starts_last_hour") if k in status})
     if lanes_pressure["on"]:
         answer["ranges"].update(copy.deepcopy(LANE_PRESSURE_RANGES))
         answer.update(copy.deepcopy(lanes_pressure["status"]))
@@ -1659,6 +1663,8 @@ class Handler(BaseHTTPRequestHandler):
                     features.append("lane_auto_limits")
                 if lanes_pressure["on"]:
                     features.append("turn_pressure_admission")
+                if lanes_pressure["live"]:
+                    features.append("lanes_live")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
@@ -2327,6 +2333,7 @@ class Handler(BaseHTTPRequestHandler):
             # "pressure" turns turn_pressure_admission on or off, "pressure_status"
             # sets what loads the machine (top-level keys of the answer).
             lanes_pressure["on"] = bool(body.get("pressure", lanes_pressure["on"]))
+            lanes_pressure["live"] = bool(body.get("live", lanes_pressure["live"]))
             if "pressure_status" in body:
                 lanes_pressure["status"].update(body["pressure_status"])
             return self.reply(200, {"ok": True})
