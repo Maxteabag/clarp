@@ -16,7 +16,7 @@ fn a_stop_is_said_in_one_sentence_on_its_answer_its_events_and_the_snapshot() {
 
     // Nothing runs and nothing waits.
     let quiet = host.post("/stop", json!({ "session": session }));
-    assert_eq!(quiet["text"], "Stopped. You can keep chatting.", "{quiet}");
+    assert_eq!(quiet["text"], "Stopped.", "{quiet}");
 
     // A turn runs, and two messages of a schedule wait behind it: a Stop holds them.
     let heard = host.listen();
@@ -36,7 +36,7 @@ fn a_stop_is_said_in_one_sentence_on_its_answer_its_events_and_the_snapshot() {
             .is_some_and(|items| items.len() == 2)
     });
     let stopped = host.post("/stop", json!({ "session": session }));
-    let said = "Stopped. 2 messages wait; send one to go on.";
+    let said = "Stopped. 2 messages wait.";
     assert_eq!(stopped["queue_paused"], true, "{stopped}");
     assert_eq!(stopped["text"], said, "{stopped}");
     // The fields it is built from stay.

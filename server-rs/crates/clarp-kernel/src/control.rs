@@ -22,14 +22,15 @@ pub const STOPPED: &str = "user_stop";
 /// app shows of a Stop, the one that pressed it and every other, in place of the fields it is
 /// built from. `waiting`: the messages that still wait, as the apps list them; `held`: whether
 /// they wait for the user (the queue is paused) or go on by themselves (a user's Stop lets the
-/// user's own waiting messages run).
+/// user's own waiting messages run). It says only what changed, as short as that can be said
+/// (issue 868: four facts after a Stop were three more than a person needs).
 pub fn stop_text(waiting: usize, held: bool) -> String {
     match (waiting, held) {
-        (0, _) => "Stopped. You can keep chatting.".to_string(),
-        (1, true) => "Stopped. 1 message waits; send one to go on.".to_string(),
-        (n, true) => format!("Stopped. {n} messages wait; send one to go on."),
-        (1, false) => "Stopped. The message that waits goes on next.".to_string(),
-        (n, false) => format!("Stopped. The {n} messages that wait go on next."),
+        (0, _) => "Stopped.".to_string(),
+        (1, true) => "Stopped. 1 message waits.".to_string(),
+        (n, true) => format!("Stopped. {n} messages wait."),
+        (1, false) => "Stopped. 1 message goes on next.".to_string(),
+        (n, false) => format!("Stopped. {n} messages go on next."),
     }
 }
 
@@ -188,23 +189,11 @@ mod tests {
 
     #[test]
     fn a_stop_is_said_in_one_sentence_that_counts_what_waits_and_says_what_goes_on() {
-        assert_eq!(stop_text(0, true), "Stopped. You can keep chatting.");
-        assert_eq!(stop_text(0, false), "Stopped. You can keep chatting.");
-        assert_eq!(
-            stop_text(1, true),
-            "Stopped. 1 message waits; send one to go on."
-        );
-        assert_eq!(
-            stop_text(2, true),
-            "Stopped. 2 messages wait; send one to go on."
-        );
-        assert_eq!(
-            stop_text(1, false),
-            "Stopped. The message that waits goes on next."
-        );
-        assert_eq!(
-            stop_text(3, false),
-            "Stopped. The 3 messages that wait go on next."
-        );
+        assert_eq!(stop_text(0, true), "Stopped.");
+        assert_eq!(stop_text(0, false), "Stopped.");
+        assert_eq!(stop_text(1, true), "Stopped. 1 message waits.");
+        assert_eq!(stop_text(2, true), "Stopped. 2 messages wait.");
+        assert_eq!(stop_text(1, false), "Stopped. 1 message goes on next.");
+        assert_eq!(stop_text(3, false), "Stopped. 3 messages go on next.");
     }
 }

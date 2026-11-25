@@ -236,8 +236,8 @@ clarp-admin repair --session pebble-2596 --from "$CLAUDE_PWA_SESSION" \
 still owns the slot; then the agent is not stuck. Stop only when the work
 itself must end: `clarp-admin stop --session X --from "$CLAUDE_PWA_SESSION"
 --reason "..."` records you as the actor. On a Rust Host whose `GET /server-info` lists
-`stop_receipt_text`, its answer's `text` says the Stop in one sentence ("Stopped. You can keep
-chatting.", or how many messages wait); tell the user that line, not the fields.
+`stop_receipt_text`, its answer's `text` says the Stop in one sentence ("Stopped.", or
+"Stopped. 2 messages wait."); tell the user that line, not the fields.
 
 To resume an existing terminal conversation as a Clarp agent, use the
 `clarp-adopt` skill.

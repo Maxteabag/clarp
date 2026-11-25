@@ -1521,11 +1521,13 @@ the event stream (one `agent-state` event per Stop).
 811). The response adds `text`, one sentence for people built from what the Stop left, read
 in the same step as `queue_paused`:
 
-- nothing waits: `"Stopped. You can keep chatting."`;
-- the queue holds messages for the user: `"Stopped. 1 message waits; send one to go on."`, or
-  `"Stopped. N messages wait; send one to go on."`;
-- the user's own waiting messages go on by themselves: `"Stopped. The message that waits goes
-  on next."`, or `"Stopped. The N messages that wait go on next."`.
+- nothing waits: `"Stopped."`;
+- the queue holds messages for the user: `"Stopped. 1 message waits."`, or
+  `"Stopped. N messages wait."`;
+- the user's own waiting messages go on by themselves: `"Stopped. 1 message goes on next."`,
+  or `"Stopped. N messages go on next."`.
+
+The sentence says only what changed (issue 868); the details stay in the fields.
 
 N counts the waiting messages an app lists (`GET /turn-queue`). Every app that learns of the
 Stop without having sent it gets the same sentence as `stop_text`: on the agent's `activity`
