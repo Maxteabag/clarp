@@ -116,6 +116,19 @@ own configured URLs are fetched, never one from the request; redirects are refus
 never returned. The web app's all-Hosts list reads this, so the browser needs no other Host's
 token; opening a peer's chat opens `url` (that Host's own web app).
 
+### Compressed answers (gzip)
+
+A request with `Accept-Encoding` naming `gzip` (and not weighing it `q=0`) gets a whole JSON,
+text or script answer of 1 KB or more gzipped, with `Content-Encoding: gzip`; every such answer
+carries `Vary: Accept-Encoding`, gzipped or not. The decoded body is byte for byte the plain one.
+The Python Host has always done so; the Rust Host does since issue 805, where a snapshot of about
+310 agents went from about 1.25 MB to a fraction of it. Never gzipped: event streams (`/events`
+and every other answer sent as it is made), WebSocket upgrades, a request with `Range` and a
+partial answer, media and files that are no text, answers without a body (`HEAD`, 204, 304) and
+answers above 64 MiB. URLSession and OkHttp ask for gzip and decode it themselves; a client that
+sets `Accept-Encoding` by hand must decode what it asked for. Through the connection relay the
+Host is asked for gzip only where the relay passes the packed body through untouched.
+
 ## Core conversation protocol
 
 ### 1. Bootstrap: `GET /agents/snapshot`

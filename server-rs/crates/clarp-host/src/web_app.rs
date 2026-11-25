@@ -1,7 +1,7 @@
 //! The public PWA shell and its assets from the Host's configured static tree.
 
 use std::fs::File;
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Read, Seek};
 use std::path::Path as FilePath;
 use std::sync::LazyLock;
 use std::time::UNIX_EPOCH;
@@ -13,7 +13,6 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use clarp_kernel::media::{self, Part};
-use flate2::{Compression, write::GzEncoder};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
@@ -420,12 +419,8 @@ impl<'a> RequestHeaders<'a> {
 
     fn bytes(&self, status: StatusCode, bytes: Vec<u8>, mime: &'static str) -> Response {
         let mut encoded = None;
-        if bytes.len() >= 1024 && self.compresses(mime) {
-            let mut encoder = GzEncoder::new(Vec::new(), Compression::new(5));
-            encoded = encoder
-                .write_all(&bytes)
-                .and_then(|()| encoder.finish())
-                .ok();
+        if bytes.len() as u64 >= crate::packed::SMALLEST && self.compresses(mime) {
+            encoded = crate::packed::gzip(&bytes);
         }
         let gzipped = encoded.is_some();
         let mut response = (

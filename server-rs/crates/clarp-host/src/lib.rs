@@ -89,6 +89,7 @@ pub mod network;
 pub mod once;
 pub mod oracle;
 pub mod owner;
+pub mod packed;
 pub mod pairing;
 pub mod past;
 pub mod peers;

@@ -19,7 +19,8 @@
 #   server-rs/tools/build answers [args]   build the Host, run the corpus against it and bring home what it
 #                                          answered, compared with nothing: for a scenario without a reference yet
 #   server-rs/tools/build voice-timeline-read   time two GETs on a disposable release Host on the build machine
-#   server-rs/tools/build snapshot-read    time GET /agents/snapshot with thirty agents on a disposable release Host
+#   server-rs/tools/build snapshot-read    time GET /agents/snapshot with thirty agents on a disposable release Host,
+#                                          then the snapshot and artifact list at 310 agents, plain and gzipped
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs

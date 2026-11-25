@@ -169,14 +169,22 @@ pub fn answer_encoding(headers: &[(String, String)], passthrough: bool) -> &'sta
     let mut named = headers.iter().rev();
     let accept = named.find(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"));
     let accept = accept.map_or("", |(_, value)| value.as_str());
-    let offered = accept.split(',').any(|part| {
+    if accepts_gzip(accept) {
+        "gzip"
+    } else {
+        "identity"
+    }
+}
+
+/// Whether an `Accept-Encoding` takes gzip: it names gzip and does not weigh it at nothing.
+pub fn accepts_gzip(accept: &str) -> bool {
+    accept.split(',').any(|part| {
         let name = part.split(';').next().unwrap_or_default();
         let weight = part.replace(' ', "").to_lowercase();
         let weight = weight.split_once(";q=").map_or("", |(_, weight)| weight);
         python::strip(name).eq_ignore_ascii_case("gzip")
             && !matches!(weight, "0" | "0.0" | "0.00" | "0.000")
-    });
-    if offered { "gzip" } else { "identity" }
+    })
 }
 
 /// Whether a sign may stand in a header's name (a token of HTTP).

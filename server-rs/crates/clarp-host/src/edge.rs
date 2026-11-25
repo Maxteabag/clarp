@@ -884,6 +884,9 @@ pub fn router(app: App) -> Router {
             (app.capture.clone(), app.clock.clone()),
             crate::diagnostics::request,
         ))
+        // Outermost: what every route answers whole goes gzipped to a client that takes it
+        // (issue 805), after every guard has made it what it is.
+        .layer(middleware::from_fn(crate::packed::layer))
         .with_state(app)
 }
 
