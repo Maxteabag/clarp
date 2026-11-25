@@ -1262,7 +1262,9 @@ async fn submit(
     // Answered aloud only where something on this Host could speak the form's agent, as a
     // send is (issue 802). Read before answers sent again are compared, so that they are held
     // to the same rule as the first time.
-    let holder = fleet.holder(artifact_id, true).map(|member| member.record.clone());
+    let holder = fleet
+        .holder(artifact_id, true)
+        .map(|member| member.record.clone());
     if sent.synthesize_audio == Some(true)
         && let Some(record) = holder
     {

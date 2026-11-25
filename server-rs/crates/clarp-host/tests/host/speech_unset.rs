@@ -56,7 +56,7 @@ fn on_a_host_with_no_speech_set_up_a_reply_is_not_spoken_and_not_reported_unspok
         "title":"Plan","payload":{"content":"<p>Plan</p>","version":"v1",
         "answer_schema":{"type":"object","properties":{"note":{"type":"string"}}}}});
     assert_eq!(host.ask("POST", "/artifacts", Some(&form)).0, 201);
-    let answers = json!({"version":"v1","submission_id":"aloud-01",
+    let answers = json!({"version":"v1","submission_id":"submission-aloud-01",
         "answers":{"note":"<speak>Read it.</speak>"},"synthesize_audio":true});
     let sent = host.ask("POST", "/artifacts/quiet-form/submit", Some(&answers));
     assert_eq!(sent.0, 200, "{}", sent.1);
@@ -79,6 +79,10 @@ fn on_a_host_with_no_speech_set_up_a_reply_is_not_spoken_and_not_reported_unspok
             .filter(|event| event["type"] == kind && event["session"] == session.as_str())
             .count()
     };
-    assert_eq!(ours("tts-error"), 0, "nor is the form's answer reported unspoken");
+    assert_eq!(
+        ours("tts-error"),
+        0,
+        "nor is the form's answer reported unspoken"
+    );
     assert_eq!(ours("audio"), 0);
 }
