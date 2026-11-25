@@ -187,7 +187,7 @@ fn a_turn_stopped_while_it_waits_for_an_account_ends_under_its_message() {
         (
             &json!(trace),
             &json!("interrupted"),
-            &json!("Stopped by its user.")
+            &json!("Stopped.")
         ),
         "{rows:#?}"
     );

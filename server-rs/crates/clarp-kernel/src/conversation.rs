@@ -361,10 +361,11 @@ pub fn interrupted_sentence(reason: &str) -> String {
 }
 
 /// Who stopped a turn, as its end says it: its user, a newer message, or the agent or the
-/// routine named, with the reason given where one was.
+/// routine named, with the reason given where one was. The user's own Stop is "Stopped.", the
+/// word the stop receipt uses (issue 811): "by its user" read as if someone else had stopped it.
 pub fn stopped_sentence(by: &str, reason: &str) -> String {
     let who = if by == crate::control::USER {
-        "Stopped by its user".to_string()
+        "Stopped".to_string()
     } else if by.starts_with("message of turn") {
         "Stopped for a newer message".to_string()
     } else {
@@ -637,7 +638,7 @@ mod tests {
         assert_eq!(why(Outcome::Withdrawn { by: "user".into() }), None);
         assert_eq!(
             why(Outcome::stopped(crate::control::Control::by("user"))),
-            Some("Stopped by its user.".into())
+            Some("Stopped.".into())
         );
         let by_an_agent = Outcome::Stopped {
             by: "agent:rs-transit".into(),

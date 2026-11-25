@@ -2919,11 +2919,11 @@ mod tests {
         assert!(turn_end(&done).get("reason").is_none());
         let mut stopped = ended();
         stopped.status = "interrupted".to_string();
-        stopped.reason = Some("Stopped by its user.".to_string());
+        stopped.reason = Some("Stopped.".to_string());
         let shown = turn_end(&stopped);
-        assert_eq!(shown["reason"], json!("Stopped by its user."));
+        assert_eq!(shown["reason"], json!("Stopped."));
         let typed: clarp_protocol::log::TurnOutcome = serde_json::from_value(shown).unwrap();
-        assert_eq!(typed.reason.as_deref(), Some("Stopped by its user."));
+        assert_eq!(typed.reason.as_deref(), Some("Stopped."));
         let mut older = ended();
         older.status = "failed".to_string();
         assert!(
