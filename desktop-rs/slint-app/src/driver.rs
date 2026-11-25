@@ -2630,7 +2630,8 @@ fn transcript_check(out: String) {
         {"id": "t2", "role": "assistant", "text": "", "activity_count": 2, "tool_details_available": true},
         {"id": "t3", "role": "assistant", "text": "", "activity_count": 1, "tool_details_available": true},
         {"id": "t4", "role": "assistant", "text": "I read **main.rs**.",
-         "tools": [{"name": "Read", "file_path": "src/main.rs", "status": "completed", "result": "fn main() {}"}]},
+         "tools": [{"name": "Read", "file_path": "src/main.rs", "status": "completed", "result": "fn main() {}"},
+                   {"name": "Bash", "command": "sleep 60", "status": "failed", "result": "<tool_use_error>Blocked: standalone sleep 60.</tool_use_error>"}]},
         {"id": "t5", "role": "assistant", "text": "Done."},
     ]});
     let fill = |count: usize| serde_json::json!({"session": "mike", "count": count, "prefix": "Line"});
@@ -2654,7 +2655,7 @@ fn transcript_check(out: String) {
             check(group.activity_label.starts_with("3 tool calls"), &format!("old activity folds into one row: {:?}", group.activity_label));
             check(!group.expanded && group.tools.row_count() == 0, "a folded group shows no tool cards");
             let read = rows.iter().find(|r| r.id == "t4");
-            check(read.is_some_and(|r| r.activity_label == "1 tool call" && !r.expanded), "a reply's own tool call is folded behind its toggle");
+            check(read.is_some_and(|r| r.activity_label == "2 tool calls" && !r.expanded), "a reply's own tool calls are folded behind its toggle");
             window.invoke_toggle_activity(app_now().active_id(), group.id.clone(), group.group_id.clone());
             window.invoke_toggle_activity(app_now().active_id(), "t4".into(), "".into());
             true
@@ -2673,6 +2674,9 @@ fn transcript_check(out: String) {
                 read.expanded && tool.as_ref().is_some_and(|t| t.name == "Read" && t.summary == "src/main.rs" && t.detail.contains("fn main")),
                 "a reply's tool card shows name, file and result",
             );
+            // A refused tool says why in plain words, without the runtime's tags.
+            let refused = read.tools.row_data(1).map(|t| t.detail.to_string()).unwrap_or_default();
+            check(refused.contains("Blocked: standalone sleep 60.") && !refused.contains("tool_use_error"), &format!("a refused tool's reason shows without its tags: {refused:?}"));
             shot(&out2, "transcript-01-tools");
             true
         })),

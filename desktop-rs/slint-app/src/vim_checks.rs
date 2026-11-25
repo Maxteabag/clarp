@@ -5,7 +5,8 @@
 //! and tabs from the leader and the command line, settings and back, and
 //! Insert typing letters as letters. Then the Ctrl keys for tabs (Ctrl+T,
 //! Ctrl+Tab, Ctrl+Shift+Tab) and Ctrl+B handing the explorer the keyboard,
-//! and ? showing the keys for the chat and for the explorer.
+//! and ? showing the keys for the chat and for the explorer. A click on
+//! the composer in Normal mode takes a word typed at once, exactly once.
 //! Needs the fake Host.
 
 use std::time::Duration;
@@ -47,6 +48,18 @@ fn clipboard() -> String {
 /// go to the composer.
 fn normal(window: &crate::AppWindow, elapsed: Duration) -> bool {
     window.get_vim_mode() == "NORMAL" && window.get_keyboard_mode() == "CHAT" && elapsed >= Duration::from_millis(300)
+}
+
+/// The open chat's composer box in the window: (x, y, width, height).
+fn composer_box() -> Option<(f32, f32, f32, f32)> {
+    use i_slint_backend_testing::ElementQuery;
+    let window = crate::window()?;
+    let id = format!("composer-box:{}", app_now().active_id());
+    let e = ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().height > 0.0)
+        .find_first()?;
+    let (at, size) = (e.absolute_position(), e.size());
+    Some((at.x, at.y, size.width, size.height))
 }
 
 /// Types a command line's text and Enter.
@@ -513,6 +526,34 @@ pub fn vim_check(out: String) {
             }
             check(true, "Ctrl+B hiding it gives the chat the keyboard");
             shot(&out4, "vim-04-explorer-hidden");
+            // Normal mode, then a click on the composer's folded line and a
+            // word typed at once, before any frame is drawn.
+            let Some((x, y, w, h)) = composer_box() else {
+                check(false, "the composer's folded line is drawn");
+                return true;
+            };
+            headless::click(x + w / 2.0, y + h / 2.0);
+            headless::type_text("hello");
+            true
+        })),
+        ("typed after the click", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let draft = app_now().active_draft();
+            check(draft == "hello", &format!("a word typed straight after clicking the composer in Normal mode lands once: {draft:?}"));
+            check(window.get_vim_mode() == "INSERT" && report().composer_focused, &format!("and the composer is Insert: {:?}", window.get_vim_mode()));
+            for _ in 0..draft.chars().count() {
+                headless::press(Key::Backspace);
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("normal again", Box::new(|_, window, elapsed| {
+            if !normal(window, elapsed) {
+                return false;
+            }
+            check(app_now().active_draft().is_empty(), "the word is cleared");
             headless::press_with(&[Key::Shift], ":");
             headless::type_text("set novim");
             headless::press(Key::Return);

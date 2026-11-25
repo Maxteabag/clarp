@@ -40,6 +40,10 @@ export component TipButton inherits Rectangle {
     in property <color> tint: Palette.muted;
     // Shown above the button while it is hovered ("Stop · Ctrl+.").
     in property <string> tip;
+    // A word drawn after the icon ("Stop"), for a button whose icon alone
+    // does not say what it does; `captioned-width` is the room both take.
+    in property <string> caption;
+    out property <length> captioned-width: root.caption == "" ? 32px : 6px + 14px + 4px + word.preferred-width + 7px;
     callback clicked();
     width: 32px;
     height: 32px;
@@ -50,9 +54,22 @@ export component TipButton inherits Rectangle {
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
     Image {
         source: root.icon;
-        width: 18px;
-        height: 18px;
+        x: root.caption == "" ? (root.width - self.width) / 2 : 6px;
+        y: (root.height - self.height) / 2;
+        width: root.caption == "" ? 18px : 14px;
+        height: root.caption == "" ? 18px : 14px;
         colorize: root.enabled ? root.tint : Palette.faint;
+    }
+    word := Text {
+        visible: root.caption != "";
+        x: 6px + 14px + 4px;
+        height: root.height;
+        text: root.caption;
+        color: root.enabled ? root.tint : Palette.faint;
+        font-size: 12 * Look.unit;
+        font-weight: 600;
+        vertical-alignment: center;
+        accessible-role: none;
     }
     touch := TouchArea {
         enabled: root.enabled;
@@ -348,9 +365,10 @@ export component Composer inherits FocusScope {
             // No taller than the editor's one line: a button never makes the
             // composer taller.
             TipButton {
-                width: Palette.body-size * 1.6;
+                width: self.captioned-width;
                 height: Palette.body-size * 1.6;
                 icon: @image-url("icons/stop.svg");
+                caption: "Stop";
                 label: "Stop";
                 tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
                 tint: Palette.danger;

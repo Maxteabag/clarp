@@ -158,6 +158,9 @@ export struct PaneView {
     // One more than where the cursor goes when `draft-set` replaces the
     // draft (a completed mention); 0 leaves it.
     draft-cursor: int,
+    // Scrolled up from the end, the chat's latest row changed (a new
+    // message, a reply still being written): the jump button says so.
+    news: bool,
     // What the amount counts: px (""), "pages" of the view, or the "row"
     // to bring to the top (vim mode's jumps).
     scroll-kind: string,
@@ -547,10 +550,24 @@ export component Pane inherits Rectangle {
                 x: 1px;
                 y: 1px;
                 icon: @image-url("icons/latest.svg");
-                label: "Jump to latest";
-                tip: ComposerKeys.latest == "" ? "Latest" : "Latest · " + ComposerKeys.latest;
+                label: root.pane.news ? "Jump to latest, new messages below" : "Jump to latest";
+                tip: (root.pane.news ? "New below · " : "") + (ComposerKeys.latest == "" ? "Latest" : "Latest · " + ComposerKeys.latest);
                 accessible-id: "jump-latest:" + root.pane.id;
                 clicked => { transcript.scroll-to-latest(); }
+            }
+            // New content arrived below since the reader scrolled up.
+            if root.pane.news: Rectangle {
+                x: parent.width - self.width + 1px;
+                y: -1px;
+                width: 11px;
+                height: 11px;
+                border-radius: 5.5px;
+                background: Palette.accent;
+                border-width: 2px;
+                border-color: Palette.raised;
+                accessible-role: text;
+                accessible-id: "jump-news:" + root.pane.id;
+                accessible-label: "New messages below";
             }
           }
           if ChatMenu.open == root.pane.id: Rectangle {
@@ -690,9 +707,10 @@ export component Pane inherits Rectangle {
             if composer-box.folded && root.pane.busy && root.pane.session != "": TipButton {
                 x: parent.width - self.width - 8px;
                 y: (parent.height - self.height) / 2;
-                width: 24px;
+                width: self.captioned-width;
                 height: 24px;
                 icon: @image-url("icons/stop.svg");
+                caption: "Stop";
                 label: "Stop";
                 tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
                 tint: Palette.danger;
@@ -752,6 +770,13 @@ export component Pane inherits Rectangle {
             label: "Insert";
             active: root.pane.active && Focus.mode == "composer";
             surface: root.background;
+          }
+          // Folded, the editor is out of reach under the line: a click on
+          // the line gives it the keyboard in the same event, so what is
+          // typed straight after the click lands in the draft.
+          if composer-box.folded && root.pane.session != "": TouchArea {
+            mouse-cursor: text;
+            clicked => { composer.focus(); }
           }
         }
     }

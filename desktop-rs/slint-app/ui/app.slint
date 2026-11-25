@@ -199,6 +199,9 @@ export component AppWindow inherits Window {
     in property <string> sidebar-cursor;
     out property <bool> search-focused: sidebar.search-has-focus;
     out property <bool> sidebar-focused: sidebar.list-has-focus;
+    // A text field has the keyboard, at once (a pane's report of its
+    // composer's focus comes a frame later).
+    out property <bool> text-input-focused: TextInputInterface.text-input-focused;
     public function focus-search() { sidebar.focus-search(); }
     public function choose-scope(scope: string) { sidebar.choose-scope(scope); }
     public function show-archive(on: bool) { sidebar.show-archive(on); }

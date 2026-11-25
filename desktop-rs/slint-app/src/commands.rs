@@ -46,7 +46,7 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     }
     if window.get_search_focused() {
         "search"
-    } else if app.active_report().composer_focused || window.global::<crate::ArtifactBridge>().get_editing() {
+    } else if app.active_report().composer_focused || window.global::<crate::ArtifactBridge>().get_editing() || typing_in_chats(window) {
         // A card's answer field types like the composer.
         "composer"
     } else if window.get_sidebar_focused() {
@@ -54,6 +54,14 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     } else {
         "pane"
     }
+}
+
+/// A text field in the chats has the keyboard, known the moment it does: a
+/// pane reports its composer's focus a frame later, and keys typed straight
+/// after a click on the composer (in Normal mode) would otherwise go to
+/// Normal mode instead of the draft.
+fn typing_in_chats(window: &AppWindow) -> bool {
+    window.get_text_input_focused() && window.get_surface() == "chats" && !window.get_sidebar_focused()
 }
 
 fn facts(app: &App, window: &AppWindow) -> Facts {

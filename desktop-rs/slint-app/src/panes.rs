@@ -73,6 +73,9 @@ pub struct PaneState {
     /// Unsent messages of one's own: when each was first shown (its status
     /// shows once `SEND_STATUS_GRACE` has passed).
     unsent: std::collections::HashMap<String, std::time::Instant>,
+    /// The chat's latest row as last presented (its key and signature):
+    /// a change while the reader is scrolled up is news (`view.news`).
+    tail: Option<(String, String)>,
 }
 
 impl PaneState {
@@ -116,6 +119,7 @@ impl PaneState {
             cards: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
             unsent: std::collections::HashMap::new(),
+            tail: None,
         }
     }
 }
@@ -519,9 +523,20 @@ impl App {
     /// A pane's report; true when more than where it is scrolled to (the
     /// offset, the top row) changed.
     pub fn reported(&self, id: &str, report: Report) -> bool {
-        let Some(old) = self.pane_state.borrow_mut().iter_mut().find(|p| p.id == id).map(|pane| std::mem::replace(&mut pane.report, report)) else {
+        let mut panes = self.pane_state.borrow_mut();
+        let Some(index) = panes.iter().position(|p| p.id == id) else {
             return true;
         };
+        let old = std::mem::replace(&mut panes[index].report, report);
+        // Back at the end, the news is read.
+        if report.at_end && panes[index].view.news {
+            panes[index].view.news = false;
+            let view = self.pane_view(&panes[index]);
+            panes[index].view = view.clone();
+            if index < self.panes.row_count() {
+                self.panes.set_row_data(index, view);
+            }
+        }
         Report { offset: report.offset, top: report.top, ..old } != report
     }
 
@@ -917,6 +932,13 @@ impl App {
         }
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         let (removed, inserted, updated) = sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
+        // The latest row changed while the reader is scrolled up: news.
+        // Older rows read in at the top leave the latest row as it was.
+        let tail = pane.shown.last().map(|s| (s.3.clone(), s.2.clone()));
+        if pane.tail.is_some() && tail != pane.tail && !pane.report.at_end {
+            pane.view.news = true;
+        }
+        pane.tail = tail;
         if removed + inserted + updated > 0 {
             crate::scroll_journal::event(&pane.id, &format!("rows -{removed} +{inserted} ~{updated}"));
         }
@@ -1132,6 +1154,10 @@ impl App {
                         continue;
                     }
                     pane.shown[at].2 = signature;
+                    // A running time ticking is not news.
+                    if at + 1 == pane.shown.len() {
+                        pane.tail = Some((entry.key.clone(), pane.shown[at].2.clone()));
+                    }
                     let mut row = pane.rows.live_row(entry);
                     row.work_box = edge;
                     pane.messages.set_row_data(at, row);
@@ -1176,6 +1202,8 @@ impl App {
                     pane.session = session.clone();
                     crate::scroll_journal::reset(&pane.id, "chat", pane.messages.row_count());
                     pane.shown.clear();
+                    pane.tail = None;
+                    pane.view.news = false;
                     pane.rows.clear();
                     pane.presented_with = None;
                     pane.cards.clear();
