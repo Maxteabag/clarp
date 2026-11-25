@@ -117,7 +117,11 @@ Limits to know:
   ```
 
   The same from an agent's turn makes a decision card to the owner in that agent's chat
-  ("Let Ben read Ada's conversation?"); his yes adds the reader. An agent cannot remove a
+  ("Let Ben read Ada's conversation?"); his yes adds the reader. Likewise its binding is
+  the owner's: from an agent's turn, `--clear`, another `--codex-home`/`--codex-provider`
+  or `--cloud-speech` on a bound agent changes nothing and makes a card ("Unbind Ada from
+  its provider?"); the answer lists it under `asked`. Starting a bound agent again in place
+  with another binding is refused (409 `own_provider`). An agent cannot remove a
   reader (`owner_only`). Over HTTP: `add_readers` / `remove_readers` on
   `POST /agent-provider`. Still not covered: an agent on the same machine that reads the
   Host's configuration or the agent's files, and a Python peer Host (it reads as a device).

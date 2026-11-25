@@ -1487,9 +1487,17 @@ apply the broadcast, not re-post `/select`, or two clients loop.
     texts emptied, and `words_withheld: true`; ids, `session`, `persona`, states, kinds,
     addresses and times stay.
   - `GET /events`: each event of the agent is blanked the same way.
-  - Files, terminals, recordings, clips and sound (`/agent-file`, `/past-sessions`,
-    `/terminal`, `/transcription-audio`, `/clips/<id>/…`, `/media/<id>` and the like) are
-    refused while the Host holds a bound agent this reader may not read.
+  - Answers that cannot be blanked (files, terminals, recordings, clips, gallery images,
+    sockets) are given where the read names only agents this reader may read:
+    `/agent-file` and `/agent-files` and `/stt/stream` by their `session`,
+    `/terminal/<session>`, `/clips/<n>/…` by the agent whose speech the clip is,
+    `/media/<asset>` by the chat the image was shown in. Where the read names no agent the
+    reader may read, or the route cannot say whose words it serves (`/dirs`,
+    `/past-sessions`, `/server-terminal`, `/audio/<name>`, `/media/`,
+    `/transcription-audio`, `/calls/ring/live`, `/oracle/v2`, a clip still being made), it is
+    refused while the Host holds a bound agent this reader may not read. A read of words
+    that names readable agents and answers other than JSON (an artifact's page) is given;
+    one that names none is refused the same way.
   - The agents' own tools ask the same: `clarp-goal`/`clarp-agent-tasks` about it, and
     `clarp-agent-artifacts list|wait|form-events|report-history|attention` about it, exit
     77 with `bound_conversation`; JSON a tool prints is blanked as above.
@@ -1507,6 +1515,15 @@ apply the broadcast, not re-post `/select`, or two clients loop.
     `accepted` adds the reader, and an answer given on his behalf by the asking agent or
     either agent named is not taken. An agent's `remove_readers` is 403 `owner_only`; an
     agent asking a reader of an agent that is not bound is 409 `not_bound`.
+  - Its binding is its owner's. On `POST /agent-provider`, a change of a bound agent's
+    `codex_home`, `codex_provider` (letting it go included) or `cloud_speech` asked by
+    anyone but the owner is not made: a card in the asking agent's chat ("Unbind B from its
+    provider?" or "Change B's provider?", payload `bound_change {agent_id, codex_home,
+    codex_provider, cloud_speech}`, one per asked binding) is listed under `asked`, and the
+    owner's `accepted` makes the change (where the home still defines the provider). A
+    caller with no turn to ask from is 403 `owner_only`. The owner's own call changes it at
+    once. `POST /agents` that starts a bound agent again in place (`replace_sid`) with
+    another binding is 409 `own_provider`.
     `clarp-admin agent provider --session B --reader X[,Y] | --no-reader X` is the tool.
   - Not covered: an agent on the same machine that reads the Host's configuration (its
     administrator token) or the agent's files; and a Python peer Host, which sends no
