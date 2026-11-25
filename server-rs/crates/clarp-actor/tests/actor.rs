@@ -1202,7 +1202,10 @@ fn words_written_with_their_own_call_are_said_along_the_way_in_the_conversation_
     let first = running.iter().find(|(row, ..)| row == "r-a");
     let first = first.unwrap_or_else(|| panic!("the first words are shown: {running:?}"));
     assert_eq!(first.1, "commentary", "{running:?}");
-    assert!(first.2, "the conversation keeps them as it shows them: {running:?}");
+    assert!(
+        first.2,
+        "the conversation keeps them as it shows them: {running:?}"
+    );
 
     world.says(
         1,
