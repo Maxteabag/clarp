@@ -1191,7 +1191,7 @@ export component Transcript inherits FocusScope {
             changed reply => { self.mark(); }
             function mark() {
                 if (self.reply) {
-                    root.reply-placed(self.on-screen);
+                    root.reply-placed(self.on-screen, self.height);
                 }
                 if (self.on-top) {
                     root.top-index = index;
@@ -1473,8 +1473,10 @@ export component Transcript inherits FocusScope {
     // chat opening, which lands on its newest message as always.
     property <string> reply-id;
     property <int> reply-index;
-    // Where that row is drawn (0 the view's top), once the list draws it.
+    // Where that row is drawn (0 the view's top) and how tall, once the
+    // list draws it.
     property <length> reply-y;
+    property <length> reply-h;
     property <bool> reply-drawn;
     function is-reply(index: int) -> bool {
         return index >= 0 && index < root.rows.length
@@ -1527,10 +1529,22 @@ export component Transcript inherits FocusScope {
         root.reply-id = "";
         root.reply-drawn = false;
     }
-    function reply-placed(y: length) {
+    // A reply shorter than the view is followed to its end, rows that
+    // come after it too: the stop is for a reply about a view tall or more
+    // (its first line reaches the top as it grows, a Running box or a tool
+    // row still below it). A row the list has not placed yet is drawn
+    // nowhere near the view; only a place in view counts.
+    function long-reply() -> bool {
+        return root.reply-h >= list.visible-height * 0.75;
+    }
+    function reply-placed(y: length, h: length) {
+        if (y + h <= 0px || y >= list.visible-height) {
+            return;
+        }
         root.reply-y = y;
+        root.reply-h = h;
         root.reply-drawn = true;
-        if (root.follow && !root.dragging && y < -0.5px) {
+        if (root.follow && !root.dragging && y < -0.5px && root.long-reply()) {
             root.stop-at-reply();
         }
     }
@@ -1538,7 +1552,7 @@ export component Transcript inherits FocusScope {
     // above the top: then it stops with that row at the top.
     function follow-end() {
         root.check-reply();
-        if (root.reply-id != "" && root.reply-drawn) {
+        if (root.reply-id != "" && root.reply-drawn && root.long-reply()) {
             let end-y = Math.min(0px, list.visible-height - list.content-height);
             if (root.reply-y + end-y - list.content-y < -0.5px) {
                 root.stop-at-reply();
