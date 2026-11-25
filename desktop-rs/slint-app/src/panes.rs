@@ -519,6 +519,24 @@ impl App {
         self.replace_draft(&session, text, Some(id));
     }
 
+    /// Pane `id` stopped following a new reply with its first line at the
+    /// top: the rest of it is below, which the jump-to-latest dot says.
+    pub fn news_below(&self, id: &str) {
+        let mut panes = self.pane_state.borrow_mut();
+        let Some(index) = panes.iter().position(|p| p.id == id) else {
+            return;
+        };
+        if panes[index].view.news {
+            return;
+        }
+        panes[index].view.news = true;
+        let view = self.pane_view(&panes[index]);
+        panes[index].view = view.clone();
+        if index < self.panes.row_count() {
+            self.panes.set_row_data(index, view);
+        }
+    }
+
     /// A pane's report, from its transcript and composer.
     /// A pane's report; true when more than where it is scrolled to (the
     /// offset, the top row) changed.
