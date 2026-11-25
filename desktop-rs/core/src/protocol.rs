@@ -431,7 +431,8 @@ impl Agent {
         } else {
             return None;
         };
-        let name = provider_name(&json::string(quota, "provider_id"));
+        let provider = json::string(quota, "provider_id");
+        let name = provider_name(&provider);
         let used = quota.get("used_percentage").and_then(Value::as_f64);
         let mut text = if exhausted {
             if json::string(quota, "reason") == "credits_depleted" { format!("{name} out of credits") } else { format!("{name} limit reached") }
