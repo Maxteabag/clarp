@@ -94,6 +94,26 @@
 #                  go on: each is in a scope of its own)
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
+#   server-rs/tools/install-host --rollback
+#   server-rs/tools/install-host --judge
+#
+#   --rollback     put back the last release that ran steady (below) and start it: for a Host that
+#                  crash-loops right after an install. It says which release it left and which it
+#                  started, and refuses, changing nothing, where no release is known to have run
+#                  steady or that one is installed now. It puts back that release's binaries and
+#                  its unit as they were installed; the config, the data and the agents' tools stay
+#                  as they are. Also installed as ~/.local/share/clarp-host/libexec/install-host,
+#                  for a machine with no checkout at hand
+#   --judge        judge now whether the release installed now ran steady, and say so
+#
+# Every install keeps its binaries and its unit in ~/.local/share/clarp-host/releases/<version>,
+# beside the skills it ships (issue 853). Pruning keeps the release installed now, the one installed
+# before it, and the last one that ran steady: current for at least 30 minutes, with the unit's
+# restart count unchanged and no core dump of the unit's in all the time it was current. It is
+# judged when the next install replaces it, or by --judge. releases/steady names it and says how it
+# was judged; releases/current says since when the release installed now has run, and with what
+# count.
+#
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
 # --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --relay-also, --seats-tool,
 # --contact-pictures) is kept with
@@ -118,6 +138,12 @@ from="$here/dist"; start=0; files_only=0
 skills_from="$here/../skills"; skills_named=0
 declare -A said=()
 said_relays=()
+only=""
+case "${1:-}" in
+    --rollback|--judge)
+        [ "$#" = 1 ] || { echo "install-host: $1 takes no other option" >&2; exit 2; }
+        only="${1#--}"; shift ;;
+esac
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
@@ -128,7 +154,8 @@ while [ $# -gt 0 ]; do
             said_relays+=("$2"); shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--push-keys FILE|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--relay-also FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--push-keys FILE|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--relay-also FILE|off] [--seats-tool PATH|off] [--contact-pictures on|off] [--skills-from DIR] [--start] [--files-only]" >&2
+           echo "       install-host --rollback | --judge" >&2; exit 2 ;;
     esac
 done
 if [ "$skills_named" = 1 ] && [ ! -f "$skills_from/manifest.json" ]; then
@@ -139,6 +166,157 @@ fi
 share="${XDG_DATA_HOME:-$HOME/.local/share}/clarp-host"
 config="${XDG_CONFIG_HOME:-$HOME/.config}/clarp-host"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+
+# The releases kept for a rollback (issue 853). On 25 Nov 2026 a Host crash-looped for 22 minutes
+# after an install, and the two releases it kept both had the fault: there was nothing to go back
+# to. So each install keeps its binaries and its unit under releases/<version>, and pruning never
+# removes the last release that ran steady. Two small files beside the releases say what is known:
+# `current` the release installed now, since when it has run and the unit's restart count then;
+# `steady` the last release that ran steady and how that was judged.
+releases="$share/releases"
+host_unit=clarp-host.service
+steady_minutes=30
+# A value of one of those files, or nothing.
+kept_value() {
+    [ -f "$1" ] || return 0
+    sed -n "/^$2=/{s/^$2=//p;q}" "$1"
+}
+restart_count() {
+    local count
+    count="$(systemctl --user show "$host_unit" -p NRestarts --value 2>/dev/null || true)"
+    case "$count" in ''|*[!0-9]*) echo unknown ;; *) echo "$count" ;; esac
+}
+# Says the release named has run as installed now: from now on, with the unit's restart count now.
+write_current() {
+    (
+        umask 077
+        cat > "$releases/.current.new" <<EOF
+# Written by install-host (issue 853): the release installed now, since when it has run, and the
+# unit's restart count when it started. The next install or install-host --judge judges
+# whether it ran steady.
+version=$1
+since=$(date +%s)
+since_text=$(date -Is)
+restarts=$(restart_count)
+EOF
+    )
+    mv -f "$releases/.current.new" "$releases/current"
+}
+# Whether the release installed now ran steady: current for at least $steady_minutes minutes, its
+# unit active, with the restart count it started with and no core dump of the unit's since. A
+# release judged steady stays the steady one until another is.
+judge_current() {
+    local version since restarts now count state cores ran_steady
+    version="$(kept_value "$releases/current" version)"
+    [ -n "$version" ] || { echo "install-host: no release has a start on record to judge"; return 0; }
+    if [ "$version" != "$(cat "$share/data/DEPLOYED_VERSION" 2>/dev/null || true)" ]; then
+        echo "install-host: $version, on record as current, is not the release installed now: not judged"
+        return 0
+    fi
+    if [ "$version" = "$(kept_value "$releases/steady" version)" ]; then
+        echo "install-host: $version is the steady release already"
+        return 0
+    fi
+    if [ ! -x "$releases/$version/bin/clarp-host" ]; then
+        echo "install-host: $version's binaries were not kept: not judged"
+        return 0
+    fi
+    since="$(kept_value "$releases/current" since)"
+    restarts="$(kept_value "$releases/current" restarts)"
+    case "$since" in ''|*[!0-9]*) echo "install-host: $version's start is not on record: not judged"; return 0 ;; esac
+    now="$(date +%s)"
+    if [ $((now - since)) -lt $((steady_minutes * 60)) ]; then
+        echo "install-host: $version has run $(((now - since) / 60)) of $steady_minutes minutes: not judged yet"
+        return 0
+    fi
+    state="$(systemctl --user show "$host_unit" -p ActiveState --value 2>/dev/null || true)"
+    count="$(restart_count)"
+    if command -v coredumpctl > /dev/null 2>&1; then
+        cores="$(coredumpctl --no-pager --no-legend --quiet list --since "@$since" "COREDUMP_USER_UNIT=$host_unit" 2>/dev/null | grep -c . || true)"
+    else
+        cores="not checked (coredumpctl is not installed)"
+    fi
+    ran_steady=1
+    [ "$state" = active ] || ran_steady=0
+    { [ "$restarts" != unknown ] && [ "$count" = "$restarts" ]; } || ran_steady=0
+    case "$cores" in 0|"not checked"*) ;; *) ran_steady=0 ;; esac
+    if [ "$ran_steady" = 0 ]; then
+        echo "install-host: $version did not run steady: unit $state, restarts $restarts at its start and $count now, core dumps since: $cores"
+        return 0
+    fi
+    (
+        umask 077
+        cat > "$releases/.steady.new" <<EOF
+# Written by install-host (issue 853): the last release that ran steady. Pruning never removes it,
+# and install-host --rollback starts it. Steady: current for at least $steady_minutes minutes, with
+# $host_unit's restart count unchanged and no core dump of the unit's in all that time.
+version=$version
+current_since=$(kept_value "$releases/current" since_text)
+judged_at=$(date -Is)
+minutes_current=$(((now - since) / 60))
+restarts_at_start=$restarts
+restarts_when_judged=$count
+core_dumps=$cores
+EOF
+    )
+    mv -f "$releases/.steady.new" "$releases/steady"
+    echo "install-host: $version ran steady for $(((now - since) / 60)) minutes: it is the release a rollback starts"
+}
+# Waits for the Host to answer, ten seconds at most.
+host_answers() {
+    for _ in $(seq 1 50); do
+        curl -fsS -m 2 -H "Authorization: Bearer $2" "http://$1/server-info" > /dev/null 2>&1 && return 0
+        sleep 0.2
+    done
+    curl -fsS -m 2 -H "Authorization: Bearer $2" "http://$1/server-info" > /dev/null 2>&1
+}
+# Puts the last release that ran steady back in place, binaries and unit, and starts it.
+rollback() {
+    local steady left kept listen token name
+    steady="$(kept_value "$releases/steady" version)"
+    left="$(cat "$share/data/DEPLOYED_VERSION" 2>/dev/null || echo unknown)"
+    if [ -z "$steady" ]; then
+        echo "install-host: --rollback: no release is known to have run steady ($releases/steady names none). Nothing was changed." >&2
+        echo "  A release is judged steady once it has been current for $steady_minutes minutes without a restart or a core dump, when the next install replaces it." >&2
+        exit 1
+    fi
+    kept="$releases/$steady"
+    if [ "$steady" = "$left" ]; then
+        echo "install-host: --rollback: the steady release $steady is the one installed now; there is nothing older known to be steady. Nothing was changed." >&2
+        exit 1
+    fi
+    for name in bin/clarp-host bin/clarp-shim bin/SHA256SUMS "$host_unit"; do
+        [ -f "$kept/$name" ] || { echo "install-host: --rollback: $kept/$name is missing. Nothing was changed." >&2; exit 1; }
+    done
+    (cd "$kept/bin" && sha256sum --quiet -c SHA256SUMS) || { echo "install-host: --rollback: the binaries kept in $kept/bin are not the ones that were installed. Nothing was changed." >&2; exit 1; }
+    # The release left is not judged: whoever rolls back does not trust it.
+    for name in clarp-host clarp-shim; do
+        install -m 755 "$kept/bin/$name" "$share/bin/.$name.new"
+        mv -f "$share/bin/.$name.new" "$share/bin/$name"
+    done
+    cp "$kept/$host_unit" "$units/.$host_unit.new"
+    mv -f "$units/.$host_unit.new" "$units/$host_unit"
+    printf '%s\n' "$steady" > "$share/data/DEPLOYED_VERSION"
+    rm -f "$releases/current"
+    systemctl --user daemon-reload
+    systemctl --user reset-failed "$host_unit" 2> /dev/null || true
+    systemctl --user enable --quiet "$host_unit"
+    systemctl --user restart "$host_unit"
+    listen="$(sed -n 's/^ExecStart=.* --listen \([^ ]*\) .*/\1/p' "$units/$host_unit" | head -1)"
+    token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env" 2>/dev/null || true)"
+    if ! host_answers "$listen" "$token"; then
+        echo "install-host: rolled back from $left to $steady and started it, and the Host does not answer on $listen" >&2
+        journalctl --user -u "$host_unit" --no-pager -n 8 >&2 || true
+        exit 1
+    fi
+    write_current "$steady"
+    echo "rolled back: left $left, started $steady (it ran steady from $(kept_value "$releases/steady" current_since), judged $(kept_value "$releases/steady" judged_at))"
+    echo "running: the Host answers on $listen. Its config, data and agents' tools are as the last install left them."
+}
+case "$only" in
+    rollback) rollback; exit 0 ;;
+    judge) mkdir -p "$releases"; judge_current; exit 0 ;;
+esac
 
 # What this installation was told before, then what it is told now. Only what somebody chose is
 # kept: where nobody chose, the installer's own answer of the day holds.
@@ -554,6 +732,20 @@ chmod -R go-rwx "$share/data" "$share/cache" "$share/logs"
         for file in "${extra_relays[@]}"; do printf 'relay-also=%s\n' "$file"; done
     } > "$kept"
 )
+version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
+previous="$(cat "$share/data/DEPLOYED_VERSION" 2>/dev/null || true)"
+# The release installed until now is judged before it is replaced (only where systemd may be asked),
+# and this one's binaries are kept for a rollback, its unit once that is written below.
+mkdir -p "$releases"
+[ "$files_only" = 1 ] || judge_current
+rm -f "$releases/current"
+rm -rf "$releases/$version/.bin.new"
+mkdir -p "$releases/$version/.bin.new"
+for kept_file in clarp-host clarp-shim SHA256SUMS COMMIT; do
+    if [ -f "$from/$kept_file" ]; then cp --reflink=auto -p "$from/$kept_file" "$releases/$version/.bin.new/"; fi
+done
+rm -rf "$releases/$version/bin"
+mv "$releases/$version/.bin.new" "$releases/$version/bin"
 # Put in place under another name and moved: a Host that is running keeps the file it has open.
 for binary in clarp-host clarp-shim; do
     install -m 755 "$from/$binary" "$share/bin/.$binary.new"
@@ -699,8 +891,6 @@ install -m 644 "$here/tools/transcription-download.py" "$share/libexec/.transcri
 mv -f "$share/libexec/.transcription-download.py.new" "$share/libexec/transcription-download.py"
 install -m 644 "$here/tools/voice-metrics.py" "$share/libexec/.voice-metrics.py.new"
 mv -f "$share/libexec/.voice-metrics.py.new" "$share/libexec/voice-metrics.py"
-version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
-previous="$(cat "$share/data/DEPLOYED_VERSION" 2>/dev/null || true)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 # The skills this Host keeps installed for its agents' tools where it keeps the machine's tools
 # (--accounts select; the Host itself decides that at its start): the repository's tree of
@@ -721,11 +911,6 @@ if [ -f "$skills_from/manifest.json" ]; then
         mv "$release/.skills.new" "$release/skills"
         rm -rf "$release/.skills.old"
     fi
-    # The release installed before this one stays until the Host has moved the links over at its
-    # start; older ones go. A link into one removed still reads as outdated and is moved too.
-    for old in $(ls -1 "$share/releases"); do
-        if [ "$old" != "$version" ] && [ "$old" != "$previous" ]; then rm -rf "${share:?}/releases/$old"; fi
-    done
     skills=" --skills $release/skills"
     [ -d "$python_share/releases" ] && skills="$skills --skills-other-releases $python_share/releases"
     python_chosen="$(dirname "$python_config")/install.json"
@@ -923,6 +1108,21 @@ RestartSec=2
 [Install]
 WantedBy=default.target
 EOF
+# The unit is kept with the release it starts, for a rollback to put back as it was. Pruning then
+# keeps the release installed now, the one installed before it (until the Host has moved its
+# skills' links over at its start; a link into one removed still reads as outdated and is moved
+# too) and the last one that ran steady. Older ones go.
+cp "$units/$host_unit" "$releases/$version/.$host_unit.new"
+mv -f "$releases/$version/.$host_unit.new" "$releases/$version/$host_unit"
+steady_version="$(kept_value "$releases/steady" version)"
+for old in "$releases"/*/; do
+    old="$(basename "$old")"
+    case "$old" in "$version"|"$previous"|"$steady_version") continue ;; esac
+    rm -rf "${releases:?}/${old:?}"
+done
+# This installer itself, for a rollback on a machine with no checkout at hand.
+install -m 755 "$here/tools/install-host" "$share/libexec/.install-host.new"
+mv -f "$share/libexec/.install-host.new" "$share/libexec/install-host"
 
 # Only a cut-over machine changes the Python installer's managed shell commands.
 # A Python reinstall writes these same marked wrappers back.
@@ -1034,12 +1234,10 @@ systemctl --user daemon-reload
 if [ "$start" = 1 ]; then
     systemctl --user enable --quiet clarp-host.service
     systemctl --user restart clarp-host.service
-    for _ in $(seq 1 50); do
-        curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/server-info" > /dev/null 2>&1 && break
-        sleep 0.2
-    done
-    if curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/server-info" > /dev/null 2>&1; then
+    if host_answers "$listen" "$token"; then
         echo "running: the Host answers on $listen"
+        # From now on it is the release whose run the next install or --judge judges.
+        [ "$version" = unknown ] || write_current "$version"
         # How its start went: asked until no agent is still being opened (a minute at most). What
         # is broken or could not be read is said, and the install ends with a code of its own;
         # the Host stays up as it is, and whoever installed it decides what to do.

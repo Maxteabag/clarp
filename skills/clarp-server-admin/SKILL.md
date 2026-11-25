@@ -34,6 +34,34 @@ running it again updates in place. It needs `curl`, `python3` and a systemd
 user session, never uses sudo, and refuses root and macOS. Never run it on a
 machine whose Host someone else owns or deploys.
 
+## A Rust Host that crash-loops right after an install: roll back
+
+When `clarp-host.service` keeps restarting right after an install (the restart count
+in `systemctl --user show clarp-host.service -p NRestarts` climbs, or `coredumpctl
+list` shows new core dumps of `clarp-host`), put back the last release that ran
+steady instead of waiting for a fixed build:
+
+```bash
+server-rs/tools/install-host --rollback                 # from a checkout that has it
+~/.local/share/clarp-host/libexec/install-host --rollback   # or the copy every install leaves
+```
+
+It says which release it left and which it started, and refuses, changing nothing,
+when no release is known to have run steady or that release is the one installed.
+"Steady" means current for at least 30 minutes, with the unit's restart count
+unchanged and no core dump of the unit's in all the time it was current. It is
+judged when the next install replaces a release, or on demand with `install-host --judge`.
+`~/.local/share/clarp-host/releases/steady` names that release and how it was judged,
+and pruning never removes it. A Host installed before this existed gets its first
+steady release one install after the first install that keeps binaries.
+
+A rollback puts back that release's binaries and its unit as they were installed.
+The config, the data and the agents' tools stay as they are. If the release left
+raised a store's schema, the older Host refuses that store ("has schema N, this
+build reads schema M") and does not answer. A rollback cannot help then: fix
+forward. A crash loop that has nothing to do with an install is not a reason to
+roll back. Read its journal and core dumps first.
+
 ## What the user is experiencing
 
 On a Rust Host, `clarp-admin experience --open` lists outstanding findings.

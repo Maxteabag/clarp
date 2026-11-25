@@ -4016,7 +4016,8 @@ fixtures come from the Python Host's own functions in an isolated store.
 
 **The tools' skills kept installed (`managed_skills`, 20 Nov 2026).** A release ships a tree of skills with a
 manifest (the repository's `skills/`, or the tree `--skills-from` names); the install tool copies it to `<share>/releases/<version>/skills`, keeps the
-version installed before and removes older ones, and names it to the Host (`--skills`), with the releases of the
+version installed before and the last one that ran steady (issue 853: the header of `server-rs/tools/install-host`
+says how it is judged, and `--rollback` starts it) and removes older ones, and names it to the Host (`--skills`), with the releases of the
 Python Host on the machine (`--skills-other-releases`) and that Host's record of its chosen skills
 (`--skills-chosen-before`). It never touches a tool's skill folder, and the programs a skill requires are looked up
 on the unit's path, which is the Python Host's. The tools' folders (Claude Code's, Codex's, and Antigravity's where

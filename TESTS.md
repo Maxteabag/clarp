@@ -11,6 +11,8 @@ Nothing runs per push or per pull request.
 | Rust Host final pass | `server-rs/tools/final-pass` (the release train runs it) | the build machine |
 | Rust Host build and tests | `server-rs/tools/build test` | the build machine |
 | Contract rows | `server-rs/tools/tests/test_rust_contract.py` | anywhere |
+| No plain descriptor on SQLite's files (issue 848) | `server-rs/tools/tests/test_sqlite_files.py` | anywhere |
+| Steady release and rollback (issue 853) | `server-rs/tools/tests/test_install_host_rollback.py` | anywhere (a disposable home, stand-in systemd) |
 | Web app (JavaScript) | `npm test` | vitest, in-process |
 | Desktop client | the Desktop checks workflow, started by hand | GitHub Actions |
 
