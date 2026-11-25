@@ -298,7 +298,7 @@ pub fn status_line(view: &LiveView, host_now_ms: i64) -> Option<StatusLine> {
         "thinking" => (format!("◌ {}{}", if headline.is_empty() { "Thinking" } else { headline }, since(turn_started)), true),
         "responding" => (format!("◌ Responding{}", since(turn_started)), true),
         "compacting" => (format!("◌ Compacting{}", since(turn_started)), true),
-        "limited" => (format!("◌ {}", if headline.is_empty() { "Waiting for the usage limit" } else { headline }), true),
+        "limited" => (format!("◌ {}", if headline.is_empty() { crate::chat_view::limited_words(activity) } else { headline }), true),
         "waiting" => (format!("◆ {}", if headline.is_empty() { "Waiting for you" } else { headline }), false),
         "interrupted" => ("■ Interrupted".to_owned(), false),
         "background" => (format!("◇ {}", if headline.is_empty() { "Working in the background" } else { headline }), false),

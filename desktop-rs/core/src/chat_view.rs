@@ -243,8 +243,21 @@ pub fn status_words(activity: &Object) -> String {
             tool_words(&tool.map(|t| text(t, "name")).unwrap_or_default()).to_owned()
         }
         "waiting" | "limited" | "background" if !headline.is_empty() => headline,
+        "limited" => limited_words(activity).to_owned(),
         "thinking" if !headline.is_empty() => headline,
         _ => step_words(&state, "").unwrap_or_default().to_owned(),
+    }
+}
+
+/// What a `limited` turn waits for, in plain words, when the Host sends no
+/// headline: `waits_for` (Rust Host contract 188, feature `waits_for`) tells
+/// the machine's pressure and the network from a usage limit; without it
+/// (an older Host) `limited` is a usage limit, as before.
+pub fn limited_words(activity: &Object) -> &'static str {
+    match activity.get("waits_for").and_then(Value::as_str).unwrap_or_default() {
+        "machine" => "Waiting for the machine",
+        "network" => "Waiting for the network",
+        _ => "Waiting for the usage limit",
     }
 }
 
