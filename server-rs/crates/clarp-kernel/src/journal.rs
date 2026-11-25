@@ -1088,8 +1088,11 @@ impl Batch<'_> {
         if self.items.is_empty() {
             return Ok(Committed::default());
         }
-        self.recorder.row_ts =
-            later_rows(&mut self.items, self.recorder.row_ts, self.recorder.log.as_ref())?;
+        self.recorder.row_ts = later_rows(
+            &mut self.items,
+            self.recorder.row_ts,
+            self.recorder.log.as_ref(),
+        )?;
         let last_seq = self.recorder.log.append(&self.items)?;
         // The items are durable. From here the state follows them.
         let first_seq = last_seq + 1 - self.items.len() as Seq;
