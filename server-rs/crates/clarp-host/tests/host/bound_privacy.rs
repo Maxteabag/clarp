@@ -521,3 +521,117 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     assert_eq!(status, 409, "{said}");
     assert_eq!(said["error"], "own_provider", "{said}");
 }
+
+/// The roster events that carry their change (feature `roster_fields`) and the read of one
+/// agent's row (feature `agent_row`) give a reader who may not read a bound agent what the
+/// snapshot gives it of that agent, and no more (issue 809).
+#[test]
+fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
+    let place = Place::new("bound-roster-fields");
+    let codex = place.root.join("codex");
+    program(&codex, CODEX);
+    let host = place.start_in(
+        "bound-owner-token",
+        &["--helpers-checked-every-ms", "3600000"],
+        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
+    );
+    let home = own_home(&place, "home-a");
+    let ada = bound_agent(&host, "Ada", &home);
+    let ben = host.new_agent("Ben");
+    for (session, id) in [(&ada, "u-1"), (&ben, "u-2")] {
+        host.send(session, "hello", id);
+    }
+    for session in [&ada, &ben] {
+        wait_for("each first turn", || host.state(session) == "done");
+    }
+    // Ada's helper is bound as she is; the line of a maker at work names its helper.
+    let made = host.post(
+        "/agents",
+        json!({
+            "name": "Slice", "backend": "codex", "model": "a-deployment-name",
+            "role": "helper", "parent": ada, "session": "slice",
+        }),
+    );
+    assert_eq!(made["session"], "slice", "{made}");
+    let ben_turn = first_turn_token(&place, &agent_id(&host, &ben));
+    let as_ben = [("X-Clarp-Turn", ben_turn.as_str())];
+    let mark = |state: &str| {
+        let body = json!({ "session": "slice", "state": state });
+        let (status, said) = host.ask("POST", "/agent-helper-state", Some(&body));
+        assert_eq!(status, 200, "{said}");
+    };
+    mark("done");
+    let owners = host.listen();
+    let heard = heard_as(&host, &as_ben, || {
+        mark("running");
+        wait_for("the owner hears the helper's move", || {
+            owners.lock().unwrap().iter().any(|event| {
+                event["kind"] == "helper-state" && event["fields"]["helper_state"] == "running"
+            })
+        });
+    });
+    let events: Vec<Value> = heard
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:")))
+        .filter_map(|data| serde_json::from_str(data).ok())
+        .collect();
+    let bens = events
+        .iter()
+        .find(|event| event["kind"] == "helper-state" && event["session"] == "slice")
+        .unwrap_or_else(|| panic!("Ben hears of the helper's move: {heard}"));
+    let owners = owners.lock().unwrap().clone();
+    let full = owners
+        .iter()
+        .rev()
+        .find(|event| event["kind"] == "helper-state" && event["session"] == "slice")
+        .unwrap()
+        .clone();
+
+    // The owner is told Ada's line, which names her helper; Ben is told that she is at work and
+    // how many helpers she has, and not the words of her line.
+    assert!(
+        full["parent"]["fields"]["status_text"]
+            .as_str()
+            .is_some_and(|line| line.starts_with("slice")),
+        "{full}"
+    );
+    assert_eq!(bens["words_withheld"], true, "{bens}");
+    assert_eq!(bens["fields"]["helper_state"], "running", "{bens}");
+    let parent = &bens["parent"];
+    assert_eq!(parent["session"], json!(ada), "{bens}");
+    assert_eq!(parent["fields"]["status_text"], "", "{bens}");
+    assert_eq!(parent["fields"]["running_children"], 1, "{bens}");
+    assert_eq!(parent["fields"]["latest_state"], "background", "{bens}");
+    assert!(!heard.contains(SECRET), "{heard}");
+
+    // What Ben is told of each agent is what his snapshot says of it, field for field; and so
+    // is the one row he reads.
+    let (status, snapshot) = read_as(&host, &as_ben, "/agents/snapshot");
+    assert_eq!(status, 200, "{snapshot}");
+    let row = |session: &str| {
+        snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    let (rows_ada, rows_slice) = (row(&ada), row("slice"));
+    assert_eq!(rows_ada["words_withheld"], true, "{rows_ada}");
+    for (fields, row) in [(&bens["fields"], &rows_slice), (&parent["fields"], &rows_ada)] {
+        for (name, value) in fields.as_object().unwrap() {
+            assert_eq!(value, &row[name], "{name}: {fields} against {row}");
+        }
+    }
+    for (session, expected) in [(ada.as_str(), &rows_ada), ("slice", &rows_slice)] {
+        let (status, one) = read_as(&host, &as_ben, &format!("/agents/{session}"));
+        assert_eq!(status, 200, "{one}");
+        assert_eq!(&one, expected);
+        assert!(!one.to_string().contains(SECRET), "{one}");
+    }
+    // The owner reads Ada's row whole.
+    let (status, one) = read_as(&host, &[], &format!("/agents/{ada}"));
+    assert_eq!(status, 200, "{one}");
+    assert!(one.get("words_withheld").is_none(), "{one}");
+}

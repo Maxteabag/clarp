@@ -175,6 +175,8 @@ mod relay_aliases;
 mod remote_action;
 #[path = "host/render_spec_export.rs"]
 mod render_spec_export;
+#[path = "host/roster_fields.rs"]
+mod roster_fields;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
 #[path = "host/source_trace.rs"]

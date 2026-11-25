@@ -110,6 +110,7 @@ pub mod render_spec;
 pub mod request_tool;
 pub mod revisions;
 pub mod roster;
+pub mod roster_fields;
 pub mod router;
 pub mod schedules;
 pub mod screens;

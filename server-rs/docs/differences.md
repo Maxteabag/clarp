@@ -557,6 +557,15 @@ the daily schedule.
 
 ## Rust-first features
 
+- **Roster events carry what changed, and one row can be read alone (issue 809, Rust contracts
+  182 and 183).** The Python Host's `agent-roster` events about one agent say only their kind and
+  session, and an app reads the whole snapshot for each. The Rust Host adds `agent_id` and
+  `fields` (the changed fields of the agent's snapshot row, made by the code that makes the row)
+  to the kinds `helper-state`, `mute-changed`, `chat_view` and a beginning `agent-transit`, and
+  `parent` (the maker's counts and state) to `helper-state` (feature `roster_fields`); and it
+  answers `GET /agents/{session}` with one row of the snapshot (feature `agent_row`). A phone re-read
+  a 940 kB snapshot about 300 times an hour for events that changed one or two fields.
+
 - **A turn whose agent's folder is gone says so (issue 758, Rust contract 173).** The Python
   Host started the tool in the agent's folder and, when that folder had been removed, failed
   with the system's words for the program it could not start. The Rust Host looks first: a

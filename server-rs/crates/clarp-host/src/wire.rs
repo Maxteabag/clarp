@@ -2141,14 +2141,14 @@ pub fn summary(
         "alive": true,
         "busy": live.is_some(),
         "focused": focused,
-        "latest_state": state_name(&kind),
+        "latest_state": own_state(status).0,
         "latest_state_ts": state_stamp(record, status),
         "turn_started_at": turn_started_at,
         "last_activity": since,
         // When a turn last ran to its end: a turn that failed or was stopped since does not
         // take that away.
         "last_turn_end": status.completed_at_ms.unwrap_or(0),
-        "status_text": (!status.label.is_empty()).then_some(&status.label),
+        "status_text": own_state(status).1,
         "activity": activity(record, status),
         "live_activity": live_activity,
         "compacting": kind == AgentStateKind::Compacting,
@@ -2172,6 +2172,13 @@ pub fn summary(
         row["helper_chat"] = json!(true);
     }
     row
+}
+
+/// An agent's own state on its row, before the work it left running is counted
+/// (`edge::busy_with`): its `latest_state` and its `status_text`.
+pub(crate) fn own_state(status: &Status) -> (String, Option<&String>) {
+    let said = (!status.label.is_empty()).then_some(&status.label);
+    (state_name(&state_kind(status)), said)
 }
 
 /// What an agent's row says of a provider of its own and of cloud speech: only where it has

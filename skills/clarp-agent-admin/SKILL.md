@@ -120,6 +120,16 @@ lists the feature `list_etags` answers `304` with no body while nothing changed
 for that reader. Other Hosts send no tag and answer in full, so keep the body
 you have and fall back to it only on a 304. While agents work, both lists change
 every few seconds, so a 304 is mostly for quiet periods.
+To read one agent's row rather than the whole fleet, use `GET /agents/<session>`
+on a Rust Host that lists feature `agent_row` (contract 183) in
+`GET /server-info`: it answers that agent's row exactly as the snapshot has it,
+and 404 `agent_not_found` for a session the Host does not have. A Python Host
+and older Rust Hosts do not have it: read `GET /agents/snapshot` there. On a
+Host with feature `roster_fields` (contract 182), an `agent-roster` event of
+kind `helper-state`, `mute-changed`, `chat_view` or a beginning
+`agent-transit` carries `fields` (the changed fields of that row) and, for a
+helper, `parent` (its maker's counts and state), so a watcher of `/events`
+needs no read for it.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.

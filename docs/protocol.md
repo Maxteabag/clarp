@@ -161,7 +161,9 @@ that wants the saving keeps the body and its tag itself and sends `If-None-Match
 
 The one call a client makes to learn everything about the server's agents.
 Call it on start, on every SSE (re)connect, and whenever an `agent-roster`
-event arrives.
+event arrives (on a Host with features `roster_fields` and `agent_row`, only for
+the events that section names: the others carry their change, or name the one
+row to read).
 
 ```json
 {
@@ -394,7 +396,9 @@ Rules:
   agents whose parent is this one and `running_children` those still
   `running`. Nest helpers under their parent; a done helper is archived
   after the grace period (`[agents] helper_archive_grace_hours`, 24 by
-  default). `agent-roster` with `kind: "helper-state"` asks for a refetch.
+  default). `agent-roster` with `kind: "helper-state"` asks for a refetch; on
+  a Host with feature `roster_fields` it carries the helper's and its
+  parent's changed fields instead ([below](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)).
 - `background_jobs` separates the two kinds of work that keep an agent busy
   after its turn ends. `sub_agents` is the number of its helper agents still
   `running` (the same number as `running_children`). `count` is the number
@@ -1107,7 +1111,7 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `agent-transit` | `agent_id`, `session`, `transit_id`, `backend`, `model`, `phase` ∈ reading, translating, registering, switching, done, failed, `error` (text on failed, else null), `previous_backend`, `previous_model`, `carried` (on done; its `summary` since contract 161) | Rust feature `agent_backend_transit` (contract 158): how a move of the agent to another backend goes. Show progress, then the result; see [Moving an agent to another backend](#moving-an-agent-to-another-backend). |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id`, `queue_change`, `text`, `origin`, `sender`, `read_together` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). `queue_change` (Host contract 115, feature `waited_send_order`): `edited` (with the item's new `text`) or `deleted`, for the item `client_msg_id`. An event that names an item (edited, deleted, a retired goal wake) also carries its `origin` and `sender` as `GET /turn-queue` does (R182). `read_together` (Rust Host contract 169, feature `queued_read_together`), on the event a message joined the queue with: as on its `GET /turn-queue` item. |
@@ -1712,13 +1716,57 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   events are returned oldest first in `{events,count}`. Limit defaults to 200 and
   cannot exceed 5,000. `clarp-admin client-log` reads them as JSON lines.
 
+### One agent's change in its roster event, and one agent's row (features `roster_fields` and `agent_row`, Rust Host contracts 182 and 183)
+
+An `agent-roster` event that names one agent once said only `{type, kind, session}`, and an app
+read the whole snapshot for it (issue 809). On a Rust Host that lists these features:
+
+- **`roster_fields` (contract 182).** An event of these kinds carries `agent_id` and `fields`:
+  the fields of the agent's snapshot row its change moved, with their values as that row has
+  them when the event is numbered. Patch the row and read nothing.
+  - `helper-state`: `fields` `helper_state`, `archived_at`; and `parent`, the maker's
+    `{session, agent_id, fields}` with `fields` `child_count`, `running_children`,
+    `background_jobs`, `latest_state` and `status_text` (the maker's line names its helpers
+    while it has nothing of its own to say). Patch both rows. A helper whose maker the Host no
+    longer has carries no `parent`.
+  - `mute-changed`: `muted`.
+  - `chat_view`: `chat_view` (the same value as the event's `chat_view`).
+  - `agent-transit` as a change of backend begins: `transit`. The event at its end (`done` or
+    `failed`) carries no `fields`: the agent's backend, model and what follows from them
+    changed; read the row.
+  An event of these kinds without `fields` (an agent the Host no longer has, or an older Host)
+  is read as before. The values are made by the code that makes the snapshot's rows, so a
+  patched row equals a fresh read.
+- **`agent_row` (contract 183).** `GET /agents/{session}` answers one agent's row (or a
+  janitor's), exactly as `GET /agents/snapshot` has it, put away or not: about 3 kB in place of
+  the whole list. A session the Host does not have is 404 `{"error": "agent_not_found",
+  "message"}`. A limited device may read it as it reads the snapshot. Read it, in place of the
+  snapshot, for an event of these kinds, whose change stays in that agent's row:
+  `portrait-selected`, `agent-moved`, `stale-work`, `coordination-changed` with a `session`,
+  `agent-transit` without `fields`, and a carried kind about a row the app does not hold (one
+  put away that `include_archived=0` left out).
+- **The snapshot is read** for every other kind (`created`, `forked`, `relaunched`, `deleted`,
+  `archive-changed`, `agent-renamed`, `contact-assigned`, `voice-changed`, `voice-profile`,
+  `backend-quota`, the personas' and janitors' kinds) and for the reconnect nudge: their change
+  reaches other rows or the snapshot's head (a maker's counts, its helpers' states, the voices
+  shared, the names in `roster`, `archived_count`).
+- **Bound privacy (feature `bound_privacy`).** A reader who may not read an agent's words is
+  given its event and its row as the snapshot gives that reader its row: names, states, numbers
+  and times kept, words blank, `words_withheld: true`. The event and its `parent` are each
+  judged by their own `session`, frame by frame as the stream is sent. `GET /agents/{session}`
+  of such an agent answers 200 with that row, never 403.
+
 ### The sync algorithm
 
 A client that follows these steps never shows a duplicated, missing, or
 stale message:
 
 ```
-on start / reconnect / agent-roster:
+on agent-roster with fields (feature roster_fields):
+    patch the row of session with fields; patch the row of parent.session with parent.fields
+on agent-roster of a one-row kind (feature agent_row), or of a carried kind for a row not held:
+    row = GET /agents/{session}; replace that row (404: drop it)
+on start / reconnect / any other agent-roster:
     snapshot = GET /agents/snapshot
     for each agent with a cached chat:
         if cached.conversation_id != agent.conversation_id: drop cache

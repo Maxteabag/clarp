@@ -191,6 +191,12 @@ impl Hub {
         if let Some(profiles) = self.profiles.get() {
             profiles.add_to(&mut event);
         }
+        // What an event about one agent's row changed, as the row has it now (issue 809).
+        if event["type"] == "agent-roster"
+            && let Some(directory) = self.queue_directory()
+        {
+            crate::roster_fields::add_to(&mut event, &directory);
+        }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;
         recent.next_id += 1;

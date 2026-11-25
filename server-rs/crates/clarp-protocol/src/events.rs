@@ -167,6 +167,17 @@ pub struct AgentRoster {
     pub kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// With `fields`: the agent the event is about (feature `roster_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// The fields of the agent's snapshot row its change moved, as the row has them: patch
+    /// the row with them and read nothing (feature `roster_fields`, issue 809).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Value>,
+    /// For a helper's change: its maker's `session`, `agent_id` and the `fields` of the
+    /// maker's row its helpers decide (feature `roster_fields`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Value>,
 }
 
 /// Which agent is open.

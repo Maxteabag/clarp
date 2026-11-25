@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 181;
+pub const HOST_CONTRACT: u64 = 183;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -431,6 +431,15 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `held` what the machine has free, what auto keeps free of new lanes and what is left
     // (`available_mb`, `reserve_mb`, `room_mb`); `POST` sets any of them.
     ("lane_auto_limits", 180),
+    // An `agent-roster` event about one agent of the kind `helper-state`, `mute-changed`,
+    // `chat_view` or `agent-transit` (as a change of backend begins) carries `fields`, the
+    // fields of the agent's snapshot row its change moved, as the row has them; a helper's
+    // also carries `parent` with the maker's `fields` that its helpers decide. An app patches
+    // its rows and reads nothing (`crate::roster_fields`, issue 809).
+    ("roster_fields", 182),
+    // `GET /agents/{session}` answers one agent's row exactly as `GET /agents/snapshot` has
+    // it, for an event about one agent that does not carry its change (issue 809).
+    ("agent_row", 183),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -790,7 +799,7 @@ pub fn router(app: App) -> Router {
         .route("/message-tool-details", get(tool_details))
         .route("/agents/snapshot", get(snapshot))
         .route("/agents", post(create_agent))
-        .route("/agents/{session}", delete(remove_agent))
+        .route("/agents/{session}", get(one_agent).delete(remove_agent))
         // A whole conversation arrives in one request.
         .route("/agents/import", post(import_agent))
         .route("/log", get(log))
@@ -1517,10 +1526,21 @@ pub(crate) struct Families(HashMap<String, Family>);
 
 impl Families {
     pub(crate) fn of(directory: &Directory) -> Self {
+        Self::counted(directory, |_| true)
+    }
+
+    /// The family of one agent alone, counted as the whole list counts it: what its own row
+    /// says of the agents it made, without looking at any other agent's family.
+    pub(crate) fn of_parent(directory: &Directory, parent_id: &str) -> Self {
+        Self::counted(directory, |parent| parent == parent_id)
+    }
+
+    fn counted(directory: &Directory, wanted: impl Fn(&str) -> bool) -> Self {
         let mut families: HashMap<String, Family> = HashMap::new();
         for member in &directory.members {
             let record = &member.record;
-            let Some(parent) = &record.parent_agent_id else {
+            let Some(parent) = record.parent_agent_id.as_ref().filter(|parent| wanted(parent))
+            else {
                 continue;
             };
             let family = families.entry(parent.clone()).or_default();
@@ -1690,6 +1710,21 @@ pub(crate) fn agent_row(
         None if record.avatar_symbol.is_empty() => faces.of(&record.persona, view.backend),
         None => String::new(),
     });
+    busy_with(&mut row, families, member, &view);
+    row
+}
+
+/// The fields of an agent's row that the agents it made and the processes it left running
+/// decide: `child_count`, `running_children`, `background_jobs`, and `latest_state` and
+/// `status_text`, which `row` holds as the agent's own (`wire::own_state`) and which say
+/// `background` and that work where the agent itself is idle. The snapshot's row and the
+/// maker's fields in an `agent-roster` event (`crate::roster_fields`) are both made here.
+pub(crate) fn busy_with(
+    row: &mut Value,
+    families: &Families,
+    member: &Member,
+    view: &crate::agent::View,
+) {
     // Two things keep an agent busy after its turn: helpers it made that are working, and
     // background processes it left running. A job that only mirrors one of its helpers is
     // not a process of its own.
@@ -1725,7 +1760,17 @@ pub(crate) fn agent_row(
             row["status_text"] = json!(helpers::work_summary(&family.working, &processes));
         }
     }
-    row
+}
+
+/// What an `agent-roster` event carries for an agent's maker when a helper of it moved: the
+/// fields [`busy_with`] decides, as its row in the snapshot has them now.
+pub(crate) fn family_fields(directory: &Directory, member: &Member) -> Value {
+    let view = member.agent.view();
+    let (state, said) = wire::own_state(&view.status);
+    let mut fields = json!({ "latest_state": state, "status_text": said });
+    let families = Families::of_parent(directory, &member.record.agent_id);
+    busy_with(&mut fields, &families, member, &view);
+    fields
 }
 
 #[derive(Debug, Deserialize)]
@@ -1733,21 +1778,30 @@ struct SnapshotQuery {
     include_archived: Option<String>,
 }
 
-/// Every agent of the Host. With `include_archived=0` the ones that are put away are left
-/// out and counted: `GET /agents/archived` pages them.
-async fn snapshot(
-    State(app): State<App>,
-    Extension(principal): Extension<Principal>,
-    Query(query): Query<SnapshotQuery>,
-) -> Json<Value> {
-    let directory = app.fleet.directory();
-    let without_archived = query.include_archived.as_deref() == Some("0");
+/// The rows of agents, made as the snapshot makes them, and what its head is made from.
+struct AgentRows {
+    agents: Vec<Value>,
+    /// The personas, with the making of their pictures under way.
+    personas: Vec<Value>,
+    voices: clarp_kernel::voice_profile::HostView,
+}
+
+/// The rows of the agents and janitors `wanted` keeps, in the snapshot's order, each as
+/// `GET /agents/snapshot` has it: [`snapshot`] and the read of one row ([`one_agent`]) both
+/// make them here, so the two cannot differ. `families` counts at least the families of the
+/// agents wanted.
+async fn agent_rows(
+    app: &App,
+    directory: &Directory,
+    principal: &Principal,
+    families: &Families,
+    wanted: &(dyn Fn(&Member) -> bool + Sync),
+) -> AgentRows {
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
-    let families = Families::of(&directory);
-    let quota = crate::quota::rows(&app).await;
+    let quota = crate::quota::rows(app).await;
     // Which agents the user calls live: by their profiles, as they are now.
-    let (live_defaults, live_available) = app.calls.taking(&app).await;
-    let owners = app.mouth.owners_from(&directory);
+    let (live_defaults, live_available) = app.calls.taking(app).await;
+    let owners = app.mouth.owners_from(directory);
     let forks = crate::conversation_forks::Named::read();
     let teams = app
         .teams
@@ -1760,11 +1814,9 @@ async fn snapshot(
     let mut agents: Vec<Value> = directory
         .members
         .iter()
-        .filter(|member| !(without_archived && put_away(member)))
+        .filter(|member| wanted(member))
         .map(|member| {
-            let mut row = agent_row(
-                &directory, &families, member, &app.faces, &owners, &quota, &forks,
-            );
+            let mut row = agent_row(directory, families, member, &app.faces, &owners, &quota, &forks);
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
             if live_defaults.contains(&member.record.session) {
@@ -1776,50 +1828,29 @@ async fn snapshot(
     // And the janitors, after them: members of the fleet that are no agents to chat with.
     // An app tells them by `is_janitor` and lists them apart; each is shown with the
     // picture of its job.
-    let jobs = crate::janitors::jobs(&app).await;
-    for member in &directory.janitors {
-        if without_archived && put_away(member) {
-            continue;
+    if directory.janitors.iter().any(|member| wanted(member)) {
+        let jobs = crate::janitors::jobs(app).await;
+        for member in directory.janitors.iter().filter(|member| wanted(member)) {
+            let mut row = agent_row(directory, families, member, &app.faces, &owners, &quota, &forks);
+            row["team_ids"] = json!(team_ids(member));
+            row["live_call_available"] = json!(false);
+            let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
+            row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
+            row["model_avatar_url"] = json!("");
+            agents.push(row);
         }
-        let mut row = agent_row(
-            &directory, &families, member, &app.faces, &owners, &quota, &forks,
-        );
-        row["team_ids"] = json!(team_ids(member));
-        row["live_call_available"] = json!(false);
-        let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
-        row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
-        row["model_avatar_url"] = json!("");
-        agents.push(row);
     }
     // Who an agent can be: the personas this Host has built in, with the voices the owner's
     // file gives them and the look the owner gave them, and the personas the owner made.
     let [named, cartesia, gemini] = crate::owner::personas(&owners);
-    let personas = directory.personas.listed(&clarp_kernel::personas::Owner {
+    let mut personas = directory.personas.listed(&clarp_kernel::personas::Owner {
         roster: &named,
         cartesia: &cartesia,
         gemini: &gemini,
     });
-    // The names an app offers: every persona's, then every agent's that is none of them,
-    // whichever agents were asked for. A name is one name whatever the case of its letters.
-    let mut roster: Vec<&str> = Vec::new();
-    let mut offered: HashSet<String> = HashSet::new();
-    let of_personas = personas
-        .iter()
-        .filter_map(|persona| persona["name"].as_str());
-    let of_agents = directory
-        .members
-        .iter()
-        .map(|member| member.record.persona.as_str());
-    for name in of_personas.chain(of_agents) {
-        let name = name.trim();
-        if !name.is_empty() && offered.insert(name.to_lowercase()) {
-            roster.push(name);
-        }
-    }
     // A contact's picture under way, said on the contact and on its agents that have neither a
     // picture nor a symbol of their own (`avatar_generation_status_for_agent`).
-    let under_way = crate::pictures::under_way(&app).await;
-    let mut personas = personas.clone();
+    let under_way = crate::pictures::under_way(app).await;
     if !under_way.is_empty() {
         let mut by_name = HashMap::new();
         for persona in &mut personas {
@@ -1846,8 +1877,8 @@ async fn snapshot(
     }
     // How each agent sounds and is heard, from one view of the Host and one pass over its
     // agents; an archived agent speaks to nobody and has none.
-    let voices = crate::profile::view(&app.mouth, &app.ears, &directory, &owners);
-    let mut profiles: HashMap<String, Value> = crate::profile::all(&voices, &directory)
+    let voices = crate::profile::view(&app.mouth, &app.ears, directory, &owners);
+    let mut profiles: HashMap<String, Value> = crate::profile::all(&voices, directory)
         .into_iter()
         .collect();
     let archived: HashSet<&str> = directory
@@ -1873,6 +1904,78 @@ async fn snapshot(
         }
     ) {
         clarp_kernel::devices::limit_snapshot_cwd(&mut agents);
+    }
+    AgentRows {
+        agents,
+        personas,
+        voices,
+    }
+}
+
+/// `GET /agents/{session}`: one agent's row (or a janitor's), exactly as `GET
+/// /agents/snapshot` has it now, put away or not (feature `agent_row`, issue 809). An app
+/// reads it for an `agent-roster` event about one agent that does not carry its change,
+/// in place of the whole snapshot. A reader who may not read the agent is given the row as
+/// the snapshot gives it that reader (`crate::bound_privacy`); a session the Host does not
+/// have is 404.
+async fn one_agent(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Path(session): Path<String>,
+) -> Response {
+    let directory = app.fleet.directory();
+    let session = session.trim();
+    let Some(member) = directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .find(|member| member.record.session == session)
+    else {
+        let why = format!("No agent session: {session}");
+        let told = json!({ "error": "agent_not_found", "message": why });
+        return (StatusCode::NOT_FOUND, Json(told)).into_response();
+    };
+    let agent_id = member.record.agent_id.clone();
+    let families = Families::of_parent(&directory, &agent_id);
+    let wanted = |member: &Member| member.record.agent_id == agent_id;
+    let rows = agent_rows(&app, &directory, &principal, &families, &wanted).await;
+    let row = rows.agents.into_iter().next().unwrap_or(Value::Null);
+    Json(row).into_response()
+}
+
+/// Every agent of the Host. With `include_archived=0` the ones that are put away are left
+/// out and counted: `GET /agents/archived` pages them.
+async fn snapshot(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Query(query): Query<SnapshotQuery>,
+) -> Json<Value> {
+    let directory = app.fleet.directory();
+    let without_archived = query.include_archived.as_deref() == Some("0");
+    let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
+    let families = Families::of(&directory);
+    let wanted = |member: &Member| !(without_archived && member.record.archived_at_ms.is_some());
+    let AgentRows {
+        agents,
+        personas,
+        voices,
+    } = agent_rows(&app, &directory, &principal, &families, &wanted).await;
+    // The names an app offers: every persona's, then every agent's that is none of them,
+    // whichever agents were asked for. A name is one name whatever the case of its letters.
+    let mut roster: Vec<&str> = Vec::new();
+    let mut offered: HashSet<String> = HashSet::new();
+    let of_personas = personas
+        .iter()
+        .filter_map(|persona| persona["name"].as_str());
+    let of_agents = directory
+        .members
+        .iter()
+        .map(|member| member.record.persona.as_str());
+    for name in of_personas.chain(of_agents) {
+        let name = name.trim();
+        if !name.is_empty() && offered.insert(name.to_lowercase()) {
+            roster.push(name);
+        }
     }
     let (voice_defaults, voice_profile_version) = crate::profile::head(&voices);
     let available_mcp_servers = tokio::task::spawn_blocking(crate::mcp::available)
@@ -5035,6 +5138,8 @@ mod tests {
         for (method, path, kept_out) in [
             (Method::GET, "/log", false),
             (Method::GET, "/agents/snapshot", false),
+            (Method::GET, "/agents/echo", false),
+            (Method::GET, "/agents/archived", true),
             (Method::POST, "/send", false),
             (Method::POST, "/select", false),
             (Method::POST, "/stop", true),

@@ -83,7 +83,10 @@
         "kind": {"type": "string"},
         "session": {"type": "string"},
         "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"},
-        "chat_view": {"enum": ["conversation", "session"], "description": "feature chat_view: with kind chat_view, the agent's new chat view (issue 702)"}
+        "chat_view": {"enum": ["conversation", "session"], "description": "feature chat_view: with kind chat_view, the agent's new chat view (issue 702)"},
+        "agent_id": {"type": "string", "description": "feature roster_fields: with fields, the agent the event is about"},
+        "fields": {"type": "object", "description": "feature roster_fields: the fields of the agent's snapshot row its change moved, as the row has them (kinds helper-state, mute-changed, chat_view, agent-transit as a change begins; issue 809)"},
+        "parent": {"type": "object", "description": "feature roster_fields: with kind helper-state, the maker's session, agent_id and fields (child_count, running_children, background_jobs, latest_state, status_text)"}
       }
     },
     "agent-focus": {

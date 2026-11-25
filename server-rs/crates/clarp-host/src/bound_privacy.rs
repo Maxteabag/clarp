@@ -466,6 +466,8 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/agent-transit", Words(Query)),
     ("/agents/archived", Words(Query)),
     ("/agents/snapshot", Words(Query)),
+    // One agent's row: blanked as the snapshot blanks it, never refused (issue 809).
+    ("/agents/{session}", Words(Query)),
     ("/artifact-catalogs/clarp.form/1", NoWords),
     ("/artifact-catalogs/clarp.form/2", NoWords),
     ("/artifacts", Words(Query)),
