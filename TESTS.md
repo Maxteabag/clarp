@@ -8,7 +8,7 @@ Nothing runs per push or per pull request.
 
 | Layer | Command | Where it runs |
 |---|---|---|
-| Rust Host final pass | `server-rs/tools/final-pass` (run by `train-pass.sh`) | the build machine |
+| Rust Host final pass | `server-rs/tools/final-pass` (the release train runs it) | the build machine |
 | Rust Host build and tests | `server-rs/tools/build test` | the build machine |
 | Contract rows | `server-rs/tools/tests/test_rust_contract.py` | anywhere |
 | Web app (JavaScript) | `npm test` | vitest, in-process |
