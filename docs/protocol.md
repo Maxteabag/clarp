@@ -540,6 +540,13 @@ Rules:
   in the transcript), but a client never parses them: compare ids for equality
   only. A row of a provider message keeps its id when the transcript's lines
   shift; a positional `msg-` id changes with its line's position.
+- **The spoken part is not the written body.** An assistant row's `text` keeps its voice
+  markup. What it marks with `<speak>…</speak>` is the part said aloud (the Host makes it a clip
+  where speech is set up). An app shows it as a separate spoken block, apart from the written
+  body (iOS: unfolded and foldable, with replay; Android may draw a spoken summary row, for a
+  long reply), or leaves it out (the desktop). The written body is the text outside the
+  `<speak>` blocks, with the voice's own markup (`<vox>`, `<break>`, emotion tags) taken out. A
+  row with nothing written has its spoken words as its answer.
 - **The other agents a row names are the roster's.** The other agents a row
   names (`sender_name` and `sender_session` by `sender_agent_id`,
   `reply_to_name` and `reply_to_session` by `reply_to_agent_id`) are the
@@ -755,6 +762,12 @@ Live rows follow the same rule (both apps). Under an effective `hide`, a live tu
 name the agent the turn works with. A live note, decision card or artifact is always drawn, and
 a turn whose `audience` is `user` is drawn as before. When a `turn` op changes an open turn's
 `audience` to `user` (the user stepped into it), draw it from then on.
+
+**A chat list's preview is the written part.** `last_message` and `last_completed_message` are
+the newest row the chat shows, on one line, cut at 80 characters, built from its written part,
+the text outside its `<speak>` blocks (see "The spoken part is not the written body" under
+`GET /log`); from its spoken words only where nothing is written. The push notification and the
+`user-notification` event's `preview` keep the spoken form where there is one.
 
 **What a chat list shows of it (feature `coordination_working_state`).** The snapshot follows
 the same rule as `/log` with `coordination=auto`: in a chat whose effective

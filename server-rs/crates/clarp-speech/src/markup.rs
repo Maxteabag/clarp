@@ -273,6 +273,12 @@ fn drop_vox_for_display(text: &str) -> String {
 /// `attributes` also takes an opening tag with attributes (`<speak lang="en">`); without it
 /// only a bare `<speak>` counts. A turn's spoken blocks are read without attributes, as the
 /// Python Host reads them.
+/// What a reply says in writing: its text without its `<speak>` blocks, a block still arriving
+/// included. Empty for a reply that is only spoken.
+pub fn written_part(text: &str) -> String {
+    SPEAK_REGION.replace_all(text, "").into_owned()
+}
+
 pub fn speak_blocks(text: &str, attributes: bool) -> Vec<String> {
     let blocks = if attributes {
         &*SPEAK_BLOCK_ATTR
@@ -475,6 +481,21 @@ pub fn spoken_pieces(reply: &str) -> Vec<(String, bool)> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_written_part_of_a_reply_is_what_is_outside_its_spoken_blocks() {
+        assert_eq!(
+            written_part("<speak>The gist.</speak>\n\nThe answer."),
+            "\n\nThe answer."
+        );
+        assert_eq!(
+            written_part("Before <speak voice=\"a\">said</speak> after"),
+            "Before  after"
+        );
+        assert_eq!(written_part("<speak>Only spoken.</speak>"), "");
+        assert_eq!(written_part("Written. <speak>still arriving"), "Written. ");
+        assert_eq!(written_part("No markup."), "No markup.");
+    }
 
     #[test]
     fn what_is_shown_has_no_voice_markup() {

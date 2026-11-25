@@ -1959,7 +1959,10 @@ pub fn no_conversation(cwd: &str) -> Value {
 }
 
 /// What a row says in a list of chats: one line, as a screen shows it, no longer than 80
-/// characters, and what the user wrote marked as theirs.
+/// characters, and what the user wrote marked as theirs. The spoken part is not the written
+/// body (an app shows it as a separate spoken block, or leaves it out): a list's preview is the
+/// written part, the text outside the `<speak>` blocks, and the spoken words only where nothing
+/// is written. A push keeps the spoken form ([`notification_preview`]).
 pub(crate) fn preview(version: &Versioned) -> String {
     let (theirs, text) = match &version.entry {
         Entry::Message(message) => (true, message.text.as_str()),
@@ -1973,7 +1976,12 @@ pub(crate) fn preview(version: &Versioned) -> String {
         ),
         Entry::TurnEnd(_) | Entry::Commentary(_) => (false, ""),
     };
-    let shown = markup::clean_for_display(text, true);
+    let written = markup::clean_for_display(&markup::written_part(text), true);
+    let shown = if written.is_empty() {
+        markup::clean_for_display(text, true)
+    } else {
+        written
+    };
     if shown.is_empty() {
         return String::new();
     }
@@ -3836,11 +3844,29 @@ mod tests {
                 None,
             )
         };
+        // What the chat draws of a reply with a spoken gist before its answer: the answer,
+        // never the gist (the UX loop's round 3, issue 802).
         assert_eq!(
             preview(&reply(
                 "<speak>Hi <vox>um</vox> there.</speak>\n\nSecond line."
             )),
-            "Hi there. Second line."
+            "Second line."
+        );
+        let gist = "<speak>Sure <break time=\"350ms\"/> <vox>so</vox>, the gist: Postgres never \
+                    overwrites rows.</speak>\n\n# PostgreSQL MVCC\n\nEvery row has versions.";
+        assert_eq!(
+            preview(&reply(gist)),
+            "# PostgreSQL MVCC Every row has versions."
+        );
+        // A reply that is only spoken shows its spoken words: there is nothing else.
+        assert_eq!(
+            preview(&reply("<speak>Done <vox>um</vox>, it is green.</speak>")),
+            "Done it is green."
+        );
+        // A spoken block still arriving is not the written part either.
+        assert_eq!(
+            preview(&reply("Written first. <speak>And then")),
+            "Written first."
         );
         let long = preview(&reply(&"abcdefghi ".repeat(20)));
         assert_eq!(long.chars().count(), 80, "{long}");
