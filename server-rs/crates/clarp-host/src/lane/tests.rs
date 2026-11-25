@@ -210,6 +210,8 @@ fn status(thread: &str, options: &str, idle_ms: u64, busy: bool) -> Value {
     })
 }
 
+/// A run folder of this test process, emptied first: each test names its own, since the tests run
+/// in parallel in one process and a shared name would empty another test's lanes.
 fn run_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("lane-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -1115,7 +1117,7 @@ fn lanes_started_moments_ago_count_at_their_typical_size_until_they_have_grown()
         .unwrap();
     assert_eq!(place, Place::Free);
     // A lane that has not weighed itself at all counts at its typical size however old it is.
-    let run2 = run_dir("unweighed");
+    let run2 = run_dir("young-unweighed");
     let _unweighed = aged(FakeLane::start(&run2, "u", status("t", "d", 0, true)));
     let chat2 = Endpoint::of(Tool::Codex, &run2, "chat");
     let tight = Settings::of(None).room_with(Some(machine(2_400)));
@@ -1132,4 +1134,20 @@ fn the_reserve_is_kept_between_five_and_fifty_percent_however_it_was_written() {
     assert_eq!(of("lane_reserve_percent = 70\n").reserve_percent, 50);
     assert_eq!(of("lane_reserve_percent = 2\n").reserve_percent, 5);
     assert_eq!(of("lane_reserve_percent = 30\n").reserve_percent, 30);
+}
+
+#[test]
+fn no_two_tests_share_a_run_folder() {
+    // Tests run in parallel in one process, and `run_dir` empties its folder: two tests that name
+    // the same folder take each other's lanes away under load (issue: a landing failed on it).
+    let source = include_str!("tests.rs");
+    let mut names: Vec<&str> = source
+        .split("run_dir(\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect();
+    let all = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), all, "a run folder is named twice: {names:?}");
 }
