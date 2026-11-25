@@ -1251,6 +1251,32 @@ mod tests {
     }
 
     #[test]
+    fn bound_privacy_only_the_owner_changes_a_bound_agents_binding() {
+        let bound = record("ada", "/homes/ada", "theirs");
+        let free = record("ben", "", "");
+        let twin = record("cid", "/homes/ada", "theirs");
+        let unbound = Binding {
+            home: String::new(),
+            provider: String::new(),
+            cloud_speech: None,
+        };
+        let speaking = Binding {
+            cloud_speech: Some(true),
+            ..Binding::of(&bound)
+        };
+        for to in [&unbound, &speaking] {
+            assert!(!must_ask(&Reader::Owner, &bound, to));
+            // Not even an agent bound as it is, nor one that cannot say whose turn it is.
+            for reader in [Reader::agent(&free), Reader::agent(&twin), Reader::Unknown] {
+                assert!(must_ask(&reader, &bound, to), "{reader:?}");
+            }
+        }
+        // The binding as it is, asked again, and an agent that is not bound, ask nobody.
+        assert!(!must_ask(&Reader::agent(&free), &bound, &Binding::of(&bound)));
+        assert!(!must_ask(&Reader::agent(&free), &free, &speaking));
+    }
+
+    #[test]
     fn bound_privacy_blanks_a_withheld_agents_objects_and_keeps_its_name_and_state() {
         let bound = record("ada", "/homes/ada", "theirs");
         let free = record("ben", "", "");
