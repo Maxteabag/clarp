@@ -252,8 +252,7 @@ server-rs/
   conformance/          the Rust Host against the Python Host on what a client sees (README.md there)
   docs/differences.md   what differs from the Python Host on purpose
   docs/reference-defects.md   what the conformance runs showed to be wrong in the Python Host
-  tools/build           the build queue: check, test, clippy, fmt, conform on the XPS 15, one job at a time
-  tools/repo-gates      the repository's Python gates, on the same machine and queue
+  tools/build           the build queue: check, test, clippy, fmt on the XPS 15, one job at a time
   tools/*-vectors.py    gone: the generators left with the Python Host (#787); the fixtures they wrote stay,
                         and a fixture's 'Written by' line is its history
 ```
