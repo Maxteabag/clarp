@@ -442,14 +442,23 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
         .and_then(Value::as_array)
         .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
         .unwrap_or_default();
-    // The work splits at each message read into the turn, by when it was
+    // How each was read (`read_rows_at`, contract 195, one word per entry):
+    // only a steer splits the work; one read at the turn's start belongs
+    // with the turn's own message. An older Host sends no words: each splits.
+    let read_at: Vec<String> = live_turn
+        .get("read_rows_at")
+        .and_then(Value::as_array)
+        .map(|words| words.iter().map(|w| w.as_str().unwrap_or_default().to_owned()).collect())
+        .unwrap_or_default();
+    let steered: Vec<&String> = read_rows.iter().enumerate().filter(|(i, _)| read_at.get(*i).map(String::as_str) != Some("start")).map(|(_, id)| id).collect();
+    // The work splits at each message steered into the turn, by when it was
     // written, as history splits it at that row (`history_fold`).
     let cuts: Vec<Cut> = if options.whole_turn {
         Vec::new()
     } else {
         let mut cuts: Vec<Cut> = rows
             .iter()
-            .filter(|r| read_rows.contains(&r.id))
+            .filter(|r| steered.contains(&&r.id))
             .filter_map(|r| Some(Cut { row: r.id.clone(), at_ms: written(r)? }))
             .collect();
         cuts.sort_by_key(|c| c.at_ms);

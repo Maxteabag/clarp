@@ -478,7 +478,10 @@ fn turn(
         _ if options.read_into => rows
             .iter()
             .enumerate()
-            .filter(|(i, r)| r.role == "user" && Some(*i) != prompt && ids.contains(r.read_into.as_str()))
+            // Only a steer splits the work (contract 195): a message read at
+            // the turn's start belongs with its own message; an older Host
+            // says no `at`, and its read_into rows split as before.
+            .filter(|(i, r)| r.role == "user" && Some(*i) != prompt && ids.contains(r.read_into.as_str()) && r.read_into_at != "start")
             .filter_map(|(_, r)| Some(live_present::Cut { row: r.id.clone(), at_ms: ms(r)? }))
             .collect(),
         (Some(first), Some(end)) => rows
