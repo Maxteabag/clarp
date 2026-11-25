@@ -325,8 +325,8 @@ export component Sidebar inherits Rectangle {
     out property <bool> search-has-focus: search.has-focus;
     in property <string> cursor;
     out property <bool> list-has-focus: list.has-focus;
-    // The pointer is over the list: the app keeps the rows' order until it
-    // leaves, and rows change only in place.
+    // The pointer is over the list. While it is, or the list has the
+    // keyboard, the app keeps the rows' order and rows change only in place.
     out property <bool> pointer-in-list: hover.has-hover;
     public function focus-list() { list.focus(); }
     // The All/Unread chips, as a click does.

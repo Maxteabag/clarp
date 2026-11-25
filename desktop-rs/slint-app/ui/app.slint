@@ -218,10 +218,13 @@ export component AppWindow inherits Window {
     callback fold-toggled(string);
     callback restore-agent(string);
     callback filter-changed();
-    // The pointer entered (true) or left the explorer's list.
-    callback list-pointer(bool);
+    // The explorer's list is held (true: the pointer is over it or it has
+    // the keyboard) or let go (both have left; a pane or the composer
+    // taking the keyboard counts as leaving).
+    callback list-held(bool);
     out property <bool> sidebar-pointer-in-list: sidebar.pointer-in-list;
-    changed sidebar-pointer-in-list => { root.list-pointer(self.sidebar-pointer-in-list); }
+    out property <bool> sidebar-list-held: sidebar.pointer-in-list || sidebar.list-has-focus;
+    changed sidebar-list-held => { root.list-held(self.sidebar-list-held); }
     callback toggle-muted();
     callback open-switcher();
     callback link-clicked(string);
