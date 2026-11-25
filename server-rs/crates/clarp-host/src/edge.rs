@@ -1942,7 +1942,28 @@ async fn started_again(
     app: &App,
     replaces: String,
     request: CreateAgentRequest,
+    owner: bool,
 ) -> Result<Result<AgentRecord, NotMade>, (StatusCode, Value)> {
+    // A bound agent's binding is its owner's: anyone else starting it again keeps it.
+    if !owner && let Some(member) = app.fleet.directory().by_session(&replaces) {
+        let before = &member.record;
+        let said = |asked: &Option<String>, had: &String| {
+            asked.as_deref().map_or_else(|| had.clone(), |said| said.trim().to_string())
+        };
+        let to = crate::bound_privacy::Binding {
+            home: said(&request.codex_home, &before.codex_home),
+            provider: said(&request.codex_provider, &before.codex_provider),
+            cloud_speech: request.cloud_speech.or(before.cloud_speech),
+        };
+        if crate::bound_privacy::must_ask(&crate::bound_privacy::Reader::Unknown, before, &to) {
+            let why = "An agent bound to a model provider of its own keeps its binding when \
+                anyone but its owner starts it again. Ask him with clarp-admin agent provider.";
+            return Err((
+                StatusCode::CONFLICT,
+                json!({ "error": "own_provider", "message": why }),
+            ));
+        }
+    }
     let unavailable = |why: Unavailable| {
         let why = ApiError::from(why);
         let body = match why.body {
@@ -2018,6 +2039,16 @@ fn creation_backend(backend: &str) -> String {
 pub(crate) async fn make_agent(
     app: &App,
     asked: &serde_json::Map<String, Value>,
+) -> Result<Value, (StatusCode, Value)> {
+    make_agent_as(app, asked, false).await
+}
+
+/// [`make_agent`], where `owner` says the owner asks: only he starts an agent bound to a
+/// provider of its own again with another binding (`bound_privacy`).
+pub(crate) async fn make_agent_as(
+    app: &App,
+    asked: &serde_json::Map<String, Value>,
+    owner: bool,
 ) -> Result<Value, (StatusCode, Value)> {
     let refused = |status: StatusCode, code: &str, message: &str| {
         (status, json!({ "error": code, "message": message }))
@@ -2144,7 +2175,7 @@ pub(crate) async fn make_agent(
     let record = match replaces {
         Some(replaces) => {
             request.mcp_servers = mcp_selection()?;
-            started_again(app, replaces, request)
+            started_again(app, replaces, request, owner)
                 .await?
                 .map_err(not_made)?
         }
@@ -2373,6 +2404,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
 
 async fn create_agent(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
@@ -2393,7 +2425,12 @@ async fn create_agent(
     {
         return why.into_response();
     }
-    match make_agent(&app, asked).await {
+    let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await;
+    let owner = match reader {
+        Ok(reader) => reader == crate::bound_privacy::Reader::Owner,
+        Err(refused) => return refused.into_response(),
+    };
+    match make_agent_as(&app, asked, owner).await {
         Ok(made) => Json(made).into_response(),
         Err((status, why)) => (status, Json(why)).into_response(),
     }

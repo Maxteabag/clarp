@@ -191,7 +191,9 @@ impl Withheld {
         match value {
             Value::String(text) if self.keeps(key, text) => value.clone(),
             Value::String(_) => Value::String(String::new()),
-            Value::Array(items) if items.iter().all(Value::is_string) && !kept_key(key) => {
+            Value::Array(items)
+                if items.iter().all(Value::is_string) && !kept_key(key) && !key.ends_with("_ids") =>
+            {
                 Value::Array(Vec::new())
             }
             Value::Array(items) => {
@@ -213,6 +215,10 @@ impl Withheld {
     fn keeps(&self, key: &str, text: &str) -> bool {
         if NAME_KEYS.contains(&key) {
             return self.names.contains(text);
+        }
+        // An id is no word, but a reference a card's asker wrote is its words.
+        if key == "reference_id" {
+            return false;
         }
         if key.ends_with("_id") || key.ends_with("_ids") || key.ends_with("_url") {
             return true;
@@ -329,7 +335,8 @@ fn is_token(text: &str) -> bool {
 // ---- who asks ----------------------------------------------------------------------------------
 
 /// The reader a request is: an agent by the turn it presents (`X-Clarp-Turn`), an agent's tool
-/// by its token, another Host by `X-Clarp-Peer` or a listed origin, and otherwise the owner.
+/// by its token, another Host by `X-Clarp-Peer`, and otherwise the owner (a paired device,
+/// from any page it reads, and the administrator's token without a turn).
 /// A key that cannot be read is answered so (503), as the Host answers any turn it cannot place.
 pub async fn reader_of(
     app: &App,
@@ -348,9 +355,8 @@ pub async fn reader_of(
     if matches!(principal, Some(Principal::Tools)) {
         return Ok(Reader::Unknown);
     }
-    if crate::coordination::from_a_peer(headers)
-        || crate::cross_origin::from_listed_origin(headers, &app.config.web_read_origins)
-    {
+    // A paired device is the owner's, whatever page it reads from; another Host says so.
+    if crate::coordination::from_a_peer(headers) {
         return Ok(Reader::Elsewhere);
     }
     Ok(Reader::Owner)
