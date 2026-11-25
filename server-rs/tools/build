@@ -14,10 +14,6 @@
 #   server-rs/tools/build fmt              format the sources in place here (runs rustfmt remotely on a private
 #                                          copy, brings back only what it changed; exits 3 when a file it
 #                                          formatted was changed here meanwhile and was left alone)
-#   server-rs/tools/build conform [args]   build the Host and compare it with the Python Host's written-down
-#                                          answers (server-rs/conformance); starts only the Rust Host
-#   server-rs/tools/build answers [args]   build the Host, run the corpus against it and bring home what it
-#                                          answered, compared with nothing: for a scenario without a reference yet
 #   server-rs/tools/build voice-timeline-read   time two GETs on a disposable release Host on the build machine
 #   server-rs/tools/build snapshot-read    time GET /agents/snapshot with thirty agents on a disposable release Host,
 #                                          then the snapshot and artifact list at 310 agents, plain and gzipped
@@ -99,8 +95,6 @@ case "$cmd" in
     test)   cargo_cmd="cargo build -j $JOBS -p clarp-shim --bins && cargo test --workspace -j $JOBS $(printf '%q ' "$@")" ;;
     clippy) cargo_cmd="cargo clippy --workspace --all-targets --locked --keep-going -j $JOBS -- -D warnings" ;;
     fmt)    cargo_cmd="cargo fmt --all" ;;
-    conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
-    answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     voice-timeline-read)
         cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-voice-timeline.py target/release/clarp-host'"
         ;;
@@ -116,7 +110,7 @@ case "$cmd" in
         printf -v cargo_cmd '%q ' systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 timeout -k 3 "$slice_seconds" unshare --user --map-root-user --net --pid --fork --kill-child --mount-proc sh -ec 'ip link set lo up; exec python3 tools/fleet-load "$@"' fleet-load "$1" "$2"
         ;;
     release) cargo_cmd="cargo build --release -j $JOBS -p clarp-host -p clarp-shim" ;;
-    *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status|drop" >&2; exit 2 ;;
+    *) echo "usage: build check|test [args]|clippy|fmt|release|status|drop" >&2; exit 2 ;;
 esac
 
 # Keep source lines for backtraces without embedding full type and variable
@@ -124,7 +118,7 @@ esac
 queue_mode=--build
 queue_env=
 case "$cmd" in
-    check|test|clippy|conform|answers)
+    check|test|clippy)
         # Admit and compile with the same effective profile, including caller overrides.
         queue_env="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV"
         queue_mode=--build-debug
@@ -218,13 +212,6 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/s
 # The background-task test runs the repository's goal launcher.
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-background-jobs/scripts"
 "${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$remote/skills/clarp-background-jobs/scripts/"
-if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
-    # The conformance driver is the replay harness run against the Rust Host: it needs the
-    # harness, and the server's source for the words its report may print.
-    ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/tests/replay $remote/server"
-    rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../tests/replay/" "$HOST:$remote/tests/replay/"
-    rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../server/" "$HOST:$remote/server/"
-fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 # Cargo releases the slot before rsync fetches the binaries. Keep links for the
 # transfer so a later build can evict this target without interrupting the fetch.
@@ -242,10 +229,6 @@ if [ "$cmd" = release ] && [ $code -eq 0 ]; then
     mkdir -p "$here/dist"
     rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$export_dir/clarp-host" "$HOST:$export_dir/clarp-shim" "$here/dist/"
     (cd "$here/dist" && sha256sum clarp-host clarp-shim > SHA256SUMS && git -C "$here" rev-parse HEAD > COMMIT)
-fi
-if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
-    # What the Rust Host answered, to read beside what is written down (not committed).
-    rsync -a --delete -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/conformance/out/" "$here/conformance/out/" 2>/dev/null || true
 fi
 # The lockfile is made by the first build; bring it home so it is committed.
 rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/Cargo.lock" "$here/Cargo.lock" 2>/dev/null || true
