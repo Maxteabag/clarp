@@ -253,7 +253,9 @@ class Host:
         command = [str(binary), "--data", str(self.root / "data"), "--run", str(self.root / "run"),
                    "--listen", f"127.0.0.1:{self.port}", "--launcher", "direct", "--shim", str(shim),
                    "--name", "turn-timings", "--cwd", str(self.root / "ws"), "--accounts", "none",
-                   "--keep-spools"]
+                   "--keep-spools",
+                   # Its own settings folder, the one configure() writes (issue 780).
+                   "--config", str(self.root / "config" / "clarp-host")]
         self.log = open(self.root / "host.log", "w")
         self.proc = subprocess.Popen(command, cwd=self.root, env=own_environment(self.root, self.secret),
                                      stdin=subprocess.DEVNULL, stdout=self.log, stderr=subprocess.STDOUT,
