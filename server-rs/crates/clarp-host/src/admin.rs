@@ -1772,7 +1772,11 @@ mod tests {
             Ok(args(&["checkpoint", "p1", "3", "{\"progress\":\"p\"}\n"]))
         );
         assert_eq!(
-            from_stdin("clarp-agent-tasks", args(&["subgoal", "p1", "add", "-"]), piped),
+            from_stdin(
+                "clarp-agent-tasks",
+                args(&["subgoal", "p1", "add", "-"]),
+                piped
+            ),
             Ok(args(&["subgoal", "p1", "add", "{\"progress\":\"p\"}\n"]))
         );
         let unread = || -> std::io::Result<String> { panic!("nothing is read without a dash") };
@@ -1781,7 +1785,11 @@ mod tests {
             Ok(args(&["get", "p1"]))
         );
         assert_eq!(
-            from_stdin("clarp-admin", args(&["agent", "fork", "--spec", "-"]), unread),
+            from_stdin(
+                "clarp-admin",
+                args(&["agent", "fork", "--spec", "-"]),
+                unread
+            ),
             Ok(args(&["agent", "fork", "--spec", "-"])),
             "another tool keeps its dash"
         );

@@ -138,9 +138,7 @@ async fn add(
     let path = registry_path(&app).ok_or_else(none_kept)?;
     let legacy = app.fleet.directory().legacy_peers.clone();
     tokio::task::spawn_blocking(move || {
-        registry::edit(&path, &legacy, |peers| {
-            peers.insert(name, stored)
-        })
+        registry::edit(&path, &legacy, |peers| peers.insert(name, stored))
     })
     .await
     .map_err(|_| registry_failed())?
@@ -159,9 +157,7 @@ async fn remove(
     let legacy = app.fleet.directory().legacy_peers.clone();
     let removed = name.clone();
     let known = tokio::task::spawn_blocking(move || {
-        registry::edit(&path, &legacy, |peers| {
-            peers.remove(&removed).is_some()
-        })
+        registry::edit(&path, &legacy, |peers| peers.remove(&removed).is_some())
     })
     .await
     .map_err(|_| registry_failed())?

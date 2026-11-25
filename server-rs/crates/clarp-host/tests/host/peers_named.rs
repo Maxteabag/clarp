@@ -30,10 +30,11 @@ fn a_host_started_without_a_peers_file_has_no_peers_where_the_installed_file_lie
     assert_eq!(unnamed.get("/peers"), json!([]));
     assert_eq!(
         unnamed.get("/peers/snapshot")["peers"],
-        json!([]),
+        json!({}),
         "and reads none of their agents"
     );
-    let again = json!({"name": "home", "url": "https://home.invalid", "token": "fixture-peer-token"});
+    let again =
+        json!({"name": "home", "url": "https://home.invalid", "token": "fixture-peer-token"});
     assert_eq!(
         unnamed.ask("POST", "/peers", Some(&again)),
         (
@@ -42,5 +43,9 @@ fn a_host_started_without_a_peers_file_has_no_peers_where_the_installed_file_lie
         )
     );
     assert_eq!(unnamed.ask("DELETE", "/peers/work", None).0, 409);
-    assert_eq!(std::fs::read(&installed).unwrap(), kept, "the file is left as it was");
+    assert_eq!(
+        std::fs::read(&installed).unwrap(),
+        kept,
+        "the file is left as it was"
+    );
 }

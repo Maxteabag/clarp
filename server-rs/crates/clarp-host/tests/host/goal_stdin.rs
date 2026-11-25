@@ -4,7 +4,12 @@
 use super::*;
 
 /// Runs the goal tool as `tool` does, with `piped` on its standard input.
-fn goal_piped(host: &Host, dir: &std::path::Path, args: &[&str], piped: &str) -> (i32, String, String) {
+fn goal_piped(
+    host: &Host,
+    dir: &std::path::Path,
+    args: &[&str],
+    piped: &str,
+) -> (i32, String, String) {
     let mut child = sealed_command(dir, env!("CARGO_BIN_EXE_clarp-host"))
         .arg("tool")
         .arg("clarp-goal")
@@ -76,5 +81,8 @@ fn a_checkpoint_past_what_one_argument_holds_is_piped_to_the_goal_tool_whole() {
     let (code, _, err) = goal_piped(&host, &place.root, &["act", &plan, &now, "-", "-"], "{}");
     assert_eq!(code, 2, "{err}");
     assert!(err.contains("only one argument may be -"), "{err}");
-    assert_eq!(goal(&host, &place.root, &["get", &plan])["revision"], kept["revision"]);
+    assert_eq!(
+        goal(&host, &place.root, &["get", &plan])["revision"],
+        kept["revision"]
+    );
 }

@@ -68,7 +68,10 @@ fn an_agent_shows_and_sets_how_an_agent_is_heard_and_default_takes_it_away() {
     assert!(err.contains("no such agent session"), "{err}");
     let (code, _, err) = admin(&["--session", &session, "--loud"]);
     assert_eq!(code, 2);
-    assert!(err.contains("usage: clarp-admin transcription agent"), "{err}");
+    assert!(
+        err.contains("usage: clarp-admin transcription agent"),
+        "{err}"
+    );
 
     // An app may have kept it under the agent's persona: default takes that away too.
     host.post(

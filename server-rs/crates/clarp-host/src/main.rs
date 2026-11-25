@@ -469,6 +469,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // What could not be read of what it keeps, in one line: the door shows the same counts.
     // Said after where it listens, which is the Host's first line.
     eprintln!("{}", app.fleet.left_out().line());
+    if app.config.peers.is_none() {
+        eprintln!("clarp-host: started without --peers: this Host has no peers");
+    }
     if let Some(why) = app.turns.unkept() {
         app.fleet.unkept(clarp_host::turn_identity::KIND, why);
     } else if !app.turns.has_key() {
@@ -617,9 +620,6 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if config.peers.is_none() {
-        eprintln!("clarp-host: started without --peers: this Host has no peers");
-    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
