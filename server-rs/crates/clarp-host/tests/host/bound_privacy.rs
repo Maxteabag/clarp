@@ -389,7 +389,10 @@ fn a_bound_agents_words_are_read_by_its_owner_its_binding_and_the_readers_its_ow
     let speech = ask(&["--cloud-speech", "on"]);
     assert!(speech["asked"][0]["decision_id"].is_string(), "{speech}");
     let unbind = ask(&["--clear"]);
-    let card = unbind["asked"][0]["decision_id"].as_str().unwrap().to_string();
+    let card = unbind["asked"][0]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(unbind["codex_provider"], "stand-in", "{unbind}");
     assert_eq!(provider_of(&host), (json!("stand-in"), json!(false)));
     // Asked again, it is the same card.

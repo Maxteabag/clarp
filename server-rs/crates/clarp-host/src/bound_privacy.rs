@@ -655,7 +655,8 @@ async fn named(app: &App, request: &Request, names: Names, withheld: &Withheld) 
         Query | Nobody => {}
         Clip(at) => {
             let clip = segments.get(at).and_then(|clip| clip.parse::<u64>().ok());
-            let speaker = clip.and_then(|clip| crate::voice::speaker_of(&app.fleet.directory(), clip));
+            let speaker =
+                clip.and_then(|clip| crate::voice::speaker_of(&app.fleet.directory(), clip));
             asked.push(speaker.unwrap_or_else(|| UNKNOWN.to_string()));
         }
         Media(at) => {
@@ -961,11 +962,7 @@ pub async fn change_readers(
 
 /// The agent whose turn asks, where a turn asks; refused (`owner_only`, in these words) for
 /// any other caller that is not the owner.
-fn asker_of(
-    app: &App,
-    reader: &Reader,
-    why: &str,
-) -> Result<Arc<Member>, (StatusCode, Value)> {
+fn asker_of(app: &App, reader: &Reader, why: &str) -> Result<Arc<Member>, (StatusCode, Value)> {
     let asker_id = reader.agent_id().unwrap_or_default();
     let directory = app.fleet.directory();
     let mut members = directory.members.iter();
@@ -982,11 +979,7 @@ fn asker_of(
 
 /// Asks the owner a card in the chat of the agent that asked: the card it has under the
 /// same reference where it has one (one card a question), else a new one.
-async fn ask_owner(
-    app: &App,
-    asker: &Member,
-    card: Value,
-) -> Result<Value, (StatusCode, Value)> {
+async fn ask_owner(app: &App, asker: &Member, card: Value) -> Result<Value, (StatusCode, Value)> {
     let reference = card["reference_id"].clone();
     let made_before = crate::library::decisions_of(app, &asker.record.session)
         .into_iter()
@@ -1199,7 +1192,9 @@ async fn rebound(app: &App, artifact: &Value, on_behalf: Option<&str>) {
         })
         .await;
         if !matches!(checked, Ok(Ok(_))) {
-            eprintln!("clarp-host: a binding the owner approved can no longer be used; not changed");
+            eprintln!(
+                "clarp-host: a binding the owner approved can no longer be used; not changed"
+            );
             return;
         }
     }
@@ -1272,7 +1267,11 @@ mod tests {
             }
         }
         // The binding as it is, asked again, and an agent that is not bound, ask nobody.
-        assert!(!must_ask(&Reader::agent(&free), &bound, &Binding::of(&bound)));
+        assert!(!must_ask(
+            &Reader::agent(&free),
+            &bound,
+            &Binding::of(&bound)
+        ));
         assert!(!must_ask(&Reader::agent(&free), &free, &speaking));
     }
 

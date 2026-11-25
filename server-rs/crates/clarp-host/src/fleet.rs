@@ -3575,7 +3575,11 @@ impl Fleet {
         // A bound agent's binding is changed only where its owner decides it
         // (`POST /agent-provider`, `bound_privacy`): starting it again keeps it.
         let rebinds = (&codex_home, &codex_provider, cloud_speech)
-            != (&before.codex_home, &before.codex_provider, before.cloud_speech);
+            != (
+                &before.codex_home,
+                &before.codex_provider,
+                before.cloud_speech,
+            );
         if before.bound() && rebinds {
             let why = "An agent bound to a model provider of its own keeps its binding when it is \
                 started again. Change it with POST /agent-provider (clarp-admin agent provider).";
