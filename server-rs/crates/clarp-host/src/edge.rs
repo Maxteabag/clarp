@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 176;
+pub const HOST_CONTRACT: u64 = 177;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -422,6 +422,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // anchored as a user's turn's are, its audience still the agents'
     // (`clarp_actor::conversation::in_conversation_view`, issue 745).
     ("helper_conversation", 175),
+    // An agent's row of `GET /agents/snapshot` says `helper_chat: true` where its chat was a
+    // helper's, whatever its role is now; a move takes it along, so a moved helper's chat keeps
+    // the turns other agents gave it (issue 777).
+    ("helper_chat", 177),
     // `&px=64|128|256` on the address of an agent's or a persona's picture, its own or one
     // this Host ships (`/static/avatars/`, `/static/janitor-avatars/`), gives a square JPEG
     // of it made once and kept; an address with the picture's current `v` may be kept by
@@ -2519,6 +2523,8 @@ async fn import_agent(
         role: Some(field("role"))
             .filter(|role| role == "helper")
             .unwrap_or_default(),
+        // A chat that was a helper's stays one where it goes (issue 777).
+        helper_chat: request.agent["helper_chat"] == true,
         parent_agent_id: Some(field("parent_agent_id")).filter(|parent| !parent.is_empty()),
         helper_state: Some(field("helper_state")).filter(|state| !state.is_empty()),
         // Who it is there comes with it: its symbol, how it speaks (which the tool that

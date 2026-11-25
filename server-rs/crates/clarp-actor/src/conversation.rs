@@ -231,7 +231,11 @@ pub(crate) fn conversation_in(entry: &Entry, session_rows: Option<usize>, helper
         ),
         Entry::Reply(_) => session_rows.is_some(),
         Entry::Imported(import) => {
-            session_rows.is_some() || clarp_kernel::chat_view::imported_is_conversation(&import.row)
+            session_rows.is_some()
+                || clarp_kernel::chat_view::imported_is_conversation(&import.row)
+                // A helper's chat that moved here: the messages other agents gave it came
+                // as imported rows (issue 777).
+                || (helper && import.row["role"] == "user" && import.row["origin"] == "agent")
         }
         _ => false,
     }
