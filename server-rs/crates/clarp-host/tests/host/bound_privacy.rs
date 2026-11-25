@@ -572,7 +572,10 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
     });
     let events: Vec<Value> = heard
         .lines()
-        .filter_map(|line| line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:")))
+        .filter_map(|line| {
+            line.strip_prefix("data: ")
+                .or_else(|| line.strip_prefix("data:"))
+        })
         .filter_map(|data| serde_json::from_str(data).ok())
         .collect();
     let bens = events
@@ -625,7 +628,10 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
     };
     let (rows_ada, rows_slice) = (row(&ada), row("slice"));
     assert_eq!(rows_ada["words_withheld"], true, "{rows_ada}");
-    for (fields, row) in [(&bens["fields"], &rows_slice), (&parent["fields"], &rows_ada)] {
+    for (fields, row) in [
+        (&bens["fields"], &rows_slice),
+        (&parent["fields"], &rows_ada),
+    ] {
         for (name, value) in fields.as_object().unwrap() {
             assert_eq!(value, &row[name], "{name}: {fields} against {row}");
         }
@@ -655,12 +661,18 @@ fn a_withheld_agents_roster_fields_and_row_carry_what_its_snapshot_row_does() {
         .unwrap();
     let told = heard
         .lines()
-        .filter_map(|line| line.strip_prefix("data: ").or_else(|| line.strip_prefix("data:")))
+        .filter_map(|line| {
+            line.strip_prefix("data: ")
+                .or_else(|| line.strip_prefix("data:"))
+        })
         .filter_map(|data| serde_json::from_str::<Value>(data).ok())
         .filter(|event| event["type"] == "transcript-updated" && event["session"] == ada)
         .last()
         .unwrap_or_else(|| panic!("Ben hears that Ada's conversation changed: {heard}"));
-    assert_eq!(told["conversation_id"], rows_ada["conversation_id"], "{told}");
+    assert_eq!(
+        told["conversation_id"], rows_ada["conversation_id"],
+        "{told}"
+    );
     assert!(told["head_revision"].as_u64().unwrap() <= rows_ada["head_revision"].as_u64().unwrap());
 
     // The owner reads Ada's row whole.

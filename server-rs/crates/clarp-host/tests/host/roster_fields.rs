@@ -36,7 +36,10 @@ fn assert_fields_are_the_rows(fields: &Value, row: &Value) {
     let fields = fields.as_object().unwrap();
     assert!(!fields.is_empty());
     for (name, value) in fields {
-        assert_eq!(value, &row[name], "{name}: the event's {fields:?}, the row {row}");
+        assert_eq!(
+            value, &row[name],
+            "{name}: the event's {fields:?}, the row {row}"
+        );
     }
 }
 
@@ -106,7 +109,10 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
         assert_eq!(parent["fields"]["running_children"], running, "{event}");
     }
     let event = carried(&heard, "helper-state", "slice").unwrap();
-    assert_eq!(event["parent"]["fields"]["latest_state"], "background", "{event}");
+    assert_eq!(
+        event["parent"]["fields"]["latest_state"], "background",
+        "{event}"
+    );
     assert!(
         event["parent"]["fields"]["status_text"]
             .as_str()
@@ -130,13 +136,24 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
         carried(&heard, "chat_view", &maker).is_some()
     });
     let event = carried(&heard, "chat_view", &maker).unwrap();
-    assert_eq!(event["fields"], json!({ "chat_view": "conversation" }), "{event}");
+    assert_eq!(
+        event["fields"],
+        json!({ "chat_view": "conversation" }),
+        "{event}"
+    );
     assert_fields_are_the_rows(&event["fields"], &snapshot_row(&host, &maker));
 
     // A kind whose change is more than a few fields carries none: the row is read.
-    host.post("/agent-rename", json!({ "session": maker, "name": "Builder" }));
+    host.post(
+        "/agent-rename",
+        json!({ "session": maker, "name": "Builder" }),
+    );
     wait_for("the rename", || {
-        heard.lock().unwrap().iter().any(|event| event["kind"] == "agent-renamed")
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["kind"] == "agent-renamed")
     });
     let told = heard.lock().unwrap().clone();
     let mut renames = told.iter().filter(|event| event["kind"] == "agent-renamed");
@@ -164,7 +181,12 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
                     && event["conversation_id"] == row["conversation_id"]
             })
     });
-    assert!(snapshot_row(&host, &maker)["head_revision"].as_u64().unwrap() > 0);
+    assert!(
+        snapshot_row(&host, &maker)["head_revision"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
 
     // One agent's row is its row in the snapshot, the maker's and the helper's alike; a session the Host does not have is not found.
     for session in [maker.as_str(), "slice"] {
@@ -173,7 +195,11 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
         });
     }
     let (status, said) = host.ask("GET", "/agents/nobody", None);
-    assert_eq!((status, &said["error"]), (404, &json!("agent_not_found")), "{said}");
+    assert_eq!(
+        (status, &said["error"]),
+        (404, &json!("agent_not_found")),
+        "{said}"
+    );
     // The other reads under `/agents/` are what they were.
     assert!(host.get("/agents/snapshot")["agents"].is_array());
     assert!(host.get("/agents/archived").is_object());

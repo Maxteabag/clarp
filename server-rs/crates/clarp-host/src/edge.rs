@@ -1540,7 +1540,10 @@ impl Families {
         let mut families: HashMap<String, Family> = HashMap::new();
         for member in &directory.members {
             let record = &member.record;
-            let Some(parent) = record.parent_agent_id.as_ref().filter(|parent| wanted(parent))
+            let Some(parent) = record
+                .parent_agent_id
+                .as_ref()
+                .filter(|parent| wanted(parent))
             else {
                 continue;
             };
@@ -1817,7 +1820,9 @@ async fn agent_rows(
         .iter()
         .filter(|member| wanted(member))
         .map(|member| {
-            let mut row = agent_row(directory, families, member, &app.faces, &owners, &quota, &forks);
+            let mut row = agent_row(
+                directory, families, member, &app.faces, &owners, &quota, &forks,
+            );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
             if live_defaults.contains(&member.record.session) {
@@ -1832,7 +1837,9 @@ async fn agent_rows(
     if directory.janitors.iter().any(|member| wanted(member)) {
         let jobs = crate::janitors::jobs(app).await;
         for member in directory.janitors.iter().filter(|member| wanted(member)) {
-            let mut row = agent_row(directory, families, member, &app.faces, &owners, &quota, &forks);
+            let mut row = agent_row(
+                directory, families, member, &app.faces, &owners, &quota, &forks,
+            );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(false);
             let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);

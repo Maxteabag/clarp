@@ -49,9 +49,10 @@ pub fn add_to(event: &mut Value, directory: &Directory) {
     event["agent_id"] = json!(member.record.agent_id);
     event["fields"] = fields;
     if kind == "helper-state"
-        && let Some(parent) = member.record.parent_agent_id.as_deref().and_then(|parent| {
-            self::member(directory, |member| member.record.agent_id == parent)
-        })
+        && let Some(parent) =
+            member.record.parent_agent_id.as_deref().and_then(|parent| {
+                self::member(directory, |member| member.record.agent_id == parent)
+            })
     {
         event["parent"] = json!({
             "session": parent.record.session,
