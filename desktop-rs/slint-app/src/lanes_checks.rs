@@ -46,6 +46,26 @@ fn pairs(expected: &[(&str, &str)]) -> Vec<(String, String)> {
     expected.iter().map(|(l, d)| ((*l).to_owned(), (*d).to_owned())).collect()
 }
 
+/// A row a step towards the readings, as Down moves the owner: the list
+/// follows the current row, and only a row it has drawn can bring itself into
+/// view, so it walks there rather than jumping. A stage walks for at most 9 s
+/// (stages time out at 15), so the walk is three of them.
+fn walk_to_readings() -> Stage {
+    ("scrolled to the readings", Box::new(|_, window, elapsed| {
+        let readings = window.get_setting_rows().iter().position(|r| r.kind == "info" && r.label == "    Memory").map_or(0, |i| i as i32);
+        let current = window.get_setting_current();
+        if current > readings + 2 {
+            return true;
+        }
+        if elapsed > Duration::from_secs(9) {
+            eprintln!("kept-processes: walked to row {current} of {readings}");
+            return true;
+        }
+        window.set_setting_current(current + 1);
+        false
+    }))
+}
+
 fn change(id: &str, delta: i32) {
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
     crate::settings_view::change(&app, &window, id, delta);
@@ -215,16 +235,9 @@ pub fn kept_processes_check(out: String) {
             window.invoke_focus_settings();
             true
         })),
-        ("scrolled to the readings", Box::new(|_, window, elapsed| {
-            // Down, a row a step, as the owner moves: the list follows the
-            // current row past the readings, so the shot shows them.
-            let readings = window.get_setting_rows().iter().position(|r| r.kind == "info" && r.label == "    Memory").unwrap_or(0) as i32;
-            if window.get_setting_current() <= readings && elapsed < Duration::from_secs(10) {
-                crate::headless::press(slint::platform::Key::DownArrow);
-                return false;
-            }
-            true
-        })),
+        walk_to_readings(),
+        walk_to_readings(),
+        walk_to_readings(),
         ("pressure in view", Box::new(move |_, _, elapsed| {
             // A frame has drawn the list where it scrolled to.
             if elapsed < Duration::from_millis(500) {
