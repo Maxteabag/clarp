@@ -9,11 +9,11 @@
 //! auto and what the machine has free, the fixed limits say they are fixed;
 //! switching Limits posts it and hides the auto rows, and stepping a fixed
 //! limit in auto posts it alone and shows Fixed. Last the Host offers
-//! `turn_pressure_admission` (contract 186): the three pressure thresholds
-//! are listed and the most kept in auto is not; below them Live processes,
-//! Cold starts, last hour and Pressure, each with a line per tool or
-//! reading. Stepping the CPU threshold posts it alone and keeps auto, and
-//! the event reads the pressure again.
+//! `turn_pressure_admission` (contract 186): no pressure thresholds and no
+//! most kept in auto are listed; below the limits Live processes,
+//! Cold starts, last hour (a line per tool) and Pressure (calm or high,
+//! with the turns held; no percentages). The settings event reads the
+//! pressure again.
 
 use std::time::Duration;
 
@@ -188,18 +188,16 @@ pub fn kept_processes_check(out: String) {
             true
         })),
         ("pressure shown", Box::new(move |app, window, elapsed| {
-            let shown = by_id(window, "kept-pressure-cpu").is_some() && row(window, "Pressure").is_some();
+            let shown = row(window, "Pressure").is_some();
             if !shown && elapsed < Duration::from_secs(8) {
                 return false;
             }
-            let detail = |id: &str| by_id(window, id).map(|r| r.detail.to_string());
-            check(detail("kept-pressure-cpu").as_deref() == Some("60%"), &format!("CPU threshold 60%: {:?}", detail("kept-pressure-cpu")));
-            check(detail("kept-pressure-io").as_deref() == Some("30%"), &format!("IO threshold 30%: {:?}", detail("kept-pressure-io")));
-            check(detail("kept-pressure-memory").as_deref() == Some("10%"), &format!("memory threshold 10%: {:?}", detail("kept-pressure-memory")));
+            // No pressure percentages anywhere (the owner, 25 Nov 2026).
+            check(["kept-pressure-cpu", "kept-pressure-io", "kept-pressure-memory"].iter().all(|id| by_id(window, id).is_none()), "no pressure thresholds shown");
             check(by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto") && by_id(window, "kept-reserve").is_some(), "auto, with the memory kept free");
             check(by_id(window, "kept-ceiling").is_none(), "no most kept in auto: it bounds nothing");
             check(row(window, "Now").is_none(), "the live processes say what Now said");
-            let groups = info_from(window, "Live processes", 9);
+            let groups = info_from(window, "Live processes", 6);
             let expected = pairs(&[
                 ("Live processes", "8 · 2 busy · 6 idle · 1945 MB"),
                 ("    Claude", "8 · 2 busy · 6 idle"),
@@ -207,38 +205,19 @@ pub fn kept_processes_check(out: String) {
                 ("    Claude", "3"),
                 ("    Codex", "2"),
                 ("Pressure", "High · 2 turns held"),
-                ("    CPU, the Host's own", "64.5% waiting, last minute · holds at 60%"),
-                ("    IO", "4% waiting, last minute · holds at 30%"),
-                ("    Memory", "0% stalled, last 10 seconds · holds at 10%"),
             ]);
-            check(groups == expected, &format!("live processes, cold starts and pressure: {groups:?}"));
+            check(groups == expected, &format!("live processes, cold starts and pressure, no percentages: {groups:?}"));
+            check(!groups.iter().chain(&info_from(window, "Pressure", 4)).any(|(_, detail)| detail.contains('%')), "no percentage in the section");
             // A search for a group's title finds its lines too (#846).
             let found = |query: &str| -> Vec<(String, String)> {
                 crate::settings_view::filter(crate::settings_view::rows(app), query).iter().filter(|r| r.kind == "info").map(|r| (r.label.to_string(), r.detail.to_string())).collect()
             };
-            let pressure = found("pressure");
-            let lines = ["    CPU, the Host's own", "    IO", "    Memory"];
-            check(lines.iter().all(|l| pressure.iter().any(|(label, _)| label == l)), &format!("searching \"pressure\" shows the Pressure lines: {pressure:?}"));
             let cold = found("cold");
             check(cold.contains(&("    Claude".to_owned(), "3".to_owned())) && cold.contains(&("    Codex".to_owned(), "2".to_owned())), &format!("searching \"cold\" shows the cold starts per tool: {cold:?}"));
-            check(!cold.iter().any(|(label, _)| label == "    IO"), &format!("and not another group's lines: {cold:?}"));
             shot(&out4, "kept-processes-04-pressure");
-            change("kept-pressure-cpu", 1);
-            true
-        })),
-        ("threshold changed", Box::new(|_, window, elapsed| {
-            let posted = posts("/lane-settings");
-            let shown = by_id(window, "kept-pressure-cpu").is_some_and(|r| r.detail == "61%");
-            let read = row(window, "    CPU, the Host's own").is_some_and(|r| r.detail.ends_with("holds at 61%"));
-            if (!shown || !read) && elapsed < Duration::from_secs(5) {
-                return false;
-            }
-            check(posted.last().is_some_and(|p| p["body"] == json!({"pressure_cpu_percent": 61})), &format!("the CPU threshold posted alone: {:?}", posted.last()));
-            check(shown && read, "61%, and the Host weighs CPU at 61%");
-            check(by_id(window, "kept-limits").is_some_and(|r| r.detail == "Auto"), "a threshold does not switch to fixed");
             let calm = json!({"pressure_status": {"held_for_pressure": 0, "pressure": {"cpu_source": "system", "cpu": null, "io": null, "memory": null, "high": false}}});
             check(control("/__control/lane-settings", &calm).is_ok(), "the machine calms");
-            check(control("/__control/event", &json!({"type": "lane-settings-updated", "pressure_cpu_percent": 61})).is_ok(), "the settings event");
+            check(control("/__control/event", &json!({"type": "lane-settings-updated", "pressure_cpu_percent": 60})).is_ok(), "the settings event");
             true
         })),
         ("calm", Box::new(|_, window, elapsed| {
@@ -247,8 +226,6 @@ pub fn kept_processes_check(out: String) {
                 return false;
             }
             check(calm, "the event reads the pressure again: calm, no turns held");
-            let cpu = row(window, "    CPU, whole machine").map(|r| r.detail.to_string());
-            check(cpu.as_deref() == Some("not read on this machine · holds at 61%"), &format!("a reading the Host has not: {cpu:?}"));
             true
         })),
     ];
