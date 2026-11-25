@@ -136,3 +136,106 @@ pub fn roster_stale_check(out: String) {
     ];
     run_stages(stages);
 }
+
+/// The busy stretch: this many `agent-roster` events, this far apart.
+const BURST: usize = 55;
+const BURST_GAP_MS: u64 = 100;
+
+/// Row reads (`GET /agents/{session}`) of Rachel and Mike.
+fn row_reads() -> usize {
+    requests("GET", "/agents/rachel").len() + requests("GET", "/agents/mike").len()
+}
+
+/// Whether the burst tagged `tag` has landed: each kind's last value shows.
+fn burst_landed(app: &crate::App, tag: &str) -> bool {
+    let engine = app.engine.borrow();
+    let (Some(rachel), Some(mike)) = (engine.roster().find("rachel"), engine.roster().find("mike")) else { return false };
+    mike.avatar_symbol == format!("{tag}-53") && rachel.status_text == format!("{tag} stale 54")
+}
+
+/// What the burst's last events left, as the Host's rows have them.
+fn burst_values(app: &crate::App, tag: &str, when: &str) {
+    let engine = app.engine.borrow();
+    let (Some(rachel), Some(mike)) = (engine.roster().find("rachel"), engine.roster().find("mike")) else {
+        check(false, &format!("{when}: Rachel and Mike are listed"));
+        return;
+    };
+    check(mike.helper_state == "running", &format!("{when}: Mike's helper state is the last event's: {:?}", mike.helper_state));
+    check(rachel.running_children == 1 && rachel.child_count == 1, &format!("{when}: and Rachel's helper counts: {} of {}", rachel.running_children, rachel.child_count));
+    check(rachel.muted, &format!("{when}: Rachel is muted, as the last mute-changed said"));
+    check(mike.chat_view == "session", &format!("{when}: Mike's chat view is the last one: {:?}", mike.chat_view));
+    check(mike.avatar_symbol == format!("{tag}-53"), &format!("{when}: Mike's portrait is the last one: {:?}", mike.avatar_symbol));
+    check(rachel.status_text == format!("{tag} stale 54"), &format!("{when}: Rachel's line is the last one: {:?}", rachel.status_text));
+    check(mike.backend == "codex" && rachel.persona == "Rachel", &format!("{when}: fields no event named are kept"));
+}
+
+/// `--check roster-rows` (issue 841): an agent's row changes by its
+/// `agent-roster` event without reading the agent list. A busy stretch of
+/// 55 roster events (helper states with their maker's counts, mutes, chat
+/// views, a portrait and stale work, 10 a second) is sent twice: first by a
+/// Host without `roster_fields` and `agent_row`, where every event reads
+/// `/agents/snapshot`, then by one with them, where the rows are patched and
+/// the two one-row kinds read `GET /agents/{session}`; no snapshot is read.
+/// Both end with the rows the Host has. The counts are printed as a perf
+/// line. Needs the fake Host.
+pub fn roster_rows_check(_out: String) {
+    let marks = Rc::new(Cell::new((0usize, 0usize)));
+    let before = Rc::new(Cell::new((0usize, 0usize)));
+    let (marks2, marks3, marks4) = (marks.clone(), marks.clone(), marks.clone());
+    let before2 = before.clone();
+    let quiet_since = |window: f64| {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        !snapshot_times().last().is_some_and(|last| now - last < window)
+    };
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(move |app, _, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || app.engine.borrow().roster_freshness() != State::Fresh || !quiet_since(1.5) {
+                return false;
+            }
+            marks.set((snapshot_times().len(), row_reads()));
+            check(control("/__control/roster-burst", &json!({"count": BURST, "interval_ms": BURST_GAP_MS, "tag": "before"})).is_ok(), "a Host without the features sends a busy stretch");
+            true
+        })),
+        ("before", Box::new(move |app, _, elapsed| {
+            if !burst_landed(app, "before") || elapsed < Duration::from_millis(BURST as u64 * BURST_GAP_MS + 1000) || !quiet_since(1.0) {
+                return false;
+            }
+            burst_values(app, "before", "without the features");
+            let (snapshots, rows) = marks2.get();
+            before.set((snapshot_times().len() - snapshots, row_reads() - rows));
+            check(before.get().0 > 0 && before.get().1 == 0, &format!("an older Host's events read the list: {} snapshots, {} rows", before.get().0, before.get().1));
+            check(control("/__control/roster-rows", &json!({"fields": true, "row": true})).is_ok(), "the Host offers roster_fields and agent_row");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("reconnected", Box::new(move |app, _, elapsed| {
+            if elapsed < Duration::from_millis(500) || app.engine.borrow().roster_freshness() != State::Fresh || !quiet_since(1.5) {
+                return false;
+            }
+            marks3.set((snapshot_times().len(), row_reads()));
+            check(control("/__control/roster-burst", &json!({"count": BURST, "interval_ms": BURST_GAP_MS, "tag": "after"})).is_ok(), "the Host with them sends the same stretch");
+            true
+        })),
+        ("after", Box::new(move |app, _, elapsed| {
+            if !burst_landed(app, "after") || elapsed < Duration::from_millis(BURST as u64 * BURST_GAP_MS + 1000) {
+                return false;
+            }
+            burst_values(app, "after", "with the features");
+            let (snapshots, rows) = marks4.get();
+            let after = (snapshot_times().len() - snapshots, row_reads() - rows);
+            let was = before2.get();
+            check(after.0 == 0, &format!("no event read the agent list: {} snapshots", after.0));
+            check(after.1 > 0 && after.1 <= 22, &format!("only portrait-selected and stale-work read their one row: {} reads for 22 events", after.1));
+            println!(
+                "perf roster-rows: {BURST} roster events in {:.1} s: without roster_fields/agent_row {} snapshot reads; with them {} snapshot reads and {} one-row reads",
+                (BURST as u64 * BURST_GAP_MS) as f64 / 1000.0,
+                was.0,
+                after.0,
+                after.1
+            );
+            true
+        })),
+    ];
+    run_stages(stages);
+}

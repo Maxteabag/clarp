@@ -41,6 +41,7 @@ pub mod search;
 mod panels;
 pub mod profile;
 pub mod roster_freshness;
+mod roster_rows;
 mod teams;
 pub mod transit;
 mod updates;
@@ -281,6 +282,8 @@ pub struct Engine {
     lanes: lanes::Lanes,
     transits: transit::Transits,
     chat_view: chat_view::ChatView,
+    /// One agent's change patched or read alone (issue 841).
+    roster_rows: roster_rows::RosterRows,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
     cache_save_due: HashSet<String>,
@@ -441,6 +444,7 @@ impl Engine {
             lanes: lanes::Lanes::default(),
             transits: transit::Transits::default(),
             chat_view: chat_view::ChatView::default(),
+            roster_rows: roster_rows::RosterRows::default(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
             cache_saved_at: HashMap::new(),
@@ -924,6 +928,7 @@ impl Engine {
         self.reset_form_events();
         self.reset_artifact_summary();
         self.reset_render_specs();
+        self.reset_roster_rows();
         self.api.set_endpoint(endpoint, &self.token);
         self.changes.push(Change::Endpoint);
         self.set_error("");
@@ -1626,7 +1631,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) {
+        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) || self.roster_rows_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1649,6 +1654,7 @@ impl Engine {
             self.lanes_server_info(object);
             self.transit_server_info(object);
             self.chat_view_server_info(object);
+            self.roster_rows_server_info(object);
             self.form_events_server_info(object);
             self.stop_server_info(object);
             self.artifact_summary_server_info(object);
@@ -1683,7 +1689,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
@@ -1844,7 +1850,7 @@ impl Engine {
             "agent-transit" => self.transit_event(event),
             "agent-roster" => {
                 self.chat_view_roster(event);
-                self.request_snapshot();
+                self.roster_event(event);
             }
             "delivery-updated" => {
                 // F4: a send's delivery state changed without a new revision;

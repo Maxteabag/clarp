@@ -600,6 +600,7 @@ pub fn start_check(name: &str, out: String) {
         "kept-processes" => lanes_checks::kept_processes_check(out),
         "all-hosts" => all_hosts_checks::all_hosts_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
+        "roster-rows" => roster_checks::roster_rows_check(out),
         "explorer" => explorer_checks::explorer_check(out),
         "frame-budget" => budget_checks::frame_budget_check(out),
         "a2a" => {
