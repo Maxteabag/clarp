@@ -138,6 +138,16 @@ env -u CLARP_TOOL_TOKEN \
 The link is single-use and carries the code: hand it only to the device, and
 revoke a test pairing afterwards (`pair revoke DEVICE_ID`).
 
+Setting `CLARP_HOST_TOKEN` by hand is the owner's mode: on a Rust Host with
+`tools_owner_free` (contract 193) the tool says so (`X-Clarp-Owner-Mode`) and the Host
+writes one log line for every such call (tool, verb, parent process, directory). Use it
+only for what the owner asked. Everything else an agent's tools do presents the token of
+the agents' tools: a turn's `CLARP_TOOL_TOKEN`, or outside a turn
+`~/.config/clarp-host/tools.toml` (`[server] kind, bind_addr, port, tool_token`, mode
+0600, written by install-host, never holding the owner's token). A script that reads
+`auth_token` from `config.toml` and calls the Host from no app and no turn is named in the
+Host's log (`clarp-host: admin token without a turn:`), so it can be moved to that file.
+
 ## Which code may meet which database
 
 Only the installed Host and runtime services upgrade a database, when they

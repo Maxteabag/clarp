@@ -134,13 +134,19 @@ year; a new picture has a new `v`.
 
 ## 7. Setting a running agent's picture (Rust Host)
 
-There is no `clarp-admin` avatar command. An agent's picture comes from its own gallery:
+An agent's picture comes from its own gallery. Do it for yourself or one of your own helpers,
+from your own turn (or a job it started); another agent's picture is the owner's to change:
 
 1. `clarp-media-publish FILE --session <agent-session> --caption "..."` returns
    `clarp-media://asset/<asset_id>`.
-2. `POST /agent-portraits {"action":"add_media_asset","session":"<s>","asset_id":"<asset_id>"}`
-   with the `[server].auth_token` bearer adds it as an alternate (max 3 kept) and returns its `portrait_id`.
-3. `POST /agent-portraits {"action":"select_primary","session":"<s>","portrait_id":"<id>"}` makes it the picture worn.
+2. `clarp-admin portrait add --session <agent-session> --asset <asset_id>` keeps it as an
+   alternate (max 3 kept) and prints the portraits with its `portrait_id`.
+3. `clarp-admin portrait select --session <agent-session> --portrait <portrait_id>` makes it
+   the picture worn.
+
+Both need a Rust Host with the feature `tools_owner_free` (contract 193). They do what
+`POST /agent-portraits` does; do not call that route with `[server].auth_token` from
+config.toml, which is the owner's token.
 4. Verify: `GET /agents/snapshot` shows `avatar_url` `/avatars/<agent_id>?v=...`, and fetching it returns the file you published.
 
 If the `openai` module is missing, run the generator with `uv run -q --with openai python ...`.

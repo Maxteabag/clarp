@@ -76,11 +76,17 @@ fn refused(why: String) -> ApiError {
 /// the owner makes a persona. Without a voice, or with the word for none (`{}`), it is given
 /// one that no agent and no persona has.
 async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiError> {
-    let asked = object(&body)?;
-    let voice = text(&asked, "voice_id").trim().to_string();
+    let persona = made(&app, &object(&body)?).await?;
+    Ok((StatusCode::CREATED, Json(json!({ "persona": persona }))).into_response())
+}
+
+/// A persona is made, as `POST /personas` makes it: the persona as it is now. Who may ask is the
+/// caller's to have checked.
+pub(crate) async fn made(app: &App, asked: &Map<String, Value>) -> Result<Value, ApiError> {
+    let voice = text(asked, "voice_id").trim().to_string();
     let voice = if voice == "{}" { String::new() } else { voice };
     let fetched = app.mouth.cached_voice_names().0;
-    let made = app.fleet.persona_write(None, said(&asked, voice), fetched);
+    let made = app.fleet.persona_write(None, said(asked, voice), fetched);
     let persona = made.await?.map_err(refused)?;
     // A persona made without a picture and without a symbol is asked one, unless the request
     // says not to (`generate_avatar: false`); nothing waits for it.
@@ -89,12 +95,12 @@ async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
         && persona["avatar_symbol"].as_str().unwrap_or("").is_empty();
     if drawn && bare {
         let name = persona["name"].as_str().unwrap_or("").to_string();
-        let tier = text(&asked, "tier");
-        let backend = text(&asked, "backend");
+        let tier = text(asked, "tier");
+        let backend = text(asked, "backend");
         let app = app.clone();
         tokio::spawn(async move { crate::pictures::ask(&app, &name, &tier, &backend).await });
     }
-    Ok((StatusCode::CREATED, Json(json!({ "persona": persona }))).into_response())
+    Ok(persona)
 }
 
 /// `POST /personas/update` with `{original_name, name, voice_id, ...}`: the owner changes
@@ -336,6 +342,14 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         Ok(said @ Value::Object(_)) => said,
         _ => return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json")),
     };
+    Ok(Json(portraits_changed(&app, &said).await?))
+}
+
+/// An agent's portraits are changed, as `POST /agent-portraits` changes them
+/// (`{action: add_media_asset|select_primary, session, asset_id|portrait_id}`): the portraits as
+/// they are now. Who may ask is the caller's to have checked.
+pub(crate) async fn portraits_changed(app: &App, said: &Value) -> Result<Value, ApiError> {
+    let app = app.clone();
     let text = |key: &str| said[key].as_str().map(python::strip).unwrap_or_default();
     let action = text("action");
     if !matches!(action, "add_media_asset" | "select_primary") {
@@ -428,7 +442,7 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         let news = json!({ "type": "agent-roster", "kind": "portrait-selected", "session": record.session });
         app.hub.publish(news, app.clock.now_ms());
     }
-    Ok(Json(told(&app, &record, &record.portraits)))
+    Ok(told(&app, &record, &record.portraits))
 }
 
 /// `GET /notification-avatars/<agent>?v=&exp=&sig=`: the picture an agent has of its own,

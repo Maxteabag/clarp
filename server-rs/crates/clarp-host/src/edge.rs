@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 192;
+pub const HOST_CONTRACT: u64 = 193;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -478,6 +478,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // cut, and from its reading on the turn is the owner's in his chat. Only where it cannot be
     // steered does the turn make way (`owner_preempts`, issue 839).
     ("owner_steers", 192),
+    // An agent's tools need not present the administrator's token (#795): with the token of the
+    // agents' tools they read `GET /agents/snapshot`, `/attention/inbox` and `/turn-queue`
+    // (through bound privacy, as the turn they present), and `clarp-admin persona create`,
+    // `portrait add|select` and `agent archive` act for the agent of a verified turn and its
+    // own helpers. Outside a turn a tool finds that token in `tools.toml`, which install-host
+    // writes beside `config.toml`. A call with the administrator's token from no app and no
+    // turn is named in the Host's log, as is one in the owner's mode (`X-Clarp-Owner-Mode`).
+    ("tools_owner_free", 193),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1262,6 +1270,10 @@ fn of_the_oracle(request: &Request, path: &str) -> bool {
 }
 
 /// Whether this caller is kept from this request by its scope.
+/// What an agent's tools read of the fleet besides `/tools/` (#795): what an agent is shown of
+/// the others, the owner's cards, and an agent's waiting messages.
+const TOOLS_READ: [&str; 3] = ["/agents/snapshot", "/attention/inbox", "/turn-queue"];
+
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     // An agent's own tools are asked for from this machine, with the token a turn was given
     // or the administrator's. No device asks for them.
@@ -1269,11 +1281,16 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
         return !matches!(principal, Principal::Administrator | Principal::Tools);
     }
     // Scripts may read the public job list or ask the user's phone for a calendar
-    // event. Job detail, cancellation and other app routes keep their own scope.
+    // event. Job detail, cancellation and other app routes keep their own scope. They may read
+    // the fleet as an agent reads it (#795): the agents, the cards and an agent's waiting
+    // messages, each answered through `bound_privacy` with the reader of the turn they present,
+    // and with none an agent that cannot say whose it is: a bound agent's words are withheld.
     if matches!(principal, Principal::Tools) {
+        let read = method == Method::GET || method == Method::HEAD;
         return !((method == Method::POST && path == "/calendar/request")
             || (method == Method::GET && path == "/background-jobs")
-            || (method == Method::GET && path == "/lane-settings"));
+            || (method == Method::GET && path == "/lane-settings")
+            || (read && TOOLS_READ.contains(&path)));
     }
     let Principal::Device {
         scope: Scope::Limited,
@@ -1374,6 +1391,23 @@ fn who(
     Some((principal, Presented::Address))
 }
 
+/// How a request the administrator's token let in stands for the lines that name who still
+/// uses it (`owner_token_log`): the Host's own token (not an alias), in the header.
+fn owner_token_seen(
+    app: &App,
+    request: &Request,
+    presented: Presented,
+) -> crate::owner_token_log::Seen {
+    let headers = request.headers();
+    let in_header = presented == Presented::Header
+        && headers
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(bearer)
+            .is_some_and(|token| same_token(token, &app.config.auth_token));
+    crate::owner_token_log::seen(headers, in_header)
+}
+
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
     // Scope is decided on the raw path before route parameters are decoded.
     let path = request.uri().path().to_string();
@@ -1435,6 +1469,24 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                         app.clock.now_ms(),
                     );
                     device = Some(device_id.clone());
+                }
+                if principal == Principal::Administrator && !app.config.auth_token.is_empty() {
+                    let seen = owner_token_seen(&app, &request, presented);
+                    request.extensions_mut().insert(seen);
+                    // A tool call is written with its tool and verb where it is answered.
+                    if path != "/tools/run" && seen != crate::owner_token_log::Seen::Other {
+                        let peer = request.extensions().get::<ConnectInfo<SocketAddr>>();
+                        let peer = peer.map(|peer| peer.0);
+                        let method = request.method().to_string();
+                        let port = app.config.listen.port();
+                        let written = path.clone();
+                        let line = tokio::task::spawn_blocking(move || {
+                            crate::owner_token_log::route_line(seen, &method, &written, peer, port)
+                        });
+                        if let Ok(Some(line)) = line.await {
+                            eprintln!("{line}");
+                        }
+                    }
                 }
                 request.extensions_mut().insert(Asker { source });
                 request.extensions_mut().insert(principal);
@@ -3937,9 +3989,19 @@ fn has_owner_token(app: &App, principal: &Principal) -> bool {
 async fn run_tool(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    seen: Option<Extension<crate::owner_token_log::Seen>>,
     Json(call): Json<ToolCall>,
 ) -> Json<ToolAnswer> {
     let owner_token = has_owner_token(&app, &principal);
+    if let Some(Extension(seen)) = seen {
+        let turn = call
+            .env
+            .get(crate::turn_identity::TURN_ENV)
+            .is_some_and(|token| !token.trim().is_empty());
+        if let Some(line) = crate::owner_token_log::tool_line(seen, &call, turn) {
+            eprintln!("{line}");
+        }
+    }
     Json(tools::run(&app, &call, owner_token).await)
 }
 
@@ -5243,12 +5305,54 @@ mod tests {
             );
             assert!(!out_of_scope(&full, &method, path), "{method} {path}");
             assert!(!out_of_scope(&Principal::Administrator, &method, path));
-            // The token of an agent's tools opens none of what the apps read and do.
-            assert!(
+            // The token of an agent's tools opens none of what the apps read and do, but the
+            // fleet's reads it is given (#795).
+            let read = method == Method::GET && TOOLS_READ.contains(&path);
+            assert_eq!(
                 out_of_scope(&Principal::Tools, &method, path),
+                !read,
                 "{method} {path}"
             );
         }
+    }
+
+    #[test]
+    fn an_agents_tools_read_the_fleet_and_change_nothing_of_it() {
+        for path in TOOLS_READ {
+            assert!(
+                !out_of_scope(&Principal::Tools, &Method::GET, path),
+                "{path}"
+            );
+            assert!(
+                !out_of_scope(&Principal::Tools, &Method::HEAD, path),
+                "{path}"
+            );
+            for method in [Method::POST, Method::PUT, Method::DELETE] {
+                assert!(
+                    out_of_scope(&Principal::Tools, &method, path),
+                    "{method} {path}"
+                );
+            }
+        }
+        // What lies beside them stays the apps' and the owner's.
+        for path in [
+            "/agents/snapshot/x",
+            "/attention",
+            "/turn-queue/resume",
+            "/agents",
+            "/decisions/d1/resolve",
+            "/log",
+        ] {
+            assert!(
+                out_of_scope(&Principal::Tools, &Method::GET, path),
+                "{path}"
+            );
+        }
+        assert!(out_of_scope(
+            &Principal::Tools,
+            &Method::POST,
+            "/turn-queue/resume"
+        ));
     }
 
     #[test]

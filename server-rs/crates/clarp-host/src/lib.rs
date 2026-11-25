@@ -89,6 +89,7 @@ pub mod network;
 pub mod once;
 pub mod oracle;
 pub mod owner;
+mod owner_token_log;
 pub mod packed;
 pub mod pairing;
 pub mod past;
@@ -166,6 +167,30 @@ pub fn tool_token(administrators: &str) -> String {
     pairing::digest(&format!(
         "clarp-host: the token of an agent's own tools\0{administrators}"
     ))
+}
+
+/// The header by which the owner's own command says it uses the administrator's token on
+/// purpose (`clarp-admin` with CLARP_HOST_TOKEN set by hand): the Host writes one line for
+/// every such call, so an agent that slips into it is seen. A tool that only found the token
+/// in the installer's file sends none, and is counted as a caller still to be moved (#795).
+pub const OWNER_MODE_HEADER: &str = "x-clarp-owner-mode";
+
+/// What every turn is told of its Host: where it listens, and the token its agent's tools
+/// present. Never the administrator's token. A skill's own script that speaks to its Host
+/// by itself is told the same Host and the same token, under the names it reads: left to
+/// itself it would find the Python Host of the machine, and ask there for an agent of this
+/// one. A timer the Host starts for an agent's delayed prompt is told the same.
+pub fn tool_env(address: &str, administrators: &str) -> Vec<(String, String)> {
+    let mut env = vec![
+        (TOOL_ADDR_ENV.to_string(), address.to_string()),
+        (SCRIPT_URL_ENV.to_string(), format!("http://{address}")),
+    ];
+    let token = tool_token(administrators);
+    if !token.is_empty() {
+        env.push((TOOL_TOKEN_ENV.to_string(), token.clone()));
+        env.push((SCRIPT_TOKEN_ENV.to_string(), token));
+    }
+    env
 }
 
 /// The lanes' mode where the owner's config sets none, from `--lane-limits-default`: set before

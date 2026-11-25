@@ -10,7 +10,7 @@ use super::*;
 
 /// A stand-in Codex for a bound agent: it reports the agent's made-up provider `stand-in` in
 /// its rollout, and answers with the words it was sent and a phrase only it says.
-const CODEX: &str = r#"#!/usr/bin/env python3
+pub(crate) const CODEX: &str = r#"#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
@@ -35,9 +35,9 @@ print('{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}', 
 "#;
 
 /// What only the bound agent says.
-const SECRET: &str = "customer-ledger-figures";
+pub(crate) const SECRET: &str = "customer-ledger-figures";
 
-fn own_home(place: &Place, name: &str) -> PathBuf {
+pub(crate) fn own_home(place: &Place, name: &str) -> PathBuf {
     let home = place.root.join(name);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
@@ -50,7 +50,7 @@ fn own_home(place: &Place, name: &str) -> PathBuf {
     home
 }
 
-fn bound_agent(host: &Host, name: &str, home: &std::path::Path) -> String {
+pub(crate) fn bound_agent(host: &Host, name: &str, home: &std::path::Path) -> String {
     let made = host.post(
         "/agents",
         json!({

@@ -1,4 +1,4 @@
-		usage: clarp-admin [-h] {experience,leader-decision,janitor,trigger,controller-action,setup,skills,transcription,doctor,url,paths,explanations,sessions,oracle,call,onboard,pair,push,network,voice,tts,backup,update,rollback,uninstall,agent,stop,repair,prompt,tell-user,request,reply,bookkeeping,model,client-log,peers,repos,location,calendar,schedule} ...
+		usage: clarp-admin [-h] {experience,leader-decision,janitor,trigger,controller-action,setup,skills,transcription,doctor,url,paths,explanations,sessions,oracle,call,onboard,pair,push,network,voice,tts,backup,update,rollback,uninstall,agent,stop,repair,prompt,tell-user,request,reply,bookkeeping,model,client-log,peers,repos,location,calendar,schedule,persona,portrait} ...
 janitor		usage: clarp-admin janitor [-h] {list,templates,inspect,runs,configure,attach,enable,pause,remove,release,export,reset-defaults,create,run-context,review,outcome,migrate-pilot} ...
 janitor list		usage: clarp-admin janitor list [-h]
 janitor templates		usage: clarp-admin janitor templates [-h]
@@ -116,7 +116,8 @@ backup restore		usage: clarp-admin backup restore [-h] path
 update	--ref	usage: clarp-admin update [-h] [--ref REF] [--allow-older-schema]
 rollback		usage: clarp-admin rollback [-h] [--allow-older-schema] [version]
 uninstall		usage: clarp-admin uninstall [-h] [--purge-data] [--force-network-cleanup]
-agent		usage: clarp-admin agent [-h] {create,fork,helper-state,provider,transit} ...
+agent		usage: clarp-admin agent [-h] {archive,create,fork,helper-state,provider,transit} ...
+agent archive	--session	usage: clarp-admin agent archive [-h] --session SESSION [--restore]
 agent create	--parent --role --cwd --backend --model --effort --session --voice-id --codex-home --codex-provider --cloud-speech	usage: clarp-admin agent create [-h] [--parent PARENT] [--role {agent,helper}] [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [--session SESSION] [--voice-id VOICE_ID] [--codex-home CODEX_HOME] [--codex-provider CODEX_PROVIDER] [--cloud-speech {on,off}] [--test] name
 agent fork	--task --task-file --count --spec --worktree --cwd --from --backend --model --effort	usage: clarp-admin agent fork [-h] [--task TASK] [--task-file TASK_FILE] [--count COUNT] [--spec SPEC] [--worktree WORKTREE] [--cwd CWD] [--from FROM_SESSION] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [name]
 agent helper-state	--from	usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] session [{done,failed,running}]
@@ -155,3 +156,8 @@ leader-decision search	--question --tags	usage: clarp-admin leader-decision sear
 leader-decision log	--question --answer --type --tags --risk --time-horizon --source-trace --source-message-id --source-agent-id	usage: clarp-admin leader-decision log [-h] --question QUESTION --answer ANSWER [--type TYPE] [--tags TAGS] [--risk RISK] [--time-horizon TIME_HORIZON] [--source-trace TRACE] [--source-message-id ID] [--source-agent-id ID]
 leader-decision apply	--decision-id --reason --trace-id	usage: clarp-admin leader-decision apply [-h] --decision-id ID [--reason REASON] [--trace-id TRACE]
 leader-decision user-values	--statement --category --decision-id --tags	usage: clarp-admin leader-decision user-values [-h] [--statement STATEMENT] [--category CATEGORY] [--decision-id ID] [--tags TAGS] [--promote]
+persona		usage: clarp-admin persona [-h] {create} ...
+persona create	--voice-id --personality --avatar-symbol	usage: clarp-admin persona create [-h] [--voice-id VOICE_ID] [--personality PERSONALITY] [--avatar-symbol AVATAR_SYMBOL] [--no-picture] name
+portrait		usage: clarp-admin portrait [-h] {add,select} ...
+portrait add	--session --asset	usage: clarp-admin portrait add [-h] --session SESSION --asset ASSET_ID
+portrait select	--session --portrait	usage: clarp-admin portrait select [-h] --session SESSION --portrait PORTRAIT_ID

@@ -1067,6 +1067,29 @@ EOF
 mv -f "$config_new" "$config_file"
 exec 9<&-
 
+# What an agent's tool reads where no turn told it its Host (a worker an agent left, a timer):
+# this Host, and the token of the agents' tools, never the administrator's (#795). Made by the
+# Host's own binary, from the administrator's token given in its environment, not its arguments.
+tools_token="$(CLARP_HOST_TOKEN="$token" "$share/bin/clarp-host" tool-token)" || tools_token=""
+tools_file="$config/tools.toml"
+if [ -z "$tools_token" ]; then
+    echo "install-host: the Host's binary made no token for the agents' tools; $tools_file is not written" >&2
+else
+(umask 077; cat > "$config/.tools.toml.new" <<EOF
+# Written by install-host. An agent's tool outside a turn finds its Rust Host here, and presents
+# the token of the agents' tools (what a turn is given as CLARP_TOOL_TOKEN). It holds no
+# administrator's token: that stays in config.toml, for the owner's own commands.
+[server]
+kind = "clarp-host"
+bind_addr = "$address"
+port = $port
+tool_token = "$tools_token"
+EOF
+)
+mv -f "$config/.tools.toml.new" "$tools_file"
+fi
+unset tools_token
+
 cat > "$units/clarp-host.service" <<EOF
 # Written by server-rs/tools/install-host. The Rust Clarp Host, version $version.
 [Unit]

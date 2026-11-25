@@ -5,8 +5,8 @@ decisions and steering, and the workers keep working without interruption.
 
 ## 1. Create the agent
 
-Use `clarp-agent-admin` (`POST /personas`, then `POST /agents`). Check first that the
-name is free: `POST /personas` returns 409 for a taken name. A Claude backend is
+Use `clarp-agent-admin` (`clarp-admin persona create`, then `clarp-admin agent create`).
+A taken name is refused (HTTP 409), and nothing is made. A Claude backend is
 needed to run `clarp-status-fork`. Personality, at most 4000 characters, for example:
 
 > The user's front desk for their working agents. You never do the work yourself; you

@@ -120,6 +120,8 @@ fn fenced(call: &ToolCall) -> Option<ToolAnswer> {
     let what = match (call.tool.as_str(), argv.as_slice()) {
         ("clarp-agent-bg", [_, "job-upsert" | "job-restart", ..]) => "register a background job",
         ("clarp-admin", ["agent", "create" | "fork", ..]) => "make or fork an agent",
+        ("clarp-admin", ["agent", "archive", ..]) => "put an agent away",
+        ("clarp-admin", ["persona" | "portrait", ..]) => "make a contact or change a picture",
         _ => return None,
     };
     Some(ToolAnswer::said(

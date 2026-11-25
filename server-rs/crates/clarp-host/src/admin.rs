@@ -69,6 +69,19 @@ fn request(
     token: &str,
     body: Option<&Value>,
 ) -> Result<(u16, Value), String> {
+    marked_request(method, address, path, token, false, body)
+}
+
+/// [`request`], saying that the administrator's token is the owner's on purpose where it is
+/// ([`crate::OWNER_MODE_HEADER`]).
+fn marked_request(
+    method: &str,
+    address: &str,
+    path: &str,
+    token: &str,
+    owner_mode: bool,
+    body: Option<&Value>,
+) -> Result<(u16, Value), String> {
     let address = address.trim_start_matches("http://").trim_end_matches('/');
     let mut stream = TcpStream::connect(address)
         .map_err(|error| format!("no Host answers at {address}: {error}"))?;
@@ -82,6 +95,11 @@ fn request(
         String::new()
     } else {
         format!("Authorization: Bearer {token}\r\n")
+    };
+    let authorization = if owner_mode && !token.is_empty() {
+        format!("{authorization}{}: 1\r\n", crate::OWNER_MODE_HEADER)
+    } else {
+        authorization
     };
     let head = format!(
         "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{authorization}Content-Type: application/json\r\nContent-Length: {}\r\n\r\n",
@@ -1211,7 +1229,11 @@ fn installed_host(env: impl Fn(&'static str) -> Option<OsString>) -> Option<(Str
 /// Host is found by what it told the turn (`CLARP_HOST_ADDR`), or, for a worker an agent left
 /// running, in the file the installer wrote for the agents of this Host. A tool that is
 /// called where neither says so does nothing and says why.
-pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome {
+///
+/// `owner_mode`: the token is the administrator's, put there on purpose by the owner's own
+/// command (CLARP_HOST_TOKEN), and the Host is told so. A token read from the installer's file
+/// is never marked.
+pub fn tool(mut args: impl Iterator<Item = String>, token: &str, owner_mode: bool) -> ToolOutcome {
     let Some(name) = args.next() else {
         return ToolOutcome {
             exit: 2,
@@ -1395,7 +1417,14 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let began = std::time::Instant::now();
     let mut unanswered_since: Option<std::time::Instant> = None;
     loop {
-        let result = post(&address, "/tools/run", token, &asked);
+        let result = marked_request(
+            "POST",
+            &address,
+            "/tools/run",
+            token,
+            owner_mode,
+            Some(&asked),
+        );
         let retryable = match &result {
             Err(_) | Ok((502..=504, _)) => true,
             Ok((200, answer)) => answer.is_null(),

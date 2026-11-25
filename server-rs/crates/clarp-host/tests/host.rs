@@ -215,6 +215,8 @@ mod takeover_b;
 mod teams_runtime;
 #[path = "host/terminal_turn.rs"]
 mod terminal_turn;
+#[path = "host/tools_owner_free.rs"]
+mod tools_owner_free;
 #[path = "host/transcription_agent.rs"]
 mod transcription_agent;
 #[path = "host/transcription_errors.rs"]

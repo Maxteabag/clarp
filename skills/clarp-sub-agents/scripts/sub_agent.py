@@ -147,6 +147,25 @@ class AdminError(RuntimeError):
     pass
 
 
+def _passthrough(identity: bool) -> list[str]:
+    """What a unit this starts is given of this process's environment, as systemd-run options.
+
+    The places it reads by value. The Host it reports to and the token of the agents' tools
+    by name alone (``--setenv=NAME``: systemd-run takes the value from its own environment, so
+    no token is on a command line), so that its tools present that token and never find the
+    administrator's in the installer's file (#795). With ``identity``, also the turn that
+    started it (CLARP_PROVIDER_TURN, or a Codex lane's turn file), so that the Host knows whose
+    watcher it is; a worker that runs another agent's program is not given it.
+    """
+    by_value = ("PATH", "HOME", "CLARP_SHARE_DIR", "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR",
+                "CLAUDE_PWA_CONFIG", "CLAUDE_PWA_DB", "CLARP_SUB_AGENT_DIR")
+    by_name = ("CLARP_HOST_ADDR", "CLARP_TOOL_TOKEN")
+    if identity:
+        by_name += ("CLARP_PROVIDER_TURN", "CLARP_PROVIDER_TURN_FILE")
+    return ([f"--setenv={k}={os.environ[k]}" for k in by_value if os.environ.get(k)]
+            + [f"--setenv={k}" for k in by_name if os.environ.get(k)])
+
+
 def _admin(*args: str) -> dict:
     """Run clarp-admin and parse its JSON output."""
     exe = shutil.which("clarp-admin")
@@ -248,9 +267,7 @@ def _launch_watcher(name: str, helper: str, parent: str) -> None:
         print(f"started helper {helper} (parent={parent}); no systemd, so no background job")
         return
     subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
-    passthrough = [f"--setenv={k}={os.environ[k]}" for k in
-                   ("PATH", "HOME", "CLARP_SHARE_DIR", "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR",
-                    "CLAUDE_PWA_CONFIG", "CLAUDE_PWA_DB", "CLARP_SUB_AGENT_DIR") if os.environ.get(k)]
+    passthrough = _passthrough(identity=True)
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect",
                     "-p", f"StandardOutput=file:{log}", "-p", f"StandardError=append:{log}",
                     *passthrough, sys.executable, str(pathlib.Path(__file__).resolve()),
@@ -428,9 +445,7 @@ def start(a: argparse.Namespace) -> int:
     unit = f"clarp-sub-agent-{a.name}"
     subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
     log = DIR / f"{a.name}.log"
-    passthrough = [f"--setenv={k}={os.environ[k]}" for k in
-                   ("PATH", "HOME", "CLARP_SHARE_DIR", "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR",
-                    "CLAUDE_PWA_CONFIG", "CLAUDE_PWA_DB", "CLARP_SUB_AGENT_DIR") if os.environ.get(k)]
+    passthrough = _passthrough(identity=False)
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect",
                     "-p", f"WorkingDirectory={workdir}",
                     "-p", f"StandardOutput=file:{log}", "-p", f"StandardError=append:{log}",

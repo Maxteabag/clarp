@@ -181,10 +181,14 @@ async fn archive(State(app): State<App>, body: Bytes) -> Answered {
     ) else {
         return Err(bad("session and archived required"));
     };
-    amend(&app, &session, Amend::Archive(archived)).await?;
-    Ok(Json(
-        json!({ "ok": true, "session": session, "archived": archived }),
-    ))
+    Ok(Json(put_away(&app, &session, archived).await?))
+}
+
+/// An agent is put away (`archived`) or taken back, as `POST /agent-archive` does it: answered
+/// `{ok, session, archived}`. Who may ask is the caller's to have checked.
+pub(crate) async fn put_away(app: &App, session: &str, archived: bool) -> Result<Value, Refusal> {
+    amend(app, session, Amend::Archive(archived)).await?;
+    Ok(json!({ "ok": true, "session": session, "archived": archived }))
 }
 
 /// `POST /agent-voice-verbosity` with `{session, voice_verbosity}`: how much the agent says

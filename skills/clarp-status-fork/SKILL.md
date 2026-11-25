@@ -22,7 +22,11 @@ Agents are matched by session slug, slug prefix or persona name.
 
 On a Rust Host, the script selects the agent from the local snapshot, excludes
 moved-away entries, and reads queue, background-job and attention facts over
-loopback. The administrator credential stays inside that HTTP client. If the
+loopback. It presents the token of the agents' tools, never the owner's: its turn's
+`CLARP_TOOL_TOKEN`, else `tools.toml` beside the Host's `config.toml`, else that token
+made from `config.toml` as the Host makes it. The Host answers it through bound privacy
+as the turn it presents (`X-Clarp-Turn`), so a bound agent it may not read is refused.
+These reads need a Rust Host with `tools_owner_free` (contract 193). If the
 agent still lives on the local Python Host, the script uses the existing Python
 path.
 

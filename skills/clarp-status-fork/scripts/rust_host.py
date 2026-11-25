@@ -1,5 +1,12 @@
-"""Read status-fork facts from the local Rust Host's administrator API."""
+"""Read status-fork facts from the local Rust Host, as an agent's tool reads them.
 
+It presents the token of the agents' tools, never the administrator's (#795): what its turn
+was given (CLARP_TOOL_TOKEN), else what the installer wrote for the tools (tools.toml beside
+the Host's config.toml), else the same token made from config.toml as the Host makes it. The
+Host answers it through bound privacy, with the reader of the turn it presents.
+"""
+
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -24,22 +31,51 @@ def running(unit):
     ).returncode == 0
 
 
+# What the Host's token of the agents' tools is made from (clarp_host::tool_token).
+TOOLS_TOKEN_PREFIX = b"clarp-host: the token of an agent's own tools\0"
+
+
+def tools_token_of(administrators):
+    """The token of the agents' tools on a Host whose administrator has this token."""
+    if not administrators:
+        return ""
+    return hashlib.sha256(TOOLS_TOKEN_PREFIX + administrators.encode()).hexdigest()
+
+
+def tools_token(config, server, environ=os.environ):
+    """The token this script presents to the Host `config` names (its `[server]` table):
+    the one its turn was given for this Host, the tools' own file's, or the one made from
+    config.toml. Never the administrator's own."""
+    told = environ.get("CLARP_TOOL_TOKEN", "").strip()
+    here = f"{server.get('bind_addr', '127.0.0.1')}:{server.get('port')}"
+    if told and environ.get("CLARP_HOST_ADDR", "").strip() == here:
+        return told
+    try:
+        tools = tomllib.loads((config.parent / "tools.toml").read_text())["server"]
+        if (tools.get("kind") == "clarp-host" and tools.get("tool_token")
+                and f"{tools.get('bind_addr', '127.0.0.1')}:{tools.get('port')}" == here):
+            return str(tools["tool_token"])
+    except (OSError, KeyError, TypeError, ValueError):
+        pass
+    return tools_token_of(str(server.get("auth_token") or ""))
+
+
 class RustHost:
-    def __init__(self, config):
+    def __init__(self, config, environ=os.environ):
         try:
             server = tomllib.loads(config.read_text())["server"]
             addr = server.get("bind_addr", "127.0.0.1")
             self.address = ipaddress.ip_address("127.0.0.1" if addr == "localhost" else addr)
             self.port = server["port"]
-            self._token = server["auth_token"]
+            self._token = tools_token(config, server, environ)
         except (OSError, KeyError, TypeError, ValueError):
             raise HostError("cannot read the local Rust Host's server configuration") from None
         if not self.address.is_loopback:
-            raise HostError("the Rust Host's administrator API must be on loopback")
+            raise HostError("the Rust Host must be on loopback")
         if (type(self.port) is not int or not 0 < self.port < 65536
                 or not isinstance(self._token, str) or not self._token.isascii()
                 or any(not 33 <= ord(c) <= 126 for c in self._token) or not self._token):
-            raise HostError("invalid local Rust Host port or administrator credential")
+            raise HostError("invalid local Rust Host port or tools credential")
 
     def get(self, route, **query):
         path = route + ("?" + urlencode(query) if query else "")

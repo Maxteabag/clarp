@@ -26,25 +26,33 @@ not already occupied, and recognizable artwork.
 
 ## Creating a personality
 
-A personality is one live `POST /personas` call. It needs no deploy and no
-restart. Reach the server on `[server].bind_addr` and `[server].port` from
-the configuration reported by `clarp-admin paths` — it is not necessarily on localhost —
-and authenticate with `[server].auth_token` as a bearer token.
+A personality is one live call. It needs no deploy and no restart. Make it from your own
+turn (or a job your turn started) with the tool, which presents the token of the agents'
+tools and never the owner's:
 
 ```
-POST /personas {name, voice_id, personality, avatar_base64, avatar_symbol}
+clarp-admin persona create NAME [--voice-id VOICE_ID] [--personality TEXT] \
+    [--avatar-symbol SYMBOL] [--no-picture]
 ```
 
-- `voice_id` is a JSON *string*, not an object: `{"cartesia":"<uuid>"}`. Copy
-  the chosen voice's `selection_value` verbatim.
-- `avatar_base64` is a square **JPEG** of at most 512000 raw bytes. It is
-  stored server-side and served at `/persona-avatars/<persona_id>`.
-- `personality` is at most 4000 characters, and takes precedence over any
-  built-in clause for that name.
+It needs a Rust Host with the feature `tools_owner_free` (contract 193); on an older Host
+it says "not available". Outside a turn it is refused: the Host must know which agent asks.
 
-`POST /agents {name, cwd, backend}` then starts a session that inherits the
-persona's voice, personality, and avatar. `DELETE /personas/<name>` removes a
-non-builtin.
+- `--voice-id` is a JSON *string*, not an object: `{"cartesia":"<uuid>"}`. Copy the
+  chosen voice's `selection_value` verbatim. Without one the persona is given a free voice.
+- `--personality` is at most 4000 characters, and takes precedence over any built-in
+  clause for that name.
+- A picture is drawn for a persona made without a symbol, unless `--no-picture`. An image
+  of your own goes on the agent afterwards, from its gallery (`clarp-admin portrait`, see
+  `clarp-avatar-generation`).
+
+Then `clarp-admin agent create NAME [--cwd DIR] [--backend B]` starts a session that
+inherits the persona's voice, personality and picture.
+
+`POST /personas` with `avatar_base64`, `POST /personas/update` and `DELETE /personas/<name>`
+stay the owner's (his apps, or his own command with `CLARP_HOST_TOKEN`). Do not read
+`[server].auth_token` from config.toml to call them: the Host logs every call made with the
+owner's token from no app and no turn, and an agent's tools are moving off it (#795).
 
 For a disposable agent on the Rust Host, use `clarp-admin agent create NAME --test`
 or send `"test": true` in `POST /agents`. The experience watcher skips that agent.

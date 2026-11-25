@@ -197,17 +197,26 @@ pub(crate) async fn prompt(
         // The delayed prompt is sent by this Host's own tool, which finds the Host by the file
         // its installer wrote.
         let executable = share_dir().join("tools/clarp-admin");
-        return schedule_prompt(parsed, &executable, app.clock.now_ms(), async |args| {
-            if !tokio::fs::metadata(&executable)
-                .await
-                .is_ok_and(|file| file.is_file())
-            {
-                return Err(
-                    "could not schedule prompt: this Host's clarp-admin tool is missing".into(),
-                );
-            }
-            launch_prompt(args).await
-        })
+        // It is told this Host and the token of the agents' tools, as a turn is, and never
+        // finds the administrator's in the installer's file (#795).
+        let told = delayed_prompt_env(app);
+        return schedule_prompt(
+            parsed,
+            &executable,
+            app.clock.now_ms(),
+            &told,
+            async |args| {
+                if !tokio::fs::metadata(&executable)
+                    .await
+                    .is_ok_and(|file| file.is_file())
+                {
+                    return Err(
+                        "could not schedule prompt: this Host's clarp-admin tool is missing".into(),
+                    );
+                }
+                launch_prompt(args, &told).await
+            },
+        )
         .await;
     }
     let to = parsed.option("--to").unwrap_or_default();
@@ -372,10 +381,25 @@ fn parse_delay(value: &str) -> Result<i64, String> {
     Ok(seconds)
 }
 
+/// What a delayed prompt's timer is told of this Host: where it listens and the token of the
+/// agents' tools, by the names a tool reads (`CLARP_HOST_ADDR`, `CLARP_TOOL_TOKEN`). None on a
+/// Host without a token, whose tools present none.
+fn delayed_prompt_env(app: &App) -> Vec<(String, String)> {
+    crate::tool_env(&app.config.listen.to_string(), &app.config.auth_token)
+        .into_iter()
+        .filter(|(name, _)| name == crate::TOOL_ADDR_ENV || name == crate::TOOL_TOKEN_ENV)
+        .collect()
+}
+
+/// Schedules a delayed prompt as a timer of the user's. `told`: what the timer's tool is told,
+/// each named to the scheduler by its name alone (`--setenv=NAME`, its value taken from the
+/// scheduler's own environment, which [`launch_prompt`] sets), so that no value is on a
+/// command line.
 async fn schedule_prompt(
     parsed: &crate::artifact_tool::Parsed,
     executable: &Path,
     now_ms: i64,
+    told: &[(String, String)],
     launch: impl AsyncFnOnce(Vec<OsString>) -> Result<(), String>,
 ) -> ToolAnswer {
     let delay = parsed.option("--delay").unwrap_or_default();
@@ -400,6 +424,9 @@ async fn schedule_prompt(
             jiff::Timestamp::from_millisecond(due).map_err(|e| e.to_string())?;
             args.push(format!("--on-calendar={}", utc(due)).into());
             args.push("--timer-property=AccuracySec=1s".into());
+        }
+        for (name, _) in told {
+            args.push(format!("--setenv={name}").into());
         }
         args.push("--".into());
         args.push(executable.into());
@@ -428,14 +455,14 @@ async fn schedule_prompt(
     }
 }
 
-async fn launch_prompt(args: Vec<OsString>) -> Result<(), String> {
+async fn launch_prompt(args: Vec<OsString>, told: &[(String, String)]) -> Result<(), String> {
+    // Through the shared constructor: no turn's identity rides along into the scheduler. What
+    // the timer is told is set here, and named alone in `args`.
+    let mut scheduler = tokio::process::Command::from(crate::child::command("systemd-run"));
+    scheduler.envs(told.iter().map(|(name, value)| (name, value)));
     let output = tokio::time::timeout(
         Duration::from_secs(10),
-        // Through the shared constructor: no turn's identity rides along into the scheduler.
-        tokio::process::Command::from(crate::child::command("systemd-run"))
-            .args(args)
-            .kill_on_drop(true)
-            .output(),
+        scheduler.args(args).kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| "could not confirm the scheduled prompt".to_string())?
@@ -1281,6 +1308,235 @@ async fn agent_provider(
     }
 }
 
+// ---- what an agent does for itself and its own helpers (#795) -------------------------------
+
+/// The agent a call acts as: the one whose turn it carries (`CLARP_PROVIDER_TURN`, which a job
+/// the turn started keeps), verified by the Host's own signature. Nothing the caller writes is
+/// taken for it. Refused, in words that say what to do, where the call carries no turn that
+/// names an agent.
+async fn acting_as(
+    app: &App,
+    call: &ToolCall,
+    command: &str,
+) -> Result<std::sync::Arc<crate::fleet::Member>, ToolAnswer> {
+    let token = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty());
+    let found = match token {
+        Some(token) => crate::turn_identity::caller(app, token).await,
+        None => Ok(None),
+    };
+    match found {
+        Ok(Some(member)) => Ok(member),
+        Ok(None) => Err(ToolAnswer::said(
+            4,
+            format!(
+                "clarp-admin {command}: verified turn identity required: run it from your own \
+                 turn, or from a job your turn started. Nothing was done."
+            ),
+        )),
+        Err(why) => Err(ToolAnswer::said(
+            1,
+            format!("clarp-admin {command}: {}", why.0),
+        )),
+    }
+}
+
+/// The agent `session` names, where it is `actor` itself or one of its own helpers (its helper,
+/// or a helper's helper, by the parents the Host keeps); refused in words otherwise.
+fn own_or_helper(
+    app: &App,
+    actor: &crate::fleet::Member,
+    session: &str,
+    command: &str,
+) -> Result<std::sync::Arc<crate::fleet::Member>, ToolAnswer> {
+    let directory = app.fleet.directory();
+    let Some(target) = directory.by_session(session.trim()).cloned() else {
+        return Err(ToolAnswer::said(
+            1,
+            format!("clarp-admin {command}: no such agent: {session}. Nothing was done."),
+        ));
+    };
+    let by_id = |id: &str| {
+        directory
+            .members
+            .iter()
+            .find(|member| member.record.agent_id == id)
+            .cloned()
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut at = Some(target.clone());
+    while let Some(member) = at {
+        if member.record.agent_id == actor.record.agent_id {
+            return Ok(target);
+        }
+        if !seen.insert(member.record.agent_id.clone()) {
+            break;
+        }
+        at = member.record.parent_agent_id.as_deref().and_then(by_id);
+    }
+    Err(ToolAnswer::said(
+        4,
+        format!(
+            "clarp-admin {command}: {session} is neither {} nor one of its helpers. An agent does \
+             this for itself and its own helpers only; ask the owner for another. Nothing was \
+             done.",
+            actor.record.session
+        ),
+    ))
+}
+
+/// `clarp-admin persona create NAME [--voice-id V] [--personality P] [--avatar-symbol S]
+/// [--no-picture]`: a contact is made, as `POST /personas` makes one, from an agent's own turn.
+/// Its picture comes later from a gallery (`clarp-admin portrait`), or is drawn for it unless
+/// `--no-picture`.
+async fn persona(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    const USAGE: &str = "usage: clarp-admin persona create [-h] [--voice-id VOICE_ID] \
+                         [--personality PERSONALITY] [--avatar-symbol AVATAR_SYMBOL] \
+                         [--no-picture] name";
+    let usage =
+        |why: &str| ToolAnswer::said(2, format!("{USAGE}\nclarp-admin persona: error: {why}"));
+    let Some((verb, rest)) = args.split_first() else {
+        return usage("the following arguments are required: action");
+    };
+    if verb != "create" {
+        return usage(&format!(
+            "argument action: invalid choice: '{verb}' (choose from 'create')"
+        ));
+    }
+    let valued = ["--voice-id", "--personality", "--avatar-symbol"];
+    let parsed = match parse(rest, &valued, &["--no-picture"], &["name"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let name = parsed.positional.first().cloned().unwrap_or_default();
+    if name.trim().is_empty() {
+        return usage("the following arguments are required: name");
+    }
+    if let Err(refused) = acting_as(app, call, "persona").await {
+        return refused;
+    }
+    let mut asked = serde_json::Map::new();
+    asked.insert("name".into(), json!(name));
+    for (flag, key) in [
+        ("--voice-id", "voice_id"),
+        ("--personality", "personality"),
+        ("--avatar-symbol", "avatar_symbol"),
+    ] {
+        if let Some(value) = parsed.option(flag) {
+            asked.insert(key.into(), json!(value));
+        }
+    }
+    if parsed.flags.contains("--no-picture") {
+        asked.insert("generate_avatar".into(), json!(false));
+    }
+    match crate::personas::made(app, &asked).await {
+        Ok(persona) => shown(&json!({ "persona": persona })),
+        Err(refused) => ToolAnswer::said(
+            4,
+            format!(
+                "clarp-admin persona: the Host refused it (HTTP {}): {}",
+                refused.status().as_u16(),
+                refused.message()
+            ),
+        ),
+    }
+}
+
+/// `clarp-admin portrait add --session S --asset ASSET_ID` and `portrait select --session S
+/// --portrait PORTRAIT_ID`: an agent keeps a picture it published as a portrait, or wears one it
+/// keeps, as `POST /agent-portraits` does it; for itself or one of its own helpers only.
+async fn portrait(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    const USAGE: &str = "usage: clarp-admin portrait {add,select} [-h] --session SESSION \
+                         (--asset ASSET_ID | --portrait PORTRAIT_ID)";
+    let usage =
+        |why: &str| ToolAnswer::said(2, format!("{USAGE}\nclarp-admin portrait: error: {why}"));
+    let Some((verb, rest)) = args.split_first() else {
+        return usage("the following arguments are required: action");
+    };
+    let (action, key, flag) = match verb.as_str() {
+        "add" => ("add_media_asset", "asset_id", "--asset"),
+        "select" => ("select_primary", "portrait_id", "--portrait"),
+        other => {
+            return usage(&format!(
+                "argument action: invalid choice: '{other}' (choose from 'add', 'select')"
+            ));
+        }
+    };
+    let parsed = match parse(rest, &["--session", flag], &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let (Some(session), Some(value)) = (
+        parsed.option("--session").filter(|s| !s.trim().is_empty()),
+        parsed.option(flag).filter(|s| !s.trim().is_empty()),
+    ) else {
+        return usage(&format!(
+            "the following arguments are required: --session, {flag}"
+        ));
+    };
+    let actor = match acting_as(app, call, "portrait").await {
+        Ok(actor) => actor,
+        Err(refused) => return refused,
+    };
+    let target = match own_or_helper(app, &actor, session, "portrait") {
+        Ok(target) => target,
+        Err(refused) => return refused,
+    };
+    let mut said = json!({ "action": action, "session": target.record.session });
+    said[key] = json!(value);
+    match crate::personas::portraits_changed(app, &said).await {
+        Ok(answer) => shown(&answer),
+        Err(refused) => ToolAnswer::said(
+            4,
+            format!(
+                "clarp-admin portrait: the Host refused it (HTTP {}): {}",
+                refused.status().as_u16(),
+                refused.message()
+            ),
+        ),
+    }
+}
+
+/// `clarp-admin agent archive --session S [--restore]`: an agent puts itself or one of its own
+/// helpers away (or takes it back), as `POST /agent-archive` does it.
+async fn agent_archive(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin agent archive [-h] --session SESSION [--restore]\n\
+                 clarp-admin agent archive: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &["--session"], &["--restore"], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let Some(session) = parsed.option("--session").filter(|s| !s.trim().is_empty()) else {
+        return usage("the following arguments are required: --session");
+    };
+    let actor = match acting_as(app, call, "agent archive").await {
+        Ok(actor) => actor,
+        Err(refused) => return refused,
+    };
+    let target = match own_or_helper(app, &actor, session, "agent archive") {
+        Ok(target) => target,
+        Err(refused) => return refused,
+    };
+    let archived = !parsed.flags.contains("--restore");
+    match roster::put_away(app, &target.record.session, archived).await {
+        Ok(answer) => shown(&answer),
+        Err(refused) => {
+            let (status, body) = refused.answered();
+            ToolAnswer::said(1, format!("clarp-admin: HTTP {status}: {body}"))
+        }
+    }
+}
+
 /// `clarp-admin agent ...`: what an agent does about other agents.
 async fn agent(app: &App, call: &ToolCall, args: &[String], owner_token: bool) -> ToolAnswer {
     match args.split_first() {
@@ -1288,13 +1544,14 @@ async fn agent(app: &App, call: &ToolCall, args: &[String], owner_token: bool) -
         Some((command, rest)) if command == "helper-state" => agent_helper_state(app, rest).await,
         Some((command, rest)) if command == "fork" => agent_fork(app, call, rest).await,
         Some((command, rest)) if command == "transit" => agent_transit(app, rest).await,
+        Some((command, rest)) if command == "archive" => agent_archive(app, call, rest).await,
         Some((command, rest)) if command == "provider" => {
             agent_provider(app, call, rest, owner_token).await
         }
         Some((command, _)) => not_here(&format!("agent {command}")),
         None => ToolAnswer::said(
             2,
-            "usage: clarp-admin agent {create,fork,helper-state,provider,transit} ...",
+            "usage: clarp-admin agent {archive,create,fork,helper-state,provider,transit} ...",
         ),
     }
 }
@@ -2638,6 +2895,8 @@ pub async fn run(app: &App, call: &ToolCall, owner_token: bool) -> ToolAnswer {
         Some((command, rest)) if command == "prompt" => prompt(app, call, rest, owner_token).await,
         Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest, owner_token).await,
+        Some((command, rest)) if command == "persona" => persona(app, call, rest).await,
+        Some((command, rest)) if command == "portrait" => portrait(app, call, rest).await,
         Some((command, [action])) if command == "peers" && action == "list" => {
             match peers::list_public(app).await {
                 Ok(listed) => shown(&json!(listed)),
@@ -2796,8 +3055,23 @@ mod tests {
         )
         .unwrap();
         let path = Path::new("/owner/.local/share/clarp-host/tools/clarp-admin");
-        let answer = schedule_prompt(&parsed, path, 123, async |args| {
+        // The timer is told the Host and the tools' token by name alone: no value on the line.
+        let told = [
+            ("CLARP_HOST_ADDR".to_string(), "127.0.0.1:7690".to_string()),
+            (
+                "CLARP_TOOL_TOKEN".to_string(),
+                "the-tools-token".to_string(),
+            ),
+        ];
+        let answer = schedule_prompt(&parsed, path, 123, &told, async |args| {
             assert_eq!(args[0], "--user");
+            assert!(
+                !args
+                    .iter()
+                    .any(|arg| arg.to_string_lossy().contains("the-tools-token"))
+            );
+            assert_eq!(args[6], "--setenv=CLARP_HOST_ADDR");
+            assert_eq!(args[7], "--setenv=CLARP_TOOL_TOKEN");
             assert!(args.iter().any(|arg| arg == "--expand-environment=no"));
             let unit = args[3]
                 .to_str()
@@ -2808,7 +3082,7 @@ mod tests {
             assert!(unit.bytes().all(|byte| byte.is_ascii_hexdigit()));
             assert_eq!(args[4], "--on-calendar=1970-01-01 00:02:01 UTC");
             assert_eq!(
-                args[6..],
+                args[8..],
                 [
                     "--",
                     path.to_str().unwrap(),
@@ -2832,12 +3106,9 @@ mod tests {
         assert_eq!(parse_delay("2h"), Ok(7_200));
         assert_eq!(parse_delay("1_000s"), Ok(1_000));
         assert!(parse_delay("5d").is_err());
-        let failed = schedule_prompt(
-            &parsed,
-            path,
-            123,
-            async |_| Err("scheduler refused".into()),
-        )
+        let failed = schedule_prompt(&parsed, path, 123, &[], async |_| {
+            Err("scheduler refused".into())
+        })
         .await;
         assert_eq!(failed.exit, 1);
         assert_eq!(failed.stderr, "scheduler refused\n");

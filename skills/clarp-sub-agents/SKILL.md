@@ -230,6 +230,13 @@ start, and the command exits 1.
    clarp-admin agent helper-state stream-a-3f9c        # show its state
    ```
 
+   To put a helper of yours away at once instead of after the grace period, on a Rust
+   Host with `tools_owner_free` (contract 193): `clarp-admin agent archive --session
+   stream-a-3f9c` (`--restore` takes it back). It works from your own turn or a job it
+   started, for yourself and your own helpers only; another agent is the owner's to put
+   away. The watcher a helper gets is told your Host and the agents' tools token by name
+   (`--setenv=NAME`), with your turn's identity, so it never uses the owner's token.
+
    On the Rust Host with `helper_ended_unreported` (contract 155), a helper
    that finishes without reporting can be marked `ended-unreported`. Read
    its result before accepting it or giving it more work.

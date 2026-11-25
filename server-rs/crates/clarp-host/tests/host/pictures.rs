@@ -58,9 +58,13 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     // Binaries of nothing, as a build would leave them, and a home of the test's own.
     let from = place.root.join("from");
     std::fs::create_dir_all(&from).unwrap();
-    for name in ["clarp-host", "clarp-shim"] {
-        program(&from.join(name), "#!/bin/sh\n");
-    }
+    // The Host's stand-in makes the tools' token as the Host does: from the administrator's,
+    // given in its environment (`clarp-host tool-token`).
+    program(
+        &from.join("clarp-host"),
+        "#!/bin/sh\n[ \"$1\" = tool-token ] && [ -n \"$CLARP_HOST_TOKEN\" ] && echo \"tools-of-$(printf %s \"$CLARP_HOST_TOKEN\" | wc -c)\"\nexit 0\n",
+    );
+    program(&from.join("clarp-shim"), "#!/bin/sh\n");
     let sums = place
         .command("sha256sum")
         .args(["clarp-host", "clarp-shim"])
@@ -112,6 +116,30 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
         !install(&[]).contains("--contact-pictures"),
         "off where nothing was said"
     );
+    // The agents' tools are given a file of their own (#795): this Host and the tools' token,
+    // private to the user, and never the administrator's token.
+    let tools = home.join(".config/clarp-host/tools.toml");
+    let written = std::fs::read_to_string(&tools).unwrap();
+    let config = std::fs::read_to_string(home.join(".config/clarp-host/config.toml")).unwrap();
+    let admin = config
+        .lines()
+        .find_map(|line| line.strip_prefix("auth_token = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap();
+    assert!(!admin.is_empty());
+    assert!(!written.contains(admin), "{written}");
+    assert!(written.contains("kind = \"clarp-host\""), "{written}");
+    assert!(
+        written.contains("bind_addr = \"127.0.0.1\"\nport = 7690\n"),
+        "{written}"
+    );
+    assert!(
+        written.contains(&format!("tool_token = \"tools-of-{}\"", admin.len())),
+        "{written}"
+    );
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(&tools).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
     // The installed Host is named the file of its peers: it reads none by itself (issue 741).
     let peers = home.join(".config/clarp-host/peers.json");
     assert!(install(&[]).contains(&format!(" --peers \"{}\"", peers.display())));

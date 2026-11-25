@@ -320,7 +320,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
         hub: hub.clone(),
         revisions: revisions.clone(),
-        tool_env: tool_env(&address.to_string(), &config.auth_token),
+        tool_env: clarp_host::tool_env(&address.to_string(), &config.auth_token),
         pusher: pusher.clone(),
         blobs: blobs.clone(),
         portrait_hints: Some(clarp_host::media_created::Announcer {
@@ -621,27 +621,6 @@ async fn serve(config: Config) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// What every turn is told of its Host: where it listens, and the token its agent's tools
-/// present. Never the administrator's token. A skill's own script that speaks to its Host
-/// by itself is told the same Host and the same token, under the names it reads: left to
-/// itself it would find the Python Host of the machine, and ask there for an agent of this
-/// one.
-fn tool_env(address: &str, administrators: &str) -> Vec<(String, String)> {
-    let mut env = vec![
-        (clarp_host::TOOL_ADDR_ENV.to_string(), address.to_string()),
-        (
-            clarp_host::SCRIPT_URL_ENV.to_string(),
-            format!("http://{address}"),
-        ),
-    ];
-    let token = clarp_host::tool_token(administrators);
-    if !token.is_empty() {
-        env.push((clarp_host::TOOL_TOKEN_ENV.to_string(), token.clone()));
-        env.push((clarp_host::SCRIPT_TOKEN_ENV.to_string(), token));
-    }
-    env
-}
-
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1).peekable();
     if args.peek().map(String::as_str) == Some("pair") {
@@ -696,16 +675,33 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.peek().map(String::as_str) == Some("tool-token") {
+        // The token of the agents' tools, from the administrator's in CLARP_HOST_TOKEN: what
+        // install-host writes into the tools' own file, so that no script needs the other.
+        args.next();
+        let token = std::env::var("CLARP_HOST_TOKEN").unwrap_or_default();
+        if token.is_empty() || args.next().is_some() {
+            eprintln!("usage: CLARP_HOST_TOKEN=... clarp-host tool-token");
+            return ExitCode::from(2);
+        }
+        println!("{}", clarp_host::tool_token(&token));
+        return ExitCode::SUCCESS;
+    }
     if args.peek().map(String::as_str) == Some("tool") {
         args.next();
         // What the turn was given for its agent's tools; the administrator's, when the
-        // administrator calls a tool by hand.
-        let token = std::env::var(clarp_host::TOOL_TOKEN_ENV)
+        // administrator calls a tool by hand. The administrator's token put in CLARP_HOST_TOKEN
+        // on purpose is the owner's mode, and is said so (`OWNER_MODE_HEADER`); the one a
+        // tool finds in the installer's file is not.
+        let tools = std::env::var(clarp_host::TOOL_TOKEN_ENV)
             .ok()
-            .filter(|token| !token.is_empty())
-            .or_else(|| std::env::var("CLARP_HOST_TOKEN").ok())
-            .unwrap_or_default();
-        let outcome = clarp_host::admin::tool(args, &token);
+            .filter(|token| !token.is_empty());
+        let owners = std::env::var("CLARP_HOST_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty());
+        let owner_mode = tools.is_none() && owners.is_some();
+        let token = tools.or(owners).unwrap_or_default();
+        let outcome = clarp_host::admin::tool(args, &token, owner_mode);
         print!("{}", outcome.stdout);
         eprint!("{}", outcome.stderr);
         return ExitCode::from(outcome.exit);
