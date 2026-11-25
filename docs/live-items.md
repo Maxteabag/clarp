@@ -231,6 +231,15 @@ no `read_rows`: the working line stays above it. `started_at_ms` is no earlier t
 message's row (issue 798), so a client that places the working line by time puts it below that
 message.
 
+**What ran before a read message stays above it** (issue 843): the turn's work splits at each
+row in `read_rows`, by when that row was written. Work begun before it stays above it, work
+begun after it goes below it with the working line, so the turn reads in the same order while it
+runs, once it settles, and once history (`/log`) holds it, where a user row written between the
+turn's rows splits it the same way. The Rust desktop folds each part on its own: the last under
+`live:fold:<turn_id>` (Working while it runs, the worked time once settled, on the last part with
+work), each earlier one under `live:fold:<turn_id>@<row id>`, counted only. Its Conversation view
+keeps the turn whole: one Running box below the read message.
+
 `audience` (Host contract 108) is `agents` when another agent's message started
 the turn, else `user` (docs/protocol.md, Provenance: coordination between
 agents). When the user steps into such a turn while it runs, a `turn` op with

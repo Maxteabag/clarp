@@ -1,0 +1,267 @@
+//! A message steered into a running turn keeps its place against the work
+//! (#843): what the turn did before it stays above it, what it did after it
+//! and its working line below it, while the turn runs, once it settles and
+//! once history holds it. Built from a real Codex run: [s1] runs `sleep 20`
+//! (begun 14.145), [s2] is read into the turn (14.269), the turn answers
+//! SKUNK, then the waiting [s3] gets its own turn.
+
+use std::collections::HashSet;
+
+use clarp_core::history_fold::{self, Folded, Piece};
+use clarp_core::live::LiveView;
+use clarp_core::live_present::{Kind, Options, Presented, present};
+use clarp_core::protocol::Message;
+use serde_json::{Value, json};
+
+const T: &str = "55a4a30d4fefd760";
+const S1: &str = "u-tt-codex-1795607109250-1";
+const S2: &str = "u-tt-codex-1795607114257-2";
+const S3: &str = "u-tt-codex-1795607117262-3";
+const SLEEP_ROW: &str = "c-tt-codex-1795607109250-1-exec-151189ae-be14-4e39-98d7-aa5548ea6895";
+const ECHO_ROW: &str = "c-tt-codex-1795607109250-1-exec-2a7e";
+const ANSWER: &str = "r-tt-codex-1795607109250-1-msg_0bb7086ebb285a7a016b06ca5eaf5087d2a27be27a40e84848";
+/// 2026-11-25T11:45:00Z.
+const BASE: i64 = 1_795_607_100_000;
+const S1_AT: i64 = BASE + 9_251;
+const SLEEP_AT: i64 = BASE + 14_145;
+const S2_AT: i64 = BASE + 14_269;
+/// A step begun after [s2] was read (the variant with work after it).
+const ECHO_AT: i64 = BASE + 15_000;
+const ANSWER_AT: i64 = BASE + 34_801;
+const ENDED_AT: i64 = BASE + 34_819;
+
+fn stamp(ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ms).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
+}
+
+fn row(value: Value) -> Message {
+    Message::from_json(value.as_object().unwrap())
+}
+
+fn user(id: &str, at: i64, trace: &str, text: &str) -> Message {
+    row(json!({"id": id, "role": "user", "timestamp": stamp(at), "trace_id": trace, "text": text}))
+}
+
+fn cell_row(id: &str, at: i64, command: &str) -> Message {
+    row(json!({"id": id, "role": "assistant", "kind": "tool", "timestamp": stamp(at), "trace_id": T, "text": "",
+        "display_cells": [{"id": id, "kind": "command", "title": "Ran", "summary": command, "status": "ok", "lines": [{"label": "", "text": "(no output)", "kind": "muted"}]}]}))
+}
+
+fn answer_row() -> Message {
+    row(json!({"id": ANSWER, "role": "assistant", "timestamp": stamp(ANSWER_AT), "trace_id": T, "phase": "final", "text": "SKUNK",
+        "turn": {"turn_id": T, "status": "completed", "started_at_ms": S1_AT, "ended_at_ms": ENDED_AT, "worked_ms": 25_568, "tool_count": 1}}))
+}
+
+/// The chat's `/log` rows: while the turn runs (`settled` false) the prompt,
+/// the steered message and the tool rows landed so far; settled, its answer
+/// and the next turn's prompt too.
+fn log_rows(echo: bool, settled: bool) -> Vec<Message> {
+    let mut rows = vec![user(S1, S1_AT, T, "[s1] Run `sleep 20`, then reply SKUNK."), cell_row(SLEEP_ROW, SLEEP_AT, "sleep 20"), user(S2, S2_AT, "c0752913ac9d7621", "[s2] Also put VIPER in it.")];
+    if echo {
+        rows.push(cell_row(ECHO_ROW, ECHO_AT, "echo VIPER"));
+    }
+    if settled {
+        rows.push(answer_row());
+        rows.push(user(S3, ENDED_AT, "21dab8e1db10033f", "[s3] Reply TAPIR."));
+    }
+    rows
+}
+
+fn tool_item(id: &str, call: &str, command: &str, ordinal: i64, at: i64, settled: bool) -> Value {
+    let mut item = json!({"id": id, "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": T, "status": if settled { "completed" } else { "running" }, "ordinal": ordinal,
+        "started_at_ms": at, "tool": {"name": "exec_command", "call_id": call, "category": "exec", "group": null, "label": command, "command": command}});
+    if settled {
+        item["ended_at_ms"] = json!(at + 100);
+    }
+    item
+}
+
+/// The live turn: running (its tools running), or settled with its answer.
+fn live(echo: bool, settled: bool) -> LiveView {
+    let mut items = vec![tool_item("cx:sleep", SLEEP_ROW, "sleep 20", 1, SLEEP_AT, settled || echo)];
+    if echo {
+        items.push(tool_item("cx:echo", ECHO_ROW, "echo VIPER", 2, ECHO_AT, settled));
+    }
+    if settled {
+        items.push(json!({"id": "cx:answer", "kind": "message", "rev": 1, "conv": "c-1", "turn_id": T, "status": "completed", "ordinal": 3,
+            "started_at_ms": ANSWER_AT, "ended_at_ms": ANSWER_AT, "phase": "final", "text": "SKUNK", "row_id": ANSWER}));
+    }
+    let mut turn = json!({"turn_id": T, "status": if settled { "completed" } else { "running" }, "started_at_ms": S1_AT, "tool_count": items.len(), "read_rows": [S2]});
+    if settled {
+        turn["ended_at_ms"] = json!(ENDED_AT);
+        turn["worked_ms"] = json!(25_568);
+    }
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": if settled { ENDED_AT } else { ECHO_AT + 1_000 },
+        "activity": {"state": if settled { "idle" } else { "tool" }, "turn_id": T}, "turn": turn, "items": items});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Grouped,
+    AlwaysVisible,
+    Conversation,
+}
+
+fn live_options(mode: Mode) -> Options {
+    Options {
+        explanations: false,
+        fold_running: mode != Mode::AlwaysVisible,
+        show_commentary: mode == Mode::AlwaysVisible,
+        whole_turn: mode == Mode::Conversation,
+        ..Options::default()
+    }
+}
+
+/// What the chat draws while live items hold the turn, top to bottom: rows
+/// by id, entries by key (an entry a durable row took over by that row).
+fn live_order(p: &Presented, rows: &[Message]) -> Vec<String> {
+    let taken: HashSet<&str> = p.entries.iter().map(|e| e.row.as_str()).filter(|r| !r.is_empty()).collect();
+    let rest: Vec<&Message> = rows.iter().filter(|r| !taken.contains(r.id.as_str()) && !p.absorbed_rows.contains(&r.id) && !p.hidden_rows.contains(&r.id)).collect();
+    let anchors = p.anchors(&rest);
+    assert!(anchors.windows(2).all(|w| w[0] <= w[1]), "entries keep their order: {anchors:?}");
+    let name = |i: usize| if p.entries[i].row.is_empty() { p.entries[i].key.clone() } else { p.entries[i].row.clone() };
+    let mut order = Vec::new();
+    let mut next = 0;
+    for (index, row) in rest.iter().enumerate() {
+        while next < anchors.len() && anchors[next] == index {
+            order.push(name(next));
+            next += 1;
+        }
+        order.push(row.id.clone());
+    }
+    order.extend((next..anchors.len()).map(name));
+    order
+}
+
+/// What the chat draws once history holds the turn: each fold's entries
+/// after its prompt, its rows where they are (as the pane splices them).
+fn history_order(rows: &[Message], folded: &Folded) -> Vec<String> {
+    let mut order: Vec<String> = rows.iter().filter(|r| !folded.hidden_rows.contains(&r.id)).map(|r| r.id.clone()).collect();
+    for fold in &folded.folds {
+        let position = |order: &Vec<String>, id: &str| order.iter().position(|o| o == id);
+        let first_row = fold.pieces.iter().find_map(|p| if let Piece::Row(id) = p { position(&order, id) } else { None });
+        let mut at = fold.prompt.as_deref().and_then(|id| position(&order, id)).map(|i| i + 1).or(first_row).unwrap_or(order.len());
+        for piece in &fold.pieces {
+            match piece {
+                Piece::Row(id) => {
+                    if let Some(index) = position(&order, id) {
+                        at = index + 1;
+                    }
+                }
+                Piece::Entry(entry) => {
+                    order.insert(at, entry.key.clone());
+                    at += 1;
+                }
+            }
+        }
+    }
+    order
+}
+
+fn history(rows: &[Message], mode: Mode) -> Folded {
+    let options = history_fold::Options {
+        summaries: true,
+        show_commentary: mode == Mode::AlwaysVisible,
+        whole_turn: mode == Mode::Conversation,
+        ..history_fold::Options::default()
+    };
+    history_fold::present(rows, None, &options)
+}
+
+fn before() -> String {
+    format!("live:fold:{T}@{S2}")
+}
+
+fn working() -> String {
+    format!("live:fold:{T}")
+}
+
+fn title(p: &Presented, key: &str) -> String {
+    p.entries.iter().find(|e| e.key == key).map(|e| e.title.clone()).unwrap_or_default()
+}
+
+fn fold_title(folded: &Folded, key: &str) -> String {
+    folded.folds.iter().flat_map(|f| &f.pieces).find_map(|p| match p {
+        Piece::Entry(e) if e.key == key => Some(e.title.clone()),
+        _ => None,
+    }).unwrap_or_default()
+}
+
+#[test]
+fn grouped_the_work_before_a_steered_message_stays_above_it_while_running_settled_and_in_history() {
+    let running = present(&live(false, false), &log_rows(false, false), &live_options(Mode::Grouped));
+    assert_eq!(live_order(&running, &log_rows(false, false)), [S1, &before(), S2, &working()], "the work so far, the message, Working");
+    assert_eq!(title(&running, &before()), "1 tool");
+    assert_eq!(title(&running, &working()), "Working");
+
+    let rows = log_rows(false, true);
+    let settled = present(&live(false, true), &rows, &live_options(Mode::Grouped));
+    let drawn = live_order(&settled, &rows);
+    assert_eq!(drawn, [S1, &before(), S2, ANSWER, S3], "settled: the work above the message, the answer below it");
+    assert_eq!(title(&settled, &before()), "Worked for 26s · 1 tool");
+
+    let folded = history(&rows, Mode::Grouped);
+    assert_eq!(history_order(&rows, &folded), drawn, "history draws it as live did");
+    assert_eq!(fold_title(&folded, &before()), "Worked for 26s · 1 tool");
+}
+
+#[test]
+fn grouped_work_after_the_steered_message_goes_below_it_in_every_state() {
+    let running = present(&live(true, false), &log_rows(true, false), &live_options(Mode::Grouped));
+    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, &before(), S2, &working()]);
+    assert_eq!(title(&running, &before()), "1 tool");
+    assert_eq!(title(&running, &working()), "Working · 1 tool", "Working holds what runs after the message");
+
+    let rows = log_rows(true, true);
+    let settled = present(&live(true, true), &rows, &live_options(Mode::Grouped));
+    let drawn = live_order(&settled, &rows);
+    assert_eq!(drawn, [S1, &before(), S2, &working(), ANSWER, S3]);
+    assert_eq!((title(&settled, &before()), title(&settled, &working())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()), "the worked time on the last work row");
+
+    let folded = history(&rows, Mode::Grouped);
+    assert_eq!(history_order(&rows, &folded), drawn);
+    assert_eq!((fold_title(&folded, &before()), fold_title(&folded, &working())), ("1 tool".to_owned(), "Worked for 26s · 1 tool".to_owned()));
+}
+
+#[test]
+fn always_visible_each_step_keeps_its_time_place_against_the_steered_message() {
+    let running = present(&live(true, false), &log_rows(true, false), &live_options(Mode::AlwaysVisible));
+    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, "live:cx:sleep", S2, "live:cx:echo"], "a step begun before the message stays above it");
+    let only_sleep = present(&live(false, false), &log_rows(false, false), &live_options(Mode::AlwaysVisible));
+    assert_eq!(live_order(&only_sleep, &log_rows(false, false)), [S1, "live:cx:sleep", S2], "still running, it keeps its place");
+
+    for echo in [false, true] {
+        let rows = log_rows(echo, true);
+        let settled = present(&live(echo, true), &rows, &live_options(Mode::AlwaysVisible));
+        let drawn = live_order(&settled, &rows);
+        let folded = history(&rows, Mode::AlwaysVisible);
+        assert_eq!(history_order(&rows, &folded), drawn, "history as live, echo {echo}");
+        let at = |key: &str| drawn.iter().position(|k| k == key);
+        assert!(at(&before()) < at(S2) && at(S2) < at(ANSWER), "{drawn:?}");
+    }
+}
+
+#[test]
+fn conversation_view_keeps_the_turn_whole_below_the_steered_message() {
+    let running = present(&live(true, false), &log_rows(true, false), &live_options(Mode::Conversation));
+    assert_eq!(live_order(&running, &log_rows(true, false)), [S1, S2, &working()], "one Running box below the message");
+    assert_eq!(title(&running, &working()), "Working · 2 tools");
+
+    let rows = log_rows(true, true);
+    let folded = history(&rows, Mode::Conversation);
+    assert_eq!(folded.folds.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(), [working()], "the turn's work stays one piece");
+    // Conversation view leaves a finished turn's work out; its reply stays.
+    let reply: Vec<String> = history_order(&rows, &folded).into_iter().filter(|id| !id.starts_with("live:")).collect();
+    assert_eq!(reply, [S1, S2, ANSWER, S3]);
+    let settled = present(&live(true, true), &rows, &live_options(Mode::Conversation));
+    assert!(settled.entries.iter().all(|e| e.kind != Kind::Fold || e.key == working()));
+}
+
+#[test]
+fn a_part_key_names_its_turn() {
+    assert_eq!(clarp_core::chat_view::fold_turn(&before()), T);
+    assert_eq!(clarp_core::chat_view::fold_turn(&working()), T);
+}

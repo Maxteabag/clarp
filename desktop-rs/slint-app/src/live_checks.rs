@@ -194,6 +194,7 @@ pub fn live_check(out: String) {
     let (stale1, stale2) = (stale.clone(), stale.clone());
     let out17 = out.clone();
     let (out18, out19, out20, out21, out22) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let (out23, out24) = (out.clone(), out.clone());
     let place: Rc<RefCell<Option<(String, f32)>>> = Rc::default();
     let (place1, place2) = (place.clone(), place.clone());
     let theme_before: Rc<RefCell<String>> = Rc::default();
@@ -944,9 +945,66 @@ pub fn live_check(out: String) {
             if !read || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_QUEUED, ANCHOR_TOOL]);
-            check(in_order(&order), &format!("a message read into the running turn sits above its working line: {order:?}"));
+            // The step began before the message: it stays above it, running
+            // or not, as the settled turn will show it (#843).
+            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL, ANCHOR_QUEUED]);
+            check(in_order(&order), &format!("a step begun before the message read into the turn stays above it: {order:?}"));
             shot(&out22, "live-12b-anchor-steered");
+            // A step the turn begins after reading it.
+            let started = ANCHOR_STARTED;
+            control("/__control/live-event", &json!({"session": "anchor", "event": {"conv": "c-probe", "server_now_ms": started + 13_000, "ops": [
+                {"op": "upsert", "conv": "c-probe", "id": "x:anchor-2", "kind": "tool", "rev": 1, "item": {"id": "x:anchor-2", "kind": "tool", "rev": 1, "conv": "c-probe", "turn_id": ANCHOR_TURN,
+                    "status": "running", "ordinal": 21, "started_at_ms": started + 12_000, "ended_at_ms": null,
+                    "tool": {"name": "Bash", "call_id": "anchor-2", "category": "exec", "label": "make docs", "command": "make docs"}}},
+            ]}}))
+            .is_ok()
+        })),
+        ("anchor steered after", Box::new(move |app, _window, elapsed| {
+            if live_row(ANCHOR_TOOL_AFTER).is_none() || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL, ANCHOR_QUEUED, ANCHOR_TOOL_AFTER]);
+            check(in_order(&order), &format!("a step begun after the message goes below it: {order:?}"));
+            // Grouped: the work before the message folds above it, Working below it.
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::GROUPED);
+            true
+        })),
+        ("anchor steered grouped", Box::new(move |_, _window, elapsed| {
+            let before = format!("live:fold:{ANCHOR_TURN}@{ANCHOR_QUEUED}");
+            if live_row(&before).is_none() || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let working = format!("live:fold:{ANCHOR_TURN}");
+            let order = anchor_order(&[REAL_PROMPT, ANCHOR_NEXT, &before, ANCHOR_QUEUED, &working]);
+            check(in_order(&order), &format!("running: the work so far, the message, Working: {order:?}"));
+            let title = |key: &str| live_row(key).map(|r| r.live.title.to_string()).unwrap_or_default();
+            check(title(&before) == "1 tool" && title(&working) == "Working · 1 tool", &format!("the work so far is counted, Working holds what runs after: {:?} {:?}", title(&before), title(&working)));
+            shot(&out23, "live-12c-anchor-steered-grouped");
+            // The turn settles: both steps done, the read row still named.
+            let started = ANCHOR_STARTED;
+            let done = |id: &str, call: &str, label: &str, ordinal: i64, at: i64| json!({"op": "upsert", "conv": "c-probe", "id": id, "kind": "tool", "rev": 2, "item": {"id": id, "kind": "tool", "rev": 2, "conv": "c-probe", "turn_id": ANCHOR_TURN,
+                "status": "completed", "ordinal": ordinal, "started_at_ms": at, "ended_at_ms": at + 1_000,
+                "tool": {"name": "Bash", "call_id": call, "category": "exec", "label": label, "command": label}}});
+            control("/__control/live-event", &json!({"session": "anchor", "event": {"conv": "c-probe", "server_now_ms": started + 15_000, "ops": [
+                done("x:anchor-1", "anchor-1", "make test", 20, started + 1_000),
+                done("x:anchor-2", "anchor-2", "make docs", 21, started + 12_000),
+                {"op": "turn", "conv": "c-probe", "turn": {"turn_id": ANCHOR_TURN, "status": "completed", "started_at_ms": started, "ended_at_ms": started + 14_000, "worked_ms": 14_000, "tool_count": 2,
+                    "read_rows": [ANCHOR_QUEUED]}},
+            ]}}))
+            .is_ok()
+        })),
+        ("anchor steered settled", Box::new(move |app, _window, elapsed| {
+            let working = format!("live:fold:{ANCHOR_TURN}");
+            if !live_row(&working).is_some_and(|r| r.live.title.starts_with("Worked")) || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let before = format!("live:fold:{ANCHOR_TURN}@{ANCHOR_QUEUED}");
+            let order = anchor_order(&[REAL_PROMPT, ANCHOR_NEXT, &before, ANCHOR_QUEUED, &working]);
+            check(in_order(&order), &format!("settled, the same order: {order:?}"));
+            let title = |key: &str| live_row(key).map(|r| r.live.title.to_string()).unwrap_or_default();
+            check(title(&before) == "1 tool" && title(&working) == "Worked for 14s · 1 tool", &format!("the worked time on the last work row: {:?} {:?}", title(&before), title(&working)));
+            shot(&out24, "live-12d-anchor-steered-settled");
+            app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
             // A stale live turn: GET /live kept the first turn running while
             // two newer prompts started turns of their own in /log.
             control("/__control/live-load", &json!({"session": "stale", "fixture": "live-real-stale-turn.json", "agent_id": "agent-stale"})).is_ok()
@@ -1014,6 +1072,8 @@ const ANCHOR_NEXT: &str = "u-anchor-next";
 const ANCHOR_QUEUED: &str = "u-anchor-queued";
 const ANCHOR_TURN: &str = "tr-anchor-2";
 const ANCHOR_TOOL: &str = "live:x:anchor-1";
+/// A step the turn began after reading ANCHOR_QUEUED.
+const ANCHOR_TOOL_AFTER: &str = "live:x:anchor-2";
 /// 2026-10-03T11:49:30Z, when the next message was written.
 const ANCHOR_STARTED: i64 = 1791028170000;
 

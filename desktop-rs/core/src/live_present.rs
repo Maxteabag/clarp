@@ -110,6 +110,9 @@ pub struct Options {
     /// hidden): what a turn wrote for other agents is left out
     /// ([`LiveView::veiled`]).
     pub veil: bool,
+    /// Conversation view: the turn's work stays one piece (its Running box
+    /// holds all of it), never split at a message read into it.
+    pub whole_turn: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -151,11 +154,12 @@ impl Presented {
     /// entry began. A turn the Host never settled (its agent died) whose
     /// items go on under newer prompts splits at them.
     ///
-    /// The turn's working line (its running work row, Running box or a step
-    /// that runs) goes below the last message read into the turn
-    /// (`read_rows`): a message steered into a running turn sits above
-    /// Working, and what follows the line stays below it. What the turn did
-    /// before that message keeps its place above it.
+    /// The turn's working line (its running work row or Running box) goes
+    /// below the last message read into the turn (`read_rows`): a message
+    /// steered into a running turn sits above Working. What the turn did
+    /// before that message keeps its place above it, in a work row of its
+    /// own (`arrange`), and every step keeps the place its time gives it, so
+    /// the turn reads in the same order once it settles and history holds it.
     pub fn anchors(&self, rows: &[&Message]) -> Vec<usize> {
         let mut at = self.anchor(rows);
         let read = self.below_read(rows);
@@ -197,10 +201,25 @@ impl Presented {
     }
 }
 
-/// The turn's working line: its work row or Running box while the turn runs,
-/// or a step still running (no work row folds it). A message is never one.
+/// The turn's working line: its work row or Running box while the turn runs.
+/// A work row of what the turn did before a message it read is not one
+/// (its key names that message), and a step keeps the place its time gives
+/// it, as it will in history.
 fn working(entry: &Entry) -> bool {
-    entry.kind != Kind::Message && matches!(entry.status.as_str(), "running" | "pending" | crate::chat_view::STALLED)
+    entry.kind == Kind::Fold && !entry.key.contains(PART) && matches!(entry.status.as_str(), "running" | "pending" | crate::chat_view::STALLED)
+}
+
+/// Between a turn's fold key and the message a part of its work ran before:
+/// `live:fold:<turn>@<row id>`.
+pub const PART: char = '@';
+
+/// A message read into a turn while it ran: the turn's work splits at it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cut {
+    /// Its `/log` row.
+    pub row: String,
+    /// When it was written (Host time).
+    pub at_ms: i64,
 }
 
 /// A row's Host time; rows without one (unsent ones) never push the turn.
@@ -416,7 +435,26 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     // turn until then, so the row does not lose its time meanwhile.
     let live_turn = turn.expect("a turn");
     let summary = if settled { logged_summary(rows, &turn_id) } else { None };
-    presented.entries = arrange(&turn_id, summary.unwrap_or(live_turn), settled, &shown, rows_of, options);
+    let read_rows: Vec<String> = live_turn
+        .get("read_rows")
+        .and_then(Value::as_array)
+        .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+        .unwrap_or_default();
+    // The work splits at each message read into the turn, by when it was
+    // written, as history splits it at that row (`history_fold`).
+    let cuts: Vec<Cut> = if options.whole_turn {
+        Vec::new()
+    } else {
+        let mut cuts: Vec<Cut> = rows
+            .iter()
+            .filter(|r| read_rows.contains(&r.id))
+            .filter_map(|r| Some(Cut { row: r.id.clone(), at_ms: written(r)? }))
+            .collect();
+        cuts.sort_by_key(|c| c.at_ms);
+        cuts
+    };
+    let began = |item: &Object| int(item, "started_at_ms");
+    presented.entries = arrange_parts(&turn_id, summary.unwrap_or(live_turn), settled, &shown, &began, &cuts, rows_of, options).into_iter().flatten().collect();
     // A durable row whose commentary the work row folds is not shown in
     // the chat either; opened, it shows in its place again.
     let placed_rows: HashSet<&str> = presented.entries.iter().map(|e| e.row.as_str()).collect();
@@ -424,11 +462,7 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     presented.hidden_rows.extend(folded_rows);
     presented.turn_id = turn_id;
     presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
-    presented.read_rows = turn
-        .and_then(|t| t.get("read_rows"))
-        .and_then(Value::as_array)
-        .map(|ids| ids.iter().filter_map(Value::as_str).map(str::to_owned).collect())
-        .unwrap_or_default();
+    presented.read_rows = read_rows;
     presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
     presented
 }
@@ -457,11 +491,60 @@ pub fn work_title(running: bool, worked_ms: Option<i64>, calls: usize) -> Option
     })
 }
 
-/// A turn's item rows: one entry per item (an entry in `rows_of` stands
-/// for its item), consecutive explore members as one, and when the turn
-/// has settled its work folded (§7.6). The live turn and history's
+/// A turn's item rows in parts, one more than `cuts`: what ran before the
+/// first message read into the turn, between each two, and after the last
+/// (#843). An item goes in the part its time (`at`) says; one without a time
+/// stays in the part of the item before it. Each part folds on its own: the
+/// last under the turn's key (`live:fold:<turn>`, Working while it runs),
+/// each earlier one under the turn's key and the message it ran before
+/// (`live:fold:<turn>@<row>`), counted only. Settled, the turn's worked time
+/// goes on the last part that has a work row. The live turn and history's
 /// settled turns (`history_fold`) read the same through this.
-pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Object], mut rows_of: HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn arrange_parts(
+    turn_id: &str,
+    turn: &Object,
+    settled: bool,
+    shown: &[&Object],
+    at: &dyn Fn(&Object) -> Option<i64>,
+    cuts: &[Cut],
+    mut rows_of: HashMap<String, Entry>,
+    options: &Options,
+) -> Vec<Vec<Entry>> {
+    let mut parts: Vec<Vec<&Object>> = vec![Vec::new(); cuts.len() + 1];
+    let mut part = 0;
+    for item in shown {
+        if let Some(began) = at(item) {
+            part = part.max(cuts.iter().filter(|c| c.at_ms <= began).count());
+        }
+        parts[part].push(*item);
+    }
+    let last = cuts.len();
+    let mut timed = true;
+    let mut arranged: Vec<Vec<Entry>> = Vec::with_capacity(parts.len());
+    for (index, items) in parts.iter().enumerate().rev() {
+        let key = match cuts.get(index) {
+            Some(cut) => format!("live:fold:{turn_id}{PART}{}", cut.row),
+            None => format!("live:fold:{turn_id}"),
+        };
+        // The working line goes on below the last message read while the
+        // turn runs, even before anything runs after it.
+        let working = !settled && index == last && last > 0;
+        let entries = arrange(&key, turn, settled, index == last, timed, working, items, &mut rows_of, options);
+        timed &= !entries.iter().any(|e| e.kind == Kind::Fold);
+        arranged.push(entries);
+    }
+    arranged.reverse();
+    arranged
+}
+
+/// One part of a turn's item rows: one entry per item (an entry in `rows_of`
+/// stands for its item), consecutive explore members as one, and when the
+/// turn has settled its work folded (§7.6) under `key`. `last`: the part
+/// that runs now (a running turn's Working row); `timed`: the part that
+/// shows the worked time; `working`: a Working row even with nothing folded.
+#[allow(clippy::too_many_arguments)]
+fn arrange(key: &str, turn: &Object, settled: bool, last: bool, timed: bool, working: bool, shown: &[&Object], rows_of: &mut HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
     // One entry per item, consecutive explore members as one.
     let mut entries: Vec<Entry> = Vec::new();
     let mut index = 0;
@@ -516,13 +599,15 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
             _ => 0,
         }).sum();
         let had_calls = entries.iter().any(|e| matches!(e.kind, Kind::Tool | Kind::Explore));
-        let worked_ms = if settled { int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)) } else { None };
+        let worked_ms = if settled && timed { int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)) } else { None };
         // A row when there is folded work with a time or a call, or when every call
         // failed and the time is known; never for a turn that used nothing. A
-        // running turn has one while it has folded work.
-        let has_work = !folded.is_empty() || (settled && had_calls);
-        if let Some(title) = work_title(!settled, worked_ms, calls).filter(|_| has_work) {
-            let key = format!("live:fold:{turn_id}");
+        // running turn has one while it has folded work. What ran before a
+        // message the running turn read is counted, not timed: it is not Working.
+        let running = !settled && last;
+        let has_work = !folded.is_empty() || (settled && had_calls) || (working && options.fold_running);
+        if let Some(title) = work_title(running, worked_ms, calls).filter(|_| has_work) {
+            let key = key.to_owned();
             let open = options.expanded.contains(&key) && !folded.is_empty() && !(settled && options.hide_settled);
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
@@ -530,7 +615,7 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
                 started_at_ms: folded.iter().filter_map(|i| entries[*i].started_at_ms).min(),
                 key,
                 kind: Kind::Fold,
-                status: if settled { text(turn, "status").to_owned() } else { "running".to_owned() },
+                status: if settled { text(turn, "status").to_owned() } else if running { "running".to_owned() } else { "completed".to_owned() },
                 title,
                 expandable: !folded.is_empty(),
                 expanded: open,
