@@ -43,7 +43,7 @@ use crate::fleet::Member;
 use crate::wire;
 
 /// The file of the index, in the Host's data folder.
-pub const FILE: &str = "search.db";
+pub const SEARCH_DB: &str = "search.db";
 /// How many rows one read of an agent asks for.
 const PAGE: usize = 200;
 /// The least time between two reads of one agent's changes: a reply that grows is told a few

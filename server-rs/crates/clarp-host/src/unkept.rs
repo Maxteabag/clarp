@@ -468,7 +468,9 @@ pub(crate) mod at_the_port {
                 ),
                 controller_actions: Arc::default(),
                 connector: Arc::new(crate::connector::Connector::told(&config)),
-                search: Arc::new(crate::search::Desk::new(self.dir.join(crate::search::FILE))),
+                search: Arc::new(crate::search::Desk::new(
+                    self.dir.join(crate::search::SEARCH_DB),
+                )),
                 ears: Arc::new(crate::heard::Ears::new(&config, &fleet).await.unwrap()),
                 seats: Arc::new(crate::seats::Desk::new("", false)),
                 faces: Arc::new(crate::faces::Faces::new(None)),

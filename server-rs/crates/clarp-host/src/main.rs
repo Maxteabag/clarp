@@ -448,7 +448,7 @@ async fn serve(config: Config) -> Result<(), String> {
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
         search: Arc::new(clarp_host::search::Desk::new(
-            config.data_dir.join(clarp_host::search::FILE),
+            config.data_dir.join(clarp_host::search::SEARCH_DB),
         )),
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
