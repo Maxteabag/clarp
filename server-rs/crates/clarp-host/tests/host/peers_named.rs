@@ -19,14 +19,14 @@ fn a_host_started_without_a_peers_file_has_no_peers_where_the_installed_file_lie
     let kept = std::fs::read(&installed).unwrap();
 
     let unnamed = place.start();
-    assert!(
+    // It says so at its start, after the line that says where it listens.
+    wait_for("the Host to say it has no peers", || {
         unnamed
             .heard
             .lock()
             .unwrap()
-            .contains("started without --peers: this Host has no peers"),
-        "it says so at its start"
-    );
+            .contains("started without --peers: this Host has no peers")
+    });
     assert_eq!(unnamed.get("/peers"), json!([]));
     assert_eq!(
         unnamed.get("/peers/snapshot")["peers"],
