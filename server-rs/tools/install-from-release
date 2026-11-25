@@ -47,6 +47,7 @@ main() {
         say "The Clarp Host's builds need glibc, and this system's C library is another one (musl, as on Alpine)."
         exit 1
     fi
+    # host-release.yml fails a build whose binaries need more than this.
     if [ "$(printf '%s\n' 2.34 "$glibc" | sort -V | head -1)" != 2.34 ]; then
         say "The Clarp Host's builds need glibc 2.34 or newer, and this system has $glibc."
         exit 1

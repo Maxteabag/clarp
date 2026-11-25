@@ -72,6 +72,17 @@ jobs:
       - name: Build
         working-directory: server-rs
         run: cargo build --release --locked -p clarp-host -p clarp-shim
+      - name: The binaries need no glibc newer than the installer promises
+        # install-from-release refuses a glibc older than 2.34; a newer runner or dependency that
+        # raised what the binaries need would make that promise false, so the build stops here.
+        run: |
+          needs=$(objdump -T server-rs/target/release/clarp-host server-rs/target/release/clarp-shim |
+            grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -1)
+          echo "the binaries need glibc $needs"
+          if [ "$(printf '%s\n' 2.34 "$needs" | sort -V | tail -1)" != 2.34 ]; then
+            echo "they need glibc $needs, newer than the 2.34 install-from-release checks for" >&2
+            exit 1
+          fi
       - name: Package
         run: |
           dir="clarp-host-${{ matrix.arch }}-linux"
