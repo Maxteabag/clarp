@@ -905,7 +905,8 @@ the first words as an answer too. Each message the turn answers keeps
 its answer, also one given before a follow-up was read into the turn; two replies with no work
 between them are both answers. When the turn ends (settles; a turn a follow-up replaced has
 none), what came after its last answer is settled: its newest words enter as the turn's last
-anchor, also when work followed them (a turn that ended on words along the way shows those),
+anchor, also when work followed them (a turn that ended on words along the way shows those, with
+`phase` `final`: the answer of its turn, as the live turn showed it at its end),
 else its last note or user prompt; if nothing after the last answer was said, the last answer
 counts that work. An anchor carries `session_rows`, how many of the turn's rows since the anchor
 before it the conversation view leaves out (with the rows of a message that had no answer of its
