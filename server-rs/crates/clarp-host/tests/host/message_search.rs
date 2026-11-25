@@ -285,3 +285,79 @@ fn an_agent_finds_what_its_turn_may_read_of_log_and_no_more() {
     let adas = tool_search(&host, &place, Some(&ada_turn), false, "customer");
     assert_eq!(sessions_of(&adas), sorted, "{adas}");
 }
+
+/// The agent's row in the snapshot.
+fn row_of(host: &Host, session: &str) -> Value {
+    host.get("/agents/snapshot")["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session)
+        .cloned()
+        .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
+}
+
+/// Throws the index away while the Host is down: the next Host reads every agent anew.
+fn without_index(place: &Place) {
+    for name in ["search.db", "search.db-wal", "search.db-shm"] {
+        let _ = std::fs::remove_file(place.root.join("data").join(name));
+    }
+}
+
+#[test]
+fn an_agent_whose_queue_a_stop_holds_is_read_and_partial_ends() {
+    let place = Place::new("message-search-held");
+    let host = place.start();
+    let ada = host.new_agent("Ada");
+    host.send(&ada, "Kites over Lista", "h-1");
+    wait_for("Ada's answer", || host.state(&ada) == "done");
+    host.send(&ada, "sleep 60", "h-2");
+    wait_for("the long turn", || host.state(&ada) == "thinking");
+    let queued = host.post(
+        "/send",
+        json!({ "session": ada, "text": "later", "client_msg_id": "h-3",
+                "queue_if_busy": true, "origin": "automation" }),
+    );
+    assert_eq!(queued["queued"], true, "{queued}");
+    let stopped = host.post("/stop", json!({ "session": ada }));
+    assert_eq!(stopped["queue_paused"], true, "{stopped}");
+    wait_for("the stop", || host.state(&ada) == "interrupted");
+    host.kill();
+    without_index(&place);
+
+    // A Host with no index, and an agent that rests with a held queue that may never run.
+    let host = place.start();
+    let row = row_of(&host, &ada);
+    assert_eq!(row["queue_paused"], true, "{row}");
+    assert!(row["queued_turn_count"].as_u64().unwrap() >= 1, "{row}");
+    assert_eq!(row["busy"], false, "{row}");
+    assert_eq!(search(&host, "q=kites")["partial"], true);
+    let hits = found(&host, "q=kites", 2);
+    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
+    // Read while its queue was still held, and nothing of the held work ran for it.
+    assert_eq!(row_of(&host, &ada)["queue_paused"], true);
+}
+
+#[test]
+fn an_agent_that_works_on_is_read_at_the_slow_rate_and_partial_ends() {
+    let place = Place::new("message-search-busy");
+    // The ten minutes and the minute of a live Host, shortened.
+    let world = [("CLARP_SEARCH_BUSY_MS", "2000"), ("CLARP_SEARCH_SLOW_MS", "1000")];
+    let host = place.start_in("", &[], &world);
+    let ada = host.new_agent("Ada");
+    host.send(&ada, "Comets over Bergen", "w-1");
+    wait_for("Ada's answer", || host.state(&ada) == "done");
+    host.send(&ada, "sleep 120", "w-2");
+    wait_for("the long turn", || host.state(&ada) == "thinking");
+    host.kill();
+    without_index(&place);
+
+    // The next Host takes the turn up again: the agent works the whole time.
+    let host = place.start_in("", &[], &world);
+    wait_for("the turn taken up", || row_of(&host, &ada)["busy"] == true);
+    assert_eq!(search(&host, "q=comets")["partial"], true);
+    let hits = found(&host, "q=comets", 2);
+    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
+    let row = row_of(&host, &ada);
+    assert_eq!(row["busy"], true, "read while it worked: {row}");
+}

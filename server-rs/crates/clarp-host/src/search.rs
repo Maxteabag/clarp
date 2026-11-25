@@ -11,10 +11,14 @@
 //! text, the same view, the same beginning.
 //!
 //! History from before is read in the background once the Host is up: one page at a time, at
-//! most one every [`PACE`], and of an agent only while it has no turn running and nothing
-//! waiting, so a working agent's thread is never kept from its work and the disk never sees a
-//! burst (on 25 Nov 2026 a laptop's evening stalls were filesystem-wide fsyncs). A search
-//! meanwhile answers what is indexed and says `partial`. Where each agent stands is kept with
+//! most one every [`PACE`], and of an agent while it has no turn running and nothing waiting
+//! that could run (a queue a Stop holds runs nothing), so a working agent's thread is kept
+//! from its work as little as can be and the disk never sees a burst (on 25 Nov 2026 a
+//! laptop's evening stalls were filesystem-wide fsyncs). An agent that works on and on (a long
+//! turn, or turns back to back) is read all the same once it has worked [`BUSY_AFTER`], one
+//! page a minute ([`SLOW_EVERY`]), less than an app scrolling its chat; so `partial` ends. On
+//! 26 Nov 2026 it never did on a laptop: five agents whose queue a Stop held never counted as
+//! resting. A search meanwhile answers what is indexed and says `partial`. Where each agent stands is kept with
 //! its rows, so a restart resumes; an index found damaged is thrown away and read anew.
 //!
 //! Who may read what is decided when a search is made, not when a row is kept: only agents in
@@ -61,6 +65,13 @@ const AFTER_START: Duration = Duration::from_secs(5);
 const LIMIT: usize = 20;
 /// How many searches read at once.
 const READERS: usize = 4;
+/// How long an agent with history to read may work before it is read while it works.
+const BUSY_AFTER: Duration = Duration::from_secs(10 * 60);
+/// How often an agent that works is read then: one page a minute.
+const SLOW_EVERY: Duration = Duration::from_secs(60);
+/// A page read slower than this skips the agent's next minute: a slow disk never adds to a
+/// working agent's held time.
+const SLOW_READ: Duration = Duration::from_millis(500);
 
 // ---- the index's own thread ------------------------------------------------------------------
 
@@ -288,6 +299,33 @@ struct Indexer {
     roster_changed: bool,
     /// When the last page of history was read.
     paced_from: Option<Instant>,
+    /// When each agent with history to read was first found working.
+    busy_since: HashMap<String, Instant>,
+    /// When each working agent's last page was read, or its minute skipped.
+    slow_at: HashMap<String, Instant>,
+    /// How long each agent's last page of history took to read.
+    took: HashMap<String, Duration>,
+    /// [`BUSY_AFTER`] and [`SLOW_EVERY`], or what the Host's tests set.
+    busy_after: Duration,
+    slow_every: Duration,
+}
+
+/// What history is to be read: an agent's page now (and whether it works, so is read at the
+/// slow rate), and when one is next due otherwise.
+#[derive(Default)]
+struct Next {
+    now: Option<(String, bool)>,
+    later: Option<Instant>,
+}
+
+/// A wait the Host's tests shorten (`CLARP_SEARCH_BUSY_MS`, `CLARP_SEARCH_SLOW_MS`); no owner's
+/// setting.
+fn waited(name: &str, otherwise: Duration) -> Duration {
+    std::env::var(name)
+        .ok()
+        .and_then(|said| said.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map_or(otherwise, Duration::from_millis)
 }
 
 impl Indexer {
@@ -302,6 +340,11 @@ impl Indexer {
             stalled: HashSet::new(),
             roster_changed: true,
             paced_from: None,
+            busy_since: HashMap::new(),
+            slow_at: HashMap::new(),
+            took: HashMap::new(),
+            busy_after: waited("CLARP_SEARCH_BUSY_MS", BUSY_AFTER),
+            slow_every: waited("CLARP_SEARCH_SLOW_MS", SLOW_EVERY),
         }
     }
 
@@ -344,10 +387,17 @@ impl Indexer {
             }
             // History, one page, when the last is far enough behind.
             let paced = self.paced_from.map(|from| from + PACE);
-            if !self.reread
-                && paced.is_none_or(|at| at <= now)
-                && let Some(agent_id) = self.next_history()
+            let next = if self.reread {
+                Next::default()
+            } else {
+                self.next_history(now)
+            };
+            if paced.is_none_or(|at| at <= now)
+                && let Some((agent_id, working)) = next.now.clone()
             {
+                if working {
+                    self.slow_at.insert(agent_id.clone(), now);
+                }
                 self.paced_from = Some(Instant::now());
                 self.history(&agent_id).await;
                 continue;
@@ -357,9 +407,10 @@ impl Indexer {
                 .due
                 .values()
                 .copied()
-                // The pace, where an agent that rests has history to read; one that works
-                // is passed over until its turn ends, which the roster says.
-                .chain(paced.filter(|_| self.next_history().is_some()))
+                // The pace, where history is to be read now; one that works and is not due
+                // yet is read when it rests (its turn's end wakes this) or at its minute.
+                .chain(paced.filter(|_| next.now.is_some()))
+                .chain(next.later)
                 .chain(self.reread.then(|| now + PACE * 4))
                 .min();
             let heard = match wake {
@@ -386,6 +437,9 @@ impl Indexer {
             self.marks.clear();
             self.unread.clear();
             self.stalled.clear();
+            self.busy_since.clear();
+            self.slow_at.clear();
+            self.took.clear();
             self.reread = true;
         } else {
             eprintln!("clarp-host: search index: {why}");
@@ -430,31 +484,63 @@ impl Indexer {
             .cloned()
     }
 
-    /// The next agent whose history is read: one the index holds nothing of first, and only
-    /// one that rests now (no turn running, nothing waiting). A busy one is passed over.
-    fn next_history(&self) -> Option<String> {
+    /// The next agent whose history is read: one the index holds nothing of first. One that
+    /// rests now (no turn running, nothing that could run waiting) at once; one that works only
+    /// once it has worked [`BUSY_AFTER`], and then once each [`SLOW_EVERY`], its minute skipped
+    /// where its last page took longer than [`SLOW_READ`] to read.
+    fn next_history(&mut self, now: Instant) -> Next {
         let directory = self.app.fleet.directory();
-        let rests = |agent_id: &str| {
-            directory
-                .members
-                .iter()
-                .chain(&directory.janitors)
-                .find(|member| member.record.agent_id == agent_id)
-                .is_none_or(|member| resting(member))
-        };
-        let unread = self
+        let members: HashMap<&str, &Arc<Member>> = directory
+            .members
+            .iter()
+            .chain(&directory.janitors)
+            .map(|member| (member.record.agent_id.as_str(), member))
+            .collect();
+        let older = self
+            .marks
+            .iter()
+            .filter(|(_, mark)| !mark.complete)
+            .map(|(agent, _)| agent);
+        let wanted: Vec<String> = self
             .unread
             .iter()
-            .find(|agent| !self.stalled.contains(*agent) && rests(agent));
-        let older = || {
-            self.marks
-                .iter()
-                .find(|(agent, mark)| {
-                    !mark.complete && !self.stalled.contains(*agent) && rests(agent)
-                })
-                .map(|(agent, _)| agent)
-        };
-        unread.or_else(older).cloned()
+            .chain(older)
+            .filter(|agent| !self.stalled.contains(*agent))
+            .cloned()
+            .collect();
+        let mut next = Next::default();
+        let mut rests = None;
+        let mut works = None;
+        for agent in wanted {
+            // One that is gone is taken out of the index by the read.
+            let Some(member) = members.get(agent.as_str()) else {
+                rests.get_or_insert(agent);
+                continue;
+            };
+            if resting(member) {
+                self.busy_since.remove(&agent);
+                rests.get_or_insert(agent);
+                continue;
+            }
+            let since = *self.busy_since.entry(agent.clone()).or_insert(now);
+            let mut due = since + self.busy_after;
+            if let Some(last) = self.slow_at.get(&agent) {
+                due = due.max(*last + self.slow_every);
+            }
+            if due <= now && self.took.get(&agent).is_some_and(|took| *took > SLOW_READ) {
+                // Its last page was slow: this minute is passed over.
+                self.took.remove(&agent);
+                self.slow_at.insert(agent.clone(), now);
+                due = now + self.slow_every;
+            }
+            if due <= now {
+                works.get_or_insert(agent);
+            } else {
+                next.later = Some(next.later.map_or(due, |later| later.min(due)));
+            }
+        }
+        next.now = rests.map(|agent| (agent, false)).or(works.map(|agent| (agent, true)));
+        next
     }
 
     /// Looks the index over against the fleet: an agent that is gone or moved away leaves it,
@@ -503,6 +589,7 @@ impl Indexer {
                 self.due.remove(agent_id);
                 self.read_at.remove(agent_id);
                 self.stalled.remove(agent_id);
+                self.done_with_history(agent_id);
                 true
             }
             Err(why) => {
@@ -566,6 +653,7 @@ impl Indexer {
         };
         let which = which(&member);
         let mark = self.marks.get(agent_id).cloned();
+        let started = Instant::now();
         let (page, mark) = match mark {
             None => match member.agent.tail(PAGE, which).await {
                 Ok(page) => {
@@ -595,6 +683,7 @@ impl Indexer {
                 }
             }
         };
+        self.took.insert(agent_id.to_string(), started.elapsed());
         let older_than = page
             .entries
             .first()
@@ -605,9 +694,20 @@ impl Indexer {
             older_than,
             ..mark
         };
+        let complete = next.complete;
         if self.keep_page(agent_id, &page, next).await {
             self.unread.remove(agent_id);
+            if complete {
+                self.done_with_history(agent_id);
+            }
         }
+    }
+
+    /// An agent whose history is all read, or gone: nothing of it is waited for.
+    fn done_with_history(&mut self, agent_id: &str) {
+        self.busy_since.remove(agent_id);
+        self.slow_at.remove(agent_id);
+        self.took.remove(agent_id);
     }
 
     /// History that could not be read is tried again after the agent's next change.
@@ -634,11 +734,12 @@ impl Indexer {
     }
 }
 
-/// Whether an agent rests: no turn of it runs and nothing of it waits. Only then is its
-/// history read, so its thread serves its work first.
+/// Whether an agent rests: no turn of it runs, and nothing waits that could run. What a Stop
+/// holds (its queue paused) runs nothing until someone speaks to the agent again, which may be
+/// never: such an agent rests.
 fn resting(member: &Member) -> bool {
     let view = member.agent.view();
-    view.status.live.is_none() && view.status.waiting.is_empty()
+    view.status.live.is_none() && (view.status.waiting.is_empty() || view.status.paused)
 }
 
 /// The rows an agent's chat shows, as `/log` reads them for an app.
