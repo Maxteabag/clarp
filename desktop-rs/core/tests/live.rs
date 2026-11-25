@@ -130,6 +130,25 @@ fn events_during_an_outstanding_fetch_apply_above_the_snapshot_once_it_lands() {
 }
 
 #[test]
+fn a_snapshot_older_than_the_events_applied_does_not_put_the_view_back() {
+    // Two fetches crossed: the first answer lands, events apply, then the
+    // second answer, taken before them, arrives (#847).
+    let mut view = LiveView::new();
+    let snapshot = |lseq: i64| json!({"epoch": "e", "lseq": lseq, "activity": {"state": "idle"}, "turn": null, "items": []});
+    view.expect_snapshot();
+    view.apply_snapshot(snapshot(0).as_object().unwrap());
+    let event = json!({"type": "live", "conv": "c", "epoch": "e", "lseq": 1, "ops": [{"op": "status", "conv": "c", "activity": {"state": "thinking"}}]});
+    view.apply_event(event.as_object().unwrap());
+    assert!(view.apply_snapshot(snapshot(0).as_object().unwrap()).is_empty());
+    assert_eq!(view.lseq(), Some(1));
+    assert_eq!(view.activity()["state"], "thinking");
+    // A new epoch's snapshot replaces the view whatever its lseq.
+    let restarted = json!({"epoch": "f", "lseq": 0, "activity": {"state": "idle"}, "turn": null, "items": []});
+    view.apply_snapshot(restarted.as_object().unwrap());
+    assert_eq!((view.epoch(), view.lseq()), (Some("f"), Some(0)));
+}
+
+#[test]
 fn nothing_held_asks_for_the_snapshot_first() {
     let mut view = LiveView::new();
     let event = json!({"type": "live", "conv": "c", "epoch": "e", "lseq": 7, "ops": [{"op": "status", "conv": "c", "activity": {"state": "thinking"}}]});
