@@ -169,8 +169,10 @@ of them is not done.
       writes its id, so the file may still name the lane before it. A handle on that process
       (`pidfd_open`, through `rustix`, as the workspace has no `unsafe`) is opened, the holder is
       looked at again, and the lane is signalled through the handle (`pidfd_send_signal`), so a
-      process whose id came free and was given again is never reached. Only a kernel without
-      process handles falls back to the id, right after that second look.
+      process whose id came free and was given again is never signalled. The lane's scope is
+      read by its id, so the handle is looked at after that read too: a process that ended
+      meanwhile is left, as its id may name a process of another lane's scope. Only a kernel
+      without process handles falls back to the id alone, right after the second look.
   - **The conversation's lock** (`clarp_shim::lane::thread_lock`) is the rule's other half.
     - A per-turn process holds it shared, without waiting, for its whole life (`flock --shared
       --nonblock`, `lane::codex::guard_exec`). Where a lane holds it, the per-turn process fails
@@ -197,9 +199,9 @@ of them is not done.
       (above), so the terminal never holds the request and the agent's lease on a lane's exit.
       While a turn of the agent may run its tool (it starts or runs, and does not wait for a
       terminal already open), or a lane refuses to leave because it runs work of its own, the
-      terminal is refused: 409 with words that say to stop the turn or wait for its end, in
-      plain text like the route's other refusals, and the code `agent_turn_running` in the
-      header `X-Clarp-Code` (issue #770). This holds for every tool's terminal, since it is
+      terminal is refused: 409 with `{"error": <words that say to stop the turn or wait for
+      its end>, "code": "agent_turn_running"}`, and the code again in the header
+      `X-Clarp-Code` (issue #770). This holds for every tool's terminal, since it is
       asked of the agent's turns and of every tool's lane. A turn between two attempts has no
       tool running: the terminal opens, and the next attempt waits for it.
 - **A turn starts at most once** (D16). A lane makes the claim's spool before it hands the tool

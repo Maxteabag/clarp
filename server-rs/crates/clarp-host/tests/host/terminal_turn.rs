@@ -44,20 +44,23 @@ fn an_agents_terminal_is_refused_while_a_turn_of_it_runs_and_opens_after() {
     host.send(&agent, "hold on", "m1");
     wait_for("the turn's tool to start", || started.exists());
     let refused = asked_for_a_socket(&host, ADMIN, &path);
-    // In the route's own form, as its other refusals: the words as plain text, which the apps
-    // show as they come, and the stable code in a header for an app that acts on it.
+    // The words and the stable code in the body, which the apps read a refused terminal's
+    // sentence from, and the code again in a header.
     assert_eq!(
         (
             refused.status,
-            refused.text().as_str(),
+            serde_json::from_slice::<Value>(&refused.body).unwrap(),
             refused.header("content-type"),
             refused.header("x-clarp-code"),
         ),
         (
             409,
-            "A turn of this agent is running. Stop it or wait until it ends, then open the \
-             terminal.",
-            "text/plain",
+            json!({
+                "error": "A turn of this agent is running. Stop it or wait until it ends, \
+                          then open the terminal.",
+                "code": "agent_turn_running",
+            }),
+            "application/json",
             "agent_turn_running",
         )
     );

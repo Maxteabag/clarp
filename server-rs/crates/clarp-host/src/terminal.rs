@@ -64,15 +64,18 @@ const LOOKED_AT_ONLY: &str = "Janitors are inspection-only. Use their Pause or C
 /// turn's tool would both write one conversation (issue #770).
 pub(crate) const TURN_RUNS: &str =
     "A turn of this agent is running. Stop it or wait until it ends, then open the terminal.";
-/// The stable code of that refusal, in the `X-Clarp-Code` header beside the words, for an app
-/// that acts on it rather than showing the words.
+/// The stable code of that refusal, in its body beside the words and in the `X-Clarp-Code`
+/// header, for an app that acts on it rather than showing the words.
 const TURN_RUNNING: &str = "agent_turn_running";
 
-/// The refusal of an agent's terminal while a turn of the agent runs (issue #770): 409 and the
-/// words in plain text, as the route's other refusals, which the apps show as they come; the
-/// code in a header, so no app has to read a new body.
+/// The refusal of an agent's terminal while a turn of the agent runs (issue #770): 409 with
+/// `{"error": <words>, "code": "agent_turn_running"}`, the body apps already read a refused
+/// terminal's sentence from (the moved refusal's form), and the code again in a header, which an
+/// app that cannot read a failed upgrade's body can still see.
 fn turn_running() -> Response {
-    let mut refused = line::refused(StatusCode::CONFLICT, TURN_RUNS);
+    let body = serde_json::json!({ "error": TURN_RUNS, "code": TURN_RUNNING });
+    let refusal = ApiError::custom(StatusCode::CONFLICT, TURN_RUNS, body);
+    let mut refused = refusal.into_response();
     refused.headers_mut().insert(
         axum::http::HeaderName::from_static("x-clarp-code"),
         axum::http::HeaderValue::from_static(TURN_RUNNING),
