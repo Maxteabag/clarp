@@ -1295,6 +1295,24 @@ response's `queue_paused` is the queue as the Stop left it, and `GET /turn-queue
 says the same afterwards. The stopped turn's `interrupted` state is told once on
 the event stream (one `agent-state` event per Stop).
 
+**The Stop in one sentence** (Rust Host contract 184, feature `stop_receipt_text`, issue
+811). The response adds `text`, one sentence for people built from what the Stop left, read
+in the same step as `queue_paused`:
+
+- nothing waits: `"Stopped. You can keep chatting."`;
+- the queue holds messages for the user: `"Stopped. 1 message waits; send one to go on."`, or
+  `"Stopped. N messages wait; send one to go on."`;
+- the user's own waiting messages go on by themselves: `"Stopped. The message that waits goes
+  on next."`, or `"Stopped. The N messages that wait go on next."`.
+
+N counts the waiting messages an app lists (`GET /turn-queue`). Every app that learns of the
+Stop without having sent it gets the same sentence as `stop_text`: on the agent's `activity`
+(the snapshot's row and the `agent-activity` event) for as long as the Stop is its latest
+state, counted as the queue is when the activity is told, and in the `detail` of the Stop's
+`agent-state` event. Show this line in place of the fields it is built from; `queue_paused`,
+`goals_paused`, `stop_actor`, `stop_actor_verified` and `stop_reason` stay for apps that act on
+them. A Host without the feature sends neither field.
+
 Related: `GET /turn-queue?session=` lists queued turns; `POST /turn-queue/<id>/send`
 releases one. Each item is `{id, text, enqueued_at, synthesize_audio, client_msg_id,
 sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,

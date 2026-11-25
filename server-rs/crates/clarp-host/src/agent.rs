@@ -114,6 +114,8 @@ pub struct Stopped {
     /// Whether the agent's queue is held as the Stop left it, read in the same step. A Stop
     /// of the conversation fork's turn leaves the agent's own turn and its queue as they were.
     pub paused: bool,
+    /// The messages that still wait, as the apps list them, read in the same step.
+    pub waiting: usize,
 }
 
 /// Caller identity established by the Host before the goal command reaches its owner.
@@ -3530,10 +3532,12 @@ impl Worker {
                 ..
             } if actor.fork_runs() => {
                 let (_, out) = actor.fork_halt();
+                let queue = actor.queue_state();
                 let stopped = Stopped {
                     told: 1,
                     goals_paused: 0,
-                    paused: actor.queue_state().paused,
+                    paused: queue.paused,
+                    waiting: queue.listed,
                 };
                 answered(Ok((stopped, out)), answer)?
             }
@@ -3572,12 +3576,13 @@ impl Worker {
                     }
                     Ok(((told, paused.len()), out))
                 });
-                let paused = actor.queue_state().paused;
+                let queue = actor.queue_state();
                 let stopped = stopped.map(|((told, goals_paused), out)| {
                     let stopped = Stopped {
                         told,
                         goals_paused,
-                        paused,
+                        paused: queue.paused,
+                        waiting: queue.listed,
                     };
                     (stopped, out)
                 });

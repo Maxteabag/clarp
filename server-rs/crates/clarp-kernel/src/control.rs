@@ -18,6 +18,21 @@ use crate::python;
 pub const USER: &str = "user";
 /// What a state left by a Stop says it came from.
 pub const STOPPED: &str = "user_stop";
+/// The stop receipt's sentence for people (issue 811, feature `stop_receipt_text`): what every
+/// app shows of a Stop, the one that pressed it and every other, in place of the fields it is
+/// built from. `waiting`: the messages that still wait, as the apps list them; `held`: whether
+/// they wait for the user (the queue is paused) or go on by themselves (a user's Stop lets the
+/// user's own waiting messages run).
+pub fn stop_text(waiting: usize, held: bool) -> String {
+    match (waiting, held) {
+        (0, _) => "Stopped. You can keep chatting.".to_string(),
+        (1, true) => "Stopped. 1 message waits; send one to go on.".to_string(),
+        (n, true) => format!("Stopped. {n} messages wait; send one to go on."),
+        (1, false) => "Stopped. The message that waits goes on next.".to_string(),
+        (n, false) => format!("Stopped. The {n} messages that wait go on next."),
+    }
+}
+
 /// What a note left by a repair says it came from.
 pub const REPAIRED: &str = "slot_repair";
 /// How many signs of a claimed actor, and of a reason, are kept.
@@ -165,4 +180,31 @@ pub fn provenance(detail: &Map<String, Value>) -> Map<String, Value> {
         .iter()
         .filter_map(|key| Some(((*key).to_string(), detail.get(*key)?.clone())));
     kept.collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_is_said_in_one_sentence_that_counts_what_waits_and_says_what_goes_on() {
+        assert_eq!(stop_text(0, true), "Stopped. You can keep chatting.");
+        assert_eq!(stop_text(0, false), "Stopped. You can keep chatting.");
+        assert_eq!(
+            stop_text(1, true),
+            "Stopped. 1 message waits; send one to go on."
+        );
+        assert_eq!(
+            stop_text(2, true),
+            "Stopped. 2 messages wait; send one to go on."
+        );
+        assert_eq!(
+            stop_text(1, false),
+            "Stopped. The message that waits goes on next."
+        );
+        assert_eq!(
+            stop_text(3, false),
+            "Stopped. The 3 messages that wait go on next."
+        );
+    }
 }

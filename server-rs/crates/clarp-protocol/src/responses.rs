@@ -44,6 +44,11 @@ pub struct StopResponse {
     pub queue_paused: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goals_paused: Option<u64>,
+    /// The Stop in one sentence for people, built from what it left (feature
+    /// `stop_receipt_text`, Rust Host contract 184): "Stopped. You can keep chatting.", or how
+    /// many messages wait and what makes them go on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 /// The answer to `POST /select`.

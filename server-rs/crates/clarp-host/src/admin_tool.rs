@@ -635,7 +635,7 @@ async fn control(app: &App, call: &ToolCall, command: &str, args: &[String]) -> 
                         "stop_actor": stopped.stop_actor,
                         "stop_actor_verified": stopped.stop_actor_verified,
                         "stop_reason": stopped.stop_reason, "goals_paused": stopped.goals_paused,
-                        "queue_paused": stopped.queue_paused,
+                        "queue_paused": stopped.queue_paused, "text": stopped.text,
                     })
                 }),
             Err(refused) => Err(refused),

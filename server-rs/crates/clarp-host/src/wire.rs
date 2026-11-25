@@ -528,7 +528,17 @@ pub fn state(
             }
             detail
         }
-        (None, Some(last)) => ending_detail(last, backend, &record.model, ended),
+        (None, Some(last)) => {
+            let mut detail = ending_detail(last, backend, &record.model, ended);
+            // The Stop in the receipt's one sentence, as every app shows it (issue 811).
+            if detail["source"] == control::STOPPED {
+                detail["stop_text"] = json!(control::stop_text(
+                    status.listed_queue_depth,
+                    status.paused
+                ));
+            }
+            detail
+        }
         (None, None) => json!({ "session": record.session }),
     };
     json!({
@@ -748,6 +758,14 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         for (key, value) in control::provenance(&marked) {
             activity[key] = value;
         }
+    }
+    // A Stop that is the agent's latest state is told in the receipt's one sentence too, so
+    // that every app shows the same line, not only the one that pressed it (issue 811).
+    if activity.get("stop_actor").is_some() {
+        activity["stop_text"] = json!(control::stop_text(
+            status.listed_queue_depth,
+            status.paused
+        ));
     }
     activity
 }
