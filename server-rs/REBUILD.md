@@ -103,9 +103,10 @@ without it the installed release runs. Nothing is built. `turn-timings report <r
 
 ## 3. Hard rules
 
-1. **Rust compiles in two places only: the XPS 15, through `server-rs/tools/build`, and GitHub Actions.** Never
-   run `cargo` on elitebook or laptopstudio, and never by hand on the XPS 15: the script is the queue that keeps it
-   to one build at a time, at lowest priority (that machine runs a Clarp Host of its own). The Google build machine
+1. **Rust compiles in two places only: the ai-swarm build VM, through `server-rs/tools/build`, and GitHub Actions.**
+   Since 25 Nov 2026 (Peter's order: all heavy work on the VM) the VM is the script's default host; never run `cargo`
+   on elitebook, laptopstudio or the XPS 15. The VM is untrusted: it gets source only, never a secret, and a release
+   that is installed comes from `buildbox-cargo clarp-release` (skill buildbox). The Google build machine
    is not used.
 2. **The live Hosts are not ours.** Never deploy, update or restart `clarp*` units. Never run code against the
    live `state.sqlite`; read it only with `sqlite3 -readonly` or `mode=ro`. A disposable Host must not be able to
@@ -252,7 +253,7 @@ server-rs/
   conformance/          the Rust Host against the Python Host on what a client sees (README.md there)
   docs/differences.md   what differs from the Python Host on purpose
   docs/reference-defects.md   what the conformance runs showed to be wrong in the Python Host
-  tools/build           the build queue: check, test, clippy, fmt on the XPS 15, one job at a time
+  tools/build           the build queue: check, test, clippy, fmt on the ai-swarm build VM (its default host)
   tools/*-vectors.py    gone: the generators left with the Python Host (#787); the fixtures they wrote stay,
                         and a fixture's 'Written by' line is its history
 ```

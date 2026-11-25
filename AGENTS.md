@@ -198,8 +198,9 @@ work goes to the iOS app, the Android app and the Rust desktop app (desktop-rs/)
 ## The Host in Rust (`server-rs/`)
 
 `server-rs/` is the rebuild of the Host in Rust (Peter's go of 14 Nov 2026). Read `server-rs/REBUILD.md` before you
-touch it: it names the lead, the rules, and who owns which crate. Its Rust compiles on the XPS 15 through
-`server-rs/tools/build` (one build at a time, Peter's word of 15 Nov 2026) and in the `Server (Rust)` workflow,
+touch it: it names the lead, the rules, and who owns which crate. Its Rust compiles on the ai-swarm build VM through
+`server-rs/tools/build` (its default host since Peter's order of 25 Nov 2026: all heavy work runs on the VM, never on
+his machines; the VM is untrusted, so it gets source only and never a secret; skill buildbox) and in the `Server (Rust)` workflow,
 which runs only when started by hand. The
 rule in the next section still holds on elitebook and laptopstudio, for `server-rs` too.
 

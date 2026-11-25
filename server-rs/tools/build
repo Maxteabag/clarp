@@ -38,8 +38,16 @@
 # again. Where the filesystem cannot clone, the first build starts cold.
 set -euo pipefail
 
-HOST="${CLARP_BUILD_HOST:-xps15}"
-JOBS="${CLARP_BUILD_JOBS:-6}"
+# 25 Nov 2026 (the owner): all heavy work runs on the ai-swarm build VM (ssh host ecit-buildbox), never on the
+# owner's machines. The VM is untrusted: it gets source only, never a secret (skill: buildbox). Its ssh login uses
+# the master that `buildbox-cargo status` opens. CLARP_BUILD_HOST still names another host when one is needed.
+HOST="${CLARP_BUILD_HOST:-ecit-buildbox}"
+if [ "$HOST" = ecit-buildbox ]; then
+    JOBS="${CLARP_BUILD_JOBS:-12}"
+    if command -v buildbox-cargo >/dev/null 2>&1; then buildbox-cargo status >/dev/null 2>&1 || true; fi
+else
+    JOBS="${CLARP_BUILD_JOBS:-6}"
+fi
 # The queue frees room (other checkouts' targets, oldest built first) below this much free space. The
 # build machine's disk is shared with other builds (Android, since 23 Nov 2026), and at 10 GiB it filled.
 floor="${CLARP_BUILD_MIN_FREE_BYTES:-25769803776}" # 24 GiB
