@@ -1563,6 +1563,49 @@ mod tests {
     }
 
     #[test]
+    fn bound_privacy_blanks_a_withheld_agents_chat_preview_as_its_row() {
+        // A chat's preview on the event stream (feature `events_chat_previews`) names its
+        // agent as its row does: a reader who may not read it gets its ids, numbers and state,
+        // and no words.
+        let bound = record("ada", "/homes/ada", "theirs");
+        let withheld = Withheld::among([&bound], &Reader::Unknown).unwrap();
+        let preview = |session: &str| {
+            let event = json!({
+                "type": "agent-roster", "kind": "preview", "agent_id": format!("id-{session}"),
+                "session": session,
+                "fields": {
+                    "conversation_id": "c1", "head_revision": 7, "last_message_id": "m7",
+                    "last_message": "secret", "busy": true, "latest_state": "tool",
+                    "latest_state_ts": 5, "status_text": "Reading secret.md",
+                    "last_activity": 5,
+                },
+            });
+            format!("data: {event}\n\n")
+        };
+        let out = String::from_utf8(withheld.frame(preview("ada").as_bytes())).unwrap();
+        assert!(out.starts_with("data: ") && !out.contains("id: "), "{out}");
+        let event: Value =
+            serde_json::from_str(out.strip_prefix("data: ").unwrap().trim_end()).unwrap();
+        assert!(!out.contains("secret"), "{out}");
+        assert_eq!(event["kind"], "preview");
+        assert_eq!(event["words_withheld"], true);
+        let fields = &event["fields"];
+        assert_eq!(fields["last_message"], "");
+        assert_eq!(fields["status_text"], "");
+        assert_eq!(
+            (&fields["conversation_id"], &fields["last_message_id"]),
+            (&json!("c1"), &json!("m7"))
+        );
+        assert_eq!(fields["head_revision"], 7);
+        assert_eq!(fields["busy"], true);
+        assert_eq!(fields["latest_state"], "tool");
+        assert_eq!(fields["latest_state_ts"], 5);
+        // A readable agent's preview goes as it is.
+        let open = preview("ben");
+        assert_eq!(withheld.frame(open.as_bytes()), open.as_bytes().to_vec());
+    }
+
+    #[test]
     fn bound_privacy_leaves_out_the_rows_a_withheld_agents_event_carries() {
         let bound = record("ada", "/homes/ada", "theirs");
         let withheld = Withheld::among([&bound], &Reader::Unknown).unwrap();

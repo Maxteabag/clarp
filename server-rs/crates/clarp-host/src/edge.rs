@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 211;
+pub const HOST_CONTRACT: u64 = 212;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -557,6 +557,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // meanwhile, and each helper above one that starts or stops is told by a `helper-state`
     // event of its own (issue 936).
     ("helper_state_below", 211),
+    // `GET /events?chat_previews=1&visible=...` sends, of every chat not both followed and on
+    // screen, an `agent-roster` of kind `preview` with its list fields at most every 5 s in
+    // place of its transcript, activity, state and status lines; `POST /events/{id}/live`
+    // sets `visible` with `live` (issues 905 and 913).
+    ("events_chat_previews", 212),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1849,18 +1854,19 @@ impl Families {
     }
 }
 
-/// An agent's row in the snapshot: who it is and what it is doing.
-pub(crate) fn agent_row(
-    directory: &Directory,
-    families: &Families,
-    member: &Member,
-    faces: &crate::faces::Faces,
-    owners: &toml::Table,
-    quota: &crate::quota::Rows,
-    forks: &crate::conversation_forks::Named,
-    at: &crate::availability::At,
-) -> Value {
-    let view = member.agent.view();
+/// How an agent's coordination is shown, as its row says it.
+struct OwnLine {
+    /// Its coordination is hidden: its newest message is the newest that is not between agents.
+    hides: bool,
+    choice: Option<clarp_kernel::hidden_coordination::Visibility>,
+    visibility: clarp_kernel::hidden_coordination::Visibility,
+}
+
+/// The head of an agent's row: what [`wire::summary`] makes of it, with its newest message as
+/// its readers may see it (hidden coordination) and its last activity by that message. The
+/// snapshot's row ([`agent_row`]) and a chat's preview ([`preview_fields`]) both start here,
+/// so the two cannot differ.
+fn own_line(directory: &Directory, member: &Member, view: &crate::agent::View) -> (Value, OwnLine) {
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
     let (global, choice) =
         crate::hidden_coordination::visibility(directory, &member.record.agent_id);
@@ -1880,6 +1886,72 @@ pub(crate) fn agent_row(
         view.ended.as_ref(),
         focused,
     );
+    if hides || view.newest_is_form_answer {
+        let at = newest.map_or(member.record.created_at_ms, |preview| {
+            preview.ts_ms.max(member.record.created_at_ms)
+        });
+        row["last_activity"] = json!(at);
+    }
+    (
+        row,
+        OwnLine {
+            hides,
+            choice,
+            visibility,
+        },
+    )
+}
+
+/// The fields of an agent's snapshot row a chat's preview carries (feature
+/// `events_chat_previews`, issues 905 and 913).
+pub(crate) const PREVIEW_FIELDS: [&str; 9] = [
+    "conversation_id",
+    "head_revision",
+    "last_message_id",
+    "last_message",
+    "busy",
+    "latest_state",
+    "latest_state_ts",
+    "status_text",
+    "last_activity",
+];
+
+/// A chat's preview: the [`PREVIEW_FIELDS`] of its agent's snapshot row, as that row has them
+/// now, made by the code that makes the row ([`own_line`], [`busy_with`]) from what the Host
+/// holds in memory. It reads no conversation and no other agent's row: only the agents this
+/// one made, as its maker's fields in an `agent-roster` event are counted.
+pub(crate) fn preview_fields(directory: &Directory, member: &Member) -> Value {
+    let view = member.agent.view();
+    let (mut row, _) = own_line(directory, member, &view);
+    let families = Families::of_parent(directory, &member.record.agent_id);
+    busy_with(&mut row, &families, member, &view);
+    let mut fields = serde_json::Map::with_capacity(PREVIEW_FIELDS.len());
+    for field in PREVIEW_FIELDS {
+        fields.insert(field.to_string(), row[field].take());
+    }
+    Value::Object(fields)
+}
+
+/// An agent's row in the snapshot: who it is and what it is doing.
+pub(crate) fn agent_row(
+    directory: &Directory,
+    families: &Families,
+    member: &Member,
+    faces: &crate::faces::Faces,
+    owners: &toml::Table,
+    quota: &crate::quota::Rows,
+    forks: &crate::conversation_forks::Named,
+    at: &crate::availability::At,
+) -> Value {
+    let view = member.agent.view();
+    let (
+        mut row,
+        OwnLine {
+            hides,
+            choice,
+            visibility,
+        },
+    ) = own_line(directory, member, &view);
     wire::mark_stall(&mut row, view.stalled_since);
     wire::mark_stall(&mut row["activity"], view.stalled_since);
     if row["live_activity"].is_object() {
@@ -1927,12 +1999,6 @@ pub(crate) fn agent_row(
             clarp_kernel::hidden_coordination::veil_activity(&mut row["activity"], &headline);
             clarp_kernel::hidden_coordination::veil_live(&mut row["live_activity"], &headline);
         }
-    }
-    if hides || view.newest_is_form_answer {
-        let at = newest.map_or(member.record.created_at_ms, |preview| {
-            preview.ts_ms.max(member.record.created_at_ms)
-        });
-        row["last_activity"] = json!(at);
     }
     // Whether its tool's account is used up, or near a limit with no other seat to take its
     // turn: advice for whoever is about to write to it.
@@ -4995,6 +5061,34 @@ struct EventsQuery {
     /// `1`: the stream says its id first, and `POST /events/{id}/live` changes what it follows
     /// (feature `events_live_change`).
     live_change: Option<String>,
+    /// `1`: of a chat not both followed and on screen the stream sends a preview in place of
+    /// its changes (feature `events_chat_previews`).
+    chat_previews: Option<String>,
+    /// The chats whose panes are on screen, as `live` names them: shown whole where followed
+    /// too (feature `events_chat_previews`).
+    visible: Option<String>,
+}
+
+/// Whether a query's option is set.
+fn opted(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1" | "true" | "yes"))
+}
+
+/// A list of sessions or agent ids in a request's body, as `live=` names them; `None` where
+/// it is not a list of texts.
+fn names_in(value: &Value) -> Option<Vec<&str>> {
+    value
+        .as_array()?
+        .iter()
+        .map(Value::as_str)
+        .collect::<Option<Vec<&str>>>()
+}
+
+/// A set of chats as a change answers and the stream says it: in order.
+fn sorted(names: HashSet<String>) -> Vec<String> {
+    let mut names: Vec<String> = names.into_iter().collect();
+    names.sort();
+    names
 }
 
 /// Whose stream it is, for a change of what it follows: a device by its id, the Host's own
@@ -5008,38 +5102,51 @@ fn stream_owner(principal: &Principal) -> String {
 }
 
 /// `POST /events/{stream_id}/live` `{"live": [...]}`: what an open stream of the caller's follows
-/// from its `live-changed` on, named as `live=` names it (feature `events_live_change`). 404 for a
-/// stream that ended or that another token opened.
+/// from its `live-changed` on, named as `live=` names it (feature `events_live_change`). On a
+/// stream that shows previews, `"visible": [...]` sets the chats on screen with it, both taking
+/// effect at the same `live-changed` (feature `events_chat_previews`). 404 for a stream that
+/// ended or that another token opened.
 async fn change_live(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
     Path(stream_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    let named = body["live"].as_array().and_then(|names| {
-        names
-            .iter()
-            .map(Value::as_str)
-            .collect::<Option<Vec<&str>>>()
-    });
-    let Some(named) = named else {
+    let Some(named) = names_in(&body["live"]) else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "live must be a list of sessions or agent ids",
         ));
     };
-    let mut live: Vec<String> = crate::live_change::followed(named).into_iter().collect();
-    live.sort();
+    let visible = match body.get("visible").filter(|value| !value.is_null()) {
+        None => None,
+        Some(value) => match names_in(value) {
+            Some(named) => Some(sorted(crate::live_change::followed(named))),
+            None => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "visible must be a list of sessions or agent ids",
+                ));
+            }
+        },
+    };
+    let live = sorted(crate::live_change::followed(named));
     match app
         .hub
         .streams
-        .change(&stream_id, &stream_owner(&principal), live)
+        .change(&stream_id, &stream_owner(&principal), live, visible)
     {
-        crate::live_change::Changed::Taken(live) => Ok(Json(json!({
-            "ok": true,
-            "stream_id": stream_id,
-            "live": live,
-        }))),
+        crate::live_change::Changed::Taken(change) => {
+            let mut answer = json!({
+                "ok": true,
+                "stream_id": stream_id,
+                "live": change.live,
+            });
+            if let Some(visible) = change.visible {
+                answer["visible"] = json!(visible);
+            }
+            Ok(Json(answer))
+        }
         crate::live_change::Changed::Unknown => {
             Err(ApiError::new(StatusCode::NOT_FOUND, "stream not found"))
         }
@@ -5170,12 +5277,19 @@ async fn events(
     let wanted: Option<HashSet<String>> = query
         .live
         .map(|live| crate::live_change::followed(live.split(',')));
+    // A stream that sends the chats it does not show whole as previews, and the chats on
+    // screen it opened with (feature `events_chat_previews`).
+    let previews = opted(query.chat_previews.as_deref()).then(|| {
+        let visible = query.visible.as_deref().unwrap_or("").split(',');
+        crate::chat_previews::Previews::new(crate::live_change::followed(visible))
+    });
     // A stream whose chats may change while it is open: its id is its first word.
-    let changing = matches!(
-        query.live_change.as_deref().map(str::trim),
-        Some("1" | "true" | "yes")
-    )
-    .then(|| app.hub.streams.open(stream_owner(&principal)));
+    let changing = opted(query.live_change.as_deref()).then(|| {
+        let visible = previews
+            .as_ref()
+            .map(|previews| sorted(previews.visible.clone()));
+        app.hub.streams.open(stream_owner(&principal), visible)
+    });
     // A chat watched live by one of the owner's apps is a chat open on his device: its agent's
     // lanes are his while the connection lasts (the owner's rule of 25 Nov 2026). Only a paired
     // device or the Host's own token, which the app on the Host's machine presents, counts;
@@ -5186,12 +5300,14 @@ async fn events(
     );
     let watched = wanted.map(|wanted| {
         let marks = if owners {
-            ViewMarks::start(&app, &wanted)
+            ViewMarks::start(&app, &on_screen(&app, &wanted, previews.as_ref()))
         } else {
             ViewMarks(None)
         };
         (wanted, app.hub.watch(), marks)
     });
+    let followed = watched.as_ref().map(|(wanted, _, _)| wanted);
+    let given = |published: &Published| replayed(previews.as_ref(), followed, published);
     let (mut first, live, last) = if compact {
         // A client that asked to be caught up compacted and resumes having missed something is
         // told so first, then given the newest of what it missed (feature `compact_resume`,
@@ -5200,7 +5316,7 @@ async fn events(
         let resumed = app.hub.resume(after);
         let gap = after.is_some() && (!resumed.missed.is_empty() || resumed.truncated);
         let first = if gap {
-            catch_up(&app, resumed.missed, resumed.truncated, &listener).await
+            catch_up(&app, resumed.missed, resumed.truncated, &listener, &given).await
         } else {
             VecDeque::from([unnumbered(&json!({ "type": "agent-roster" }))])
         };
@@ -5212,7 +5328,7 @@ async fn events(
         let (missed, live) = app.hub.subscribe(after);
         let mut first = VecDeque::with_capacity(missed.len() + 1);
         for published in &missed {
-            if !not_for(&app, published, &listener).await {
+            if given(published) && !not_for(&app, published, &listener).await {
                 first.push_back(numbered(published));
             }
         }
@@ -5237,6 +5353,7 @@ async fn events(
             last,
             HashMap::new(),
             changing,
+            previews,
         ),
         move |(
             mut first,
@@ -5246,6 +5363,7 @@ async fn events(
             mut last,
             mut read_under,
             mut changing,
+            mut previews,
         )| {
             let clock = clock.clone();
             let (app, listener) = (app.clone(), listener.clone());
@@ -5257,7 +5375,9 @@ async fn events(
                     if let Some(event) = first.pop_front() {
                         return Some((
                             Ok(event),
-                            (first, live, watched, closing, last, read_under, changing),
+                            (
+                                first, live, watched, closing, last, read_under, changing, previews,
+                            ),
                         ));
                     }
                     // The Host stopped and its last word was sent: the stream ends.
@@ -5279,6 +5399,30 @@ async fn events(
                             None => std::future::pending().await,
                         }
                     };
+                    // The chat previews that are due, each made as its agent stands now: before
+                    // anything else that waits, so that a busy Host never holds them back.
+                    if let Some(previews) = previews.as_mut()
+                        && previews
+                            .next_due()
+                            .is_some_and(|at| at <= tokio::time::Instant::now())
+                    {
+                        let directory = app.fleet.directory();
+                        let now = tokio::time::Instant::now();
+                        for preview in previews.take_due(&directory, now) {
+                            first.push_back(unnumbered(&preview));
+                        }
+                        continue;
+                    }
+                    // The next chat preview that is due, for a stream that shows them.
+                    let due_at = previews
+                        .as_ref()
+                        .and_then(crate::chat_previews::Previews::next_due);
+                    let due = async {
+                        match due_at {
+                            Some(at) => tokio::time::sleep_until(at).await,
+                            None => std::future::pending().await,
+                        }
+                    };
                     let heard = tokio::time::timeout_at(beat_at, async {
                         tokio::select! {
                             biased;
@@ -5286,6 +5430,7 @@ async fn events(
                             published = live.recv() => Heard::Event(published),
                             open = changed => Heard::Changed(open),
                             shown = shown => Heard::Shown(shown),
+                            () = due => Heard::Due,
                         }
                     })
                     .await;
@@ -5294,6 +5439,24 @@ async fn events(
                             // What this connection stands at, for a catch-up after a lag.
                             if published.id != 0 {
                                 last = last.max(published.id);
+                            }
+                            // Of a chat it previews, the change is folded into its preview; a
+                            // send's receipt goes on as well.
+                            if let Some(previews) = previews.as_mut() {
+                                let followed = watched.as_ref().map(|(wanted, _, _)| wanted);
+                                let fate = crate::chat_previews::fate(&published.json, |chat| {
+                                    previews.full(followed, chat)
+                                });
+                                match fate {
+                                    crate::chat_previews::Fate::Send => {}
+                                    crate::chat_previews::Fate::SendAndPreview(chat) => {
+                                        previews.changed(chat, tokio::time::Instant::now());
+                                    }
+                                    crate::chat_previews::Fate::Preview(chat) => {
+                                        previews.changed(chat, tokio::time::Instant::now());
+                                        continue;
+                                    }
+                                }
                             }
                             // A ring this client may not be told of is passed over.
                             if not_for(&app, &published, &listener).await {
@@ -5326,12 +5489,30 @@ async fn events(
                         }
                         Ok(Heard::Shown(Ok(shown))) => {
                             let wanted = watched.as_ref().map(|(wanted, _, _)| wanted);
-                            match wanted.and_then(|wanted| shown.for_one(wanted)) {
+                            let told = match previews.as_mut() {
+                                // A chat it previews is sent its turn ops alone; its status
+                                // goes into its preview.
+                                Some(previews) => {
+                                    let chat = crate::chat_previews::Chat {
+                                        session: shown.session.clone(),
+                                        agent_id: shown.agent_id.clone(),
+                                    };
+                                    let whole = previews.full(wanted, &chat);
+                                    if !whole {
+                                        previews.changed(chat, tokio::time::Instant::now());
+                                    }
+                                    shown.for_previews(whole)
+                                }
+                                None => wanted.and_then(|wanted| shown.for_one(wanted)),
+                            };
+                            match told {
                                 Some(json) => shown_event(json),
                                 // Not for this connection.
                                 None => continue,
                             }
                         }
+                        // A preview is due: made at the top of the loop.
+                        Ok(Heard::Due) => continue,
                         // A client that fell too far behind and asked to be caught up is not cut
                         // off: it is told so, given the newest of what it missed from the kept
                         // events, and goes on live (feature `compact_resume`). Of what turns
@@ -5340,8 +5521,18 @@ async fn events(
                             let caught = app.hub.resume(Some(last));
                             live = caught.live;
                             last = caught.head;
+                            // The app reads the snapshot after it: no preview is due for what
+                            // came before, and the next of each chat says all of it.
+                            if let Some(previews) = previews.as_mut() {
+                                previews.resynced();
+                            }
+                            let followed = watched.as_ref().map(|(wanted, _, _)| wanted);
+                            let given = |published: &Published| {
+                                replayed(previews.as_ref(), followed, published)
+                            };
                             first =
-                                catch_up(&app, caught.missed, caught.truncated, &listener).await;
+                                catch_up(&app, caught.missed, caught.truncated, &listener, &given)
+                                    .await;
                             continue;
                         }
                         Ok(Heard::Shown(Err(RecvError::Lagged(_)))) if compact => continue,
@@ -5360,14 +5551,28 @@ async fn events(
                         }
                         // From here on it follows what it was told, and says so.
                         Ok(Heard::Changed(true)) => {
-                            let named = changing
+                            let change = changing
                                 .as_mut()
-                                .and_then(|held| held.changes.borrow_and_update().clone())
+                                .and_then(|held| held.changes.borrow_and_update().clone());
+                            let named = change
+                                .as_ref()
+                                .map(|change| change.live.clone())
                                 .unwrap_or_default();
                             let wanted =
                                 crate::live_change::followed(named.iter().map(String::as_str));
+                            // Both sets take effect here together: a chat now shown whole is
+                            // previewed no more from this event on.
+                            let visible = change.and_then(|change| change.visible);
+                            if let (Some(previews), Some(visible)) =
+                                (previews.as_mut(), visible.as_ref())
+                            {
+                                let on = crate::live_change::followed(
+                                    visible.iter().map(String::as_str),
+                                );
+                                previews.moved(Some(&wanted), on);
+                            }
                             let marks = if owners {
-                                ViewMarks::start(&app, &wanted)
+                                ViewMarks::start(&app, &on_screen(&app, &wanted, previews.as_ref()))
                             } else {
                                 ViewMarks(None)
                             };
@@ -5378,7 +5583,11 @@ async fn events(
                                 }
                                 None => watched = Some((wanted, app.hub.watch(), marks)),
                             }
-                            unnumbered(&json!({ "type": "live-changed", "live": named }))
+                            let mut said = json!({ "type": "live-changed", "live": named });
+                            if let Some(visible) = visible {
+                                said["visible"] = json!(visible);
+                            }
+                            unnumbered(&said)
                         }
                         Ok(Heard::Changed(false)) => {
                             changing = None;
@@ -5393,13 +5602,57 @@ async fn events(
                     };
                     return Some((
                         Ok(event),
-                        (first, live, watched, closing, last, read_under, changing),
+                        (
+                            first, live, watched, closing, last, read_under, changing, previews,
+                        ),
                     ));
                 }
             }
         },
     );
     Sse::new(stream)
+}
+
+/// Whether a replay or a catch-up gives an event: on a stream that shows previews, not the
+/// changes of a chat it previews (feature `events_chat_previews`), of which the snapshot the app
+/// reads after it says the newest. A send's receipt is given as every other event is; no
+/// preview is made for it, since the snapshot read after the replay says the chat as it is now.
+fn replayed(
+    previews: Option<&crate::chat_previews::Previews>,
+    followed: Option<&HashSet<String>>,
+    published: &Published,
+) -> bool {
+    previews.is_none_or(|previews| {
+        !matches!(
+            crate::chat_previews::fate(&published.json, |chat| previews.full(followed, chat)),
+            crate::chat_previews::Fate::Preview(_)
+        )
+    })
+}
+
+/// The sessions of the chats a stream shows whole: those it follows, and on a stream that shows
+/// previews only those of them on screen as well (feature `events_chat_previews`). What the
+/// owner's lanes count as open on his device.
+fn on_screen(
+    app: &App,
+    followed: &HashSet<String>,
+    previews: Option<&crate::chat_previews::Previews>,
+) -> HashSet<String> {
+    let Some(previews) = previews else {
+        return followed.clone();
+    };
+    let directory = app.fleet.directory();
+    directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .map(|member| crate::chat_previews::Chat {
+            session: member.record.session.clone(),
+            agent_id: member.record.agent_id.clone(),
+        })
+        .filter(|chat| previews.full(Some(followed), chat))
+        .map(|chat| chat.session)
+        .collect()
 }
 
 /// What a connection is given of a gap: the marker, then the newest of what it missed, each with
@@ -5410,8 +5663,12 @@ async fn catch_up(
     missed: Vec<Arc<Published>>,
     truncated: bool,
     listener: &str,
+    replayed: &(dyn Fn(&Published) -> bool + Sync),
 ) -> VecDeque<SseEvent> {
     let (given, skipped) = crate::catch_up::compacted(missed);
+    // On a stream that shows previews, what a preview stands for is not given either.
+    let (given, previewed): (Vec<_>, Vec<_>) = given.into_iter().partition(|p| replayed(p));
+    let skipped = skipped + previewed.len();
     let mut out = VecDeque::with_capacity(given.len() + 2);
     out.push_back(unnumbered(&crate::catch_up::marker(truncated, skipped)));
     for published in &given {
@@ -5470,6 +5727,8 @@ enum Heard {
     Closing,
     /// What the stream follows was changed (`true`), or can no longer be (`false`).
     Changed(bool),
+    /// A chat preview is due (feature `events_chat_previews`).
+    Due,
 }
 
 #[cfg(test)]
@@ -5535,6 +5794,8 @@ mod tests {
                 rows_coordination: None,
                 compact: compact.then(|| "1".to_string()),
                 live_change: None,
+                chat_previews: None,
+                visible: None,
             };
             let answer = events(
                 State(app.clone()),

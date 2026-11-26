@@ -126,12 +126,16 @@ fn an_event_stream_is_told_the_host_is_updating_before_it_stops() {
     let place = Place::new("host-updating");
     let mut host = place.start();
     let heard = host.listen();
-    wait_for("the stream to begin", || {
-        heard
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event["type"] == "agent-roster")
+    // A stream with chat previews (feature `events_chat_previews`) is told the same last word.
+    let previewing = host.listen_at("/events?live_change=1&chat_previews=1&compact=1&gzip=0");
+    wait_for("the streams to begin", || {
+        [&heard, &previewing].iter().all(|heard| {
+            heard
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event["type"] == "agent-roster")
+        })
     });
     let before = host.get("/server-info");
     assert!(before["contract"].is_object());
@@ -156,6 +160,13 @@ fn an_event_stream_is_told_the_host_is_updating_before_it_stops() {
         "{last}"
     );
     assert!(last.get("event_id").is_none(), "{last}");
+    wait_for("the previewing stream's last word", || {
+        previewing
+            .lock()
+            .unwrap()
+            .last()
+            .is_some_and(|event| event["type"] == "host-updating")
+    });
     wait_within("the Host to exit", Duration::from_secs(7), || {
         host.process.try_wait().unwrap().is_some()
     });

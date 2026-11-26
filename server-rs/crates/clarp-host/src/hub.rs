@@ -62,6 +62,9 @@ pub struct Shown {
     /// `None` when it has nothing of that: a connection that does not follow the agent is
     /// sent nothing then.
     pub summary: Option<String>,
+    /// The same with its `turn` ops alone: what a stream that shows previews is sent of a chat
+    /// it does not show whole (feature `events_chat_previews`). `None` when it has none.
+    pub turns: Option<String>,
 }
 
 impl Shown {
@@ -73,6 +76,16 @@ impl Shown {
             Some(&self.whole)
         } else {
             self.summary.as_deref()
+        }
+    }
+
+    /// What a stream that shows previews is sent of it: all of it where it shows the chat
+    /// whole, else its `turn` ops alone; its status lines go into the chat's preview.
+    pub fn for_previews(&self, whole: bool) -> Option<&str> {
+        if whole {
+            Some(&self.whole)
+        } else {
+            self.turns.as_deref()
         }
     }
 }
@@ -451,8 +464,17 @@ impl Hub {
             .filter(|op| matches!(op["op"].as_str(), Some("status" | "turn")))
             .cloned()
             .collect();
+        let turn_ops: Vec<Value> = of_all
+            .iter()
+            .filter(|op| op["op"] == "turn")
+            .cloned()
+            .collect();
         let summary = (!of_all.is_empty()).then(|| {
             event["ops"] = Value::Array(of_all);
+            event.to_string()
+        });
+        let turns = (!turn_ops.is_empty()).then(|| {
+            event["ops"] = Value::Array(turn_ops);
             event.to_string()
         });
         let text = |name: &str| event[name].as_str().unwrap_or("").to_string();
@@ -461,6 +483,7 @@ impl Hub {
             agent_id: text("agent_id"),
             whole,
             summary,
+            turns,
         }));
     }
 
@@ -829,6 +852,11 @@ mod tests {
             .collect();
         assert_eq!(ops, ["status", "turn"]);
         assert_eq!(short["lseq"], 4, "under the same number");
+        // A stream that shows previews: whole where it shows the chat whole, else its turn ops.
+        assert_eq!(first.for_previews(true), Some(first.whole.as_str()));
+        let turns: Value = serde_json::from_str(first.for_previews(false).unwrap()).unwrap();
+        assert_eq!(turns["ops"], json!([{"op": "turn"}]));
+        assert_eq!(turns["lseq"], 4);
         assert_eq!(
             first.for_one(&wanted(&[])),
             first.for_one(&wanted(&["mike"]))
@@ -837,6 +865,7 @@ mod tests {
         let second = watching.try_recv().unwrap();
         assert!(second.for_one(&wanted(&["claire"])).is_some());
         assert_eq!(second.for_one(&wanted(&["mike"])), None);
+        assert_eq!(second.for_previews(false), None);
         assert!(watching.try_recv().is_err());
     }
 

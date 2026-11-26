@@ -81,6 +81,8 @@ mod diagnostics;
 mod end_at_answer;
 #[path = "host/enter_at_start.rs"]
 mod enter_at_start;
+#[path = "host/events_chat_previews.rs"]
+mod events_chat_previews;
 #[path = "host/events_gzip.rs"]
 mod events_gzip;
 #[path = "host/events_live_change.rs"]

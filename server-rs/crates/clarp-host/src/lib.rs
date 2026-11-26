@@ -29,6 +29,7 @@ pub mod calendar;
 pub mod calls;
 pub mod carried;
 pub mod catch_up;
+pub mod chat_previews;
 mod chat_view;
 pub(crate) mod child;
 pub mod chip;

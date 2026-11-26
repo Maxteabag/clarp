@@ -1561,6 +1561,61 @@ id and cannot be changed. A Host without the feature ignores `live_change=1`, se
 event and answers the `POST` with 404 too: send it only where `GET /server-info` lists
 `events_live_change`.
 
+#### Chat previews on the event stream (feature `events_chat_previews`, Rust Host contract 212)
+
+An app that lists many chats and shows one or two of them need not be sent every change of
+every chat. Use it where `GET /server-info` lists both `events_chat_previews` and
+`events_live_change`:
+
+1. Open `GET /events?live_change=1&chat_previews=1&live=<follows>&visible=<chats on screen>`.
+   `visible` names the conversation panes actually shown, by session or agent id (as `live`
+   does, `*` for every one); it is empty on a chat-list-only screen. A chat is **shown whole**
+   when it is both followed and on screen. Every other chat is **previewed**; an empty or absent
+   `visible` previews every chat.
+2. When the screen changes, `POST /events/{stream_id}/live` `{"live": [...], "visible": [...]}`
+   with the opener's token. Send both complete sets. The answer is
+   `{"ok": true, "stream_id", "live": [...], "visible": [...]}`, the sets as accepted (a body
+   without `visible` keeps the chats on screen the stream had; `visible` that is not a list of
+   texts gets 400). The stream then sends `{"type": "live-changed", "live": [...], "visible":
+   [...]}` where both take effect together. Changes faster than the stream takes them collapse:
+   take the newest `live-changed`.
+3. A chat shown whole is sent everything, as on a stream without previews. When a chat becomes
+   shown whole (at its `live-changed`), read its `GET /live?session=` and its `/log` delta from
+   the revision its own timeline holds, and buffer the `live` events that arrive meanwhile by
+   `lseq`, as [live-items.md](live-items.md) §3 says of a newly followed chat.
+4. Of a previewed chat the stream sends no `transcript-updated`, no `agent-activity`, no
+   `agent-state` other than a dispatch's (the one that names `client_msg_id`: a send's receipt),
+   and of its `live` events only those with `turn` ops, carrying those alone. In their place, at most
+   once every 5 seconds per chat (the first about 250 ms after a quiet chat changes), it sends
+
+   ```json
+   {"type": "agent-roster", "kind": "preview", "agent_id": "...", "session": "...",
+    "fields": {"busy": true, "latest_state": "tool", "latest_state_ts": 1795670000000,
+               "status_text": null, "last_activity": 1795670000000,
+               "conversation_id": "...", "head_revision": 41, "last_message_id": "...",
+               "last_message": "..."}}
+   ```
+
+   `fields` are those of the chat's row in `GET /agents/snapshot` at the moment it is sent, with
+   the same bounded text and hidden-coordination rule. `conversation_id`, `head_revision`,
+   `last_message_id` and `last_message` are left out when none of them moved since the chat's
+   last preview on this stream; a preview that would say nothing new is not sent. Patch the row;
+   read no `/log`. Its `head_revision` is the list's: it does not move the stored timeline's
+   cursor. Its title, persona and unread state are not in it: keep them from the roster's other
+   events and from `user-notification`.
+5. Everything else is sent for every chat as before: the roster's events (with `availability`),
+   `user-notification`, decisions and artifacts, `queue-updated`, `delivery-updated`, clips and
+   every other event.
+6. A preview has no SSE `id:` and is never replayed. The replay on opening and a catch-up after
+   a gap (`compact=1`) leave out what previews stand for (counted in the marker's `skipped`) and
+   end with the plain `agent-roster`: read the snapshot then. A send's receipt (the dispatch's
+   `agent-state` with `client_msg_id`) is replayed as every other event is. Read the history of a pane on
+   screen as usual.
+
+A reader that may not read an agent (bound privacy) is sent its preview blanked, as its row in
+the snapshot is. A stream without `chat_previews=1` is unchanged. A Host without the feature
+ignores `chat_previews=1` and `visible`, and answers the POST without `visible`.
+
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,
 `spawned` are not. `waiting` means the agent needs the user (a permission
