@@ -4908,9 +4908,12 @@ async fn events(
     }
     first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
     let clock = app.clock.clone();
+    // The stream ends the moment the Host is told to stop, not when its process is gone: its
+    // apps reconnect to the next Host about five seconds sooner (issue 880).
+    let closing = Box::pin(app.hub.closing());
     let stream = stream::unfold(
-        (first, live, watched),
-        move |(mut first, mut live, mut watched)| {
+        (first, live, watched, closing),
+        move |(mut first, mut live, mut watched, mut closing)| {
             let clock = clock.clone();
             let (app, listener) = (app.clone(), listener.clone());
             async move {
@@ -4919,7 +4922,7 @@ async fn events(
                 let beat_at = tokio::time::Instant::now() + HEARTBEAT;
                 loop {
                     if let Some(event) = first.pop_front() {
-                        return Some((Ok(event), (first, live, watched)));
+                        return Some((Ok(event), (first, live, watched, closing)));
                     }
                     // What a turn shows, for a connection that asked for it; for one that did
                     // not, a wait that never ends.
@@ -4931,6 +4934,8 @@ async fn events(
                     };
                     let heard = tokio::time::timeout_at(beat_at, async {
                         tokio::select! {
+                            biased;
+                            () = &mut closing => Heard::Closing,
                             published = live.recv() => Heard::Event(published),
                             shown = shown => Heard::Shown(shown),
                         }
@@ -4958,6 +4963,7 @@ async fn events(
                             Heard::Event(Err(RecvError::Lagged(_) | RecvError::Closed))
                             | Heard::Shown(Err(RecvError::Lagged(_) | RecvError::Closed)),
                         ) => return None,
+                        Ok(Heard::Closing) => return None,
                         Err(_) => {
                             let beat = json!({ "type": "heartbeat", "ts": clock.now_ms() });
                             SseEvent::default()
@@ -4965,7 +4971,7 @@ async fn events(
                                 .data(beat.to_string())
                         }
                     };
-                    return Some((Ok(event), (first, live, watched)));
+                    return Some((Ok(event), (first, live, watched, closing)));
                 }
             }
         },
@@ -5016,6 +5022,8 @@ impl Drop for ViewMarks {
 enum Heard {
     Event(Result<Arc<Published>, RecvError>),
     Shown(Result<Arc<crate::hub::Shown>, RecvError>),
+    /// The Host is stopping: the stream ends (issue 880).
+    Closing,
 }
 
 #[cfg(test)]

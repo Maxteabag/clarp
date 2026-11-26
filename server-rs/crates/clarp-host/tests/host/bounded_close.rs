@@ -96,28 +96,96 @@ fn a_helper_whose_parent_was_deleted_before_its_removal_came_is_abandoned_at_the
     assert_eq!(again["helper_completed_at_ms"], json!(completed));
 }
 
-#[test]
-fn an_open_event_stream_cannot_keep_the_host_from_exiting() {
+/// Asks the Host to stop as systemd does.
+fn terminate(host: &Host) {
     use nix::sys::signal::{Signal, kill};
     use nix::unistd::Pid;
-
-    let place = Place::new("shutdown-open-stream");
-    let mut host = place.start();
-    let events = host.listen();
-    wait_for("the open event stream", || {
-        events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event["type"] == "server-version")
-    });
-
-    let stopping = Instant::now();
     let pid = Pid::from_raw(i32::try_from(host.process.id()).unwrap());
     kill(pid, Signal::SIGTERM).unwrap();
+}
+
+/// Issue 880: an event stream open when the Host is told to stop ends at once, the first step
+/// of the stop, so its app reconnects to the next Host without waiting out the drain (6.8 s
+/// after a stop, against 1.9 s after a kill, before).
+#[test]
+fn an_event_stream_open_when_the_host_is_told_to_stop_ends_at_once() {
+    let place = Place::new("shutdown-ends-streams");
+    let mut host = place.start();
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .write_all(b"GET /events HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n")
+        .unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut heard = Vec::new();
+    let mut chunk = [0u8; 4096];
+    while !String::from_utf8_lossy(&heard).contains("agent-roster") {
+        let count = stream.read(&mut chunk).unwrap();
+        assert!(count > 0, "the stream ended before it began");
+        heard.extend_from_slice(&chunk[..count]);
+    }
+
+    let stopping = Instant::now();
+    terminate(&host);
+    // The stream's last chunk comes, and its connection is closed.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(4)))
+        .unwrap();
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                heard.extend_from_slice(&chunk[..count]);
+                if heard.ends_with(b"0\r\n\r\n") {
+                    break;
+                }
+            }
+            Err(error) => panic!("the stream did not end after the stop: {error}"),
+        }
+    }
+    let ended = stopping.elapsed();
+    // A few hundred milliseconds; a second allows for a loaded build machine.
+    assert!(
+        ended < Duration::from_secs(1),
+        "the stream ended {ended:?} after the stop"
+    );
+    // Nothing else holds the Host: it is gone long before the drain's five seconds.
+    wait_within("the Host to exit", Duration::from_secs(4), || {
+        host.process.try_wait().unwrap().is_some()
+    });
+    assert!(
+        !host
+            .heard
+            .lock()
+            .unwrap()
+            .contains("HTTP shutdown deadline reached")
+    );
+}
+
+/// A connection that never ends still cannot keep the Host from exiting: a request whose body
+/// never comes is waited for to the drain's deadline, and no longer.
+#[test]
+fn a_connection_that_never_ends_cannot_keep_the_host_from_exiting() {
+    let place = Place::new("shutdown-open-request");
+    let mut host = place.start();
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .write_all(
+            b"POST /send HTTP/1.1\r\nHost: test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"session\"",
+        )
+        .unwrap();
+    wait_within(
+        "the request to be at the Host",
+        Duration::from_secs(5),
+        || host.get("/server-info")["contract"].is_object(),
+    );
+
+    let stopping = Instant::now();
+    terminate(&host);
     // Allow for scheduling the signal and observing the exit on a shared build machine.
     wait_within(
-        "the Host to exit with an open stream",
+        "the Host to exit with an open request",
         Duration::from_secs(7),
         || host.process.try_wait().unwrap().is_some(),
     );
@@ -134,4 +202,5 @@ fn an_open_event_stream_cannot_keep_the_host_from_exiting() {
                 .contains("HTTP shutdown deadline reached with 1 open connections")
         },
     );
+    drop(stream);
 }

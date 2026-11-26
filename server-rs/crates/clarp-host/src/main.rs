@@ -625,7 +625,7 @@ async fn serve(config: Config) -> Result<(), String> {
     // And where the Host is reached through a relay, what a phone asks there is asked of
     // the same routes, from now on.
     clarp_host::connector::run(&app, router.clone());
-    shutdown::serve(listener, router)
+    shutdown::serve(listener, router, app.hub.clone())
         .await
         .map_err(|error| error.to_string())
 }

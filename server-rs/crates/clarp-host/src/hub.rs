@@ -85,6 +85,9 @@ pub struct Hub {
     /// The turns that ended, as their agents judged them, until the experience watcher takes
     /// them.
     turn_ends: Mutex<VecDeque<crate::experience_watch::Ended>>,
+    /// The Host is stopping: every event stream ends now, so that its apps reconnect to the
+    /// Host that follows at once rather than when this process is gone (issue 880).
+    closing: watch::Sender<bool>,
 }
 
 impl Hub {
@@ -95,6 +98,7 @@ impl Hub {
         let (shown, _) = broadcast::channel(BEHIND_MAX);
         let (statuses, _) = broadcast::channel(BEHIND_MAX);
         let (badge, _) = tokio::sync::watch::channel(0);
+        let (closing, _) = watch::channel(false);
         let seconds = u64::try_from(now_ms / 1_000).unwrap_or(0);
         Self {
             capture: None,
@@ -113,6 +117,22 @@ impl Hub {
             profiles: crate::profile::Slot::new(),
             queue_roster: OnceLock::new(),
             turn_ends: Mutex::new(VecDeque::new()),
+            closing,
+        }
+    }
+
+    /// The Host is stopping: every event stream open now, or opened after, ends (issue 880).
+    pub fn close_streams(&self) {
+        self.closing.send_replace(true);
+    }
+
+    /// Resolves once the Host is stopping ([`Hub::close_streams`]), at once when it already
+    /// is. What an event stream waits on beside its events.
+    pub fn closing(&self) -> impl std::future::Future<Output = ()> + Send + 'static + use<> {
+        let mut closing = self.closing.subscribe();
+        async move {
+            // A sender that is gone is a Host that is gone: the stream ends then too.
+            let _ = closing.wait_for(|closing| *closing).await;
         }
     }
 

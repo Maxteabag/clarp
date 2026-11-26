@@ -17,7 +17,14 @@ use tokio::sync::oneshot;
 
 const DRAIN: Duration = Duration::from_secs(5);
 
-pub(super) async fn serve(listener: TcpListener, router: Router) -> io::Result<()> {
+/// `hub`: told first when the Host is asked to stop, so that every event stream ends before the
+/// drain begins. A stream never ends by itself, and kept the drain open to its end: apps came
+/// back 6.8 s after a stop, against 1.9 s after a kill (issue 880).
+pub(super) async fn serve(
+    listener: TcpListener,
+    router: Router,
+    hub: Arc<clarp_host::hub::Hub>,
+) -> io::Result<()> {
     let open = Arc::new(AtomicUsize::new(0));
     let listener = CountingListener {
         listener,
@@ -37,6 +44,7 @@ pub(super) async fn serve(listener: TcpListener, router: Router) -> io::Result<(
         biased;
         () = told_to_stop() => {
             let deadline = tokio::time::Instant::now() + DRAIN;
+            hub.close_streams();
             let _ = stop.send(());
             match tokio::time::timeout_at(deadline, server).await {
                 Ok(result) => result,
