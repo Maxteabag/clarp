@@ -206,6 +206,18 @@ impl Steps {
     }
 }
 
+/// How many of the agents the door waits for are still being opened.
+fn still_opening(app: &App) -> usize {
+    app.fleet
+        .directory()
+        .members
+        .iter()
+        .filter(|member| {
+            member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING)
+        })
+        .count()
+}
+
 async fn serve(config: Config) -> Result<(), String> {
     let mut steps = Steps::new();
     // The socket its unit holds across a restart, taken before the Host starts any process, so
@@ -547,6 +559,23 @@ async fn serve(config: Config) -> Result<(), String> {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
     steps.mark("door");
+    // How many agents were still being opened when the door let requests in, and when the last
+    // of them was (issue 935): one line, from beside the start, which goes on meanwhile.
+    {
+        let app = app.clone();
+        let began = steps.began;
+        tokio::spawn(async move {
+            let at_door = still_opening(&app);
+            while still_opening(&app) > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            eprintln!(
+                "clarp-host: {at_door} agents were still being opened at the door; the last was \
+                 opened {} ms after the start began",
+                began.elapsed().as_millis()
+            );
+        });
+    }
     app.mouth.start_voice_names().await;
     steps.mark("voice_names");
     clarp_host::profile::migrate_at_start(&app).await;
