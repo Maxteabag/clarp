@@ -264,11 +264,17 @@ export component AgentProfile inherits Modal {
                 spacing: 3px;
                 // A request that failed for real, in plain words, once,
                 // inside the panel (a Host that lacks one says nothing).
-                if root.info.error != "": Text {
-                    text: root.info.error;
-                    color: Palette.danger;
-                    font-size: 11 * Look.unit;
-                    wrap: word-wrap;
+                if root.info.error != "": VerticalLayout {
+                    // In line with the cards' titles.
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 6px;
+                    Text {
+                        text: root.info.error;
+                        color: Palette.danger;
+                        font-size: 11 * Look.unit;
+                        wrap: word-wrap;
+                    }
                 }
                 // One card for this chat: the session is in the subtitle.
                 Card {
