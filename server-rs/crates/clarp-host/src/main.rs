@@ -307,6 +307,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // earlier run may have given out however it ended (issue 935): a client resuming from an
     // earlier run's number is told it missed something.
     let mut hub = Hub::new(clock.now_ms()).reserving(config.data_dir.join("event-numbers"));
+    // One write and flush on the way to answering: said on its own in the start's steps.
+    steps.mark("events");
     hub.capture = Some(capture.clone());
     let hub = Arc::new(hub);
     // The first event of a Host's life says which version it is. A client that connects while

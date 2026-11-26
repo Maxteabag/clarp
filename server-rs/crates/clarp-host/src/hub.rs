@@ -488,6 +488,12 @@ const BLOCK: u64 = 1 << 20;
 /// write at its stop, or crashed: a client resuming from an earlier run's number is always told
 /// that it missed something. The next block is reserved in the background when half of this one is
 /// used; a publish waits for the disk only where a block runs out before that is done.
+///
+/// Where the disk refuses a reservation, the guarantee lapses, and that is said once: numbers go
+/// on being given out above the last reservation on disk, unreserved, so that the apps go on
+/// hearing of changes, and a later run that follows a crash may give out some of them again. No
+/// publish then touches the disk: the reservation is tried again in the background, at most every
+/// 30 seconds, and the guarantee holds again once one is on disk above the numbers given out.
 pub struct Reserved {
     path: std::path::PathBuf,
     block: u64,
@@ -499,7 +505,16 @@ pub struct Reserved {
     ahead: std::sync::atomic::AtomicBool,
     /// The disk refused a reservation: said once.
     refused: std::sync::atomic::AtomicBool,
+    /// The last reservation was refused: numbers are being given out unreserved.
+    lapsed: std::sync::atomic::AtomicBool,
+    /// When the reservation was last tried again while lapsed.
+    tried: Mutex<Option<std::time::Instant>>,
+    /// How many times a reservation was written or tried: what a test of the lapse counts.
+    attempts: std::sync::atomic::AtomicU64,
 }
+
+/// How often a lapsed reservation is tried again, in the background.
+const RETRY_LAPSED: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Reserved {
     fn new(path: std::path::PathBuf, block: u64) -> Self {
@@ -510,6 +525,9 @@ impl Reserved {
             writing: Mutex::new(()),
             ahead: std::sync::atomic::AtomicBool::new(false),
             refused: std::sync::atomic::AtomicBool::new(false),
+            lapsed: std::sync::atomic::AtomicBool::new(false),
+            tried: Mutex::new(None),
+            attempts: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -530,6 +548,7 @@ impl Reserved {
         if self.end.load(Ordering::Acquire) >= end {
             return Ok(());
         }
+        self.attempts.fetch_add(1, Ordering::Relaxed);
         let beside = self.path.with_extension("new");
         let mut file = std::fs::File::create(&beside)?;
         file.write_all(end.to_string().as_bytes())?;
@@ -543,6 +562,7 @@ impl Reserved {
     }
 
     fn refused(&self, why: &std::io::Error) {
+        self.lapsed.store(true, std::sync::atomic::Ordering::Release);
         if !self.refused.swap(true, std::sync::atomic::Ordering::Relaxed) {
             eprintln!(
                 "clarp-host: the numbers of its events could not be reserved on disk ({why}): a \
@@ -552,31 +572,56 @@ impl Reserved {
     }
 
     /// The number `id` is about to be given out: it is covered by what is on disk, and the next
-    /// block is on its way once half of this one is used.
+    /// block is on its way once half of this one is used. Lapsed, it touches no disk.
     fn cover(self: &Arc<Self>, id: u64) {
         use std::sync::atomic::Ordering;
         let end = self.end.load(Ordering::Acquire);
         if id >= end {
+            if self.lapsed.load(Ordering::Acquire) {
+                self.retry(id);
+                return;
+            }
             // Run out before the reservation ahead was on disk: this number waits for it.
             if let Err(why) = self.reserve(id.saturating_add(self.block)) {
                 self.refused(&why);
             }
             return;
         }
-        if id.saturating_add(self.block / 2) >= end && !self.ahead.swap(true, Ordering::AcqRel) {
-            let reserved = self.clone();
-            let next = end.saturating_add(self.block);
-            let spawned = std::thread::Builder::new()
-                .name("event-reserve".into())
-                .spawn(move || {
-                    if let Err(why) = reserved.reserve(next) {
-                        reserved.refused(&why);
-                    }
-                    reserved.ahead.store(false, Ordering::Release);
-                });
-            if spawned.is_err() {
-                self.ahead.store(false, Ordering::Release);
-            }
+        if id.saturating_add(self.block / 2) >= end {
+            self.ahead(end.saturating_add(self.block));
+        }
+    }
+
+    /// Lapsed: the reservation is tried again in the background, at most every `RETRY_LAPSED`.
+    fn retry(self: &Arc<Self>, id: u64) {
+        let mut tried = self.tried.lock().unwrap_or_else(PoisonError::into_inner);
+        if tried.is_some_and(|at| at.elapsed() < RETRY_LAPSED) {
+            return;
+        }
+        *tried = Some(std::time::Instant::now());
+        drop(tried);
+        // The block ahead of the number given out now: numbers given out meanwhile are within it.
+        self.ahead(id.saturating_add(self.block));
+    }
+
+    /// Writes the reservation up to `end` on a thread of its own, one at a time.
+    fn ahead(self: &Arc<Self>, end: u64) {
+        use std::sync::atomic::Ordering;
+        if self.ahead.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let reserved = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("event-reserve".into())
+            .spawn(move || {
+                match reserved.reserve(end) {
+                    Ok(()) => reserved.lapsed.store(false, Ordering::Release),
+                    Err(why) => reserved.refused(&why),
+                }
+                reserved.ahead.store(false, Ordering::Release);
+            });
+        if spawned.is_err() {
+            self.ahead.store(false, Ordering::Release);
         }
     }
 }
@@ -655,9 +700,16 @@ mod tests {
         // Every number given out was below the reservation on disk when it was given out.
         let on_disk: u64 = std::fs::read_to_string(&file).unwrap().trim().parse().unwrap();
         assert!(on_disk > c_first);
-        // A reservation that cannot be written leaves the hub giving out numbers, as before.
+        // A reservation that cannot be written lapses: the hub goes on giving out numbers, and no
+        // publish touches the disk; it is tried again in the background, at most every 30 s.
         let unwritable = Hub::new(now).reserving_in_blocks(place.join("no/such/folder/file"), 8);
-        assert!(unwritable.publish(roster("still"), now) > 0);
+        let given: Vec<u64> = (0..100).map(|n| unwritable.publish(roster("still"), now + n)).collect();
+        assert!(given.windows(2).all(|pair| pair[1] == pair[0] + 1));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let reserved = unwritable.reserved.as_ref().unwrap();
+        let tried = reserved.attempts.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(tried <= 2, "the disk was tried {tried} times for 100 events");
+        assert!(reserved.lapsed.load(std::sync::atomic::Ordering::Acquire));
         std::fs::remove_dir_all(&place).unwrap();
     }
 
