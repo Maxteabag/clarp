@@ -709,9 +709,13 @@ export component Block inherits VerticalLayout {
         property <length> nudge;
         function go(to: int) { table-box.first = Math.max(1, Math.min(to, table-box.end)); table-box.nudge = 0px; }
         function next-page() { table-box.go(table-box.last < table-box.count - 1 ? table-box.last + 1 : 1); }
-        // The chat sets its width; it asks for its natural one.
+        // The chat sets its width; it asks for its natural one. Every
+        // sideways hint is its own, never its cells': the cells' widths come
+        // from this width, so asking them back would be a loop.
         min-width: 0px;
         preferred-width: self.natural;
+        max-width: 100000px;
+        horizontal-stretch: 1;
         accessible-role: AccessibleRole.table;
         accessible-id: "table";
         accessible-label: self.count + " columns";
@@ -720,6 +724,9 @@ export component Block inherits VerticalLayout {
             table-view := Rectangle {
                 height: table-grid.preferred-height;
                 min-width: 0px;
+                preferred-width: 0px;
+                max-width: 100000px;
+                horizontal-stretch: 1;
                 clip: true;
                 border-width: 1px;
                 border-color: Palette.border;
