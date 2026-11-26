@@ -8,7 +8,7 @@ pub mod pairing;
 mod sse;
 pub mod terminal;
 
-pub use api::{ApiClient, ApiReply, CLIENT_HEADER, TRAFFIC_ROUTES, Traffic, client_header};
+pub use api::{ApiClient, ApiReply, MediaRange, CLIENT_HEADER, TRAFFIC_ROUTES, Traffic, client_header};
 pub use sse::{SseClient, SseSignal};
 
 pub const USER_AGENT: &str = "ClarpNativeDesktop/0.1";

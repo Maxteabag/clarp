@@ -28,6 +28,13 @@ cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
+# playback: a synthetic clip (6 s of test picture and a 440 Hz tone, H.264
+# and AAC as a phone records), its sound written to a file to measure.
+if [ "$name" = playback ]; then
+    ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 \
+        -t 6 -c:v libx264 -profile:v high -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart "$scratch/clip.mp4" || exit 1
+    export CLARP_TEST_VIDEO="$scratch/clip.mp4" CLARP_TEST_VIDEO_SOUND_FILE="$out/playback-sound.wav"
+fi
 # The terminal launcher an agent terminal needs (and a CLI); never run,
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
 mkdir -p "$scratch/bin"

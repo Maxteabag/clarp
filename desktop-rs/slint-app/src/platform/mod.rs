@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod keyboard;
 pub mod stall_monitor;
 pub mod mpris;
+pub mod mpv;
 pub mod opener;
 pub mod runtime;
 

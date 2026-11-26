@@ -15,6 +15,12 @@ impl Engine {
         (!self.token.is_empty()).then(|| (url, self.token.clone()))
     }
 
+    /// The Host and token for `session`'s media: a peer chat's own Host.
+    pub fn endpoint_for(&self, session: &str) -> Option<(Url, String)> {
+        on_peer!(self.peer_ref(session), |engine, _local| engine.endpoint());
+        self.endpoint()
+    }
+
     /// The request whose failure the error shows ("" when it came from
     /// elsewhere).
     pub fn error_source(&self) -> &str {

@@ -16,6 +16,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import pathlib
 import queue
 import random
@@ -1669,6 +1670,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def reply_range(self, data, content_type):
+        total = len(data)
+        wanted = re.match(r"bytes=(\d+)-(\d*)$", self.headers.get("Range", ""))
+        if not wanted:
+            self.send_response(200)
+            first, last = 0, total - 1
+        else:
+            first = int(wanted.group(1))
+            last = min(int(wanted.group(2)) if wanted.group(2) else total - 1, total - 1)
+            if first >= total:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{total}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {first}-{last}/{total}")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(last - first + 1))
+        self.end_headers()
+        self.wfile.write(data[first:last + 1])
+
     def reply(self, status, body):
         data = json.dumps(body).encode()
         path = urlparse(self.path).path
@@ -1695,7 +1719,7 @@ class Handler(BaseHTTPRequestHandler):
         record({"method": "GET", "path": url.path, "query": query,
                 "authorization": self.headers.get("Authorization", ""),
                 "last_event_id": self.headers.get("Last-Event-ID", ""), "client": self.headers.get("X-Clarp-Client", ""),
-                "at": time.time()})
+                "range": self.headers.get("Range", ""), "at": time.time()})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         failure = failures.get(url.path)
@@ -1950,6 +1974,10 @@ class Handler(BaseHTTPRequestHandler):
             # An image that takes its time: the message must not grow when it lands.
             time.sleep(1.5)
             return self.reply_bytes(200, solid_png(300, 300, (150, 60, 200, 255)), "image/png")
+        if url.path == "/media/playback-video":
+            # The playback check's synthetic clip (check.sh makes it), served
+            # in the parts a player asks for, as the Host serves media.
+            return self.reply_range(pathlib.Path(os.environ["CLARP_TEST_VIDEO"]).read_bytes(), "video/mp4")
         if url.path == "/media/vid1":
             return self.reply_bytes(200, b"\x00\x00\x00\x18ftypmp42fixture-video", "video/mp4")
         if url.path == "/media/thumb-slow":

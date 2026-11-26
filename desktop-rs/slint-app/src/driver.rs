@@ -63,6 +63,9 @@ mod font_checks;
 // ---- agent portraits at their device size
 #[path = "avatar_checks.rs"]
 mod avatar_checks;
+// ---- the in-app player (a synthetic clip, libmpv)
+#[path = "playback_checks.rs"]
+mod playback_checks;
 // ---- message search and @-mentions
 #[path = "search_checks.rs"]
 mod search_checks;
@@ -609,6 +612,7 @@ pub fn start_check(name: &str, out: String) {
         "narrow" => narrow_checks::narrow_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
+        "playback" => playback_checks::playback_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
         "live" => {
             row_overlap_checks::watch();

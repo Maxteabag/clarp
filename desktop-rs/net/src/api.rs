@@ -15,6 +15,9 @@ use url::Url;
 
 use crate::USER_AGENT;
 
+mod media_range;
+pub use media_range::MediaRange;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiReply {
     Json { tag: String, object: Object },

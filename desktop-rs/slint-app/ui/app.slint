@@ -24,6 +24,8 @@ export { LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpC
 // ---- profile and overview
 import { AgentProfile, ProfileLayers, ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, TransitChoice } from "profile.slint";
 import { MediaItem } from "media.slint";
+import { MediaPlayer, PlaybackBridge } from "playback.slint";
+export { PlaybackBridge }
 import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
 import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
@@ -997,6 +999,14 @@ export component AppWindow inherits Window {
             moved(index) => { root.switcher-moved(index); }
             dismissed => { root.switcher-dismissed(); }
             adjusted(index, delta) => { root.switcher-adjusted(index, delta); }
+        }
+        // A video in fullscreen covers the whole window, whatever shows it.
+        if PlaybackBridge.fullscreen: MediaPlayer {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            fills-window: true;
         }
     }
 }

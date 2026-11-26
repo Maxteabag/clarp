@@ -25,6 +25,7 @@ mod panes;
 mod queue_strip;
 mod triage;
 mod perf;
+mod playback;
 mod motion;
 mod scroll_book;
 mod scroll_journal;
@@ -628,6 +629,8 @@ impl App {
                     platform::audio::with(platform::audio::Audio::silence);
                 }
                 Change::Endpoint => {
+                    // The open video read from the Host that was.
+                    playback::close();
                     let endpoint = self.engine.borrow().endpoint();
                     platform::audio::with(|audio| match &endpoint {
                         Some((url, token)) => audio.set_endpoint(Some(url.clone()), token),
@@ -860,6 +863,7 @@ fn main() {
         pump_now(&app);
         row
     });
+    playback::install(&window);
     {
         let bridge = window.global::<MentionBridge>();
         bridge.on_scan(|pane, text, cursor| with_window(|app, _| mention_view::scan(app, &pane, &text, cursor)));

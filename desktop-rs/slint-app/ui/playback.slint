@@ -1,0 +1,247 @@
+import { Palette, Look, ChromeText } from "theme.slint";
+import { IconButton, Busy } from "agent_controls.slint";
+
+// The in-app player's state and controls (src/playback.rs fills it). One
+// item plays at a time, so every MediaPlayer shows the same one.
+export global PlaybackBridge {
+    // "video", "audio", or "" when nothing is open.
+    in property <string> kind;
+    in property <string> title;
+    in property <image> poster;
+    in property <bool> has-poster;
+    // The newest picture drawn.
+    in property <image> frame;
+    in property <bool> has-frame;
+    in property <bool> playing;
+    in property <bool> preparing;
+    // Seconds; a duration of 0 is not known yet.
+    in property <float> position;
+    in property <float> duration;
+    in property <float> volume: 100;
+    in property <bool> muted;
+    in property <bool> has-volume;
+    // The picture fills the window.
+    in property <bool> fullscreen;
+    // Why it can't play, when it can't.
+    in property <string> message;
+    callback toggle();
+    callback seek-to(float);
+    callback seek-by(float);
+    callback toggle-mute();
+    callback set-volume(float);
+    callback toggle-fullscreen();
+    // The picture's surface in physical pixels.
+    callback surface-resized(int, int);
+    // A key in the player (text, shift); false leaves it to the viewer.
+    callback key(string, bool) -> bool;
+    // m:ss, or h:mm:ss.
+    public pure function clock(seconds: float) -> string {
+        if (seconds < 0) { return "0:00"; }
+        let total = Math.floor(seconds);
+        let h = Math.floor(total / 3600);
+        let m = Math.floor(Math.mod(total, 3600) / 60);
+        let s = Math.mod(total, 60);
+        return (h > 0 ? h + ":" + (m < 10 ? "0" : "") + m : "" + m) + ":" + (s < 10 ? "0" : "") + s;
+    }
+}
+
+// A bar to drag or click along: the time, or the volume.
+component Track inherits Rectangle {
+    in property <float> value;
+    in property <float> maximum: 1;
+    in property <string> label;
+    callback moved(float);
+    height: 18px;
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-maximum: root.maximum;
+    accessible-value-minimum: 0;
+    property <float> share: root.maximum > 0 ? Math.clamp(root.value / root.maximum, 0, 1) : 0;
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 4px;
+        border-radius: 2px;
+        background: #ffffff38;
+        Rectangle {
+            x: 0;
+            width: parent.width * root.share;
+            border-radius: 2px;
+            background: Palette.accent;
+        }
+    }
+    Rectangle {
+        x: parent.width * root.share - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: touch.has-hover || touch.pressed ? 12px : 8px;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: Palette.accent;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down && root.maximum > 0) {
+                root.moved(Math.clamp(self.mouse-x / self.width, 0, 1) * root.maximum);
+            }
+        }
+        moved => {
+            if (self.pressed && root.maximum > 0) {
+                root.moved(Math.clamp(self.mouse-x / self.width, 0, 1) * root.maximum);
+            }
+        }
+    }
+}
+
+// The player: the picture (or, for audio, its title), and below it play or
+// pause, the time to seek along, sound and fullscreen. Space plays and
+// pauses, ←/→ seek 5 s (Shift 30 s), J/L 10 s, Home/End, ↑/↓ volume,
+// M mute, F fullscreen; Escape leaves fullscreen, else closes the viewer.
+export component MediaPlayer inherits Rectangle {
+    // The instance that covers the window in fullscreen (app.slint).
+    in property <bool> fills-window;
+    in property <bool> reduced-motion;
+    public function focus-keys() { keys.focus(); }
+    property <bool> video: PlaybackBridge.kind == "video";
+    // The surface whose size the pictures are drawn at.
+    property <bool> sizing: root.video && root.fills-window == PlaybackBridge.fullscreen;
+    property <length> surface-width: root.sizing ? surface.width : 0;
+    property <length> surface-height: root.sizing ? surface.height : 0;
+    changed surface-width => { root.report(); }
+    changed surface-height => { root.report(); }
+    init => { root.report(); }
+    function report() {
+        if (root.sizing) {
+            PlaybackBridge.surface-resized(Math.round(surface.width / 1phx), Math.round(surface.height / 1phx));
+        }
+    }
+    background: #000000;
+    clip: true;
+    accessible-role: groupbox;
+    accessible-label: (root.video ? "Video player: " : "Audio player: ") + PlaybackBridge.title;
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (PlaybackBridge.key(event.text, event.modifiers.shift)) { return accept; }
+            reject
+        }
+    }
+    VerticalLayout {
+        surface := Rectangle {
+            vertical-stretch: 1;
+            if root.video && PlaybackBridge.has-frame: Image {
+                width: parent.width;
+                height: parent.height;
+                source: PlaybackBridge.frame;
+                image-fit: contain;
+                accessible-role: image;
+                accessible-label: PlaybackBridge.title;
+            }
+            if root.video && !PlaybackBridge.has-frame && PlaybackBridge.has-poster: Image {
+                width: parent.width;
+                height: parent.height;
+                source: PlaybackBridge.poster;
+                image-fit: contain;
+            }
+            if !root.video: VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                padding: 24px;
+                if PlaybackBridge.has-poster: Image {
+                    height: Math.min(parent.height * 0.5, 220px);
+                    source: PlaybackBridge.poster;
+                    image-fit: contain;
+                }
+                Text {
+                    text: "♪";
+                    visible: !PlaybackBridge.has-poster;
+                    color: Palette.muted;
+                    font-size: 48 * Look.unit;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: PlaybackBridge.title;
+                    color: Palette.text;
+                    font-size: 14 * Look.unit;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            if PlaybackBridge.preparing && PlaybackBridge.message == "": Busy { reduced-motion: root.reduced-motion; }
+            if PlaybackBridge.message != "": Rectangle {
+                width: said.preferred-width + 24px;
+                height: said.preferred-height + 14px;
+                border-radius: 3px;
+                background: #000000b0;
+                said := Text {
+                    text: PlaybackBridge.message;
+                    color: Palette.warning;
+                    font-size: ChromeText.body;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            TouchArea {
+                clicked => { root.focus-keys(); PlaybackBridge.toggle(); }
+                double-clicked => { if (root.video) { PlaybackBridge.toggle-fullscreen(); } }
+            }
+        }
+        Rectangle {
+            height: 40px;
+            background: #0d0e14e8;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                alignment: stretch;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: PlaybackBridge.playing ? @image-url("icons/pause.svg") : @image-url("icons/play.svg");
+                    tip: PlaybackBridge.playing ? "Pause (Space)" : "Play (Space)";
+                    clicked => { root.focus-keys(); PlaybackBridge.toggle(); }
+                }
+                Text {
+                    text: PlaybackBridge.clock(PlaybackBridge.position);
+                    color: Palette.chrome-text;
+                    font-family: "JetBrains Mono";
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                }
+                Track {
+                    y: (parent.height - self.height) / 2;
+                    horizontal-stretch: 1;
+                    label: "Position";
+                    value: PlaybackBridge.position;
+                    maximum: PlaybackBridge.duration;
+                    moved(to) => { root.focus-keys(); PlaybackBridge.seek-to(to); }
+                }
+                Text {
+                    text: PlaybackBridge.duration > 0 ? PlaybackBridge.clock(PlaybackBridge.duration) : "--:--";
+                    color: Palette.muted;
+                    font-family: "JetBrains Mono";
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                }
+                if PlaybackBridge.has-volume: IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: PlaybackBridge.muted || PlaybackBridge.volume <= 0 ? @image-url("icons/rail-muted.svg") : @image-url("icons/rail-sound.svg");
+                    tip: PlaybackBridge.muted ? "Unmute (M)" : "Mute (M)";
+                    clicked => { root.focus-keys(); PlaybackBridge.toggle-mute(); }
+                }
+                if PlaybackBridge.has-volume: Track {
+                    y: (parent.height - self.height) / 2;
+                    width: 72px;
+                    label: "Volume";
+                    value: PlaybackBridge.muted ? 0 : PlaybackBridge.volume;
+                    maximum: 100;
+                    moved(to) => { root.focus-keys(); PlaybackBridge.set-volume(to); }
+                }
+                if root.video: IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: PlaybackBridge.fullscreen ? @image-url("icons/fullscreen-exit.svg") : @image-url("icons/fullscreen.svg");
+                    tip: PlaybackBridge.fullscreen ? "Leave fullscreen (F or Esc)" : "Fullscreen (F)";
+                    clicked => { root.focus-keys(); PlaybackBridge.toggle-fullscreen(); }
+                }
+            }
+        }
+    }
+}
