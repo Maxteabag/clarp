@@ -1,15 +1,16 @@
 //! Whether an agent can answer now (Host feature `agent_availability`,
-//! #918, desktop #924). The Host puts `availability` {state, reason,
+//! #918, desktop #924). The Host puts `availability` {state, text,
 //! since_ms, back_at_ms, queue_ahead, last_alive_ms} on every agent row of
 //! `/agents/snapshot` and `/agents/{session}`, and sends it again in an
 //! `agent-roster` event of kind `availability` (`fields`) when it changes.
 //! Just before a planned restart it sends one `host-updating` event
-//! {since_ms, back_at_ms, reason}: until the desktop has read the snapshot
+//! {text, since_ms, back_at_ms}: until the desktop has read the snapshot
 //! again, every agent of that Host shows "Host updating".
 //!
 //! The times are the Host's clock (epoch ms); the line counts with the
 //! offset to it, so it never goes stale here. An older Host sends neither,
-//! and nothing new shows. Every word the desktop shows for it lives here.
+//! and nothing new shows. The words are the Host's `text`; only the time
+//! part ("back in ~20 s", "last sign of life 4 min ago") is made here.
 
 use chrono::{DateTime, TimeZone};
 use serde_json::Value;
@@ -26,8 +27,11 @@ pub const HOST_UPDATING: &str = "host-updating";
 /// One agent's `availability`, as the Host sent it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Availability {
+    /// For logic only: `ok` shows nothing.
     pub state: String,
-    pub reason: String,
+    /// The Host's line without its time part ("Restarting", "Busy · 25
+    /// messages ahead of you"), shown as sent; "" at `ok`.
+    pub text: String,
     pub since_ms: i64,
     pub back_at_ms: Option<i64>,
     pub queue_ahead: i64,
@@ -53,7 +57,7 @@ impl Availability {
         }
         Some(Self {
             state,
-            reason: text(object, "reason"),
+            text: text(object, "text"),
             since_ms: positive(object, "since_ms").unwrap_or(0),
             back_at_ms: positive(object, "back_at_ms"),
             queue_ahead: object.get("queue_ahead").and_then(Value::as_i64).unwrap_or(0).max(0),
@@ -65,24 +69,28 @@ impl Availability {
 /// A Host's `host-updating` event: it restarts, and is back about then.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HostUpdating {
+    /// The Host's words ("Host updating"), shown as sent.
+    pub text: String,
     pub since_ms: i64,
     pub back_at_ms: Option<i64>,
-    pub reason: String,
 }
 
 impl HostUpdating {
     pub fn from_event(event: &Object) -> Self {
         Self {
+            text: text(event, "text"),
             since_ms: positive(event, "since_ms").unwrap_or(0),
             back_at_ms: positive(event, "back_at_ms"),
-            reason: text(event, "reason"),
         }
     }
 }
 
-/// "~40 s", "~2 min", or "at 14:05" an hour or more ahead; None once the
-/// time has passed.
-fn back_in<Tz: TimeZone>(back_at_ms: i64, host_now_ms: i64, offset_ms: i64, zone: &Tz) -> Option<String>
+/// Further off than this, the time part names the clock time.
+const COUNT_UP_TO_MS: i64 = 10 * 60_000;
+
+/// "back in ~40 s", "back in ~3 min", or "back at 14:05" further off;
+/// None once the time has passed.
+fn back<Tz: TimeZone>(back_at_ms: i64, host_now_ms: i64, offset_ms: i64, zone: &Tz) -> Option<String>
 where
     Tz::Offset: std::fmt::Display,
 {
@@ -91,13 +99,13 @@ where
         return None;
     }
     let seconds = (left_ms + 999) / 1000;
-    Some(if seconds < 60 {
+    Some(if left_ms > COUNT_UP_TO_MS {
+        format!("back {}", at(back_at_ms, host_now_ms, offset_ms, zone))
+    } else if seconds < 60 {
         // Rounded up to 5 s: a calm count, not a stopwatch.
         format!("back in ~{} s", (seconds + 4) / 5 * 5)
-    } else if seconds < 3600 {
-        format!("back in ~{} min", (seconds + 30) / 60)
     } else {
-        format!("back {}", at(back_at_ms, host_now_ms, offset_ms, zone))
+        format!("back in ~{} min", (seconds + 30) / 60)
     })
 }
 
@@ -136,10 +144,11 @@ fn joined(head: &str, tail: Option<String>) -> String {
     }
 }
 
-/// The one line for an agent, or empty when it can answer now. A Host that
-/// is updating comes first; then the agent's own state. `local_now_ms` is
-/// this machine's clock, `offset_ms` the Host's clock minus it, and `zone`
-/// the zone clock times are shown in.
+/// The one line for an agent, or empty when it can answer now. The words
+/// are the Host's `text` as sent; only the time part is added here, since
+/// only this side can count. A Host that is updating comes first; then the
+/// agent's own state. `local_now_ms` is this machine's clock, `offset_ms`
+/// the Host's clock minus it, and `zone` the zone clock times are shown in.
 pub fn line<Tz: TimeZone>(
     availability: Option<&Availability>,
     updating: Option<&HostUpdating>,
@@ -151,25 +160,16 @@ where
     Tz::Offset: std::fmt::Display,
 {
     let host_now = local_now_ms + offset_ms;
-    if let Some(updating) = updating {
-        return joined("Host updating", updating.back_at_ms.and_then(|b| back_in(b, host_now, offset_ms, zone)));
+    if let Some(updating) = updating.filter(|u| !u.text.is_empty()) {
+        return joined(&updating.text, updating.back_at_ms.and_then(|b| back(b, host_now, offset_ms, zone)));
     }
-    let Some(a) = availability else { return String::new() };
-    match a.state.as_str() {
-        "restarting" => joined("Restarting", a.back_at_ms.and_then(|b| back_in(b, host_now, offset_ms, zone))),
-        "switching_account" if a.reason.is_empty() => "Switching account".into(),
-        "switching_account" => format!("Switching account ({})", a.reason),
-        "usage_limit" => joined(
-            "Usage limit",
-            a.back_at_ms.filter(|b| *b > host_now).map(|b| format!("back {}", at(b, host_now, offset_ms, zone))),
-        ),
-        "unresponsive" => joined("Not responding", a.last_alive_ms.map(|t| format!("last sign of life {} ago", ago(host_now - t)))),
-        "busy" if a.queue_ahead == 1 => "Busy · 1 message ahead of you".into(),
-        "busy" if a.queue_ahead > 1 => format!("Busy · {} messages ahead of you", a.queue_ahead),
-        // `ok`, `busy` with nothing ahead, and any state this desktop does
-        // not know yet.
-        _ => String::new(),
-    }
+    let Some(a) = availability.filter(|a| a.state != "ok" && !a.text.is_empty()) else { return String::new() };
+    let time = if a.state == "unresponsive" {
+        a.last_alive_ms.map(|t| format!("last sign of life {} ago", ago(host_now - t)))
+    } else {
+        a.back_at_ms.and_then(|b| back(b, host_now, offset_ms, zone))
+    };
+    joined(&a.text, time)
 }
 
 /// Drops `availability` from a cached snapshot's rows: a state read at an
