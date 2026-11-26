@@ -951,7 +951,7 @@ mod tests {
             ..Default::default()
         };
         let clock = clarp_core::availability::Clock::default();
-        assert_eq!(super::row_activity(&row, clock), "Busy · 25 messages ahead of you");
+        assert_eq!(super::row_activity(&row, clock), "Answering other agents · 25 ahead of you");
         // A state this desktop does not know, without a reason, says nothing.
         row.availability = clarp_core::availability::parse(&serde_json::json!({"state": "napping"}));
         assert_eq!(super::row_activity(&row, clock), clarp_core::stall::ROW_STATUS);

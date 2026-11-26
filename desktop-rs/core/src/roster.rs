@@ -237,7 +237,7 @@ impl Roster {
             last_activity: agent.last_activity,
             turn_started_at: agent.turn_started_at,
             stalled_since: if live { crate::stall::stop_offered(agent) } else { None },
-            availability: self.host_updating.clone().or_else(|| if live { agent.availability.clone() } else { None }),
+            availability: self.availability_of(agent).cloned(),
             conversation_id: agent.conversation_id.clone(),
             head_revision: agent.head_revision,
             context_tokens: agent.context_tokens,
@@ -590,11 +590,21 @@ impl Roster {
         }
     }
 
-    /// Why the agent of `session` cannot answer now: the Host updating,
-    /// else its own state while the Host is in reach; None otherwise.
+    /// Why the agent of `session` cannot answer the user now: the Host
+    /// updating, else its own state while the Host is in reach and the
+    /// state blocks the user (`availability::blocks_user`: busy on the
+    /// user's own turn does not); None otherwise.
     pub fn availability(&self, session: &str) -> Option<&crate::availability::Availability> {
-        let agent = self.find(session)?;
-        self.host_updating.as_ref().or_else(|| agent.availability.as_ref().filter(|_| self.transport_available))
+        self.availability_of(self.find(session)?)
+    }
+
+    fn availability_of<'a>(&'a self, agent: &'a Agent) -> Option<&'a crate::availability::Availability> {
+        self.host_updating.as_ref().or_else(|| {
+            agent
+                .availability
+                .as_ref()
+                .filter(|a| self.transport_available && crate::availability::blocks_user(a, &agent.working_audience))
+        })
     }
 
     /// An `agent-activity` event: a Host of contract 149 or later says on

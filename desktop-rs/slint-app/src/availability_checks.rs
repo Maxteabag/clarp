@@ -1,11 +1,14 @@
 //! `--check agent-availability` (#918, feature `agent_availability`): when
 //! the Host says an agent cannot answer now (`availability` on its snapshot
 //! row, then live in an `agent-roster` event of kind `availability`), the
-//! chat row's status line and the open chat's header carry one line with
-//! why and for how long ("Restarting · back in ~20 s"). `ok` takes it away.
-//! A `host-updating` event puts "Host updating" on every agent until the
-//! desktop reconnects. A Host without the feature shows nothing new,
-//! whatever its rows carry.
+//! chat row's status line and the open chat's header carry one short line
+//! with why and for how long ("Restarting · ~20 s"); there is no banner.
+//! Busy shows only while the running turn answers other agents ("Answering
+//! other agents · 1 ahead of you"): on the user's own turn the header says
+//! "working" and the working indicator is as it was. No sign of life shows
+//! over the user's turn too. `ok` takes it away. A `host-updating` event
+//! puts "Host updating" on every agent until the desktop reconnects. A Host
+//! without the feature shows nothing new, whatever its rows carry.
 
 use std::time::Duration;
 
@@ -45,6 +48,16 @@ fn availability(state: &str, text: &str, back_in_ms: Option<i64>, queue_ahead: i
 /// Rachel's snapshot row says `value` (the list is read again).
 fn rachel_row(value: Value) -> Result<(), String> {
     control("/__control/agent", &json!({"session": "rachel", "set": {"availability": value}}))
+}
+
+/// Rachel's row works on a turn for `audience` (`user`, `agents`), or is
+/// idle (None), and says `value` (the list is read again).
+fn rachel_turn(audience: Option<&str>, value: Value) -> Result<(), String> {
+    let set = match audience {
+        Some(audience) => json!({"busy": true, "latest_state": "thinking", "working_audience": audience, "availability": value}),
+        None => json!({"busy": false, "latest_state": "idle", "working_audience": null, "availability": value}),
+    };
+    control("/__control/agent", &json!({"session": "rachel", "set": set}))
 }
 
 /// Rachel's change as the Host sends it live: an `agent-roster` event of
@@ -95,7 +108,7 @@ fn gone(name: &'static str, out: String, shot_name: &'static str) -> Stage {
         }
         check(line.is_empty(), &format!("{name}: the pane says nothing of it: {line:?}"));
         let row = activity(window, "rachel");
-        for word in ["Restarting", "Busy", "Host updating", "Usage limit"] {
+        for word in ["Restarting", "Busy", "Answering", "No sign of life", "Host updating", "Usage limit"] {
             check(!row.starts_with(word), &format!("{name}: nor the chat row: {row:?}"));
         }
         shot(&out, shot_name);
@@ -103,7 +116,14 @@ fn gone(name: &'static str, out: String, shot_name: &'static str) -> Stage {
     }))
 }
 
+thread_local! {
+    /// The pane's working indicator on the user's own turn before the Host
+    /// says busy.
+    static WORKING: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
 pub fn agent_availability_check(out: String) {
+    let out_own = out.clone();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, _| app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty()))),
         // ---- an older Host: the field is ignored
@@ -121,35 +141,75 @@ pub fn agent_availability_check(out: String) {
             check(sent.is_ok(), &format!("Rachel restarts: {sent:?}"));
             true
         })),
-        shows("restarting", "Restarting · back in ~", out.clone(), "availability-02-restarting"),
-        // ---- the agent-roster event of kind availability patches it live
-        ("busy", Box::new(|_, _, _| {
-            let sent = rachel_event(availability("busy", "Busy · 25 messages ahead of you", None, 25));
-            check(sent.is_ok(), &format!("Rachel is busy with a queue: {sent:?}"));
+        // ---- quiet: an idle agent that cannot answer says why, in short
+        shows("restarting", "Restarting · ~", out.clone(), "availability-02-restarting"),
+        // ---- the user's own turn: busy is the working indicator's
+        ("own turn", Box::new(|_, _, _| {
+            let sent = rachel_turn(Some("user"), availability("ok", "", None, 0));
+            check(sent.is_ok(), &format!("Rachel works on the user's message: {sent:?}"));
             true
         })),
-        shows("busy", "Busy · 25 messages ahead of you", out.clone(), "availability-03-busy"),
+        ("own turn working", Box::new(|_, _, elapsed| {
+            let (pane, header) = (view(), header_info());
+            if (!pane.busy || !header.contains("working")) && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(pane.availability.is_empty() && header.contains("working"), &format!("the header says working: {header:?}"));
+            WORKING.with(|w| w.set(Some(pane.working)));
+            let sent = rachel_event(availability("busy", "Busy · 1 message ahead of you", None, 1));
+            check(sent.is_ok(), &format!("the Host says Rachel is busy: {sent:?}"));
+            true
+        })),
+        ("own turn quiet", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (pane, header, row) = (view(), header_info(), activity(window, "rachel"));
+            check(pane.availability.is_empty(), &format!("busy on the user's own turn is no line: {:?}", pane.availability));
+            check(header.contains("working") && !header.contains("Busy") && !header.contains("Answering"), &format!("the header says working, as before: {header:?}"));
+            check(!row.contains("Busy") && !row.contains("Answering"), &format!("nor the chat row: {row:?}"));
+            let before = WORKING.with(std::cell::Cell::get);
+            check(before == Some(pane.working), &format!("the working indicator is as it was: {before:?} then {}", pane.working));
+            shot(&out_own, "availability-03-own-turn");
+            true
+        })),
+        // ---- other agents' turn: the user waits
+        ("other agents", Box::new(|_, _, _| {
+            let sent = rachel_turn(Some("agents"), availability("busy", "Busy · 1 message ahead of you", None, 1));
+            check(sent.is_ok(), &format!("Rachel answers another agent: {sent:?}"));
+            true
+        })),
+        shows("other agents", "Answering other agents · 1 ahead of you", out.clone(), "availability-04-other-agents"),
+        // ---- no sign of life shows over the user's own turn
+        ("silent", Box::new(|_, _, _| {
+            let silent = json!({"state": "unresponsive", "text": "Not responding", "since_ms": now(), "back_at_ms": null,
+                "queue_ahead": 0, "last_alive_ms": now() - 4 * 60_000 - 5_000});
+            let sent = rachel_turn(Some("user"), silent);
+            check(sent.is_ok(), &format!("Rachel's turn for the user went silent: {sent:?}"));
+            true
+        })),
+        shows("silent", "No sign of life for 4 min", out.clone(), "availability-05-silent"),
         // ---- ok clears it
         ("ok", Box::new(|_, _, _| {
-            let sent = rachel_event(availability("ok", "", None, 0));
+            let sent = rachel_turn(None, availability("ok", "", None, 0));
             check(sent.is_ok(), &format!("Rachel can answer again: {sent:?}"));
             true
         })),
-        gone("ok", out.clone(), "availability-04-ok"),
+        gone("ok", out.clone(), "availability-06-ok"),
         // ---- the Host updating: every agent says so until it is back
         ("host updating", Box::new(|_, _, _| {
             let sent = control("/__control/event", &json!({"type": "host-updating", "since_ms": now(), "back_at_ms": now() + 40_000, "text": "Host updating"}));
             check(sent.is_ok(), &format!("the Host is about to restart: {sent:?}"));
             true
         })),
-        shows("host updating", "Host updating · back in ~", out.clone(), "availability-05-host-updating"),
+        shows("host updating", "Host updating · ~", out.clone(), "availability-07-host-updating"),
         ("every agent", Box::new(|_, window, _| {
             let mike = activity(window, "mike");
             check(mike.starts_with("Host updating"), &format!("Mike's row says it too: {mike:?}"));
             true
         })),
         host_feature(true),
-        gone("back up", out, "availability-06-back-up"),
+        gone("back up", out, "availability-08-back-up"),
     ];
     run_stages(stages);
 }

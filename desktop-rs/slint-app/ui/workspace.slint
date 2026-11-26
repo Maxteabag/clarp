@@ -151,9 +151,10 @@ export struct PaneView {
     // Stop (#249; the words are core stall.rs's), and the Stop button's label.
     stall: string,
     stall-stop: string,
-    // Why the agent cannot answer now (#918; the words are core
-    // availability.rs's): "Restarting · back in ~20 s", "" while it can.
-    // It takes the place of the header's status and "working".
+    // Why the agent cannot answer the user now (#918; the words and when
+    // it shows are core availability.rs's): "Restarting · ~20 s", "" while
+    // it can or works on the user's own message. It takes the place of the
+    // header's status and "working"; there is no banner.
     availability: string,
     can-send: bool,
     transcribing: int,

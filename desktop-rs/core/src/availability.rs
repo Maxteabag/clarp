@@ -6,13 +6,23 @@
 //! event, which stands for every agent of that Host until the desktop has
 //! reconnected and read the list again.
 //!
-//! The Host sends its calm line as `text`, without the time part. The
-//! desktop shows it as sent and adds the time part itself ("back in ~20 s",
-//! "back at 14:05", "last sign of life 4 min ago"), counted on the Host's
-//! clock from this machine's offset to it. A state whose text is empty gets
-//! the desktop's own words. One line in the chat list and the open chat's
-//! header, gone when the state is `ok` or the agent's answer arrives. An
-//! older Host sends neither and shows nothing new.
+//! The line shows only while the agent cannot answer the user now (Peter,
+//! 26 Nov 2026: no banner, one short calm line in the chat's header,
+//! never while it works visibly on the user's own message). `busy` counts
+//! only while the running turn answers other agents (`working_audience`
+//! `agents`); the user's own turn has the working indicator. Restarting,
+//! a switch of account, a usage limit, no sign of life and the Host
+//! updating show whatever turn runs.
+//!
+//! The words are short: "Answering other agents · 1 ahead of you",
+//! "Restarting · ~20 s", "Switching account", "Host updating", "No sign of
+//! life for 4 min". The Host's `text` shows where it is that short already
+//! (restarting, a usage limit, the Host updating, a state this desktop
+//! does not know); the desktop adds the time part itself ("~20 s", "until
+//! 14:05"), counted on the Host's clock from this machine's offset to it.
+//! One line in the chat list and the open chat's header, gone when the
+//! state is `ok` or the agent's answer arrives. An older Host sends neither
+//! and shows nothing new.
 //!
 //! Every wire name and every word the desktop shows for it lives here, so a
 //! renamed field is a one-line change and the wording changes in one place.
@@ -169,26 +179,43 @@ pub fn answered(log: &Object, since: Option<i64>) -> bool {
     })
 }
 
+/// Whether the state keeps the agent from answering the user now, given
+/// who its running turn is for (`working_audience`: `user`, `agents`, or
+/// empty while idle). Busy on the user's own turn, or on no turn the Host
+/// names, is the working indicator's to show; busy answering other agents
+/// keeps the user waiting. Every other state does, whatever turn runs.
+pub fn blocks_user(availability: &Availability, working_audience: &str) -> bool {
+    availability.state != State::Busy || working_audience == "agents"
+}
+
 /// The desktop's own words for a state the Host sent no text for; None for
 /// a state it does not know.
 fn own_words(availability: &Availability) -> Option<String> {
     Some(match availability.state {
-        State::Busy => match availability.queue_ahead {
-            0 => "Busy".to_owned(),
-            1 => "Busy · 1 message ahead of you".to_owned(),
-            ahead => format!("Busy · {ahead} messages ahead of you"),
-        },
+        State::Busy => busy(availability.queue_ahead),
         State::Restarting => "Restarting".to_owned(),
-        State::SwitchingAccount => "Switching account (usage limit)".to_owned(),
+        State::SwitchingAccount => SWITCHING_ACCOUNT.to_owned(),
         State::UsageLimit => "Usage limit reached".to_owned(),
-        State::Unresponsive => "Not responding".to_owned(),
+        State::Unresponsive => NO_SIGN_OF_LIFE.to_owned(),
         State::HostUpdating => "Host updating".to_owned(),
         State::Other(_) => return None,
     })
 }
 
-/// "back in ~20 s" under 90 seconds, "back in ~12 min" under an hour,
-/// "back at 14:05" (local 24-hour time) after; None once the time is past.
+const SWITCHING_ACCOUNT: &str = "Switching account";
+const NO_SIGN_OF_LIFE: &str = "No sign of life";
+
+/// A busy agent shows only while it answers other agents (`blocks_user`):
+/// "Answering other agents · 3 ahead of you".
+fn busy(queue_ahead: i64) -> String {
+    match queue_ahead {
+        0 => "Answering other agents".to_owned(),
+        ahead => format!("Answering other agents · {ahead} ahead of you"),
+    }
+}
+
+/// "~20 s" under 90 seconds, "~12 min" under an hour, "until 14:05"
+/// (local 24-hour time) after; None once the time is past.
 fn back(back_at: Option<i64>, clock: Clock) -> Option<String> {
     let back_at = back_at?;
     let left = back_at - clock.host_now_ms();
@@ -197,36 +224,41 @@ fn back(back_at: Option<i64>, clock: Clock) -> Option<String> {
     }
     let seconds = (left + 999) / 1000;
     if seconds < 90 {
-        return Some(format!("back in ~{seconds} s"));
+        return Some(format!("~{seconds} s"));
     }
     if seconds < 3600 {
-        return Some(format!("back in ~{} min", (seconds + 30) / 60));
+        return Some(format!("~{} min", (seconds + 30) / 60));
     }
     let local = chrono::Local.timestamp_millis_opt(back_at - clock.host_offset_ms).single()?;
-    Some(format!("back at {}", local.format("%H:%M")))
+    Some(format!("until {}", local.format("%H:%M")))
 }
 
-/// "last sign of life 4 min ago", or "just now" under a minute.
-fn last_alive(alive: i64, clock: Clock) -> String {
-    let minutes = (clock.host_now_ms() - alive).max(0) / 60_000;
-    if minutes < 1 { "last sign of life just now".to_owned() } else { format!("last sign of life {minutes} min ago") }
+/// "No sign of life for 4 min": whole minutes since the last sign, at
+/// least one (the Host says so only after three).
+fn silent_for(alive: i64, clock: Clock) -> String {
+    let minutes = ((clock.host_now_ms() - alive).max(0) / 60_000).max(1);
+    format!("{NO_SIGN_OF_LIFE} for {minutes} min")
 }
 
-/// The one line for the chat list and the open chat's header: the Host's
-/// text as sent (the desktop's own words when it is empty), then the time
+/// The one line for the chat list and the open chat's header, for a state
+/// that blocks the user (`blocks_user`): the short words, then the time
 /// part. None when there is nothing to say: a state this desktop does not
 /// know, sent without text.
 pub fn line(availability: &Availability, clock: Clock) -> Option<String> {
-    let mut line = if availability.text.is_empty() { own_words(availability)? } else { availability.text.clone() };
+    let mut line = match availability.state {
+        // The Host's words for these say less than the user needs ("Busy"
+        // names no one) or more ("(usage limit)"): the desktop's own.
+        State::Busy | State::SwitchingAccount => own_words(availability)?,
+        State::Unresponsive => match availability.last_alive_ms {
+            Some(alive) => silent_for(alive, clock),
+            None => NO_SIGN_OF_LIFE.to_owned(),
+        },
+        _ if !availability.text.is_empty() => availability.text.clone(),
+        _ => own_words(availability)?,
+    };
     if let Some(back) = back(availability.back_at_ms, clock) {
         line.push_str(" · ");
         line.push_str(&back);
-    }
-    if availability.state == State::Unresponsive
-        && let Some(alive) = availability.last_alive_ms
-    {
-        line.push_str(" · ");
-        line.push_str(&last_alive(alive, clock));
     }
     Some(line)
 }
@@ -287,28 +319,54 @@ mod tests {
     }
 
     #[test]
-    fn the_hosts_text_shows_as_sent_with_the_time_part_added() {
-        assert_eq!(says(json!({"state": "restarting", "text": "Restarting", "back_at_ms": NOW + 20_000})), "Restarting · back in ~20 s");
-        assert_eq!(says(json!({"state": "switching_account", "text": "Switching account (usage limit)"})), "Switching account (usage limit)");
-        assert_eq!(says(json!({"state": "busy", "text": "Busy · 25 messages ahead of you", "queue_ahead": 25})), "Busy · 25 messages ahead of you");
+    fn the_hosts_short_text_shows_as_sent_with_the_time_part_added() {
+        assert_eq!(says(json!({"state": "restarting", "text": "Restarting", "back_at_ms": NOW + 20_000})), "Restarting · ~20 s");
+        assert_eq!(says(json!({"state": "usage_limit", "text": "Usage limit"})), "Usage limit");
+        assert_eq!(says(json!({"state": "restarting", "text": "Restarting after the Host restarted"})), "Restarting after the Host restarted");
+    }
+
+    #[test]
+    fn the_desktop_says_less_where_the_host_says_more() {
+        // Busy shows only for other agents' turns: it names them, and how
+        // many messages go before the user's.
+        assert_eq!(says(json!({"state": "busy", "text": "Busy · 25 messages ahead of you", "queue_ahead": 25})), "Answering other agents · 25 ahead of you");
+        assert_eq!(says(json!({"state": "busy", "text": "Busy · 1 message ahead of you", "queue_ahead": 1})), "Answering other agents · 1 ahead of you");
+        assert_eq!(says(json!({"state": "busy", "text": "Busy", "queue_ahead": 0})), "Answering other agents");
+        assert_eq!(says(json!({"state": "switching_account", "text": "Switching account (usage limit)"})), "Switching account");
+        assert_eq!(says(json!({"state": "switching_account", "text": "Switching account (sign-in)"})), "Switching account");
         assert_eq!(
             says(json!({"state": "unresponsive", "text": "Not responding", "last_alive_ms": NOW - 4 * 60_000 - 10_000})),
-            "Not responding · last sign of life 4 min ago"
+            "No sign of life for 4 min"
         );
-        assert_eq!(says(json!({"state": "unresponsive", "text": "Not responding", "last_alive_ms": NOW - 40_000})), "Not responding · last sign of life just now");
-        assert_eq!(says(json!({"state": "busy", "text": "Busy", "last_alive_ms": NOW - 600_000})), "Busy", "the last sign of life belongs to unresponsive");
+        assert_eq!(says(json!({"state": "unresponsive", "text": "Not responding", "last_alive_ms": NOW - 40_000})), "No sign of life for 1 min", "never zero minutes");
+        assert_eq!(says(json!({"state": "unresponsive", "text": "Not responding"})), "No sign of life");
     }
 
     #[test]
     fn empty_text_gets_the_desktops_own_words() {
-        assert_eq!(says(json!({"state": "busy", "queue_ahead": 25})), "Busy · 25 messages ahead of you");
-        assert_eq!(says(json!({"state": "busy", "queue_ahead": 1})), "Busy · 1 message ahead of you");
-        assert_eq!(says(json!({"state": "busy", "queue_ahead": 0})), "Busy");
-        assert_eq!(says(json!({"state": "restarting", "text": "", "back_at_ms": NOW + 20_000})), "Restarting · back in ~20 s");
-        assert_eq!(says(json!({"state": "switching_account"})), "Switching account (usage limit)");
+        assert_eq!(says(json!({"state": "restarting", "text": "", "back_at_ms": NOW + 20_000})), "Restarting · ~20 s");
         assert_eq!(says(json!({"state": "usage_limit"})), "Usage limit reached");
-        assert_eq!(says(json!({"state": "unresponsive"})), "Not responding");
-        assert_eq!(says(json!({"state": "busy", "text": "  "})), "Busy", "blank text is no text");
+        assert_eq!(says(json!({"state": "unresponsive"})), "No sign of life");
+        assert_eq!(says(json!({"state": "busy", "text": "  ", "queue_ahead": 2})), "Answering other agents · 2 ahead of you", "blank text is no text");
+    }
+
+    /// Peter, 26 Nov 2026: the line shows only while the agent cannot
+    /// answer the user now, never while it works visibly on the user's own
+    /// message; work for other agents still keeps the user waiting.
+    #[test]
+    fn busy_blocks_the_user_only_on_other_agents_turns() {
+        let busy = of(json!({"state": "busy", "queue_ahead": 1})).unwrap();
+        assert!(blocks_user(&busy, "agents"));
+        assert!(!blocks_user(&busy, "user"), "the user's own turn: the working indicator says it");
+        assert!(!blocks_user(&busy, ""), "no turn the Host names: no evidence it blocks");
+        for state in ["restarting", "switching_account", "usage_limit", "unresponsive", "napping"] {
+            let other = of(json!({"state": state})).unwrap();
+            for audience in ["user", "agents", ""] {
+                assert!(blocks_user(&other, audience), "{state} shows on a turn for {audience:?}");
+            }
+        }
+        let updating = host_updating(json!({"type": "host-updating"}).as_object().unwrap());
+        assert!(blocks_user(&updating, "user"));
     }
 
     #[test]
@@ -316,26 +374,26 @@ mod tests {
         assert_eq!(of(json!({"state": "napping"})).unwrap().state, State::Other("napping".into()));
         assert_eq!(words(json!({"state": "napping"})), None);
         assert_eq!(words(json!({})), None);
-        assert_eq!(says(json!({"state": "napping", "text": "Taking a break", "back_at_ms": NOW + 5_000})), "Taking a break · back in ~5 s");
+        assert_eq!(says(json!({"state": "napping", "text": "Taking a break", "back_at_ms": NOW + 5_000})), "Taking a break · ~5 s");
     }
 
     #[test]
     fn the_time_part_is_seconds_then_minutes_then_a_clock_time() {
         let back = |ms: i64| says(json!({"state": "restarting", "text": "Restarting", "back_at_ms": NOW + ms}));
-        assert_eq!(back(19_200), "Restarting · back in ~20 s", "seconds round up");
-        assert_eq!(back(400), "Restarting · back in ~1 s");
-        assert_eq!(back(89_000), "Restarting · back in ~89 s");
-        assert_eq!(back(90_000), "Restarting · back in ~2 min");
-        assert_eq!(back(150_000), "Restarting · back in ~3 min", "minutes round to the nearest");
-        assert_eq!(back(3_599_000), "Restarting · back in ~60 min");
-        assert_eq!(back(3_600_000), format!("Restarting · back at {}", local(NOW + 3_600_000)));
+        assert_eq!(back(19_200), "Restarting · ~20 s", "seconds round up");
+        assert_eq!(back(400), "Restarting · ~1 s");
+        assert_eq!(back(89_000), "Restarting · ~89 s");
+        assert_eq!(back(90_000), "Restarting · ~2 min");
+        assert_eq!(back(150_000), "Restarting · ~3 min", "minutes round to the nearest");
+        assert_eq!(back(3_599_000), "Restarting · ~60 min");
+        assert_eq!(back(3_600_000), format!("Restarting · until {}", local(NOW + 3_600_000)));
         assert_eq!(back(0), "Restarting", "a time that is past is left out");
         assert_eq!(back(-5_000), "Restarting");
-        let limit = says(json!({"state": "usage_limit", "text": "Usage limit reached", "back_at_ms": NOW + 3 * 3_600_000}));
-        assert_eq!(limit, format!("Usage limit reached · back at {}", local(NOW + 3 * 3_600_000)));
+        let limit = says(json!({"state": "usage_limit", "text": "Usage limit", "back_at_ms": NOW + 3 * 3_600_000}));
+        assert_eq!(limit, format!("Usage limit · until {}", local(NOW + 3 * 3_600_000)));
         let alive = |ms: i64| says(json!({"state": "unresponsive", "last_alive_ms": NOW - ms}));
-        assert_eq!(alive(119_000), "Not responding · last sign of life 1 min ago");
-        assert_eq!(alive(-3_000), "Not responding · last sign of life just now", "a clock ahead never counts below zero");
+        assert_eq!(alive(239_000), "No sign of life for 3 min");
+        assert_eq!(alive(-3_000), "No sign of life for 1 min", "a clock ahead never counts below one");
     }
 
     #[test]
@@ -343,12 +401,14 @@ mod tests {
         // The Host's clock is 30 s ahead of this machine's: back_at_ms 50 s
         // ahead of the Host's now is 50 s away, not 80.
         let restarting = of(json!({"state": "restarting", "back_at_ms": NOW + 30_000 + 50_000})).unwrap();
-        assert_eq!(line(&restarting, Clock { local_now_ms: NOW, host_offset_ms: 30_000 }).unwrap(), "Restarting · back in ~50 s");
-        assert_eq!(line(&restarting, at(NOW)).unwrap(), "Restarting · back in ~80 s", "without an offset the local clock counts");
+        assert_eq!(line(&restarting, Clock { local_now_ms: NOW, host_offset_ms: 30_000 }).unwrap(), "Restarting · ~50 s");
+        assert_eq!(line(&restarting, at(NOW)).unwrap(), "Restarting · ~80 s", "without an offset the local clock counts");
         // A clock time is this machine's: two minutes earlier than the Host's.
         let later = of(json!({"state": "usage_limit", "back_at_ms": NOW + 7_200_000})).unwrap();
         let skewed = Clock { local_now_ms: NOW, host_offset_ms: 120_000 };
-        assert_eq!(line(&later, skewed).unwrap(), format!("Usage limit reached · back at {}", local(NOW + 7_200_000 - 120_000)));
+        assert_eq!(line(&later, skewed).unwrap(), format!("Usage limit reached · until {}", local(NOW + 7_200_000 - 120_000)));
+        let silent = of(json!({"state": "unresponsive", "last_alive_ms": NOW + 30_000 - 5 * 60_000})).unwrap();
+        assert_eq!(line(&silent, Clock { local_now_ms: NOW, host_offset_ms: 30_000 }).unwrap(), "No sign of life for 5 min");
     }
 
     #[test]
@@ -356,7 +416,7 @@ mod tests {
         let event = json!({"type": "host-updating", "text": "Host updating", "since_ms": NOW, "back_at_ms": NOW + 40_000});
         let updating = host_updating(event.as_object().unwrap());
         assert_eq!(updating.state, State::HostUpdating);
-        assert_eq!(line(&updating, at(NOW)).unwrap(), "Host updating · back in ~40 s");
+        assert_eq!(line(&updating, at(NOW)).unwrap(), "Host updating · ~40 s");
         assert_eq!(line(&updating, at(NOW + 41_000)).unwrap(), "Host updating");
         let bare = host_updating(json!({"type": "host-updating"}).as_object().unwrap());
         assert_eq!(line(&bare, at(NOW)).unwrap(), "Host updating", "no text: the desktop's words");
