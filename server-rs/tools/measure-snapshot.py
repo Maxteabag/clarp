@@ -26,6 +26,9 @@ import time
 
 import scratch
 
+# What a client asks with to be sent an answer gzipped also from this machine: a Host answers a
+# client on loopback that takes plain with plain (issue 932).
+GZIP_ONLY = "gzip, identity;q=0"
 AGENTS = 30
 WARM = 10
 TIMED = 100
@@ -96,12 +99,12 @@ def wire(address, pid):
         request(address, "POST", "/artifacts", json.dumps(body))
     for path in ("/agents/snapshot", "/artifacts"):
         plain, _ = request(address, "GET", path)
-        packed, _, answer = request(address, "GET", path, headers={"Accept-Encoding": "gzip"}, full=True)
+        packed, _, answer = request(address, "GET", path, headers={"Accept-Encoding": GZIP_ONLY}, full=True)
         encoding = answer.getheader("Content-Encoding")
         if encoding != "gzip" or gzip.decompress(packed) != plain:
             raise RuntimeError(f"{path}: Content-Encoding {encoding!r}, or its body decodes to another")
         line = [f"{path}: {len(plain)} bytes plain, {len(packed)} gzipped ({len(packed) / len(plain):.1%})"]
-        for name, headers in (("plain", {}), ("gzip", {"Accept-Encoding": "gzip"})):
+        for name, headers in (("plain", {}), ("gzip", {"Accept-Encoding": GZIP_ONLY})):
             for _ in range(3):
                 request(address, "GET", path, headers=headers)
             before = cpu_ms(pid)

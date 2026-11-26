@@ -39,6 +39,9 @@ import time
 from urllib.parse import urlsplit
 import zlib
 
+# What a client asks with to be sent an answer gzipped also from this machine: a Host answers a
+# client on loopback that takes plain with plain (issue 932).
+GZIP_ONLY = "gzip, identity;q=0"
 ANSWERS = 7
 SESSION = "probe"
 HELD_OPEN = 40
@@ -303,7 +306,7 @@ def answer(target, session, mode, n, cursor):
                         continue
                     path = (f"/log?session={session}&limit=100&{APP_LOG_OPTIONS}"
                             f"&after_revision={cursor['revision']}")
-                    status, headers, data, wire = target.request("GET", path, headers={"Accept-Encoding": "gzip"})
+                    status, headers, data, wire = target.request("GET", path, headers={"Accept-Encoding": GZIP_ONLY})
                     if status != 200:
                         raise RuntimeError(f"/log answered {status}")
                     counts["log_calls"] += 1

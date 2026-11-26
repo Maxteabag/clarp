@@ -12,7 +12,9 @@ const KEEP: &str = "private, no-cache";
 #[test]
 fn the_snapshot_and_the_artifact_list_are_tagged_for_their_caller_through_the_hosts_layers() {
     let place = Place::new("list-etags");
-    let host = place.start();
+    // With a token: a Host without one is open to this machine only, and refuses whatever a
+    // proxy hands on.
+    let host = place.start_with_token("the-administrators-token");
     let ben = host.new_agent("Ben");
     host.send(&ben, "hello", "u-1");
     wait_for("the first turn", || host.state(&ben) == "done");
@@ -26,6 +28,11 @@ fn the_snapshot_and_the_artifact_list_are_tagged_for_their_caller_through_the_ho
     let turn = first_turn_token(&place, &agent_id(&host, &ben));
     let get =
         |path: &str, headers: &[(&str, &str)]| fetch(&host, &host.token, "GET", path, headers, b"");
+    // A paired phone: a proxy on this machine (Tailscale Serve) may hand its requests on, where
+    // the owner's token is taken only from this machine itself.
+    let (phone, _) = pair(&host, "Phone", "full");
+    let from_phone =
+        |path: &str, headers: &[(&str, &str)]| fetch(&host, &phone, "GET", path, headers, b"");
 
     for path in ["/agents/snapshot", "/artifacts"] {
         let first = get(path, &[]);
@@ -44,8 +51,20 @@ fn the_snapshot_and_the_artifact_list_are_tagged_for_their_caller_through_the_ho
         assert_eq!(held.header("etag"), tag, "{path}");
         assert_eq!(held.header("cache-control"), KEEP, "{path}");
 
-        // Gzipped: the same tag, and the body decodes to the plain one.
-        let packed = get(path, &[("Accept-Encoding", "gzip")]);
+        // From this machine a client that takes plain is sent it plain (issue 932): the same
+        // tag, the same bytes, and still told that the answer varies by what was asked.
+        let here = get(path, &[("Accept-Encoding", "gzip")]);
+        assert_eq!(here.status, 200, "{path}");
+        assert_eq!(here.header("content-encoding"), "", "{path}");
+        assert_eq!(here.header("etag"), tag, "{path}");
+        let varies = (here.headers.iter())
+            .any(|(name, value)| name == "vary" && value.contains("Accept-Encoding"));
+        assert!(varies, "{path}");
+        assert_eq!(here.body, first.body, "{path}");
+
+        // Gzipped for a client that takes only gzip: the same tag, and the body decodes to
+        // the plain one.
+        let packed = get(path, &[("Accept-Encoding", "gzip, identity;q=0")]);
         assert_eq!(packed.status, 200, "{path}");
         assert_eq!(packed.header("content-encoding"), "gzip", "{path}");
         assert_eq!(packed.header("etag"), tag, "{path}");
@@ -54,9 +73,39 @@ fn the_snapshot_and_the_artifact_list_are_tagged_for_their_caller_through_the_ho
             .read_to_end(&mut decoded)
             .unwrap();
         assert_eq!(decoded, first.body, "{path}");
+
+        // A request a proxy on this machine handed on comes on loopback as well, and is packed
+        // as before: its plain answer's tag, and a body that decodes to that plain answer.
+        for marker in [
+            ("X-Forwarded-For", "100.101.102.103"),
+            ("Tailscale-User-Login", "someone@example.com"),
+        ] {
+            let plain = from_phone(path, &[marker]);
+            assert_eq!(plain.status, 200, "{path} {marker:?}: {}", plain.text());
+            let packed = from_phone(path, &[("Accept-Encoding", "gzip"), marker]);
+            assert_eq!(packed.status, 200, "{path} {marker:?}");
+            assert_eq!(
+                packed.header("content-encoding"),
+                "gzip",
+                "{path} {marker:?}"
+            );
+            assert_eq!(
+                packed.header("etag"),
+                plain.header("etag"),
+                "{path} {marker:?}"
+            );
+            let mut decoded = Vec::new();
+            GzDecoder::new(&packed.body[..])
+                .read_to_end(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded, plain.body, "{path} {marker:?}");
+        }
         let held = get(
             path,
-            &[("Accept-Encoding", "gzip"), ("If-None-Match", &tag)],
+            &[
+                ("Accept-Encoding", "gzip, identity;q=0"),
+                ("If-None-Match", &tag),
+            ],
         );
         assert_eq!(held.status, 304, "{path}");
 

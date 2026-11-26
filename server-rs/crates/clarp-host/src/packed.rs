@@ -11,14 +11,26 @@
 //! framing never waits for a packer. A part of something (a range), a socket's upgrade, an
 //! answer already packed, an answer with no body (`HEAD`, 204, 304) and media, which is
 //! packed by its own format, go as they are.
+//!
+//! How it is packed depends on the path it takes (issue 932). Measured on 26 Nov 2026, level 5
+//! added about 21 ms to an answer of 1 MB and 45 ms to one of 2 MB read over loopback, where
+//! the line costs nothing; through the relay, packing made the same answers several times
+//! faster. So a request from this machine that nobody handed on is answered plain when it
+//! takes plain; whatever else comes (the LAN, the relay, a proxy, the tailnet, a socket that
+//! says nothing) is packed as before. Only the socket decides that a request is from this
+//! machine, never a header; a header that says a proxy stood between only takes it off it.
+//! Level 1 straight over the LAN was measured too and dropped: it packs about half again as
+//! large, and was slower at 25 and 50 Mbit/s for answers of 1 and 2 MB.
 
 use axum::body::{Body, HttpBody};
-use axum::extract::Request;
+use axum::extract::{ConnectInfo, Request};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use clarp_kernel::trust;
 use flate2::{Compression, write::GzEncoder};
 use std::io::Write;
+use std::net::SocketAddr;
 
 /// Smaller than this, the gzip header and the time cost more than they save.
 pub const SMALLEST: u64 = 1024;
@@ -32,6 +44,58 @@ const LEVEL: u32 = 5;
 /// where level 5 packs to 27%, in less than half the time; a snapshot of 1.25 MB stays at
 /// level 5 (11%).
 const FAST_ABOVE: usize = 2 << 20;
+
+/// Whether a request comes from this machine, handed on by nobody (`trust::local_request`),
+/// by the socket it came on: there the line is the machine. A request with no socket (the
+/// relay's connector hands its requests in without one) is not; `::ffff:127.0.0.1` is.
+pub(crate) fn from_this_machine(request: &Request) -> bool {
+    let Some(ConnectInfo(peer)) = request.extensions().get::<ConnectInfo<SocketAddr>>() else {
+        return false;
+    };
+    let address = peer.ip().to_canonical();
+    address.is_loopback()
+        && trust::local_request(
+            &address.to_string(),
+            &crate::edge::headers_of(request.headers()),
+        )
+}
+
+/// Whether a client takes an answer plain: unless it weighs `identity` at nothing, or weighs
+/// `*` at nothing and names no `identity` it takes. A weight that is no number counts as
+/// nothing here, so a doubtful header keeps the answer packed as before.
+pub(crate) fn takes_plain(accept: &str) -> bool {
+    let (mut identity, mut star) = (None::<bool>, None::<bool>);
+    for part in accept.split(',') {
+        let mut fields = part.split(';');
+        let name = fields.next().unwrap_or_default().trim();
+        let weight = fields.find_map(|field| {
+            let (key, value) = field.split_once('=')?;
+            key.trim().eq_ignore_ascii_case("q").then_some(value.trim())
+        });
+        let taken = weight.is_none_or(|weight| weight.parse::<f32>().is_ok_and(|q| q > 0.0));
+        let held = if name.eq_ignore_ascii_case("identity") {
+            &mut identity
+        } else if name == "*" {
+            &mut star
+        } else {
+            continue;
+        };
+        *held = Some(held.unwrap_or(true) && taken);
+    }
+    identity.or(star).unwrap_or(true)
+}
+
+/// Whether a request takes plain by all its `Accept-Encoding` fields together: a list may be
+/// split over several (RFC 9110, 5.2), and `gzip` in one with `identity;q=0` in the next
+/// refuses plain. A field that is no text keeps the answer packed.
+fn plain_taken(headers: &HeaderMap) -> bool {
+    let fields: Option<Vec<&str>> = headers
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .map(|value| value.to_str().ok())
+        .collect();
+    fields.is_some_and(|fields| !fields.is_empty() && takes_plain(&fields.join(",")))
+}
 
 /// Whether a request takes its answer gzipped: one with a body, whole, from a client that
 /// takes gzip.
@@ -47,6 +111,7 @@ pub fn asked(method: &Method, headers: &HeaderMap) -> bool {
 pub async fn layer(request: Request, next: Next) -> Response {
     let asked = asked(request.method(), request.headers());
     let streamed = asked && stream_asked(request.uri().query());
+    let plain_here = asked && from_this_machine(&request) && plain_taken(request.headers());
     let response = next.run(request).await;
     if streamed && event_stream(response.status(), response.headers()) {
         return packed_stream(response);
@@ -59,7 +124,8 @@ pub async fn layer(request: Request, next: Next) -> Response {
     parts
         .headers
         .append(header::VARY, HeaderValue::from_static("Accept-Encoding"));
-    if !asked {
+    // From this machine, plain when plain is taken: packing costs more than the line saves.
+    if !asked || plain_here {
         return Response::from_parts(parts, body);
     }
     // The size is known, so the body is already in memory: this reads no stream.
@@ -201,7 +267,16 @@ mod tests {
     use tower::ServiceExt;
 
     fn big_json() -> String {
-        let rows: Vec<String> = (0..400)
+        rows_json(400)
+    }
+
+    /// About 320 KB: an answer that level 5 packs, larger than the lists of most tests.
+    fn medium_json() -> String {
+        rows_json(4800)
+    }
+
+    fn rows_json(count: usize) -> String {
+        let rows: Vec<String> = (0..count)
             .map(|n| {
                 format!(r#"{{"session":"agent-{n}","busy":false,"title":"a row of the list"}}"#)
             })
@@ -211,6 +286,7 @@ mod tests {
 
     fn router() -> Router {
         let json = big_json();
+        let medium = medium_json();
         let events = || async {
             let parts = futures_util::stream::iter(
                 (0..50)
@@ -244,6 +320,13 @@ mod tests {
                     async move { ([(header::CONTENT_TYPE, "application/json")], json) }
                 }),
             )
+            .route(
+                "/medium",
+                get(move || {
+                    let medium = medium.clone();
+                    async move { ([(header::CONTENT_TYPE, "application/json")], medium) }
+                }),
+            )
             .route("/events", get(events))
             .route("/picture", get(picture))
             .route("/ranged", get(ranged))
@@ -263,6 +346,34 @@ mod tests {
         let (parts, body) = response.into_parts();
         let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
         (Response::from_parts(parts, Body::empty()), bytes.to_vec())
+    }
+
+    /// A request as it comes on a socket from `peer` (`None`: as the relay's connector hands
+    /// one in, with no socket), with its headers.
+    async fn fetch_from(
+        peer: Option<&str>,
+        path: &str,
+        headers: &[(&str, &str)],
+    ) -> (Response, Vec<u8>) {
+        let mut request = Request::builder().uri(path);
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let mut request = request.body(Body::empty()).unwrap();
+        if let Some(peer) = peer {
+            let peer: SocketAddr = peer.parse().unwrap();
+            request.extensions_mut().insert(ConnectInfo(peer));
+        }
+        let response = router().oneshot(request).await.unwrap();
+        let (parts, body) = response.into_parts();
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        (Response::from_parts(parts, Body::empty()), bytes.to_vec())
+    }
+
+    fn decoded(packed: &[u8]) -> Vec<u8> {
+        let mut decoded = Vec::new();
+        GzDecoder::new(packed).read_to_end(&mut decoded).unwrap();
+        decoded
     }
 
     fn encoding(response: &Response) -> Option<&str> {
@@ -375,6 +486,149 @@ mod tests {
         for path in ["/picture", "/ranged", "/small"] {
             let (response, _) = fetch(path, Some("gzip")).await;
             assert_eq!(encoding(&response), None, "{path}");
+        }
+    }
+
+    const LOOPBACK: &str = "127.0.0.1:50123";
+
+    #[tokio::test]
+    async fn from_this_machine_an_answer_goes_plain_when_plain_is_taken() {
+        for peer in [LOOPBACK, "[::1]:50123", "[::ffff:127.0.0.1]:50123"] {
+            let (response, body) =
+                fetch_from(Some(peer), "/big", &[("accept-encoding", "gzip")]).await;
+            assert_eq!(encoding(&response), None, "{peer}");
+            assert_eq!(
+                response.headers().get(header::VARY).unwrap(),
+                "Accept-Encoding"
+            );
+            assert_eq!(body, big_json().into_bytes(), "{peer}");
+        }
+        // A page this machine served is from this machine too.
+        let (response, _) = fetch_from(
+            Some(LOOPBACK),
+            "/big",
+            &[
+                ("accept-encoding", "gzip"),
+                ("origin", "http://localhost:8765"),
+            ],
+        )
+        .await;
+        assert_eq!(encoding(&response), None);
+    }
+
+    #[tokio::test]
+    async fn from_this_machine_a_client_that_refuses_plain_is_still_sent_gzip() {
+        for accept in [
+            "gzip, identity;q=0",
+            "gzip, *;q=0",
+            "gzip;q=1, identity; q=0.000",
+            "gzip, identity;q=nothing",
+        ] {
+            let (response, packed) =
+                fetch_from(Some(LOOPBACK), "/big", &[("accept-encoding", accept)]).await;
+            assert_eq!(encoding(&response), Some("gzip"), "{accept}");
+            assert_eq!(decoded(&packed), big_json().into_bytes(), "{accept}");
+        }
+        // The list split over two fields: `gzip`, then `identity;q=0` in the next.
+        let (response, packed) = fetch_from(
+            Some(LOOPBACK),
+            "/big",
+            &[
+                ("accept-encoding", "gzip"),
+                ("accept-encoding", "identity;q=0"),
+            ],
+        )
+        .await;
+        assert_eq!(encoding(&response), Some("gzip"));
+        assert_eq!(decoded(&packed), big_json().into_bytes());
+        // `*` at nothing, but `identity` named as taken: plain.
+        let (response, _) = fetch_from(
+            Some(LOOPBACK),
+            "/big",
+            &[("accept-encoding", "gzip, *;q=0, identity")],
+        )
+        .await;
+        assert_eq!(encoding(&response), None);
+    }
+
+    #[tokio::test]
+    async fn a_proxy_on_this_machine_is_no_fast_path() {
+        // Tailscale Serve, a tunnel, a forwarding proxy, a page from elsewhere: all enter on
+        // loopback, and are packed as before.
+        for marker in [
+            ("x-forwarded-for", "100.101.102.103"),
+            ("tailscale-user-login", "someone@example.com"),
+            ("forwarded", "for=192.0.2.60"),
+            ("cf-connecting-ip", "192.0.2.60"),
+            ("x-clarp-transport", "relay"),
+            ("origin", "https://elsewhere.example"),
+            ("sec-fetch-site", "cross-site"),
+        ] {
+            let (response, packed) = fetch_from(
+                Some(LOOPBACK),
+                "/big",
+                &[("accept-encoding", "gzip"), marker],
+            )
+            .await;
+            assert_eq!(encoding(&response), Some("gzip"), "{marker:?}");
+            assert_eq!(packed, gzip(big_json().as_bytes()).unwrap(), "{marker:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn off_this_machine_an_answer_is_packed_as_before() {
+        let medium = medium_json().into_bytes();
+        let wanted = gzip(&medium).unwrap();
+        // The LAN (straight, v4, mapped and v6), the tailnet, the internet and the relay (no
+        // socket): level 5, byte for byte what the Host sent before issue 932.
+        for peer in [
+            Some("192.168.1.20:50123"),
+            Some("[::ffff:172.20.1.9]:50123"),
+            Some("[fe80::1]:50123"),
+            Some("100.101.102.103:50123"),
+            Some("[fd7a:115c:a1e0::1]:50123"),
+            Some("203.0.113.9:50123"),
+            None,
+        ] {
+            let (response, packed) =
+                fetch_from(peer, "/medium", &[("accept-encoding", "gzip")]).await;
+            assert_eq!(encoding(&response), Some("gzip"), "{peer:?}");
+            assert!(packed == wanted, "{peer:?}");
+            assert_eq!(decoded(&packed), medium, "{peer:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stream_asked_with_gzip_is_gzipped_on_every_path() {
+        for peer in [Some(LOOPBACK), Some("192.168.1.20:50123"), None] {
+            let (response, packed) =
+                fetch_from(peer, "/events?gzip=1", &[("accept-encoding", "gzip")]).await;
+            assert_eq!(encoding(&response), Some("gzip"), "{peer:?}");
+            assert!(decoded(&packed).starts_with(b"data: 0 "), "{peer:?}");
+        }
+    }
+
+    #[test]
+    fn plain_is_taken_unless_it_is_weighed_at_nothing() {
+        for accept in [
+            "gzip",
+            "gzip, deflate, br",
+            "identity",
+            "*",
+            "gzip, *;q=0, identity;q=0.5",
+            "",
+        ] {
+            assert!(takes_plain(accept), "{accept:?}");
+        }
+        for accept in [
+            "gzip, identity;q=0",
+            "gzip, IDENTITY ; Q=0.0",
+            "gzip, *;q=0",
+            "gzip, *;q=0, identity;q=0",
+            "gzip, identity, identity;q=0",
+            "gzip, identity;q=-1",
+        ] {
+            assert!(!takes_plain(accept), "{accept:?}");
         }
     }
 
