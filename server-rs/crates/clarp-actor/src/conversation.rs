@@ -1102,7 +1102,9 @@ fn rows(
 ) -> Result<Vec<Versioned>, ActorError> {
     let mut reader = Reader::new(log).with_span(span).reading(which);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
+    let mut last_tool_parent = None;
     for item in items {
+        let previous_tool_parent = last_tool_parent.take();
         // A row named again: it is given again, as it is now. A hidden row the user joined is
         // news to every reader; a check-in sent again for the apps (`resend`) only to a chat,
         // not to the goal keeper or a delegate's start. A sending again that names no row
@@ -1138,6 +1140,15 @@ fn rows(
         }
         if let Some(changed) = entry.part_of() {
             if place == Place::Newest {
+                if matches!(entry, Entry::Tool(_)) {
+                    // stored() reads the latest version of every tool on this reply. Adjacent
+                    // parts of the same reply cannot change its value or move another row.
+                    if previous_tool_parent.as_deref() == Some(changed) {
+                        last_tool_parent = previous_tool_parent;
+                        continue;
+                    }
+                    last_tool_parent = Some(changed.to_owned());
+                }
                 found.retain(|known| known.entry.id() != changed);
                 found.extend(reader.stored(changed, which)?);
             }
