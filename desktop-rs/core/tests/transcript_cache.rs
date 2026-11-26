@@ -24,7 +24,7 @@ fn transcript_cache_restores_durable_rows_without_stale_regression() {
     );
     original.add_optimistic("pending", "Do not persist");
     original.mark_delivery_failed("pending");
-    original.show_transient_thinking("Rachel");
+    original.show_transient_thinking();
 
     let snapshot = original.cache_snapshot();
     assert_eq!(snapshot["turns"].as_array().unwrap().len(), 3, "the failed delivery is kept, the thinking row is not");
