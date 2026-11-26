@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 205;
+pub const HOST_CONTRACT: u64 = 206;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -522,6 +522,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // of each agent of what it missed, the rest as before; such a connection without
     // `Last-Event-ID` is given no replay. Without `compact=1` all is as before (issue 882).
     ("compact_resume", 201),
+    // Every agent row says whether the agent can answer now, and if not why and until when:
+    // `availability {state, text, since_ms, back_at_ms, queue_ahead, last_alive_ms}`, live as an
+    // `agent-roster` event of kind `availability`; and every event stream is sent one
+    // `host-updating` before the Host stops (`crate::availability`, issue 918).
+    ("agent_availability", 204),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1777,6 +1782,7 @@ pub(crate) fn agent_row(
     owners: &toml::Table,
     quota: &crate::quota::Rows,
     forks: &crate::conversation_forks::Named,
+    at: crate::availability::At,
 ) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
@@ -1855,6 +1861,9 @@ pub(crate) fn agent_row(
     // Whether its tool's account is used up, or near a limit with no other seat to take its
     // turn: advice for whoever is about to write to it.
     row["backend_quota"] = quota.of(view.backend, &member.record.model);
+    // Whether it can answer now, and if not why and until when (feature `agent_availability`).
+    row["availability"] =
+        crate::availability::of_member(member, &view, &row["backend_quota"], at);
     // A change of its backend that runs now (feature `agent_backend_transit`), else null.
     row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);
     // The face it is shown with: the picture it has of its own; else, unless it has a
@@ -1969,6 +1978,7 @@ async fn agent_rows(
 ) -> AgentRows {
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let quota = crate::quota::rows(app).await;
+    let at = crate::availability::At::of(app);
     // Which agents the user calls live: by their profiles, as they are now.
     let (live_defaults, live_available) = app.calls.taking(app).await;
     let owners = app.mouth.owners_from(directory);
@@ -1987,7 +1997,7 @@ async fn agent_rows(
         .filter(|member| wanted(member))
         .map(|member| {
             let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks,
+                directory, families, member, &app.faces, &owners, &quota, &forks, at,
             );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
@@ -2004,7 +2014,7 @@ async fn agent_rows(
         let jobs = crate::janitors::jobs(app).await;
         for member in directory.janitors.iter().filter(|member| wanted(member)) {
             let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks,
+                directory, families, member, &app.faces, &owners, &quota, &forks, at,
             );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(false);
@@ -2642,6 +2652,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
                 &app.mouth.owners(),
                 &unasked,
                 &crate::conversation_forks::Named::read(),
+                crate::availability::At::of(app),
             )
         })
         .unwrap_or_default();
@@ -5004,7 +5015,7 @@ async fn events(
     let clock = app.clock.clone();
     // The stream ends the moment the Host is told to stop, not when its process is gone: its
     // apps reconnect to the next Host about five seconds sooner (issue 880).
-    let closing = Box::pin(app.hub.closing());
+    let closing = Some(Box::pin(app.hub.closing()));
     let stream = stream::unfold(
         (first, live, watched, closing, last),
         move |(mut first, mut live, mut watched, mut closing, mut last)| {
@@ -5018,6 +5029,10 @@ async fn events(
                     if let Some(event) = first.pop_front() {
                         return Some((Ok(event), (first, live, watched, closing, last)));
                     }
+                    // The Host stopped and its last word was sent: the stream ends.
+                    let Some(stopping) = closing.as_mut() else {
+                        return None;
+                    };
                     // What a turn shows, for a connection that asked for it; for one that did
                     // not, a wait that never ends.
                     let shown = async {
@@ -5029,7 +5044,7 @@ async fn events(
                     let heard = tokio::time::timeout_at(beat_at, async {
                         tokio::select! {
                             biased;
-                            () = &mut closing => Heard::Closing,
+                            () = stopping => Heard::Closing,
                             published = live.recv() => Heard::Event(published),
                             shown = shown => Heard::Shown(shown),
                         }
@@ -5086,7 +5101,12 @@ async fn events(
                             Heard::Event(Err(RecvError::Lagged(_) | RecvError::Closed))
                             | Heard::Shown(Err(RecvError::Lagged(_) | RecvError::Closed)),
                         ) => return None,
-                        Ok(Heard::Closing) => return None,
+                        // The Host stops: its last word, where it said one (`host-updating`,
+                        // feature `agent_availability`), and then the stream ends.
+                        Ok(Heard::Closing) => {
+                            closing = None;
+                            SseEvent::default().data(&*app.hub.farewell()?)
+                        }
                         Err(_) => {
                             let beat = json!({ "type": "heartbeat", "ts": clock.now_ms() });
                             SseEvent::default()

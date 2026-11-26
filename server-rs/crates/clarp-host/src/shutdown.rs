@@ -19,11 +19,13 @@ const DRAIN: Duration = Duration::from_secs(5);
 
 /// `hub`: told first when the Host is asked to stop, so that every event stream ends before the
 /// drain begins. A stream never ends by itself, and kept the drain open to its end: apps came
-/// back 6.8 s after a stop, against 1.9 s after a kill (issue 880).
+/// back 6.8 s after a stop, against 1.9 s after a kill (issue 880). `farewell`: what every
+/// stream is sent as its last frame then (`host-updating`, feature `agent_availability`).
 pub(super) async fn serve(
     listener: TcpListener,
     router: Router,
     hub: Arc<clarp_host::hub::Hub>,
+    farewell: impl FnOnce() -> serde_json::Value,
 ) -> io::Result<()> {
     let open = Arc::new(AtomicUsize::new(0));
     let listener = CountingListener {
@@ -44,7 +46,7 @@ pub(super) async fn serve(
         biased;
         () = told_to_stop() => {
             let deadline = tokio::time::Instant::now() + DRAIN;
-            hub.close_streams();
+            hub.close_streams_with(&farewell());
             let _ = stop.send(());
             match tokio::time::timeout_at(deadline, server).await {
                 Ok(result) => result,

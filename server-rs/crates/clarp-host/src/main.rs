@@ -625,7 +625,13 @@ async fn serve(config: Config) -> Result<(), String> {
     // And where the Host is reached through a relay, what a phone asks there is asked of
     // the same routes, from now on.
     clarp_host::connector::run(&app, router.clone());
-    shutdown::serve(listener, router, app.hub.clone())
+    // Whether each agent can answer now is told as it changes; and how long the Host took to
+    // come back since it was last told to stop is kept, for what it says when it is told again.
+    clarp_host::availability::run(&app);
+    clarp_host::availability::host_started(&app.config.data_dir, app.clock.now_ms());
+    let (data_dir, clock) = (app.config.data_dir.clone(), app.clock.clone());
+    let farewell = move || clarp_host::availability::host_updating(&data_dir, clock.now_ms());
+    shutdown::serve(listener, router, app.hub.clone(), farewell)
         .await
         .map_err(|error| error.to_string())
 }

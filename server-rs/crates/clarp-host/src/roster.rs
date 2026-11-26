@@ -579,6 +579,7 @@ async fn archived(
                 .find(|member| member.record.agent_id == *agent_id)?;
             let mut row = edge::agent_row(
                 &directory, &families, member, &app.faces, &owners, &quota, &forks,
+                crate::availability::At::of(&app),
             );
             let session = &member.record.session;
             row["team_ids"] = json!(teams.get(agent_id).map_or(&[][..], Vec::as_slice));

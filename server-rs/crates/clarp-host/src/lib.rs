@@ -22,6 +22,7 @@ pub mod android_chip;
 pub mod apps;
 pub mod artifact_tool;
 pub mod audio;
+pub mod availability;
 mod bookkeeping;
 pub mod bound_privacy;
 pub mod calendar;

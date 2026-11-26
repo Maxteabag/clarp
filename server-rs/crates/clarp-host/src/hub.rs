@@ -106,6 +106,15 @@ pub struct Hub {
     /// The Host is stopping: every event stream ends now, so that its apps reconnect to the
     /// Host that follows at once rather than when this process is gone (issue 880).
     closing: watch::Sender<bool>,
+    /// What every event stream is sent as its last frame when the Host stops (`host-updating`,
+    /// feature `agent_availability`).
+    farewell: Mutex<Option<Arc<str>>>,
+    /// When this run of the Host started.
+    started_ms: i64,
+    /// The agents whose status or queue moved since availability was last looked at, and the
+    /// way to wake whoever looks (`crate::availability::run`).
+    availability_moved: Mutex<HashSet<String>>,
+    availability_woken: tokio::sync::Notify,
 }
 
 impl Hub {
@@ -138,7 +147,57 @@ impl Hub {
             queue_roster: OnceLock::new(),
             turn_ends: Mutex::new(VecDeque::new()),
             closing,
+            farewell: Mutex::new(None),
+            started_ms: now_ms,
+            availability_moved: Mutex::default(),
+            availability_woken: tokio::sync::Notify::new(),
         }
+    }
+
+    /// When this run of the Host started.
+    pub fn started_ms(&self) -> i64 {
+        self.started_ms
+    }
+
+    /// An agent's status or queue moved: its availability is looked at again. Does not wait.
+    pub(crate) fn availability_moved(&self, agent_id: &str) {
+        let mut moved = self
+            .availability_moved
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if moved.insert(agent_id.to_owned()) && moved.len() == 1 {
+            self.availability_woken.notify_one();
+        }
+    }
+
+    /// The agents whose status or queue moved since this was last asked.
+    pub(crate) fn take_availability_moved(&self) -> HashSet<String> {
+        std::mem::take(
+            &mut *self
+                .availability_moved
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        )
+    }
+
+    /// Resolves when an agent's status or queue moved ([`Hub::availability_moved`]).
+    pub(crate) async fn availability_wait(&self) {
+        self.availability_woken.notified().await;
+    }
+
+    /// The Host is stopping, with what every event stream is sent before it ends.
+    pub fn close_streams_with(&self, farewell: &Value) {
+        *self.farewell.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(Arc::from(farewell.to_string()));
+        self.close_streams();
+    }
+
+    /// What an event stream is sent as its last frame, when the Host said one.
+    pub(crate) fn farewell(&self) -> Option<Arc<str>> {
+        self.farewell
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// The Host is stopping: every event stream open now, or opened after, ends (issue 880).

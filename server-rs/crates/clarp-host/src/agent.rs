@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -816,6 +817,10 @@ pub struct AgentHandle {
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
     close: Arc<CloseState>,
+    /// The running turn's last sign of life (its tool's last output, else its start), 0 where
+    /// no turn runs: kept apart from the view, which is not made anew for every line a tool
+    /// prints (`availability`, issue 918).
+    alive: Arc<AtomicI64>,
 }
 
 #[derive(Default)]
@@ -857,6 +862,11 @@ pub(crate) const REMOVING: &str =
 pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
+    /// The running turn's last sign of life, where a turn runs.
+    pub fn last_alive_ms(&self) -> Option<i64> {
+        Some(self.alive.load(Ordering::Relaxed)).filter(|at| *at > 0)
+    }
+
     pub(crate) fn refresh_telling(&self) {
         let _ = self.tx.send(Ask::RefreshTelling);
     }
@@ -1686,6 +1696,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         broken: Some(OPENING.to_string()),
     }));
     let now_ms = setup.clock.now_ms();
+    let alive = Arc::new(AtomicI64::new(0));
     let worker = Worker {
         native: native_goal::Native::default(),
         claude_bypass: None,
@@ -1735,6 +1746,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
         stall: Stall::default(),
+        alive: alive.clone(),
     };
     let name = format!("agent-{}", worker.setup.record.session);
     let spawned = std::thread::Builder::new()
@@ -1747,6 +1759,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         tx,
         view,
         close: Arc::default(),
+        alive,
     }
 }
 
@@ -1850,6 +1863,8 @@ struct Worker {
     /// The two clocks as they were read together last: what tells a sleep of the machine.
     clock_seen: (Instant, i64),
     stall: Stall,
+    /// The running turn's last sign of life, shared with the agent's handle.
+    alive: Arc<AtomicI64>,
 }
 
 #[derive(Default)]
@@ -5595,6 +5610,10 @@ impl Worker {
             .map(|live| working_with(actor, live, &self.setup.hub));
         use clarp_kernel::teams::runtime::routine;
         let prior = self.view.borrow().clone();
+        // An agent that was being opened can answer now (`availability`).
+        if prior.broken.is_some() {
+            self.setup.hub.availability_moved(&self.setup.record.agent_id);
+        }
         let origin = status
             .live
             .as_ref()
@@ -5684,6 +5703,10 @@ impl Worker {
         let queue_edit = self.queue_edit.take();
         let passed = std::mem::take(&mut self.passed);
         let stall_changed = self.refresh_stall();
+        if let Some(actor) = &self.actor {
+            let alive = actor.running_silence_since().unwrap_or(0);
+            self.alive.store(alive, Ordering::Relaxed);
+        }
         if !(changed.conversation
             || changed.status
             || changed.queue
@@ -5750,6 +5773,18 @@ impl Worker {
                 .and_then(|told| told.last.as_ref())
                 .map(|was| was.id);
         let now = self.now_ms();
+        // Whether the agent can answer now may have changed (`availability`, issue 918); and a
+        // process that said its first word measures how long the next start takes.
+        if changed.status || changed.queue || stall_changed {
+            self.setup.hub.availability_moved(&self.setup.record.agent_id);
+        }
+        if let (Some(was), Some(live)) = (was_live, status.live.as_ref())
+            && was.turn == live.turn
+            && was.starting
+            && !live.starting
+        {
+            crate::availability::started(backend, now - was.moved_at_ms);
+        }
         // What the agent last finished for its user is another thing once a turn of the
         // user's or the Oracle's began or ended, and once something came to wait for the
         // agent or was taken back: whatever else it does between leaves that as it was.
@@ -6186,6 +6221,7 @@ impl Worker {
         view.broken = Some(why.to_string());
         view.stalled_since = None;
         self.view.send_replace(Arc::new(view));
+        self.setup.hub.availability_moved(&self.setup.record.agent_id);
     }
 }
 
@@ -6571,6 +6607,7 @@ mod mailbox_tests {
                 tx,
                 view,
                 close: Arc::default(),
+                alive: Arc::default(),
             },
             rx,
         )
