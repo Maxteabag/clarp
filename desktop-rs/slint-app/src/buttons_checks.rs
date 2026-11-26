@@ -21,7 +21,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
-use slint::Model;
+use slint::{ComponentHandle, Model};
 
 use super::{Stage, app_now, check, check_window_size_free, control, posts, report, run_stages, sends, shot, view};
 use crate::headless;
