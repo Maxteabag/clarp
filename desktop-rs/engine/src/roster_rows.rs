@@ -26,8 +26,9 @@ use crate::{Change, Engine};
 pub(crate) const FIELDS_FEATURE: &str = "roster_fields";
 pub(crate) const ROW_FEATURE: &str = "agent_row";
 
-/// The kinds whose events carry `fields` on a Host with `roster_fields`.
-const CARRIED: [&str; 4] = ["helper-state", "mute-changed", "chat_view", "agent-transit"];
+/// The kinds whose events carry `fields` on a Host with `roster_fields`
+/// (`availability`: why the agent cannot answer now, #918).
+const CARRIED: [&str; 5] = ["helper-state", "mute-changed", "chat_view", "agent-transit", clarp_core::availability::ROSTER_KIND];
 /// The kinds whose change stays in the agent's own row: with `agent_row`,
 /// that row is read. `coordination-changed` is one only with a `session`
 /// (without, the Host's own value changed), and `agent-transit` only

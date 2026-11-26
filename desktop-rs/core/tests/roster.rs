@@ -606,3 +606,96 @@ fn the_hosts_own_queue_answer_wins_over_a_count_kept_from_a_newer_revision() {
     let hazel = roster.find("hazel").unwrap();
     assert_eq!((hazel.queued_turn_count, hazel.queue_revision), (0, 3));
 }
+
+/// #918: a Host offering `agent_availability` puts `availability` on the
+/// snapshot row and patches it live (`agent-roster` kind `availability`);
+/// `ok` clears it, `agent-state` does not touch it, and an older Host shows
+/// nothing new.
+#[test]
+fn why_an_agent_cannot_answer_follows_the_host() {
+    use clarp_core::availability::{Clock, FEATURE, State, line};
+    let clock = Clock { local_now_ms: 10_000, host_offset_ms: 0 };
+    let restarting = json!({"state": "restarting", "text": "Restarting", "since_ms": 5_000, "back_at_ms": 30_000, "queue_ahead": 0, "last_alive_ms": null});
+    let mut h = Harness::new();
+    h.with(|r| r.set_availability_feature(true));
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"availability": restarting.clone()}))]));
+    let shown = h.row("sam").availability.clone().expect("a snapshot carries it");
+    assert_eq!(shown.state, State::Restarting);
+    assert_eq!(line(&shown, clock).as_deref(), Some("Restarting · back in ~20 s"));
+    assert_eq!(h.roster.availability("sam"), Some(&shown));
+
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "thinking", "ts": 13}))));
+    assert!(h.row("sam").availability.is_some(), "a state event leaves it");
+    h.with(|r| {
+        r.patch_row("sam", &obj(json!({"availability": {"state": "busy", "queue_ahead": 25}})));
+    });
+    assert_eq!(h.row("sam").availability.as_ref().and_then(|a| line(a, clock)).as_deref(), Some("Busy · 25 messages ahead of you"), "a roster patch sets it");
+    h.with(|r| {
+        r.patch_row("sam", &obj(json!({"availability": {"state": "ok", "queue_ahead": 0}})));
+    });
+    assert_eq!(h.row("sam").availability, None, "ok clears it");
+
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"availability": restarting.clone()}))]));
+    h.with(|r| r.mark_transport_unavailable());
+    assert_eq!((h.row("sam").availability.clone(), h.roster.availability("sam")), (None, None), "an unreachable Host says nothing of it");
+
+    let mut off = Harness::new();
+    off.with(|r| r.set_availability_feature(true));
+    off.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"availability": restarting.clone()}))]));
+    off.with(|r| r.set_availability_feature(false));
+    assert_eq!(off.row("sam").availability, None, "a Host without the feature clears what was shown");
+
+    // A Host without the feature shows nothing new, whatever it sends.
+    let mut old = Harness::new();
+    old.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"availability": restarting.clone()}))]));
+    assert_eq!(old.row("sam").availability, None);
+    old.with(|r| {
+        r.patch_row("sam", &obj(json!({"availability": restarting})));
+    });
+    assert_eq!(old.row("sam").availability, None);
+    old.with(|r| r.apply_host_updating(&obj(json!({"type": "host-updating", "back_at_ms": 50_000}))));
+    assert_eq!(old.row("sam").availability, None);
+    assert!(clarp_core::availability::offered_by(&obj(json!({"capabilities": {"features": [FEATURE]}}))));
+}
+
+/// #918: `host-updating` puts one line on every agent of the Host, through
+/// the stream dropping, until the desktop reads the list again.
+#[test]
+fn a_host_update_stands_for_every_agent_until_it_is_back() {
+    use clarp_core::availability::State;
+    let mut h = Harness::new();
+    h.with(|r| r.set_availability_feature(true));
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({})), roster_row("max", "max-id", 9, json!({}))]));
+    h.with(|r| r.apply_host_updating(&obj(json!({"type": "host-updating", "since_ms": 1, "back_at_ms": 40_000, "text": "Host updating"}))));
+    for session in ["sam", "max"] {
+        assert_eq!(h.row(session).availability.as_ref().map(|a| a.state.clone()), Some(State::HostUpdating), "{session}");
+    }
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({})), roster_row("max", "max-id", 9, json!({}))]));
+    assert!(h.row("sam").availability.is_some(), "a list read before the Host went down does not end it");
+    h.with(|r| r.mark_transport_unavailable());
+    assert!(h.row("sam").availability.is_some(), "it shows while the Host is down");
+    assert!(h.roster.availability("max").is_some());
+    h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({})), roster_row("max", "max-id", 9, json!({}))]));
+    assert_eq!((h.row("sam").availability.clone(), h.row("max").availability.clone()), (None, None), "the list read again ends it");
+
+    h.with(|r| r.apply_host_updating(&obj(json!({"type": "host-updating"}))));
+    h.with(|r| r.set_availability_feature(true));
+    assert_eq!(h.row("sam").availability, None, "a /server-info answer is the Host up too");
+}
+
+/// #918: the agent's answer arriving in a `/log` delta ends the line before
+/// the Host's `ok` does; a user's row, or another agent's chat, does not.
+#[test]
+fn the_agents_answer_ends_the_availability_line() {
+    let mut h = Harness::new();
+    h.with(|r| r.set_availability_feature(true));
+    h.snapshot(json!([
+        roster_row("sam", "sam-id", 10, json!({"availability": {"state": "busy", "queue_ahead": 3}})),
+        roster_row("max", "max-id", 9, json!({"availability": {"state": "restarting"}})),
+    ]));
+    h.with(|r| r.apply_log_delta("sam", &obj(json!({"turns": [{"role": "user", "text": "hello"}]}))));
+    assert!(h.row("sam").availability.is_some(), "the user's own row is no answer");
+    h.with(|r| r.apply_log_delta("sam", &obj(json!({"turns": [{"role": "assistant", "text": "here"}]}))));
+    assert_eq!(h.row("sam").availability, None, "the answer ends it");
+    assert!(h.row("max").availability.is_some(), "only in that chat");
+}

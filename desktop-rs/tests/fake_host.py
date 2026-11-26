@@ -55,10 +55,10 @@ rooms_gone = False  # an older Host without /agent-conversations
 agents = [
     {"agent_id": "a1", "session": "rachel", "persona": "Rachel", "backend": "claude",
      "latest_state": "idle", "alive": True, "last_activity": 2000, "turn_started_at": 0, "conversation_id": "c-rachel", "head_revision": 2,
-     "stalled_since": None, "stalled_action": None},
+     "stalled_since": None, "stalled_action": None, "availability": None},
     {"agent_id": "a2", "session": "mike", "persona": "Mike", "backend": "codex",
      "latest_state": "idle", "alive": True, "last_activity": 1000, "turn_started_at": 0, "conversation_id": "c-mike", "head_revision": 1,
-     "stalled_since": None, "stalled_action": None},
+     "stalled_since": None, "stalled_action": None, "availability": None},
 ]
 turns = {
     "rachel": [
@@ -199,10 +199,13 @@ queue_steer = {"on": False}
 # 183): off until /__control/roster-rows turns them on.
 roster_rows = {"fields": False, "row": False}
 # The kinds whose events carry `fields`, and those an app reads one row for.
-ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit")
+ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit", "availability")
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
+# Why an agent cannot answer now (feature agent_availability, #918): on, as a
+# current Host has it; /__control/availability-feature turns it off.
+availability_feature = True
 # Conversation and Session views (feature chat_view, #702) and conversation
 # forks (conversation_fork): off until /__control/chat-view turns them on.
 # `refuse`: POST /agent-chat-view answers 403 agents_may_not.
@@ -1702,6 +1705,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("turn_audience_returns")
             if stall_feature:
                 features.append("stalled_turn")
+            if availability_feature:
+                features.append("agent_availability")
             if message_search["on"]:
                 features.append("message_search")
             if queue_steer["on"]:
@@ -2360,6 +2365,12 @@ class Handler(BaseHTTPRequestHandler):
             # reads it from /server-info when it connects).
             global stall_feature
             stall_feature = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/availability-feature":
+            # Test control: the agent_availability feature on or off (the
+            # client reads it from /server-info when it connects).
+            global availability_feature
+            availability_feature = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/live":
             # Test control: the live_items feature on or off (the client

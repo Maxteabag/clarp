@@ -1465,6 +1465,9 @@ impl Engine {
             return;
         }
         self.with_conversation(session, |c| c.apply_log(object, kind));
+        if kind == LoadKind::Delta {
+            self.mutate_roster(|r| r.apply_log_delta(session, object));
+        }
         self.schedule_cache_save(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") {
             self.request_delta(session);
@@ -1650,6 +1653,7 @@ impl Engine {
             self.force_snapshot();
             self.live_server_info(object);
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
+            self.mutate_roster(|r| r.set_availability_feature(clarp_core::availability::offered_by(object)));
             self.coordination_server_info(object);
             self.lanes_server_info(object);
             self.transit_server_info(object);
@@ -1854,6 +1858,7 @@ impl Engine {
                 self.chat_view_roster(event);
                 self.roster_event(event);
             }
+            clarp_core::availability::HOST_UPDATING_EVENT => self.mutate_roster(|r| r.apply_host_updating(event)),
             "delivery-updated" => {
                 // F4: a send's delivery state changed without a new revision;
                 // the hint carries no state, so re-read the chat's tail.

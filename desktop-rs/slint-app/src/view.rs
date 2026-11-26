@@ -264,10 +264,16 @@ thread_local! {
 /// whose stamp changed, not the list.
 pub(crate) fn start_turn_clock() {
     let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), || {
+    // Why an agent cannot answer (#918) ticks every tenth second only.
+    let ticks = std::cell::Cell::new(0u32);
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1), move || {
         if let Some(app) = crate::app() {
             app.tick_turn_stamps();
             app.tick_stall_notices();
+            ticks.set((ticks.get() + 1) % 10);
+            if ticks.get() == 0 {
+                app.tick_availability();
+            }
             crate::triage::tick(&app);
         }
     });
@@ -284,15 +290,11 @@ fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
+/// `host_offset_ms`: the row's Host clock minus this machine's, for the
+/// wait in its availability line.
+pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str, host_offset_ms: i64) -> ChatRow {
     let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
-    let activity = if row.stalled_since.is_some() {
-        clarp_core::stall::ROW_STATUS.to_owned()
-    } else if row.busy && !row.status_text.is_empty() {
-        one_line(&row.status_text)
-    } else {
-        String::new()
-    };
+    let activity = row_activity(row, clarp_core::availability::Clock::now(host_offset_ms));
     let mut chat = ChatRow {
         session: row.session.clone().into(),
         initial: initial(&row.name),
@@ -316,6 +318,20 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
     };
     (chat.running_helpers, chat.running_processes) = running_work(&chat, 0);
     chat
+}
+
+/// The row's status line: why the agent cannot answer now (#918), else a
+/// stalled turn's "Seems stuck" (#249), else a working agent's status.
+pub(crate) fn row_activity(row: &clarp_core::roster::AgentRow, clock: clarp_core::availability::Clock) -> String {
+    if let Some(line) = row.availability.as_ref().and_then(|a| clarp_core::availability::line(a, clock)) {
+        line
+    } else if row.stalled_since.is_some() {
+        clarp_core::stall::ROW_STATUS.to_owned()
+    } else if row.busy && !row.status_text.is_empty() {
+        one_line(&row.status_text)
+    } else {
+        String::new()
+    }
 }
 
 /// What an explorer row shows running: (sub-agents and helpers, background
@@ -915,9 +931,33 @@ mod tests {
             last_message: "First line\n\nsecond line".into(),
             ..Default::default()
         };
-        let chat = super::chat_row(&row, 0, "");
+        let chat = super::chat_row(&row, 0, "", 0);
         assert_eq!(chat.activity.as_str(), "helper: python3 - <<'EOF' p = 'core/tests/x.rs' assert_eq!(a, b)");
         assert_eq!(chat.preview.as_str(), "First line second line");
+    }
+
+    /// #918: why the agent cannot answer is the row's one status line,
+    /// ahead of a stall and of the working status; gone, the row is as
+    /// before.
+    #[test]
+    fn the_availability_line_is_the_row_status() {
+        let mut row = clarp_core::roster::AgentRow {
+            session: "sam".into(),
+            busy: true,
+            status_text: "Reading files".into(),
+            stalled_since: Some(1),
+            availability: clarp_core::availability::parse(&serde_json::json!({"state": "busy", "queue_ahead": 25})),
+            ..Default::default()
+        };
+        let clock = clarp_core::availability::Clock::default();
+        assert_eq!(super::row_activity(&row, clock), "Busy · 25 messages ahead of you");
+        // A state this desktop does not know, without a reason, says nothing.
+        row.availability = clarp_core::availability::parse(&serde_json::json!({"state": "napping"}));
+        assert_eq!(super::row_activity(&row, clock), clarp_core::stall::ROW_STATUS);
+        row.availability = None;
+        assert_eq!(super::row_activity(&row, clock), clarp_core::stall::ROW_STATUS);
+        row.stalled_since = None;
+        assert_eq!(super::row_activity(&row, clock), "Reading files");
     }
 
     /// The compact explorer's marks count what the full row's badges count:

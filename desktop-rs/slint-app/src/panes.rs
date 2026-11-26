@@ -686,6 +686,7 @@ impl App {
         view.live_busy = busy;
         view.live_stop_key = key.into();
         view.stall = Self::stall_indicator(engine, session).into();
+        view.availability = Self::availability_line(engine, session).into();
         view.stall_stop = clarp_core::stall::STOP_LABEL.into();
         // The stalled indicator's Stop names its key, as the status line's does.
         if !view.stall.is_empty() && view.live_stop_key.is_empty() {
@@ -758,6 +759,13 @@ impl App {
         clarp_core::stall::indicator(since, chrono::Utc::now().timestamp_millis(), agent.queued_turn_count > 0)
     }
 
+    /// Why the open chat's agent cannot answer now (#918), the header's
+    /// line, counted on its Host's clock; "" while it can.
+    fn availability_line(engine: &Engine, session: &str) -> String {
+        let clock = clarp_core::availability::Clock::now(engine.host_clock_offset_ms(session));
+        engine.roster().availability(session).and_then(|a| clarp_core::availability::line(a, clock)).unwrap_or_default()
+    }
+
     /// Once a second with the turn clock: a stalled chat's minutes move on,
     /// so only the panes whose indicator changed are rewritten.
     pub fn tick_stall_notices(&self) {
@@ -775,6 +783,29 @@ impl App {
             pane.view.stall = stall.into();
             if let Some(mut row) = self.panes.row_data(index).filter(|row| row.id == pane.view.id) {
                 row.stall = pane.view.stall.clone();
+                self.panes.set_row_data(index, row);
+            }
+        }
+    }
+
+    /// Every ten seconds (`App::tick_availability`): the header lines of
+    /// agents that cannot answer count their wait; only the panes whose
+    /// line changed are rewritten.
+    pub fn tick_availability_lines(&self) {
+        let Ok(engine) = self.engine.try_borrow() else { return };
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        for index in 0..panes.len() {
+            let pane = &mut panes[index];
+            if pane.view.availability.is_empty() {
+                continue;
+            }
+            let line = Self::availability_line(&engine, &pane.session);
+            if pane.view.availability == line.as_str() {
+                continue;
+            }
+            pane.view.availability = line.into();
+            if let Some(mut row) = self.panes.row_data(index).filter(|row| row.id == pane.view.id) {
+                row.availability = pane.view.availability.clone();
                 self.panes.set_row_data(index, row);
             }
         }

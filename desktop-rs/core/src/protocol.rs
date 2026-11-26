@@ -50,6 +50,9 @@ pub struct Agent {
     pub stalled_since: Option<i64>,
     /// What the Host offers for the stall: "stop", or None.
     pub stalled_action: Option<String>,
+    /// Why the agent cannot answer now (feature `agent_availability`,
+    /// #918), or None while it can, and on a Host too old to say.
+    pub availability: Option<crate::availability::Availability>,
     /// Who the running turn is for (`working_audience`, Host contract
     /// 124): `user`, `agents`, or empty while idle or from an older Host.
     pub working_audience: String,
@@ -145,6 +148,7 @@ impl Default for Agent {
             turn_started_at: None,
             stalled_since: None,
             stalled_action: None,
+            availability: None,
             working_audience: String::new(),
             working_with: String::new(),
             last_activity: 0,
@@ -229,6 +233,7 @@ impl Agent {
             turn_started_at: object.get("turn_started_at").and_then(Value::as_i64).filter(|t| *t > 0),
             stalled_since: crate::stall::since(object),
             stalled_action: crate::stall::action(object),
+            availability: crate::availability::read(object),
             working_audience: object.get("working_audience").and_then(Value::as_str).unwrap_or_default().trim().to_ascii_lowercase(),
             working_with: object.get("working_with").and_then(|w| w.get("name")).and_then(Value::as_str).unwrap_or_default().trim().to_owned(),
             last_activity: i("last_activity"),
@@ -317,6 +322,7 @@ impl Agent {
                 "turn_started_at" => self.turn_started_at = new.turn_started_at,
                 "stalled_since" => self.stalled_since = new.stalled_since,
                 "stalled_action" => self.stalled_action = new.stalled_action.clone(),
+                crate::availability::FIELD => self.availability = new.availability.clone(),
                 "working_audience" => self.working_audience = new.working_audience.clone(),
                 "working_with" => self.working_with = new.working_with.clone(),
                 "last_activity" => self.last_activity = new.last_activity,

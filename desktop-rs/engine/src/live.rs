@@ -51,6 +51,9 @@ pub(crate) struct Live {
     /// 198): the stream asks for it with `gzip=1`, and the HTTP client
     /// (which sends `Accept-Encoding: gzip`) unpacks it as it arrives.
     pub events_gzip: bool,
+    /// The Host's clock minus this machine's, from the last
+    /// `server_now_ms` any chat's live items carried (0 until one did).
+    pub host_offset_ms: i64,
     /// Whether the stream's query carries `gzip=1` now.
     gzip_asked: bool,
     /// A turn that did not complete says why on its end (`turn_end_reason`).
@@ -119,6 +122,13 @@ impl Engine {
     }
 
     /// The chat's live state, once the feature is on and it was opened.
+    /// The Host clock's offset to this machine's for `session`'s Host
+    /// (Host minus local, ms), as its live items last told it; 0 unknown.
+    pub fn host_clock_offset_ms(&self, session: &str) -> i64 {
+        on_peer!(self.peer_ref(session), |engine, local| engine.host_clock_offset_ms(local));
+        self.live.host_offset_ms
+    }
+
     pub fn live_view(&self, session: &str) -> Option<&LiveView> {
         on_peer!(self.peer_ref(session), |engine, local| engine.live_view(local));
         self.live.views.get(session)
@@ -382,6 +392,9 @@ impl Engine {
         let effects = view.apply_event(event);
         if view.generation() != before {
             view.observe_clock(server_now, now_ms());
+            if server_now > 0 {
+                self.live.host_offset_ms = server_now - now_ms();
+            }
             self.live.heard.insert(session.clone());
             self.changes.push(Change::Live(session.clone()));
         }
@@ -403,7 +416,11 @@ impl Engine {
                 self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
             }
             let Some(view) = self.live.views.get_mut(session) else { return true };
-            view.observe_clock(object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0), now_ms());
+            let server_now = object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0);
+            view.observe_clock(server_now, now_ms());
+            if server_now > 0 {
+                self.live.host_offset_ms = server_now - now_ms();
+            }
             // An idle, empty snapshot is what a silent Host answers too.
             let state = view.activity().get("state").and_then(Value::as_str).unwrap_or("idle");
             if !view.items().is_empty() || !matches!(state, "idle" | "") {
