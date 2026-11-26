@@ -104,6 +104,10 @@ export default {
     headers.set("x-forwarded-proto", "https");
     headers.set("x-forwarded-host", url.host);
     headers.set("x-forwarded-prefix", `/h/${hostId}`);
+    // The edge may normalize Accept-Encoding. Preserve what this client actually offered
+    // across the internal fetch; overwrite any client-supplied copy of the relay header.
+    const clientEncoding = request.cf ? request.cf.clientAcceptEncoding : request.headers.get("accept-encoding");
+    headers.set("x-relay-client-encoding", typeof clientEncoding === "string" ? clientEncoding : "identity");
     const forwarded = new Request(inner.toString(), { method: request.method, headers, body: request.body, redirect: "manual" });
     return env.HOST_RELAY.get(env.HOST_RELAY.idFromName(hostId)).fetch(forwarded);
   },
@@ -166,7 +170,7 @@ export class HostRelay implements DurableObject {
     const id = this.allocate();
     const path = request.headers.get("x-relay-path") ?? url.pathname + url.search;
     const headers: Record<string, string> = {};
-    request.headers.forEach((v, k) => { if (!HOP_BY_HOP.has(k) && !k.startsWith("cf-") && k !== "x-relay-path") headers[k] = v; });
+    request.headers.forEach((v, k) => { if (!HOP_BY_HOP.has(k) && !k.startsWith("cf-") && k !== "x-relay-path" && k !== "x-relay-client-encoding") headers[k] = v; });
 
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") return this.tunnelWebSocket(host, id, path, headers);
 
@@ -178,7 +182,8 @@ export class HostRelay implements DurableObject {
     // The phone closing the response (SSE reconnect, app backgrounded) errors the writable side.
     writer.closed.catch(() => { if (this.pending.delete(id)) { try { host.send(frame(K.ABORT, id)); } catch {} } });
 
-    host.send(json(K.REQ, id, { method: request.method, path, headers }));
+    headers["accept-encoding"] = request.headers.get("x-relay-client-encoding") || "identity";
+    host.send(json(K.REQ, id, { method: request.method, path, headers, passthrough_encoding: true }));
     // Stream the request body in bounded chunks, then mark its end.
     if (request.body) {
       const reader = request.body.getReader();
