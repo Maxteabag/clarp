@@ -121,6 +121,20 @@ def _run_now(_delay, fn):
     fn()
 
 
+def test_dispatch_car_mode_reaches_backend_and_marker(tmp_path, monkeypatch):
+    """car_mode rides the same road as synthesize_audio: the backend spawn
+    sees it (codex-style runners fold the doc into the preamble) and the
+    Claude source marker carries it for the UserPromptSubmit hook."""
+    monkeypatch.delenv("CLARP_CACHE_DIR", raising=False)
+    service, backends, _ = _make_service(tmp_path)
+    service.dispatch(text="how far", requested_session="mike", trace_id="t",
+                     synthesize_audio=True, car_mode=True)
+    _, call = backends.spawned[0]
+    assert call["car_mode"] is True
+    marker = Path(tmp_path, ".cache", "clarp", "source-markers", "mike")
+    assert marker.read_text() == "pwa-voice mike 12.500 t 1 1\n"
+
+
 def test_dispatch_service_is_mockable_without_http_or_processes(tmp_path, monkeypatch):
     monkeypatch.delenv("CLARP_CACHE_DIR", raising=False)
     agent_id = agents_db.create_agent(
@@ -157,7 +171,8 @@ def test_dispatch_service_is_mockable_without_http_or_processes(tmp_path, monkey
     marker = Path(tmp_path, ".cache", "clarp", "source-markers", "mike")
     assert call["voice_preamble"] is False
     assert call["synthesize_audio"] is False
-    assert marker.read_text() == "pwa-voice mike 12.500 trace-1 0\n"
+    assert call["car_mode"] is False
+    assert marker.read_text() == "pwa-voice mike 12.500 trace-1 0 0\n"
     state = agents_db.latest_state(agent_id)
     assert state["kind"] == AgentState.THINKING
     assert state["detail"]["trace_id"] == "trace-1"
@@ -829,7 +844,7 @@ def test_retry_rearms_pwa_source_marker(tmp_path, monkeypatch):
     call1["on_error"]("API Error: The socket connection was closed unexpectedly.")
     assert len(backends.spawned) == 2
     assert marker.exists(), "retry did not re-arm the pwa source marker"
-    assert marker.read_text() == "pwa-voice mike 12.500 t 1\n"
+    assert marker.read_text() == "pwa-voice mike 12.500 t 1 0\n"
 
 
 def test_connection_drop_exhausts_retries_then_interrupts(tmp_path):

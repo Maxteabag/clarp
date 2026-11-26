@@ -121,5 +121,11 @@ def test_source_marker_text_has_trace_and_session():
     assert source_marker_text(
         session="mike", trace_id="t1", now=12.3456, synthesize_audio=False
     ) == (
-        "pwa-voice mike 12.346 t1 0\n"
+        "pwa-voice mike 12.346 t1 0 0\n"
+    )
+    assert source_marker_text(
+        session="mike", trace_id="t1", now=12.3456, synthesize_audio=True,
+        car_mode=True,
+    ) == (
+        "pwa-voice mike 12.346 t1 1 1\n"
     )

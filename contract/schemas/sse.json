@@ -139,7 +139,17 @@
         "stream_url": {"type": "string"},
         "playlist_url": {"type": "string"},
         "complete_url": {"type": "string"},
-        "audio_format": {"type": "string"},
+        "audio_format": {
+          "type": ["string", "object"],
+          "description": "Advertised clip format. raw-pcm delivery sends {container, encoding, sample_rate, channels}; the client configures its decoder from it.",
+          "additionalProperties": true,
+          "properties": {
+            "container": {"type": "string"},
+            "encoding": {"type": "string"},
+            "sample_rate": {"type": "integer"},
+            "channels": {"type": "integer"}
+          }
+        },
         "preview": {"type": "string"}
       }
     },

@@ -22,3 +22,6 @@ Cancellation is sticky for a stable ID; use explicit `job-restart` only when
 the user intentionally starts a new run of that previously cancelled target,
 then use the new handle it prints.
 Set the short header status only while detached work genuinely continues.
+Never set a visible status for foreground analysis, tool calls, or builds
+you are awaiting in the current turn. Detached statuses must be 2-3 words
+and under 20 characters.

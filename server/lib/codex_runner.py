@@ -25,6 +25,7 @@ The runner is fire-and-forget: it returns the TurnHandle and callbacks
 fire from the drainer thread, mirroring clarp_runner's contract so the
 /send handler can treat both backends uniformly.
 """
+
 from __future__ import annotations
 
 import json
@@ -72,54 +73,26 @@ _VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
 # PWA/iOS client renders plain text but CANNOT show interactive prompts, so
 # the agent must ask in prose rather than via a question/choice tool.
 _NO_INTERACTIVE_QUESTIONS = (
-    "You are connected through a phone/voice app. It shows your text replies "
-    "but CANNOT display interactive prompts — no question tools, no "
-    "multiple-choice pickers, no approval dialogs. If you need to ask the "
-    "user something or offer choices, just write it as plain text and wait "
-    "for their next message. Never call a tool whose purpose is to ask the "
-    "user a question or request a choice; it won't render and they can't "
-    "answer it."
+    "Phone/voice client: no question tools, pickers, or approval dialogs "
+    "render — ask in plain text and wait for the reply."
 )
 
 # Added only for spoken turns: how the <speak> voice gating works.
 _VOICE_INSTRUCTION = (
-    "This reply is read aloud over text-to-speech: treat the spoken "
-    "<speak>...</speak> blocks like a phone call and the surrounding text like "
-    "the screen. Your VERY FIRST output — before any tool call, file read, or "
-    "silent thinking — must be a one-line <speak> acknowledgment (e.g. "
-    "<speak>On it — checking now.</speak>), because the user is hands-free and "
-    "hears only silence until you speak. "
-    "After that opening acknowledgment, STAY SILENT while you work: do NOT "
-    "narrate routine steps, progress, or each tool call. Most intermediate "
-    "steps should carry NO <speak> block at all. Only break the silence "
-    "mid-task when the user genuinely needs to hear it right then — a blocker, "
-    "an error, a decision that needs their input, or a question you must ask "
-    "before continuing. "
-    "When you finish, give ONE spoken final summary: say the outcome and "
-    "whatever they'd actually want in their ear, judged for listening — "
-    "selective, but not a vague headline. Leave out detail that only makes "
-    "sense on screen. "
-    "Put code, paths, commands, logs, tables, long lists, and detailed "
-    "evidence OUTSIDE the tags (shown but not spoken). Say it once: don't "
-    "restate your spoken text in the written part."
+    "Spoken reply: open with a one-line <speak> ack before any tool call. "
+    "Stay silent while working — break it only for blockers, errors, or "
+    "needed input. End with one spoken summary of the outcome. Code, paths, "
+    "logs stay outside the tags and are never restated."
 )
 
 # Added for spoken turns: make the delivery sound human. Fillers are wrapped in
 # <vox>…</vox> so they're SPOKEN but stripped from the on-screen text; <break>
 # is honoured by the TTS engine and likewise hidden from display.
 _NATURAL_SPEECH = (
-    "Every spoken response should sound conversational, including confident "
-    "and simple answers. Use brief pauses such as <break time=\"350ms\"/> and "
-    "occasional fillers naturally throughout; do not reserve them for "
-    "uncertainty. Wrap EVERY filler in <vox>…</vox> so it is spoken yet never "
-    "shown on screen, e.g. "
+    'Sound conversational: <break time="350ms"/> pauses and '
     "<vox>um</vox>, <vox>uh</vox>, <vox>hmm</vox>, <vox>like</vox>, "
-    "<vox>you know</vox>. Keep very short acknowledgments concise, but give "
-    "substantive spoken replies at least one natural conversational cue. Keep it tasteful "
-    "— a couple of pauses or fillers, never a stutter-fest; breaks around "
-    "300–450ms; spell fillers plainly (um/uh/hmm), never stretched out. These "
-    "cues live ONLY inside <speak>; the <vox> wraps and the tags are stripped "
-    "from the visible text automatically."
+    "<vox>you know</vox>-style fillers wrapped in <vox>…</vox>, a couple per "
+    "reply, only inside <speak>."
 )
 
 # Voice-markup normalization (display strip + TTS unwrap) lives in one place:
@@ -132,18 +105,14 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     session = (session or "").strip()
     if not persona:
         return ""
-    session_hint = f" The app session id for this agent is `{session}`." if session else ""
-    identity = (
-        f"You are the assistant persona named {persona}.{session_hint} "
-        f"When the user addresses {persona}, they are addressing you. "
-        f"Do not say that you are Claude, Codex, Gemini, or another base model "
-        f"instead of {persona}; keep model/vendor identity secondary unless the "
-        f"user explicitly asks about the underlying model."
-    )
+    identity = f"Your name is {persona}."
+    if session:
+        identity = f"{identity} The app session id for this agent is `{session}`."
     custom_personality = ""
     if session:
         try:
             from . import agents as agents_db
+
             custom_personality = str(
                 (agents_db.get_by_session(session) or {}).get("personality") or ""
             ).strip()
@@ -156,48 +125,50 @@ def persona_identity_instruction(persona: str, session: str = "") -> str:
     )
     if personality:
         identity = f"{identity} {personality}"
-    if session:
-        identity = (
-            f"{identity} Use the installed `clarp-background-jobs` skill for "
-            f"work that continues after your final response. Never set a visible "
-            f"status for foreground analysis, tool calls, or builds you are "
-            f"awaiting in the current turn. Detached statuses must be 2-3 words "
-            f"and under 20 characters."
-        )
     return identity
 
 
-def _preamble(*, voice: bool, identity: str = "") -> str:
-    body = app_turn_instructions(voice=voice)
+def _preamble(*, voice: bool, identity: str = "", car_mode: bool = False) -> str:
+    body = app_turn_instructions(voice=voice, car_mode=car_mode)
     if identity:
         body = f"{body}\n\n{identity}"
     return f"{_VOICE_PREAMBLE_HEAD} {body}{_VOICE_PREAMBLE_SPLIT}"
 
 
-def app_turn_instructions(*, voice: bool) -> str:
+def app_turn_instructions(*, voice: bool, car_mode: bool = False) -> str:
     """Application constraints for a turn, without user-message wrappers.
 
     Persistent transports place this in app-server ``additionalContext`` so it
     stays model-visible without polluting the user's transcript message.
+
+    `car_mode` appends the user-editable car-mode doc (see lib.car_mode): the
+    phone reported that the user is driving, so spoken replies must be short
+    and nothing may depend on the screen.
     """
     body = _NO_INTERACTIVE_QUESTIONS
     if voice:
         body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_NATURAL_SPEECH}"
+    if car_mode:
+        from . import car_mode as car_mode_doc
+
+        body = f"{body}\n\n{car_mode_doc.car_mode_instruction()}"
     return body
 
 
-def apply_voice_preamble(text: str, *, voice: bool = True,
-                         persona: str = "", session: str = "") -> str:
+def apply_voice_preamble(
+    text: str, *, voice: bool = True, persona: str = "", session: str = "",
+    car_mode: bool = False,
+) -> str:
     """Prepend the app-turn instruction block to a prompt.
 
     The no-interactive-questions rule is always included (the app can't show
     question UIs); the <speak> voice guidance is added only when `voice` is
     True (a spoken turn). `voice` defaults True so existing callers keep the
-    full block."""
+    full block. `car_mode` folds in the car-mode doc."""
     identity = persona_identity_instruction(persona, session)
     if identity:
-        return _preamble(voice=voice, identity=identity) + text
-    return _preamble(voice=voice) + text
+        return _preamble(voice=voice, identity=identity, car_mode=car_mode) + text
+    return _preamble(voice=voice, car_mode=car_mode) + text
 
 
 def strip_voice_preamble(text: str) -> str:
@@ -206,8 +177,9 @@ def strip_voice_preamble(text: str) -> str:
     if isinstance(text, str) and text.startswith(_VOICE_PREAMBLE_HEAD):
         i = text.find(_VOICE_PREAMBLE_SPLIT)
         if i != -1:
-            return text[i + len(_VOICE_PREAMBLE_SPLIT):]
+            return text[i + len(_VOICE_PREAMBLE_SPLIT) :]
     return text
+
 
 # Live registry: agent_id → list of running TurnHandle objects, so /stop
 # can interrupt in-flight turns. Mirrors clarp_runner._ACTIVE.
@@ -231,9 +203,14 @@ def _unregister(agent_id: str, h: "TurnHandle") -> None:
     _REGISTRY.unregister(agent_id, h)
 
 
-def build_cmd(session_id: str = "", *, is_new_session: bool = False,
-              model: str = "", reasoning_effort: str = "",
-              isolated: bool = False) -> list[str]:
+def build_cmd(
+    session_id: str = "",
+    *,
+    is_new_session: bool = False,
+    model: str = "",
+    reasoning_effort: str = "",
+    isolated: bool = False,
+) -> list[str]:
     """argv for one `codex exec` turn (prompt appended by the caller).
 
     Fresh turn   →  codex exec --json --dangerously-bypass-approvals-and-sandbox
@@ -267,6 +244,7 @@ def build_cmd(session_id: str = "", *, is_new_session: bool = False,
 @dataclass
 class _TurnState:
     """Accumulators for one turn's drainer thread."""
+
     saw_session: bool = False
     failed_error: str = ""
     tokens_in: int = 0
@@ -295,6 +273,7 @@ def spawn_turn(
     stream: Any = None,
     enqueue: Optional[Callable[..., int]] = None,
     voice_preamble: bool = False,
+    car_mode: bool = False,
     model: str = "",
     effort: str = "",
     isolated: bool = False,
@@ -318,24 +297,35 @@ def spawn_turn(
     # the spawn fails with FileNotFoundError. Agents created with the default
     # working dir store the bare tilde.
     cwd = pathlib.Path(os.path.expanduser(str(cwd)))
-    cmd = build_cmd(backend_session_id, is_new_session=is_new_session,
-                    model=model, reasoning_effort=effort, isolated=isolated)
+    cmd = build_cmd(
+        backend_session_id,
+        is_new_session=is_new_session,
+        model=model,
+        reasoning_effort=effort,
+        isolated=isolated,
+    )
     # Every codex turn is app-dispatched, so the instruction block is always
     # prepended (Codex has no hook to inject it like Claude does): the
     # no-interactive-questions rule always, plus the <speak> voice guidance
     # when this is a spoken turn.
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
     persona = (agent or {}).get("persona") or ""
-    cmd.append(apply_voice_preamble(
-        text,
-        voice=voice_preamble,
-        persona=persona,
-        session=session,
-    ))
+    cmd.append(
+        apply_voice_preamble(
+            text,
+            voice=voice_preamble,
+            persona=persona,
+            session=session,
+            car_mode=car_mode,
+        )
+    )
     flag = "resume" if (backend_session_id and not is_new_session) else "new"
-    log("codexSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
-                      f"text_len={len(text)} trace={trace_id or '∅'} "
-                      f"agent={agent_id or '∅'}")
+    log(
+        "codexSpawn",
+        f"cwd={cwd} {flag}={backend_session_id or '∅'} "
+        f"text_len={len(text)} trace={trace_id or '∅'} "
+        f"agent={agent_id or '∅'}",
+    )
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd),
@@ -347,18 +337,23 @@ def spawn_turn(
         env={**os.environ, "CLAUDE_PWA_SESSION": session},
     )
     attach_stderr_drain(proc)
-    handle = TurnHandle(proc=proc, drain_thread=None)   # type: ignore[arg-type]
+    handle = TurnHandle(proc=proc, drain_thread=None)  # type: ignore[arg-type]
     runtime_agent_id = "" if isolated else agent_id
     if runtime_agent_id:
         _register(runtime_agent_id, handle)
     drain = threading.Thread(
         target=_drain_stdout,
         kwargs=dict(
-            proc=proc, agent_id=runtime_agent_id, session=session,
-            trace_id=trace_id, handle=handle,
+            proc=proc,
+            agent_id=runtime_agent_id,
+            session=session,
+            trace_id=trace_id,
+            handle=handle,
             backend_session_id=backend_session_id,
-            on_session_init=on_session_init, on_result=on_result,
-            on_error=on_error, stream=stream,
+            on_session_init=on_session_init,
+            on_result=on_result,
+            on_error=on_error,
+            stream=stream,
             enqueue=enqueue or tts_queue.enqueue,
         ),
         daemon=True,
@@ -370,6 +365,7 @@ def spawn_turn(
 
 
 # ---- event extraction helpers (tolerant of envelope vs flat shapes) ----
+
 
 def _event_parts(ev: dict) -> tuple[str, dict]:
     """Return (inner_type, payload) for a codex event line.
@@ -417,6 +413,7 @@ def _agent_text(payload: dict) -> str:
 
 # ---- the drainer -------------------------------------------------------
 
+
 def _drain_stdout(
     *,
     proc: subprocess.Popen,
@@ -446,29 +443,37 @@ def _drain_stdout(
             try:
                 ev = json.loads(line)
             except json.JSONDecodeError:
-                continue                       # banner / non-JSON noise
+                continue  # banner / non-JSON noise
             if not isinstance(ev, dict):
                 continue
             if st.failed_error:
                 continue
             try:
-                _handle_event(ev, st, agent_id=agent_id,
-                              session=session, trace_id=trace_id,
-                              on_session_init=on_session_init,
-                              on_error=on_error,
-                              stream=stream, enqueue=enqueue)
-            except Exception as e:             # noqa: BLE001
+                _handle_event(
+                    ev,
+                    st,
+                    agent_id=agent_id,
+                    session=session,
+                    trace_id=trace_id,
+                    on_session_init=on_session_init,
+                    on_error=on_error,
+                    stream=stream,
+                    enqueue=enqueue,
+                )
+            except Exception as e:  # noqa: BLE001
                 log_exception("codexEventFail", e, detail=trace_id)
 
         rc = proc.wait()
         if rc != 0:
             err = stderr_text(proc)
-            log("codexExitErr", f"rc={rc} trace={trace_id or '∅'} "
-                                f"stderr={(err or '')[:500]!r}")
+            log(
+                "codexExitErr",
+                f"rc={rc} trace={trace_id or '∅'} stderr={(err or '')[:500]!r}",
+            )
             if on_error is not None and not st.failed_error:
                 try:
                     on_error(err or f"codex exited rc={rc}")
-                except Exception as e:         # noqa: BLE001
+                except Exception as e:  # noqa: BLE001
                     log_exception("codexOnErrorFail", e, detail=trace_id)
         else:
             # Clean exit → synthesise a Claude-shaped result event so the
@@ -483,13 +488,15 @@ def _drain_stdout(
                 }
                 try:
                     on_result(result)
-                except Exception as e:         # noqa: BLE001
+                except Exception as e:  # noqa: BLE001
                     log_exception("codexOnResultFail", e, detail=trace_id)
         if not st.saw_session:
-            log("codexNoSessionEvent",
+            log(
+                "codexNoSessionEvent",
                 f"trace={trace_id or '∅'} — turn produced no thread.started/"
-                f"session_meta; history binding may be missing")
-    except Exception as e:                     # noqa: BLE001
+                f"session_meta; history binding may be missing",
+            )
+    except Exception as e:  # noqa: BLE001
         log_exception("codexDrainFail", e, detail=trace_id)
     finally:
         if agent_id:
@@ -497,11 +504,16 @@ def _drain_stdout(
 
 
 def _handle_event(
-    ev: dict, st: _TurnState, *,
-    agent_id: str, session: str, trace_id: str,
+    ev: dict,
+    st: _TurnState,
+    *,
+    agent_id: str,
+    session: str,
+    trace_id: str,
     on_session_init: Optional[Callable[[str], None]],
     on_error: Optional[Callable[[str], None]],
-    stream: Any, enqueue: Callable[..., int],
+    stream: Any,
+    enqueue: Callable[..., int],
 ) -> None:
     etype = str(ev.get("type") or "")
 
@@ -525,15 +537,23 @@ def _handle_event(
                         on_error(st.failed_error)
         return
     if etype == "turn.started":
-        _record_state(agent_id, AgentState.THINKING,
-                      {"dispatch": "codex", "trace_id": trace_id})
+        _record_state(
+            agent_id, AgentState.THINKING, {"dispatch": "codex", "trace_id": trace_id}
+        )
         return
     if etype in ("item.started", "item.updated", "item.completed"):
         item = ev.get("item")
         if isinstance(item, dict):
-            _handle_item(etype, item, st, agent_id=agent_id,
-                         session=session, trace_id=trace_id,
-                         stream=stream, enqueue=enqueue)
+            _handle_item(
+                etype,
+                item,
+                st,
+                agent_id=agent_id,
+                session=session,
+                trace_id=trace_id,
+                stream=stream,
+                enqueue=enqueue,
+            )
         return
     if etype == "turn.completed":
         usage = ev.get("usage")
@@ -541,8 +561,13 @@ def _handle_event(
             st.tokens_in = int(usage.get("input_tokens") or st.tokens_in or 0)
             st.tokens_out = int(usage.get("output_tokens") or st.tokens_out or 0)
         _persist_live_text(
-            st, agent_id=agent_id, session=session, trace_id=trace_id,
-            stream=stream, force=True)
+            st,
+            agent_id=agent_id,
+            session=session,
+            trace_id=trace_id,
+            stream=stream,
+            force=True,
+        )
         _broadcast_transcript(stream, agent_id, session)
         return
     if etype in ("turn.failed", "thread.error", "error"):
@@ -577,34 +602,51 @@ def _handle_event(
 
     # --- turn lifecycle → agent state ---
     if inner == "task_started":
-        _record_state(agent_id, AgentState.THINKING,
-                      {"dispatch": "codex", "trace_id": trace_id})
+        _record_state(
+            agent_id, AgentState.THINKING, {"dispatch": "codex", "trace_id": trace_id}
+        )
         return
 
-    if inner in ("function_call", "custom_tool_call", "web_search_call",
-                 "mcp_tool_call_begin", "exec_command_begin"):
+    if inner in (
+        "function_call",
+        "custom_tool_call",
+        "web_search_call",
+        "mcp_tool_call_begin",
+        "exec_command_begin",
+    ):
         name = str(payload.get("name") or payload.get("tool") or "tool")
-        _record_state(agent_id, AgentState.TOOL,
-                      {"dispatch": "codex", "tool": name, "trace_id": trace_id})
+        _record_state(
+            agent_id,
+            AgentState.TOOL,
+            {"dispatch": "codex", "tool": name, "trace_id": trace_id},
+        )
         _broadcast_transcript(stream, agent_id, session)
         return
 
-    if inner in ("function_call_output", "custom_tool_call_output",
-                 "patch_apply_end", "exec_command_end", "web_search_end"):
+    if inner in (
+        "function_call_output",
+        "custom_tool_call_output",
+        "patch_apply_end",
+        "exec_command_end",
+        "web_search_end",
+    ):
         # A tool finished — refresh the history pane; state goes back to
         # THINKING until the next agent_message / tool / task_complete.
         _broadcast_transcript(stream, agent_id, session)
         return
 
     if inner == "context_compacted":
-        _record_state(agent_id, AgentState.COMPACTING,
-                      {"dispatch": "codex", "trace_id": trace_id})
+        _record_state(
+            agent_id, AgentState.COMPACTING, {"dispatch": "codex", "trace_id": trace_id}
+        )
         return
 
     if inner == "turn_aborted":
-        _record_state(agent_id, AgentState.IDLE,
-                      {"dispatch": "codex", "aborted": True,
-                       "trace_id": trace_id})
+        _record_state(
+            agent_id,
+            AgentState.IDLE,
+            {"dispatch": "codex", "aborted": True, "trace_id": trace_id},
+        )
         return
 
     # --- token telemetry (for the per-turn banner) ---
@@ -614,12 +656,14 @@ def _handle_event(
             st.tokens_in = int(
                 info.get("input_tokens")
                 or info.get("total_input_tokens")
-                or st.tokens_in or 0
+                or st.tokens_in
+                or 0
             )
             st.tokens_out = int(
                 info.get("output_tokens")
                 or info.get("total_output_tokens")
-                or st.tokens_out or 0
+                or st.tokens_out
+                or 0
             )
         return
 
@@ -635,10 +679,21 @@ def _handle_event(
             return
         st.last_agent_message = text
         _persist_live_text(
-            st, text=text, agent_id=agent_id, session=session,
-            trace_id=trace_id, stream=stream)
-        _speak(text, st, agent_id=agent_id, session=session,
-               trace_id=trace_id, enqueue=enqueue)
+            st,
+            text=text,
+            agent_id=agent_id,
+            session=session,
+            trace_id=trace_id,
+            stream=stream,
+        )
+        _speak(
+            text,
+            st,
+            agent_id=agent_id,
+            session=session,
+            trace_id=trace_id,
+            enqueue=enqueue,
+        )
         return
 
     if inner == "task_complete":
@@ -649,11 +704,22 @@ def _handle_event(
             # The final message may contain <speak> blocks the streaming
             # agent_message events didn't (some models only emit the full
             # text at completion). Speak any we haven't already.
-            _speak(msg, st, agent_id=agent_id, session=session,
-                   trace_id=trace_id, enqueue=enqueue)
+            _speak(
+                msg,
+                st,
+                agent_id=agent_id,
+                session=session,
+                trace_id=trace_id,
+                enqueue=enqueue,
+            )
         _persist_live_text(
-            st, agent_id=agent_id, session=session, trace_id=trace_id,
-            stream=stream, force=True)
+            st,
+            agent_id=agent_id,
+            session=session,
+            trace_id=trace_id,
+            stream=stream,
+            force=True,
+        )
         _broadcast_transcript(stream, agent_id, session)
         return
 
@@ -661,16 +727,34 @@ def _handle_event(
 # Item types codex emits inside item.* events that represent the agent
 # doing work (vs. speaking). Any of these flips the agent to TOOL.
 _TOOL_ITEM_TYPES = {
-    "command_execution", "function_call", "local_shell_call", "tool_call",
-    "file_change", "patch_apply", "mcp_tool_call", "dynamic_tool_call",
-    "collab_tool_call", "collab_agent_tool_call", "web_search",
-    "web_search_call", "image_view", "image_generation",
+    "command_execution",
+    "function_call",
+    "local_shell_call",
+    "tool_call",
+    "file_change",
+    "patch_apply",
+    "mcp_tool_call",
+    "dynamic_tool_call",
+    "collab_tool_call",
+    "collab_agent_tool_call",
+    "web_search",
+    "web_search_call",
+    "image_view",
+    "image_generation",
 }
 
 
-def _handle_item(etype: str, item: dict, st: _TurnState, *,
-                 agent_id: str, session: str, trace_id: str,
-                 stream: Any, enqueue: Callable[..., int]) -> None:
+def _handle_item(
+    etype: str,
+    item: dict,
+    st: _TurnState,
+    *,
+    agent_id: str,
+    session: str,
+    trace_id: str,
+    stream: Any,
+    enqueue: Callable[..., int],
+) -> None:
     """Handle a modern item.{started,updated,completed} event.
 
     `item.type == "agent_message"` carries the assistant text (spoken on
@@ -684,27 +768,41 @@ def _handle_item(etype: str, item: dict, st: _TurnState, *,
             return
         st.last_agent_message = text
         _persist_live_text(
-            st, text=text, agent_id=agent_id, session=session,
-            trace_id=trace_id, stream=stream,
-            force=etype == "item.completed")
+            st,
+            text=text,
+            agent_id=agent_id,
+            session=session,
+            trace_id=trace_id,
+            stream=stream,
+            force=etype == "item.completed",
+        )
         # Only speak the completed block — item.updated may carry partials.
         if etype == "item.completed":
-            _speak(text, st, agent_id=agent_id, session=session,
-                   trace_id=trace_id, enqueue=enqueue)
+            _speak(
+                text,
+                st,
+                agent_id=agent_id,
+                session=session,
+                trace_id=trace_id,
+                enqueue=enqueue,
+            )
         return
 
     if itype == "reasoning":
         # Model thinking — keep the agent in a busy state, but nothing to
         # speak or render.
-        _record_state(agent_id, AgentState.THINKING,
-                      {"dispatch": "codex", "trace_id": trace_id})
+        _record_state(
+            agent_id, AgentState.THINKING, {"dispatch": "codex", "trace_id": trace_id}
+        )
         return
 
     if itype in _TOOL_ITEM_TYPES:
         name = str(item.get("command") or item.get("name") or itype)
-        _record_state(agent_id, AgentState.TOOL,
-                      {"dispatch": "codex", "tool": name[:80],
-                       "trace_id": trace_id})
+        _record_state(
+            agent_id,
+            AgentState.TOOL,
+            {"dispatch": "codex", "tool": name[:80], "trace_id": trace_id},
+        )
         _broadcast_transcript(stream, agent_id, session)
         return
 
@@ -733,9 +831,8 @@ def _persist_live_text(
     if not force and st.last_live_write_at > 0:
         if now - st.last_live_write_at < LIVE_TEXT_INTERVAL_SEC:
             return
-    backend_session_id = (
-        st.live_backend_session_id
-        or agents_db.live_backend_session(agent_id)
+    backend_session_id = st.live_backend_session_id or agents_db.live_backend_session(
+        agent_id
     )
     if not backend_session_id:
         return
@@ -754,8 +851,15 @@ def _persist_live_text(
         log_exception("codexLivePartialFail", e, detail=trace_id or agent_id)
 
 
-def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
-           trace_id: str, enqueue: Callable[..., int]) -> None:
+def _speak(
+    text: str,
+    st: _TurnState,
+    *,
+    agent_id: str,
+    session: str,
+    trace_id: str,
+    enqueue: Callable[..., int],
+) -> None:
     """Extract <speak>…</speak> regions and enqueue each as a TTS clip.
 
     De-duplicates against blocks already spoken this turn (the same region
@@ -782,8 +886,12 @@ def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
         for index, chunk in enumerate(spoken_chunks_for_tts(block)):
             payload_text = chunk
             # Persona prefix only the first chunk of each explicit speak block.
-            if (index == 0 and persona and agent_id != focused
-                    and not chunk.lower().startswith(persona.lower())):
+            if (
+                index == 0
+                and persona
+                and agent_id != focused
+                and not chunk.lower().startswith(persona.lower())
+            ):
                 payload_text = f"{persona} here. {chunk}"
             try:
                 qid = enqueue(
@@ -797,7 +905,7 @@ def _speak(text: str, st: _TurnState, *, agent_id: str, session: str,
                 )
                 st.spoke_any = True
                 log("codexEnqueue", f"agent={agent_id} qid={qid} chars={len(chunk)}")
-            except Exception as e:                 # noqa: BLE001
+            except Exception as e:  # noqa: BLE001
                 log_exception("codexEnqueueFail", e, detail=str(agent_id))
 
 
@@ -806,7 +914,7 @@ def _record_state(agent_id: str, kind: str, detail: dict | None = None) -> None:
         return
     try:
         agents_db.record_state(agent_id, kind, detail)
-    except Exception as e:                     # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         log_exception("codexRecordStateFail", e, detail=f"{agent_id}:{kind}")
 
 
@@ -814,12 +922,14 @@ def _broadcast_transcript(stream: Any, agent_id: str, session: str) -> None:
     if stream is None or not agent_id:
         return
     try:
-        stream.broadcast({
-            "type": SSEType.TRANSCRIPT_UPDATED,
-            "agent_id": agent_id,
-            "session": session,
-        })
-    except Exception as e:                     # noqa: BLE001
+        stream.broadcast(
+            {
+                "type": SSEType.TRANSCRIPT_UPDATED,
+                "agent_id": agent_id,
+                "session": session,
+            }
+        )
+    except Exception as e:  # noqa: BLE001
         log_exception("codexBroadcastFail", e, detail=agent_id)
 
 

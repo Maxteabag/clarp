@@ -28,6 +28,28 @@ export function hideIncompleteStreamingVoiceMarkup(value) {
   return text;
 }
 
+const VOICE_PREAMBLE_HEAD = '[voice-mode]';
+const VOICE_PREAMBLE_SPLIT = '\n\n--- user message ---\n';
+
+// Remove every embedded preamble block, wherever it appears (turn text,
+// tool inputs echoing a wrapped prompt). Non-greedy up to the split marker,
+// matching both real newlines and JSON-escaped \\n sequences.
+const VOICE_PREAMBLE_ANYWHERE_RE = /\[voice-mode\][\s\S]*?(?:\n\n--- user message ---\n|\\n\\n--- user message ---\\n)/g;
+
+export function stripVoicePreambleEverywhere(value) {
+  return String(value || '').replace(VOICE_PREAMBLE_ANYWHERE_RE, '');
+}
+
+// Inverse of the server's apply_voice_preamble: recover the user's original
+// message for display. A no-op unless the preamble is present.
+export function stripVoicePreamble(value) {
+  const text = String(value || '');
+  if (!text.startsWith(VOICE_PREAMBLE_HEAD)) return text;
+  const i = text.indexOf(VOICE_PREAMBLE_SPLIT);
+  if (i === -1) return text;
+  return text.slice(i + VOICE_PREAMBLE_SPLIT.length);
+}
+
 export function stripVoiceMarkup(value, { streaming = false } = {}) {
   const source = streaming ? hideIncompleteStreamingVoiceMarkup(value) : String(value);
   return source

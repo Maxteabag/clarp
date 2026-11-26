@@ -224,6 +224,7 @@ means an out-of-band job is running and the agent is otherwise idle.
   "trace_id": "<optional; from a preceding /transcribe>",
   "synthesize_audio": true,
   "hands_free": false,
+  "car_mode": false,
   "queue_if_busy": false,
   "transcription_id": "<optional; from /transcribe>"
 }
@@ -242,6 +243,12 @@ Rules:
 - `hands_free: true` is for dictation: the server may route the text to a
   different agent (name routing or the orchestrator) and answers with the
   session it chose.
+- `car_mode: true` says the user is driving. The server appends the car-mode
+  instructions doc (`~/.config/clarp/car-mode.md`, falling back to the shipped
+  `docs/car-mode.example.md`) to that turn's instructions: short spoken
+  replies, nothing read aloud that needs the screen, confirmation before
+  irreversible actions. Per request, like `hands_free`; it is not remembered
+  for turns that queue behind a busy agent.
 
 Response `200`:
 

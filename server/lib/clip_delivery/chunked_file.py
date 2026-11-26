@@ -129,8 +129,36 @@ class ChunkedFileSession:
         self._source = source
         self._text_len = text_len
         self._trace_id = trace_id
+        # Encoded (mp3) bytes can't be level-checked here, but chunk timing
+        # still tells us when the producer stalled or ran behind.
+        from ..audio_metrics import PcmStreamAnalyzer
+        self._metrics = PcmStreamAnalyzer(
+            encoding="mp3", sample_rate=44100, on_anomaly=self._emit_anomaly)
 
     publish_after_finalize = False   # broker streams bytes live
+
+    def _emit_anomaly(self, event: dict) -> None:
+        _emit("clip_delivery", "audioAnomaly", level="warn",
+              session=self._session, agent_id=self._agent.get("agent_id"),
+              persona=self._agent.get("persona"), clip_id=self._clip_id,
+              trace_id=self._trace_id, detail=dict(event))
+
+    def _emit_stats(self, *, ok: bool, error: str = "") -> None:
+        try:
+            self._metrics.finish()
+            summary = self._metrics.summary()
+        except Exception as e:  # noqa: BLE001
+            log_exception("clipMetricsSummaryFail", e, detail=str(self._clip_id))
+            return
+        summary["ok"] = ok
+        if error:
+            summary["error"] = error[:300]
+        _emit("clip_delivery", "audioStats",
+              level="warn" if (not ok or summary.get("anomalies")) else "info",
+              session=self._session, agent_id=self._agent.get("agent_id"),
+              persona=self._agent.get("persona"), clip_id=self._clip_id,
+              trace_id=self._trace_id,
+              duration_ms=summary.get("produce_wall_ms"), detail=summary)
 
     @property
     def clip_id(self) -> int:
@@ -150,6 +178,10 @@ class ChunkedFileSession:
         }
 
     def feed(self, chunk_idx: int, chunk: bytes) -> None:
+        try:
+            self._metrics.feed(chunk)
+        except Exception as e:  # noqa: BLE001
+            log_exception("clipMetricsFeedFail", e, detail=str(self._clip_id))
         if self._broker is None:
             return
         try:
@@ -158,6 +190,7 @@ class ChunkedFileSession:
             log_exception("clipBrokerAppendFail", e, detail=str(self._clip_id))
 
     def finalize(self, *, total_bytes: int) -> FinalizeResult:
+        self._emit_stats(ok=True)
         size = (self._target.stat().st_size if self._target.exists()
                 else total_bytes)
 
@@ -207,6 +240,7 @@ class ChunkedFileSession:
         )
 
     def fail(self, error: str) -> None:
+        self._emit_stats(ok=False, error=str(error or ""))
         # Tear down partial artifacts so the watcher / herald can't
         # broadcast a half-written clip. Pinned by
         # test_failure_path_leaves_no_partial_mp3.
@@ -230,3 +264,12 @@ class ChunkedFileSession:
             except Exception as e:  # noqa: BLE001
                 log_exception("clipBrokerFailCleanup", e,
                               detail=str(self._clip_id))
+
+
+def _emit(*args, **kwargs) -> None:
+    """eventlog.emit that can never break delivery (import-safe, no raise)."""
+    try:
+        from .. import eventlog
+        eventlog.emit(*args, **kwargs)
+    except Exception:  # noqa: BLE001
+        pass

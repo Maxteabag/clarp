@@ -135,6 +135,12 @@ export const KEYMAP = [
   { key: 'H', action: 'shrink', context: 'pane.multi', label: 'Resize', group: 'nav', when: 'hasMultiplePanes' },
   { key: 'L', action: 'grow', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
 
+  // Transcript scroll. pane.multi arrows navigate between panes (more
+  // specific context wins there); with a single pane they scroll instead.
+  // Never in insert: arrows belong to the caret while typing.
+  { key: 'up', action: 'scroll-up', context: 'pane', label: 'Scroll', displayKey: '↑↓', group: 'view' },
+  { key: 'down', action: 'scroll-down', context: 'pane', hidden: true },
+
   // quick switch
   { key: 'space', action: 'quick-switch', context: 'global', label: 'Go to', group: 'nav' },
 

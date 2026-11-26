@@ -353,13 +353,13 @@ def test_preamble_always_forbids_interactive_questions():
 
     # Non-voice turn: no <speak> guidance, but the no-question rule is present.
     silent = codex_runner.apply_voice_preamble(msg, voice=False)
-    assert "interactive prompts" in silent
+    assert "no question tools" in silent
     assert "<speak>" not in silent
     assert codex_runner.strip_voice_preamble(silent) == msg
 
     # Voice turn: both the no-question rule AND the <speak> guidance.
     spoken = codex_runner.apply_voice_preamble(msg, voice=True)
-    assert "interactive prompts" in spoken
+    assert "no question tools" in spoken
     assert "<speak>" in spoken
     assert codex_runner.strip_voice_preamble(spoken) == msg
 
@@ -367,10 +367,12 @@ def test_preamble_always_forbids_interactive_questions():
 def test_voice_preamble_requests_conversational_delivery_for_all_speech():
     spoken = codex_runner.apply_voice_preamble("Explain the result.", voice=True)
 
-    assert "Every spoken response should sound conversational" in spoken
-    assert "do not reserve them for uncertainty" in spoken
-    assert "When you're unsure or working through something complex" not in spoken
-    assert "few or no fillers" not in spoken
+    # The natural-speech block is deliberately compact (prompt-cache friendly)
+    # but must still ask for pauses and <vox>-wrapped fillers on every reply.
+    assert "Sound conversational" in spoken
+    assert '<break time="350ms"/>' in spoken
+    assert "<vox>um</vox>" in spoken
+    assert "only inside <speak>" in spoken
 
 
 def test_voice_preamble_can_hide_persona_identity():
@@ -381,6 +383,6 @@ def test_voice_preamble_can_hide_persona_identity():
         persona="Bella",
         session="bella",
     )
-    assert "assistant persona named Bella" in wrapped
-    assert "When the user addresses Bella" in wrapped
+    assert "Your name is Bella." in wrapped
+    assert "The app session id for this agent is `bella`." in wrapped
     assert codex_runner.strip_voice_preamble(wrapped) == msg

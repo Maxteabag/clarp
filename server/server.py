@@ -12,6 +12,7 @@ Endpoints (see Handler.do_GET / do_POST for the dispatch tables):
 from __future__ import annotations
 
 import gzip
+import functools
 import json
 import mimetypes
 import os
@@ -3438,6 +3439,10 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
         synthesize_audio_raw = data.get("synthesize_audio", None)
         hands_free = data.get("hands_free", False) is True
+        # The phone's Car Mode surface is open: the turn gets the car-mode
+        # instructions doc on top of the voice preamble. Per-request, like
+        # hands_free, and strictly boolean true.
+        car_mode = data.get("car_mode", False) is True
         unheard_audio_sessions_raw = data.get("unheard_audio_sessions") or []
         unheard_audio_sessions = tuple(dict.fromkeys(
             str(value).strip()
@@ -3499,7 +3504,8 @@ class Handler(BaseHTTPRequestHandler):
                 hands_free=hands_free,
                 synthesize_audio=synthesize_audio,
                 unheard_audio_sessions=unheard_audio_sessions,
-                dispatch=TurnDispatchService(self.ctx).dispatch,
+                dispatch=functools.partial(
+                    TurnDispatchService(self.ctx).dispatch, car_mode=car_mode),
                 fallback_request=orchestrator_fallback,
             )
             if orchestrated is None and orchestrator_fallback:
@@ -3547,6 +3553,7 @@ class Handler(BaseHTTPRequestHandler):
                 prompt_admission=prompt_admission,
                 queue_if_busy=queue_if_busy,
                 unheard_audio_sessions=unheard_audio_sessions,
+                car_mode=car_mode,
             )
         except DispatchError as e:
             return self._send(e.status, str(e).encode(), "text/plain")

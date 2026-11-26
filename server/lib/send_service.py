@@ -51,10 +51,14 @@ def resolve_send_target(*, text: str, requested_session: str,
 
 
 def source_marker_text(*, session: str, trace_id: str, now: float,
-                       synthesize_audio: bool = True) -> str:
+                       synthesize_audio: bool = True,
+                       car_mode: bool = False) -> str:
+    # Field 6 (car_mode) is read by the Claude UserPromptSubmit hook, which
+    # folds the car-mode doc into its additionalContext. Older hooks ignore
+    # trailing fields, so appending keeps the marker backward compatible.
     return (
         f"{TurnSource.PWA_VOICE_MARKER} {session} {now:.3f} {trace_id} "
-        f"{1 if synthesize_audio else 0}\n"
+        f"{1 if synthesize_audio else 0} {1 if car_mode else 0}\n"
     )
 
 

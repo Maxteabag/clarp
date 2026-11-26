@@ -77,6 +77,7 @@ def spawn_turn(
     stream: Any = None,
     enqueue: Optional[Callable[..., int]] = None,
     voice_preamble: bool = False,
+    car_mode: bool = False,
     model: str = "",
     effort: str = "",
     isolated: bool = False,
@@ -95,7 +96,8 @@ def spawn_turn(
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
     persona = (agent or {}).get("persona") or ""
     prompt = apply_voice_preamble(
-        text, voice=voice_preamble, persona=persona, session=session)
+        text, voice=voice_preamble, persona=persona, session=session,
+        car_mode=car_mode)
     cmd = build_cmd(
         backend_session_id, is_new_session=is_new_session,
         model=model, effort=effort)

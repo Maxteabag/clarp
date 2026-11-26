@@ -139,6 +139,7 @@ def spawn_turn(
     stream: Any = None,
     enqueue: Optional[Callable[..., int]] = None,
     voice_preamble: bool = False,
+    car_mode: bool = False,
     model: str = "",
     effort: str = "",
     run_if_owned: Optional[Callable[[Callable[[], None]], bool]] = None,
@@ -160,6 +161,7 @@ def spawn_turn(
         voice=voice_preamble,
         persona=persona,
         session=session,
+        car_mode=car_mode,
     )
     cmd = build_cmd(backend_session_id, is_new_session=is_new_session,
                     model=model, effort=effort)

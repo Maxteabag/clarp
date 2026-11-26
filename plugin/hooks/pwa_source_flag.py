@@ -33,6 +33,13 @@ try:
     from lib.eventlog import emit as _emit_event  # noqa: E402
 except ImportError:
     def _emit_event(*a, **kw): pass
+try:
+    from lib.car_mode import car_mode_instruction as _car_mode_instruction  # noqa: E402
+except ImportError:
+    def _car_mode_instruction() -> str:
+        return ("[car-mode] The user is driving and hands-free. Keep every "
+                "spoken reply short, never read code, paths, or lists aloud, "
+                "and confirm before doing anything irreversible.")
 
 PATHS = RuntimePaths.from_home(pathlib.Path.home())
 
@@ -42,6 +49,7 @@ class PwaMarker:
     fresh: bool
     trace_id: str = ""
     synthesize_audio: bool = True
+    car_mode: bool = False
 
 
 def _read_pwa_marker(marker: pathlib.Path, session: str) -> PwaMarker:
@@ -59,6 +67,7 @@ def _read_pwa_marker(marker: pathlib.Path, session: str) -> PwaMarker:
             fresh,
             parts[3] if fresh and len(parts) >= 4 else "",
             parts[4] != "0" if fresh and len(parts) >= 5 else True,
+            parts[5] == "1" if fresh and len(parts) >= 6 else False,
         )
     except (OSError, ValueError):
         return PwaMarker(False)
@@ -163,7 +172,9 @@ def main() -> int:
     # Eat the pwa-voice marker + reset "spoken first chunk" flags (voice turns
     # only). `voiced` gates the <speak> guidance below.
     voiced = False
+    car_mode = False
     if pwa_fresh:
+        car_mode = marker_info.car_mode
         try: marker.unlink()
         except OSError: pass
         if marker_info.synthesize_audio:
@@ -187,7 +198,7 @@ def main() -> int:
     #     PWA/iOS client renders text but can't show question/choice tools).
     #   * <speak> voice gating — only on spoken turns.
     context = _build_additional_context(app_dispatched=bool(env_session),
-                                        voiced=voiced)
+                                        voiced=voiced, car_mode=car_mode)
     if context:
         try:
             print(json.dumps({
@@ -201,17 +212,21 @@ def main() -> int:
     return 0
 
 
-def _build_additional_context(*, app_dispatched: bool, voiced: bool) -> str:
+def _build_additional_context(*, app_dispatched: bool, voiced: bool,
+                              car_mode: bool = False) -> str:
     """Compose the UserPromptSubmit additionalContext for this turn.
 
     The no-interactive-questions rule is included for every app-dispatched
-    turn; the <speak> voice guidance is appended only on spoken turns.
-    Returns "" when neither applies (e.g. a third-party local terminal)."""
+    turn; the <speak> voice guidance is appended only on spoken turns; the
+    car-mode doc is appended when the phone reported the user is driving.
+    Returns "" when none apply (e.g. a third-party local terminal)."""
     parts = []
     if app_dispatched:
         parts.append(_NO_INTERACTIVE_QUESTIONS)
     if voiced:
         parts.append(_SPEAK_INSTRUCTIONS)
+    if car_mode:
+        parts.append(_car_mode_instruction())
     return "\n\n".join(parts)
 
 

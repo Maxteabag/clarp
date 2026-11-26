@@ -9,7 +9,7 @@
 
 import { escapeAttr, escapeHTML } from '@core/html.js';
 import { ActivityStatus } from '@core/protocol.js';
-import { stripVoiceMarkup } from '@core/voice-markup.js';
+import { stripVoiceMarkup, stripVoicePreamble, stripVoicePreambleEverywhere } from '@core/voice-markup.js';
 
 export function pathTail(p) {
   if (!p) return '';
@@ -194,9 +194,10 @@ export function renderTool(t) {
     body = '<ul class="tool-todos">' + todos.map(td =>
       `<li class="todo-${escapeHTML(td.status)}">${escapeHTML(td.content)}</li>`).join('') + '</ul>';
   } else if (t.input) {
+    const input = stripVoicePreambleEverywhere(JSON.stringify(t.input, null, 2));
     const k = Object.keys(t.input)[0];
     summary = summary || (k ? `${k}=${t.input[k]}` : '');
-    body = '<pre class="tool-cmd">' + escapeHTML(JSON.stringify(t.input, null, 2)) + '</pre>';
+    body = '<pre class="tool-cmd">' + escapeHTML(input) + '</pre>';
   }
   if (t.result) body += `<pre class="tool-cmd tool-result">${escapeHTML(t.result)}</pre>`;
   const label = status === ActivityStatus.ERROR ? 'failed'
@@ -208,8 +209,9 @@ export function renderTool(t) {
 }
 
 export function renderTurnBody(t) {
-  const body = t.text
-    ? `<div class="body">${renderText(t.text, t.kind === 'live')}</div>`
+  const text = t.role === 'user' ? stripVoicePreambleEverywhere(t.text) : t.text;
+  const body = text
+    ? `<div class="body">${renderText(text, t.kind === 'live')}</div>`
     : '';
   return body + (t.tools || []).map(renderTool).join('');
 }

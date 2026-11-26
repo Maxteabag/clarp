@@ -1,11 +1,28 @@
 """Parse OpenCode session history into the shared turn list."""
+
 from __future__ import annotations
 
 import json
+import datetime
 import os
 import pathlib
 import sqlite3
 from typing import Any
+
+
+def _iso_timestamp(value: Any) -> str:
+    raw = str(value or "").strip()
+    if raw.isdigit():
+        try:
+            return (
+                datetime.datetime.fromtimestamp(
+                    int(raw) / 1000, datetime.timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+                + "Z"
+            )
+        except (OverflowError, OSError, ValueError):
+            return raw
+    return raw
 
 
 def opencode_home() -> pathlib.Path:
@@ -45,9 +62,11 @@ def _role_of(data: dict) -> str:
     return ""
 
 
-def _turns_from_messages(rows: list[tuple[str, str]]) -> list[dict]:
+def _turns_from_messages(rows) -> list[dict]:
     turns: list[dict] = []
-    for created, raw in rows:
+    for row in rows:
+        created, raw = row[0], row[1]
+        part_raws = list(row[2]) if len(row) > 2 else []
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -57,26 +76,62 @@ def _turns_from_messages(rows: list[tuple[str, str]]) -> list[dict]:
         role = _role_of(data)
         if not role:
             continue
-        text = _text_of(data.get("content") or data.get("body") or data)
+        parts: list[dict] = []
+        for praw in part_raws:
+            try:
+                pdata = json.loads(praw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(pdata, dict):
+                parts.append(pdata)
+        text = _text_of(data.get("content") or data.get("body"))
+        if not text:
+            text = "\n".join(
+                filter(
+                    None,
+                    (_text_of(p) for p in parts if str(p.get("type") or "") == "text"),
+                )
+            )
         tools: list[dict] = []
         for part in data.get("parts") or []:
             if not isinstance(part, dict):
                 continue
             kind = str(part.get("type") or part.get("tool") or "")
             if kind in {"tool", "tool_use", "toolcall"}:
-                tools.append({
-                    "name": str(part.get("name") or part.get("tool") or "tool"),
-                    "status": "ok",
-                    "input": part.get("input") or part.get("state") or {},
-                })
+                tools.append(
+                    {
+                        "name": str(part.get("name") or part.get("tool") or "tool"),
+                        "status": "ok",
+                        "input": part.get("input") or part.get("state") or {},
+                    }
+                )
             elif not text:
                 text = _text_of(part)
+        for part in parts:
+            kind = str(part.get("type") or part.get("tool") or "")
+            if kind in {"tool", "tool_use", "toolcall"}:
+                state = part.get("state")
+                tools.append(
+                    {
+                        "name": str(part.get("tool") or part.get("name") or "tool"),
+                        "status": str(state.get("status") or "ok")
+                        if isinstance(state, dict)
+                        else "ok",
+                        "input": part.get("input")
+                        or (state.get("input") if isinstance(state, dict) else {})
+                        or {},
+                    }
+                )
         if not text and not tools:
             continue
-        turns.append({
-            "role": role, "text": text, "tools": tools,
-            "timestamp": str(created),
-        })
+        turns.append(
+            {
+                "role": role,
+                "text": text,
+                "tools": tools,
+                "timestamp": _iso_timestamp(created),
+            }
+        )
     return turns
 
 
@@ -107,12 +162,16 @@ def parse_turns(path) -> list[dict]:
         role = _role_of(row)
         if not role:
             continue
-        turns.append({
-            "role": role,
-            "text": _text_of(row.get("content") or row.get("part") or row),
-            "tools": [],
-            "timestamp": str(row.get("time") or row.get("timestamp") or ""),
-        })
+        turns.append(
+            {
+                "role": role,
+                "text": _text_of(row.get("content") or row.get("part") or row),
+                "tools": [],
+                "timestamp": _iso_timestamp(
+                    row.get("time") or row.get("timestamp") or ""
+                ),
+            }
+        )
     return turns
 
 
@@ -125,15 +184,31 @@ def _parse_db_session(db: pathlib.Path, session_id: str) -> list[dict]:
         return []
     try:
         rows = con.execute(
-            "SELECT time_created, data FROM message "
+            "SELECT id, time_created, data FROM message "
             "WHERE session_id = ? ORDER BY time_created, id",
             (session_id,),
         ).fetchall()
+        try:
+            part_rows = con.execute(
+                "SELECT message_id, data FROM part "
+                "WHERE session_id = ? ORDER BY time_created, id",
+                (session_id,),
+            ).fetchall()
+        except sqlite3.Error:
+            part_rows = []
     except sqlite3.Error:
         return []
     finally:
         con.close()
-    return _turns_from_messages([(str(a), b) for a, b in rows])
+    by_message: dict[str, list[str]] = {}
+    for message_id, part_data in part_rows:
+        by_message.setdefault(str(message_id), []).append(part_data)
+    return _turns_from_messages(
+        [
+            (str(created), data, by_message.get(str(message_id), []))
+            for message_id, created, data in rows
+        ]
+    )
 
 
 def find_latest_jsonl(session_id: str, *, home: pathlib.Path | None = None):
@@ -173,8 +248,10 @@ def list_sessions(
     except sqlite3.Error:
         return []
     try:
-        sql = ("SELECT id, directory, title, time_updated FROM session "
-               "WHERE time_archived IS NULL ")
+        sql = (
+            "SELECT id, directory, title, time_updated FROM session "
+            "WHERE time_archived IS NULL "
+        )
         params: list[Any] = []
         if want and not all_projects:
             sql += "AND directory = ? "
@@ -197,8 +274,13 @@ def list_sessions(
         mtime = int(updated or 0)
         if mtime > 10_000_000_000:
             mtime //= 1000
-        out.append({
-            "id": str(session_id), "mtime": mtime, "preview": preview,
-            "title": str(title or ""), "cwd": str(directory or ""),
-        })
+        out.append(
+            {
+                "id": str(session_id),
+                "mtime": mtime,
+                "preview": preview,
+                "title": str(title or ""),
+                "cwd": str(directory or ""),
+            }
+        )
     return out

@@ -104,9 +104,19 @@ function handleEvent(ev) {
       // audio.src (iOS plays HLS natively).
       playlist_url: ev.playlist_url || '',
       delivery: ev.delivery || '',
+      // Advertised container/encoding (string mime or a {container,
+      // encoding, sample_rate, channels} dict for raw-pcm). Not used for
+      // routing — carried so the player's diagnostics can tell a
+      // format-mismatch from a network stall.
+      audio_format: ev.audio_format ?? null,
+      complete_url: ev.complete_url || '',
     });
-    if (!result.accepted) clog('sseDup', `${key} reason=${result.reason}`);
-    else                  clog('sseAudio', `key=${key} ts=${ts}`);
+    const fmt = ev.audio_format == null ? '' : (
+      typeof ev.audio_format === 'string' ? ev.audio_format : JSON.stringify(ev.audio_format));
+    const meta = { clip_id: ev.clip_id ?? null };
+    if (ev.trace_id) meta.trace_id = ev.trace_id;
+    if (!result.accepted) clog('sseDup', `${key} reason=${result.reason}`, meta);
+    else clog('sseAudio', `key=${key} ts=${ts} delivery=${ev.delivery || ''} fmt=${fmt}`, meta);
 
   } else if (ev.type === SSEType.SERVER_VERSION) {
     // Server-pushed reload, faster than waiting for the SW update poll.

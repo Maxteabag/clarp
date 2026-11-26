@@ -107,8 +107,8 @@ def test_build_cmd_persona_identity_opt_in():
     cmd = clarp_runner.build_cmd(persona="Bella", session="bella")
     i = cmd.index("--append-system-prompt")
     prompt = cmd[i + 1]
-    assert "assistant persona named Bella" in prompt
-    assert "When the user addresses Bella" in prompt
+    assert "Your name is Bella." in prompt
+    assert "The app session id for this agent is `bella`." in prompt
 
 
 def test_build_cmd_scopes_mcp_per_agent_selection(tmp_path, monkeypatch):

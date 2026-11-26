@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Clarp setup, updates, managed skills, and transcription models."""
+
 from __future__ import annotations
 
 import argparse
@@ -34,22 +35,32 @@ CONFIG_FILE = CONFIG_DIR / "config.toml"
 INSTALL_STATE = CONFIG_DIR / "install.json"
 SHARE = Path(os.environ.get("CLARP_SHARE_DIR", xdg.data_dir(HOME)))
 CLAUDE_SKILLS = Path(os.environ.get("CLARP_CLAUDE_SKILLS", HOME / ".claude/skills"))
-CODEX_SKILLS = Path(os.environ.get(
-    "CLARP_CODEX_SKILLS",
-    Path(os.environ.get("CODEX_HOME", HOME / ".codex")) / "skills",
-))
+CODEX_SKILLS = Path(
+    os.environ.get(
+        "CLARP_CODEX_SKILLS",
+        Path(os.environ.get("CODEX_HOME", HOME / ".codex")) / "skills",
+    )
+)
 _INSTALL_STATE_LOCK_DEPTH = 0
 
 
-def run(*args: str, cwd: Path | None = None, check: bool = True,
-        env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def run(
+    *args: str,
+    cwd: Path | None = None,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     return subprocess.run(args, cwd=cwd, check=check, text=True, env=env)
 
 
 def git_origin(repo: Path) -> str:
     result = subprocess.run(
-        ["git", "remote", "get-url", "origin"], cwd=repo,
-        text=True, capture_output=True, check=False)
+        ["git", "remote", "get-url", "origin"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     value = result.stdout.strip()
     parsed = urllib.parse.urlsplit(value)
     if parsed.scheme in {"http", "https"}:
@@ -60,14 +71,15 @@ def git_origin(repo: Path) -> str:
                 host = f"[{host}]"
             if parsed.port is not None:
                 host = f"{host}:{parsed.port}"
-        value = urllib.parse.urlunsplit(
-            (parsed.scheme, host, parsed.path, "", ""))
+        value = urllib.parse.urlunsplit((parsed.scheme, host, parsed.path, "", ""))
     return value
 
 
 def stable_release_tags(tags: list[str]) -> list[str]:
     """Stable channel excludes prereleases, matching server update checks."""
-    return [tag for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?", tag)]
+    return [
+        tag for tag in tags if re.fullmatch(r"v\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?", tag)
+    ]
 
 
 def read_json(path: Path, default):
@@ -98,19 +110,26 @@ def server_connection() -> tuple[str, str]:
     cfg = tomllib.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
     server = cfg.get("server", {})
     host = str(server.get("bind_addr", "127.0.0.1"))
-    if host in {"0.0.0.0", "::", "localhost"}: host = "127.0.0.1"
-    if ":" in host and not host.startswith("["): host = f"[{host}]"
+    if host in {"0.0.0.0", "::", "localhost"}:
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
     return f"http://{host}:{int(server.get('port', 7682))}", str(
-        server.get("auth_token", "") or "")
+        server.get("auth_token", "") or ""
+    )
 
 
 def api_request(method: str, path: str, body=None):
     base, token = server_connection()
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(
-        base + path, data=data, method=method,
-        headers={"Content-Type": "application/json"})
-    if token: request.add_header("Authorization", f"Bearer {token}")
+        base + path,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=15) as response:
         raw = response.read()
     return json.loads(raw) if raw else {}
@@ -148,8 +167,9 @@ def link_skill(skill_id: str) -> None:
         root.mkdir(parents=True, exist_ok=True)
         destination = root / skill_id
         if destination.exists() or destination.is_symlink():
-            if managed_link(destination) or (destination.is_symlink()
-                                               and destination.resolve() == source.resolve()):
+            if managed_link(destination) or (
+                destination.is_symlink() and destination.resolve() == source.resolve()
+            ):
                 destination.unlink()
             else:
                 print(f"WARNING: preserving non-Clarp skill at {destination}")
@@ -220,13 +240,19 @@ def cmd_skills(args) -> int:
             server_root = REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib import personal_skills
+
         if args.skills_command == "import":
             for skill_id in personal_skills.import_path(
-                    Path(args.path), replace=args.replace):
+                Path(args.path), replace=args.replace
+            ):
                 print(f"imported: {skill_id}")
         elif args.skills_command == "source-add":
-            print(json.dumps(personal_skills.add_git(
-                args.url, name=args.name, ref=args.ref), indent=2))
+            print(
+                json.dumps(
+                    personal_skills.add_git(args.url, name=args.name, ref=args.ref),
+                    indent=2,
+                )
+            )
         else:
             print(json.dumps(personal_skills.update_git(args.name), indent=2))
         return 0
@@ -271,21 +297,36 @@ def _cmd_skills_locked(args) -> int:
                 active.append(item["id"])
         state = read_json(INSTALL_STATE, {})
         if not state.get("artifact_skill_split_v1") and "clarp-artifacts" in active:
-            active.extend(item["id"] for item in manifest["skills"]
-                          if item.get("pack") == "artifacts")
+            active.extend(
+                item["id"]
+                for item in manifest["skills"]
+                if item.get("pack") == "artifacts"
+            )
             state["artifact_skill_split_v1"] = True
             state["skills"] = sorted(set(active))
             write_json(INSTALL_STATE, state)
         else:
             save_selected_skills(active)
         if not state.get("artifact_skill_defaults_v2") and "clarp-artifacts" in active:
-            previous_active=set(active)
-            removed={"clarp-links","clarp-message-drafts","clarp-collections","clarp-live-tasks","clarp-deployments","clarp-workspaces"}
-            active=[s for s in active if s not in removed]
-            for new_default in ("clarp-directories","clarp-github-actions"):
-                if new_default in entries and new_default not in active: active.append(new_default)
-            state=read_json(INSTALL_STATE,{}); state["artifact_skill_defaults_v2"]=True; state["skills"]=sorted(set(active)); write_json(INSTALL_STATE,state)
-            for skill_id in previous_active-set(active): unlink_skill(skill_id)
+            previous_active = set(active)
+            removed = {
+                "clarp-links",
+                "clarp-message-drafts",
+                "clarp-collections",
+                "clarp-live-tasks",
+                "clarp-deployments",
+                "clarp-workspaces",
+            }
+            active = [s for s in active if s not in removed]
+            for new_default in ("clarp-directories", "clarp-github-actions"):
+                if new_default in entries and new_default not in active:
+                    active.append(new_default)
+            state = read_json(INSTALL_STATE, {})
+            state["artifact_skill_defaults_v2"] = True
+            state["skills"] = sorted(set(active))
+            write_json(INSTALL_STATE, state)
+            for skill_id in previous_active - set(active):
+                unlink_skill(skill_id)
         # A rollback may not know skills introduced by the newer release. Keep
         # their selection for a future re-upgrade, but remove links that would
         # otherwise point through `current` at nonexistent sources.
@@ -303,13 +344,22 @@ def _cmd_skills_locked(args) -> int:
 
 def import_transcription_modules():
     server_root = SHARE / "current"
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib.stt import _installed_model_records  # type: ignore
-    from lib.transcription_catalog import (model_by_id, public_catalog,
-                                           recommended_model_id)  # type: ignore
-    return (_installed_model_records, public_catalog(), recommended_model_id(),
-            model_by_id)
+    from lib.transcription_catalog import (
+        model_by_id,
+        public_catalog,
+        recommended_model_id,
+    )  # type: ignore
+
+    return (
+        _installed_model_records,
+        public_catalog(),
+        recommended_model_id(),
+        model_by_id,
+    )
 
 
 def install_model(model_id: str) -> None:
@@ -326,9 +376,11 @@ def install_model(model_id: str) -> None:
         raise SystemExit(f"{model_id} is not supported on {host}")
     print(f"installing {item['name']} ({item['weight']})")
     server_root = SHARE / "current"
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib.transcription_models import install
+
     install(model_id)
     print(f"installed: {model_id}")
 
@@ -340,9 +392,11 @@ def remove_model(model_id: str, *, allow_active: bool = False) -> None:
         print(f"not installed: {model_id}")
         return
     server_root = SHARE / "current"
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib.transcription_models import remove
+
     remove(model_id, allow_active=allow_active)
     print(f"removed: {model_id}")
 
@@ -350,20 +404,23 @@ def remove_model(model_id: str, *, allow_active: bool = False) -> None:
 def cmd_transcription(args) -> int:
     if args.transcription_command == "adapters":
         server_root = SHARE / "current"
-        if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+        if not (server_root / "lib").is_dir():
+            server_root = REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib import custom_stt_adapters
+
         action = args.adapter_command
         if action == "list":
             print(json.dumps({"adapters": custom_stt_adapters.inventory()}, indent=2))
             return 0
         if action == "validate":
             manifest = custom_stt_adapters.load_manifest(args.path, portable=True)
-            print(json.dumps({"ok": True, "adapter": manifest.provider_row()}, indent=2))
+            print(
+                json.dumps({"ok": True, "adapter": manifest.provider_row()}, indent=2)
+            )
             return 0
         if action == "install":
-            manifest = custom_stt_adapters.install(
-                args.path, replace=args.replace)
+            manifest = custom_stt_adapters.install(args.path, replace=args.replace)
             print(json.dumps({"ok": True, "installed": manifest.id}, indent=2))
             return 0
         if action == "remove":
@@ -372,25 +429,34 @@ def cmd_transcription(args) -> int:
             if args.provider.strip().lower() == active:
                 raise SystemExit(
                     "cannot remove the active transcription adapter; "
-                    "select another model first")
+                    "select another model first"
+                )
             custom_stt_adapters.remove(args.provider)
             print(json.dumps({"ok": True, "removed": args.provider}, indent=2))
             return 0
         manifest = custom_stt_adapters.get(args.provider)
         if manifest is None:
             raise SystemExit(
-                f"custom transcription adapter is not installed: {args.provider}")
+                f"custom transcription adapter is not installed: {args.provider}"
+            )
         print(json.dumps(custom_stt_adapters.test_adapter(manifest), indent=2))
         return 0
     installed, catalog, recommended, lookup = import_transcription_modules()
     installed_ids = {item["id"] for item in installed()}
     if args.transcription_command == "list":
         for item in catalog:
-            state = ("installed" if item["id"] in installed_ids else
-                     "download" if item.get("supported", True) else "unsupported")
+            state = (
+                "installed"
+                if item["id"] in installed_ids
+                else "download"
+                if item.get("supported", True)
+                else "unsupported"
+            )
             marker = " recommended" if item.get("recommended") else ""
             size = item["download_bytes"] / 1_000_000
-            print(f"{item['id']:<38} {item['weight']:<11} {size:>6.0f} MB  {state}{marker}")
+            print(
+                f"{item['id']:<38} {item['weight']:<11} {size:>6.0f} MB  {state}{marker}"
+            )
         return 0
     if args.transcription_command == "install":
         install_model(args.model_id)
@@ -402,15 +468,21 @@ def cmd_transcription(args) -> int:
         item = lookup(args.model_id)
         if item is None:
             server_root = SHARE / "current"
-            if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+            if not (server_root / "lib").is_dir():
+                server_root = REPO / "server"
             sys.path.insert(0, str(server_root))
             from lib.custom_stt_adapters import get as custom_adapter, models
-            provider = args.model_id.split(":", 1)[0] \
-                if ":" in args.model_id else ""
+
+            provider = args.model_id.split(":", 1)[0] if ":" in args.model_id else ""
             manifest = custom_adapter(provider)
-            item = next((row for row in models(manifest)
-                         if row["id"] == args.model_id), None) \
-                if manifest is not None else None
+            item = (
+                next(
+                    (row for row in models(manifest) if row["id"] == args.model_id),
+                    None,
+                )
+                if manifest is not None
+                else None
+            )
         if item is None:
             raise SystemExit(f"unsupported model: {args.model_id}")
         if not item.get("custom"):
@@ -424,7 +496,8 @@ def cmd_transcription(args) -> int:
         cfg = tomllib.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
         server = cfg.get("server", {})
         host = server.get("bind_addr", "127.0.0.1")
-        if host in {"0.0.0.0", "::"}: host = "127.0.0.1"
+        if host in {"0.0.0.0", "::"}:
+            host = "127.0.0.1"
         url = f"http://{host}:{server.get('port', 7682)}/transcription-capabilities"
         request = urllib.request.Request(url)
         if server.get("auth_token"):
@@ -434,9 +507,11 @@ def cmd_transcription(args) -> int:
         return 0
     if args.transcription_command == "import":
         server_root = SHARE / "current"
-        if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+        if not (server_root / "lib").is_dir():
+            server_root = REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib.transcription_models import register
+
         model_id = f"{args.provider}:{args.model}"
         register(model_id, args.path, runtime_path=args.runtime_path or None)
         print(f"registered: {model_id}")
@@ -445,7 +520,9 @@ def cmd_transcription(args) -> int:
 
 
 def validate_setup_choices(
-    backend: str, optional: list[str], toolchain: str = "existing",
+    backend: str,
+    optional: list[str],
+    toolchain: str = "existing",
 ) -> None:
     if backend not in {"claude", "codex", "both"}:
         raise SystemExit("backend must be claude, codex, or both")
@@ -487,8 +564,10 @@ def database_needs_roster() -> bool:
             table = database.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='agents'"
             ).fetchone()
-            return table is None or database.execute(
-                "SELECT 1 FROM agents LIMIT 1").fetchone() is None
+            return (
+                table is None
+                or database.execute("SELECT 1 FROM agents LIMIT 1").fetchone() is None
+            )
     except sqlite3.Error:
         return False
 
@@ -511,7 +590,8 @@ def seed_fresh_roster(backend: str) -> None:
 def _restore_files(snapshots: dict[Path, bytes | None]) -> None:
     for path, content in snapshots.items():
         if content is None:
-            if path.exists(): path.unlink()
+            if path.exists():
+                path.unlink()
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
@@ -532,29 +612,39 @@ def configured_server_value(key: str, fallback):
     return fallback if value is None else value
 
 
-def _execute_setup(backend: str, transcription: str, bind: str | None,
-                   port: int | None,
-                   optional: list[str], channel: str,
-                   toolchain: str = "existing", tts_provider: str = "",
-                   tts_fallback: str = "none", network_mode: str = "",
-                   public_url: str = "") -> int:
-    if (os.environ.get("PYTEST_CURRENT_TEST")
-            and os.environ.get("CLARP_ALLOW_TEST_INSTALL") != "1"):
+def _execute_setup(
+    backend: str,
+    transcription: str,
+    bind: str | None,
+    port: int | None,
+    optional: list[str],
+    channel: str,
+    toolchain: str = "existing",
+    tts_provider: str = "",
+    tts_fallback: str = "none",
+    network_mode: str = "",
+    public_url: str = "",
+) -> int:
+    if (
+        os.environ.get("PYTEST_CURRENT_TEST")
+        and os.environ.get("CLARP_ALLOW_TEST_INSTALL") != "1"
+    ):
         default_config = xdg.config_dir(HOME).resolve()
         default_share = xdg.data_dir(HOME).resolve()
-        if (CONFIG_DIR.resolve() == default_config
-                or SHARE.resolve() == default_share):
+        if CONFIG_DIR.resolve() == default_config or SHARE.resolve() == default_share:
             raise RuntimeError(
                 "refusing to run setup against default user paths under pytest; "
-                "isolate CONFIG_DIR and SHARE or set CLARP_ALLOW_TEST_INSTALL=1")
+                "isolate CONFIG_DIR and SHARE or set CLARP_ALLOW_TEST_INSTALL=1"
+            )
     user_values = CONFIG_DIR / "user-values.md"
     snapshots = {
         path: path.read_bytes() if path.is_file() else None
         for path in (CONFIG_FILE, user_values, INSTALL_STATE)
     }
     previous_skills = set(selected_skills())
-    previous_release = ((SHARE / "current").resolve()
-                        if (SHARE / "current").exists() else None)
+    previous_release = (
+        (SHARE / "current").resolve() if (SHARE / "current").exists() else None
+    )
     chosen: list[str] = []
     previous_install_state = snapshots[INSTALL_STATE]
     skills_reconciled = False
@@ -568,8 +658,10 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
             shutil.copy2(REPO / "config.example.toml", CONFIG_FILE)
         # User values start from the generic product template. Setup does not
         # discover or import differently named preference files implicitly.
-        if (not user_values.exists()
-                and (REPO / "docs/user-values.example.md").is_file()):
+        if (
+            not user_values.exists()
+            and (REPO / "docs/user-values.example.md").is_file()
+        ):
             shutil.copy2(REPO / "docs/user-values.example.md", user_values)
         if bind is not None:
             set_toml_value(CONFIG_FILE, "server", "bind_addr", bind)
@@ -577,6 +669,7 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
             set_toml_value(CONFIG_FILE, "server", "port", port)
         if tts_provider:
             from lib.tts_providers import valid_ids
+
             valid_tts = valid_ids()
             if tts_provider not in valid_tts:
                 raise SystemExit(f"unsupported TTS provider: {tts_provider}")
@@ -589,12 +682,14 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
         if new_config or fresh_database:
             set_toml_value(CONFIG_FILE, "server", "default_session", "mike")
         cfg = tomllib.loads(CONFIG_FILE.read_text())
-        effective_bind = str(
-            cfg.get("server", {}).get("bind_addr", "127.0.0.1"))
-        if (not cfg.get("server", {}).get("auth_token")
-                and effective_bind not in {"127.0.0.1", "::1"}):
+        effective_bind = str(cfg.get("server", {}).get("bind_addr", "127.0.0.1"))
+        if not cfg.get("server", {}).get("auth_token") and effective_bind not in {
+            "127.0.0.1",
+            "::1",
+        }:
             set_toml_value(
-                CONFIG_FILE, "server", "auth_token", secrets.token_urlsafe(32))
+                CONFIG_FILE, "server", "auth_token", secrets.token_urlsafe(32)
+            )
 
         if transcription not in {"apple", "apple-only", "none"}:
             _installed, _catalog, recommended, lookup = import_transcription_modules()
@@ -607,7 +702,8 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                 raise SystemExit(
                     "The setup-time server default must be Faster-Whisper or "
                     "whisper.cpp. Choose recommended or a matching provider id; "
-                    "choose the platform-recommended provider.")
+                    "choose the platform-recommended provider."
+                )
             install_model(model_id)
             if not already_installed:
                 newly_installed_model = model_id
@@ -628,49 +724,75 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                     break
                 except (OSError, urllib.error.URLError):
                     if time.time() >= deadline:
-                        raise RuntimeError("Clarp server did not become ready after install")
+                        raise RuntimeError(
+                            "Clarp server did not become ready after install"
+                        )
                     time.sleep(0.25)
         with install_state_lock():
             previous_skills = set(selected_skills())
             previous_install_state = (
-                INSTALL_STATE.read_bytes() if INSTALL_STATE.is_file() else None)
+                INSTALL_STATE.read_bytes() if INSTALL_STATE.is_file() else None
+            )
             skills_reconciled = True
             manifest = load_manifest()
             core = [item["id"] for item in manifest["skills"] if item["pack"] == "core"]
-            artifact_skills = [item["id"] for item in manifest["skills"]
-                               if item["pack"] == "artifacts" and item.get("default_enabled", True)]
+            artifact_skills = [
+                item["id"]
+                for item in manifest["skills"]
+                if item["pack"] == "artifacts" and item.get("default_enabled", True)
+            ]
             chosen = sorted(set(core + artifact_skills + optional))
             for skill_id in sorted(previous_skills - set(chosen)):
                 unlink_skill(skill_id)
-            for skill_id in chosen: link_skill(skill_id)
-            write_json(INSTALL_STATE, {
-                "source_repo": str(REPO), "skills": chosen,
-                "source_remote": git_origin(REPO),
-                "channel": channel, "backend": backend,
-                "transcription": transcription, "python": sys.executable,
-                "toolchain": toolchain,
-                "artifact_skill_split_v1": True,
-                "artifact_skill_defaults_v2": True,
-            })
+            for skill_id in chosen:
+                link_skill(skill_id)
+            write_json(
+                INSTALL_STATE,
+                {
+                    "source_repo": str(REPO),
+                    "skills": chosen,
+                    "source_remote": git_origin(REPO),
+                    "channel": channel,
+                    "backend": backend,
+                    "transcription": transcription,
+                    "python": sys.executable,
+                    "toolchain": toolchain,
+                    "artifact_skill_split_v1": True,
+                    "artifact_skill_defaults_v2": True,
+                },
+            )
             if (SHARE / "current/server.py").is_file():
                 seed_fresh_roster(backend)
         # Networking is deliberately last: it mutates external Tailscale state.
         # No later setup step may fail after this transition commits.
         if network_mode:
-            cmd_network(argparse.Namespace(
-                network_command="use", mode=network_mode,
-                url=public_url, previous_port=previous_network_port))
+            cmd_network(
+                argparse.Namespace(
+                    network_command="use",
+                    mode=network_mode,
+                    url=public_url,
+                    previous_port=previous_network_port,
+                )
+            )
     except BaseException:
-        _restore_files({path: content for path, content in snapshots.items()
-                        if path != INSTALL_STATE})
+        _restore_files(
+            {
+                path: content
+                for path, content in snapshots.items()
+                if path != INSTALL_STATE
+            }
+        )
         if newly_installed_model:
             try:
                 remove_model(newly_installed_model, allow_active=True)
             except Exception as cleanup_error:  # noqa: BLE001 - preserve root failure
-                print(f"warning: could not roll back model: {cleanup_error}",
-                      file=sys.stderr)
-        current_release = ((SHARE / "current").resolve()
-                           if (SHARE / "current").exists() else None)
+                print(
+                    f"warning: could not roll back model: {cleanup_error}",
+                    file=sys.stderr,
+                )
+        current_release = (
+            (SHARE / "current").resolve() if (SHARE / "current").exists() else None
+        )
         if current_release != previous_release:
             if previous_release and previous_release.is_dir():
                 activate_release(previous_release)
@@ -704,23 +826,23 @@ def cmd_setup(args) -> int:
     port = args.port
     optional = list(args.optional_skill)
     if interactive:
-        bind_default = bind or str(
-            configured_server_value("bind_addr", "127.0.0.1"))
-        port_default = port if port is not None else int(
-            configured_server_value("port", 7682))
+        bind_default = bind or str(configured_server_value("bind_addr", "127.0.0.1"))
+        port_default = (
+            port if port is not None else int(configured_server_value("port", 7682))
+        )
         print("\nClarp setup wizard\n")
         backend = prompt("Agent backends (claude/codex/both)", backend)
         toolchain = prompt(
-            "Agent tools (managed/existing/none)", toolchain or "managed")
-        print("Transcription choices: none (no download), "
-              "recommended (~488 MB), or a supported model id")
-        transcription = prompt(
-            "Transcription", transcription or "recommended")
+            "Agent tools (managed/existing/none)", toolchain or "managed"
+        )
+        print(
+            "Transcription choices: none (no download), "
+            "recommended (~488 MB), or a supported model id"
+        )
+        transcription = prompt("Transcription", transcription or "recommended")
         current = _network_config()
-        current_tts = str(
-            current.get("tts", {}).get("provider", "cartesia"))
-        current_network = str(
-            current.get("network", {}).get("mode", "tailscale"))
+        current_tts = str(current.get("tts", {}).get("provider", "cartesia"))
+        current_network = str(current.get("network", {}).get("mode", "tailscale"))
         print("Voice choices: clarp/cartesia/elevenlabs/deepgram/none")
         tts_provider = prompt("Voice output", tts_provider or current_tts)
         tts_fallback = prompt("Voice fallback", tts_fallback or "none")
@@ -742,24 +864,39 @@ def cmd_setup(args) -> int:
             raise SystemExit("--transcription is required with --non-interactive")
     validate_setup_choices(backend, optional, toolchain)
     if toolchain == "existing":
-        required = (["claude"] if backend == "claude" else
-                    ["codex"] if backend == "codex" else ["claude", "codex"])
+        required = (
+            ["claude"]
+            if backend == "claude"
+            else ["codex"]
+            if backend == "codex"
+            else ["claude", "codex"]
+        )
         missing = [command for command in required if not external_command(command)]
         if missing:
             raise SystemExit(
-                "selected existing toolchain is missing: " + ", ".join(missing))
+                "selected existing toolchain is missing: " + ", ".join(missing)
+            )
 
     return _execute_setup(
-        backend, transcription, bind, port, optional, args.channel, toolchain,
-        tts_provider, tts_fallback, network_mode, public_url)
+        backend,
+        transcription,
+        bind,
+        port,
+        optional,
+        args.channel,
+        toolchain,
+        tts_provider,
+        tts_fallback,
+        network_mode,
+        public_url,
+    )
 
 
 def cmd_doctor(_args) -> int:
     failures = 0
     container_mode = os.environ.get("CLARP_DEPLOYMENT_MODE") == "container"
     try:
-        service_python = Path(
-            (SHARE / "current/SERVICE_PYTHON").read_text().strip())
+        service_python = Path((SHARE / "current/SERVICE_PYTHON").read_text().strip())
     except OSError:
         service_python = Path(sys.executable)
     checks = {
@@ -769,7 +906,8 @@ def cmd_doctor(_args) -> int:
     }
     if not container_mode:
         checks["current release"] = (
-            SHARE / "current" if (SHARE / "current").exists() else None)
+            SHARE / "current" if (SHARE / "current").exists() else None
+        )
     for label, value in checks.items():
         ok = bool(value)
         failures += not ok
@@ -780,7 +918,9 @@ def cmd_doctor(_args) -> int:
         failures += not ok
         print(f"{'OK' if ok else 'FAIL':<5} private data volume: {data}")
         for label, command in {
-            "git": "git", "GitHub CLI": "gh", "ffmpeg": "ffmpeg",
+            "git": "git",
+            "GitHub CLI": "gh",
+            "ffmpeg": "ffmpeg",
         }.items():
             value = shutil.which(command)
             failures += not bool(value)
@@ -791,8 +931,10 @@ def cmd_doctor(_args) -> int:
         except ImportError:
             whisper_runtime = ""
         failures += not bool(whisper_runtime)
-        print(f"{'OK' if whisper_runtime else 'FAIL':<5} "
-              f"Faster-Whisper: {whisper_runtime or 'missing'}")
+        print(
+            f"{'OK' if whisper_runtime else 'FAIL':<5} "
+            f"Faster-Whisper: {whisper_runtime or 'missing'}"
+        )
     else:
         ok = service_manager.is_active()
         failures += not ok
@@ -801,15 +943,18 @@ def cmd_doctor(_args) -> int:
         server_root = SHARE if (SHARE / "lib").is_dir() else REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib.tts_providers import status as tts_status
+
         voice = tts_status()
         selected_voice = next(
-            row for row in voice["providers"]
-            if row["id"] == voice["provider"])
+            row for row in voice["providers"] if row["id"] == voice["provider"]
+        )
         ok = bool(selected_voice["available"])
         failures += not ok
-        print(f"{'OK' if ok else 'FAIL':<5} voice provider: "
-              f"{selected_voice['name']}"
-              + ("" if ok else " (not configured or installed)"))
+        print(
+            f"{'OK' if ok else 'FAIL':<5} voice provider: "
+            f"{selected_voice['name']}"
+            + ("" if ok else " (not configured or installed)")
+        )
     except Exception as exc:  # noqa: BLE001 - doctor reports rather than crashes
         failures += 1
         print(f"FAIL  voice provider: {exc}")
@@ -837,29 +982,39 @@ def cmd_paths(_args) -> int:
     from lib.deployment import DeploymentLayout
 
     layout = DeploymentLayout.from_environment()
-    print(json.dumps({
-        "platform": service_manager.platform_kind(),
-        "share": str(layout.share),
-        "config": str(layout.config_file),
-        "database": str(layout.state_database),
-        "cache": str(layout.cache_dir),
-        "logs": str(
-            HOME / "Library/Logs/Clarp"
-            if service_manager.platform_kind() == "macos"
-            else layout.cache_dir / "logs"),
-        "service": str(service_manager.definition_path(HOME)),
-        "toolchain": str((layout.share / "toolchain").resolve(strict=False)),
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "platform": service_manager.platform_kind(),
+                "share": str(layout.share),
+                "config": str(layout.config_file),
+                "database": str(layout.state_database),
+                "cache": str(layout.cache_dir),
+                "logs": str(
+                    HOME / "Library/Logs/Clarp"
+                    if service_manager.platform_kind() == "macos"
+                    else layout.cache_dir / "logs"
+                ),
+                "service": str(service_manager.definition_path(HOME)),
+                "toolchain": str((layout.share / "toolchain").resolve(strict=False)),
+            },
+            indent=2,
+        )
+    )
     return 0
 
 
 def cmd_sessions(_args) -> int:
     from lib import db
 
-    rows = db.conn().execute(
-        """SELECT session,agent_id,persona,backend,cwd
+    rows = (
+        db.conn()
+        .execute(
+            """SELECT session,agent_id,persona,backend,cwd
              FROM agents WHERE deleted_at IS NULL ORDER BY persona,session"""
-    ).fetchall()
+        )
+        .fetchall()
+    )
     print(json.dumps([dict(row) for row in rows], indent=2))
     return 0
 
@@ -870,6 +1025,7 @@ def cmd_backup(args) -> int:
         server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib import instance_backup
+
     path = Path(args.path).expanduser() if getattr(args, "path", None) else None
     if args.backup_command == "create":
         result = instance_backup.create(path)
@@ -893,22 +1049,31 @@ def cmd_onboard(args) -> int:
     public_url = (args.url or os.environ.get("CLARP_PUBLIC_URL", "")).strip()
     if not public_url:
         host = str(server.get("bind_addr", "127.0.0.1"))
-        if host in {"0.0.0.0", "::"}: host = "127.0.0.1"
+        if host in {"0.0.0.0", "::"}:
+            host = "127.0.0.1"
         public_url = f"http://{host}:{int(server.get('port', 7682))}"
     server_root = SHARE
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib.server_identity import get_server_info
+
     info = get_server_info()
     if not str(server.get("auth_token") or "").strip():
         raise SystemExit("onboarding requires configured server authentication")
     from lib.device_pairing import issue
+
     record = issue(device_name="iPhone", scope="full")
-    values = urllib.parse.urlencode({
-        "name": args.name or info["name"], "url": public_url.rstrip("/"),
-        "code": record["code"], "server_id": info["server_id"],
-        "scope": record["scope"], "expires_at": record["expires_at"],
-    })
+    values = urllib.parse.urlencode(
+        {
+            "name": args.name or info["name"],
+            "url": public_url.rstrip("/"),
+            "code": record["code"],
+            "server_id": info["server_id"],
+            "scope": record["scope"],
+            "expires_at": record["expires_at"],
+        }
+    )
     print(f"clarp://pair?{values}")
     return 0
 
@@ -939,6 +1104,7 @@ def cmd_pair(args) -> int:
         server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib.device_pairing import issue, list_devices, revoke
+
     if args.pair_command == "list":
         print(json.dumps({"devices": list_devices(include_revoked=args.all)}, indent=2))
         return 0
@@ -952,31 +1118,36 @@ def cmd_pair(args) -> int:
     if not str(cfg.get("server", {}).get("auth_token") or "").strip():
         raise SystemExit(
             "pairing requires server authentication; configure networking/auth "
-            "in clarp-tui or set [server] auth_token, then restart Clarp")
+            "in clarp-tui or set [server] auth_token, then restart Clarp"
+        )
     public_url = _pairing_public_url(args.url)
     parsed = urllib.parse.urlsplit(public_url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise SystemExit(
-            "pairing requires a valid http:// or https:// Computer URL")
+        raise SystemExit("pairing requires a valid http:// or https:// Computer URL")
     if parsed.hostname in {"127.0.0.1", "::1", "localhost"} and not args.allow_loopback:
         raise SystemExit(
             "pairing URL is loopback-only; pass --url with the HTTPS/LAN address "
-            "the iPhone can reach")
-    record = issue(
-        device_name=args.name, scope=args.scope, ttl_seconds=args.ttl)
+            "the iPhone can reach"
+        )
+    record = issue(device_name=args.name, scope=args.scope, ttl_seconds=args.ttl)
     from lib.server_identity import get_server_info
+
     info = get_server_info()
-    query = urllib.parse.urlencode({
-        "name": info["name"], "url": public_url,
-        # The exchange response is authoritative for server identity and scope.
-        # Keeping the bootstrap URI compact makes a square terminal QR fit.
-        "code": record["code"],
-    })
+    query = urllib.parse.urlencode(
+        {
+            "name": info["name"],
+            "url": public_url,
+            # The exchange response is authoritative for server identity and scope.
+            # Keeping the bootstrap URI compact makes a square terminal QR fit.
+            "code": record["code"],
+        }
+    )
     uri = f"clarp://pair?{query}"
     if args.json:
         print(json.dumps({**record, "url": public_url, "uri": uri}, indent=2))
         return 0
     import qrcode
+
     qr = qrcode.QRCode(border=1)
     qr.add_data(uri)
     qr.make(fit=True)
@@ -1009,11 +1180,15 @@ def _tailscale_info() -> dict:
     if not executable:
         return {"installed": False, "online": False, "dns_name": ""}
     result = subprocess.run(
-        [executable, "status", "--json"], text=True,
-        capture_output=True, check=False)
+        [executable, "status", "--json"], text=True, capture_output=True, check=False
+    )
     if result.returncode != 0:
-        return {"installed": True, "online": False, "dns_name": "",
-                "error": result.stderr.strip()}
+        return {
+            "installed": True,
+            "online": False,
+            "dns_name": "",
+            "error": result.stderr.strip(),
+        }
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -1039,17 +1214,22 @@ def _tailscale_serve_status() -> dict:
         if _tailscale_cleanup_expected():
             raise SystemExit(
                 "Tailscale is unavailable, so Clarp cannot verify or remove "
-                "its previously managed Serve route")
+                "its previously managed Serve route"
+            )
         return {}
     status = subprocess.run(
-        [executable, "serve", "status", "--json"], text=True,
-        capture_output=True, check=False)
+        [executable, "serve", "status", "--json"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     if status.returncode != 0:
         if not _tailscale_cleanup_expected():
             return {}
         raise SystemExit(
             "could not inspect Tailscale Serve before cleanup: "
-            + (status.stderr.strip() or status.stdout.strip()))
+            + (status.stderr.strip() or status.stdout.strip())
+        )
     try:
         return json.loads(status.stdout or "{}")
     except json.JSONDecodeError as exc:
@@ -1070,9 +1250,7 @@ def _managed_tailscale_serve_routes(
 ) -> dict[str, int]:
     """Map HTTPS ports to matching Clarp loopback listener ports."""
     payload = _tailscale_serve_status()
-    expected = {
-        f"http://127.0.0.1:{port}": port for port in listener_ports
-    }
+    expected = {f"http://127.0.0.1:{port}": port for port in listener_ports}
     routes: dict[str, int] = {}
     for host_port, web in (payload.get("Web") or {}).items():
         handlers = web.get("Handlers", {}) if isinstance(web, dict) else {}
@@ -1089,7 +1267,9 @@ def _managed_tailscale_serve_ports(port: int) -> set[str]:
 
 
 def _assert_tailscale_root_available(
-    port: int, *, https_port: str = "443",
+    port: int,
+    *,
+    https_port: str = "443",
     allowed_proxy_ports: set[int] | None = None,
 ) -> None:
     """Refuse to overwrite another application's root Serve handler."""
@@ -1101,43 +1281,49 @@ def _assert_tailscale_root_available(
             continue
         handlers = web.get("Handlers", {})
         root = handlers.get("/", {}) if isinstance(handlers, dict) else {}
-        if root and (not isinstance(root, dict)
-                     or root.get("Proxy") not in expected):
+        if root and (not isinstance(root, dict) or root.get("Proxy") not in expected):
             raise SystemExit(
                 f"Tailscale Serve HTTPS port {https_port} root is already "
-                "managed by another application")
+                "managed by another application"
+            )
 
 
 def _set_managed_tailscale_serve(
-    port: int, *, https_port: str = "443", enabled: bool,
+    port: int,
+    *,
+    https_port: str = "443",
+    enabled: bool,
 ) -> None:
     executable = shutil.which("tailscale") or "tailscale"
     command = [
-        executable, "serve", f"--https={https_port}", "--set-path=/",
+        executable,
+        "serve",
+        f"--https={https_port}",
+        "--set-path=/",
     ]
     if enabled:
         command[2:2] = ["--bg"]
         command.append(f"http://127.0.0.1:{port}")
     else:
         command.append("off")
-    result = subprocess.run(
-        command, text=True, capture_output=True, check=False)
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         action = "restore" if enabled else "remove"
         raise SystemExit(
             f"could not {action} Clarp's Tailscale Serve route: "
-            + (result.stderr.strip() or result.stdout.strip()))
+            + (result.stderr.strip() or result.stdout.strip())
+        )
 
 
 def _remove_managed_tailscale_serve(
-    port: int, *, https_ports: set[str] | None = None,
+    port: int,
+    *,
+    https_ports: set[str] | None = None,
 ) -> None:
     """Remove only root Serve handlers that point at this Clarp port."""
-    ports = (_managed_tailscale_serve_ports(port)
-             if https_ports is None else https_ports)
+    ports = _managed_tailscale_serve_ports(port) if https_ports is None else https_ports
     for https_port in sorted(ports):
-        _set_managed_tailscale_serve(
-            port, https_port=https_port, enabled=False)
+        _set_managed_tailscale_serve(port, https_port=https_port, enabled=False)
 
 
 def cmd_network(args) -> int:
@@ -1146,16 +1332,21 @@ def cmd_network(args) -> int:
     server = cfg.get("server", {})
     if args.network_command == "status":
         mode = str(network.get("mode", "off"))
-        print(json.dumps({
-            "mode": mode,
-            "advertise_lan": bool(network.get("advertise_lan", False)),
-            "bind_addr": str(server.get("bind_addr", "127.0.0.1")),
-            "port": int(server.get("port", 7682)),
-            "public_base_url": str(server.get("public_base_url", "")),
-            "pairing_url": _pairing_public_url() if mode != "off" else "",
-            "auth_configured": bool(server.get("auth_token")),
-            "tailscale": _tailscale_info(),
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "mode": mode,
+                    "advertise_lan": bool(network.get("advertise_lan", False)),
+                    "bind_addr": str(server.get("bind_addr", "127.0.0.1")),
+                    "port": int(server.get("port", 7682)),
+                    "public_base_url": str(server.get("public_base_url", "")),
+                    "pairing_url": _pairing_public_url() if mode != "off" else "",
+                    "auth_configured": bool(server.get("auth_token")),
+                    "tailscale": _tailscale_info(),
+                },
+                indent=2,
+            )
+        )
         return 0
 
     mode = args.mode
@@ -1167,8 +1358,7 @@ def cmd_network(args) -> int:
     previous_port = int(getattr(args, "previous_port", port) or port)
     previous_config = CONFIG_FILE.read_bytes()
     serve_marker = CONFIG_FILE.with_name("tailscale-serve.json")
-    previous_marker = (serve_marker.read_bytes()
-                       if serve_marker.is_file() else None)
+    previous_marker = serve_marker.read_bytes() if serve_marker.is_file() else None
     marker_state = _tailscale_serve_marker()
     marker_port = marker_state.get("listener_port")
     candidate_ports = {previous_port, port}
@@ -1179,8 +1369,7 @@ def cmd_network(args) -> int:
     # Actual Serve state is authoritative for rollback even when an older
     # release left config.mode desynchronized from its live route.
     previous_serve_routes = dict(existing_serve_routes)
-    serve_ports_to_remove = (existing_serve_ports
-                             if mode != "tailscale" else set())
+    serve_ports_to_remove = existing_serve_ports if mode != "tailscale" else set()
     created_serve_ports: set[str] = set()
     try:
         if mode != "off":
@@ -1190,17 +1379,15 @@ def cmd_network(args) -> int:
             if not info.get("installed"):
                 raise SystemExit("Tailscale is not installed")
             if not info.get("online") or not info.get("dns_name"):
-                raise SystemExit(
-                    "Tailscale is not logged in or has no MagicDNS name")
-            _assert_tailscale_root_available(
-                port, allowed_proxy_ports=candidate_ports)
+                raise SystemExit("Tailscale is not logged in or has no MagicDNS name")
+            _assert_tailscale_root_available(port, allowed_proxy_ports=candidate_ports)
             if "443" not in existing_serve_ports:
                 created_serve_ports.add("443")
             _set_managed_tailscale_serve(port, enabled=True)
             set_toml_value(CONFIG_FILE, "server", "bind_addr", "127.0.0.1")
             set_toml_value(
-                CONFIG_FILE, "server", "public_base_url",
-                f"https://{info['dns_name']}")
+                CONFIG_FILE, "server", "public_base_url", f"https://{info['dns_name']}"
+            )
             set_toml_value(CONFIG_FILE, "network", "advertise_lan", False)
         elif mode == "lan":
             set_toml_value(CONFIG_FILE, "server", "bind_addr", "0.0.0.0")
@@ -1209,7 +1396,8 @@ def cmd_network(args) -> int:
         elif mode == "manual":
             set_toml_value(CONFIG_FILE, "server", "bind_addr", "127.0.0.1")
             set_toml_value(
-                CONFIG_FILE, "server", "public_base_url", args.url.rstrip("/"))
+                CONFIG_FILE, "server", "public_base_url", args.url.rstrip("/")
+            )
             set_toml_value(CONFIG_FILE, "network", "advertise_lan", False)
         else:
             set_toml_value(CONFIG_FILE, "server", "bind_addr", "127.0.0.1")
@@ -1219,12 +1407,16 @@ def cmd_network(args) -> int:
         service_manager.restart()
         if serve_ports_to_remove:
             _remove_managed_tailscale_serve(
-                previous_port, https_ports=serve_ports_to_remove)
+                previous_port, https_ports=serve_ports_to_remove
+            )
         if mode == "tailscale":
-            write_json(serve_marker, {
-                "listener_port": port,
-                "https_ports": sorted(existing_serve_ports | {"443"}),
-            })
+            write_json(
+                serve_marker,
+                {
+                    "listener_port": port,
+                    "https_ports": sorted(existing_serve_ports | {"443"}),
+                },
+            )
         elif serve_marker.exists():
             serve_marker.unlink()
     except BaseException as original_error:
@@ -1245,27 +1437,32 @@ def cmd_network(args) -> int:
             for _attempt in range(3):
                 try:
                     _set_managed_tailscale_serve(
-                        route_port, https_port=https_port, enabled=enabled)
+                        route_port, https_port=https_port, enabled=enabled
+                    )
                     return
                 except (SystemExit, Exception) as exc:
                     last_error = str(exc)
                     time.sleep(0.25)
             action = "restore" if enabled else "remove"
             rollback_errors.append(
-                f"Tailscale route {action} on HTTPS {https_port}: {last_error}")
+                f"Tailscale route {action} on HTTPS {https_port}: {last_error}"
+            )
 
         for https_port in sorted(created_serve_ports):
             restore_route(https_port, enabled=False, route_port=port)
         for https_port, route_port in sorted(previous_serve_routes.items()):
-            restore_route(
-                https_port, enabled=True, route_port=route_port)
+            restore_route(https_port, enabled=True, route_port=route_port)
         if rollback_errors:
             raise RuntimeError(
                 f"network change failed ({original_error}); rollback also failed: "
-                + "; ".join(rollback_errors)) from original_error
+                + "; ".join(rollback_errors)
+            ) from original_error
         raise
-    print(json.dumps({"ok": True, "mode": mode,
-                      "pairing_url": _pairing_public_url()}, indent=2))
+    print(
+        json.dumps(
+            {"ok": True, "mode": mode, "pairing_url": _pairing_public_url()}, indent=2
+        )
+    )
     return 0
 
 
@@ -1275,22 +1472,32 @@ def cmd_tts(args) -> int:
         server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib import tts_providers
+
     if args.tts_command == "adapters":
         from lib import custom_tts_adapters
+
         reserved = tts_providers.VALID_IDS
         action = args.adapter_command
         if action == "list":
-            print(json.dumps({"adapters": custom_tts_adapters.inventory(
-                reserved_ids=reserved)}, indent=2))
+            print(
+                json.dumps(
+                    {"adapters": custom_tts_adapters.inventory(reserved_ids=reserved)},
+                    indent=2,
+                )
+            )
             return 0
         if action == "validate":
             manifest = custom_tts_adapters.load_manifest(
-                args.path, reserved_ids=reserved, portable=True)
-            print(json.dumps({"ok": True, "adapter": manifest.provider_row()}, indent=2))
+                args.path, reserved_ids=reserved, portable=True
+            )
+            print(
+                json.dumps({"ok": True, "adapter": manifest.provider_row()}, indent=2)
+            )
             return 0
         if action == "install":
             manifest = custom_tts_adapters.install(
-                args.path, reserved_ids=reserved, replace=args.replace)
+                args.path, reserved_ids=reserved, replace=args.replace
+            )
             print(json.dumps({"ok": True, "installed": manifest.id}, indent=2))
             return 0
         if action == "remove":
@@ -1299,7 +1506,8 @@ def cmd_tts(args) -> int:
             if normalized in {active["provider"], active["fallback"]}:
                 raise SystemExit(
                     "cannot remove the active primary or fallback adapter; "
-                    "select a replacement first")
+                    "select a replacement first"
+                )
             custom_tts_adapters.remove(args.provider, reserved_ids=reserved)
             print(json.dumps({"ok": True, "removed": args.provider}, indent=2))
             return 0
@@ -1313,8 +1521,12 @@ def cmd_tts(args) -> int:
         return 0
     if args.tts_command == "configure":
         import getpass
-        key = (sys.stdin.readline().strip() if args.stdin else
-               getpass.getpass(f"{args.provider} API key: ").strip())
+
+        key = (
+            sys.stdin.readline().strip()
+            if args.stdin
+            else getpass.getpass(f"{args.provider} API key: ").strip()
+        )
         if not key:
             raise SystemExit("API key cannot be empty")
         section = args.provider
@@ -1329,23 +1541,28 @@ def cmd_tts(args) -> int:
     allowed = tts_providers.valid_ids()
     if provider not in allowed:
         raise SystemExit(f"unsupported TTS provider: {provider}")
-    provider_rows = {
-        row["id"]: row for row in tts_providers.status()["providers"]}
+    provider_rows = {row["id"]: row for row in tts_providers.status()["providers"]}
     if fallback not in allowed or (
-            fallback != "none"
-            and not provider_rows.get(fallback, {}).get("can_fallback", False)):
+        fallback != "none"
+        and not provider_rows.get(fallback, {}).get("can_fallback", False)
+    ):
         raise SystemExit(f"unsupported TTS fallback: {fallback}")
     for selected in {provider, fallback} - {"none"}:
-        if (provider_rows[selected]["kind"] == "local"
-                and not provider_rows[selected]["installed"]):
+        if (
+            provider_rows[selected]["kind"] == "local"
+            and not provider_rows[selected]["installed"]
+        ):
             raise SystemExit(
-                f"{selected} is not installed; "
-                f"run clarp-admin tts install {selected}")
-        if (provider_rows[selected].get("custom")
-                and not provider_rows[selected]["available"]):
+                f"{selected} is not installed; run clarp-admin tts install {selected}"
+            )
+        if (
+            provider_rows[selected].get("custom")
+            and not provider_rows[selected]["available"]
+        ):
             raise SystemExit(
                 f"custom TTS adapter is unavailable: {selected}; "
-                f"run clarp-admin tts adapters test {selected}")
+                f"run clarp-admin tts adapters test {selected}"
+            )
     set_toml_value(CONFIG_FILE, "tts", "provider", provider)
     set_toml_value(CONFIG_FILE, "tts", "fallback", fallback)
     if args.voice:
@@ -1354,8 +1571,9 @@ def cmd_tts(args) -> int:
         set_toml_value(CONFIG_FILE, "audio", "delivery", "chunked-file")
     if (SHARE / "current").exists():
         service_manager.restart(check=False)
-    print(json.dumps({"ok": True, "provider": provider,
-                      "fallback": fallback}, indent=2))
+    print(
+        json.dumps({"ok": True, "provider": provider, "fallback": fallback}, indent=2)
+    )
     return 0
 
 
@@ -1372,27 +1590,39 @@ def cmd_prompt(args) -> int:
     if args.delay:
         executable = shutil.which("clarp-admin") or str(Path(__file__).resolve())
         command = [executable, "prompt", "--to", args.to, "--text", args.text]
-        if args.from_session: command += ["--from", args.from_session]
-        if args.origin: command += ["--origin", args.origin]
-        if args.server: command += ["--server", args.server]
+        if args.from_session:
+            command += ["--from", args.from_session]
+        if args.origin:
+            command += ["--origin", args.origin]
+        if args.server:
+            command += ["--server", args.server]
         ok, error = service_manager.launch_detached(
-            command, unit=f"clarp-prompt-{secrets.token_hex(6)}",
-            delay_seconds=parse_delay(args.delay))
+            command,
+            unit=f"clarp-prompt-{secrets.token_hex(6)}",
+            delay_seconds=parse_delay(args.delay),
+        )
         if not ok:
             raise SystemExit(error or "could not schedule prompt")
         print(f"scheduled prompt to {args.to} after {args.delay}")
         return 0
     origin = "agent" if args.from_session else (args.origin or "automation")
     payload = {
-        "session": args.to, "text": args.text, "force_session": True,
-        "synthesize_audio": False, "hands_free": False, "origin": origin,
+        "session": args.to,
+        "text": args.text,
+        "force_session": True,
+        "synthesize_audio": False,
+        "hands_free": False,
+        "origin": origin,
     }
-    if args.from_session: payload["sender"] = args.from_session
+    if args.from_session:
+        payload["sender"] = args.from_session
     if args.server:
         server_root = SHARE
-        if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+        if not (server_root / "lib").is_dir():
+            server_root = REPO / "server"
         sys.path.insert(0, str(server_root))
         from lib.server_peers import send
+
         result = send(args.server, payload)
     else:
         result = api_request("POST", "/send", payload)
@@ -1400,11 +1630,38 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def cmd_create_agent(args) -> int:
+    payload = {
+        "name": args.name,
+        "backend": args.backend,
+        "cwd": args.cwd,
+        "synthesize_audio": args.announce,
+    }
+    if args.session:
+        payload["session"] = args.session
+    if args.model:
+        payload["model"] = args.model
+    if args.effort:
+        payload["effort"] = args.effort
+    try:
+        result = api_request("POST", "/agents", payload)
+    except urllib.error.HTTPError as exc:
+        try:
+            print(json.dumps(json.loads(exc.read().decode()), indent=2))
+        except (ValueError, UnicodeDecodeError):
+            print(f"server rejected the request (HTTP {exc.code})")
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_peers(args) -> int:
     server_root = SHARE
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib import server_peers
+
     if args.peers_command == "list":
         print(json.dumps(server_peers.list_public(), indent=2))
     elif args.peers_command == "add":
@@ -1417,9 +1674,11 @@ def cmd_peers(args) -> int:
 
 def cmd_repos(args) -> int:
     server_root = SHARE
-    if not (server_root / "lib").is_dir(): server_root = REPO / "server"
+    if not (server_root / "lib").is_dir():
+        server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib import workspace_repos
+
     if args.repos_command == "list":
         result = workspace_repos.list_repositories()
     elif args.repos_command == "clone":
@@ -1435,7 +1694,8 @@ def cmd_location(args) -> int:
     current = api_request("GET", f"/location?{query}")
     now_ms = int(time.time() * 1000)
     if current.get("ts") and now_ms - int(current["ts"]) <= args.max_age * 1000:
-        print(json.dumps(current, indent=2)); return 0
+        print(json.dumps(current, indent=2))
+        return 0
     started = now_ms
     api_request("POST", "/location/request", {"session": args.session})
     deadline = time.time() + args.timeout
@@ -1443,16 +1703,22 @@ def cmd_location(args) -> int:
         time.sleep(2)
         current = api_request("GET", f"/location?{query}")
         if current.get("ts") and int(current["ts"]) >= started:
-            print(json.dumps(current, indent=2)); return 0
+            print(json.dumps(current, indent=2))
+            return 0
     raise SystemExit("location was not shared before timeout")
 
 
 def cmd_calendar(args) -> int:
     payload = {
-        "session": args.session, "title": args.title,
-        "start": args.start, "end": args.end,
-        "time_zone": args.time_zone, "location": args.location,
-        "notes": args.notes, "url": args.url, "calendar": args.calendar,
+        "session": args.session,
+        "title": args.title,
+        "start": args.start,
+        "end": args.end,
+        "time_zone": args.time_zone,
+        "location": args.location,
+        "notes": args.notes,
+        "url": args.url,
+        "calendar": args.calendar,
         "all_day": args.all_day,
     }
     print(json.dumps(api_request("POST", "/calendar/request", payload), indent=2))
@@ -1461,9 +1727,15 @@ def cmd_calendar(args) -> int:
 
 def releases() -> list[Path]:
     root = SHARE / "releases"
-    return sorted((p for p in root.iterdir()
-                   if p.is_dir() and (p / "INSTALL_OK").is_file()),
-                  key=lambda p: p.stat().st_mtime, reverse=True) if root.is_dir() else []
+    return (
+        sorted(
+            (p for p in root.iterdir() if p.is_dir() and (p / "INSTALL_OK").is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if root.is_dir()
+        else []
+    )
 
 
 def activate_release(release: Path) -> None:
@@ -1477,10 +1749,10 @@ def activate_release(release: Path) -> None:
         service_python = Path((release / "SERVICE_PYTHON").read_text().strip())
         service_path = (release / "SERVICE_PATH").read_text().strip()
     except OSError as exc:
-        raise SystemExit(
-            f"release has no service runtime metadata: {release}") from exc
+        raise SystemExit(f"release has no service runtime metadata: {release}") from exc
     temporary = SHARE / ".current.next"
-    if temporary.is_symlink(): temporary.unlink()
+    if temporary.is_symlink():
+        temporary.unlink()
     temporary.symlink_to(release, target_is_directory=True)
     temporary.replace(current)
     try:
@@ -1500,14 +1772,15 @@ def activate_release(release: Path) -> None:
                 toolchain_link.unlink()
         live_unit.parent.mkdir(parents=True, exist_ok=True)
         service_manager.write_definition(
-            python=service_python, share=SHARE, service_path=service_path,
-            home=HOME)
+            python=service_python, share=SHARE, service_path=service_path, home=HOME
+        )
         cmd_skills(argparse.Namespace(skills_command="repair-links"))
         service_manager.install_and_restart()
     except BaseException:
         if previous and previous.is_dir():
             fallback = SHARE / ".current.rollback"
-            if fallback.is_symlink(): fallback.unlink()
+            if fallback.is_symlink():
+                fallback.unlink()
             fallback.symlink_to(previous, target_is_directory=True)
             fallback.replace(current)
             try:
@@ -1517,8 +1790,7 @@ def activate_release(release: Path) -> None:
             if previous_toolchain:
                 replacement = SHARE / ".toolchain.rollback"
                 replacement.unlink(missing_ok=True)
-                replacement.symlink_to(
-                    previous_toolchain, target_is_directory=True)
+                replacement.symlink_to(previous_toolchain, target_is_directory=True)
                 replacement.replace(SHARE / "toolchain")
             elif (SHARE / "toolchain").is_symlink():
                 (SHARE / "toolchain").unlink()
@@ -1527,7 +1799,8 @@ def activate_release(release: Path) -> None:
             elif live_unit.exists():
                 live_unit.unlink()
             service_manager.restore_after_failed_install(
-                had_previous=previous_unit is not None)
+                had_previous=previous_unit is not None
+            )
             try:
                 cmd_skills(argparse.Namespace(skills_command="repair-links"))
             except BaseException:
@@ -1544,8 +1817,11 @@ def cmd_rollback(args) -> int:
         raise SystemExit("no installed releases")
     current = (SHARE / "current").resolve() if (SHARE / "current").exists() else None
     candidates = [item for item in available if item.resolve() != current]
-    target = next((item for item in candidates if item.name == args.version), None) \
-        if args.version else (candidates[0] if candidates else None)
+    target = (
+        next((item for item in candidates if item.name == args.version), None)
+        if args.version
+        else (candidates[0] if candidates else None)
+    )
     if target is None:
         raise SystemExit("no previous matching release")
     activate_release(target)
@@ -1562,18 +1838,32 @@ def cmd_update(args) -> int:
             remote = str(state.get("source_remote") or "").strip()
             if not remote:
                 raise SystemExit(
-                    "source repository unavailable and no update remote was recorded")
+                    "source repository unavailable and no update remote was recorded"
+                )
             source.parent.mkdir(parents=True, exist_ok=True)
             run("git", "clone", "--filter=blob:none", remote, str(source))
     # Quick-start clones are shallow. Refresh remote branch heads explicitly as
     # well as tags so the no-tag fallback cannot silently reinstall stale main.
-    run("git", "fetch", "--tags", "--prune", "origin",
-        "+refs/heads/*:refs/remotes/origin/*", cwd=source)
+    run(
+        "git",
+        "fetch",
+        "--tags",
+        "--prune",
+        "origin",
+        "+refs/heads/*:refs/remotes/origin/*",
+        cwd=source,
+    )
     ref = args.ref
     if not ref and state.get("channel", "stable") == "stable":
-        tags = stable_release_tags(subprocess.run(
-            ["git", "tag", "--list", "v*", "--sort=-version:refname"],
-            cwd=source, text=True, capture_output=True, check=True).stdout.splitlines())
+        tags = stable_release_tags(
+            subprocess.run(
+                ["git", "tag", "--list", "v*", "--sort=-version:refname"],
+                cwd=source,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.splitlines()
+        )
         ref = tags[0] if tags else "origin/main"
     ref = ref or "origin/main"
     with tempfile.TemporaryDirectory(prefix="clarp-update-") as temporary:
@@ -1581,12 +1871,18 @@ def cmd_update(args) -> int:
         run("git", "worktree", "add", "--detach", str(worktree), ref, cwd=source)
         try:
             env = os.environ.copy()
-            env["CLARP_TOOLCHAIN_MODE"] = str(
-                state.get("toolchain") or "existing")
+            env["CLARP_TOOLCHAIN_MODE"] = str(state.get("toolchain") or "existing")
             run(str(worktree / "install.sh"), cwd=worktree, env=env)
         finally:
-            run("git", "worktree", "remove", "--force", str(worktree),
-                cwd=source, check=False)
+            run(
+                "git",
+                "worktree",
+                "remove",
+                "--force",
+                str(worktree),
+                cwd=source,
+                check=False,
+            )
     cmd_skills(argparse.Namespace(skills_command="repair-links"))
     print(f"updated Clarp from {ref}")
     return 0
@@ -1602,7 +1898,8 @@ def cmd_uninstall(args) -> int:
         routes = _managed_tailscale_serve_routes(listener_ports)
         if routes:
             _remove_managed_tailscale_serve(
-                next(iter(listener_ports)), https_ports=set(routes))
+                next(iter(listener_ports)), https_ports=set(routes)
+            )
         marker = CONFIG_FILE.with_name("tailscale-serve.json")
         if marker.exists():
             marker.unlink()
@@ -1611,19 +1908,33 @@ def cmd_uninstall(args) -> int:
             raise SystemExit(
                 f"could not remove Clarp's network route: {exc}. "
                 "Restore Tailscale and retry, or pass --force-network-cleanup "
-                "to accept the dangling-route risk") from exc
+                "to accept the dangling-route risk"
+            ) from exc
         print(f"warning: {exc}; continuing forced uninstall", file=sys.stderr)
     service_manager.stop_and_disable()
-    for skill_id in selected_skills(): unlink_skill(skill_id)
+    for skill_id in selected_skills():
+        unlink_skill(skill_id)
     # Clarp installs exactly one thing outside its own directories.
-    for root, names in ((HOME / ".local/bin", [
-            "clarp-admin", "clarp-tui", "clarp-agent-tasks", "clarp-agent-artifacts",
-            "clarp-media-publish", "clarp-agent-bg", "clarp-message-watch",
-            "clarp-github-workflow-artifact"]),):
+    for root, names in (
+        (
+            HOME / ".local/bin",
+            [
+                "clarp-admin",
+                "clarp-tui",
+                "clarp-agent-tasks",
+                "clarp-agent-artifacts",
+                "clarp-media-publish",
+                "clarp-agent-bg",
+                "clarp-message-watch",
+                "clarp-github-workflow-artifact",
+            ],
+        ),
+    ):
         for name in names:
             path = root / name
             managed = path.is_symlink() and path.resolve().is_relative_to(
-                SHARE.resolve())
+                SHARE.resolve()
+            )
             if path.is_file() and not path.is_symlink():
                 try:
                     managed = "# managed-by-clarp" in path.read_text()[:256]
@@ -1632,15 +1943,31 @@ def cmd_uninstall(args) -> int:
             if managed:
                 path.unlink()
     unit = service_manager.definition_path(HOME)
-    if unit.is_file(): unit.unlink()
+    if unit.is_file():
+        unit.unlink()
     service_manager.reload_definitions()
-    for name in ("current", "server.py", "lib", "static", "scripts", "skills",
-                 "plugin", "systemd", "docs", "requirements.txt",
-                 "pyproject.toml", "uv.lock", "DEPLOYED_VERSION",
-                 "DEPLOYED_RELEASE_ID", "SOURCE_REMOTE"):
+    for name in (
+        "current",
+        "server.py",
+        "lib",
+        "static",
+        "scripts",
+        "skills",
+        "plugin",
+        "systemd",
+        "docs",
+        "requirements.txt",
+        "pyproject.toml",
+        "uv.lock",
+        "DEPLOYED_VERSION",
+        "DEPLOYED_RELEASE_ID",
+        "SOURCE_REMOTE",
+    ):
         path = SHARE / name
-        if path.is_symlink(): path.unlink()
-    if (SHARE / "releases").is_dir(): shutil.rmtree(SHARE / "releases")
+        if path.is_symlink():
+            path.unlink()
+    if (SHARE / "releases").is_dir():
+        shutil.rmtree(SHARE / "releases")
     toolchain_link = SHARE / "toolchain"
     if toolchain_link.is_symlink():
         toolchain_link.unlink()
@@ -1650,8 +1977,10 @@ def cmd_uninstall(args) -> int:
     if (SHARE / "bin").is_dir():
         shutil.rmtree(SHARE / "bin")
     if args.purge_data:
-        if SHARE.is_dir(): shutil.rmtree(SHARE)
-        if CONFIG_DIR.is_dir(): shutil.rmtree(CONFIG_DIR)
+        if SHARE.is_dir():
+            shutil.rmtree(SHARE)
+        if CONFIG_DIR.is_dir():
+            shutil.rmtree(CONFIG_DIR)
         print("removed Clarp runtime, configuration, and conversation data")
     else:
         print("removed Clarp runtime; preserved configuration and conversation data")
@@ -1667,7 +1996,8 @@ def parser() -> argparse.ArgumentParser:
         description=(
             "Install or reconfigure Clarp through the shared setup engine.\n"
             "Without --non-interactive, this command asks terminal questions.\n"
-            "For the graphical terminal wizard, run: clarp-tui"),
+            "For the graphical terminal wizard, run: clarp-tui"
+        ),
         epilog="""examples:
   # Interactive CLI questions
   clarp-admin setup
@@ -1688,47 +2018,75 @@ def parser() -> argparse.ArgumentParser:
 First installation from a source checkout should normally use ./setup.sh,
 which creates the locked Python environment before invoking this command.
 Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
-""")
+""",
+    )
     setup.add_argument(
-        "--non-interactive", action="store_true",
-        help="disable all prompts; requires explicit toolchain and transcription")
+        "--non-interactive",
+        action="store_true",
+        help="disable all prompts; requires explicit toolchain and transcription",
+    )
     setup.add_argument(
-        "--backend", choices=("claude", "codex", "both"), default="both",
-        help="agent backends to enable (default: both)")
+        "--backend",
+        choices=("claude", "codex", "both"),
+        default="both",
+        help="agent backends to enable (default: both)",
+    )
     setup.add_argument(
-        "--transcription", default="",
-        help="recommended, none, or a supported model id")
-    setup.add_argument("--toolchain", choices=("managed", "existing", "none"),
-                       default="",
-                       help="pinned Clarp tools, PATH tools, or deferred setup")
+        "--transcription", default="", help="recommended, none, or a supported model id"
+    )
     setup.add_argument(
-        "--tts", choices=("clarp", "cartesia", "elevenlabs", "deepgram",
-                          "none"), default="",
-        help="primary voice-output provider")
+        "--toolchain",
+        choices=("managed", "existing", "none"),
+        default="",
+        help="pinned Clarp tools, PATH tools, or deferred setup",
+    )
+    setup.add_argument(
+        "--tts",
+        choices=("clarp", "cartesia", "elevenlabs", "deepgram", "none"),
+        default="",
+        help="primary voice-output provider",
+    )
     setup.add_argument(
         "--tts-fallback",
         choices=("clarp", "cartesia", "elevenlabs", "deepgram", "none"),
-        default="none", help="explicit voice fallback (default: none)")
+        default="none",
+        help="explicit voice fallback (default: none)",
+    )
     setup.add_argument(
-        "--network", choices=("tailscale", "lan", "manual", "off"),
-        default="", help="phone networking mode")
+        "--network",
+        choices=("tailscale", "lan", "manual", "off"),
+        default="",
+        help="phone networking mode",
+    )
     setup.add_argument(
-        "--public-url", default="",
-        help="existing HTTPS address; required for --network manual")
+        "--public-url",
+        default="",
+        help="existing HTTPS address; required for --network manual",
+    )
     setup.add_argument(
-        "--bind", help="server bind address; existing value is preserved when omitted")
+        "--bind", help="server bind address; existing value is preserved when omitted"
+    )
     setup.add_argument(
-        "--port", type=int,
-        help="server port; existing value is preserved when omitted")
+        "--port", type=int, help="server port; existing value is preserved when omitted"
+    )
     setup.add_argument(
-        "--optional-skill", action="append", default=[], metavar="SKILL_ID",
-        help="optional skill to enable; repeat for multiple skills")
+        "--optional-skill",
+        action="append",
+        default=[],
+        metavar="SKILL_ID",
+        help="optional skill to enable; repeat for multiple skills",
+    )
     setup.add_argument(
-        "--channel", choices=("stable", "development"), default="stable",
-        help="update channel (default: stable)")
+        "--channel",
+        choices=("stable", "development"),
+        default="stable",
+        help="update channel (default: stable)",
+    )
     setup.set_defaults(func=cmd_setup)
 
-    skills = sub.add_parser("skills").add_subparsers(dest="skills_command", required=True)
+    skills = sub.add_parser("skills").add_subparsers(
+        dest="skills_command", required=True
+    )
     skills.add_parser("list").set_defaults(func=cmd_skills)
     skills.add_parser("repair-links").set_defaults(func=cmd_skills)
     skills_import = skills.add_parser("import")
@@ -1749,7 +2107,8 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         command.set_defaults(func=cmd_skills)
 
     transcription = sub.add_parser("transcription").add_subparsers(
-        dest="transcription_command", required=True)
+        dest="transcription_command", required=True
+    )
     transcription.add_parser("list").set_defaults(func=cmd_transcription)
     transcription.add_parser("test").set_defaults(func=cmd_transcription)
     for name in ("install", "remove", "use"):
@@ -1758,15 +2117,15 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         command.set_defaults(func=cmd_transcription)
     import_model = transcription.add_parser("import")
     import_model.add_argument(
-        "--provider",
-        choices=("faster-whisper", "whisper.cpp"),
-        required=True)
+        "--provider", choices=("faster-whisper", "whisper.cpp"), required=True
+    )
     import_model.add_argument("--model", required=True)
     import_model.add_argument("--path", required=True)
     import_model.add_argument("--runtime-path", default="")
     import_model.set_defaults(func=cmd_transcription)
     stt_adapters = transcription.add_parser("adapters").add_subparsers(
-        dest="adapter_command", required=True)
+        dest="adapter_command", required=True
+    )
     stt_adapters.add_parser("list").set_defaults(func=cmd_transcription)
     stt_validate = stt_adapters.add_parser("validate")
     stt_validate.add_argument("path")
@@ -1790,13 +2149,11 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     onboard.add_argument("--name", default="")
     onboard.set_defaults(func=cmd_onboard)
 
-    pair = sub.add_parser("pair").add_subparsers(
-        dest="pair_command", required=True)
+    pair = sub.add_parser("pair").add_subparsers(dest="pair_command", required=True)
     pair_create = pair.add_parser("create")
     pair_create.add_argument("--url", default="")
     pair_create.add_argument("--name", default="iPhone")
-    pair_create.add_argument("--scope", choices=("full", "limited"),
-                             default="full")
+    pair_create.add_argument("--scope", choices=("full", "limited"), default="full")
     pair_create.add_argument("--ttl", type=int, default=600)
     pair_create.add_argument("--allow-loopback", action="store_true")
     pair_create.add_argument("--json", action="store_true")
@@ -1809,16 +2166,15 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     pair_revoke.set_defaults(func=cmd_pair)
 
     network = sub.add_parser("network").add_subparsers(
-        dest="network_command", required=True)
+        dest="network_command", required=True
+    )
     network.add_parser("status").set_defaults(func=cmd_network)
     network_use = network.add_parser("use")
-    network_use.add_argument(
-        "mode", choices=("tailscale", "lan", "manual", "off"))
+    network_use.add_argument("mode", choices=("tailscale", "lan", "manual", "off"))
     network_use.add_argument("--url", default="")
     network_use.set_defaults(func=cmd_network)
 
-    tts = sub.add_parser("tts").add_subparsers(
-        dest="tts_command", required=True)
+    tts = sub.add_parser("tts").add_subparsers(dest="tts_command", required=True)
     tts.add_parser("status").set_defaults(func=cmd_tts)
     tts_use = tts.add_parser("use")
     tts_use.add_argument("provider")
@@ -1827,11 +2183,13 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     tts_use.set_defaults(func=cmd_tts)
     tts_configure = tts.add_parser("configure")
     tts_configure.add_argument(
-        "provider", choices=("cartesia", "elevenlabs", "deepgram"))
+        "provider", choices=("cartesia", "elevenlabs", "deepgram")
+    )
     tts_configure.add_argument("--stdin", action="store_true")
     tts_configure.set_defaults(func=cmd_tts)
     adapters = tts.add_parser("adapters").add_subparsers(
-        dest="adapter_command", required=True)
+        dest="adapter_command", required=True
+    )
     adapters.add_parser("list").set_defaults(func=cmd_tts)
     adapters_validate = adapters.add_parser("validate")
     adapters_validate.add_argument("path")
@@ -1847,7 +2205,8 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     adapters_remove.add_argument("provider")
     adapters_remove.set_defaults(func=cmd_tts)
     backup = sub.add_parser("backup").add_subparsers(
-        dest="backup_command", required=True)
+        dest="backup_command", required=True
+    )
     backup_create = backup.add_parser("create")
     backup_create.add_argument("path", nargs="?")
     backup_create.set_defaults(func=cmd_backup)
@@ -1873,8 +2232,26 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     prompt_cmd.add_argument("--origin", choices=("automation", "watcher"))
     prompt_cmd.add_argument("--server", help="explicit configured peer name")
     prompt_cmd.set_defaults(func=cmd_prompt)
-    peers = sub.add_parser("peers").add_subparsers(
-        dest="peers_command", required=True)
+    create_agent = sub.add_parser("create-agent")
+    create_agent.add_argument("--name", required=True)
+    create_agent.add_argument(
+        "--backend", default="", help="claude, codex or agy (server default if omitted)"
+    )
+    create_agent.add_argument(
+        "--cwd", default="", help="working directory (defaults to server-side default)"
+    )
+    create_agent.add_argument(
+        "--session", default="", help="explicit session id (fresh ids only)"
+    )
+    create_agent.add_argument("--model", default="")
+    create_agent.add_argument("--effort", default="")
+    create_agent.add_argument(
+        "--announce",
+        action="store_true",
+        help="speak the ready announcement (quiet by default)",
+    )
+    create_agent.set_defaults(func=cmd_create_agent)
+    peers = sub.add_parser("peers").add_subparsers(dest="peers_command", required=True)
     peers.add_parser("list").set_defaults(func=cmd_peers)
     peer_add = peers.add_parser("add")
     peer_add.add_argument("name")
@@ -1884,8 +2261,7 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     peer_remove = peers.add_parser("remove")
     peer_remove.add_argument("name")
     peer_remove.set_defaults(func=cmd_peers)
-    repos = sub.add_parser("repos").add_subparsers(
-        dest="repos_command", required=True)
+    repos = sub.add_parser("repos").add_subparsers(dest="repos_command", required=True)
     repos.add_parser("list").set_defaults(func=cmd_repos)
     repo_clone = repos.add_parser("clone")
     repo_clone.add_argument("url")

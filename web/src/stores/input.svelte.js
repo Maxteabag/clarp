@@ -88,6 +88,13 @@ export function targetPaneId() {
   return panesState.tree.activeId;
 }
 
+function scrollActiveHistory(direction) {
+  const body = document.querySelector('.pane-leaf.active .history-body')
+    || document.querySelector('.history-body');
+  if (!body) return;
+  body.scrollTop += direction * Math.max(120, Math.round(body.clientHeight * 0.8));
+}
+
 export function keyContext() {
   return {
     desktop: isDesktop,
@@ -130,6 +137,9 @@ const ACTIONS = {
   'nav-right': () => navigateActivePane('right'),
   'nav-up': () => navigateActivePane('up'),
   'nav-down': () => navigateActivePane('down'),
+
+  'scroll-up': () => scrollActiveHistory(-1),
+  'scroll-down': () => scrollActiveHistory(1),
 
   'quick-switch': () => shell.onQuickSwitch?.(),
   'focus-sidebar': () => enterSidebar(),

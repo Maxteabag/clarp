@@ -58,11 +58,29 @@ function ackClip(clip, status, error) {
   } catch (_) {}
 }
 
+/**
+ * Shape the player adapter's (event, detail, snapshot) into what /clog keeps.
+ * The server's eventlog only persists clip_id, duration_ms, trace_id and a
+ * dict `detail` — every other top-level key is dropped. So the snapshot
+ * (volume, buffer, readyState, timings, stall counts, ...) rides inside
+ * `detail` next to the human-readable `msg`. Exported for tests.
+ */
+export function playerLog(event, detail, snap) {
+  const msg = String(detail ?? '');
+  if (!snap || typeof snap !== 'object') { clog(event, msg); return; }
+  const { clip_id, trace_id, duration_ms, ...rest } = snap;
+  const extra = { detail: { msg, ...rest } };
+  if (clip_id != null && clip_id !== '') extra.clip_id = clip_id;
+  if (trace_id) extra.trace_id = trace_id;
+  if (Number.isFinite(duration_ms)) extra.duration_ms = Math.round(duration_ms);
+  clog(event, msg, extra);
+}
+
 export function initAudio(el) {
   player = el;
   playerAdapter = createPlayerAdapter(player, {
     speed: SPEED_RATE,
-    log: clog,
+    log: playerLog,
     showSpeaking: (on) => { audio.speaking = !!on; },
   });
   scheduler = createScheduler({

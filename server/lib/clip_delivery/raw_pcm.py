@@ -6,6 +6,7 @@ import time
 
 from .. import agents as agents_db
 from .. import clips as clips_lib
+from ..audio_metrics import PcmStreamAnalyzer
 from ..log import log_exception
 from ..protocol import ClipProducerStatus
 from . import FinalizeResult
@@ -122,6 +123,15 @@ class RawPcmSession:
         self._source = source
         self._text_len = text_len
         self._trace_id = trace_id
+        # Corruption diagnostics: every chunk is inspected on the way to the
+        # broker, anomalies are logged as they happen, and finalize()/fail()
+        # roll the whole clip up into one audioStats row.
+        self._metrics = PcmStreamAnalyzer(
+            encoding=str(self._audio_format.get("encoding") or ""),
+            sample_rate=int(self._audio_format.get("sample_rate") or 0),
+            channels=int(self._audio_format.get("channels") or 1),
+            on_anomaly=self._emit_anomaly,
+        )
 
     @property
     def clip_id(self) -> int:
@@ -136,6 +146,10 @@ class RawPcmSession:
         return _extra_fields(self._clip_id, self._audio_format)
 
     def feed(self, chunk_idx: int, chunk: bytes) -> None:
+        try:
+            self._metrics.feed(chunk)
+        except Exception as e:  # noqa: BLE001 — diagnostics never block audio
+            log_exception("clipMetricsFeedFail", e, detail=str(self._clip_id))
         if self._broker is None:
             return
         try:
@@ -143,7 +157,32 @@ class RawPcmSession:
         except Exception as e:  # noqa: BLE001
             log_exception("clipBrokerAppendFail", e, detail=str(self._clip_id))
 
+    def _emit_anomaly(self, event: dict) -> None:
+        _emit("clip_delivery", "audioAnomaly", level="warn",
+              session=self._session, agent_id=self._agent.get("agent_id"),
+              persona=self._agent.get("persona"), clip_id=self._clip_id,
+              trace_id=self._trace_id, detail=dict(event))
+
+    def _emit_stats(self, *, ok: bool, error: str = "") -> None:
+        try:
+            self._metrics.finish()
+            summary = self._metrics.summary()
+        except Exception as e:  # noqa: BLE001
+            log_exception("clipMetricsSummaryFail", e, detail=str(self._clip_id))
+            return
+        summary["ok"] = ok
+        if error:
+            summary["error"] = error[:300]
+        level = "warn" if (not ok or summary.get("anomalies")) else "info"
+        _emit("clip_delivery", "audioStats", level=level,
+              session=self._session, agent_id=self._agent.get("agent_id"),
+              persona=self._agent.get("persona"), clip_id=self._clip_id,
+              trace_id=self._trace_id,
+              duration_ms=summary.get("produce_wall_ms"),
+              detail=summary)
+
     def finalize(self, *, total_bytes: int) -> FinalizeResult:
+        self._emit_stats(ok=True)
         size = (self._target.stat().st_size if self._target.exists()
                 else total_bytes)
         try:
@@ -184,6 +223,7 @@ class RawPcmSession:
         )
 
     def fail(self, error: str) -> None:
+        self._emit_stats(ok=False, error=str(error or ""))
         try:
             self._target.unlink()
         except OSError:
@@ -206,4 +246,13 @@ class RawPcmSession:
             except Exception as e:  # noqa: BLE001
                 log_exception("clipBrokerFailCleanup", e,
                               detail=str(self._clip_id))
+
+
+def _emit(*args, **kwargs) -> None:
+    """eventlog.emit that can never break delivery (import-safe, no raise)."""
+    try:
+        from .. import eventlog
+        eventlog.emit(*args, **kwargs)
+    except Exception:  # noqa: BLE001
+        pass
 

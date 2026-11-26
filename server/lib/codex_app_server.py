@@ -38,6 +38,7 @@ class _ActiveTurn:
     stream: Any
     enqueue: Callable[..., int]
     voice: bool = False
+    car_mode: bool = False
     steer_ready: threading.Event = field(default_factory=threading.Event)
 
 
@@ -273,7 +274,7 @@ class _Client:
               is_new_session: bool, session: str, trace_id: str, model: str,
               effort: str, voice: bool, persona: str,
               handle: AppTurnHandle, on_session_init, on_result,
-              on_error, stream, enqueue) -> None:
+              on_error, stream, enqueue, car_mode: bool = False) -> None:
         cwd = pathlib.Path(os.path.expanduser(str(cwd))).resolve()
         developer_instructions = persona_identity_instruction(persona, session)
         # Claim the logical slot before any blocking RPC. A simultaneous send
@@ -282,7 +283,7 @@ class _Client:
         active = _ActiveTurn(
             "", backend_session_id, self.agent_id, session, trace_id,
             _TurnState(live_backend_session_id=backend_session_id),
-            handle, on_result, on_error, stream, enqueue, voice,
+            handle, on_result, on_error, stream, enqueue, voice, car_mode,
         )
         self.stream = stream
         self.active = active
@@ -319,7 +320,7 @@ class _Client:
                 # contract probe is part of this transport's integration test.
                 "additionalContext": {"clarp-app": {
                     "kind": "application",
-                    "value": app_turn_instructions(voice=voice),
+                    "value": app_turn_instructions(voice=voice, car_mode=car_mode),
                 }},
                 "cwd": str(cwd), "approvalPolicy": "never",
                 "sandboxPolicy": {"type": "dangerFullAccess"},
@@ -354,7 +355,8 @@ class _Client:
         if synthesize_audio and not active.voice:
             params["additionalContext"] = {"clarp-voice-followup": {
                 "kind": "application",
-                "value": app_turn_instructions(voice=True),
+                "value": app_turn_instructions(
+                    voice=True, car_mode=active.car_mode),
             }}
             active.voice = True
             agents_db.enable_latest_turn_audio(active.agent_id)
@@ -410,7 +412,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
                on_session_init=None, on_result=None, on_error=None,
                trace_id: str = "", stream=None, enqueue=None,
                voice_preamble: bool = False, model: str = "", effort: str = "",
-               isolated: bool = False) -> AppTurnHandle:
+               isolated: bool = False, car_mode: bool = False) -> AppTurnHandle:
     if isolated:
         # Isolated jobs do not need steering and retain the hardened exec path.
         from . import codex_runner
@@ -420,7 +422,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, trace_id=trace_id, stream=stream, enqueue=enqueue,
             voice_preamble=voice_preamble, model=model, effort=effort,
-            isolated=True,
+            isolated=True, car_mode=car_mode,
         )
     client = _client(agent_id, session, stream=stream)
     handle = AppTurnHandle(client)
@@ -432,7 +434,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
                  voice=voice_preamble, persona=persona, handle=handle,
                  on_session_init=on_session_init, on_result=on_result,
                  on_error=on_error, stream=stream,
-                 enqueue=enqueue or tts_queue.enqueue)
+                 enqueue=enqueue or tts_queue.enqueue, car_mode=car_mode)
     log("codexAppTurnStart", f"agent={agent_id} thread={client.thread_id} trace={trace_id}")
     return handle
 

@@ -90,6 +90,35 @@ def test_spoken_hook_context_requests_conversational_delivery_for_all_speech():
     assert "few or no fillers" not in spoken
 
 
+def test_marker_carries_car_mode_flag(tmp_path):
+    marker = tmp_path / "rachel"
+    marker.write_text(
+        f"{TurnSource.PWA_VOICE_MARKER} rachel {time.time():.3f} trace-1 1 1\n"
+    )
+    info = pwa_source_flag._read_pwa_marker(marker, "rachel")
+    assert info.fresh and info.synthesize_audio and info.car_mode
+
+    # Five-field markers from an older server default to "not driving".
+    marker.write_text(
+        f"{TurnSource.PWA_VOICE_MARKER} rachel {time.time():.3f} trace-1 0\n"
+    )
+    info = pwa_source_flag._read_pwa_marker(marker, "rachel")
+    assert info.fresh and not info.synthesize_audio and not info.car_mode
+
+
+def test_car_mode_context_appends_the_driving_doc():
+    spoken = pwa_source_flag._build_additional_context(
+        app_dispatched=True, voiced=True, car_mode=True)
+    assert "[car-mode]" in spoken
+    assert spoken.index("<speak>") < spoken.index("[car-mode]")
+    silent = pwa_source_flag._build_additional_context(
+        app_dispatched=True, voiced=False, car_mode=True)
+    assert "[car-mode]" in silent and "<speak>" not in silent
+    plain = pwa_source_flag._build_additional_context(
+        app_dispatched=True, voiced=True)
+    assert "[car-mode]" not in plain
+
+
 def test_non_app_turn_emits_no_context():
     """A turn the app didn't dispatch (e.g. third-party local terminal) and
     isn't voiced gets no injected context at all."""

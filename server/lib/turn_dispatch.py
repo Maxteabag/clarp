@@ -167,6 +167,10 @@ class _TurnSpec:
     prompt_admission_id: str = ""
     queue_id: str = ""
     unheard_audio: bool = False
+    # The phone's Car Mode surface was open when this was sent. Per-turn like
+    # synthesize_audio; not persisted for durable-queued turns (by the time a
+    # queued message finally runs, the user may well have parked).
+    car_mode: bool = False
 
 
 class DispatchError(RuntimeError):
@@ -300,7 +304,8 @@ class TurnDispatchService:
                  skip_admission: bool = False,
                  durable_queue_id: str = "",
                  unheard_audio_sessions: tuple[str, ...] = (),
-                 allow_paused_queue: bool = False) -> DispatchResult:
+                 allow_paused_queue: bool = False,
+                 car_mode: bool = False) -> DispatchResult:
         # NB: the live session->trace mapping is set only when a turn actually
         # spawns (see below / _finish_turn), NOT here — a message that merely
         # queues behind a busy agent must not move the trace, or the running
@@ -412,6 +417,7 @@ class TurnDispatchService:
             queue_id=(durable_queue_id
                       or ((client_msg_id or trace_id) if queue_if_busy else "")),
             unheard_audio=unheard_audio,
+            car_mode=car_mode,
         )
         # Queue receipts and ordinary user admissions share one SQLite write
         # transaction, preserving client_msg_id idempotency even if concurrent
@@ -864,13 +870,14 @@ class TurnDispatchService:
             raise DispatchError(503, "could not durably queue message") from e
 
     def _write_source_marker(self, *, session: str, trace_id: str,
-                             synthesize_audio: bool) -> None:
+                             synthesize_audio: bool,
+                             car_mode: bool = False) -> None:
         try:
             path = source_marker_path(self.home, session)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source_marker_text(
                 session=session, trace_id=trace_id, now=self.now(),
-                synthesize_audio=synthesize_audio))
+                synthesize_audio=synthesize_audio, car_mode=car_mode))
         except OSError as e:
             log_exception("sendLastSourceWriteFail", e)
 
@@ -919,7 +926,8 @@ class TurnDispatchService:
         if spec.backend == self.backends.CLAUDE:
             self._write_source_marker(
                 session=spec.session, trace_id=spec.trace_id,
-                synthesize_audio=spec.synthesize_audio)
+                synthesize_audio=spec.synthesize_audio,
+                car_mode=spec.car_mode)
         # Mutable across this attempt's callbacks: did system.init land?
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id}
@@ -950,6 +958,7 @@ class TurnDispatchService:
                 stream=self.ctx.stream,
                 voice_preamble=spec.synthesize_audio,
                 synthesize_audio=spec.synthesize_audio,
+                car_mode=spec.car_mode,
                 model=spec.model,
                 effort=spec.effort,
                 run_if_owned=run_if_owned,

@@ -39,6 +39,17 @@ from .log import log_exception
 
 
 CHUNK_WAIT_SEC = 30.0
+# A consumer that had to wait longer than this for the next chunk was
+# starving: the producer fell behind real time (or the broker stalled).
+STARVE_WAIT_MS = 250
+
+
+def _emit(*args, **kwargs) -> None:
+    try:
+        from . import eventlog
+        eventlog.emit(*args, **kwargs)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @dataclass
@@ -251,13 +262,25 @@ def _serve_live_range(handler, stream: _ClipStream,
             return target_end is not None and available > target_end
 
     # Bounded wait for the requested slice.
-    deadline = time.time() + CHUNK_WAIT_SEC
+    wait_started = time.time()
+    deadline = wait_started + CHUNK_WAIT_SEC
+    timed_out = False
     while not _ready_for(end):
         with stream.cond:
             remaining = deadline - time.time()
             if remaining <= 0:
+                timed_out = True
                 break
             stream.cond.wait(timeout=min(0.5, remaining))
+    waited_ms = int((time.time() - wait_started) * 1000)
+    if timed_out or waited_ms > STARVE_WAIT_MS:
+        with stream.cond:
+            have = sum(len(c) for c in stream.chunks)
+        _emit("clip_stream", "rangeWait", level="warn" if timed_out else "info",
+              clip_id=clip_id, duration_ms=waited_ms,
+              detail={"start": start, "end": end, "available_bytes": have,
+                      "timed_out": timed_out, "finished": stream.finished,
+                      "failed": stream.failed})
 
     with stream.cond:
         available_bytes = b"".join(stream.chunks)
@@ -317,17 +340,31 @@ def _serve_live_chunked(handler, stream: _ClipStream, clip_id: int,
         log_exception("clipStreamHeaderFail", e, detail=str(clip_id))
         return
 
+    started = time.time()
+    stats = {"chunks": 0, "bytes": 0, "starves": 0, "max_wait_ms": 0,
+             "max_write_ms": 0, "outcome": "eof"}
     try:
-        _write_live_chunks(handler, stream)
+        _write_live_chunks(handler, stream, clip_id=clip_id, stats=stats)
     except (BrokenPipeError, ConnectionResetError):
+        stats["outcome"] = "client_gone"
         return
     except OSError as e:
+        stats["outcome"] = "write_fail"
         log_exception("clipStreamWriteFail", e, detail=str(clip_id))
+    finally:
+        # One row per consumer connection: how many times it starved, how
+        # long, and whether the socket itself was slow (a stalled client).
+        stats["duration_ms"] = int((time.time() - started) * 1000)
+        _emit("clip_stream", "served",
+              level="warn" if stats["starves"] or stats["outcome"] != "eof" else "info",
+              clip_id=clip_id, duration_ms=stats["duration_ms"], detail=stats)
 
 
-def _write_live_chunks(handler, stream: _ClipStream) -> None:
+def _write_live_chunks(handler, stream: _ClipStream, *, clip_id: int | None = None,
+                       stats: dict | None = None) -> None:
     idx = 0
     wait_started: float | None = None
+    stats = stats if stats is not None else {}
     while True:
         with stream.cond:
             while idx >= len(stream.chunks) and not stream.finished and not stream.failed:
@@ -337,17 +374,42 @@ def _write_live_chunks(handler, stream: _ClipStream) -> None:
                 if remaining <= 0:
                     stream.failed = True
                     stream.error = "stream wait timeout"
+                    stats["outcome"] = "producer_timeout"
+                    _emit("clip_stream", "stall", level="warn", clip_id=clip_id,
+                          duration_ms=int((time.time() - wait_started) * 1000),
+                          detail={"reason": "producer wait timeout",
+                                  "chunks_served": idx,
+                                  "bytes_served": stats.get("bytes", 0)})
                     break
                 stream.cond.wait(timeout=min(0.5, remaining))
             if idx < len(stream.chunks):
                 chunk = stream.chunks[idx]
                 idx += 1
+                if wait_started is not None:
+                    waited_ms = int((time.time() - wait_started) * 1000)
+                    if waited_ms > stats.get("max_wait_ms", 0):
+                        stats["max_wait_ms"] = waited_ms
+                    if waited_ms > STARVE_WAIT_MS:
+                        stats["starves"] = stats.get("starves", 0) + 1
+                        if stats["starves"] <= 5:
+                            _emit("clip_stream", "starve", level="warn",
+                                  clip_id=clip_id, duration_ms=waited_ms,
+                                    detail={"chunk": idx, "bytes_served": stats.get("bytes", 0)})
                 wait_started = None
             elif stream.finished or stream.failed:
+                if stream.failed and stats.get("outcome") == "eof":
+                    stats["outcome"] = "producer_failed"
+                    stats["error"] = stream.error
                 break
             else:
                 continue
+        write_started = time.time()
         _write_chunk(handler, chunk)
+        write_ms = int((time.time() - write_started) * 1000)
+        if write_ms > stats.get("max_write_ms", 0):
+            stats["max_write_ms"] = write_ms
+        stats["chunks"] = stats.get("chunks", 0) + 1
+        stats["bytes"] = stats.get("bytes", 0) + len(chunk)
     try:
         handler.wfile.write(b"0\r\n\r\n")
         handler.wfile.flush()
