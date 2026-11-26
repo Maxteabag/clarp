@@ -2373,11 +2373,13 @@ socket's queue and is answered by the next Host, never refused. An open event st
 when its Host stops (its last frame `host-updating`) and is reconnected by the app, with the
 `Last-Event-ID` of the last frame it read.
 
-Event numbers never repeat across runs of a Host: each run reserves its numbers on disk before it
-gives any out, above every number an earlier run may have given out, whether that run stopped,
-failed to record its stop or crashed. A stream resumed with an earlier run's number is therefore
-always told it missed something (`agent-roster` with `resync`, `truncated` on `compact=1`) and
-reads the snapshot again.
+Event numbers do not repeat across runs of a Host while its disk accepts their reservation: each
+run reserves its numbers on disk before it gives any out, above every number an earlier run may
+have given out, whether that run stopped, failed to record its stop or crashed. A stream resumed
+with an earlier run's number is then always told it missed something (`agent-roster` with
+`resync`, `truncated` on `compact=1`) and reads the snapshot again. Where the disk refuses the
+reservation, the Host says so once in its journal and goes on numbering its events unreserved; after
+a crash of that run, the next run may give out some of those numbers again.
 
 ### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
