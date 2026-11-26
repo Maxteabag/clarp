@@ -355,3 +355,12 @@ fn an_unknown_context_size_stays_unknown() {
     assert_eq!(size(json!({"session": "a", "context_tokens": 0, "context_window": 200000})), Some(0), "a real empty context is 0");
     assert_eq!(size(json!({"session": "a", "context_tokens": 51200})), Some(51200));
 }
+
+#[test]
+fn every_backend_shows_its_name_not_its_id() {
+    use clarp_core::protocol::backend_name;
+    assert_eq!(backend_name("agy"), "Antigravity");
+    assert_eq!(backend_name("opencode"), "OpenCode");
+    assert_eq!(backend_name("claude"), "Claude");
+    assert_eq!(backend_name("something-new"), "something-new");
+}

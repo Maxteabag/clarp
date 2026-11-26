@@ -59,7 +59,7 @@ fn fill(app: &App, window: &AppWindow) {
                 portrait: crate::avatar_view::portrait(app, &row.session, card),
                 preview: preview.into(),
                 state: row.state.as_str().into(),
-                backend: row.backend.as_str().into(),
+                backend: clarp_core::protocol::backend_name(&row.backend).into(),
                 model: row.model.as_str().into(),
                 folder: row.working_directory.as_str().into(),
                 queued: crate::view::queued_shown(&row.session, row.queue_count),

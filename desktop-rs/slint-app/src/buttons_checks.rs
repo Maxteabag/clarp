@@ -276,6 +276,8 @@ pub fn buttons_check(out: String) {
             }
             let pane = app_now().active_id();
             check(drawn(&format!("queue-strip:{pane}")), "the strip is the open chat's");
+            let state = label(&format!("queue-state:{pane}"));
+            check(state == "2 messages waiting", &format!("the strip says where the queue stands, and only that (its buttons say what they do): {state:?}"));
             check(label(&format!("composer-meter:{pane}")) == "context 21K/1M · 2%", &format!("the composer's frame shows the context meter: {:?}", label(&format!("composer-meter:{pane}"))));
             check(!view().meter_warn, "2% of the context is no warning");
             check_window_size_free(window, "with the queue strip shown");

@@ -68,8 +68,12 @@ pub fn ended(rows: &[Message]) -> Vec<Line> {
 }
 
 /// Where each line goes among the shown rows (an index to insert at, in
-/// the rows as they are): at the end of its turn, after its prompt and its
-/// own rows and before the next prompt or an unsent message. A turn none of
+/// the rows as they are): at the end of its turn, before the first row
+/// after it that is not its own: the next prompt, an unsent message, or a
+/// row of another turn (the answer and Working row of a turn that took over
+/// with no prompt row between). Its own end written later (its closing
+/// summary, after the new turn began) does not carry the line down there;
+/// with nothing after it, under its last own row. A turn none of
 /// whose rows is shown (its prompt on an older page) gets no line, nor one
 /// whose own shown row says the same words already (a failure's row).
 pub fn place(lines: &[Line], shown: &[Shown<'_>]) -> Vec<(usize, Line)> {
@@ -80,13 +84,9 @@ pub fn place(lines: &[Line], shown: &[Shown<'_>]) -> Vec<(usize, Line)> {
         if said {
             continue;
         }
-        let Some(start) = shown.iter().rposition(own) else { continue };
-        let at = shown
-            .iter()
-            .enumerate()
-            .skip(start + 1)
-            .find(|(_, row)| row.unsent || (row.role == "user" && !own(*row)))
-            .map_or(shown.len(), |(i, _)| i);
+        let (Some(first), Some(last)) = (shown.iter().position(own), shown.iter().rposition(own)) else { continue };
+        let other = |row: &Shown<'_>| row.unsent || (row.role == "user" && !own(row)) || (!row.trace_id.is_empty() && !own(row));
+        let at = shown.iter().enumerate().skip(first + 1).find(|(_, row)| other(row)).map_or(last + 1, |(i, _)| i);
         placed.push((at, line.clone()));
     }
     placed.sort_by_key(|(at, _)| *at);
@@ -147,6 +147,23 @@ mod tests {
         let rows = vec![row("u1", "user", "t1", "go", None), row("a1", "assistant", "t1", "working on it", Some(stopped)), unsent];
         let placed = place(&ended(&rows), &shown(&rows));
         assert_eq!(placed[0].0, 2);
+    }
+
+    #[test]
+    fn a_turn_taken_over_keeps_its_line_above_the_new_answer() {
+        // Send now stopped t1 for a waiting message: t2's answer and its
+        // work follow with no prompt row between (an answer with no trace
+        // too); the line stays with t1.
+        let stopped = json!({"turn_id": "t1", "status": "interrupted", "reason": "Stopped for a newer message."});
+        let rows = vec![
+            row("u1", "user", "t1", "go", None),
+            row("a1", "assistant", "t1", "half an answer", Some(stopped)),
+            row("w2", "assistant", "t2", "", None),
+            row("a2", "assistant", "", "the new answer", None),
+            row("e1", "assistant", "t1", "", None),
+        ];
+        let placed = place(&ended(&rows), &shown(&rows));
+        assert_eq!(placed[0].0, 2, "right under the stopped turn: {placed:?}");
     }
 
     #[test]

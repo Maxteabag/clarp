@@ -452,11 +452,20 @@ impl Agent {
 
 /// A provider id as the user knows it.
 fn provider_name(provider: &str) -> &str {
-    match provider {
-        "codex" => "Codex",
+    if provider.is_empty() { "This backend" } else { backend_name(provider) }
+}
+
+/// A backend's id ("agy", "opencode") as the user knows it ("Antigravity",
+/// "OpenCode"): what every list, row and profile shows where the Host gave
+/// no label of its own. An id it does not know is shown as it is.
+pub fn backend_name(id: &str) -> &str {
+    match id {
         "claude" => "Claude",
-        "agy" => "Antigravity",
-        "" => "This backend",
+        "codex" => "Codex",
+        "agy" | "agy-acp" => "Antigravity",
+        "opencode" => "OpenCode",
+        "grok" => "Grok",
+        "gemini" => "Gemini",
         other => other,
     }
 }

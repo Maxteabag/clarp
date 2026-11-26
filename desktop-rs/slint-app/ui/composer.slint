@@ -447,9 +447,12 @@ export component QueueStrip inherits Rectangle {
             height: 18px;
             spacing: 8px;
             Text {
+                // Only where the queue stands; its buttons say what they do.
                 text: (root.count == 1 ? "1 message waiting" : root.count + " messages waiting")
-                    + (root.paused && !root.busy ? "  ·  queue paused: Send now runs one"
-                        : root.busy ? "  ·  Send now hands it to the agent during this turn" : "");
+                    + (root.paused && !root.busy ? "  ·  queue paused" : "");
+                accessible-role: text;
+                accessible-id: "queue-state:" + root.pane-id;
+                accessible-label: self.text;
                 color: Palette.muted;
                 font-size: 11 * Look.unit;
                 overflow: elide;

@@ -573,8 +573,8 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
             .find(|b| b.id == id)
             .map(|b| b.label.clone())
             .or_else(|| engine.backend_options().iter().find(|o| text(o, "id") == id).map(|o| text(o, "label")))
-            .filter(|l| !l.is_empty())
-            .unwrap_or_else(|| id.to_owned())
+            .filter(|l| !l.is_empty() && l != id)
+            .unwrap_or_else(|| clarp_core::protocol::backend_name(id).to_owned())
     };
     let model_label = |backend: &str, id: &str| -> String {
         if id.is_empty() {
