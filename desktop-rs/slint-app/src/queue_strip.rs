@@ -89,13 +89,6 @@ pub struct Chip {
     pub acting: bool,
 }
 
-/// The user's own waiting message (origin user or oracle, or none said),
-/// not yet being read into the turn.
-fn own_waiting(item: &Value) -> bool {
-    let owners = item.get("origin").and_then(Value::as_str).is_none_or(|o| o == "user" || o == "oracle");
-    owners && item.get("status").and_then(Value::as_str) != Some("started") && !item_id(item).is_empty()
-}
-
 pub fn chip(engine: &Engine, session: &str) -> Chip {
     use clarp_core::{queue_line as words, send_while_working as sww};
     let reason = engine.send_while_working_reason(session);
@@ -103,24 +96,24 @@ pub fn chip(engine: &Engine, session: &str) -> Chip {
         return Chip { reason, ..Chip::default() };
     }
     let items = engine.turn_queue(session);
-    let own: Vec<&Value> = items.iter().filter(|item| own_waiting(item)).collect();
+    let own: Vec<&Value> = items.iter().filter(|item| words::waiting_owner_id(item).is_some()).collect();
     if own.is_empty() {
         // Nothing waits: only what the Host did with a send instead, if it said.
         return Chip { reason, ..Chip::default() };
     }
-    let acting = engine.turn_queue_acting(session) || engine.stopping_for_waiting(session);
+    let acting = engine.turn_queue_acting(session);
     let count = own.len() as i32;
+    if !engine.turn_queue_steer(session) {
+        return Chip { count, reason, ..Chip::default() };
+    }
     let steerable = |item: &&&Value| {
         item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting") && item.get("steerable").and_then(Value::as_bool) == Some(true)
     };
-    if engine.turn_queue_steer(session)
-        && let Some(item) = own.iter().rev().find(steerable)
-    {
+    if let Some(item) = own.iter().rev().find(steerable) {
         return Chip { kind: "steer", target: item_id(item), label: words::STEER_NOW, count, reason, acting };
     }
     let reason = if reason.is_empty() { sww::CANT_STEER.to_owned() } else { reason };
-    let target = if engine.turn_queue_steer(session) { item_id(own[0]) } else { String::new() };
-    Chip { kind: "stop", target, label: words::STOP_AND_SEND, count, reason, acting }
+    Chip { kind: "stop", target: String::new(), label: words::STOP_AND_SEND, count, reason, acting }
 }
 
 /// Sends a one-off choice's words for `session`'s Host into Send's menu:
@@ -213,15 +206,11 @@ pub fn act(app: &App, session: &str, kind: &str, target: &str) -> bool {
     if current.kind != kind || current.target != target {
         return false;
     }
-    if !current.acting {
-        match kind {
-            "steer" => engine.steer_queued_turn(target),
-            "stop" if !target.is_empty() => engine.take_over_queued_turn(target),
-            "stop" => engine.stop_for_waiting(session),
-            _ => return false,
-        }
+    match kind {
+        "steer" => engine.act_on_queue_chip(session, Some(target)),
+        "stop" => engine.act_on_queue_chip(session, None),
+        _ => false,
     }
-    true
 }
 
 /// Tokens as the meter says them: 950, 21K, 1.2M, 1M.

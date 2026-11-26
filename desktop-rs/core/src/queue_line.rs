@@ -8,6 +8,17 @@
 /// something waits, so an entry the Host no longer has never lingers.
 pub const REREAD_SECS: u64 = 30;
 
+/// ID of an owner's queued message that has not started. A message left
+/// for later can take over a turn, although it cannot be steered into one.
+pub fn waiting_owner_id(item: &serde_json::Value) -> Option<&str> {
+    let owner = item["origin"].as_str().is_none_or(|origin| matches!(origin, "user" | "oracle"));
+    if !owner || !item["sender"].is_null() || matches!(item["status"].as_str(), Some("started" | "claimed")) {
+        return None;
+    }
+    item["queue_id"].as_str().filter(|id| !id.is_empty())
+        .or_else(|| item["id"].as_str().filter(|id| !id.is_empty()))
+}
+
 /// The line's count: "1 waiting", "3 waiting".
 pub fn waiting(count: i32) -> String {
     format!("{} waiting", count.max(0))

@@ -26,6 +26,8 @@ pub(crate) struct TurnQueue {
     /// now (`Step`), so a turn that cannot be steered is stopped instead,
     /// and one that ended meanwhile is sent to plainly.
     chains: HashMap<String, Chain>,
+    /// A chip action keeps its session even when a different chat is opened.
+    chip_actions: HashMap<String, (String, ChipStep)>,
     /// The Host's answer to the last refused Send now (a turn still runs),
     /// and its chat. A reload keeps it: the Host reloads the queue with
     /// `queue-updated` on the same refusal.
@@ -54,6 +56,13 @@ enum Step {
 struct Chain {
     queue_id: String,
     tried: Vec<Step>,
+}
+
+#[derive(Clone, Copy)]
+enum ChipStep {
+    Steer,
+    ReadForTakeOver,
+    TakeOver,
 }
 
 impl Engine {
@@ -243,11 +252,64 @@ impl Engine {
         }
     }
 
+    /// Act on the busy chat's chip. A take-over reads the current queue
+    /// before choosing its oldest eligible owner message.
+    pub fn act_on_queue_chip(&mut self, session: &str, steer_id: Option<&str>) -> bool {
+        on_peer!(self.peer_mut(session), |engine, local| engine.act_on_queue_chip(local, steer_id));
+        if !self.queue.steer || self.queue.session != session || session.is_empty() {
+            return false;
+        }
+        if self.turn_queue_acting(session) {
+            return true;
+        }
+        if let Some(id) = steer_id {
+            if !self.queued_steerable(id) || !self.queue.items.iter().any(|item| clarp_core::queue_line::waiting_owner_id(item) == Some(id)) {
+                return false;
+            }
+            self.post_chip_step(session, id, ChipStep::Steer);
+        } else {
+            self.read_for_chip_takeover(session);
+        }
+        true
+    }
+
+    fn chip_step(&mut self, session: &str, step: ChipStep) -> String {
+        let tag = format!("queue-chip:{}", uuid::Uuid::new_v4());
+        self.queue.chip_actions.insert(tag.clone(), (session.to_owned(), step));
+        if self.queue.refused_session == session {
+            self.queue.refused.clear();
+        }
+        self.changes.push(Change::Queue(session.to_owned()));
+        tag
+    }
+
+    fn read_for_chip_takeover(&mut self, session: &str) {
+        let tag = self.chip_step(session, ChipStep::ReadForTakeOver);
+        self.api.get(&tag, "/turn-queue", &[("session", session)]);
+    }
+
+    fn post_chip_step(&mut self, session: &str, id: &str, step: ChipStep) {
+        let tag = self.chip_step(session, step);
+        let verb = if matches!(step, ChipStep::Steer) { "steer" } else { "take-over" };
+        let mut body = json!({});
+        self.ask_voice(&mut body);
+        self.api.post_json(&tag, &format!("{}/{verb}", Self::queue_item_path(id)), body, None);
+    }
+
+    fn refresh_after_chip(&mut self, session: &str) {
+        if session == self.queue.session {
+            self.load_turn_queue(session);
+        } else {
+            self.changes.push(Change::Queue(session.to_owned()));
+        }
+    }
+
     /// A Send now, steer or take-over of `session`'s runs: the line's
     /// action shows it is under way and takes no second press.
     pub fn turn_queue_acting(&self, session: &str) -> bool {
         on_peer!(self.peer_ref(session), |engine, local| engine.turn_queue_acting(local));
-        self.queue.sends.iter().any(|tag| self.queue.action_sessions.get(tag).is_some_and(|s| s == session))
+        self.queue.chip_actions.values().any(|(chat, _)| chat == session)
+            || self.queue.sends.iter().any(|tag| self.queue.action_sessions.get(tag).is_some_and(|s| s == session))
     }
 
     /// The next way to send a refused message now, or None when every way
@@ -267,12 +329,33 @@ impl Engine {
     }
 
     pub(crate) fn queue_json(&mut self, tag: &str, object: &Object) -> bool {
+        if let Some((session, step)) = self.queue.chip_actions.remove(tag) {
+            if matches!(step, ChipStep::ReadForTakeOver)
+                && let Some(oldest) = json::array(object, "items").iter().find_map(clarp_core::queue_line::waiting_owner_id)
+            {
+                self.post_chip_step(&session, oldest, ChipStep::TakeOver);
+            } else {
+                self.refresh_after_chip(&session);
+            }
+            return true;
+        }
         if let Some(rest) = tag.strip_prefix("turn-queue:") {
             let (generation, session) = rest.split_once(':').unwrap_or((rest, ""));
             if generation.parse::<u64>().ok() != Some(self.queue.generation) || session != self.queue.session {
                 return true;
             }
             self.queue.items = json::array(object, "items");
+            // Contract 197 publishes a turn-wide flag. A per-item flag, when
+            // supplied, overrides it.
+            if json::boolean(object, "steerable") {
+                for item in &mut self.queue.items {
+                    let steerable = clarp_core::queue_line::waiting_owner_id(item).is_some()
+                        && item["kind"].as_str().is_none_or(|kind| kind == "waiting");
+                    if let Some(fields) = item.as_object_mut() {
+                        fields.entry("steerable".to_owned()).or_insert(Value::Bool(steerable));
+                    }
+                }
+            }
             self.queue.paused = json::boolean(object, "paused");
             // The Host's queue is the truth: a count the agent list kept from
             // an older revision follows it (a stale strip never lingers).
@@ -302,6 +385,25 @@ impl Engine {
     /// the Host refused because a turn still runs (409) is its refusal, in
     /// the Host's words: the message waits on.
     pub(crate) fn queue_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
+        if let Some((session, step)) = self.queue.chip_actions.remove(tag) {
+            let code = clarp_core::endpoint::refusal_code(message);
+            match code {
+                Some("not_steerable") if matches!(step, ChipStep::Steer) => {
+                    self.read_for_chip_takeover(&session);
+                }
+                Some("no_turn_running" | "not_waiting") => self.refresh_after_chip(&session),
+                _ => {
+                    self.queue.refused = if let Some(code) = code {
+                        message.strip_suffix(&format!(" [{code}]")).unwrap_or(message).to_owned()
+                    } else {
+                        message.to_owned()
+                    };
+                    self.queue.refused_session = session.clone();
+                    self.changes.push(Change::Queue(session));
+                }
+            }
+            return true;
+        }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         if let Some(rest) = tag.strip_prefix("turn-queue:") {
             if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) != Some(self.queue.generation) {

@@ -295,6 +295,86 @@ fn send_now_steers_and_stops_the_turn_where_it_cannot_be_steered() {
 }
 
 #[test]
+fn queue_chip_takes_over_the_oldest_current_owner_message() {
+    let (host, mut d) = open_chip_queue("chip-takeover");
+    // The chip was drawn with q1 oldest. A missed queue update changes
+    // what is eligible before the click reaches the Host.
+    replace_chip_queue(&host);
+
+    assert!(d.engine.act_on_queue_chip("rachel", None));
+    assert!(d.engine.act_on_queue_chip("rachel", None), "a second tap is consumed while the first is in flight");
+    d.until("take-over finished", |e| !e.turn_queue_acting("rachel") && !e.turn_queue_loading());
+    assert_eq!(chip_posts(&host), ["/turn-queue/oldest/take-over"]);
+    assert!(d.engine.turn_queue("rachel").iter().any(|item| item["queue_id"] == "q2"));
+}
+
+#[test]
+fn queue_chip_refused_steer_checks_current_owner_queue_and_ends_on_takeover_refusals() {
+    for (status, code, reason) in [
+        (409, "turn_not_cuttable", "This goal is using the running turn."),
+        (409, "no_turn_running", "The turn already ended."),
+        (404, "not_waiting", "The message is already gone."),
+    ] {
+        let (host, mut d) = open_chip_queue(code);
+        replace_chip_queue(&host);
+        host.control("/__control/fail", json!({
+            "path": "/turn-queue/q2/steer", "status": 409,
+            "response": {"code": "not_steerable", "error": "This turn cannot take a message now."},
+        }));
+        host.control("/__control/fail", json!({
+            "path": "/turn-queue/oldest/take-over", "status": status,
+            "response": {"code": code, "error": reason},
+        }));
+        assert!(d.engine.act_on_queue_chip("rachel", Some("q2")));
+        d.until("chip finished", |e| !e.turn_queue_acting("rachel") && !e.turn_queue_loading());
+
+        assert_eq!(chip_posts(&host), ["/turn-queue/q2/steer", "/turn-queue/oldest/take-over"], "{code}");
+        let log = host.log();
+        let take_over = log.iter().position(|r| r["method"] == "POST" && r["path"] == "/turn-queue/oldest/take-over").unwrap();
+        let refreshed = log[take_over + 1..].iter().any(|r| r["method"] == "GET" && r["path"] == "/turn-queue");
+        if code == "turn_not_cuttable" {
+            assert_eq!(d.engine.turn_queue_refusal("rachel"), reason);
+            assert!(!refreshed, "the refused item stays in the displayed queue");
+        } else {
+            assert!(refreshed, "{code} asks for a fresh queue");
+            assert!(d.engine.turn_queue_refusal("rachel").is_empty(), "{code}");
+        }
+    }
+}
+
+fn open_chip_queue(name: &str) -> (Host, Driver) {
+    let host = Host::start(name);
+    host.control("/__control/queue-steer", json!({"on": true}));
+    host.control("/__control/agent", json!({"session": "rachel", "set": {"busy": true, "latest_state": "thinking"}}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("steering advertised", |e| e.turn_queue_steer("rachel"));
+    d.engine.load_turn_queue("rachel");
+    d.until("queue loaded", |e| !e.turn_queue_loading() && e.turn_queue("rachel").len() == 2);
+    (host, d)
+}
+
+fn replace_chip_queue(host: &Host) {
+    host.control("/__control/turn-queue", json!({
+        "session": "rachel", "announce": false,
+        "items": [
+            {"queue_id": "agent", "origin": "agent", "text": "agent work"},
+            {"queue_id": "started", "origin": "user", "status": "started", "text": "already being read"},
+            {"queue_id": "claimed", "origin": "user", "status": "claimed", "text": "already chosen to take over"},
+            {"queue_id": "oldest", "origin": "user", "text": "oldest eligible"},
+            {"queue_id": "q2", "origin": "user", "text": "newer steer target"},
+        ],
+    }));
+}
+
+fn chip_posts(host: &Host) -> Vec<String> {
+    host.log().iter().filter_map(|r| {
+        let path = r["path"].as_str()?;
+        (r["method"] == "POST" && (path.starts_with("/turn-queue/") || path == "/stop" || path == "/send")).then(|| path.to_owned())
+    }).collect()
+}
+
+#[test]
 fn busy_send_uses_the_host_setting_or_one_off_and_reports_fallback() {
     use clarp_core::send_while_working::Mode;
     let host = Host::start("send-while-working");

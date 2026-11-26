@@ -1807,7 +1807,7 @@ class Handler(BaseHTTPRequestHandler):
                 if queue_steer["on"]:
                     for item in items:
                         item.setdefault("kind", "waiting")
-                        item["steerable"] = busy and item["kind"] == "waiting"
+                        item.setdefault("steerable", busy and item["kind"] == "waiting")
                 return self.reply(200, {"items": items, "paused": paused})
         if url.path == "/attention":
             return self.reply(200, {"items": attention})
@@ -2173,7 +2173,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if url.path == "/__control/fail":
             # Test control: the next `count` GETs to `path` answer `status`.
-            failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1))]
+            failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1)), body.get("response")]
             return self.reply(200, {"ok": True})
         if url.path == "/__control/form-events":
             # Test control: the next `lose_receipts` accepted event batches
@@ -2508,7 +2508,8 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 session = body.get("session", "")
                 turn_queue[session] = [dict(i) for i in body.get("items", [])]
-            broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue[session])})
+            if body.get("announce", True):
+                broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue[session])})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/send-while-working":
             send_while_working["on"] = bool(body.get("on", True))
@@ -2920,6 +2921,8 @@ class Handler(BaseHTTPRequestHandler):
             failure = failures.get(url.path)
             if failure and failure[1] > 0:
                 failure[1] -= 1
+                if len(failure) > 2 and failure[2] is not None:
+                    return self.reply(failure[0], failure[2])
                 words = {404: "not waiting", 409: "the running turn cannot be cut"}.get(failure[0], "refused")
                 return self.reply(failure[0], {"error": words, "code": "turn_not_cuttable" if failure[0] == 409 else "not_waiting"})
             with state_lock:

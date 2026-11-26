@@ -270,8 +270,12 @@ impl ApiClient {
                     match body {
                         Err(error) => ApiReply::Failed { tag, message: request_error(&error, timeout), status: status.as_u16() },
                         Ok(body) if !status.is_success() => ApiReply::Failed {
+                            message: if tag.starts_with("queue-chip:") {
+                                queue_chip_error(&body, &http_status_text(status))
+                            } else {
+                                error_message(&body, &http_status_text(status))
+                            },
                             tag,
-                            message: error_message(&body, &http_status_text(status)),
                             status: status.as_u16(),
                         },
                         Ok(body) => match serde_json::from_slice::<Value>(&body) {
@@ -331,6 +335,14 @@ pub(crate) fn auth_headers(token: &str, accept: &'static str) -> HeaderMap {
             headers.insert(AUTHORIZATION, value);
         }
     headers
+}
+
+/// The turn-queue endpoints carry a top-level code alongside the Host's words.
+fn queue_chip_error(body: &[u8], fallback: &str) -> String {
+    let message = error_message(body, fallback);
+    let Ok(object) = serde_json::from_slice::<Value>(body) else { return message };
+    let Some(code) = object["code"].as_str() else { return message };
+    format!("{message} [{code}]")
 }
 
 #[cfg(test)]

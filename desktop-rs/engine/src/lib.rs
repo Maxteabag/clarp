@@ -1600,7 +1600,6 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
-        self.send_while_working_stop_answer(tag);
         if self.form_events_json(tag, object) {
             return;
         }
@@ -1702,7 +1701,6 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        self.send_while_working_stop_answer(tag);
         if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }

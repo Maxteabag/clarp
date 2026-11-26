@@ -3,10 +3,9 @@
 //! offers the setting, its value (`GET /send-settings` on connecting, its
 //! event, or this desktop's write while the Host answers), the `while_busy`
 //! every send carries (the setting, or one send's own choice), the Host's
-//! words for a send it did otherwise, per chat, and the waiting line's Stop
-//! and send while it runs. Without the feature nothing here changes a send.
+//! words for a send it did otherwise, per chat.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use clarp_core::json::{self, Object};
 use clarp_core::send_while_working::{self as sww, Mode};
@@ -27,9 +26,6 @@ pub(crate) struct SendWhileWorking {
     before_write: Option<Mode>,
     /// Chat → the Host's reason why a send of it stopped the turn.
     reasons: HashMap<String, String>,
-    /// Chats whose waiting line stopped the turn, until the turn has ended
-    /// or their queue changed.
-    stopping: HashSet<String>,
     /// The next send's own choice (Send's menu), instead of the setting.
     once: Option<Mode>,
 }
@@ -97,34 +93,9 @@ impl Engine {
         self.send_while_working.reasons.get(session).cloned().unwrap_or_default()
     }
 
-    /// The waiting line's Stop and send: the plain Stop, so every waiting
-    /// message of the user's goes on next, read together.
-    pub fn stop_for_waiting(&mut self, session: &str) {
-        on_peer!(self.peer_mut(session), |engine, local| engine.stop_for_waiting(local));
-        if session.is_empty() || !self.send_while_working.stopping.insert(session.to_owned()) {
-            return;
-        }
-        self.changes.push(Change::Queue(session.to_owned()));
-        self.stop_session(session);
-    }
-
-    /// The waiting line's Stop and send runs for `session`.
-    pub fn stopping_for_waiting(&self, session: &str) -> bool {
-        on_peer!(self.peer_ref(session), |engine, local| engine.stopping_for_waiting(local));
-        self.send_while_working.stopping.contains(session)
-    }
-
     fn note_send_reason(&mut self, session: &str, reason: String) {
         if !session.is_empty() && self.send_while_working.reasons.get(session) != Some(&reason) {
             self.send_while_working.reasons.insert(session.to_owned(), reason);
-            self.changes.push(Change::Queue(session.to_owned()));
-        }
-    }
-
-    fn settle_for_waiting(&mut self, session: &str, turn_ended: bool) {
-        let stopped = self.send_while_working.stopping.remove(session);
-        let reason = turn_ended && self.send_while_working.reasons.remove(session).is_some();
-        if stopped || reason {
             self.changes.push(Change::Queue(session.to_owned()));
         }
     }
@@ -155,24 +126,17 @@ impl Engine {
         }
     }
 
-    /// The events that change it: the setting's own, a chat's queue (a Stop
-    /// and send has been answered), and a turn that has ended. A fallback is
-    /// said only in the send's answer.
+    /// Follow setting changes and clear a chat's fallback when its turn ends.
     pub(crate) fn send_while_working_event(&mut self, kind: &str, session: &str, event: &Object) {
         if kind == sww::EVENT {
             if let Some(mode) = sww::read(event) {
                 self.send_while_working_mode(mode);
             }
-        } else if kind == "queue-updated" {
-            self.settle_for_waiting(session, false);
-        } else if kind == "agent-state" {
-            // A turn stopped for a send runs that send next: its words stay
-            // until that turn is done.
-            match json::string(event, "kind").as_str() {
-                "done" | "idle" | "failed" => self.settle_for_waiting(session, true),
-                "interrupted" | "stopped" => self.settle_for_waiting(session, false),
-                _ => {}
-            }
+        } else if kind == "agent-state"
+            && matches!(json::string(event, "kind").as_str(), "done" | "idle" | "failed")
+            && self.send_while_working.reasons.remove(session).is_some()
+        {
+            self.changes.push(Change::Queue(session.to_owned()));
         }
     }
 
@@ -180,14 +144,6 @@ impl Engine {
     pub(crate) fn send_while_working_send_answer(&mut self, session: &str, answer: &Object) {
         if let Some(reason) = sww::fallback(answer) {
             self.note_send_reason(session, reason);
-        }
-    }
-
-    /// A `/stop` was answered or refused: the line's spinner goes.
-    pub(crate) fn send_while_working_stop_answer(&mut self, tag: &str) {
-        if let Some(session) = tag.strip_prefix("stop:") {
-            let session = session.to_owned();
-            self.settle_for_waiting(&session, false);
         }
     }
 

@@ -269,6 +269,12 @@ pub fn buttons_check(out: String) {
             let set = control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true,
                 "queued_turn_count": 2, "context_tokens": 21_400, "context_window": 1_000_000}}));
             check(set.is_ok(), &format!("Rachel works with two messages waiting: {set:?}"));
+            check(control("/__control/turn-queue", &json!({"session": "rachel", "items": [
+                {"queue_id": "q1", "text": "first", "steerable": false},
+                {"queue_id": "q2", "text": "second", "steerable": false},
+            ]})).is_ok(), "neither message can steer on this turn");
+            check(control("/__control/queue-steer", &json!({"on": true})).is_ok(), "the Host has the take-over endpoint");
+            app_now().engine.borrow_mut().reconnect();
             true
         })),
         ("queue strip", Box::new(move |_, window, elapsed| {
@@ -290,14 +296,12 @@ pub fn buttons_check(out: String) {
             true
         })),
         ("stopped for them", Box::new(move |_, _, elapsed| {
-            let stops = posts("/stop");
-            if stops.is_empty() {
-                check(elapsed < Duration::from_secs(5), "Stop and send is the plain Stop");
+            if requests_posted("/turn-queue/q1/take-over") != 1 {
+                check(elapsed < Duration::from_secs(5), "Stop and send takes over with q1, the oldest item");
                 return elapsed >= Duration::from_secs(5);
             }
-            check(stops[0]["body"]["session"] == "rachel", &format!("for Rachel: {stops:?}"));
-            check(requests_posted("/turn-queue/q1/take-over") == 0 && requests_posted("/turn-queue/q2/take-over") == 0, "not a take-over, which would run only one");
-            check(requests_posted("/turn-queue/q1/send") == 0, "nor a send a turn refuses");
+            check(posts("/stop").is_empty() && requests_posted("/turn-queue/q2/take-over") == 0, "only the oldest takes over");
+            check(requests_posted("/turn-queue/q1/send") == 0, "the chip uses the take-over endpoint");
             shot(&out5, "buttons-05-stop-and-send");
             // Near the account's limit and deep in the context: the meter warns.
             let set = control("/__control/agent", &json!({"session": "rachel", "set": {"context_tokens": 850_000,
@@ -318,8 +322,13 @@ pub fn buttons_check(out: String) {
             check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
             shot(&out6, "buttons-06-meter-near");
             crate::queue_strip::set_shown(&app_now(), true);
-            // A Host that steers (queue_steer) and keeps Send while working.
-            check(control("/__control/queue-steer", &json!({"on": true})).is_ok(), "the Host offers Steer now");
+            check(control("/__control/turn-queue", &json!({"session": "rachel", "items": [
+                {"queue_id": "q0", "text": "waiting before q2"},
+                {"queue_id": "q2", "text": "newest waiting"},
+            ]})).is_ok(), "two steerable messages wait");
+            check(control("/__control/fail", &json!({"path": "/turn-queue/q2/steer", "status": 409,
+                "response": {"code": "not_steerable", "error": "This turn cannot steer."},
+            })).is_ok(), "the Host will refuse the steer");
             check(control("/__control/send-while-working", &json!({"on": true})).is_ok(), "and Send while working");
             app_now().engine.borrow_mut().reconnect();
             true
@@ -343,11 +352,11 @@ pub fn buttons_check(out: String) {
             true
         })),
         ("steered", Box::new(|_, _, elapsed| {
-            if requests_posted("/turn-queue/q2/steer") != 1 {
-                check(elapsed < Duration::from_secs(5), "Ctrl+Shift+Enter steers the newest waiting message in");
+            if requests_posted("/turn-queue/q2/steer") != 1 || requests_posted("/turn-queue/q0/take-over") != 1 {
+                check(elapsed < Duration::from_secs(5), "the refused steer of q2 takes over with the oldest, q0");
                 return elapsed >= Duration::from_secs(5);
             }
-            check(requests_posted("/turn-queue/q1/steer") == 0, "once, for them all");
+            check(posts("/stop").is_empty() && requests_posted("/turn-queue/q2/take-over") == 0, "the fallback takes over with q0");
             check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
             // Three wait now: still one line.
             let items = json!([{"queue_id": "q3", "text": "third"}, {"queue_id": "q4", "text": "fourth"}, {"queue_id": "q5", "text": "fifth"}]);
