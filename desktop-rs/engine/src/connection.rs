@@ -182,6 +182,11 @@ impl Engine {
         if normalized_base_url(server) != self.base_url {
             return;
         }
+        // The Host's chats and agent list cached on this computer go with
+        // its sign-in.
+        if let Some(cache) = &self.transcript_cache {
+            cache.forget_host(&self.base_url);
+        }
         self.token.clear();
         self.sse.stop();
         self.changes.push(Change::Endpoint);

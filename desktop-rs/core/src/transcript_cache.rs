@@ -111,6 +111,24 @@ impl TranscriptCache {
         Ok(())
     }
 
+    /// Removes everything cached for `base_url`: every chat and its agent
+    /// list. Forgetting a Host's sign-in leaves none of its words on disk.
+    pub fn forget_host(&self, base_url: &str) {
+        let sessions = self.all(base_url).unwrap_or_else(|error| {
+            eprintln!("TranscriptCache: could not list {base_url}: {error}");
+            Vec::new()
+        });
+        for (session, _) in sessions {
+            self.remove(base_url, &session);
+        }
+        let roster = self.roster_path_for(base_url);
+        if let Err(error) = std::fs::remove_file(&roster)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("TranscriptCache: could not remove {}: {error}", roster.display());
+        }
+    }
+
     pub fn remove(&self, base_url: &str, session: &str) {
         let path = self.path_for(base_url, session);
         if let Err(error) = std::fs::remove_file(&path)
