@@ -163,11 +163,12 @@ event gives `stream_id`, and `POST /events/<stream_id>/live` with
 `{"live": ["<session>"]}` (same token) switches the set; `live-changed` marks
 where it takes effect.
 On a Host with feature `events_chat_previews` (contract 212), a watcher of
-many chats adds `chat_previews=1&visible=<sessions shown whole>`: chats not
-both followed and visible come as `agent-roster` `kind: "preview"` patches of
-their list fields (at most every 5 s) instead of every transcript, activity and
-state event; send `{"live": [...], "visible": [...]}` to the same POST to change
-both at once.
+many chats adds `chat_previews=1&visible=<sessions shown whole>` beside an
+explicit `live=` (empty `live=` for the list alone; without `live` the stream
+stays ordinary): chats not both followed and visible come as `agent-roster`
+`kind: "preview"` patches of their list fields (at most every 5 s) instead of
+every transcript, activity and state event; send `{"live": [...], "visible":
+[...]}` to the same POST to change both at once (omit `visible` to keep it).
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.

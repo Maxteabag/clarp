@@ -1571,13 +1571,20 @@ every chat. Use it where `GET /server-info` lists both `events_chat_previews` an
    `visible` names the conversation panes actually shown, by session or agent id (as `live`
    does, `*` for every one); it is empty on a chat-list-only screen. A chat is **shown whole**
    when it is both followed and on screen. Every other chat is **previewed**; an empty or absent
-   `visible` previews every chat.
+   `visible` previews every chat. `chat_previews=1` takes effect only with a `live` parameter at
+   the opening: `live=` (empty) is a stream for the list alone. A stream opened without `live` is
+   an ordinary stream (`events_live_change` as it is) for as long as it lasts, also after a change
+   gives it chats to follow.
 2. When the screen changes, `POST /events/{stream_id}/live` `{"live": [...], "visible": [...]}`
    with the opener's token. Send both complete sets. The answer is
-   `{"ok": true, "stream_id", "live": [...], "visible": [...]}`, the sets as accepted (a body
-   without `visible` keeps the chats on screen the stream had, `"visible": []` clears them, and a
-   `visible` that is not a list of texts, `null` included, gets 400). The stream then sends `{"type": "live-changed", "live": [...], "visible":
-   [...]}` where both take effect together. Changes faster than the stream takes them collapse:
+   `{"ok": true, "stream_id", "live": [...], "visible": [...]}`, the sets as accepted. Another
+   token, or a stream that ended, gets 404 first, whatever the body's `visible`. On the caller's
+   stream with previews, a body without `visible` keeps the chats on screen the stream had,
+   `"visible": []` clears them, and a `visible` that is not a list of texts, `null` included, gets
+   400 and changes nothing. A stream without previews ignores `visible` entirely, malformed or
+   `null` too: its answer and its `live-changed` carry `live` alone, as without the feature. The
+   stream then sends `{"type": "live-changed", "live": [...], "visible": [...]}` where both take
+   effect together. Changes faster than the stream takes them collapse:
    take the newest `live-changed`.
 3. A chat shown whole is sent everything, as on a stream without previews. When a chat becomes
    shown whole (at its `live-changed`), read its `GET /live?session=` and its `/log` delta from

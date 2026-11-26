@@ -60,6 +60,18 @@ impl Drop for Held {
     }
 }
 
+/// What a change says of the chats on screen, as its body has it. Only a stream that shows
+/// previews reads it; any other stream ignores it, whatever it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Visible {
+    /// The body names none: the chats on screen stay as they were.
+    Kept,
+    /// The chats on screen from now on (none clears the screen).
+    Set(Followed),
+    /// The body names something that is no list of chats (`null` included).
+    NotAList,
+}
+
 /// What a request to change a stream found.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Changed {
@@ -67,6 +79,8 @@ pub enum Changed {
     Taken(Change),
     /// No stream of this id was opened by this owner (it ended, or it is someone else's).
     Unknown,
+    /// The owner's stream shows previews and the change's `visible` is no list: nothing changed.
+    NotAList,
 }
 
 impl Streams {
@@ -98,20 +112,19 @@ impl Streams {
 
     /// Has the stream `id` of `owner` follow `live` from now on and, on a stream that shows
     /// previews, show `visible` whole (one that names none keeps the chats on screen it had).
-    /// The newest change wins: a stream that has not yet taken one takes only the last, both
-    /// sets of it together.
-    pub fn change(
-        &self,
-        id: &str,
-        owner: &str,
-        live: Followed,
-        visible: Option<Followed>,
-    ) -> Changed {
+    /// Whose stream it is is judged first; `visible` only then, and only on a stream that shows
+    /// previews: any other stream ignores it, malformed or not. The newest change wins: a stream
+    /// that has not yet taken one takes only the last, both sets of it together.
+    pub fn change(&self, id: &str, owner: &str, live: Followed, visible: Visible) -> Changed {
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
         match open.get_mut(id) {
             Some(stream) if stream.owner == owner => {
-                if let (Some(held), Some(visible)) = (stream.visible.as_mut(), visible) {
-                    *held = visible;
+                if let Some(held) = stream.visible.as_mut() {
+                    match visible {
+                        Visible::Kept => {}
+                        Visible::Set(visible) => *held = visible,
+                        Visible::NotAList => return Changed::NotAList,
+                    }
                 }
                 let change = Change {
                     live,
@@ -148,7 +161,7 @@ mod tests {
         let other = streams.open("device-a".into(), None);
         assert_ne!(held.id, other.id);
         assert_eq!(
-            streams.change(&held.id, "device-b", vec!["mike".into()], None),
+            streams.change(&held.id, "device-b", vec!["mike".into()], Visible::NotAList),
             Changed::Unknown,
             "another token's request finds no stream"
         );
@@ -158,15 +171,22 @@ mod tests {
             visible: None,
         };
         assert_eq!(
-            streams.change(&held.id, "device-a", vec!["rachel".into()], None),
+            streams.change(&held.id, "device-a", vec!["rachel".into()], Visible::Kept),
             Changed::Taken(live(&["rachel"]))
         );
-        // A stream without previews has no chats on screen, whatever a change says.
+        // A stream without previews has no chats on screen, whatever a change says, a malformed
+        // `visible` included.
+        streams.change(
+            &held.id,
+            "device-a",
+            vec!["rachel".into()],
+            Visible::Set(vec!["rachel".into()]),
+        );
         streams.change(
             &held.id,
             "device-a",
             vec!["rachel".into(), "mike".into()],
-            Some(vec!["rachel".into()]),
+            Visible::NotAList,
         );
         assert!(held.changes.has_changed().unwrap());
         assert_eq!(
@@ -177,11 +197,11 @@ mod tests {
         let id = held.id.clone();
         drop(held);
         assert_eq!(
-            streams.change(&id, "device-a", vec![], None),
+            streams.change(&id, "device-a", vec![], Visible::Kept),
             Changed::Unknown
         );
         assert_eq!(
-            streams.change(&other.id, "device-a", vec![], None),
+            streams.change(&other.id, "device-a", vec![], Visible::NotAList),
             Changed::Taken(live(&[]))
         );
     }
@@ -195,17 +215,34 @@ mod tests {
             visible: Some(visible.iter().map(|name| (*name).to_string()).collect()),
         };
         assert_eq!(
-            streams.change(&held.id, "device-a", vec!["mike".into()], None),
+            streams.change(&held.id, "device-a", vec!["mike".into()], Visible::Kept),
             Changed::Taken(both(&["mike"], &["rachel"])),
             "a change that names no screen keeps the one it had"
+        );
+        held.changes.borrow_and_update();
+        // Another owner is told no such stream, before its `visible` is looked at.
+        assert_eq!(
+            streams.change(&held.id, "device-b", vec![], Visible::NotAList),
+            Changed::Unknown
+        );
+        // A `visible` that is no list changes nothing.
+        assert_eq!(
+            streams.change(&held.id, "device-a", vec!["zed".into()], Visible::NotAList),
+            Changed::NotAList
+        );
+        assert!(!held.changes.has_changed().unwrap(), "nothing was sent");
+        assert_eq!(
+            streams.change(&held.id, "device-a", vec!["mike".into()], Visible::Kept),
+            Changed::Taken(both(&["mike"], &["rachel"])),
+            "the refused change left the screen as it was"
         );
         streams.change(
             &held.id,
             "device-a",
             vec!["mike".into()],
-            Some(vec!["mike".into()]),
+            Visible::Set(vec!["mike".into()]),
         );
-        streams.change(&held.id, "device-a", vec![], Some(vec![]));
+        streams.change(&held.id, "device-a", vec![], Visible::Set(vec![]));
         assert_eq!(
             held.changes.borrow_and_update().clone(),
             Some(both(&[], &[])),

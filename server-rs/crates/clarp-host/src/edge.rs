@@ -5118,19 +5118,14 @@ async fn change_live(
             "live must be a list of sessions or agent ids",
         ));
     };
-    // Absent: the chats on screen stay as they were. Present: a list (`[]` clears the screen);
-    // anything else, `null` included, is refused.
+    // What the body says of the chats on screen, judged by the stream once it is known to be the
+    // caller's and to show previews: absent keeps them, a list (`[]` too) sets them, anything
+    // else, `null` included, is refused there and ignored by any other stream.
     let visible = match body.get("visible") {
-        None => None,
-        Some(value) => match names_in(value) {
-            Some(named) => Some(sorted(crate::live_change::followed(named))),
-            None => {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "visible must be a list of sessions or agent ids",
-                ));
-            }
-        },
+        None => crate::live_change::Visible::Kept,
+        Some(value) => names_in(value).map_or(crate::live_change::Visible::NotAList, |named| {
+            crate::live_change::Visible::Set(sorted(crate::live_change::followed(named)))
+        }),
     };
     let live = sorted(crate::live_change::followed(named));
     match app
@@ -5152,6 +5147,10 @@ async fn change_live(
         crate::live_change::Changed::Unknown => {
             Err(ApiError::new(StatusCode::NOT_FOUND, "stream not found"))
         }
+        crate::live_change::Changed::NotAList => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "visible must be a list of sessions or agent ids",
+        )),
     }
 }
 
@@ -5280,8 +5279,10 @@ async fn events(
         .live
         .map(|live| crate::live_change::followed(live.split(',')));
     // A stream that sends the chats it does not show whole as previews, and the chats on
-    // screen it opened with (feature `events_chat_previews`).
-    let previews = opted(query.chat_previews.as_deref()).then(|| {
+    // screen it opened with (feature `events_chat_previews`). Only a stream that names what it
+    // follows when it opens (`live=`, empty for the list alone) takes them; one without `live`
+    // is an ordinary stream for as long as it lasts, whatever it is later told to follow.
+    let previews = (opted(query.chat_previews.as_deref()) && wanted.is_some()).then(|| {
         let visible = query.visible.as_deref().unwrap_or("").split(',');
         crate::chat_previews::Previews::new(crate::live_change::followed(visible))
     });

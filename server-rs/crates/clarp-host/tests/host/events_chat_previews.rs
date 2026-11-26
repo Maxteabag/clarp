@@ -332,6 +332,20 @@ fn a_change_of_screen_moves_chats_between_previews_and_whole_without_reopening()
     let body = json!({ "live": [first, second], "visible": [second] });
     let (status, _) = host.ask_as(&other, "POST", &path, Some(&body));
     assert_eq!(status, 404);
+    // Whose stream it is comes first: another token is told no such stream, whatever its
+    // `visible` says.
+    for visible in [json!("nope"), Value::Null] {
+        let (status, refused) = host.ask_as(
+            &other,
+            "POST",
+            &path,
+            Some(&json!({ "live": [first], "visible": visible })),
+        );
+        assert_eq!(
+            (status, &refused["error"]),
+            (404, &json!("stream not found"))
+        );
+    }
     let (status, refused) = host.ask(
         "POST",
         &path,
@@ -357,6 +371,16 @@ fn a_change_of_screen_moves_chats_between_previews_and_whole_without_reopening()
             &json!("visible must be a list of sessions or agent ids")
         )
     );
+    // The refused changes changed nothing: no acknowledgement, and the screen is the opening's.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        events(&heard, 0)
+            .iter()
+            .all(|event| event["type"] != "live-changed"),
+        "a refused change is not taken"
+    );
+    let kept = host.post(&path, json!({ "live": [first, second] }));
+    assert_eq!(kept["visible"], json!([first]), "{kept}");
 
     // Rapid changes: the answers say each, the stream takes the newest.
     let from = heard.lock().unwrap().len();
@@ -676,4 +700,115 @@ fn previews_leave_the_owners_lane_marks_to_what_the_stream_follows() {
     wait_for("the followed chat marked", || mark(&first_id).exists());
     std::thread::sleep(Duration::from_millis(1_000));
     assert!(!mark(&second_id).exists(), "no longer followed, not marked");
+}
+
+/// The recipe: previews take effect only on a stream that names `live` when it opens (`live=`
+/// empty: the list alone). A stream opened without `live` stays an ordinary #892 stream: its
+/// changes carry `live` alone, it ignores `visible` (well formed, `null` or malformed), and it
+/// is sent every chat's numbered events and no preview, also after a change gives it chats.
+#[test]
+fn previews_need_live_at_the_opening_and_an_ordinary_stream_ignores_visible() {
+    let place = Place::new("chat-previews-recipe");
+    let host = place.start_with_token("the-owners-token");
+    let listed = host.new_agent("Listed");
+    let token = "token=the-owners-token";
+    // Asked for previews, but named no `live`: ordinary.
+    let unnamed = listen_timed(
+        &host,
+        &format!("/events?{token}&live_change=1&chat_previews=1&visible={listed}"),
+    );
+    // Ordinary from the start.
+    let ordinary = listen_timed(
+        &host,
+        &format!("/events?{token}&live_change=1&live={listed}"),
+    );
+    // The list alone: previews of every chat.
+    let list = listen_timed(
+        &host,
+        &format!("/events?{token}&live_change=1&chat_previews=1&live="),
+    );
+    wait_for("the streams to open", || {
+        [&unnamed, &ordinary, &list]
+            .iter()
+            .all(|heard| opened(heard))
+    });
+    let id = |heard: &Timed| {
+        events(heard, 0)[0]["stream_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let (unnamed_id, ordinary_id, list_id) = (id(&unnamed), id(&ordinary), id(&list));
+
+    // An ordinary stream ignores `visible` whatever it is, and answers and acknowledges `live`
+    // alone, as #892 does.
+    for (stream, heard, live, visible) in [
+        (&unnamed_id, &unnamed, json!([listed]), Value::Null),
+        (&unnamed_id, &unnamed, json!([]), json!("nope")),
+        (&ordinary_id, &ordinary, json!([listed]), json!([listed])),
+        (
+            &ordinary_id,
+            &ordinary,
+            json!([listed]),
+            json!({"not": "a list"}),
+        ),
+    ] {
+        let from = heard.lock().unwrap().len();
+        let answered = host.post(
+            &format!("/events/{stream}/live"),
+            json!({ "live": live, "visible": visible }),
+        );
+        assert_eq!(
+            answered,
+            json!({ "ok": true, "stream_id": stream, "live": live }),
+            "{visible}"
+        );
+        wait_for("its acknowledgement", || {
+            events(heard, from)
+                .iter()
+                .any(|event| event["type"] == "live-changed")
+        });
+        let ack = events(heard, from)
+            .into_iter()
+            .find(|event| event["type"] == "live-changed")
+            .unwrap();
+        assert_eq!(
+            ack,
+            json!({ "type": "live-changed", "live": live }),
+            "{visible}"
+        );
+    }
+    // A preview stream answers with both sets; its list-only screen is empty.
+    let answered = host.post(&format!("/events/{list_id}/live"), json!({ "live": [] }));
+    assert_eq!(
+        answered,
+        json!({ "ok": true, "stream_id": list_id, "live": [], "visible": [] })
+    );
+
+    // Every chat's changes reach the ordinary streams, numbered, with no preview; the list-only
+    // stream is sent the chat's preview in their place.
+    let marks = [&unnamed, &ordinary, &list].map(|heard| heard.lock().unwrap().len());
+    host.send(&listed, "hello", "c-recipe");
+    wait_for("its answer", || host.state(&listed) == "done");
+    wait_for("the list's preview", || {
+        previews_of(&list, marks[2], &listed)
+            .iter()
+            .any(|(_, preview)| preview["fields"]["latest_state"] == "done")
+    });
+    for (heard, from) in [(&unnamed, marks[0]), (&ordinary, marks[1])] {
+        wait_for("the transcript's change", || {
+            about(&events(heard, from), "transcript-updated", &listed)
+                .iter()
+                .any(|event| event["event_id"].as_u64().is_some())
+        });
+        assert!(
+            events(heard, 0)
+                .iter()
+                .all(|event| event["kind"] != "preview"),
+            "an ordinary stream is sent no preview"
+        );
+    }
+    let listed_events = events(&list, marks[2]);
+    assert!(about(&listed_events, "transcript-updated", &listed).is_empty());
+    assert!(about(&listed_events, "agent-activity", &listed).is_empty());
 }
