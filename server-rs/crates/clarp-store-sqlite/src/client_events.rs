@@ -1,7 +1,7 @@
 //! The bounded client log. Insertion, context pinning and pruning commit together.
 use std::path::Path;
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS client_events (
@@ -151,8 +151,15 @@ impl Store {
             )?;
         }
         expire(&tx, now)?;
-        trim(&tx, Some(device), self.per_device)?;
-        trim(&tx, None, self.total)?;
+        let (mut count, mut bytes) = usage(&tx, None)?;
+        // A device cannot hold more rows or bytes than the whole log.
+        if count > self.per_device.0 || bytes > self.per_device.1 {
+            let device_usage = usage(&tx, Some(device))?;
+            let (removed, freed) = trim(&tx, Some(device), device_usage, self.per_device)?;
+            count -= removed;
+            bytes -= freed;
+        }
+        trim(&tx, None, (count, bytes), self.total)?;
         tx.commit()?;
         Ok(rows.len())
     }
@@ -263,44 +270,56 @@ fn expire(db: &Connection, now: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn usage(db: &Connection, device: Option<&str>) -> rusqlite::Result<(i64, i64)> {
+    let sql = if device.is_some() {
+        "SELECT COUNT(*), COALESCE(SUM(size),0) FROM client_events WHERE device = ?1"
+    } else {
+        "SELECT COUNT(*), COALESCE(SUM(size),0) FROM client_events WHERE ?1 IS NULL"
+    };
+    db.prepare_cached(sql)?
+        .query_row([device], |row| Ok((row.get(0)?, row.get(1)?)))
+}
+
+/// Trim the given scope and return the rows and bytes removed from the log.
 fn trim(
     db: &Connection,
     device: Option<&str>,
+    (count, bytes): (i64, i64),
     (max_events, max_bytes): (i64, i64),
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<(i64, i64)> {
+    if count <= max_events && bytes <= max_bytes {
+        return Ok((0, 0));
+    }
     let condition = if device.is_some() {
         "device = ?1"
     } else {
         "?1 IS NULL"
     };
-    let (count, bytes): (i64, i64) = db.query_row(
-        &format!("SELECT COUNT(*), COALESCE(SUM(size),0) FROM client_events WHERE {condition}"),
-        [device],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if count <= max_events && bytes <= max_bytes {
-        return Ok(());
-    }
-    let cutoff: Option<i64> = db
-        .query_row(
-            &format!(
-                "SELECT id FROM (
-            SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS n,
-                SUM(size) OVER (ORDER BY id) AS bytes
-            FROM client_events WHERE {condition}
-        ) WHERE n >= ?2 AND bytes >= ?3 ORDER BY id LIMIT 1"
-            ),
-            params![device, count - max_events, bytes - max_bytes],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let (mut removed, mut freed) = (0, 0);
+    // Oldest first: once both limits fit, younger rows cannot change the cutoff.
+    let cutoff = {
+        let mut select = db.prepare_cached(&format!(
+            "SELECT id, size FROM client_events WHERE {condition} ORDER BY id"
+        ))?;
+        let mut rows = select.query([device])?;
+        let mut cutoff = None;
+        while let Some(row) = rows.next()? {
+            removed += 1;
+            freed += row.get::<_, i64>(1)?;
+            if count - removed <= max_events && bytes - freed <= max_bytes {
+                cutoff = Some(row.get::<_, i64>(0)?);
+                break;
+            }
+        }
+        cutoff
+    };
     if let Some(cutoff) = cutoff {
         db.execute(
             &format!("DELETE FROM client_events WHERE {condition} AND id <= ?2"),
             params![device, cutoff],
         )?;
     }
-    Ok(())
+    Ok((removed, freed))
 }
 
 #[cfg(test)]
