@@ -21,6 +21,9 @@ pub(crate) struct TurnQueue {
     action_sessions: HashMap<String, String>,
     /// The Send now tags in flight.
     sends: std::collections::HashSet<String>,
+    /// Plain `/send`s on a `queue_steer` Host, by tag: refused because a
+    /// turn runs after all (the agent's busy state lagged), they take over.
+    take_over_on_refusal: HashMap<String, String>,
     /// The Host's answer to the last refused Send now (a turn still runs),
     /// and its chat. A reload keeps it: the Host reloads the queue with
     /// `queue-updated` on the same refusal.
@@ -104,9 +107,9 @@ impl Engine {
         self.api.get(&format!("turn-queue:{}:{session}", self.queue.generation), "/turn-queue", &[("session", session)]);
     }
 
-    fn queue_action(&mut self, method: &str, path: &str, body: Value) {
+    fn queue_action(&mut self, method: &str, path: &str, body: Value) -> Option<String> {
         if self.queue.session.is_empty() {
-            return;
+            return None;
         }
         let tag = format!("queue-action:{}", uuid::Uuid::new_v4());
         self.queue.action_sessions.insert(tag.clone(), self.queue.session.clone());
@@ -122,6 +125,7 @@ impl Engine {
             "DELETE" => self.api.delete(&tag, path),
             _ => self.api.post_json(&tag, path, body, None),
         }
+        Some(tag)
     }
 
     fn queue_item_path(id: &str) -> String {
@@ -145,13 +149,38 @@ impl Engine {
         }
     }
 
-    /// Sends a queued turn now instead of after the running one.
+    /// Sends a queued turn now instead of after the running one. While the
+    /// agent works, on a Host that offers it (`queue_steer`), "now" means now:
+    /// the message is read into the running turn (`/steer`), or, where it
+    /// cannot be, the running turn stops and this message runs (`/take-over`).
+    /// `/send` alone only passes a held queue and is refused while a turn
+    /// runs. An idle agent, or a Host without `queue_steer`, sends as before.
     pub fn send_queued_turn(&mut self, queue_id: &str) {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.send_queued_turn(queue_id));
-        if !queue_id.is_empty() {
-            let mut body = json!({});
-            self.ask_voice(&mut body);
-            self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), body);
+        if queue_id.is_empty() {
+            return;
+        }
+        let busy = self.roster().find(&self.queue.session).is_some_and(|a| a.busy);
+        if self.queue.steer && busy {
+            let item = self.queue.items.iter().find(|item| {
+                item.get("queue_id").or_else(|| item.get("id")).and_then(Value::as_str) == Some(queue_id)
+            });
+            let steerable = item.is_some_and(|item| {
+                item.get("steerable").and_then(Value::as_bool) == Some(true)
+                    && item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting")
+            });
+            if steerable {
+                self.steer_queued_turn(queue_id);
+            } else {
+                self.take_over_queued_turn(queue_id);
+            }
+            return;
+        }
+        let mut body = json!({});
+        self.ask_voice(&mut body);
+        let tag = self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), body);
+        if let Some(tag) = tag.filter(|_| self.queue.steer) {
+            self.queue.take_over_on_refusal.insert(tag, queue_id.to_owned());
         }
     }
 
@@ -202,6 +231,7 @@ impl Engine {
             self.changes.push(Change::Queue(session.to_owned()));
         } else if tag.starts_with("queue-action:") {
             self.queue.sends.remove(tag);
+            self.queue.take_over_on_refusal.remove(tag);
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
             if !session.is_empty() && session == self.queue.session {
                 self.load_turn_queue(&session);
@@ -223,6 +253,15 @@ impl Engine {
             }
             self.queue.loading = false;
         } else if tag.starts_with("queue-action:") {
+            // Send now refused because a turn runs after all: it takes over.
+            if let Some(queue_id) = self.queue.take_over_on_refusal.remove(tag)
+                && status == 409
+            {
+                self.queue.sends.remove(tag);
+                self.queue.action_sessions.remove(tag);
+                self.take_over_queued_turn(&queue_id);
+                return true;
+            }
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
             // Refused in the Host's words: a turn still runs, the message is
             // not steerable, another sender's, or already gone (404).
