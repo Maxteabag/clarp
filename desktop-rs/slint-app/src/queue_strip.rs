@@ -42,12 +42,15 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
             // Only a message that met the busy agent may steer; one its
             // sender asked to wait (`kind: later`) is left for later.
             let waiting_kind = item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting");
+            // Both act on the owner's own messages only (origin user or
+            // oracle); another sender's keeps the plain Send now.
+            let owners = item.get("origin").and_then(Value::as_str).is_none_or(|o| o == "user" || o == "oracle");
             WaitingTurn {
                 id: item_id(item).into(),
                 text: text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().into(),
                 reading: item.get("status").and_then(Value::as_str) == Some("started"),
-                steer: steering && waiting_kind && item.get("steerable").and_then(Value::as_bool) == Some(true),
-                take_over: steering,
+                steer: steering && owners && waiting_kind && item.get("steerable").and_then(Value::as_bool) == Some(true),
+                take_over: steering && owners,
             }
         })
         .collect()
