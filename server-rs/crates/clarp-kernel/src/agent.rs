@@ -216,6 +216,13 @@ pub struct ToolSelection {
     pub effort: String,
 }
 
+/// The first attempt to run on the target backend after a committed handoff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitAttempt {
+    turn: TurnId,
+    attempt: u32,
+}
+
 /// What happened to an agent. These, in order, are its history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "agent", rename_all = "kebab-case")]
@@ -335,6 +342,8 @@ pub enum AgentEvent {
         backend: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         selection: Option<ToolSelection>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume: Option<TransitAttempt>,
         backend_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         opening: Option<String>,
@@ -522,6 +531,7 @@ pub struct Agent {
     /// The tool the agent's log last changed it from and to, since it was last started
     /// again: a record elsewhere that still says the first lost the change.
     changed: Option<(String, String, Option<ToolSelection>)>,
+    transit_attempt: Option<TransitAttempt>,
     /// When that change was made: what turns ended before it said was said of the tool it
     /// left (which model answered, how full its conversation was).
     changed_at_ms: Option<i64>,
@@ -602,6 +612,7 @@ impl Default for Agent {
             carried_from: None,
             carried_opening: None,
             changed: None,
+            transit_attempt: None,
             changed_at_ms: None,
             at: 0,
             user_stop_generation: 0,
@@ -875,6 +886,30 @@ impl Agent {
         self.changed
             .as_ref()
             .map(|(from, to, _)| (from.as_str(), to.as_str()))
+    }
+
+    /// A provider-capacity wait has no running process to interrupt.
+    pub fn account_wait_for_transit(&self) -> Option<&Parked> {
+        match self.live.as_ref() {
+            Some(Turn::Parked(waiting))
+                if waiting.wait.is_for_an_account() && waiting.origin != Origin::NativeGoal =>
+            {
+                Some(waiting)
+            }
+            _ => None,
+        }
+    }
+
+    /// Pending resume after a committed switch. A later wait on the target is a new wait.
+    pub fn transit_resume(&self) -> Option<TurnId> {
+        let next = self.transit_attempt.as_ref()?;
+        let waiting = self.account_wait_for_transit()?;
+        (next.turn == waiting.id && next.attempt == waiting.attempts.saturating_add(1))
+            .then_some(next.turn)
+    }
+
+    pub fn resumed_by_transit(&self, turn: TurnId, attempt: u32) -> bool {
+        self.transit_attempt.as_ref().is_some_and(|next| next.turn == turn && next.attempt == attempt)
     }
 
     pub fn changed_selection(&self) -> Option<&ToolSelection> {
@@ -1457,7 +1492,15 @@ impl Agent {
                 opening,
             } => {
                 work.agent.require_here()?;
-                if work.agent.live.is_some() {
+                let resume = if work.transit_held {
+                    work.agent.account_wait_for_transit().map(|waiting| TransitAttempt {
+                        turn: waiting.id,
+                        attempt: waiting.attempts.saturating_add(1),
+                    })
+                } else {
+                    None
+                };
+                if work.agent.live.is_some() && resume.is_none() {
                     return Err(Refusal::AtWork);
                 }
                 if !work.transit_held && !work.agent.mailbox.is_empty() {
@@ -1467,6 +1510,7 @@ impl Agent {
                     from,
                     backend,
                     selection,
+                    resume,
                     backend_session,
                     opening,
                     at_ms: now_ms,
@@ -1924,6 +1968,7 @@ impl Agent {
                 from,
                 backend,
                 selection,
+                resume,
                 backend_session,
                 opening,
                 at_ms,
@@ -1933,11 +1978,19 @@ impl Agent {
                 self.carried_from = self.backend_session.is_none().then(|| from.clone());
                 self.carried_opening = opening.clone().filter(|_| self.carried_from.is_some());
                 self.changed = Some((from.clone(), backend.clone(), selection.clone()));
+                self.transit_attempt.clone_from(resume);
+                if let Some(next) = resume
+                    && let Some(Turn::Parked(waiting)) = self.live.as_mut()
+                    && waiting.id == next.turn
+                {
+                    waiting.backend_session.clone_from(backend_session);
+                }
             }
             AgentEvent::StartedAgain { .. } => {
                 self.backend_session = None;
                 self.carried_from = None;
                 self.changed = None;
+                self.transit_attempt = None;
                 self.changed_at_ms = None;
                 self.note = None;
                 // Python counts both the pause and its release even for an idle agent.
@@ -4281,6 +4334,54 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn transit_resumes_parked_work_on_the_target_before_draining_the_queue() {
+        let mut a = Driven::new();
+        a.user(10);
+        a.user(11);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        a.send(Command::TurnMoved {
+            turn: TurnId(1),
+            activity: Activity::Responding,
+        })
+        .unwrap();
+        let park = |turn| Command::TurnParked {
+            turn,
+            wait: Wait::account(90_000),
+            reason: "source usage exhausted".to_string(),
+            kind: crate::failures::USAGE_LIMIT.to_string(),
+        };
+        a.send(park(TurnId(1))).unwrap();
+        let change = Command::ChangeTool {
+            from: "claude".into(),
+            backend: "codex".into(),
+            selection: Some(ToolSelection { model: "gpt-6.2-sol".into(), effort: "medium".into() }),
+            backend_session: Some("new-codex-thread".into()),
+            opening: None,
+        };
+        assert_eq!(a.send(change.clone()), Err(Refusal::AtWork));
+        assert!(a.send_with_transit_hold(change, true).unwrap().is_empty());
+        assert_eq!(a.agent.transit_resume(), Some(TurnId(1)));
+        assert_eq!(a.agent.backend_session(), Some("new-codex-thread"));
+        assert_eq!(a.waiting(), vec![2]);
+
+        assert_eq!(
+            a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap(),
+            vec![Effect::RetryTurn { turn: TurnId(1), message_seq: 10, attempt: 2 }]
+        );
+        assert!(a.agent.resumed_by_transit(TurnId(1), 2));
+        assert_eq!(a.agent.transit_resume(), None);
+        a.send(park(TurnId(1))).unwrap();
+        assert_eq!(a.agent.transit_resume(), None, "a new target wait is a distinct wait");
+        a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap();
+        assert!(!a.agent.resumed_by_transit(TurnId(1), 3));
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn { turn: TurnId(2), message_seq: 11 }]
+        );
     }
 
     #[test]

@@ -1102,29 +1102,23 @@ impl AgentHandle {
 
     /// The hold fences the next launch while an existing turn finishes.
     pub async fn await_transit_boundary(&self) -> Result<(), Unavailable> {
-        let mut view = self.view.clone();
-        loop {
-            {
-                let view = view
-                    .wait_for(|view| {
-                        view.broken.is_some()
-                            || view.status.live.as_ref().is_none_or(|live| {
-                                live.parked.as_ref().is_some_and(|parked| {
-                                    !parked.ran && parked.wait.is_for_an_account()
-                                })
-                            })
+        let mut watch = self.view.clone();
+        let view = watch
+            .wait_for(|view| {
+                view.broken.is_some()
+                    || view.status.live.as_ref().is_none_or(|live| {
+                        live.parked.as_ref().is_some_and(|parked| {
+                            parked.wait.is_for_an_account()
+                                && parked.origin != clarp_kernel::turn::Origin::NativeGoal
+                        })
                     })
-                    .await
-                    .map_err(|_| Unavailable::new("the agent is no longer open".to_string()))?;
-                if let Some(why) = &view.broken {
-                    return Err(Unavailable::new(why.clone()));
-                }
-                if view.status.live.is_none() {
-                    return Ok(());
-                }
-            }
-            self.hold_for_transit(true).await?;
+            })
+            .await
+            .map_err(|_| Unavailable::new("the agent is no longer open".to_string()))?;
+        if let Some(why) = &view.broken {
+            return Err(Unavailable::new(why.clone()));
         }
+        Ok(())
     }
 
     /// Goes on with another tool at the boundary, leaving held messages in the mailbox.
@@ -2671,7 +2665,7 @@ impl Worker {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
-            if let Some((turn, since)) = actor.waits_for_an_account() {
+            if !actor.transit_resume_pending() && let Some((turn, since)) = actor.waits_for_an_account() {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
                 let resets = actor.waits_until_reset();
@@ -2853,6 +2847,10 @@ impl Worker {
         match crate::agent_transit::carry(actor, &self.setup.record, change, now) {
             Ok((Ok(changed), out)) => {
                 self.after(out);
+                if self.pooled.take().is_some() && let Some(pool) = self.setup.pool() {
+                    pool.disowned(&self.setup.record.agent_id);
+                    self.held = None;
+                }
                 self.adopt_tool(backend, &change.backend, &change.model, &change.effort);
                 let _ = answer.send(Ok(Ok(changed)));
                 Ok(())

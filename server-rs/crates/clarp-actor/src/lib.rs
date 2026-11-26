@@ -4450,6 +4450,7 @@ impl Actor {
         if let Some(Turn::Parked(waiting)) = self.recorder.agent().live()
             && waiting.wait.is_for_an_account()
             && !waiting.ran
+            && self.recorder.agent().transit_resume().is_none()
         {
             let turn = waiting.id;
             out.absorb(self.hold_unsent(turn, Command::HoldUnsentForTransit { turn }, now_ms)?);
@@ -4458,6 +4459,9 @@ impl Actor {
     }
 
     pub fn run_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        if self.transit_resume_pending() {
+            return self.retry(now_ms);
+        }
         if self.recorder.agent().live().is_some()
             || self.recorder.agent().waiting().next().is_none()
         {
@@ -4466,11 +4470,16 @@ impl Actor {
         self.asked(Command::RunWaiting, now_ms).map(|(_, out)| out)
     }
 
+    pub fn transit_resume_pending(&self) -> bool {
+        self.recorder.agent().transit_resume().is_some()
+    }
+
     /// What stands in the way of changing the agent's tool: whether a turn runs, and how many
     /// messages wait. `None`: nothing.
     pub fn busy_for_change(&self) -> Option<(bool, usize)> {
         let agent = self.recorder.agent();
-        let live = agent.live().is_some();
+        let live = agent.live().is_some()
+            && !(self.recorder.transit_held() && agent.account_wait_for_transit().is_some());
         let waiting = agent.waiting().count();
         (live || waiting > 0 && !self.recorder.transit_held()).then_some((live, waiting))
     }
@@ -5460,7 +5469,9 @@ impl Actor {
                 .collect();
             told::together(&texts)
         };
+        let resumed_by_transit = self.recorder.agent().resumed_by_transit(turn, attempt);
         let prompt = match recovering.filter(|_| !bare) {
+            _ if resumed_by_transit && !bare => recovery::transit_prompt(&text),
             Some(relapsed) => recovery::resume_prompt(self.backend.id(), &text, relapsed),
             None if resuming && !bare => recovery::continue_prompt(&text),
             None => text,

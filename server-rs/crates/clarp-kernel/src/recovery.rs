@@ -354,6 +354,16 @@ pub fn resume_prompt(backend: &str, request: &str, relapsed: bool) -> String {
     format!("<clarp-account-recovery>\n{told}\n</clarp-account-recovery>")
 }
 
+/// The target sees the same request and the recorded progress from the source backend.
+pub fn transit_prompt(request: &str) -> String {
+    format!(
+        "<clarp-turn-resumed>\nClarp moved this unfinished turn to another backend. Continue \
+         from the transferred conversation. Check the results of interrupted operations \
+         before retrying them, and do not repeat work or external actions already completed. \
+         If the request is complete, report that and stop.\n\nOriginal request:\n{request}\n</clarp-turn-resumed>"
+    )
+}
+
 /// What the tool is told when a turn that had begun its work is taken up again after its
 /// provider turned an attempt away for a moment, or its connection to the provider was lost:
 /// it goes on from where the conversation stands, in an envelope its transcript reader
