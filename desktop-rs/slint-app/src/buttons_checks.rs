@@ -273,100 +273,82 @@ pub fn buttons_check(out: String) {
         })),
         ("queue strip", Box::new(move |_, window, elapsed| {
             let pane = app_now().active_id();
+            let action = format!("steer-chip-action:{pane}");
             let line = label(&format!("steer-chip:{pane}"));
-            if line != "2 waiting · Send now" || elapsed < Duration::from_millis(300) {
-                check(elapsed < Duration::from_secs(5), &format!("during the turn one line above the composer says what waits, with its action: {line:?}"));
+            if line != "2 messages waiting" || label(&action) != "Stop and send" || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), &format!("during the turn one line says what waits; a Host that steers nothing offers Stop and send: {line:?} {:?}", label(&action)));
                 return elapsed >= Duration::from_secs(5);
             }
             check(drawn(&format!("queue-strip:{pane}")), "the line is the open chat's");
             check(!drawn("queue-send:q1") && !drawn("queue-send:q2"), "one line, not a row for each message");
+            check(view().chip_reason == clarp_core::send_while_working::CANT_STEER, &format!("with the dim reason: {:?}", view().chip_reason));
             check(label(&format!("composer-meter:{pane}")) == "context 21K/1M · 2%", &format!("the composer's frame shows the context meter: {:?}", label(&format!("composer-meter:{pane}"))));
             check(!view().meter_warn, "2% of the context is no warning");
             check_window_size_free(window, "with the waiting line shown");
             shot(&out4, "buttons-04-queue-strip");
-            // The Host refuses this one: a turn still runs (a Host without queue_steer).
-            check(control("/__control/fail", &json!({"path": "/turn-queue/q1/send", "status": 409})).is_ok(), "the Host will refuse the next Send now");
-            check(press(&format!("steer-chip-action:{pane}")), "Send now is pressed on the line");
+            check(press(&action), "Stop and send is pressed");
             true
         })),
-        ("refused", Box::new(move |_, _, elapsed| {
-            let pane = app_now().active_id();
-            let refused = format!("queue-refused:{pane}");
-            if !drawn(&refused) || elapsed < Duration::from_millis(500) {
-                if elapsed >= Duration::from_secs(5) {
-                    let engine = app_now().engine.borrow().turn_queue_refusal("rachel");
-                    check(false, &format!("a refused Send now says the Host's answer under the line (pane {:?}, engine {engine:?}, waiting {})", view().waiting_refused, view().waiting.row_count()));
-                    shot(&out5, "buttons-05-send-refused");
-                    return true;
-                }
-                return false;
+        ("stopped for them", Box::new(move |_, _, elapsed| {
+            let stops = posts("/stop");
+            if stops.is_empty() {
+                check(elapsed < Duration::from_secs(5), "Stop and send is the plain Stop");
+                return elapsed >= Duration::from_secs(5);
             }
-            check(label(&refused) == "Not sent now: agent is still working", &format!("an older Host's words: {:?}", label(&refused)));
-            check(label(&format!("steer-chip:{pane}")) == "2 waiting · Send now", "and the message waits on, still counted after the queue reloaded");
-            shot(&out5, "buttons-05-send-refused");
+            check(stops[0]["body"]["session"] == "rachel", &format!("for Rachel: {stops:?}"));
+            check(requests_posted("/turn-queue/q1/take-over") == 0 && requests_posted("/turn-queue/q2/take-over") == 0, "not a take-over, which would run only one");
+            check(requests_posted("/turn-queue/q1/send") == 0, "nor a send a turn refuses");
+            shot(&out5, "buttons-05-stop-and-send");
             // Near the account's limit and deep in the context: the meter warns.
             let set = control("/__control/agent", &json!({"session": "rachel", "set": {"context_tokens": 850_000,
                 "backend_quota": {"state": "near", "provider_id": "claude", "reason": "usage_limit", "window": "five_hour",
                     "used_percentage": 91.0, "resets_at": null, "failover": "none"}}}));
             check(set.is_ok(), "the Host says Claude is near its limit");
-            // By key now: Ctrl+Shift+Enter does the line's action.
-            app_now().focus_composer();
-            headless::press_with(&[slint::platform::Key::Control, slint::platform::Key::Shift], slint::platform::Key::Return);
-            true
-        })),
-        ("sent now", Box::new(move |_, _, elapsed| {
-            let pane = app_now().active_id();
-            let sent = requests_posted("/turn-queue/q1/send") >= 2;
-            let line = label(&format!("steer-chip:{pane}"));
-            if !sent || line != "1 waiting · Send now" || !view().meter_warn {
-                check(elapsed < Duration::from_secs(5), &format!("Ctrl+Shift+Enter sends the first waiting message now (sent {sent}, line {line:?}) and the meter warns ({})", view().meter_warn));
-                return elapsed >= Duration::from_secs(5);
-            }
-            check(!drawn(&format!("queue-refused:{pane}")), "the refusal is answered by the send");
-            check(posts("/turn-queue/q1/send").iter().all(|r| r["body"]["synthesize_audio"].is_boolean()), "Send now says whether to speak the answer");
-            let meter = label(&format!("composer-meter:{pane}"));
-            check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
-            shot(&out6, "buttons-06-meter-near");
-            check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
             // Show queue off (Settings, Ctrl+K): the line goes.
             crate::queue_strip::set_shown(&app_now(), false);
             true
         })),
         ("queue hidden", Box::new(move |_, _, elapsed| {
             let pane = app_now().active_id();
-            if drawn(&format!("steer-chip:{pane}")) {
-                check(elapsed < Duration::from_secs(3), "Show queue off hides the line");
-                return elapsed >= Duration::from_secs(3);
+            if drawn(&format!("steer-chip:{pane}")) || !view().meter_warn {
+                check(elapsed < Duration::from_secs(5), &format!("Show queue off hides the line, and the meter warns ({})", view().meter_warn));
+                return elapsed >= Duration::from_secs(5);
             }
+            let meter = label(&format!("composer-meter:{pane}"));
+            check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
+            shot(&out6, "buttons-06-meter-near");
             crate::queue_strip::set_shown(&app_now(), true);
-            // A Host that offers Steer now (queue_steer).
+            // A Host that steers (queue_steer) and keeps Send while working.
             check(control("/__control/queue-steer", &json!({"on": true})).is_ok(), "the Host offers Steer now");
+            check(control("/__control/send-while-working", &json!({"on": true})).is_ok(), "and Send while working");
             app_now().engine.borrow_mut().reconnect();
             true
         })),
-        ("steer offered", Box::new(move |_, _, elapsed| {
+        ("steer offered", Box::new(move |_, window, elapsed| {
             let pane = app_now().active_id();
             let action = format!("steer-chip-action:{pane}");
-            if label(&action) != "Steer now" || elapsed < Duration::from_millis(300) {
-                check(elapsed < Duration::from_secs(8), &format!("shown again, and on a Host with queue_steer the line offers Steer now during the turn: {:?}", label(&action)));
+            if label(&action) != "Steer now" || !app_now().engine.borrow().send_while_working_offered() || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(8), &format!("shown again, and on a Host with queue_steer the line offers Steer now: {:?}", label(&action)));
                 return elapsed >= Duration::from_secs(8);
             }
-            check(label(&format!("steer-chip:{pane}")) == "1 waiting · Steer now", &format!("as the mockup says it: {:?}", label(&format!("steer-chip:{pane}"))));
+            check(label(&format!("steer-chip:{pane}")) == "2 messages waiting", &format!("it reads: {:?}", label(&format!("steer-chip:{pane}"))));
+            check(view().chip_target == "q2", &format!("Steer now reads in the newest, the Host the older first: {:?}", view().chip_target));
             shot(&out7, "buttons-07-steer-now");
-            check(control("/__control/fail", &json!({"path": "/turn-queue/q2/steer", "status": 409})).is_ok(), "the Host will refuse the steer");
-            check(press(&action), "Steer now is pressed");
+            // Send's menu during the turn: the two choices other than the setting.
+            let options: Vec<String> = window.global::<crate::SendChoice>().get_options().iter().map(|o| o.label.to_string()).collect();
+            check(options == ["After the turn", "Stop and send"], &format!("Send's menu offers the other two: {options:?}"));
+            // By key: Ctrl+Shift+Enter does the line's action.
+            app_now().focus_composer();
+            headless::press_with(&[slint::platform::Key::Control, slint::platform::Key::Shift], slint::platform::Key::Return);
             true
         })),
-        ("stopped and sent", Box::new(|_, _, elapsed| {
-            let pane = app_now().active_id();
-            let taken = requests_posted("/turn-queue/q2/take-over") == 1;
-            if !taken || drawn(&format!("steer-chip:{pane}")) {
-                check(elapsed < Duration::from_secs(5), &format!("a steer the turn cannot take stops it and sends instead (posted {taken})"));
+        ("steered", Box::new(|_, _, elapsed| {
+            if requests_posted("/turn-queue/q2/steer") != 1 {
+                check(elapsed < Duration::from_secs(5), "Ctrl+Shift+Enter steers the newest waiting message in");
                 return elapsed >= Duration::from_secs(5);
             }
-            check(requests_posted("/turn-queue/q2/steer") == 1, "after one steer");
-            check(requests_posted("/turn-queue/q2/send") == 0, "not the plain send a turn refuses");
-            check(!drawn(&format!("queue-refused:{pane}")), "and nothing says it was not sent");
+            check(requests_posted("/turn-queue/q1/steer") == 0, "once, for them all");
+            check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
             // Three wait now: still one line.
             let items = json!([{"queue_id": "q3", "text": "third"}, {"queue_id": "q4", "text": "fourth"}, {"queue_id": "q5", "text": "fifth"}]);
             let set = control("/__control/turn-queue", &json!({"session": "rachel", "items": items}))
@@ -377,7 +359,7 @@ pub fn buttons_check(out: String) {
         ("three waiting", Box::new(move |_, window, elapsed| {
             let pane = app_now().active_id();
             let line = label(&format!("steer-chip:{pane}"));
-            if line != "3 waiting · Steer now" || elapsed < Duration::from_millis(300) {
+            if line != "3 messages waiting" || elapsed < Duration::from_millis(300) {
                 check(elapsed < Duration::from_secs(5), &format!("three waiting are one line too: {line:?}"));
                 return elapsed >= Duration::from_secs(5);
             }

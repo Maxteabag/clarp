@@ -295,6 +295,47 @@ fn send_now_steers_and_stops_the_turn_where_it_cannot_be_steered() {
 }
 
 #[test]
+fn send_while_working_is_the_hosts_and_the_line_stops_a_turn_it_cannot_steer() {
+    use clarp_core::send_while_working::Mode;
+    let host = Host::start("send-while-working");
+    host.control("/__control/queue-steer", json!({"on": true}));
+    host.control("/__control/send-while-working", json!({"on": true}));
+    host.control("/__control/agent", json!({"session": "rachel", "set": {"busy": true, "latest_state": "thinking"}}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("offered and busy", |e| e.send_while_working_offered() && e.roster().find("rachel").is_some_and(|a| a.busy));
+    assert_eq!(d.engine.send_while_working(), Mode::Steer, "the snapshot's settings say Steer now");
+
+    // Written to the Host with PUT, and the Host's event agrees.
+    d.engine.set_send_while_working(Mode::AfterTurn);
+    d.until("written", |_| !host.requests("PUT", "/settings/send-while-working").is_empty());
+    assert_eq!(host.requests("PUT", "/settings/send-while-working")[0]["body"], json!({"value": "after_turn"}));
+    d.settle(Duration::from_millis(300));
+    assert_eq!(d.engine.send_while_working(), Mode::AfterTurn);
+
+    // Send's menu: one message goes its own way; the next follows the setting.
+    d.engine.send_next_as("rachel", Mode::StopAndSend);
+    d.engine.send_to("rachel", "this one now", false);
+    d.engine.send_to("rachel", "and this as set", false);
+    d.until("both sent", |_| host.requests("POST", "/send").len() >= 2);
+    let sends = host.requests("POST", "/send");
+    assert_eq!(sends[sends.len() - 2]["body"]["send_while_working"], "stop_and_send");
+    assert!(sends[sends.len() - 1]["body"].get("send_while_working").is_none());
+
+    // The line's Steer now, refused: the plain Stop, not a take-over.
+    d.engine.load_turn_queue("rachel");
+    d.until("queue loaded", |e| !e.turn_queue_loading() && e.turn_queue("rachel").len() == 2);
+    host.control("/__control/fail", json!({"path": "/turn-queue/q2/steer", "status": 409}));
+    d.engine.steer_from_line("q2");
+    assert!(d.engine.turn_queue_acting("rachel"), "the line shows its action runs");
+    d.until("stopped", |_| !host.requests("POST", "/stop").is_empty());
+    assert_eq!(host.requests("POST", "/stop")[0]["body"]["session"], "rachel");
+    assert!(host.requests("POST", "/turn-queue/q2/take-over").is_empty());
+    d.until("stop answered", |e| !e.stopping_for_waiting("rachel"));
+    assert!(d.engine.turn_queue_refusal("rachel").is_empty(), "nothing says it failed");
+}
+
+#[test]
 fn launch_defaults_survive_a_restart() {
     let host = Host::start("defaults");
     let file = host.dir.join("settings.json");

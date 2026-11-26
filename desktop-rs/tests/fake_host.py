@@ -194,6 +194,11 @@ message_search = {"on": False, "partial": False, "page": 0}
 # until /__control/queue-steer turns it on. Then GET /turn-queue items carry
 # `steerable` (a `waiting` item of the user's while its agent works).
 queue_steer = {"on": False}
+# Send while working (#920, the working contract): off until
+# /__control/send-while-working turns it on. Then the snapshot carries
+# settings.send_while_working, PUT /settings/send-while-working {value}
+# changes it and sends settings-changed.
+send_while_working = {"on": False, "value": "steer"}
 # One agent's change in its roster event (feature roster_fields, Rust Host
 # contract 182) and the read of one row, GET /agents/<session> (agent_row,
 # 183): off until /__control/roster-rows turns them on.
@@ -1711,6 +1716,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("message_search")
             if queue_steer["on"]:
                 features.append("queue_steer")
+            if send_while_working["on"]:
+                features.append("send_while_working")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
             if chat_view.get("helper"):
@@ -1748,9 +1755,12 @@ class Handler(BaseHTTPRequestHandler):
                     for agent in agents:
                         agent["coordination_visibility"] = coordination_effective(agent["session"])
                         agent["coordination_override"] = coordination["overrides"].get(agent["session"])
-                return self.reply(200, {"agents": agents, "personas": personas,
-                                        "tool_explanations": tool_explanation_settings,
-                                        "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
+                snapshot = {"agents": agents, "personas": personas,
+                            "tool_explanations": tool_explanation_settings,
+                            "available_mcp_servers": [{"name": "github", "description": "GitHub"}]}
+                if send_while_working["on"]:
+                    snapshot["settings"] = {"send_while_working": send_while_working["value"]}
+                return self.reply(200, snapshot)
         if url.path.startswith("/agents/") and roster_rows["row"] and url.path.count("/") == 2:
             # One agent's row, exactly as the snapshot has it.
             session = unquote(url.path[len("/agents/"):])
@@ -2499,6 +2509,9 @@ class Handler(BaseHTTPRequestHandler):
                 turn_queue[session] = [dict(i) for i in body.get("items", [])]
             broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue[session])})
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/send-while-working":
+            send_while_working["on"] = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/message-search":
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
@@ -3096,6 +3109,13 @@ def do_PUT(self):
     record({"method": "PUT", "path": url.path, "body": body})
     if not self.authorized():
         return self.reply(401, {"error": "unauthorized"})
+    if url.path == "/settings/send-while-working" and send_while_working["on"]:
+        value = body.get("value")
+        if value not in ("steer", "after_turn", "stop_and_send"):
+            return self.reply(400, {"error": "value must be steer, after_turn or stop_and_send"})
+        send_while_working["value"] = value
+        broadcast({"type": "settings-changed", "settings": {"send_while_working": value}})
+        return self.reply(200, {"ok": True, "settings": {"send_while_working": value}})
     if url.path.startswith("/turn-queue/"):
         item = url.path.split("/")[2]
         with state_lock:
