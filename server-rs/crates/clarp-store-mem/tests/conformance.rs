@@ -4,7 +4,9 @@
 use std::path::Path;
 
 use clarp_codec::standard_set;
-use clarp_ports::testkit::{blob_conformance, key_value_conformance, log_engine_conformance};
+use clarp_ports::testkit::{
+    blob_conformance, key_value_conformance, log_engine_conformance, read_committed_conformance,
+};
 use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 
 #[test]
@@ -18,6 +20,16 @@ fn memory_passes_the_log_engine_suite() {
         Path::new("/agents/b"),
         &none,
         &zstd,
+    );
+}
+
+#[test]
+fn memory_reads_what_was_committed_beside_its_writer() {
+    read_committed_conformance(
+        &MemEngine::new(),
+        Path::new("/agents/a"),
+        Path::new("/agents/never"),
+        &standard_set("zstd").unwrap(),
     );
 }
 

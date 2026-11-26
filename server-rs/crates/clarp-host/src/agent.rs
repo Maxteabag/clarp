@@ -742,6 +742,9 @@ pub struct View {
     pub speech: Arc<SpeechBook>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
+    /// The view was read from what the agent's log had committed while its thread still opens
+    /// it ([`OPENING`], issue 935): its row is its own, read and never written.
+    pub glanced: bool,
 }
 
 impl View {
@@ -827,6 +830,30 @@ pub struct AgentHandle {
     /// no turn runs: kept apart from the view, which is not made anew for every line a tool
     /// prints (`availability`, issue 918).
     alive: Arc<AtomicI64>,
+    /// The agent as its committed log says, while its thread still opens it (issue 935).
+    glance: Arc<GlanceSlot>,
+}
+
+/// Where an agent's glance is kept between its reading and its opening: what is asked of an
+/// agent that is still being opened is answered from it, and nothing else is.
+#[derive(Default)]
+struct GlanceSlot(Mutex<Option<Arc<Glance>>>);
+
+impl GlanceSlot {
+    fn get(&self) -> Option<Arc<Glance>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    fn set(&self, glance: Option<Arc<Glance>>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = glance;
+    }
+}
+
+/// An agent read from what its log committed ([`Actor::glance`]): one reading at a time, as
+/// on its own thread, and with its own clock.
+struct Glance {
+    actor: Mutex<Actor>,
+    clock: Arc<dyn Clock + Send + Sync>,
 }
 
 #[derive(Default)]
@@ -868,6 +895,15 @@ pub(crate) const REMOVING: &str =
 pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
+    /// Resolves once the agent's row is its own (issue 935): read from what its log committed,
+    /// or open, or known not to open.
+    pub async fn row_is_its_own(&self) {
+        let mut view = self.view.clone();
+        let _ = view
+            .wait_for(|view| view.glanced || view.broken.as_deref() != Some(OPENING))
+            .await;
+    }
+
     /// The running turn's last sign of life, where a turn runs.
     pub fn last_alive_ms(&self) -> Option<i64> {
         Some(self.alive.load(Ordering::Relaxed)).filter(|at| *at > 0)
@@ -882,6 +918,26 @@ impl AgentHandle {
     }
     pub(crate) fn visit_provider(&self, native: &str) {
         let _ = self.tx.send(Ask::VisitProvider(native.to_owned()));
+    }
+
+    /// What is read of an agent that is still being opened, read from its glance (issue 935):
+    /// `None` once it is open (or failed to open), or where it has no glance, and the agent's
+    /// own thread answers. A glance is only ever read: nothing it answers is written.
+    async fn from_glance<T: Send + 'static>(
+        &self,
+        read: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError> + Send + 'static,
+    ) -> Option<Result<T, Unavailable>> {
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return None;
+        }
+        let glance = self.glance.get()?;
+        let read = tokio::task::spawn_blocking(move || {
+            let now = glance.clock.now_ms();
+            let mut actor = glance.actor.lock().unwrap_or_else(PoisonError::into_inner);
+            read(&mut actor, now).map_err(|error| unavailable(&error))
+        })
+        .await;
+        Some(read.unwrap_or_else(|error| Err(Unavailable::new(error.to_string()))))
     }
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
@@ -1120,6 +1176,12 @@ impl AgentHandle {
 
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
+        if let Some(read) = self
+            .from_glance(|actor, now| Ok(actor.shown_whole(now)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Shown { answer }).await
     }
 
@@ -1263,6 +1325,12 @@ impl AgentHandle {
     }
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.tail_of(limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Tail {
             limit,
             which,
@@ -1277,6 +1345,12 @@ impl AgentHandle {
         limit: usize,
         which: Which,
     ) -> Result<Page, Unavailable> {
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::After {
             revision,
             limit,
@@ -1292,6 +1366,13 @@ impl AgentHandle {
         limit: usize,
         which: Which,
     ) -> Result<Option<Page>, Unavailable> {
+        let asked = id.clone();
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Before {
             id,
             limit,
@@ -1377,6 +1458,10 @@ impl AgentHandle {
     }
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
+        let asked = id.clone();
+        if let Some(read) = self.from_glance(move |actor, _| actor.row(&asked)).await {
+            return read;
+        }
         self.ask(|answer| Ask::Row { id, answer }).await
     }
 
@@ -1388,6 +1473,19 @@ impl AgentHandle {
         query: clarp_kernel::delivery::Query,
         scope: clarp_kernel::delivery::Scope,
     ) -> Result<(Vec<Value>, serde_json::Map<String, Value>), Unavailable> {
+        if self.glance.get().is_some() {
+            let (glanced, asked, scoped) = (turns.clone(), query.clone(), scope.clone());
+            if let Some(read) = self
+                .from_glance(move |actor, _| {
+                    let mut turns = glanced;
+                    let top = actor.delivery(&mut turns, &asked, &scoped);
+                    Ok((turns, top))
+                })
+                .await
+            {
+                return read;
+            }
+        }
         self.ask(|answer| Ask::Delivery {
             turns,
             query,
@@ -1691,6 +1789,34 @@ pub(crate) fn never_ran() -> Status {
 
 /// Starts an agent's thread. The agent is opened on that thread, not here.
 pub fn spawn(setup: Setup) -> AgentHandle {
+    let (handle, unopened) = prepare(setup);
+    unopened.begin();
+    handle
+}
+
+/// An agent whose handle is there and whose thread is not started yet: what is asked of it
+/// waits in its mailbox, as for any agent still being opened (issue 935).
+pub struct Unopened {
+    worker: Worker,
+    rx: mpsc::Receiver<Ask>,
+}
+
+impl Unopened {
+    /// Starts the agent's thread, which reads it and then opens it.
+    pub fn begin(self) {
+        let Self { worker, rx } = self;
+        let name = format!("agent-{}", worker.setup.record.session);
+        let spawned = std::thread::Builder::new()
+            .name(name)
+            .spawn(move || worker.run(&rx));
+        if let Err(error) = spawned {
+            eprintln!("clarp-host: an agent's thread could not be started: {error}");
+        }
+    }
+}
+
+/// An agent's handle, and its thread to be started.
+pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
     let (tx, rx) = mpsc::channel();
     let idle = never_ran();
     let (view_tx, view) = watch::channel(Arc::new(View {
@@ -1715,9 +1841,11 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         books: Arc::default(),
         speech: Arc::default(),
         broken: Some(OPENING.to_string()),
+        glanced: false,
     }));
     let now_ms = setup.clock.now_ms();
     let alive = Arc::new(AtomicI64::new(0));
+    let glance: Arc<GlanceSlot> = Arc::default();
     let worker = Worker {
         native: native_goal::Native::default(),
         claude_bypass: None,
@@ -1770,20 +1898,18 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         clock_seen: (Instant::now(), now_ms),
         stall: Stall::default(),
         alive: alive.clone(),
+        glance: glance.clone(),
+        glance_read: false,
+        glanced: None,
     };
-    let name = format!("agent-{}", worker.setup.record.session);
-    let spawned = std::thread::Builder::new()
-        .name(name)
-        .spawn(move || worker.run(&rx));
-    if let Err(error) = spawned {
-        eprintln!("clarp-host: an agent's thread could not be started: {error}");
-    }
-    AgentHandle {
+    let handle = AgentHandle {
         tx,
         view,
         close: Arc::default(),
         alive,
-    }
+        glance,
+    };
+    (handle, Unopened { worker, rx })
 }
 
 enum QueueEdit {
@@ -1894,6 +2020,13 @@ struct Worker {
     stall: Stall,
     /// The running turn's last sign of life, shared with the agent's handle.
     alive: Arc<AtomicI64>,
+    /// Where the agent's glance is kept while it is opened, shared with its handle.
+    glance: Arc<GlanceSlot>,
+    /// Whether the agent was read before its first opening.
+    glance_read: bool,
+    /// What its glance showed, while the clients may hold it: told again where its opening
+    /// found it otherwise.
+    glanced: Option<Status>,
 }
 
 #[derive(Default)]
@@ -2106,6 +2239,11 @@ impl Worker {
         // How the journal names this thread when one request holds it long.
         let thread = self.thread_name();
         loop {
+            if self.actor.is_none() && !self.glance_read {
+                self.glance_read = true;
+                let _held = crate::held::Held::new(&thread, "its glance");
+                self.glance();
+            }
             if self.actor.is_none() {
                 let opened = {
                     let _held = crate::held::Held::new(&thread, "its opening");
@@ -2751,7 +2889,10 @@ impl Worker {
         self.count_requests(self.now_ms());
         self.read_speech();
         self.publish_view();
+        // Its own view is out: what is asked of it is answered by it from now on.
+        self.glance.set(None);
         self.after(out);
+        self.tell_glanced();
         self.watch_native();
         self.reconcile_native();
         self.advance_native_goal()
@@ -5715,6 +5856,95 @@ impl Worker {
     }
 
     fn publish_view(&self) {
+        self.publish_view_as(None);
+    }
+
+    /// Reads the agent from what its log committed, before its thread opens it (issue 935): its
+    /// view is published from that reading, still being opened, and what is asked of it meanwhile
+    /// is answered from it. Read on a connection that writes nothing ([`LogEngine::read_committed`])
+    /// by the actor's own opening, without its repairs ([`Actor::glance`]). Where it cannot be
+    /// read so, nothing is published and the agent is read once it is open, as before.
+    fn glance(&mut self) {
+        let now = self.now_ms();
+        let glanced = self
+            .setup
+            .engine
+            .read_committed(&self.setup.profile.dir, self.setup.codecs.clone())
+            .map_err(|error| error.to_string())
+            .and_then(|log| {
+                Actor::glance(
+                    self.setup.profile.clone(),
+                    self.setup.backend.clone(),
+                    log,
+                    now,
+                )
+                .map_err(|error| error.to_string())
+            });
+        let actor = match glanced {
+            Ok(actor) => actor,
+            Err(why) => {
+                // Quietly: a new agent has no log yet, and the memory engine reads only through
+                // its writer. Said where the log is there and could not be read.
+                if self.setup.profile.dir.join("log.db").is_file() {
+                    eprintln!(
+                        "clarp-host: agent {} is read once it is open: {why}",
+                        self.setup.record.session
+                    );
+                }
+                return;
+            }
+        };
+        self.actor = Some(actor);
+        self.update_previews();
+        self.ended = self.last_end();
+        self.finished = self.last_finished();
+        self.refresh_books(true);
+        if let Some(actor) = &self.actor {
+            self.speech = Arc::new(actor.speech().clone());
+            self.glanced = Some(actor.status());
+        }
+        self.publish_view_as(Some(OPENING));
+        // Its opening reads its lines again, and counts them where they are new to it.
+        self.speech = Arc::default();
+        if let Some(actor) = self.actor.take() {
+            self.glance.set(Some(Arc::new(Glance {
+                actor: Mutex::new(actor),
+                clock: self.setup.clock.clone(),
+            })));
+        }
+    }
+
+    /// What its glance showed and its opening found otherwise is told: its state, and that its
+    /// conversation changed. Nothing else of the opening is news.
+    fn tell_glanced(&mut self) {
+        let Some(glanced) = self.glanced.take() else {
+            return;
+        };
+        let Some(status) = self.actor.as_ref().map(Actor::status) else {
+            return;
+        };
+        if glanced.head_revision != status.head_revision
+            || glanced.backend_session != status.backend_session
+        {
+            self.tell_transcript();
+        }
+        if let Some(actor) = &self.actor
+            && told_state(&glanced) != told_state(&status)
+        {
+            tell_work(
+                &self.setup.hub,
+                actor,
+                &self.setup.record,
+                &status,
+                actor.backend_id(),
+                (self.ended.as_ref(), self.stall.since),
+                self.now_ms(),
+            );
+        }
+    }
+
+    /// Publishes the agent's view: `broken` says why it cannot answer, `None` once it can.
+    fn publish_view_as(&self, broken: Option<&str>) {
         let Some(actor) = &self.actor else {
             return;
         };
@@ -5805,10 +6035,11 @@ impl Worker {
                 .collect(),
             books: self.books.clone(),
             speech: self.speech.clone(),
-            broken: None,
+            broken: broken.map(str::to_string),
+            glanced: broken.is_some(),
         }));
         // An agent that was being opened can answer now (`availability`).
-        if prior.broken.is_some() {
+        if prior.broken.is_some() && broken.is_none() {
             self.setup
                 .hub
                 .availability_moved(&self.setup.record.agent_id);
@@ -6346,6 +6577,9 @@ impl Worker {
         let mut view = (**self.view.borrow()).clone();
         view.broken = Some(why.to_string());
         view.stalled_since = None;
+        // An agent that could not be opened is no longer read from its glance.
+        view.glanced = false;
+        self.glance.set(None);
         self.view.send_replace(Arc::new(view));
         self.setup
             .hub
@@ -6729,6 +6963,7 @@ mod mailbox_tests {
             books: Arc::default(),
             speech: Arc::default(),
             broken: None,
+            glanced: false,
         }));
         (
             AgentHandle {
@@ -6736,6 +6971,7 @@ mod mailbox_tests {
                 view,
                 close: Arc::default(),
                 alive: Arc::default(),
+                glance: Arc::default(),
             },
             rx,
         )

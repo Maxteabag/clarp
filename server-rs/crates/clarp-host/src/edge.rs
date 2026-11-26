@@ -546,9 +546,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("events_live_change", 209),
     // `GET /host/start` says which run of the Host answers (`instance`) and how far its start has
     // come (`stage`: `starting`, `agents`, `started`). The Host answers `/server-info`,
-    // `/host/start` and a named agent's `/log`, `/live` and `/send` from the first moment of its
-    // start (the last three once that agent is open; a send in a call once `started`), the roster
-    // once every agent is open, `/events` and everything else once `started`: a request is held,
+    // `/host/start`, `/events` (a call's ring once `started`) and a named agent's `/log` and
+    // `/live` from the first moment of its start, the last two from what the agent's log committed
+    // until it is open; a `/send` once its agent is open (in a call once `started`), the roster
+    // once every agent's row is read or open, everything else once `started`: a request is held,
     // never refused. An installer holds
     // an install good once the run that answered says `started` (issue 935).
     ("host_start_readiness", 210),
@@ -5232,8 +5233,15 @@ async fn not_for(app: &App, published: &Published, principal: &str) -> bool {
         return false;
     }
     let event: Value = serde_json::from_str(&published.json).unwrap_or(Value::Null);
+    if event["type"] != "agent-ring" {
+        return false;
+    }
+    // A ring is shown to whom the recovered calls say. The stream answers before the start has
+    // recovered them (issue 935): a ring that comes first waits for them, and the stream behind
+    // it, so that it is neither shown to the wrong reader, lost, nor told out of order.
+    app.start.reached(crate::start::Stage::Started).await;
     let ring_id = event["ring_id"].as_str().unwrap_or("");
-    event["type"] == "agent-ring" && !app.calls.shows(app, ring_id, principal).await
+    !app.calls.shows(app, ring_id, principal).await
 }
 
 async fn events(

@@ -165,4 +165,21 @@ pub trait LogEngine: Send + Sync {
     /// Opens the log that lives in `agent_dir`, creating it when it is not there yet.
     /// Opening the same directory again returns the same log.
     fn open(&self, agent_dir: &Path, codecs: CodecSet) -> Result<Box<dyn AgentLog>, LogError>;
+
+    /// Reads the log that lives in `agent_dir` as it is committed now, beside its one writer and
+    /// never as one (issue 935): what a Host shows of an agent while that agent is still being
+    /// opened. Every read through it sees the same moment; `append` is refused. Creates nothing,
+    /// changes nothing, and is refused where there is no log yet. An engine that cannot read
+    /// beside its writer refuses it, and the agent is then read once it is open.
+    fn read_committed(
+        &self,
+        agent_dir: &Path,
+        codecs: CodecSet,
+    ) -> Result<Box<dyn AgentLog>, LogError> {
+        let _ = (agent_dir, codecs);
+        Err(LogError::Storage(format!(
+            "the {} engine reads a log only through its writer",
+            self.name()
+        )))
+    }
 }

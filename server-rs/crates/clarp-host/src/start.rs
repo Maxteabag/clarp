@@ -3,14 +3,17 @@
 //!
 //! A release stops one Host and starts the next. The next one answers its liveness at once
 //! (`GET /server-info`, `GET /host/start`), so the apps and the installer know it is there.
-//! What is asked of one named agent (`/log`, `/live`, `/send`) is asked of that agent's own
-//! thread, which opens the agent before it answers anything: such a request waits for that agent
-//! alone, however many others are still being opened. The roster speaks of every agent, and
-//! waits until every agent is open: an agent that is still being opened has no row of its own
-//! yet (no running turn, revision zero), and a row like that must never stand in for one whose
-//! turn runs. Everything else, the event stream with its calls' rings included, waits until the
-//! whole start is done, its recovery of the gallery, the portraits and the calls included, so that
-//! no route serves what is not yet recovered. A request that waits is held, not refused.
+//! Every agent is read from what its log committed before its own thread opens it
+//! (`Actor::glance`), on a connection that writes nothing: from then until it is open, its row,
+//! its conversation (`/log`) and its running turn (`/live`) are answered from that reading, as
+//! they stood when the Host before stopped. A send waits for its agent's opening, in its own
+//! mailbox, in the order sends came. The roster waits until every agent's row is its own, read
+//! or open: a row of an agent that is neither (no running turn, revision zero) must never stand
+//! in for one whose turn runs. The event stream answers at once, as it would after a start; only
+//! a call's ring on it waits until the calls are recovered, and holds the stream behind it in
+//! order. Everything else waits until the whole start is done, its recovery of the gallery, the
+//! portraits and the calls included, so that no route serves what is not yet recovered. A
+//! request that waits is held, not refused.
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -24,7 +27,10 @@ use crate::edge::App;
 pub enum Stage {
     /// The Host is there and says so; nothing it keeps is answered yet.
     Starting,
-    /// Every agent is open: its row is its own.
+    /// Every agent's row is its own: read from what its log committed, or open. Its own
+    /// janitors are in the roster.
+    Rows,
+    /// Every agent is open.
     Agents,
     /// The whole start is done.
     Started,
@@ -34,7 +40,9 @@ impl Stage {
     /// The word `GET /host/start` says it with.
     pub fn word(self) -> &'static str {
         match self {
-            Self::Starting => "starting",
+            // The words of contract 210: the roster that answers before its agents are open
+            // is not one of them.
+            Self::Starting | Self::Rows => "starting",
             Self::Agents => "agents",
             Self::Started => "started",
         }
@@ -90,13 +98,14 @@ impl Readiness {
 pub fn needs(path: &str) -> Stage {
     match path {
         "/server-info" | "/host/start" => Stage::Starting,
-        // Answered by the named agent's own thread, once that agent is open. A send that
-        // belongs to a call waits in its handler until the calls are recovered (`sent_from`).
+        // Answered from the named agent's glance while it is opened, then by its own thread. A
+        // send waits in that agent's mailbox until it is open; one that belongs to a call
+        // waits in its handler until the calls are recovered (`sent_from`).
         "/live" | "/log" | "/send" => Stage::Starting,
-        "/agents/snapshot" => Stage::Agents,
-        // The stream shows a call's rings to whom the calls say: it waits until they are
-        // recovered, which the start does last.
-        "/events" => Stage::Started,
+        "/agents/snapshot" => Stage::Rows,
+        // The stream holds a call's ring until the calls are recovered, which the start does
+        // last, and whatever comes after it on that stream behind it (`edge::not_for`).
+        "/events" => Stage::Starting,
         _ => Stage::Started,
     }
 }
@@ -117,14 +126,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn liveness_and_a_named_chat_at_once_the_roster_once_every_agent_is_open_the_rest_started() {
-        for path in ["/server-info", "/host/start", "/live", "/log", "/send"] {
+    fn liveness_a_named_chat_and_the_stream_at_once_the_roster_once_every_row_is_its_own() {
+        for path in [
+            "/server-info",
+            "/host/start",
+            "/live",
+            "/log",
+            "/send",
+            "/events",
+        ] {
             assert_eq!(needs(path), Stage::Starting, "{path}");
         }
-        for path in ["/agents/snapshot"] {
-            assert_eq!(needs(path), Stage::Agents, "{path}");
-        }
-        for path in ["/events", "/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
+        assert_eq!(needs("/agents/snapshot"), Stage::Rows);
+        for path in ["/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
             assert_eq!(needs(path), Stage::Started, "{path}");
         }
     }
@@ -143,5 +157,8 @@ mod tests {
         start.reach(Stage::Agents);
         assert_eq!(start.stage(), Stage::Started);
         assert_eq!(Readiness::default().stage(), Stage::Started);
+        // The roster's own stage is said as the contract's words have it.
+        assert_eq!(Stage::Rows.word(), "starting");
+        assert!(Stage::Starting < Stage::Rows && Stage::Rows < Stage::Agents);
     }
 }

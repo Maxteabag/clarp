@@ -3,7 +3,9 @@
 
 use clarp_codec::standard_set;
 use clarp_ports::log::{Kinds, LogEngine, NewItem};
-use clarp_ports::testkit::{key_value_conformance, log_engine_conformance, scratch_dir};
+use clarp_ports::testkit::{
+    key_value_conformance, log_engine_conformance, read_committed_conformance, scratch_dir,
+};
 use clarp_store_sqlite::{LOG_FILE, SqliteEngine, SqliteKeyValue};
 
 #[test]
@@ -17,6 +19,22 @@ fn sqlite_passes_the_log_engine_suite() {
         &root.join("agents/b"),
         &none,
         &zstd,
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn sqlite_reads_what_was_committed_beside_its_writer() {
+    let root = scratch_dir("sqlite-committed");
+    read_committed_conformance(
+        &SqliteEngine::new(),
+        &root.join("agents/a"),
+        &root.join("agents/never"),
+        &standard_set("zstd").unwrap(),
+    );
+    assert!(
+        !root.join("agents/never").exists(),
+        "a reader makes no directory and no file"
     );
     std::fs::remove_dir_all(root).unwrap();
 }

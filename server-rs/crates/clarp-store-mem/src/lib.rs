@@ -14,6 +14,7 @@ use clarp_ports::codec::{CodecSet, CodecTag};
 use clarp_ports::kv::{KeyValue, KeyValueEngine, StoreError};
 use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq};
 
+#[derive(Clone)]
 struct Row {
     turn: Option<u64>,
     kind: u16,
@@ -23,7 +24,7 @@ struct Row {
     stored: Vec<u8>,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct IndexedRows {
     items: Vec<Row>,
     latest: HashMap<String, usize>,
@@ -54,13 +55,37 @@ impl LogEngine for MemEngine {
     fn open(&self, agent_dir: &Path, codecs: CodecSet) -> Result<Box<dyn AgentLog>, LogError> {
         let mut disks = self.disks.lock().map_err(|_| poisoned())?;
         let rows = disks.entry(agent_dir.to_path_buf()).or_default().clone();
-        Ok(Box::new(MemLog { rows, codecs }))
+        Ok(Box::new(MemLog {
+            rows,
+            codecs,
+            committed: false,
+        }))
+    }
+
+    /// A copy of the log as it is now: what the writer adds later is not in it.
+    fn read_committed(
+        &self,
+        agent_dir: &Path,
+        codecs: CodecSet,
+    ) -> Result<Box<dyn AgentLog>, LogError> {
+        let disks = self.disks.lock().map_err(|_| poisoned())?;
+        let rows = disks
+            .get(agent_dir)
+            .ok_or_else(|| LogError::Storage(format!("{} has no log", agent_dir.display())))?;
+        let now = rows.lock().map_err(|_| poisoned())?.clone();
+        Ok(Box::new(MemLog {
+            rows: Arc::new(Mutex::new(now)),
+            codecs,
+            committed: true,
+        }))
     }
 }
 
 struct MemLog {
     rows: Rows,
     codecs: CodecSet,
+    /// A reading of what was committed ([`LogEngine::read_committed`]): it writes nothing.
+    committed: bool,
 }
 
 impl MemLog {
@@ -82,6 +107,11 @@ impl MemLog {
 
 impl AgentLog for MemLog {
     fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError> {
+        if self.committed {
+            return Err(LogError::Storage(
+                "a reading of what was committed writes nothing".to_string(),
+            ));
+        }
         // Encode first: an item that cannot be stored must leave the log as it was.
         let mut encoded = Vec::with_capacity(items.len());
         for item in items {
