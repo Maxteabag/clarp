@@ -1400,15 +1400,18 @@ pub fn list(shelves: &[Shelf<'_>], listing: &Listing, now: i64) -> Vec<Value> {
                 .map(move |a| (shelf, a))
         })
         .collect();
-    let key = |artifact: &Artifact| {
-        let at = if listing.by_creation {
+    let time = |artifact: &Artifact| {
+        if listing.by_creation {
             artifact.created_at
         } else {
             artifact.updated_at
-        };
-        (at, artifact.artifact_id.clone())
+        }
     };
-    found.sort_by_key(|(_, artifact)| std::cmp::Reverse(key(artifact)));
+    found.sort_by(|(_, left), (_, right)| {
+        time(right)
+            .cmp(&time(left))
+            .then_with(|| right.artifact_id.cmp(&left.artifact_id))
+    });
     let limit = usize::try_from(listing.limit.clamp(1, 500)).unwrap_or(1);
     let offset = usize::try_from(listing.offset.max(0)).unwrap_or(0);
     found
