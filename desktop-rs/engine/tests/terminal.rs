@@ -49,7 +49,7 @@ fn the_terminal_opens_this_desktop_as_the_bridge_to_the_hosts_terminal() {
     assert_eq!(opened[0]["directory"], directory);
     assert_eq!(
         opened[0]["arguments"],
-        json!([format!("--dir={directory}"), "--title=Rachel — claude", "--", bridge, "--agent-terminal", "rachel", "--host", host.base])
+        json!([format!("--dir={directory}"), "--title=Rachel · claude", "--", bridge, "--agent-terminal", "rachel", "--host", host.base])
     );
 
     // A backend whose CLI is not on this desktop opens all the same, in the
