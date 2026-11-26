@@ -97,6 +97,10 @@ pub fn buttons_check(out: String) {
     let (out1, out2, out3, out4, out5, out6, out7, out8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
+    let stop_baseline = Rc::new(Cell::new(0));
+    let direct_stop_baseline = stop_baseline.clone();
+    let direct_stop_count = stop_baseline.clone();
+    let steer_stop_baseline = stop_baseline.clone();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, elapsed| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
@@ -293,6 +297,7 @@ pub fn buttons_check(out: String) {
             check(!view().meter_warn, "2% of the context is no warning");
             check_window_size_free(window, "with the waiting line shown");
             shot(&out4, "buttons-04-queue-strip");
+            direct_stop_baseline.set(requests_posted("/stop"));
             check(press(&action), "Stop and send is pressed");
             true
         })),
@@ -301,7 +306,10 @@ pub fn buttons_check(out: String) {
                 check(elapsed < Duration::from_secs(5), "Stop and send takes over with q1, the oldest item");
                 return elapsed >= Duration::from_secs(5);
             }
-            check(posts("/stop").is_empty() && requests_posted("/turn-queue/q2/take-over") == 0, "only the oldest takes over");
+            check(
+                requests_posted("/stop") == direct_stop_count.get() && requests_posted("/turn-queue/q2/take-over") == 0,
+                "Stop and send takes over with q1 without issuing another Stop",
+            );
             check(requests_posted("/turn-queue/q1/send") == 0, "the chip uses the take-over endpoint");
             shot(&out5, "buttons-05-stop-and-send");
             // Near the account's limit and deep in the context: the meter warns.
@@ -322,7 +330,6 @@ pub fn buttons_check(out: String) {
             let meter = label(&format!("composer-meter:{pane}"));
             check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
             shot(&out6, "buttons-06-meter-near");
-            crate::queue_strip::set_shown(&app_now(), true);
             check(control("/__control/turn-queue", &json!({"session": "rachel", "items": [
                 {"queue_id": "q0", "text": "waiting before q2"},
                 {"queue_id": "q2", "text": "newest waiting"},
@@ -330,8 +337,23 @@ pub fn buttons_check(out: String) {
             check(control("/__control/fail", &json!({"path": "/turn-queue/q2/steer", "status": 409,
                 "response": {"code": "not_steerable", "error": "This turn cannot steer."},
             })).is_ok(), "the Host will refuse the steer");
-            check(control("/__control/send-while-working", &json!({"on": true})).is_ok(), "and Send while working");
-            app_now().engine.borrow_mut().reconnect();
+            true
+        })),
+        ("replacement queue loaded", Box::new(|app, _, elapsed| {
+            // Keep the line hidden until the replacement is loaded. Both
+            // fixtures have two messages, so the count alone cannot tell.
+            let loaded = {
+                let engine = app.engine.borrow();
+                engine.turn_queue("rachel").iter().any(|item| item["queue_id"] == "q0" && item["steerable"] == true)
+            };
+            if !loaded {
+                if elapsed >= Duration::from_secs(5) {
+                    check(false, "the replacement queue did not load");
+                    return true;
+                }
+                return false;
+            }
+            crate::queue_strip::set_shown(app, true);
             true
         })),
         ("steer offered", Box::new(move |_, window, elapsed| {
@@ -348,16 +370,23 @@ pub fn buttons_check(out: String) {
             let options: Vec<String> = window.global::<crate::SendChoice>().get_options().iter().map(|o| o.label.to_string()).collect();
             check(options == ["After the turn", "Stop and send"], &format!("Send's menu offers the other two: {options:?}"));
             // By key: Ctrl+Shift+Enter does the line's action.
+            steer_stop_baseline.set(requests_posted("/stop"));
             app_now().focus_composer();
             headless::press_with(&[slint::platform::Key::Control, slint::platform::Key::Shift], slint::platform::Key::Return);
             true
         })),
-        ("steered", Box::new(|_, _, elapsed| {
+        ("steered", Box::new(move |_, _, elapsed| {
             if requests_posted("/turn-queue/q2/steer") != 1 || requests_posted("/turn-queue/q0/take-over") != 1 {
                 check(elapsed < Duration::from_secs(5), "the refused steer of q2 takes over with the oldest, q0");
                 return elapsed >= Duration::from_secs(5);
             }
-            check(posts("/stop").is_empty() && requests_posted("/turn-queue/q2/take-over") == 0, "the fallback takes over with q0");
+            check(
+                requests_posted("/stop") == stop_baseline.get()
+                    && requests_posted("/turn-queue/q2/take-over") == 0
+                    && requests_posted("/turn-queue/q0/send") == 0
+                    && requests_posted("/turn-queue/q2/send") == 0,
+                "the refused steer of q2 takes over with q0 without another Stop or Send now",
+            );
             check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
             // Three wait now: still one line.
             let items = json!([{"queue_id": "q3", "text": "third"}, {"queue_id": "q4", "text": "fourth"}, {"queue_id": "q5", "text": "fifth"}]);
@@ -408,15 +437,20 @@ pub fn buttons_check(out: String) {
             }
             check(crate::queue_strip::shown(&app.engine.borrow()), "the setting is on again");
             check(control("/__control/agent", &json!({"session": "rachel", "set": {
-                "busy": false, "latest_state": "idle", "queue_paused": true,
+                "busy": false, "latest_state": "idle", "latest_state_ts": chrono::Utc::now().timestamp_millis(), "queue_paused": true,
             }})).is_ok(), "Rachel is idle with a held queue");
             true
         })),
         ("held queue with the new Host feature", Box::new(|app, _, elapsed| {
             let action = format!("steer-chip-action:{}", app.active_id());
-            if label(&action) != "Send now" || !view().queue_paused {
-                check(elapsed < Duration::from_secs(5), "the held line offers Send now on the feature Host");
-                return elapsed >= Duration::from_secs(5);
+            let button = label(&action);
+            let pane = view();
+            if button != "Send now" || !pane.queue_paused || pane.chip_target != "q3" {
+                if elapsed >= Duration::from_secs(5) {
+                    check(false, &format!("feature Host held queue: button {button:?}, busy {}, paused {}, target {:?}", pane.busy, pane.queue_paused, pane.chip_target));
+                    return true;
+                }
+                return false;
             }
             check(app.engine.borrow().send_while_working_offered_for("rachel"), "the Host advertises send_while_busy");
             check(press(&action), "Send now is pressed for the held item");
@@ -427,6 +461,7 @@ pub fn buttons_check(out: String) {
                 check(elapsed < Duration::from_secs(5), "the feature Host sends the first held message");
                 return elapsed >= Duration::from_secs(5);
             }
+            check(true, "the feature Host received Send now for q3");
             check(control("/__control/send-while-working", &json!({"on": false})).is_ok(), "the Host now offers only the older queue feature");
             app.engine.borrow_mut().reconnect();
             true
@@ -449,8 +484,9 @@ pub fn buttons_check(out: String) {
                 check(elapsed < Duration::from_secs(5), "the older Host sends the first held message");
                 return elapsed >= Duration::from_secs(5);
             }
+            check(true, "the queue_steer-only Host received Send now for q4");
             check(control("/__control/agent", &json!({"session": "rachel", "set": {
-                "busy": true, "latest_state": "thinking", "queue_paused": false,
+                "busy": true, "latest_state": "thinking", "latest_state_ts": chrono::Utc::now().timestamp_millis(), "queue_paused": false,
             }})).is_ok(), "Rachel starts working again");
             check(control("/__control/turn-queue", &json!({"session": "rachel", "items": [
                 {"queue_id": "legacy-oldest", "text": "older"},
