@@ -453,10 +453,6 @@ export component QueueStrip inherits Rectangle {
             Rectangle {
                 horizontal-stretch: 1;
                 min-width: 0px;
-                accessible-role: root.folded ? AccessibleRole.button : AccessibleRole.text;
-                accessible-id: root.folded ? "queue-folded:" + root.pane-id : "";
-                accessible-label: summary.text;
-                accessible-action-default => { if (root.folded) { root.manage(); } }
                 summary := Text {
                     width: parent.width;
                     height: parent.height;
@@ -464,15 +460,17 @@ export component QueueStrip inherits Rectangle {
                         : (root.count == 1 ? "1 message waiting" : root.count + " messages waiting")
                         + (root.paused && !root.busy ? "  ·  queue paused: Send now runs one"
                             : root.busy ? "  ·  Send now hands it to the agent during this turn" : "");
-                    color: root.folded && summary-touch.has-hover ? Palette.text : Palette.muted;
+                    color: Palette.muted;
                     font-size: 11 * Look.unit;
                     overflow: elide;
                     vertical-alignment: center;
                 }
-                summary-touch := TouchArea {
-                    enabled: root.folded;
-                    mouse-cursor: root.folded ? pointer : default;
-                    clicked => { root.manage(); }
+                if root.folded: Rectangle {
+                    accessible-role: button;
+                    accessible-id: "queue-folded:" + root.pane-id;
+                    accessible-label: summary.text;
+                    accessible-action-default => { root.manage(); }
+                    summary-touch := TouchArea { mouse-cursor: pointer; clicked => { root.manage(); } }
                 }
             }
             if root.folded && root.next.id != "": TipButton {
