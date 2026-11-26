@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 207;
+pub const HOST_CONTRACT: u64 = 208;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -532,6 +532,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `hidden_after`), and are not carried where the chat's visibility changed since the
     // connection's last rows of it; one read per event and set of options (issue 928).
     ("events_rows_options", 207),
+    // What the owner's Send does while the agent works, one setting of the Host's for every app
+    // (issue 920): `GET /send-settings` says `while_busy` (`steer`, the default, `after_turn` or
+    // `take_over`), `POST /send-settings` changes it and every app is told
+    // (`send-settings-updated`). `POST /send` takes `while_busy`: for the owner's own send while
+    // a turn runs, read in, wait for the turn, or stop it and run next; where the turn cannot
+    // take words at all, `steer` stops it instead. The answer says `while_busy` (what was done)
+    // and, where that is not what was asked, `fallback` with the chip's line.
+    ("send_while_busy", 208),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -919,6 +927,10 @@ pub fn router(app: App) -> Router {
         .route(
             "/lane-settings",
             get(crate::lane_settings::get).post(crate::lane_settings::set),
+        )
+        .route(
+            "/send-settings",
+            get(crate::send_settings::get).post(crate::send_settings::set),
         )
         .route("/agent-notes", post(crate::coordination::agent_note))
         .route("/orchestrator/route-delegation", post(route_delegation))

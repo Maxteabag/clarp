@@ -121,6 +121,7 @@ pub mod router;
 pub mod schedules;
 pub mod screens;
 pub mod search;
+mod send_settings;
 pub mod seats;
 mod takeover;
 pub mod teams;
