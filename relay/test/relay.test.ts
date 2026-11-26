@@ -67,6 +67,7 @@ describe('public routing and authentication', () => {
     expect(await result.json()).toEqual({ ready: true });
     const request = await received;
     expect(request.path).toBe('/status?q=one');
+    expect(request.passthrough_encoding).toBe(true);
     expect(request.headers['x-forwarded-prefix']).toBe(`/h/${hostID}`);
     expect(request.headers.authorization).toBe('Bearer test-device');
   });
@@ -97,11 +98,15 @@ describe('public routing and authentication', () => {
 describe('HTTP frame lifecycle', () => {
   it('frames request bodies and preserves response bytes and headers', async () => {
     const { object, host, sent } = relay();
-    const response = object.fetch(new Request('https://relay.test/agents/snapshot?q=one', { method: 'POST', body: 'hello' }));
+    const response = object.fetch(new Request('https://relay.test/agents/snapshot?q=one', { method: 'POST', body: 'hello', headers: { 'x-relay-client-encoding': 'gzip;q=0', 'accept-encoding': 'br, gzip' } }));
     await new Promise(resolve => setTimeout(resolve, 0));
     const frames = sent.map(unpack);
     expect(frames.map(f => f.kind)).toEqual([1, 2, 3]);
-    expect(JSON.parse(new TextDecoder().decode(frames[0].payload)).path).toBe('/agents/snapshot?q=one');
+    const metadata = JSON.parse(new TextDecoder().decode(frames[0].payload));
+    expect(metadata.path).toBe('/agents/snapshot?q=one');
+    expect(metadata.passthrough_encoding).toBe(true);
+    expect(metadata.headers['accept-encoding']).toBe('gzip;q=0');
+    expect(metadata.headers['x-relay-client-encoding']).toBeUndefined();
     expect(new TextDecoder().decode(frames[1].payload)).toBe('hello');
     await object.webSocketMessage(host, json(0x11, 1, { status: 200, headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' } }));
     const res = await response;
@@ -125,7 +130,8 @@ describe('HTTP frame lifecycle', () => {
   });
   it('tells the Host it passes a packed answer through, so the Host may pack it', async () => {
     const { object, sent } = relay();
-    object.fetch(new Request('https://relay.test/events?gzip=1', { headers: { 'accept-encoding': 'gzip' } }));
+    // The Worker hands the Durable Object what the client itself offered (x-relay-client-encoding).
+    object.fetch(new Request('https://relay.test/events?gzip=1', { headers: { 'x-relay-client-encoding': 'gzip' } }));
     await new Promise(resolve => setTimeout(resolve, 0));
     const head = JSON.parse(new TextDecoder().decode(sent.map(unpack).find(f => f.kind === 1)!.payload));
     expect(head.passthrough_encoding).toBe(true);
