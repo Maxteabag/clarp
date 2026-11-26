@@ -92,3 +92,19 @@ fn every_chat_cached_for_a_host_is_listed() {
     assert_eq!(chats[1].1["turns"][0]["text"], "one");
     std::fs::remove_dir_all(&directory).unwrap();
 }
+
+#[test]
+fn forgetting_a_host_removes_its_chats_and_agent_list_and_keeps_other_hosts() {
+    let directory = std::env::temp_dir().join(format!("clarp-transcript-forget-{}", std::process::id()));
+    let cache = TranscriptCache::new(&directory);
+    let snapshot = log(json!({"conversation_id": "c", "turns": []}));
+    cache.save("https://a.example", "rachel", &snapshot).unwrap();
+    cache.save("https://a.example", "mike", &snapshot).unwrap();
+    cache.save("https://b.example", "rachel", &snapshot).unwrap();
+    cache.save_roster("https://a.example", &log(json!({"agents": []}))).unwrap();
+    cache.forget_host("https://a.example");
+    assert!(cache.all("https://a.example").unwrap().is_empty(), "the Host's chats are gone");
+    assert!(cache.load_roster("https://a.example").is_empty(), "its agent list too");
+    assert_eq!(cache.all("https://b.example").unwrap().len(), 1, "another Host's chat stays");
+    let _ = std::fs::remove_dir_all(&directory);
+}
