@@ -197,10 +197,15 @@ impl Withheld {
     }
 
     /// An object of a withheld agent with its words blanked: what says whose it is, what it
-    /// is and when stays, and every other text is emptied, all the way down.
+    /// is and when stays, and every other text is emptied, all the way down. The rows a
+    /// `transcript-updated` carries (feature `events_rows`) are left out whole: their count,
+    /// kinds, times and ids are what `/log` refuses such a reader, not words to blank.
     fn blanked(&self, fields: &Map<String, Value>) -> Value {
         let mut kept = Map::new();
         for (key, value) in fields {
+            if CARRIED.contains(&key.as_str()) {
+                continue;
+            }
             kept.insert(key.clone(), self.blank(key, value));
         }
         kept.insert("words_withheld".to_string(), Value::Bool(true));
@@ -280,6 +285,10 @@ impl Withheld {
         out.into_bytes()
     }
 }
+
+/// What a `transcript-updated` carries of a chat's rows (feature `events_rows`): left out of a
+/// withheld agent's event, never blanked.
+const CARRIED: [&str; 2] = ["rows", "rows_latest"];
 
 /// The keys that say whose an object is.
 /// An object is the agent's that says it is from it, for it, about it or done by it: its own
@@ -1550,6 +1559,34 @@ mod tests {
         assert!(out.ends_with("\n\n"), "{out}");
         let other = b"data: {\"type\":\"log-row\",\"session\":\"ben\",\"text\":\"fine\"}\n\n";
         assert_eq!(withheld.frame(other), other.to_vec());
+    }
+
+    #[test]
+    fn bound_privacy_leaves_out_the_rows_a_withheld_agents_event_carries() {
+        let bound = record("ada", "/homes/ada", "theirs");
+        let withheld = Withheld::among([&bound], &Reader::Unknown).unwrap();
+        let frame = concat!(
+            "id: 9\ndata: {\"type\":\"transcript-updated\",\"session\":\"ada\",",
+            "\"head_revision\":12,\"rows_from\":10,\"rows_latest\":12,",
+            "\"rows\":[{\"id\":\"r1\",\"role\":\"assistant\",\"revision\":11,",
+            "\"timestamp\":\"2026-11-26T05:00:00Z\",\"trace_id\":\"t1\",\"text\":\"secret\"}]}\n\n"
+        );
+        let out = String::from_utf8(withheld.frame(frame.as_bytes())).unwrap();
+        let data = out.strip_prefix("id: 9\ndata: ").unwrap().trim_end();
+        let event: Value = serde_json::from_str(data).unwrap();
+        assert!(
+            event.get("rows").is_none() && event.get("rows_latest").is_none(),
+            "{event}"
+        );
+        assert_eq!(
+            event["rows_from"], 10,
+            "where the rows begin stays: the client reads /log"
+        );
+        assert_eq!(event["head_revision"], 12);
+        assert_eq!(event["words_withheld"], true);
+        // A readable agent's rows go as they are.
+        let open = frame.replace("\"ada\"", "\"ben\"");
+        assert_eq!(withheld.frame(open.as_bytes()), open.as_bytes().to_vec());
     }
 
     #[test]

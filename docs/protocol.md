@@ -1402,8 +1402,9 @@ A client that holds the event's `conversation_id` at revision `rows_from` or hig
 by `id` and `revision` (the rules of `/log`) and then holds `rows_latest`; it reads nothing. One
 that holds less than `rows_from` (it missed an event, or holds another conversation), one that was
 sent no `rows`, and one that reads `/log` with other options (`view`, `coordination`,
-`include_automated=0`, `include_tool_details` other than `0`) reads `/log` as before. A row of an
-agent whose words the reader may not read is blanked in the event as in `/log` (bound privacy).
+`include_automated=0`, `include_tool_details` other than `0`) reads `/log` as before. A reader
+that may not read the agent (bound privacy) is sent its `transcript-updated` without `rows` and
+`rows_latest`, and `/log` refuses it (403 `bound_conversation`), as before.
 Measured with the apps' way of listening and `gzip=1` (`server-rs/tools/build wire-read`, issue
 879), one short answer cost such a client 4.4 KB and no `/log` call, against 11.4 KB with nine
 `/log` calls without it.
