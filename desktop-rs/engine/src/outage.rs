@@ -15,6 +15,14 @@
 //! `/log` sent before the round, a `/live` still outstanding) never complete
 //! it. A stream that reopens alone does not end the outage.
 //!
+//! Following the panes (`viewport.rs`), a reopened stream is not yet
+//! caught up even with its reads: until its `stream` event names the sets
+//! the Host applies, no chat counts as shown. The round starts there, with
+//! the stream's own reconciliation as its reads (the roster once, `GET
+//! /live` and `/log` for every chat streamed in full), and follows the sets
+//! a `live-changed` applies while it runs. A stream replaced after a refused
+//! change ends the round; the new one starts the next.
+//!
 //! A `/log` read that fails on the way to the Host while the stream is up
 //! tries again by itself on a capped, jittered backoff; it does not wait for
 //! the next snapshot. `/select` (focus, a write) is not sent again: a failure
@@ -197,14 +205,44 @@ impl Engine {
             if self.error_is_transport {
                 self.set_error("");
             }
-            self.force_snapshot();
+            // Following the panes, the new stream's `stream` event reads the
+            // roster once and reconciles the shown chats.
+            if !self.viewport_streaming() {
+                self.force_snapshot();
+            }
             self.live_reconnected();
             self.live_resubscribed();
             return;
         }
         self.outage.reopened = Some(Instant::now());
-        eprintln!("Engine: the event stream is back after {} ms; catching up before saying so", self.outage.outage.elapsed(Instant::now()).as_millis());
+        let after = self.outage.outage.elapsed(Instant::now()).as_millis();
+        if self.viewport_streaming() {
+            // What the Host shows on it is known at its `stream` event.
+            eprintln!("Engine: the event stream is back after {after} ms; catching up from its opening before saying so");
+            return;
+        }
+        eprintln!("Engine: the event stream is back after {after} ms; catching up before saying so");
         self.begin_catch_up();
+    }
+
+    /// A new stream named itself (`viewport.rs`). In an outage, the round
+    /// starts here and makes the stream's reads; true when it did.
+    pub(crate) fn outage_stream_named(&mut self) -> bool {
+        if !self.outage.outage.active() || !self.connected {
+            return false;
+        }
+        self.begin_catch_up();
+        true
+    }
+
+    /// The stream was replaced after a refused change, with no drop: a
+    /// round under way read for the old one. The outage clock keeps
+    /// running; the new stream's opening starts the next round.
+    pub(crate) fn outage_stream_replaced(&mut self) {
+        if self.outage.catch_up.is_some() {
+            self.outage.generation += 1;
+            self.outage.catch_up = None;
+        }
     }
 
     // ---- the catch-up round ----------------------------------------------
@@ -212,6 +250,10 @@ impl Engine {
     /// The chats a round must read: the selected one and every one shown in
     /// a pane, on this engine's Host.
     fn catch_up_sessions(&self) -> Vec<String> {
+        if self.viewport_streaming() {
+            // Following the panes: those the stream now streams in full.
+            return self.full_now().into_iter().collect();
+        }
         let mut sessions: Vec<String> = self.live_kept_sessions().into_iter().filter(|s| !clarp_core::all_hosts::is_peer_session(s)).collect();
         sessions.sort();
         sessions
@@ -232,8 +274,24 @@ impl Engine {
             logs: HashSet::new(),
             live: HashSet::new(),
         });
-        self.force_snapshot();
         let required = self.catch_up_sessions();
+        if self.viewport_streaming() {
+            // The stream's own reconciliation is the round's reads; hidden
+            // chats read nothing until a pane shows them.
+            for session in &required {
+                self.outage.log_retry.remove(session);
+            }
+            let full = required.iter().cloned().collect();
+            self.viewport_reconcile(&full);
+            let (logs, live) = self.catch_up_reads(&required);
+            if let Some(round) = self.outage.catch_up.as_mut() {
+                round.logs = logs;
+                round.live = live;
+            }
+            self.finish_catch_up_if_done();
+            return;
+        }
+        self.force_snapshot();
         // Every chat held reads what it missed; the required ones gate the end.
         let mut held: Vec<String> = self.conversations.keys().cloned().collect();
         held.sort();
@@ -251,6 +309,36 @@ impl Engine {
         if let Some(round) = self.outage.catch_up.as_mut() {
             round.logs = logs;
             round.live = live;
+        }
+        self.finish_catch_up_if_done();
+    }
+
+    /// Of `sessions`, those whose `/log` and those whose `/live` a round
+    /// waits for, following the panes: a read on its way or waiting for an
+    /// earlier one, and the boundary read of every live view.
+    fn catch_up_reads(&self, sessions: &[String]) -> (HashSet<String>, HashSet<String>) {
+        let logs = sessions
+            .iter()
+            .filter(|s| self.outage.log_sent.contains_key(*s) || self.log_in_flight.contains(*s) || self.live.viewport.after_read.contains_key(*s))
+            .cloned()
+            .collect();
+        let live = if self.live.enabled { sessions.iter().filter(|s| self.live.views.contains_key(*s)).cloned().collect() } else { HashSet::new() };
+        (logs, live)
+    }
+
+    /// A `live-changed` applied new sets while a round runs: a chat no
+    /// longer streamed in full is not waited for (its reads wait for its
+    /// pane), and one that `reconciled` there is.
+    pub(crate) fn catch_up_sets_changed(&mut self, full: &std::collections::BTreeSet<String>, reconciled: &[String]) {
+        if !self.outage_catching_up() {
+            return;
+        }
+        let (logs, live) = self.catch_up_reads(reconciled);
+        if let Some(round) = self.outage.catch_up.as_mut() {
+            round.logs.retain(|s| full.contains(s));
+            round.live.retain(|s| full.contains(s));
+            round.logs.extend(logs);
+            round.live.extend(live);
         }
         self.finish_catch_up_if_done();
     }
@@ -337,13 +425,17 @@ impl Engine {
     /// A read answered while the stream runs, in an outage with no round:
     /// the Host answers again (an outage of reads), so a round starts.
     fn begin_after_read(&mut self) {
-        if self.outage.outage.active() && self.connected && self.sse.connected() {
+        // Following the panes, not before the stream named its sets.
+        let named = !self.viewport_streaming() || self.live.viewport.stream_id.is_some();
+        if self.outage.outage.active() && self.connected && self.sse.connected() && named {
             self.begin_catch_up();
         }
     }
 
     fn finish_catch_up_if_done(&mut self) {
+        let named = !self.viewport_streaming() || self.live.viewport.stream_id.is_some();
         let done = self.connected
+            && named
             && self.outage.catch_up.as_ref().is_some_and(|r| r.generation == self.outage.generation && r.roster && r.logs.is_empty() && r.live.is_empty());
         if !done {
             return;
@@ -421,6 +513,12 @@ impl Engine {
 
     pub(crate) fn log_retry_due(&mut self, session: &str, token: u64) {
         if self.outage.log_retry.get(session).map(|(_, t)| *t) != Some(token) || self.log_in_flight.contains(session) {
+            return;
+        }
+        if self.live.viewport.after_read.contains_key(session) {
+            // A stream's reconciliation waited for the read that failed: it
+            // is this retry (one read, in the stronger mode).
+            self.reconcile_log(session, crate::viewport::Read::Delta);
             return;
         }
         let required = self.catch_up_sessions().iter().any(|s| s == session);

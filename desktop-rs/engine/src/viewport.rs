@@ -118,6 +118,13 @@ pub(crate) struct Viewport {
     pub query: Vec<(String, String)>,
     /// Chats no pane shows whose `/log` read waits for them to be shown.
     pub deferred: HashMap<String, Read>,
+    /// Reconciliations waiting for a `/log` read made before their boundary.
+    pub after_read: HashMap<String, Read>,
+    /// Per chat, the number of the `GET /live` its last boundary asked:
+    /// answers to earlier ones are not taken.
+    pub live_boundary: HashMap<String, u64>,
+    /// The snapshot the current stream's `stream` event asked for.
+    pub stream_snapshot: Option<u64>,
 }
 
 /// Of the chats in `next`'s full set, those that just became fully
@@ -208,13 +215,14 @@ impl Engine {
     }
 
     /// The chats streamed in full now.
-    fn full_now(&self) -> BTreeSet<String> {
+    pub(crate) fn full_now(&self) -> BTreeSet<String> {
         self.live.viewport.effective.as_ref().map(Sets::full).unwrap_or_default()
     }
 
     /// Whether `session` is streamed in full now (a `live` event for it counts).
     pub(crate) fn viewport_full(&self, session: &str) -> bool {
-        self.live.viewport.effective.as_ref().is_some_and(|s| s.live.contains(session) && s.visible.contains(session))
+        self.live.viewport.stream_id.is_some()
+            && self.live.viewport.effective.as_ref().is_some_and(|s| s.live.contains(session) && s.visible.contains(session))
     }
 
     /// Keeps the stream's opening query on the wanted sets, so a reconnect
@@ -268,9 +276,10 @@ impl Engine {
         if viewport.stream_id.as_deref() != Some(stream) || !viewport.in_flight.is_some_and(|n| n.to_string() == seq) {
             return true;
         }
-        viewport.in_flight = None;
-        viewport.stream_id = None;
-        viewport.sent = None;
+        self.viewport_dropped();
+        // A catch-up round under way read for the stream now replaced: the
+        // new stream's own opening starts the next one (`outage.rs`).
+        self.outage_stream_replaced();
         self.viewport_query();
         if self.sse.running() {
             self.sse.resubscribe();
@@ -278,15 +287,23 @@ impl Engine {
         true
     }
 
-    /// The stream dropped: it is no longer the one to post to.
+    /// The stream is gone (dropped, or replaced after a refused change):
+    /// nothing is posted to it, and until the next stream names its sets no
+    /// chat counts as streamed in full, so no read follows the old screen.
     pub(crate) fn viewport_dropped(&mut self) {
         let viewport = &mut self.live.viewport;
         viewport.stream_id = None;
         viewport.in_flight = None;
         viewport.sent = None;
+        viewport.effective = None;
     }
 
-    /// A `stream` event: a new stream, applying the sets it was opened with.
+    /// A `stream` event: every new stream (the first, a reconnect, one
+    /// reopened after a refused change) is reconciled here and only here.
+    /// It applies the sets it was opened with; the roster is read once; and
+    /// every chat it streams in full, unchanged ones too, reads `GET /live`
+    /// and its history from its own revision. Events in between may have
+    /// been missed for any of them.
     pub(crate) fn viewport_stream(&mut self, event: &Object) {
         if !self.viewport_streaming() {
             return;
@@ -297,11 +314,43 @@ impl Engine {
         }
         let opened = event.get("opened_query").and_then(Value::as_object).map(Sets::from_query).unwrap_or_else(|| self.wanted_sets());
         let sets = Sets::from_event(event, &opened.visible).unwrap_or(opened);
+        let full = sets.full();
         let viewport = &mut self.live.viewport;
         viewport.stream_id = Some(stream_id);
         viewport.in_flight = None;
         viewport.sent = Some(sets.clone());
-        self.viewport_boundary(sets, true);
+        viewport.effective = Some(sets);
+        self.live.subscribed = Some(Sets::joined(&full));
+        // Not dropped any more: the old reconnect path must not run later.
+        self.live.dropped = false;
+        self.live.joining.clear();
+        if self.outage_stream_named() {
+            // The Host is back on this stream: the catch-up round makes the
+            // same reads and ends the outage once they answered.
+            return;
+        }
+        self.viewport_reconcile(&full);
+    }
+
+    /// The reads a new stream (or a catch-up round on it) makes: the roster
+    /// once, and every chat it streams in full from its own revision.
+    pub(crate) fn viewport_reconcile(&mut self, full: &BTreeSet<String>) {
+        self.force_snapshot();
+        self.live.viewport.stream_snapshot = self.snapshot_in_flight.then_some(self.snapshot_generation);
+        for session in full {
+            self.reconcile_shown(session);
+        }
+    }
+
+    /// Whether the replay's closing nudge (or a resync marker) on this
+    /// stream is already answered by the snapshot its `stream` event asked
+    /// for, which is still on its way: one read per new stream.
+    pub(crate) fn viewport_snapshot_covers(&self, event: &Object) -> bool {
+        self.viewport_streaming()
+            && json::string(event, "kind").is_empty()
+            && !json::boolean(event, "truncated")
+            && self.snapshot_in_flight
+            && self.live.viewport.stream_snapshot == Some(self.snapshot_generation)
     }
 
     /// A `live-changed` event on this stream: where the sets take effect.
@@ -316,47 +365,77 @@ impl Engine {
         }
         let fallback = self.live.viewport.sent.as_ref().map(|s| s.visible.clone()).unwrap_or_default();
         let Some(sets) = Sets::from_event(event, &fallback) else { return };
-        self.viewport_boundary(sets, false);
-    }
-
-    /// The Host applies `sets` from here on. Each chat that just became
-    /// fully streamed, and each shown chat whose read waited, catches up.
-    fn viewport_boundary(&mut self, sets: Sets, new_stream: bool) {
-        let mut promote = promoted(self.live.viewport.effective.as_ref(), &sets);
+        let promote = promoted(self.live.viewport.effective.as_ref(), &sets);
         let full = sets.full();
-        for session in self.live.viewport.deferred.keys() {
-            if full.contains(session) && !promote.contains(session) {
-                promote.push(session.clone());
-            }
-        }
         self.live.viewport.effective = Some(sets);
         self.live.subscribed = Some(Sets::joined(&full));
-        for session in promote {
-            self.promote(&session, new_stream);
+        // A shown chat whose read waited (asked while it was not yet
+        // streamed in full) goes too.
+        let waited: Vec<String> = self.live.viewport.deferred.keys().filter(|s| full.contains(*s) && !promote.contains(s)).cloned().collect();
+        let reconciled: Vec<String> = promote.into_iter().chain(waited).collect();
+        for session in &reconciled {
+            self.reconcile_shown(session);
         }
+        self.catch_up_sets_changed(&full, &reconciled);
     }
 
-    /// A chat now streamed in full: its live state from `GET /live` (events
-    /// after the boundary wait for it), its history from its own revision.
-    fn promote(&mut self, session: &str, new_stream: bool) {
-        if self.live.views.get(session).is_some_and(|v| !v.awaiting_snapshot()) {
-            self.request_live(session);
+    /// A chat streamed in full from this boundary: its live state from a
+    /// `GET /live` asked now (events after the boundary wait for it by lseq;
+    /// an answer to one asked before is not taken for it), its history from
+    /// its own revision once no earlier read is on its way.
+    fn reconcile_shown(&mut self, session: &str) {
+        if self.live.views.contains_key(session) {
+            self.viewport_live_boundary(session);
         }
         let read = self.live.viewport.deferred.remove(session);
         if !self.conversations.contains_key(session) && read.is_none() {
             // Never opened here: opening it reads it.
             return;
         }
-        if new_stream && read.is_none() && self.log_in_flight.contains(session) {
-            // A read made for this stream's opening is on its way; the
-            // snapshot read on connecting catches anything after it.
+        self.reconcile_log(session, read.unwrap_or(Read::Delta));
+    }
+
+    /// The history read of a reconciliation. A read made before the
+    /// boundary may have missed what came after it, and its answer (or
+    /// failure) clears what was queued behind it: the reconciliation waits
+    /// apart and runs when that read settles (`viewport_log_settled`).
+    pub(crate) fn reconcile_log(&mut self, session: &str, read: Read) {
+        // One reconciliation per chat: one that waited joins this one.
+        let read = self.live.viewport.after_read.remove(session).map_or(read, |waited| waited.max(read));
+        if self.log_in_flight.contains(session) {
+            let entry = self.live.viewport.after_read.entry(session.to_owned()).or_insert(read);
+            *entry = (*entry).max(read);
             return;
         }
         match read {
-            Some(Read::Replace) => self.request_tail(session, true),
-            Some(Read::Tail) => self.request_tail(session, false),
-            _ => self.catch_up_shown(session),
+            Read::Replace => self.request_tail(session, true),
+            Read::Tail => self.request_tail(session, false),
+            Read::Delta => self.catch_up_shown(session),
         }
+    }
+
+    /// The chat's `GET /live` from this boundary on: answers to ones asked
+    /// before it are not taken for it.
+    pub(crate) fn viewport_live_boundary(&mut self, session: &str) {
+        let asked = self.request_live(session);
+        self.live.viewport.live_boundary.insert(session.to_owned(), asked);
+    }
+
+    /// A `/log` read of `session` landed or failed: a reconciliation that
+    /// waited for it runs now.
+    pub(crate) fn viewport_log_settled(&mut self, session: &str) {
+        if self.log_in_flight.contains(session) {
+            return;
+        }
+        if let Some(read) = self.live.viewport.after_read.remove(session) {
+            self.reconcile_log(session, read);
+        }
+    }
+
+    /// Whether a `GET /live` answer numbered `asked` for `session` was asked
+    /// before the chat's last boundary, so cannot stand for it.
+    pub(crate) fn live_before_boundary(&self, session: &str, asked: u64) -> bool {
+        self.live.viewport.live_boundary.get(session).is_some_and(|boundary| asked < *boundary)
     }
 
     /// A shown chat reads what it missed: a new conversation (the row's
@@ -441,7 +520,7 @@ impl Engine {
             return;
         }
         for session in self.full_now() {
-            self.promote(&session, false);
+            self.reconcile_shown(&session);
         }
     }
 }

@@ -111,6 +111,10 @@ impl Engine {
             self.preview_event(event);
             return;
         }
+        if self.viewport_snapshot_covers(event) {
+            // The snapshot this stream's opening asked for is on its way.
+            return;
+        }
         self.viewport_resync(event);
         let step = step(event, self.roster_rows.fields, self.roster_rows.row);
         if step != Step::Snapshot && self.snapshot_in_flight {

@@ -2076,6 +2076,8 @@ class Handler(BaseHTTPRequestHandler):
                         live_filters[id(inbox)] = (live_filters[id(inbox)] or set()) & shown
                         viewport_full[id(inbox)] = set(live_filters[id(inbox)])
                     inbox.put(f"data: {json.dumps({'type': 'stream', 'stream_id': stream_id})}\n\n".encode())
+                    # The replay (none kept here) ends with the plain nudge.
+                    inbox.put(f"data: {json.dumps({'type': 'agent-roster'})}\n\n".encode())
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")

@@ -227,3 +227,56 @@ fn a_dropped_stream_comes_back_with_the_screen_and_reads_only_shown_chats() {
     d.settle(Duration::from_millis(400));
     assert_eq!(log_reads(&host, "mike").len(), mike_reads, "a hidden chat waits for its pane");
 }
+
+#[test]
+fn a_refused_change_reconciles_a_chat_that_stays_shown() {
+    let host = viewport_host("viewport-refused-kept");
+    let mut d = showing_rachel(&host);
+    d.engine.with_panes(|p| p.split_active("vertical", "mike"));
+    d.until("both shown", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["mike", "rachel"]));
+    d.until("mike's log", |e| e.conversation("mike").is_some_and(|c| c.len() >= 1) && !e.log_pending("mike"));
+    d.settle(Duration::from_millis(300));
+    let (live_before, log_before) = (live_reads(&host, "rachel"), log_reads(&host, "rachel").len());
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+    let streams = events_queries(&host).len();
+
+    // mike's pane closes and the change is refused: the stream reopens.
+    // rachel was shown before and after, yet events between the two
+    // streams may be missing for her too.
+    host.control("/__control/viewport", json!({"on": true, "refuse": true}));
+    let pane = d.engine.panes().active_pane_id().to_owned();
+    d.engine.with_panes(|p| p.close_pane(&pane));
+    d.until("the new stream applies rachel", |e| events_queries(&host).len() > streams && e.viewport_effective().is_some_and(|(_, v)| v == ["rachel"]));
+    d.until("rachel's live state read anew", |_| live_reads(&host, "rachel") > live_before);
+    d.until("rachel's history caught up", |_| log_reads(&host, "rachel").len() > log_before);
+    d.settle(Duration::from_millis(500));
+    assert_eq!(host.requests("GET", "/agents/snapshot").len(), snapshots + 1, "one roster snapshot for the new stream, its nudge included");
+    let read = log_reads(&host, "rachel")[log_before].clone();
+    assert!(read["query"].get("after_revision").is_some(), "from rachel's own revision: {read}");
+}
+
+#[test]
+fn panes_changed_while_disconnected_are_reconciled_from_the_new_stream_only() {
+    let host = viewport_host("viewport-offline-panes");
+    let mut d = showing_rachel(&host);
+    d.engine.select("mike");
+    d.until("mike's log", |e| e.conversation("mike").is_some_and(|c| c.len() >= 1) && !e.log_pending("mike"));
+    d.engine.select("rachel");
+    d.until("rachel shown again", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["rachel"]));
+    d.settle(Duration::from_millis(300));
+
+    host.control("/__control/outage", json!({"seconds": 1.0}));
+    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    let (rachel_live, rachel_log) = (live_reads(&host, "rachel"), log_reads(&host, "rachel").len());
+    let (mike_live, mike_log) = (live_reads(&host, "mike"), log_reads(&host, "mike").len());
+    // While the stream is down the screen moves from rachel to mike.
+    d.engine.select("mike");
+    d.until("live again", |e| e.connection_state() == "live");
+    d.until("the new stream applies mike", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["mike"]));
+    assert_eq!(events_queries(&host).last().unwrap()["visible"], "mike", "opened with the screen as it is now");
+    d.until("mike's live state", |_| live_reads(&host, "mike") > mike_live);
+    d.until("mike's history", |_| log_reads(&host, "mike").len() > mike_log);
+    d.settle(Duration::from_millis(500));
+    assert_eq!(live_reads(&host, "rachel"), rachel_live, "no /live from the screen before the drop");
+    assert_eq!(log_reads(&host, "rachel").len(), rachel_log, "no /log for a chat hidden meanwhile");
+}

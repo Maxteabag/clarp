@@ -1159,6 +1159,11 @@ impl Engine {
             }
         }
         // Caches behind the Host's head, or on a dead conversation, catch up.
+        // Following the panes, a new stream's `stream` event does this for
+        // the chats it streams in full, and hidden ones wait for their pane.
+        if self.viewport_streaming() {
+            return;
+        }
         let stale: Vec<(String, bool)> = self
             .conversations
             .iter()
@@ -1528,6 +1533,7 @@ impl Engine {
             self.catching_up.remove(session);
         }
         self.continue_pending_log_request(session);
+        self.viewport_log_settled(session);
         self.catch_up_log(session, answered);
     }
 
@@ -1826,6 +1832,7 @@ impl Engine {
                 c.set_loading(false);
                 c.set_error(&detail);
             });
+            self.viewport_log_settled(&session);
             // The Host answered (with a refusal): a catch-up round has
             // nothing more to read for this chat.
             let answered = self.outage.log_sent.remove(&session);
