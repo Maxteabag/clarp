@@ -32,6 +32,10 @@ pub(crate) enum How {
     Answered,
     /// It ended done, and nothing it said reached the chat.
     Empty,
+    /// It ended done without words on another agent's message: an agent that chose not to
+    /// answer (a "no reply needed", a note that only informs), not a backend that failed.
+    /// Marked in the finding, never counted against the backend.
+    Silent,
     /// It failed, for this reason.
     Failed { reason: String },
     /// It failed on the backend's sign-in.
@@ -41,7 +45,7 @@ pub(crate) enum How {
 impl How {
     fn bad(&self) -> Option<String> {
         match self {
-            Self::Answered => None,
+            Self::Answered | Self::Silent => None,
             Self::Empty => Some("empty".to_owned()),
             Self::Failed { reason } => Some(format!("failed: {reason}")),
             Self::SignIn => Some("sign-in".to_owned()),
@@ -82,6 +86,9 @@ pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Opti
         {
             Some(How::Answered)
         }
+        // An agent's message answered with silence: the user asked nothing, and an agent may
+        // be told not to reply. A turn of the user's, or one the Host started, still counts.
+        Outcome::Completed if matches!(origin, Origin::Agent { .. }) => Some(How::Silent),
         Outcome::Completed => Some(How::Empty),
         Outcome::Failed { kind, .. }
             if kind == USAGE_LIMIT
@@ -148,6 +155,7 @@ pub(super) fn findings(
     struct Tally<'a> {
         turns: usize,
         bad: usize,
+        silent: usize,
         reasons: BTreeMap<String, usize>,
         newest: Option<&'a Ended>,
     }
@@ -159,6 +167,9 @@ pub(super) fn findings(
     {
         let tally = backends.entry(&ended.backend).or_default();
         tally.turns += 1;
+        if ended.how == How::Silent {
+            tally.silent += 1;
+        }
         if let Some(reason) = ended.how.bad() {
             tally.bad += 1;
             *tally.reasons.entry(reason).or_default() += 1;
@@ -192,11 +203,16 @@ pub(super) fn findings(
         } else {
             format!(" on {host}")
         };
+        let silent = match tally.silent {
+            0 => String::new(),
+            1 => " 1 more ended without words on another agent's message; it is not counted.".to_owned(),
+            n => format!(" {n} more ended without words on another agent's message; they are not counted."),
+        };
         seen.add(
             KIND,
             backend,
             format!(
-                "{} of {} {backend} turns{place} in the last hour did not reach the chat: {reasons}. The newest at {at}, agent {}.",
+                "{} of {} {backend} turns{place} in the last hour did not reach the chat: {reasons}. The newest at {at}, agent {}.{silent}",
                 tally.bad, tally.turns, newest.session,
             ),
         );
@@ -265,6 +281,29 @@ mod tests {
             judged(&Outcome::Completed, &compaction, false),
             Some(How::Answered),
             "a compaction says nothing by design"
+        );
+        let agent = Origin::Agent {
+            agent_id: "front-desk".into(),
+        };
+        assert_eq!(
+            judged(&Outcome::Completed, &agent, false),
+            Some(How::Silent),
+            "an agent's message answered with silence is a choice, not a backend that failed"
+        );
+        assert_eq!(
+            judged(&Outcome::Completed, &agent, true),
+            Some(How::Answered)
+        );
+        assert_eq!(
+            judged(
+                &Outcome::Completed,
+                &Origin::Trigger {
+                    name: "automation".into()
+                },
+                false
+            ),
+            Some(How::Empty),
+            "a goal taken up again that says nothing still counts"
         );
         assert_eq!(
             judged(
@@ -361,6 +400,27 @@ mod tests {
         assert_eq!(
             seen(&two, &[], now)[&(KIND.into(), "deepseek".into())],
             "2 of 4 deepseek turns on laptopstudio in the last hour did not reach the chat: empty; failed: process exited 1. The newest at 07:50, agent kai-3."
+        );
+        let quiet = [
+            good(1, now - 50 * MINUTE),
+            ended(2, now - 45 * MINUTE, How::Silent),
+            ended(3, now - 40 * MINUTE, How::Silent),
+            ended(4, now - 30 * MINUTE, How::Silent),
+            good(5, now - 5 * MINUTE),
+        ];
+        assert!(
+            seen(&quiet, &[], now).is_empty(),
+            "silence on agents' messages opens nothing"
+        );
+        let mixed = [
+            ended(1, now - 50 * MINUTE, How::Silent),
+            ended(2, now - 40 * MINUTE, crash("process exited 1")),
+            ended(3, now - 10 * MINUTE, How::Empty),
+            good(4, now - 5 * MINUTE),
+        ];
+        assert_eq!(
+            seen(&mixed, &[], now)[&(KIND.into(), "deepseek".into())],
+            "2 of 4 deepseek turns on laptopstudio in the last hour did not reach the chat: empty; failed: process exited 1. The newest at 07:50, agent kai-3. 1 more ended without words on another agent's message; it is not counted."
         );
         let one = [
             good(1, now - 50 * MINUTE),
