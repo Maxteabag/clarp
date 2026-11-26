@@ -91,7 +91,7 @@ pub fn explorer_check(out: String) {
             }
             ready
         })),
-        ("explorer", Box::new(|_, window, elapsed| {
+        ("explorer", Box::new(move |_, window, elapsed| {
             if !window.get_sidebar_focused() || elapsed < Duration::from_millis(300) {
                 return false;
             }
