@@ -32,6 +32,10 @@ def send(kind, **fields):
             f.write(row + "\n")
     print(row, flush=True)
 
+if (root / "before-init").exists():
+    (root / "source-before-init").touch()
+    while (root / "before-init").exists():
+        time.sleep(0.05)
 send("system", subtype="init", model="claude-stand-in")
 if (root / "quiet-hold").exists():
     (root / "quiet-ready").touch()
@@ -340,26 +344,70 @@ fn queue_for_transit(host: &Host, session: &str, id: &str, text: &str) {
 
 #[test]
 fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target() {
+    transit_with_waiting_send(None, false);
+}
+
+#[test]
+fn send_while_busy_respects_transit_fence() {
+    transit_with_waiting_send(Some("steer"), false);
+    transit_with_waiting_send(Some("take_over"), false);
+    transit_with_waiting_send(Some("steer"), true);
+}
+
+fn transit_with_waiting_send(mode: Option<&str>, deferred: bool) {
     let setting = Setting::new("agent-transit-mailbox");
     let host = setting.start();
     let made = host.post("/agents", json!({"name": "Switcher", "backend": "claude"}));
     let session = made["session"].as_str().unwrap();
     let hold = setting.place.root.join("hold");
     std::fs::write(&hold, "").unwrap();
+    let before_init = setting.place.root.join("before-init");
+    if deferred {
+        std::fs::write(&before_init, "").unwrap();
+    }
+    let waiting_send = || {
+        let mut body = json!({"session": session, "text": "Waiting user message.",
+                              "client_msg_id": "switch-3"});
+        if let Some(mode) = mode {
+            body["while_busy"] = json!(mode);
+        }
+        host.post("/send", body)
+    };
+    let steerable = || host.get(&format!("/turn-queue?session={session}"))["steerable"] == true;
     host.send(session, "Finish this on Claude.", "switch-1");
     wait_for("the turn to run", || row(&host, session)["busy"] == true);
-    wait_for("source tool work before Transit", || {
-        setting.place.root.join("source-held").exists()
-    });
+    if deferred {
+        wait_for("the source waiting before session init", || {
+            setting.place.root.join("source-before-init").exists()
+        });
+        assert!(!steerable());
+        let send = waiting_send();
+        assert_eq!(send["queued"], true, "{send}");
+        assert_eq!(send["while_busy"], "steer", "{send}");
+    } else {
+        wait_for("the source accepting steers", steerable);
+    }
     queue_for_transit(&host, session, "switch-2", "Waiting automation message.");
     let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
                      "request_id": "switch-with-queue"});
     let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
     assert_eq!(status, 202, "{began}");
     std::fs::write(setting.place.root.join("record-steering"), "").unwrap();
-    let send = host.send(session, "Waiting user message.", "switch-3");
-    assert_eq!(send["queued"], true, "{send}");
+    if deferred {
+        std::fs::remove_file(before_init).unwrap();
+        wait_for("the source becoming steerable during Transit", steerable);
+    } else {
+        let send = waiting_send();
+        assert_eq!(send["queued"], true, "{send}");
+        assert!(send.get("while_busy").is_none(), "{send}");
+        assert!(send.get("fallback").is_none(), "{send}");
+    }
+    wait_for("the source reaching its tool hold", || {
+        setting.place.root.join("source-held").exists()
+    });
     assert_eq!(row(&host, session)["backend"], "claude");
+    assert_eq!(row(&host, session)["queued_turn_count"], 2);
+    assert!(!setting.place.root.join("source-received-followup").exists());
     std::fs::remove_file(hold).unwrap();
 
     let done = finished_transit(&host, session, began["transit_id"].as_str().unwrap());

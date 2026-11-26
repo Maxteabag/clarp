@@ -51,7 +51,7 @@ impl Worker {
         };
         let owners =
             admission == Admission::Queue && message.origin.is_user_send() && !coordination;
-        if !owners || actor.live_turn().is_none() {
+        if !owners || actor.transit_holds_queue() || actor.live_turn().is_none() {
             return Plan::AsAlways;
         }
         let cuttable = actor.live_cuttable();
@@ -135,7 +135,7 @@ impl Worker {
         };
         let live = actor.live_turn();
         self.steer_pending.retain(|(into, _)| Some(*into) == live);
-        if !actor.steerable() {
+        if actor.transit_holds_queue() || !actor.steerable() {
             return;
         }
         let mut still = Vec::new();
