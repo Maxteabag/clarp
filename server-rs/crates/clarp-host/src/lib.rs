@@ -122,6 +122,7 @@ pub mod router;
 pub mod schedules;
 pub mod screens;
 pub mod search;
+pub mod start;
 pub mod seats;
 mod send_settings;
 mod takeover;

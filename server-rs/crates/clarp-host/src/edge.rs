@@ -657,6 +657,8 @@ pub struct App {
     pub quota_keeper: Arc<crate::quota_keeper::Desk>,
     /// The turns that started their tool anew in the last hour, which every agent counts in.
     pub cold_starts: Arc<crate::cold_starts::ColdStarts>,
+    /// How far this Host's start has come: what a request waits for (issue 935).
+    pub start: Arc<crate::start::Readiness>,
     /// The audio bookkeeper: what was seen of clips, written down or not yet.
     pub audio: Arc<crate::audio::Desk>,
     /// What the tools said is left of their accounts.
@@ -1008,6 +1010,9 @@ pub fn router(app: App) -> Router {
         // Python Host answers it: to whoever may ask at all.
         .fallback(no_route)
         .method_not_allowed_fallback(no_route)
+        // A request waits until the start has come as far as it needs (issue 935): liveness at
+        // once, the agents' rows once every agent is open, the rest once the start is done.
+        .layer(middleware::from_fn_with_state(app.clone(), crate::start::door))
         .layer(middleware::from_fn_with_state(app.clone(), looked_at_only))
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
@@ -1637,6 +1642,9 @@ async fn host_start(
         }
     }
     Ok(Json(json!({
+        // Which run of the Host answers, and how far its start has come (issue 935): an
+        // installer holds an install good only once the run it saw answer says `started`.
+        "instance": app.hub.epoch(), "stage": app.start.stage().word(),
         "agents": agents, "opening": opening, "broken": broken,
         "left_out": app.fleet.left_out().counts(),
         "not_run": app.fleet.left_out().not_run_counts(),

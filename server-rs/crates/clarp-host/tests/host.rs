@@ -215,6 +215,8 @@ mod speech_unset;
 mod spoken_when_asked;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
+#[path = "host/start_failure.rs"]
+mod start_failure;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/steer_c.rs"]
