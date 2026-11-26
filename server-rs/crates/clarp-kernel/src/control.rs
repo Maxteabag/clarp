@@ -20,19 +20,10 @@ pub const USER: &str = "user";
 pub const STOPPED: &str = "user_stop";
 /// The stop receipt's sentence for people (issue 811, feature `stop_receipt_text`): what every
 /// app shows of a Stop, the one that pressed it and every other, in place of the fields it is
-/// built from. `waiting`: the messages that still wait, as the apps list them; `held`: whether
-/// they wait for the user (the queue is paused) or go on by themselves (a user's Stop lets the
-/// user's own waiting messages run). It says only what changed, as short as that can be said
-/// (issue 868: four facts after a Stop were three more than a person needs).
-pub fn stop_text(waiting: usize, held: bool) -> String {
-    match (waiting, held) {
-        (0, _) => "Stopped.".to_string(),
-        (1, true) => "Stopped. 1 message waits.".to_string(),
-        (n, true) => format!("Stopped. {n} messages wait."),
-        (1, false) => "Stopped. 1 message goes on next.".to_string(),
-        (n, false) => format!("Stopped. {n} messages go on next."),
-    }
-}
+/// built from. Only what changed, and true whenever it is read: a count of the messages that
+/// waited went stale in the chat's history once they had run (issue 868; an app showed it 45 s
+/// later). The counts stay in the receipt's fields.
+pub const STOP_TEXT: &str = "Stopped.";
 
 /// What a note left by a repair says it came from.
 pub const REPAIRED: &str = "slot_repair";
@@ -181,19 +172,4 @@ pub fn provenance(detail: &Map<String, Value>) -> Map<String, Value> {
         .iter()
         .filter_map(|key| Some(((*key).to_string(), detail.get(*key)?.clone())));
     kept.collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_stop_is_said_in_one_sentence_that_counts_what_waits_and_says_what_goes_on() {
-        assert_eq!(stop_text(0, true), "Stopped.");
-        assert_eq!(stop_text(0, false), "Stopped.");
-        assert_eq!(stop_text(1, true), "Stopped. 1 message waits.");
-        assert_eq!(stop_text(2, true), "Stopped. 2 messages wait.");
-        assert_eq!(stop_text(1, false), "Stopped. 1 message goes on next.");
-        assert_eq!(stop_text(3, false), "Stopped. 3 messages go on next.");
-    }
 }

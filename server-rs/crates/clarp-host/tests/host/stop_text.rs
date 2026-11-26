@@ -36,7 +36,8 @@ fn a_stop_is_said_in_one_sentence_on_its_answer_its_events_and_the_snapshot() {
             .is_some_and(|items| items.len() == 2)
     });
     let stopped = host.post("/stop", json!({ "session": session }));
-    let said = "Stopped. 2 messages wait.";
+    // The sentence is the same whatever waits: the count is in the fields (issue 868).
+    let said = "Stopped.";
     assert_eq!(stopped["queue_paused"], true, "{stopped}");
     assert_eq!(stopped["text"], said, "{stopped}");
     // The fields it is built from stay.

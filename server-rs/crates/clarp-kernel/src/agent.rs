@@ -3548,6 +3548,87 @@ mod tests {
         assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
     }
 
+    /// A turn of the user's with three of the user's messages waiting behind it.
+    fn three_behind() -> Driven {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        for seq in [11, 12, 13] {
+            a.user(seq);
+        }
+        a
+    }
+
+    #[test]
+    fn a_turn_sent_by_hand_past_a_hold_reads_in_only_its_own_message() {
+        let mut a = three_behind();
+        a.send(stop()).unwrap();
+        assert_eq!(a.finish(1), vec![], "held");
+        assert_eq!(
+            a.send(by_hand(2)).unwrap(),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert!(
+            a.agent.waiting_together().is_empty(),
+            "nothing the hold keeps"
+        );
+        assert_eq!(a.waiting(), vec![3, 4]);
+        assert!(a.agent.holds(TurnId(3)) && a.agent.holds(TurnId(4)));
+    }
+
+    #[test]
+    fn a_take_over_after_a_stop_reads_in_only_its_own_message() {
+        let mut a = three_behind();
+        a.send(stop()).unwrap();
+        a.send(take_over(2)).unwrap();
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert!(
+            a.agent.waiting_together().is_empty(),
+            "nothing the hold keeps"
+        );
+        assert_eq!(a.waiting(), vec![3, 4]);
+        assert!(a.agent.holds(TurnId(3)) && a.agent.holds(TurnId(4)));
+    }
+
+    /// The user's Stop lets the user's waiting messages run (issue 747): they are not held,
+    /// so the first that starts reads the others in with it, as without a Stop, and the pause
+    /// stays for what comes after them (issue 875: the run that showed three messages in one
+    /// turn after a Stop).
+    #[test]
+    fn the_users_stop_lets_its_waiting_messages_run_read_together() {
+        let mut a = three_behind();
+        a.send(Command::StopAndStartWaiting {
+            by: Control::by("user"),
+        })
+        .unwrap();
+        assert_eq!(
+            a.finish(1),
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
+        );
+        assert_eq!(a.agent.waiting_together(), vec![TurnId(3), TurnId(4)]);
+        assert!(a.agent.is_paused());
+    }
+
+    #[test]
+    fn without_a_hold_a_turn_reads_in_the_users_messages_behind_it_as_before() {
+        let mut a = three_behind();
+        a.finish(1);
+        assert_eq!(a.live(), Some(2));
+        assert_eq!(a.agent.waiting_together(), vec![TurnId(3), TurnId(4)]);
+    }
+
     #[test]
     fn a_waiting_message_is_sent_by_hand_past_a_hold_and_the_hold_stays_after_the_last() {
         let mut a = Driven::new();

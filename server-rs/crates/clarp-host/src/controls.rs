@@ -56,7 +56,7 @@ pub(crate) async fn stop(
         stop_actor: Some(by.actor.clone()),
         stop_actor_verified: Some(by.verified),
         stop_reason: Some(by.reason.clone()),
-        text: Some(control::stop_text(0, false)),
+        text: Some(control::STOP_TEXT.to_owned()),
         ..StopResponse::default()
     };
     let Some(member) = app.member(session) else {
@@ -71,8 +71,6 @@ pub(crate) async fn stop(
         // leaves the queue as it was.
         queue_paused: Some(stopped.paused),
         goals_paused: Some(stopped.goals_paused as u64),
-        // The same in one sentence for people, from the same step (issue 811).
-        text: Some(control::stop_text(stopped.waiting, stopped.paused)),
         ..answer
     })
 }

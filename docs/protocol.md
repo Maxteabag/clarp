@@ -1515,25 +1515,21 @@ already waiting run, oldest first, and they do not end the pause: after they ran
 the queue is still paused until the user's next fresh message or a resume. The
 response's `queue_paused` is the queue as the Stop left it, and `GET /turn-queue`
 says the same afterwards. The stopped turn's `interrupted` state is told once on
-the event stream (one `agent-state` event per Stop).
+the event stream (one `agent-state` event per Stop). The messages the Stop lets go run next
+read together, as they would without a Stop (feature `queued_read_together`): the first
+that starts takes the others in at its start, although `paused` is `true`, because the
+hold covers only what comes after them (issue 875). A message sent by hand past a hold
+(`POST /turn-queue/<id>/send`), or one that takes over a turn after a Stop, reads in only
+itself: what the hold keeps stays held.
 
 **The Stop in one sentence** (Rust Host contract 184, feature `stop_receipt_text`, issue
-811). The response adds `text`, one sentence for people built from what the Stop left, read
-in the same step as `queue_paused`:
-
-- nothing waits: `"Stopped."`;
-- the queue holds messages for the user: `"Stopped. 1 message waits."`, or
-  `"Stopped. N messages wait."`;
-- the user's own waiting messages go on by themselves: `"Stopped. 1 message goes on next."`,
-  or `"Stopped. N messages go on next."`.
-
-The sentence says only what changed (issue 868); the details stay in the fields.
-
-N counts the waiting messages an app lists (`GET /turn-queue`). Every app that learns of the
-Stop without having sent it gets the same sentence as `stop_text`: on the agent's `activity`
-(the snapshot's row and the `agent-activity` event) for as long as the Stop is its latest
-state, counted as the queue is when the activity is told, and in the `detail` of the Stop's
-`agent-state` event. Show this line in place of the fields it is built from; `queue_paused`,
+811). The response adds `text`, one sentence for people: `"Stopped."`. It says only what
+changed and stays true in the chat's history: it carries no count of the messages that
+waited, which went stale once they had run (issue 868). The counts are in the fields
+(`queue_paused`, `goals_paused`, and `GET /turn-queue`). Every app that learns of the Stop
+without having sent it gets the same sentence as `stop_text`: on the agent's `activity` (the
+snapshot's row and the `agent-activity` event) for as long as the Stop is its latest state,
+and in the `detail` of the Stop's `agent-state` event. Show this line in place of the fields it is built from; `queue_paused`,
 `goals_paused`, `stop_actor`, `stop_actor_verified` and `stop_reason` stay for apps that act on
 them. A Host without the feature sends neither field.
 
