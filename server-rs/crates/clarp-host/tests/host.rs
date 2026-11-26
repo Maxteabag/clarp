@@ -19,6 +19,8 @@ use serde_json::{Value, json};
 mod account_reset;
 #[path = "host/admin_pair.rs"]
 mod admin_pair;
+#[path = "host/agent_availability.rs"]
+mod agent_availability;
 #[path = "host/agent_creation.rs"]
 mod agent_creation;
 #[path = "host/agent_moved.rs"]
