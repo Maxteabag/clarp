@@ -245,9 +245,10 @@ start, and the command exits 1.
    its result before accepting it or giving it more work.
 
    On the Rust Host with `helper_state_below` (contract 210) a helper reads
-   `running` while a helper it made, at any depth and not archived, still
-   reads `running`, also after you marked it `done`; it reads `done` again
-   once the last of them stops. Your mark is kept: nothing is reopened. The
+   `running` while a helper below it, at any depth, that is not archived
+   still reads `running`, also after you marked it `done`; it reads `done`
+   again once the last of them stops. That holds through an archived helper
+   in between; an archived helper's own work lifts no one. Your mark is kept: nothing is reopened. The
    helper below it shows in the apps' lists and opens by its own session, so
    the user can follow it there. On an older Host a `done` helper reads
    `done` whatever runs below it.

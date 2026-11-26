@@ -534,8 +534,11 @@ impl Member {
 
 /// The agents with a helper at work below them, at any depth (issue 936), counted in one walk
 /// over the roster. A helper among them is shown `running` whatever its own state says, until
-/// the last helper at work below it stops; a helper that is put away counts for nobody.
-pub(crate) struct AboveWork(HashSet<String>);
+/// the last helper at work below it stops. A helper that is put away lifts nobody by its own
+/// work ([`AboveWork::seeds`]); one at work below it still lifts every maker above, through it.
+/// Cloned, it is the same walk: one is made for a list or an event and handed on.
+#[derive(Clone)]
+pub(crate) struct AboveWork(Arc<HashSet<String>>);
 
 impl AboveWork {
     pub(crate) fn of(directory: &Directory) -> Self {
@@ -545,12 +548,16 @@ impl AboveWork {
             .map(|member| helpers::Line {
                 agent_id: &member.record.agent_id,
                 parent: member.record.parent_agent_id.as_deref(),
-                works: member.record.archived_at_ms.is_none()
-                    && member.shown_helper_state() == Some("running"),
+                works: Self::seeds(member),
             })
             .collect();
         let above = helpers::above_work(&lines);
-        Self(above.into_iter().map(str::to_owned).collect())
+        Self(Arc::new(above.into_iter().map(str::to_owned).collect()))
+    }
+
+    /// Whether the agent's own work lifts the makers above it: a helper at work, not put away.
+    pub(crate) fn seeds(member: &Member) -> bool {
+        member.record.archived_at_ms.is_none() && member.shown_helper_state() == Some("running")
     }
 
     /// The helper state the agent is shown in, to the apps and to agents alike: its own

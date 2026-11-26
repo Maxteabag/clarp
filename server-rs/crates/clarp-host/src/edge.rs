@@ -1715,17 +1715,31 @@ pub(crate) struct Families {
 
 impl Families {
     pub(crate) fn of(directory: &Directory) -> Self {
-        Self::counted(directory, |_| true)
+        let above = crate::fleet::AboveWork::of(directory);
+        Self::counted(directory, |_| true, above)
     }
 
     /// The family of one agent alone, counted as the whole list counts it: what its own row
     /// says of the agents it made, without looking at any other agent's family.
     pub(crate) fn of_parent(directory: &Directory, parent_id: &str) -> Self {
-        Self::counted(directory, |parent| parent == parent_id)
+        let above = crate::fleet::AboveWork::of(directory);
+        Self::of_parent_with(directory, parent_id, above)
     }
 
-    fn counted(directory: &Directory, wanted: impl Fn(&str) -> bool) -> Self {
-        let above = crate::fleet::AboveWork::of(directory);
+    /// [`Families::of_parent`] with the walk of who works below whom already made.
+    pub(crate) fn of_parent_with(
+        directory: &Directory,
+        parent_id: &str,
+        above: crate::fleet::AboveWork,
+    ) -> Self {
+        Self::counted(directory, |parent| parent == parent_id, above)
+    }
+
+    fn counted(
+        directory: &Directory,
+        wanted: impl Fn(&str) -> bool,
+        above: crate::fleet::AboveWork,
+    ) -> Self {
         let mut families: HashMap<String, Family> = HashMap::new();
         for member in &directory.members {
             let record = &member.record;
@@ -1991,12 +2005,17 @@ pub(crate) fn busy_with(
 }
 
 /// What an `agent-roster` event carries for an agent's maker when a helper of it moved: the
-/// fields [`busy_with`] decides, as its row in the snapshot has them now.
-pub(crate) fn family_fields(directory: &Directory, member: &Member) -> Value {
+/// fields [`busy_with`] decides, as its row in the snapshot has them now. `above` is the walk
+/// the event's other fields were made with.
+pub(crate) fn family_fields(
+    directory: &Directory,
+    member: &Member,
+    above: &crate::fleet::AboveWork,
+) -> Value {
     let view = member.agent.view();
     let (state, said) = wire::own_state(&view.status);
     let mut fields = json!({ "latest_state": state, "status_text": said });
-    let families = Families::of_parent(directory, &member.record.agent_id);
+    let families = Families::of_parent_with(directory, &member.record.agent_id, above.clone());
     busy_with(&mut fields, &families, member, &view);
     fields
 }

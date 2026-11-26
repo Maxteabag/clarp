@@ -398,18 +398,26 @@ Rules:
   turn is over; an `agent-roster` event (`kind: helper-state`) is sent at
   each such change. `GET /agent-helper-state` answers the same. `done` stays
   `done` while the helper works. With feature `helper_state_below` (Rust
-  Host contract 210, issue 936) a helper also reads `running` while any
-  helper below it, at any depth, that is not archived reads `running`, and
-  its own state again once the last of them stops: a `done` helper whose own
-  helper still works reads `running`, then `done`. Its own state is not
-  changed (what its parent accepted stays). When a helper starts, stops, is
-  archived or restored, each helper above it that is not at work itself gets
-  an `agent-roster` event (`kind: helper-state`) of its own, after the
-  helper's. An archived helper at work keeps no one above it working; it is
-  still in the snapshot with its own `helper_state` and opens by its session.
-  `child_count` counts live
-  agents whose parent is this one and `running_children` those still
-  `running` (with `helper_state_below`, as their rows read it). Nest helpers under their parent; a done helper is archived
+  Host contract 210, issue 936) a helper also reads `running` while some
+  helper below it, at any depth, is a working seed: not archived, and
+  reading `running` by its own state (as above, a reported helper in a
+  turn counts). It reads its own state again once the last seed below it
+  stops: a `done` helper whose own helper still works reads `running`, then
+  `done`. Its own state is not changed (what its parent accepted stays).
+  The lift passes up every maker of a seed's line, archived makers and
+  makers that are no helpers included: a seed below an archived helper
+  still lifts the helpers above that archived one. An archived helper's own
+  work is no seed: it lifts no helper above it. It keeps its own
+  `helper_state` in its row and opens by its session. When a helper starts,
+  stops, is archived or restored, each helper up its line that is not at
+  work itself gets an `agent-roster` event (`kind: helper-state`) of its
+  own, after the helper's, up to the first maker that is a seed itself.
+  `child_count` counts the agents whose parent is this one and
+  `running_children` those whose rows read `running`. Both count direct
+  children only, archived ones included, as before this feature: a direct
+  child that is archived and reads `running` is counted in its maker's
+  `running_children` (and `background_jobs.sub_agents`, `latest_state`
+  `background`) though it lifts no helper above it. Nest helpers under their parent; a done helper is archived
   after the grace period (`[agents] helper_archive_grace_hours`, 24 by
   default). `agent-roster` with `kind: "helper-state"` asks for a refetch; on
   a Host with feature `roster_fields` it carries the helper's and its

@@ -248,7 +248,10 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
         let (rows, root_row) = (snapshot_row(&host, "middle"), snapshot_row(&host, &root));
         assert_eq!(rows["helper_state"], middle, "{rows}");
         assert_eq!(state_of("middle"), middle);
-        assert_eq!(root_row["running_children"], running_below_root, "{root_row}");
+        assert_eq!(
+            root_row["running_children"], running_below_root,
+            "{root_row}"
+        );
         assert_eq!(root_row["child_count"], 1, "{root_row}");
         let leaf = snapshot_row(&host, "leaf");
         assert_eq!(leaf["parent_agent_id"], middle_id, "{leaf}");
@@ -278,7 +281,10 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
     });
     check("running", 1);
     let leaf = host.get("/agents/leaf");
-    assert_eq!((&leaf["busy"], &leaf["helper_state"]), (&json!(true), &json!("running")));
+    assert_eq!(
+        (&leaf["busy"], &leaf["helper_state"]),
+        (&json!(true), &json!("running"))
+    );
     // Its turn ends with no report, and the Host marks it so: the middle helper reads the
     // result it was given, which nothing set again.
     wait_for("the leaf to end without a report", || {
@@ -289,7 +295,10 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
     // by its session all the same.
     mark("leaf", "running");
     check("running", 1);
-    host.post("/agent-archive", json!({ "session": "leaf", "archived": true }));
+    host.post(
+        "/agent-archive",
+        json!({ "session": "leaf", "archived": true }),
+    );
     check("done", 0);
     let leaf = host.get("/agents/leaf");
     assert_eq!(
@@ -297,4 +306,67 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
         (&json!("running"), true),
         "{leaf}"
     );
+}
+
+/// The helper above an archived helper is told when the work below it ends (issue 936). An
+/// archived helper at work lifts no one, but the leaf below it does, through it; when the leaf
+/// stops, the event about the top helper must come though the archived one between reads
+/// `running` by its own state.
+#[test]
+fn the_end_of_work_below_an_archived_helper_is_told_to_the_helper_above_it() {
+    let place = Place::new("helper-below-archived");
+    let host = place.start_with("", &["--helpers-checked-every-ms", "3600000"]);
+    let heard = host.listen();
+    let root = host.new_agent("Root");
+    let made = |session: &str, parent: &str| {
+        let made = host.post(
+            "/agents",
+            json!({
+                "name": session, "backend": "scripted", "role": "helper", "parent": parent,
+                "session": session,
+            }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+    };
+    made("upper", &root);
+    made("middle", "upper");
+    made("leaf", "middle");
+    let mark = |session: &str, state: &str| {
+        let (status, said) = host.ask(
+            "POST",
+            "/agent-helper-state",
+            Some(&json!({ "session": session, "state": state })),
+        );
+        assert_eq!(status, 200, "{said}");
+    };
+    // The upper helper is accepted; the middle one is put away while it works by itself, and
+    // the leaf below it is opened again (putting its maker away left it abandoned).
+    mark("upper", "done");
+    host.post(
+        "/agent-archive",
+        json!({ "session": "middle", "archived": true }),
+    );
+    mark("leaf", "running");
+    let middle = snapshot_row(&host, "middle");
+    assert_eq!(
+        (&middle["helper_state"], middle["archived_at"].is_i64()),
+        (&json!("running"), true),
+        "{middle}"
+    );
+    wait_for("the upper helper to read running for the leaf", || {
+        carried(&heard, "helper-state", "upper")
+            .is_some_and(|event| event["fields"]["helper_state"] == "running")
+    });
+    assert_eq!(snapshot_row(&host, "upper")["helper_state"], "running");
+
+    // The leaf is done: the upper helper's row reads its own result, and so does its event.
+    mark("leaf", "done");
+    assert_eq!(snapshot_row(&host, "upper")["helper_state"], "done");
+    wait_for("the upper helper's event to say done", || {
+        carried(&heard, "helper-state", "upper")
+            .is_some_and(|event| event["fields"]["helper_state"] == "done")
+    });
+    let event = carried(&heard, "helper-state", "upper").unwrap();
+    assert_fields_are_the_rows(&event["fields"], &snapshot_row(&host, "upper"));
+    assert_fields_are_the_rows(&event["parent"]["fields"], &snapshot_row(&host, &root));
 }

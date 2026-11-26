@@ -298,27 +298,33 @@ impl Hub {
         let directory = (event["type"] == "agent-roster")
             .then(|| self.queue_directory())
             .flatten();
-        let makers = directory
-            .as_deref()
-            .map(|directory| crate::roster_fields::makers_moved(&event, directory))
+        let roster = directory.as_deref().map(crate::roster_fields::Roster::new);
+        let makers = roster
+            .as_ref()
+            .map(|roster| crate::roster_fields::makers_moved(&event, roster))
             .unwrap_or_default();
-        let id = self.numbered(event, now_ms, directory.as_deref());
+        let id = self.numbered(event, now_ms, roster.as_ref());
         for session in makers {
             let told = crate::wire::roster("helper-state", &session);
-            self.numbered(told, now_ms, directory.as_deref());
+            self.numbered(told, now_ms, roster.as_ref());
         }
         id
     }
 
-    fn numbered(&self, mut event: Value, now_ms: i64, directory: Option<&Directory>) -> u64 {
+    fn numbered(
+        &self,
+        mut event: Value,
+        now_ms: i64,
+        roster: Option<&crate::roster_fields::Roster<'_>>,
+    ) -> u64 {
         if let Some(profiles) = self.profiles.get() {
             profiles.add_to(&mut event);
         }
         // What an event about one agent's row changed, as the row has it now (issue 809).
         if event["type"] == "agent-roster"
-            && let Some(directory) = directory
+            && let Some(roster) = roster
         {
-            crate::roster_fields::add_to(&mut event, directory);
+            crate::roster_fields::add_to(&mut event, roster);
         }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;

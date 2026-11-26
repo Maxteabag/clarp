@@ -22,14 +22,36 @@
 
 use serde_json::{Value, json};
 
-use crate::fleet::{Directory, Member};
+use crate::fleet::{AboveWork, Directory, Member};
+
+/// The roster events are told from, with the walk of who works below whom (issue 936): made
+/// once, at the first event that needs it, and shared by an event and the events about the
+/// makers above it that follow it, so that they say the same and the walk is made once.
+pub struct Roster<'a> {
+    directory: &'a Directory,
+    above: std::cell::OnceCell<AboveWork>,
+}
+
+impl<'a> Roster<'a> {
+    pub fn new(directory: &'a Directory) -> Self {
+        Self {
+            directory,
+            above: std::cell::OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn above(&self) -> &AboveWork {
+        self.above.get_or_init(|| AboveWork::of(self.directory))
+    }
+}
 
 /// The kinds whose events carry `fields`.
 pub const CARRIED: [&str; 4] = ["helper-state", "mute-changed", "chat_view", "agent-transit"];
 
 /// Adds what the event's change moved to an `agent-roster` event of a carried kind about one
 /// agent the Host has, from the roster as it stands. Any other event is left as it is.
-pub fn add_to(event: &mut Value, directory: &Directory) {
+pub fn add_to(event: &mut Value, roster: &Roster<'_>) {
+    let directory = roster.directory;
     let kind = event["kind"].as_str().unwrap_or("").to_owned();
     if event["type"] != "agent-roster"
         || !CARRIED.contains(&kind.as_str())
@@ -43,7 +65,7 @@ pub fn add_to(event: &mut Value, directory: &Directory) {
     else {
         return;
     };
-    let Some(fields) = fields(&kind, directory, member) else {
+    let Some(fields) = fields(&kind, roster, member) else {
         return;
     };
     event["agent_id"] = json!(member.record.agent_id);
@@ -57,18 +79,18 @@ pub fn add_to(event: &mut Value, directory: &Directory) {
         event["parent"] = json!({
             "session": parent.record.session,
             "agent_id": parent.record.agent_id,
-            "fields": crate::edge::family_fields(directory, parent),
+            "fields": crate::edge::family_fields(directory, parent, roster.above()),
         });
     }
 }
 
 /// The fields of the agent's row that a change of this kind moves, as the row has them now;
 /// `None` where this change moved more than them.
-fn fields(kind: &str, directory: &Directory, member: &Member) -> Option<Value> {
-    let record = &member.record;
+fn fields(kind: &str, roster: &Roster<'_>, member: &Member) -> Option<Value> {
+    let (directory, record) = (roster.directory, &member.record);
     match kind {
         "helper-state" => Some(json!({
-            "helper_state": crate::fleet::AboveWork::of(directory).helper_state(member),
+            "helper_state": roster.above().helper_state(member),
             "archived_at": record.archived_at_ms,
         })),
         "mute-changed" => Some(json!({ "muted": record.muted })),
@@ -86,22 +108,26 @@ fn fields(kind: &str, directory: &Directory, member: &Member) -> Option<Value> {
 }
 
 /// The helpers above the agent of a `helper-state` or `archive-changed` event whose rows its
-/// change may move: a helper is shown `running` while a helper below it works, one that is put
-/// away aside (issue 936), so a helper that starts, stops, or is put away or taken back can move
-/// each maker above it that is not at work itself. Each gets a `helper-state` event of its own,
-/// which carries its row's fields and its own maker's; the walk stops at the first maker that
-/// is no helper or works itself, whose row the helper below it no longer moves.
-pub fn makers_moved(event: &Value, directory: &Directory) -> Vec<String> {
+/// change may move (issue 936). A helper is shown `running` while a helper below it, at any
+/// depth, works and is not put away; so a helper that starts, stops, or is put away or taken
+/// back can move every helper above it, up the same line the walk of [`AboveWork`] takes,
+/// through makers that are no helpers and helpers put away alike. The walk ends at the first
+/// maker whose own work lifts the makers above it ([`AboveWork::seeds`]): what it lifts does
+/// not change. Each helper passed that is not at work itself gets a `helper-state` event of its
+/// own, carrying its row's fields and its own maker's.
+pub fn makers_moved(event: &Value, roster: &Roster<'_>) -> Vec<String> {
     let kind = &event["kind"];
     if event["type"] != "agent-roster" || (kind != "helper-state" && kind != "archive-changed") {
         return Vec::new();
     }
+    let directory = roster.directory;
     let Some(mut below) = event["session"]
         .as_str()
         .and_then(|session| member(directory, |member| member.record.session == session))
     else {
         return Vec::new();
     };
+    let mut passed: Vec<&str> = vec![&below.record.agent_id];
     let mut makers: Vec<String> = Vec::new();
     while let Some(maker) = below.record.parent_agent_id.as_deref().and_then(|parent| {
         directory
@@ -110,11 +136,13 @@ pub fn makers_moved(event: &Value, directory: &Directory) -> Vec<String> {
             .map(|member| &**member)
             .find(|member| member.record.agent_id == parent)
     }) {
-        let at_work = maker.shown_helper_state() == Some("running");
-        if !maker.record.is_helper() || at_work || makers.contains(&maker.record.session) {
+        if AboveWork::seeds(maker) || passed.contains(&maker.record.agent_id.as_str()) {
             break;
         }
-        makers.push(maker.record.session.clone());
+        passed.push(&maker.record.agent_id);
+        if maker.record.is_helper() && maker.shown_helper_state() != Some("running") {
+            makers.push(maker.record.session.clone());
+        }
         below = maker;
     }
     makers
