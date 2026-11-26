@@ -1,12 +1,25 @@
 """A target belongs to the effective dev/test profile of its last build."""
+import fcntl
 import os
 from pathlib import Path
 import runpy
 import subprocess
-import threading
+import sys
 import time
 
-queue = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'build-queue.py'))
+import pytest
+
+SCRIPT = Path(__file__).resolve().parents[1] / 'build-queue.py'
+queue = runpy.run_path(str(SCRIPT))
+
+
+def at(root, monkeypatch):
+    """The tool's functions, working in root instead of the build machine's /var/tmp/clarp-build."""
+    names = queue['main'].__globals__
+    for name, value in (('ROOT', root), ('COPY_LOCKS', root / '.copy-locks'), ('LEGACY_SLOT', root / 'lock'),
+                        ('LEGACY_HOLDER', root / 'holder'), ('LEGACY_EVICTION', root / 'eviction-lock')):
+        monkeypatch.setitem(names, name, value)
+    return names
 
 
 def test_debug_generation(tmp_path):
@@ -73,7 +86,7 @@ def reflinks(tmp_path):
 
 
 def test_a_checkout_without_a_target_starts_from_the_last_good_build_with_libraries(tmp_path, monkeypatch):
-    monkeypatch.setitem(queue['seed_target'].__globals__, 'QUEUE', tmp_path)
+    at(tmp_path, monkeypatch)
     lane(tmp_path, 'old', 10**18)
     newer = lane(tmp_path, 'newer', 2 * 10**18)
     lane(tmp_path, 'not-a-checkout', 3 * 10**18).parent.joinpath('scripts/clarp-media-publish.py').unlink()
@@ -117,8 +130,7 @@ def test_a_checkout_without_a_target_starts_from_the_last_good_build_with_librar
 
 def test_a_build_marks_its_checkout_good_only_when_it_succeeds(tmp_path, monkeypatch):
     # build_space is wrapped by contextmanager: reach the module through a plain function.
-    names = queue['last_good_build'].__globals__
-    monkeypatch.setitem(names, 'QUEUE', tmp_path)
+    names = at(tmp_path, monkeypatch)
     workspace = lane(tmp_path, 'here', 10**17)
     monkeypatch.chdir(workspace)
     monkeypatch.setitem(names, 'make_room', lambda root, current, floor: True)
@@ -132,83 +144,135 @@ def test_a_build_marks_its_checkout_good_only_when_it_succeeds(tmp_path, monkeyp
             assert (queue['last_good_build'](copy) is not None) == good
 
 
-def line_at(tmp_path, monkeypatch):
-    """The queue's functions, working in tmp_path instead of the build machine's queue."""
-    names = queue['waiting_in_line'].__globals__
-    for name, value in (('QUEUE', tmp_path), ('LOCK', tmp_path / 'lock'), ('HOLDER', tmp_path / 'holder')):
-        monkeypatch.setitem(names, name, value)
-    monkeypatch.delenv('CLARP_BUILD_LEASE', raising=False)
-    return names
+@pytest.fixture
+def held_elsewhere():
+    """Hold a lock file the way another process does (its own open file). Returns what lets it go; the
+    test's end lets go of the rest."""
+    held = set()
+
+    def hold(path, mode=fcntl.LOCK_EX):
+        path.parent.mkdir(exist_ok=True)
+        fd = os.open(path, os.O_RDONLY | os.O_CREAT)
+        fcntl.flock(fd, mode | fcntl.LOCK_NB)
+        held.add(fd)
+        return lambda: (held.remove(fd), os.close(fd))
+    yield hold
+    for fd in held:
+        os.close(fd)
 
 
-def live_waiter(tmp_path, ago_ns):
-    """Another waiter that arrived ago_ns before now: a process of this test's own, and its marker."""
-    child = subprocess.Popen(['sleep', '60'])
-    marker = tmp_path / f'wait-{time.time_ns() - ago_ns}-{child.pid}-{queue["process_start"](child.pid)}'
-    marker.write_text(f'waiter-{child.pid} since 10:00:00\n')
-    return child, marker
+def test_a_seed_never_comes_from_a_target_in_use_nor_while_an_older_build_runs(tmp_path, monkeypatch, held_elsewhere, capsys):
+    if not reflinks(tmp_path):
+        return  # without clones nothing is ever copied; the test above holds that
+    at(tmp_path, monkeypatch)
+    lane(tmp_path, 'older', 10**18)
+    lane(tmp_path, 'newer', 2 * 10**18)
+    here = lane(tmp_path, 'here', 10**17, target=False)
+    with queue['directory'](tmp_path) as root, queue['directory'](here) as workspace:
+        # A build of the tools before 26 Nov 2026 holds the machine-wide slot and names no copy: none is shown idle.
+        let_go = held_elsewhere(tmp_path / 'lock')
+        assert queue['seed_target'](root, 'here', workspace) is None
+        assert 'older tools' in capsys.readouterr().out
+        let_go()
+        # The best source has a job of its own running (or a drop): the next is taken, without waiting.
+        held_elsewhere(tmp_path / '.copy-locks/newer.lock')
+        assert queue['seed_target'](root, 'here', workspace) == 'older'
+        assert (here / 'target/debug/deps/libserde-1111111111111111.rlib').read_text() == 'older'
+        (here / 'target').rename(tmp_path / 'discard')
+        # Every good source in use: a cold build, and it says so.
+        held_elsewhere(tmp_path / '.copy-locks/older.lock')
+        assert queue['seed_target'](root, 'here', workspace) is None
+        assert 'in use (newer,older)' in capsys.readouterr().out
+        assert not (here / 'target').exists()
 
 
-def test_waiters_are_in_line_in_order_of_arrival_and_a_dead_one_gives_up_its_place(tmp_path, monkeypatch):
-    line_at(tmp_path, monkeypatch)
-    first, first_marker = live_waiter(tmp_path, 2 * 10**9)
-    second, second_marker = live_waiter(tmp_path, 10**9)
-    # A checkout's directory that happens to look like a place in line is none.
-    (tmp_path / 'wait-1-2-3').mkdir()
+def test_room_is_made_only_from_targets_not_in_use(tmp_path, monkeypatch, held_elsewhere, capsys):
+    names = at(tmp_path, monkeypatch)
+    for name, stamp in (('oldest', 10**17), ('old', 10**18), ('recent', 2 * 10**18)):
+        lane(tmp_path, name, stamp)
+    here = lane(tmp_path, 'here', 3 * 10**18)
+    monkeypatch.chdir(here)
+    # Room enough once two targets are gone.
+    monkeypatch.setitem(names, 'free_after_removal', lambda floor: sum(
+        not (tmp_path / n / 'server-rs/target').exists() for n in ('oldest', 'old', 'recent')) * floor // 2)
+    real = names['shutil'].disk_usage
+    monkeypatch.setattr(names['shutil'], 'disk_usage', lambda path: real(path)._replace(free=0))
+    with queue['directory'](tmp_path) as root:
+        let_go = held_elsewhere(tmp_path / 'lock')
+        assert not queue['make_room'](root, 'here', 100)
+        assert 'targets in use kept=all (a build of older tools is running)' in capsys.readouterr().err
+        let_go()
+        assert all((tmp_path / n / 'server-rs/target').exists() for n in ('oldest', 'old', 'recent'))
+        held_elsewhere(tmp_path / '.copy-locks/oldest.lock', fcntl.LOCK_SH)
+        assert queue['make_room'](root, 'here', 100)
+        out = capsys.readouterr().out
+        assert 'removed targets=old,recent, targets in use kept=oldest' in out
+    assert (tmp_path / 'oldest/server-rs/target').exists() and (here / 'target').exists()
+
+
+def start(root, name, *command, mode='--build-debug'):
+    """One job of checkout `name`, run by the tool as tools/build runs it on the build machine."""
+    wrapper = (
+        'import runpy, sys\nfrom pathlib import Path\n'
+        'names = runpy.run_path(sys.argv[1])["main"].__globals__\nroot = Path(sys.argv[2])\n'
+        'names.update(ROOT=root, COPY_LOCKS=root / ".copy-locks", LEGACY_SLOT=root / "lock", '
+        'LEGACY_HOLDER=root / "holder", LEGACY_EVICTION=root / "eviction-lock")\n'
+        'sys.exit(names["main"](sys.argv[3:]))\n')
+    env = dict(os.environ, CARGO_PROFILE_DEV_DEBUG='line-tables-only', CARGO_PROFILE_TEST_DEBUG='line-tables-only')
+    return subprocess.Popen([sys.executable, '-c', wrapper, str(SCRIPT), str(root), mode, '0', f'agent {name} test', *command],
+                            cwd=root / name / 'server-rs', env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+
+def until(condition, seconds=10):
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline
+        time.sleep(0.05)
+
+
+def test_checkouts_build_side_by_side_and_one_checkouts_jobs_take_turns(tmp_path, monkeypatch):
+    at(tmp_path, monkeypatch)
+    for name in ('a', 'b'):
+        lane(tmp_path, name, 10**18)
+    gate = tmp_path / 'gate'
+    gate.mkdir()
+    # A job that says it started, then waits for the test to let it end.
+    job = ['sh', '-c', f'touch {gate}/$0; while [ ! -e {gate}/$0.go ]; do sleep 0.05; done; exit $1']
+    first = start(tmp_path, 'a', *job, 'a1', '0')
+    other = start(tmp_path, 'b', *job, 'b1', '0')
+    jobs = [first, other]
     try:
-        with queue['place_in_line']('me since 10:01:00') as place:
-            assert [name for _, name, _ in queue['waiting_in_line']()] == [first_marker.name, second_marker.name, place.name]
-            assert not queue['my_turn'](False, None, place)
-            # A landing goes before the whole line and takes no place in it.
-            assert queue['my_turn'](True, None, None)
-            first.kill()
-            first.wait()
-            assert [name for _, name, _ in queue['waiting_in_line']()] == [second_marker.name, place.name]
-            assert not first_marker.exists()
-            assert not queue['my_turn'](False, None, place)
-            second.kill()
-            second.wait()
-            assert queue['my_turn'](False, None, place)
-        assert not place.exists()
-        assert (tmp_path / 'wait-1-2-3').is_dir()
+        until(lambda: (gate / 'a1').exists() and (gate / 'b1').exists())
+        # The same checkout's next job waits for its copy, and says for whom.
+        second = start(tmp_path, 'a', *job, 'a2', '101')
+        jobs.append(second)
+        time.sleep(1)
+        assert not (gate / 'a2').exists() and second.poll() is None
+        shown = subprocess.run([sys.executable, '-c',
+                                'import runpy, sys\nfrom pathlib import Path\n'
+                                'names = runpy.run_path(sys.argv[1])["main"].__globals__\nroot = Path(sys.argv[2])\n'
+                                'names.update(ROOT=root, COPY_LOCKS=root / ".copy-locks", LEGACY_SLOT=root / "lock", '
+                                'LEGACY_HOLDER=root / "holder")\nnames["main"](["status"])\n',
+                                str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True).stdout
+        # Both running copies, with how long; the waiting job holds nothing yet.
+        assert sorted(line.split(' since ')[0] for line in shown.splitlines()) == [
+            'building: agent a test', 'building: agent b test']
+        assert all(' (for 0m0' in line for line in shown.splitlines())
+        (gate / 'a1.go').touch()
+        assert first.wait(10) == 0
+        until(lambda: (gate / 'a2').exists())
+        (gate / 'a2.go').touch()
+        # A failure comes back as the command's code and marks the copy not good.
+        assert second.wait(10) == 101
+        assert "waiting for this checkout's running job to finish (agent a test since" in second.stdout.read()
+        with queue['directory'](tmp_path / 'a') as copy:
+            assert queue['last_good_build'](copy) is None
+        (gate / 'b1.go').touch()
+        assert other.wait(10) == 0
+        with queue['directory'](tmp_path / 'b') as copy:
+            assert queue['last_good_build'](copy) is not None
+        assert not [n for n in os.listdir(tmp_path / '.copy-locks') if n.endswith('.holder')]
     finally:
-        for child in (first, second):
-            child.kill()
-            child.wait()
-
-
-def test_a_later_waiter_takes_the_slot_only_after_the_one_before_it(tmp_path, monkeypatch):
-    line_at(tmp_path, monkeypatch)
-    before, _ = live_waiter(tmp_path, 10**9)
-    taken = threading.Event()
-    try:
-        with (tmp_path / 'lock').open('a') as slot:
-            waiter = threading.Thread(target=lambda: (queue['take_slot'](slot.fileno(), False, 'me since 10:01:00'), taken.set()), daemon=True)
-            waiter.start()
-            # The slot is free, but a waiter that came first is still waiting.
-            assert not taken.wait(1.5)
-            before.kill()
-            before.wait()
-            assert taken.wait(5)
-            waiter.join(5)
-        assert not [name for name in os.listdir(tmp_path) if name.startswith('wait-')]
-    finally:
-        before.kill()
-        before.wait()
-
-
-def test_status_shows_the_line_in_order_with_each_wait(tmp_path, monkeypatch, capsys):
-    line_at(tmp_path, monkeypatch)
-    first, _ = live_waiter(tmp_path, 125 * 10**9)
-    second, _ = live_waiter(tmp_path, 3 * 10**9)
-    try:
-        with (tmp_path / 'lock').open('a') as slot:
-            queue['status'](slot.fileno())
-        out = capsys.readouterr().out.splitlines()
-        assert out[0] == 'queue: free'
-        assert out[1].startswith(f'waiting 1: waiter-{first.pid} since 10:00:00 (waited 2m0')
-        assert out[2].startswith(f'waiting 2: waiter-{second.pid} since 10:00:00 (waited 0m0')
-    finally:
-        for child in (first, second):
-            child.kill()
-            child.wait()
+        for process in jobs:
+            process.kill()
+            process.wait()

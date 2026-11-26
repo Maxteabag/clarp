@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Compile and test server-rs on the build machine, one job at a time.
+# Compile and test server-rs on the build machine.
 # fleet-load-build compiles the release Host for the manual fleet benchmark.
 # fleet-load <private-remote-dir> <move|empty|full> runs one time-bounded slice.
-# Set CLARP_BUILD_FIRST=1 for a single priority step: for a train's pass and release only, which an
-# install waits for. A helper's build waits its turn in the queue, however long it is. For a whole landing, use
-# tools/build lease ./landing-driver; its build commands inherit the reservation.
-# If the driver's machine disappears, its lease can last until SSH detects the disconnect (about two hours).
-# To release the reservation sooner, end the keeper PID shown by build status on the build machine.
+# Jobs of different checkouts start at once and run side by side. One checkout's jobs take turns, since they
+# share its copy and target there. For a whole landing, use tools/build lease ./landing-driver: while it runs,
+# its build commands go before any other job of this checkout started on this machine. CLARP_BUILD_FIRST is
+# accepted and changes nothing.
 #
 #   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
 #   server-rs/tools/build test [args...]   cargo test --workspace [args...], the shim built first
@@ -21,19 +20,19 @@
 #                                          disposable release Host with a stand-in for Claude Code
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
-#   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
-#   server-rs/tools/build status           who holds the queue, who waits in what order and how long so far,
-#                                          the machine's load and free build space
+#   server-rs/tools/build lease COMMAND [args...]   keep this checkout's builds for a local landing driver
+#   server-rs/tools/build status           the jobs running there, by checkout and for how long, the machine's
+#                                          load and free build space
 #   server-rs/tools/build drop             remove this checkout's copy and its target from the build machine,
-#                                          once its branch has landed (a copy is 5 to 14 GB there)
+#                                          once its branch has landed (a copy is 5 to 14 GB there); waits for
+#                                          a job of this checkout still running there
 # A build that needs another free-space floor sets CLARP_BUILD_MIN_FREE_BYTES to its own byte count,
 # higher or lower.
 #
-# Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
-# and never several builds at once. This script is that rule: it copies this checkout's server-rs/
-# to the build machine, waits for the one build slot (flock; first come, first served, a landing
-# before all), and runs cargo there at lowest priority
-# with a target directory per checkout, so a second run is incremental. A checkout's first build
+# Peter, 26 Nov 2026: no queue and no arbitrary limits. This script copies this checkout's server-rs/
+# to the build machine and runs cargo there at once, at ordinary priority, in that checkout's copy
+# with a target directory per checkout, so a second run is incremental. Only a job of the same
+# checkout waits, for the copy (build-queue.py's own_copy). A checkout's first build
 # starts from a reflink clone of the target of the latest checkout whose last build succeeded with
 # the Host's library built (build-queue.py's seed_target): the clone shares that target's data on
 # disk (du counts it in full for each; df does not), and cargo builds only the workspace's crates
@@ -58,7 +57,7 @@ if [ "$HOST" = ecit-buildbox ]; then
 else
     JOBS="${CLARP_BUILD_JOBS:-6}"
 fi
-# The queue frees room (other checkouts' targets, oldest built first) below this much free space. The
+# A build frees room (other checkouts' targets not in use, oldest built first) below this much free space. The
 # build machine's disk is shared with other builds (Android, since 23 Nov 2026), and at 10 GiB it filled.
 floor="${CLARP_BUILD_MIN_FREE_BYTES:-25769803776}" # 24 GiB
 # Extra environment for the remote cargo, as NAME=value words. The tests that run a real tool
@@ -73,7 +72,7 @@ remote="/var/tmp/clarp-build/$name"
 # that nothing is built from the sources of both.
 if [ "${1:-}" = lease ]; then
     shift
-    exec python3 "$here/tools/build-queue.py" --drive "$HOST" "$name" "${CLAUDE_PWA_SESSION:-$(whoami)} $name" "$@"
+    exec python3 "$here/tools/build-queue.py" --drive "$name" "$@"
 fi
 if [ "${1:-}" != status ]; then
     if [[ -z "${CLARP_BUILD_LEASE:-}" || "${CLARP_BUILD_LEASE_CHECKOUT:-}" != "$name" ]]; then
@@ -97,14 +96,17 @@ if [ "$cmd" = status ]; then
     exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; python3 - status && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf "build disk: %s free\n"' < "$here/tools/build-queue.py"
 fi
 if [ "$cmd" = drop ]; then
-    # A landed branch's copy is only disk there. This checkout's locks are held (above), and the
-    # queue's eviction lock keeps another checkout's build from freeing room in it at that moment.
-    # The name reaches a remote shell: only a plain checkout name is removed, never a queue file.
-    if ! [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || [[ "$name" == . || "$name" == .. || "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* || "$name" == wait-* ]]; then
+    # A landed branch's copy is only disk there. This checkout's locks are held (above), and so is its
+    # copy's lock there, which a job of this checkout started elsewhere holds while it runs and another
+    # checkout's build takes before it frees room in it or clones from it. The shared eviction lock keeps
+    # the older tools' housekeeping, which takes no copy lock, out meanwhile.
+    # The name reaches a remote shell: only a plain checkout name is removed, never a lock or a marker.
+    if ! [[ "$name" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || [[ "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* || "$name" == wait-* ]]; then
         echo "refusing to drop a copy under this checkout name: $name" >&2
         exit 2
     fi
-    exec ssh "${ssh_opts[@]}" "$HOST" "flock /var/tmp/clarp-build/eviction-lock rm -rf -- $remote && echo 'dropped $remote' && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf 'build disk: %s free\\n'"
+    copy_lock="/var/tmp/clarp-build/.copy-locks/$name.lock"
+    exec ssh "${ssh_opts[@]}" "$HOST" "mkdir -p /var/tmp/clarp-build/.copy-locks && { flock -n $copy_lock true || echo 'waiting for the job of this checkout running there' >&2; } && flock $copy_lock flock -s /var/tmp/clarp-build/eviction-lock rm -rf -- $remote && echo 'dropped $remote' && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf 'build disk: %s free\\n'"
 fi
 
 if ! [[ "$floor" =~ ^(0|[1-9][0-9]*)$ ]] || ! [ "$floor" -ge 0 ] 2>/dev/null; then
@@ -142,19 +144,19 @@ esac
 
 # Keep source lines for backtraces without embedding full type and variable
 # information in each test executable. Explicit remote Cargo settings win.
-queue_mode=--build
-queue_env=
+job_mode=--build
+job_env=
 case "$cmd" in
     check|test|clippy)
-        # Admit and compile with the same effective profile, including caller overrides.
-        queue_env="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV"
-        queue_mode=--build-debug
+        # Prepare the target and compile with the same effective profile, including caller overrides.
+        job_env="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV"
+        job_mode=--build-debug
         EXTRA_ENV= ;;
 esac
 
 if [ "$cmd" = fmt ]; then
     # fmt formats a copy of its own, not this checkout's shared copy: another job of the same
-    # checkout may upload its tree there while fmt waits in the queue, and fmt would then format,
+    # checkout may upload its tree there while fmt runs, and fmt would then format,
     # and bring home, a tree it was not given. Only what cargo fmt reads goes up: the manifests,
     # the lockfile, a rustfmt.toml and the crates' Rust sources.
     ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote"
@@ -177,10 +179,9 @@ if [ "$cmd" = fmt ]; then
     # hash moved is one fmt changed.
     hashes="find crates -name '*.rs' -type f -print0 | xargs -0 -r sha256sum -z"
     who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
-    # fmt builds nothing, so it takes the slot without the build disk's floor, which belongs to a
-    # checkout's target.
-    printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 build-queue.py "$who" bash -c "$hashes > .fmt-sent && CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd && $hashes > .fmt-done"
-    ssh "${ssh_opts[@]}" "$HOST" "cd $copy && exec env $queued" || exit $?
+    # fmt builds nothing, so it runs without the build disk's floor, which belongs to a checkout's target.
+    printf -v job '%q ' python3 build-queue.py "$who" bash -c "$hashes > .fmt-sent && CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd && $hashes > .fmt-done"
+    ssh "${ssh_opts[@]}" "$HOST" "cd $copy && exec env $job" || exit $?
     ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-sent" > "$work/sent"
     ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-done" > "$work/done"
     declare -A sent=()
@@ -194,7 +195,7 @@ if [ "$cmd" = fmt ]; then
     printf '%s\0' "${changed[@]}" > "$work/list"
     rsync -r --from0 --files-from="$work/list" -e "ssh ${ssh_opts[*]}" "$HOST:$copy/" "$work/formatted/"
     # A formatted file comes home only over the very file that was sent. One edited here since
-    # (while fmt waited in the queue, say) is left as it is and named, and fmt then exits 3, so
+    # (while fmt ran, say) is left as it is and named, and fmt then exits 3, so
     # a script that formats and then commits stops there. The check is made again just before
     # the formatted file takes the name, which it takes whole, by a rename.
     left=0
@@ -240,7 +241,7 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/s
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-background-jobs/scripts"
 "${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$remote/skills/clarp-background-jobs/scripts/"
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
-# Cargo releases the slot before rsync fetches the binaries. Keep links for the
+# The job gives up its copy before rsync fetches the binaries. Keep links for the
 # transfer so a later build can evict this target without interrupting the fetch.
 if [ "$cmd" = release ]; then
     export_dir=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.release-XXXXXXXX")
@@ -248,8 +249,8 @@ if [ "$cmd" = release ]; then
     cargo_cmd+=" && ln target/release/clarp-host target/release/clarp-shim $export_dir/"
 fi
 set +e
-printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$queue_mode" "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec env $queue_env $queued"
+printf -v job '%q ' python3 tools/build-queue.py "$job_mode" "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd"
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec env $job_env $job"
 code=$?
 set -e
 if [ "$cmd" = release ] && [ $code -eq 0 ]; then
