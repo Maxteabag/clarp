@@ -206,13 +206,16 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
 }
 
 /// A helper is shown at work while a helper below it, at any depth, works, and its own state
-/// again once the last of them stops (issue 936). Its row, the one row, its makers' counts,
-/// `GET /agent-helper-state` and the events about each say the same, and the helper at work
-/// stays in the list and opens by its session throughout.
+/// again once the last of them stops (issue 936). The middle helper is accepted (`done`) once,
+/// before the helper below it works, and nothing sets it again: the helper below runs a real
+/// turn and ends it without a report, which the Host itself marks. Its row, the one row, its
+/// makers' counts, `GET /agent-helper-state` and the events about each say the same, and the
+/// helper at work stays in the list and opens by its session throughout.
 #[test]
 fn a_helper_reads_running_while_a_helper_below_it_works() {
     let place = Place::new("helper-below");
-    let host = place.start_with("", &["--helpers-checked-every-ms", "3600000"]);
+    // The fleet looks at its helpers often, so the end of the leaf's turn is seen at once.
+    let host = place.start_with("", &["--helpers-checked-every-ms", "50"]);
     let heard = host.listen();
     let root = host.new_agent("Root");
     let made = |session: &str, parent: &str| {
@@ -245,10 +248,7 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
         let (rows, root_row) = (snapshot_row(&host, "middle"), snapshot_row(&host, &root));
         assert_eq!(rows["helper_state"], middle, "{rows}");
         assert_eq!(state_of("middle"), middle);
-        assert_eq!(
-            root_row["running_children"], running_below_root,
-            "{root_row}"
-        );
+        assert_eq!(root_row["running_children"], running_below_root, "{root_row}");
         assert_eq!(root_row["child_count"], 1, "{root_row}");
         let leaf = snapshot_row(&host, "leaf");
         assert_eq!(leaf["parent_agent_id"], middle_id, "{leaf}");
@@ -267,21 +267,29 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
         assert_eq!(event["parent"]["session"], root, "{event}");
     };
 
-    // The middle helper is accepted while the leaf below it works: it reads running.
+    // The middle helper is accepted while the leaf below it is still at work: it reads running.
     mark("middle", "done");
     check("running", 1);
-    assert_eq!(snapshot_row(&host, "leaf")["helper_state"], "running");
-    // The leaf is accepted: the middle helper reads its own result again.
-    mark("leaf", "done");
+    // The leaf runs a real turn: the middle helper still reads running, and the leaf is in the
+    // list and opens by its session.
+    host.send("leaf", "sleep 8", "leaf-work");
+    wait_for("the leaf's turn to run", || {
+        snapshot_row(&host, "leaf")["busy"] == true
+    });
+    check("running", 1);
+    let leaf = host.get("/agents/leaf");
+    assert_eq!((&leaf["busy"], &leaf["helper_state"]), (&json!(true), &json!("running")));
+    // Its turn ends with no report, and the Host marks it so: the middle helper reads the
+    // result it was given, which nothing set again.
+    wait_for("the leaf to end without a report", || {
+        state_of("leaf") == "ended-unreported"
+    });
     check("done", 0);
     // Opened again, and then put away: a helper put away counts for nobody above it, and opens
     // by its session all the same.
     mark("leaf", "running");
     check("running", 1);
-    host.post(
-        "/agent-archive",
-        json!({ "session": "leaf", "archived": true }),
-    );
+    host.post("/agent-archive", json!({ "session": "leaf", "archived": true }));
     check("done", 0);
     let leaf = host.get("/agents/leaf");
     assert_eq!(
