@@ -7,7 +7,8 @@
 //! - Then the records a per-turn shim writes: the session, the tool's pid, its output and
 //!   error lines, and one end ([`ClaimSpool::exit`]).
 //! - Beside them, the lane lines the actor reads of a lane's turn: `steer.open` (it takes
-//!   steered words), `steer.read` (the tool read these: the only evidence), `turn.completed` /
+//!   steered words), `steer.read` (the tool read these: the only evidence; `confirmed` when the
+//!   tool's own record says so), `turn.completed` /
 //!   `turn.failed`, and `turn.progress` while the model writes with nothing else to say.
 
 use std::collections::BTreeSet;
@@ -27,6 +28,8 @@ pub struct ClaimSpool {
     last_out: i64,
     /// The steered words whose reading is written.
     read: BTreeSet<String>,
+    /// Of those, the ones whose reading is written confirmed.
+    confirmed: BTreeSet<String>,
     ended: bool,
 }
 
@@ -39,6 +42,7 @@ impl ClaimSpool {
             writer,
             last_out: now_ms,
             read: BTreeSet::new(),
+            confirmed: BTreeSet::new(),
             ended: false,
         })
     }
@@ -84,19 +88,53 @@ impl ClaimSpool {
         self.out_json(&json!({"type": "steer.open"}), now_ms)
     }
 
-    /// The tool read the steered words of `id`. Written once, and durable before anything is
-    /// said of it: a restarted Host reads the same answer.
+    /// The tool read the steered words of `id`, by its own record of them. Written once, and
+    /// durable before anything is said of it: a restarted Host reads the same answer. The line
+    /// says `confirmed`: such a reading counts also when it is found after a Stop (issue 933).
+    /// A reading assumed before is written again, once, confirmed: after a Stop the Host did not
+    /// count the assumption, and only this keeps the words from running again.
     pub fn steer_read(&mut self, id: &str, now_ms: i64) -> io::Result<()> {
-        if id.is_empty() || !self.read.insert(id.to_owned()) {
+        self.reading(id, true, now_ms)
+    }
+
+    /// The lane counts the steered words of `id` as read without the tool's own record of them:
+    /// they could not be taken back, or their reading is inferred from other words. It counts as
+    /// a reading only while the turn was not stopped: after a Stop the Host gives such words back,
+    /// as it always did.
+    pub fn steer_assumed(&mut self, id: &str, now_ms: i64) -> io::Result<()> {
+        self.reading(id, false, now_ms)
+    }
+
+    fn reading(&mut self, id: &str, confirmed: bool, now_ms: i64) -> io::Result<()> {
+        let written = if confirmed {
+            self.confirmed.contains(id)
+        } else {
+            self.read.contains(id)
+        };
+        if id.is_empty() || written {
             return Ok(());
         }
-        self.out_json(&json!({"type": "steer.read", "id": id}), now_ms)?;
+        self.read.insert(id.to_owned());
+        if confirmed {
+            self.confirmed.insert(id.to_owned());
+        }
+        let line = if confirmed {
+            json!({"type": "steer.read", "id": id, "confirmed": true})
+        } else {
+            json!({"type": "steer.read", "id": id})
+        };
+        self.out_json(&line, now_ms)?;
         self.sync()
     }
 
-    /// Whether the reading of `id` is written.
+    /// Whether the reading of `id` is written, confirmed or assumed.
     pub fn was_read(&self, id: &str) -> bool {
         self.read.contains(id)
+    }
+
+    /// Whether the reading of `id` is written confirmed.
+    pub fn was_confirmed(&self, id: &str) -> bool {
+        self.confirmed.contains(id)
     }
 
     pub fn turn_completed(&mut self, now_ms: i64) -> io::Result<()> {
@@ -158,6 +196,15 @@ mod tests {
         spool.steer_read("w", 33_000).unwrap();
         spool.steer_read("w", 33_001).unwrap();
         assert!(spool.was_read("w") && !spool.was_read("v"));
+        // An assumed reading is written once, and a confirmed one after it once more (issue
+        // 933); nothing is written after a confirmed one.
+        spool.steer_assumed("v", 33_002).unwrap();
+        spool.steer_assumed("v", 33_003).unwrap();
+        assert!(spool.was_read("v") && !spool.was_confirmed("v"));
+        spool.steer_read("v", 33_004).unwrap();
+        spool.steer_read("v", 33_005).unwrap();
+        spool.steer_assumed("w", 33_006).unwrap();
+        assert!(spool.was_confirmed("v"));
         spool.turn_completed(34_000).unwrap();
         spool.exit(Some(0), None, 34_000).unwrap();
         spool.exit(None, Some(9), 35_000).unwrap();
@@ -179,7 +226,15 @@ mod tests {
                 out("line"),
                 Entry::Err("oops".into()),
                 out(r#"{"type":"turn.progress"}"#),
-                out(&serde_json::json!({"type": "steer.read", "id": "w"}).to_string()),
+                out(
+                    &serde_json::json!({"type": "steer.read", "id": "w", "confirmed": true})
+                        .to_string()
+                ),
+                out(&serde_json::json!({"type": "steer.read", "id": "v"}).to_string()),
+                out(
+                    &serde_json::json!({"type": "steer.read", "id": "v", "confirmed": true})
+                        .to_string()
+                ),
                 out(r#"{"type":"turn.completed"}"#),
                 Entry::Shim(ShimEvent::Exited {
                     code: Some(0),

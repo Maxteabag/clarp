@@ -364,6 +364,18 @@ fn proven(list: &Value, posted: &[(String, String)], order: &StoreOrder, message
             .any(|parent| after_compaction(stored, order, parent, message))
 }
 
+/// Whether the session's stored message `list` holds an answer whose parent is `message` itself:
+/// OpenCode's own record that it read exactly those words. Every other proof ([`proven`],
+/// [`taken_in`]) infers it from another message, which may have been stored while `message` never
+/// was (a post answers before it is stored), so it is no confirmation after a Stop (issue 933).
+fn answered_itself(list: &Value, message: &str) -> bool {
+    list.as_array().into_iter().flatten().any(|stored| {
+        stored["info"]["role"] == "assistant"
+            && !compaction(&stored["info"])
+            && stored["info"]["parentID"].as_str() == Some(message)
+    })
+}
+
 /// Whether `parent` is OpenCode's own message that tells it to go on after it compacted its
 /// context, and `message` a steer of the turn's own OpenCode stored before it: then the answer to
 /// it took `message` in (issue 878). OpenCode's answer after a compaction names that message as
@@ -881,8 +893,9 @@ impl Lane {
     /// the lane is reading now: then the session is busy again, or has even answered them
     /// already with that answer still on its way to the lane, and the words are this turn's.
     /// A delete the session refuses as busy (409) says the same. A Stop's idle comes after an
-    /// abort, and takes the words back as they are. Words not taken back otherwise count as
-    /// read, so that the Host never runs them a second time.
+    /// abort: words the stored messages prove answered are read, and the rest are taken back as
+    /// they are. Words not taken back otherwise count as read, so that the Host never runs them
+    /// a second time; after a Stop the Host does not count that and gives them back.
     ///
     /// `by_order`: an answer that took the words in by message order holds the turn open
     /// ([`Settle::ByOrder`]); a recheck that found no run since passes false.
@@ -890,6 +903,17 @@ impl Lane {
         let unread = match self.turn.as_ref() {
             Some(turn) => turn.unread(),
             None => return Ok(Settle::Done),
+        };
+        // A Stop's idle: words OpenCode answered themselves, whose answer's start the lane never
+        // heard, were read; deleting them would delete what OpenCode answered, and the Host would
+        // run them again (issue 933: OpenCode 1.18.33 ran a steered message's tool twice). So
+        // were words only assumed read, which the Host does not count after a Stop. The
+        // session's stored messages decide ([`answered_itself`]); what they do not show, or a
+        // list that cannot be read, is taken back as before, and an assumption stays one.
+        let unread = if stopping {
+            self.read_by_stored(unread)?
+        } else {
+            unread
         };
         if unread.is_empty() {
             return Ok(Settle::Done);
@@ -909,17 +933,58 @@ impl Lane {
             match self.serve.client.delete(&path, 10) {
                 Ok(200..=299) => {}
                 Ok(409) if !stopping => return Ok(Settle::Runs),
+                // Not OpenCode's record that it read them: the Host counts this only for a turn
+                // that was not stopped, and gives the words of a stopped one back.
                 answer => {
                     eprintln!(
                         "clarp-shim: OpenCode lane: steered words were not taken back ({answer:?}), and count as read"
                     );
                     if let Some(turn) = self.turn.as_mut() {
-                        turn.spool.steer_read(&id, super::now_ms())?;
+                        turn.spool.steer_assumed(&id, super::now_ms())?;
                     }
                 }
             }
         }
         Ok(Settle::Done)
+    }
+
+    /// Writes as read, confirmed, the turn's steered words the session's stored messages show
+    /// OpenCode answered themselves ([`answered_itself`]), of the `unread` ones and of those only
+    /// assumed read, in the order they were posted, and returns the `unread` rest. An answer to
+    /// later words is no proof here: those earlier words may never have been stored. A list that
+    /// cannot be read proves nothing.
+    fn read_by_stored(
+        &mut self,
+        unread: Vec<(String, String)>,
+    ) -> io::Result<Vec<(String, String)>> {
+        let open: Vec<(String, String)> = match self.turn.as_ref() {
+            Some(turn) => turn
+                .steered
+                .iter()
+                .filter(|(_, id)| !turn.spool.was_confirmed(id))
+                .cloned()
+                .collect(),
+            None => return Ok(unread),
+        };
+        if open.is_empty() {
+            return Ok(unread);
+        }
+        let Some(list) = self.stored() else {
+            return Ok(unread);
+        };
+        let Some(turn) = self.turn.as_mut() else {
+            return Ok(unread);
+        };
+        let now = super::now_ms();
+        for (message, id) in &open {
+            if answered_itself(&list, message) {
+                turn.spool.steer_read(id, now)?;
+            }
+        }
+        Ok(unread
+            .into_iter()
+            .filter(|(_, id)| !turn.spool.was_confirmed(id))
+            .collect())
     }
 
     /// The recheck of a turn held open by message order alone (issue 864): no run came, or its
@@ -942,11 +1007,15 @@ impl Lane {
         match self.stored() {
             Some(list) => {
                 let now = super::now_ms();
+                // Inferred from another message, a reading is only assumed (issue 933).
                 let read = unread
                     .iter()
                     .filter(|(message, _)| proven(&list, &posted, &order, message))
-                    .try_for_each(|(_, id)| match self.turn.as_mut() {
-                        Some(turn) => turn.spool.steer_read(id, now),
+                    .try_for_each(|(message, id)| match self.turn.as_mut() {
+                        Some(turn) if answered_itself(&list, message) => {
+                            turn.spool.steer_read(id, now)
+                        }
+                        Some(turn) => turn.spool.steer_assumed(id, now),
                         None => Ok(()),
                     });
                 if let Err(error) = read {
@@ -1003,11 +1072,19 @@ impl Lane {
             && let Some(parent) = info["parentID"].as_str()
         {
             let now = super::now_ms();
+            // Only the answer's own parent is OpenCode's record of a reading; the words before it
+            // are taken in by id order, an inference (issue 933).
             let read = turn
                 .steered
                 .iter()
                 .filter(|(message, _)| taken_in(message, parent))
-                .try_for_each(|(_, id)| turn.spool.steer_read(id, now));
+                .try_for_each(|(message, id)| {
+                    if message == parent {
+                        turn.spool.steer_read(id, now)
+                    } else {
+                        turn.spool.steer_assumed(id, now)
+                    }
+                });
             if let Err(error) = read {
                 self.end(Some(1), None, Some(&error.to_string()));
                 return;

@@ -196,6 +196,39 @@ impl State {
         None
     }
 
+    /// The id a lane's line says its tool read, where the tool's own record confirms it
+    /// (`"confirmed": true`). Such a reading is a fact about what the tool did before its turn
+    /// ended, also when the lane finds it after a Stop (issue 933: Codex's own list of the turn,
+    /// OpenCode's stored answer). A reading the lane only assumed, and every line of an older
+    /// lane, say no such thing.
+    pub(super) fn confirmed_read(&self, entry: &Line) -> Option<String> {
+        let Line::Out(line) = entry else {
+            return None;
+        };
+        if !self.lane {
+            return None;
+        }
+        let event: Value = serde_json::from_str(line).ok()?;
+        if event["type"] != "steer.read" || event["confirmed"] != true {
+            return None;
+        }
+        event["id"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    }
+
+    /// Whether `entry` is a confirmed reading ([`Self::confirmed_read`]) of words that were
+    /// steered into the live attempt of `into` and are still unread there. A reading of other
+    /// words, or one already counted, changes nothing.
+    pub(super) fn confirmed_read_into(&self, entry: &Line, agent: &Agent, into: TurnId) -> bool {
+        self.confirmed_read(entry).is_some_and(|id| {
+            agent.joins().values().any(|follow| {
+                follow.join.into == into && follow.stage == Stage::Pending && follow.join.uuid == id
+            })
+        })
+    }
+
     /// Follows a line of the spool that the actor before this one read already, to be where it
     /// was. Returns whether the tool read a message into the turn there, as the live turn saw it.
     /// The live turn counts a read where the message still waited (`Stage::Pending`) and its

@@ -542,8 +542,21 @@ serve would be one point of failure for every such agent.
   their own, unless the session runs again or already answered them (words that reached
   OpenCode after its run ended start a run of their own, so that idle is stale): then the turn
   stays open until the next idle. A delete refused as busy keeps it open too; any other failed
-  delete counts the words as read. A Stop deletes them after its abort. Words sent after the
-  lane ended the turn are refused and wait for a turn of their own.
+  delete counts the words as read. A Stop deletes them after its abort, but for words the
+  session's stored messages show an answer to, with those very words as its parent (issue 933):
+  those are read. An answer to later words proves nothing there, since a post answers before
+  OpenCode stores it and the earlier words may never have been stored. Words sent after
+  the lane ended the turn are refused and wait for a turn of their own.
+- **A reading after a Stop** (issue 933, every lane). The Host takes nothing a stopped tool prints,
+  but for one line: a `steer.read` that says `"confirmed": true`, which a lane writes only from the
+  tool's own record (Codex's `userMessage` item or its list of the turn, an OpenCode answer whose
+  parent is those words, Muse's steered item). A reading inferred from other words (by id order,
+  or an answer to later words) is written without it; the tool's own record found later writes
+  the reading again, once, confirmed (at a Stop the OpenCode lane looks for it in the stored
+  messages for the words it only assumed read, too). It reads those words into the stopped turn while they still wait
+  there, so they do not run again. A reading the lane only assumed (OpenCode words it could not
+  delete) has no `confirmed`, nor has any line of a lane started before this change: after a Stop
+  the Host gives those words back, as before.
 
 ## What step 2 (Claude) must handle: what assumes a fresh Claude process per turn
 

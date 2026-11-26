@@ -226,10 +226,10 @@ read -r end || :
             json!({"type":"turn.started"}),
             json!({"type":"steer.open"}),
             // Read as Codex said it, once.
-            json!({"type":"steer.read","id":"s-1"}),
+            json!({"type":"steer.read","id":"s-1","confirmed":true}),
             json!({"type":"item.completed","item":{"type":"agent_message","id":"a1","text":"done"}}),
             // Read as the turn's own record says, before its end: only what was sent.
-            json!({"type":"steer.read","id":"s-2"}),
+            json!({"type":"steer.read","id":"s-2","confirmed":true}),
             json!({"type":"turn.completed","usage":null}),
         ]
     );

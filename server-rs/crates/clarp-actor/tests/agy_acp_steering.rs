@@ -797,3 +797,135 @@ fn a_lanes_reading_of_an_id_the_host_never_gave_is_ignored() {
     assert_eq!(messages(&actor), ["u-1", "u-2"]);
     assert!(world.joined.is_empty());
 }
+
+/// A step of an OpenCode answer that says `text`, as the lane writes OpenCode's events.
+fn opencode_step(id: &str, text: &str) -> Vec<Value> {
+    let part = |part: Value| json!({"type": "message.part.updated", "properties": {"sessionID": "ses_a", "part": part}});
+    vec![
+        part(json!({"id": format!("{id}s"), "messageID": id, "type": "step-start"})),
+        part(json!({"id": format!("{id}t"), "messageID": id, "type": "text", "text": text})),
+        part(
+            json!({"id": format!("{id}f"), "messageID": id, "type": "step-finish", "reason": "stop"}),
+        ),
+    ]
+}
+
+/// Issue 933. After a Stop, a lane finds by its tool's own record that the tool read steered
+/// words (`confirmed`: OpenCode's stored answer to them, Codex's list of the turn): they were read
+/// into the stopped turn and never run again, also when the Host restarts before the stopped
+/// tool is gone: a reading the actor met before the restart, and one the lane writes only while
+/// the Host is down, which the reopened actor meets first in the spool. Nothing else the stopped tool printed is taken. A reading the lane only assumed
+/// (words it could not take back), one of words the turn was never given, and a second one say
+/// nothing: the words still unread run after the Stop, once each, in the order they were sent.
+#[test]
+fn after_a_stop_only_a_confirmed_lane_reading_keeps_words_from_running_again() {
+    let mut world = World::new("confirmed-after-stop");
+    world.backend = clarp_backend::by_id("opencode").unwrap();
+    let mut actor = world.open();
+    let now = world.tick();
+    let first = Message {
+        id: "u-1".into(),
+        text: "go".into(),
+        origin: Origin::User,
+        trace_id: Some("trace-1".into()),
+        ..Message::default()
+    };
+    let (_, out) = actor.send(&first, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.says(1, &json!({"type": "session", "sessionID": "ses_a"}));
+    world.says(1, &json!({"type": "steer.open"}));
+    world.hint(&mut actor);
+    let read = world.send_while_running(&mut actor, "2", "read");
+    let assumed = world.send_while_running(&mut actor, "3", "assumed");
+    let unread = world.send_while_running(&mut actor, "4", "unread");
+    let later = world.send_while_running(&mut actor, "5", "read later");
+    assert_eq!(world.steered.len(), 4);
+    let id = |trace: &str| takeover::prompt_uuid(trace).unwrap();
+
+    let now = world.tick();
+    let (told, out) = actor
+        .stop_and_start_waiting(Control::by(clarp_kernel::control::USER), now)
+        .unwrap();
+    assert_eq!(told, 1);
+    world.carry_out(&mut actor, out);
+    assert_eq!(world.stopped, [1]);
+
+    // What the stopped tool still says is not taken; the lane's reading of the first words is.
+    for line in opencode_step("m9", "after the stop") {
+        world.says(1, &line);
+    }
+    world.says(
+        1,
+        &json!({"type": "steer.read", "id": id("trace-2"), "confirmed": true}),
+    );
+    world.hint(&mut actor);
+    assert_eq!(world.joined.len(), 1);
+    assert_eq!(world.joined[0].turn, read);
+
+    // The Host restarts before the lane is done: the turn is taken up again from its log.
+    drop(actor);
+    world.says(1, &json!({"type": "steer.read", "id": id("trace-3")}));
+    world.says(
+        1,
+        &json!({"type": "steer.read", "id": id("trace-5"), "confirmed": true}),
+    );
+    world.says(
+        1,
+        &json!({"type": "steer.read", "id": id("trace-2"), "confirmed": true}),
+    );
+    world.says(
+        1,
+        &json!({"type": "steer.read", "id": "never-given", "confirmed": true}),
+    );
+    world.exits(1, None, Some(2));
+    let mut actor = world.open();
+    world.hint(&mut actor);
+
+    // Read into a turn: the confirmed words once, the assumed ones never. (Words that waited
+    // behind may go to the next turn together with its own, a reading of their own.)
+    let joined: Vec<u64> = world.joined.iter().map(|read| read.turn.0).collect();
+    assert_eq!(
+        joined.iter().filter(|turn| **turn == read.0).count(),
+        1,
+        "{joined:?}"
+    );
+    assert_eq!(
+        joined.iter().filter(|turn| **turn == later.0).count(),
+        1,
+        "{joined:?}"
+    );
+    assert!(!joined.contains(&assumed.0), "{joined:?}");
+    assert!(
+        ends(&actor)
+            .iter()
+            .any(|(end, status)| end == "t-1" && status == "interrupted"),
+        "{:?}",
+        ends(&actor)
+    );
+    assert_eq!(world.took, [1, assumed.0], "the read words never run again");
+    world.says(assumed.0, &json!({"type": "session", "sessionID": "ses_a"}));
+    world.says(assumed.0, &json!({"type": "turn.completed"}));
+    world.exits(assumed.0, Some(0), None);
+    world.hint(&mut actor);
+    assert!(
+        !world.took.contains(&read.0) && !world.took.contains(&later.0),
+        "{:?}",
+        world.took
+    );
+    assert!(
+        !replies(&actor)
+            .iter()
+            .any(|(text, _, _)| text == "after the stop"),
+        "{:?}",
+        replies(&actor)
+    );
+    assert_eq!(messages(&actor), ["u-1", "u-2", "u-5", "u-3", "u-4"]);
+    // The words still unread are delivered once: in the next turn's prompt, or as their own turn.
+    let joined: Vec<u64> = world.joined.iter().map(|read| read.turn.0).collect();
+    assert_ne!(
+        world.took.contains(&unread.0),
+        joined.contains(&unread.0),
+        "{:?} {joined:?}",
+        world.took
+    );
+}

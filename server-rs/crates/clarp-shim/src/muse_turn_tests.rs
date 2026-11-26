@@ -146,7 +146,10 @@ fn steered_words_are_read_once_by_their_command_and_the_rest_are_unread() {
         .collect();
     assert_eq!(reads.len(), 1);
     let read: Value = serde_json::from_str(&reads[0]).unwrap();
-    assert_eq!(read, json!({"type": "steer.read", "id": "words-1"}));
+    assert_eq!(
+        read,
+        json!({"type": "steer.read", "id": "words-1", "confirmed": true})
+    );
 }
 
 #[test]

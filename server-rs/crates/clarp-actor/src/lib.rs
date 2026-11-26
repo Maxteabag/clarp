@@ -1199,7 +1199,8 @@ fn record_item<R: serde::Serialize>(
 }
 
 /// The process can write while it is being retired. Keep the shim's lifecycle records
-/// so its exit settles the turn, along with output recorded before the Stop.
+/// so its exit settles the turn, along with output recorded before the Stop. A lane's
+/// confirmed reading is the one other record that still counts ([`steering::State::confirmed_read`]).
 fn after_stop(record: &Record, stopped_at: Option<i64>) -> bool {
     !matches!(record.entry, Line::Shim(_)) && stopped_at.is_some_and(|at| record.t >= at)
 }
@@ -5933,12 +5934,20 @@ impl Actor {
                 if let Line::Shim(ShimEvent::Signalled { signal }) = &record.entry {
                     outside.get_or_insert_with(|| signal.clone());
                 }
-                if after_stop(record, stopped_at) {
+                // A confirmed reading after the Stop is followed as the live turn followed it:
+                // `replay` counts it only where the agent holds its read (issue 933).
+                let late = after_stop(record, stopped_at);
+                let late_read = late && steering.confirmed_read(&record.entry).is_some();
+                if late && !late_read {
                     continue;
                 }
-                note_output(&mut last_output_ms, record);
+                if !late_read {
+                    note_output(&mut last_output_ms, record);
+                }
                 let evidence = steering.record(&record.entry);
-                interpreter.on_record(record, &mut signals);
+                if !late_read {
+                    interpreter.on_record(record, &mut signals);
+                }
                 for signal in signals.drain(..) {
                     match signal {
                         Signal::Live(live) => {
@@ -6190,7 +6199,8 @@ impl Actor {
     /// When the turn that waits for its next attempt is to be tried again. `None`: no turn
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
-        if self.moved().is_some() || self.recorder.agent().import_held()
+        if self.moved().is_some()
+            || self.recorder.agent().import_held()
             || (self.recorder.transit_held() && self.recorder.agent().checkpointed_for_transit())
         {
             return None;
@@ -6768,10 +6778,20 @@ impl Actor {
                 let stop_end = late
                     && matches!(&record.entry, Line::Out(line) if self.backend.ends_turn(line))
                     && lingering::ends_at_answer(live, batch.agent(), EndsAt::Stop);
-                if late && !stop_end {
+                // But for words a lane found its tool read, by the tool's own record, while the
+                // stopped attempt still holds them unread: they were read before the turn ended,
+                // and are not given back to run again (issue 933). The reading is no output.
+                let late_read = late
+                    && !stop_end
+                    && live
+                        .steering
+                        .confirmed_read_into(&record.entry, batch.agent(), turn);
+                if late && !stop_end && !late_read {
                     continue;
                 }
-                note_output(&mut live.last_output_ms, record);
+                if !late_read {
+                    note_output(&mut live.last_output_ms, record);
+                }
                 let input_skipped = live.steering.input_skipped;
                 let evidence = if stop_end {
                     None
@@ -6902,7 +6922,9 @@ impl Actor {
                     }
                     _ => {}
                 }
-                live.interpreter.on_record(record, &mut signals);
+                if !late_read {
+                    live.interpreter.on_record(record, &mut signals);
+                }
                 for signal in signals.drain(..) {
                     let piece = match signal {
                         Signal::Bound { backend_session } => {

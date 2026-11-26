@@ -94,13 +94,18 @@ impl TurnSpool {
         self.steered.difference(&self.read).cloned().collect()
     }
 
-    /// Codex took the words of this id into the turn. Written once, and made durable before
-    /// anything is said of it: a restarted Host reads the same answer.
+    /// Codex took the words of this id into the turn, by its own record (a `userMessage` item
+    /// with that `clientId`). Written once, and made durable before anything is said of it: a
+    /// restarted Host reads the same answer. `confirmed`: it counts also when it is found after
+    /// a Stop (issue 933).
     pub fn receipt(&mut self, id: &str, now_ms: i64) -> io::Result<()> {
         if id.is_empty() || !self.read.insert(id.to_owned()) {
             return Ok(());
         }
-        self.output(json!({"type": "steer.read", "id": id}), now_ms)?;
+        self.output(
+            json!({"type": "steer.read", "id": id, "confirmed": true}),
+            now_ms,
+        )?;
         self.writer.sync()
     }
 
