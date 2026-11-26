@@ -2,7 +2,7 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -10,9 +10,9 @@ use clarp_shim::lane::{LOGIN_CHANGED, Status, owner_lock};
 use serde_json::{Value, json};
 
 use super::{
-    Endpoint, Free, LoginChanged, Memory, Mode, Place, Room, Settings, Tool, held, lanes_in,
-    make_room, make_way_within, mark_owners_turn, mark_owners_view, once_more, replied, shed,
-    start_once_more,
+    Endpoint, Free, LEAVING_LOOK, LoginChanged, MAX_STATE, Memory, Mode, Place, Room, Settings,
+    Tool, held, lanes_in, make_room, make_way_within, mark_owners_turn, mark_owners_view,
+    once_more, replied, said_it_goes, shed, start_once_more,
 };
 
 fn of(text: &str) -> Settings {
@@ -1498,6 +1498,128 @@ fn in_a_mixed_rollout_lanes_from_before_and_since_both_leave_and_silence_or_refu
         assert!(lanes[0].endpoint.released().unwrap(), "{case}: it left");
         assert!(lanes[1].endpoint.socket().exists(), "{case}");
         std::fs::remove_dir_all(&run).unwrap();
+    }
+}
+
+/// What an idle lane asked to leave says when it goes: one line, its line end last.
+fn it_goes() -> Vec<u8> {
+    let mut frame = json!({"ok": true, "state": status("t", "d", 100_000, false)})
+        .to_string()
+        .into_bytes();
+    frame.push(b'\n');
+    frame
+}
+
+#[test]
+fn a_lane_that_keeps_sending_part_of_its_answer_is_cut_off_at_the_bound_counted_from_the_ask() {
+    // An answer that arrives in parts, slower than a look, counts once its line is whole.
+    let (mut host, mut lane) = UnixStream::pair().unwrap();
+    let answer = it_goes();
+    let parts = std::thread::spawn(move || {
+        for part in answer.chunks(answer.len() / 3) {
+            lane.write_all(part).unwrap();
+            std::thread::sleep(LEAVING_LOOK * 2);
+        }
+        lane
+    });
+    let far = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    assert!(said_it_goes(&mut host, Tool::Codex, far, || false));
+    drop(parts.join().unwrap());
+
+    // A lane that keeps sending a byte of it every few milliseconds and never ends its line.
+    // 9bd36a19 read it with read_until, to which each byte was progress: no look ever ran out,
+    // and the start waited as long as the lane kept sending. The bound does not move for what
+    // arrives: the lane is cut off at it, and has not left.
+    const BOUND: std::time::Duration = std::time::Duration::from_millis(300);
+    let (mut host, mut lane) = UnixStream::pair().unwrap();
+    let mut part = it_goes();
+    part.pop();
+    let trickle = std::thread::spawn(move || {
+        // Until the Host hangs up.
+        for byte in part.iter().cycle() {
+            if lane.write_all(&[*byte]).is_err() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+    let began = std::time::Instant::now();
+    assert!(!said_it_goes(&mut host, Tool::Codex, began + BOUND, || {
+        false
+    }));
+    let took = began.elapsed();
+    assert!(took >= BOUND, "{took:?}");
+    assert!(took < BOUND + std::time::Duration::from_secs(2), "{took:?}");
+    drop(host);
+    trickle.join().unwrap();
+}
+
+#[test]
+fn an_answer_longer_than_any_can_be_is_none_and_is_read_no_further() {
+    // The answer behind blank space, which a JSON reader skips: exactly as long as an answer
+    // may be, line end included, it counts.
+    let answer = it_goes();
+    let most = usize::try_from(MAX_STATE).unwrap();
+    let padded = |blank: usize| {
+        let mut frame = vec![b' '; blank];
+        frame.extend_from_slice(&answer);
+        frame
+    };
+    let sent = |frame: Vec<u8>| {
+        let (mut host, mut lane) = UnixStream::pair().unwrap();
+        // The lane keeps its end open: whatever is decided is decided by what it sent.
+        let writer = std::thread::spawn(move || {
+            let _ = lane.write_all(&frame);
+            lane
+        });
+        let began = std::time::Instant::now();
+        let far = began + std::time::Duration::from_secs(20);
+        let went = said_it_goes(&mut host, Tool::Codex, far, || false);
+        let took = began.elapsed();
+        drop(host);
+        drop(writer.join().unwrap());
+        (went, took)
+    };
+    assert!(sent(padded(most - answer.len())).0, "the longest answer");
+    // One byte more: its first MAX_STATE bytes hold no line end. 9bd36a19 read on with
+    // read_until, unbounded, to the line end and counted the answer; it is none, and the lane is
+    // cut off once it has sent that much, not at the bound.
+    let (went, took) = sent(padded(most - answer.len() + 1));
+    assert!(!went);
+    assert!(took < std::time::Duration::from_secs(10), "{took:?}");
+}
+
+#[test]
+fn part_of_an_answer_its_lane_hung_up_after_is_none_whether_or_not_a_look_ran_out_first() {
+    // A lane sends its answer but for the line end and hangs up, at once or after a look in
+    // which nothing more came. That part is no answer either way: what decides is whether its
+    // socket went, which the lane does here, or not, just before it hangs up. 9bd36a19 decided
+    // by the socket only where a look ran out first; where it did not, it took the part for a
+    // whole answer and found none, so a lane that went did not count.
+    let mut part = it_goes();
+    part.pop();
+    for late in [false, true] {
+        for goes in [false, true] {
+            let (mut host, mut lane) = UnixStream::pair().unwrap();
+            let gone = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let socket = gone.clone();
+            let part = part.clone();
+            let writer = std::thread::spawn(move || {
+                lane.write_all(&part).unwrap();
+                if late {
+                    std::thread::sleep(LEAVING_LOOK * 3);
+                }
+                socket.store(goes, std::sync::atomic::Ordering::SeqCst);
+            });
+            let far = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            let left = || gone.load(std::sync::atomic::Ordering::SeqCst);
+            assert_eq!(
+                said_it_goes(&mut host, Tool::Codex, far, left),
+                goes,
+                "late {late}, socket gone {goes}"
+            );
+            writer.join().unwrap();
+        }
     }
 }
 

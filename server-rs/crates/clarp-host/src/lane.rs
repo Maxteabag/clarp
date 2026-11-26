@@ -1028,7 +1028,8 @@ impl Endpoint {
     /// sent, so a lane that took its name meanwhile is never asked. Whether it left for this
     /// ask: it said it goes, or its socket file went after it was asked. One that refused, said
     /// nothing with its socket still there (until the bound, or until it hung up), or had gone
-    /// before the ask (another start's place, or its own idle time) did not.
+    /// before the ask (another start's place, or its own idle time) did not; how its answer is
+    /// read is [`said_it_goes`].
     fn asked_to_leave(&self, seen: gate::Instance) -> bool {
         if !seen.is_at(&self.socket) {
             return false;
@@ -1039,30 +1040,11 @@ impl Endpoint {
         if !seen.is_reached_by(&self.socket, &stream) {
             return false;
         }
-        let Ok(stream) = Self::send(stream, &Lifecycle::Retire, LEAVING_LOOK) else {
+        let Ok(mut stream) = Self::send(stream, &Lifecycle::Retire, LEAVING_LOOK) else {
             return false;
         };
         let until = Instant::now() + RPC_TIMEOUT;
-        let mut input = BufReader::new(stream);
-        // Bytes, kept across the looks: an answer may arrive in parts.
-        let mut said = Vec::new();
-        loop {
-            match input.read_until(b'\n', &mut said) {
-                Ok(0) => return !seen.is_at(&self.socket),
-                Ok(_) => return replied::<Status>(&mut said.as_slice(), self.tool).is_ok(),
-                Err(error) if unanswered(&error) => {
-                    // On its way out: its socket is gone, and its answer may wait for its exit.
-                    if !seen.is_at(&self.socket) {
-                        return true;
-                    }
-                    // Silence is no answer, nor is more than any answer can be.
-                    if Instant::now() >= until || said.len() as u64 > MAX_STATE {
-                        return false;
-                    }
-                }
-                Err(_) => return !seen.is_at(&self.socket),
-            }
-        }
+        said_it_goes(&mut stream, self.tool, until, || !seen.is_at(&self.socket))
     }
 
     /// Retires a lane of another thread, within `bound`, on a thread of its own: the caller waits
@@ -1801,6 +1783,59 @@ fn line(input: &mut impl BufRead, tool: Tool) -> io::Result<Vec<u8>> {
         ));
     }
     Ok(line)
+}
+
+/// Whether a lane asked to leave on `stream` left for that ask, decided by `until` at the latest:
+/// it said it goes, in one whole line of at most [`MAX_STATE`] bytes that came before `until`, or
+/// it was seen to have `left` (its socket gone) since it was asked. Each read waits at most
+/// [`LEAVING_LOOK`], and never past `until`, which is not moved by what arrives: a lane that keeps
+/// sending part of a line is cut off at `until` as one that says nothing is, and one that sends
+/// more than an answer can be is cut off as soon as it has, with no more than that kept. Part of
+/// a line is no answer, whether the connection ends right after it or later; a refusal is none
+/// either.
+fn said_it_goes(
+    stream: &mut UnixStream,
+    tool: Tool,
+    until: Instant,
+    left: impl Fn() -> bool,
+) -> bool {
+    let most = usize::try_from(MAX_STATE).unwrap_or(usize::MAX);
+    // Bytes, kept across the reads: an answer may arrive in parts.
+    let mut said = Vec::new();
+    let mut part = [0; 8 * 1024];
+    loop {
+        let rest = until.saturating_duration_since(Instant::now());
+        let room = most.saturating_sub(said.len()).min(part.len());
+        if rest.is_zero()
+            || room == 0
+            || stream
+                .set_read_timeout(Some(rest.min(LEAVING_LOOK)))
+                .is_err()
+        {
+            return left();
+        }
+        match stream.read(&mut part[..room]) {
+            Ok(0) => return left(),
+            Ok(read) => {
+                let from = said.len();
+                said.extend_from_slice(&part[..read]);
+                if Instant::now() >= until {
+                    return left();
+                }
+                if let Some(end) = said[from..].iter().position(|byte| *byte == b'\n') {
+                    return replied::<Status>(&mut &said[..=from + end], tool).is_ok();
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            // On its way out: its socket is gone, and its answer may wait for its exit.
+            Err(error) if unanswered(&error) => {
+                if left() {
+                    return true;
+                }
+            }
+            Err(_) => return left(),
+        }
+    }
 }
 
 /// A socket nobody listens on any more, or a connection closed without an answer: what a lane
