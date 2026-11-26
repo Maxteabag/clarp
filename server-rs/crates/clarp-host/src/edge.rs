@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 200;
+pub const HOST_CONTRACT: u64 = 201;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -512,6 +512,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // An agent that is away says who put it there: `archived_by` on its row, on the answer and
     // on the `archive-changed` event; each archive and restore is a line in the Host's log.
     ("archive_by_anyone", 200),
+    // On `/events?compact=1`, a resume that missed events, and a connection that fell behind
+    // (which is then not cut off), is told so first (`agent-roster` with `resync`, `truncated`, `skipped`)
+    // and given only the newest `transcript-updated` of each chat and `agent-activity`
+    // of each agent of what it missed, the rest as before; such a connection without
+    // `Last-Event-ID` is given no replay. Without `compact=1` all is as before (issue 882).
+    ("compact_resume", 201),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -4847,6 +4853,9 @@ struct EventsQuery {
     /// `1`: a `transcript-updated` carries the rows it stands for, where they are few and small
     /// (feature `events_rows`).
     rows: Option<String>,
+    /// `1`: a resume and a lag are caught up compacted, told first, and never cut; no replay
+    /// without `Last-Event-ID` (feature `compact_resume`).
+    compact: Option<String>,
 }
 
 /// The rows a `transcript-updated` stands for, as `/log` answers a delta from its `rows_from`
@@ -4928,7 +4937,10 @@ async fn events(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse().ok())
         .or(query.last_event_id);
-    let (missed, live) = app.hub.subscribe(after);
+    let compact = matches!(
+        query.compact.as_deref().map(str::trim),
+        Some("1" | "true" | "yes")
+    );
     let rows = matches!(
         query.rows.as_deref().map(str::trim),
         Some("1" | "true" | "yes")
@@ -4958,23 +4970,40 @@ async fn events(
         };
         (wanted, app.hub.watch(), marks)
     });
-    // First what the client missed, then the word to look at everything: whatever happened
-    // while it was away for longer than the hub remembers, the snapshot and the conversations
-    // will tell.
-    let mut first = VecDeque::with_capacity(missed.len() + 2);
-    for published in &missed {
-        if !not_for(&app, published, &listener).await {
-            first.push_back(numbered(published));
+    let (first, live, last) = if compact {
+        // A client that asked to be caught up compacted and resumes having missed something is
+        // told so first, then given the newest of what it missed (feature `compact_resume`,
+        // issue 882). One that missed nothing, or names no event (it reads the snapshot
+        // anyway), is given the word to look at everything.
+        let resumed = app.hub.resume(after);
+        let gap = after.is_some() && (!resumed.missed.is_empty() || resumed.truncated);
+        let first = if gap {
+            catch_up(&app, resumed.missed, resumed.truncated, &listener).await
+        } else {
+            VecDeque::from([unnumbered(&json!({ "type": "agent-roster" }))])
+        };
+        (first, resumed.live, resumed.head)
+    } else {
+        // First what the client missed, then the word to look at everything: whatever happened
+        // while it was away for longer than the hub remembers, the snapshot and the
+        // conversations will tell. Older apps take that word as the end of the replay.
+        let (missed, live) = app.hub.subscribe(after);
+        let mut first = VecDeque::with_capacity(missed.len() + 1);
+        for published in &missed {
+            if !not_for(&app, published, &listener).await {
+                first.push_back(numbered(published));
+            }
         }
-    }
-    first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
+        first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
+        (first, live, 0)
+    };
     let clock = app.clock.clone();
     // The stream ends the moment the Host is told to stop, not when its process is gone: its
     // apps reconnect to the next Host about five seconds sooner (issue 880).
     let closing = Box::pin(app.hub.closing());
     let stream = stream::unfold(
-        (first, live, watched, closing),
-        move |(mut first, mut live, mut watched, mut closing)| {
+        (first, live, watched, closing, last),
+        move |(mut first, mut live, mut watched, mut closing, mut last)| {
             let clock = clock.clone();
             let (app, listener) = (app.clone(), listener.clone());
             async move {
@@ -4983,7 +5012,7 @@ async fn events(
                 let beat_at = tokio::time::Instant::now() + HEARTBEAT;
                 loop {
                     if let Some(event) = first.pop_front() {
-                        return Some((Ok(event), (first, live, watched, closing)));
+                        return Some((Ok(event), (first, live, watched, closing, last)));
                     }
                     // What a turn shows, for a connection that asked for it; for one that did
                     // not, a wait that never ends.
@@ -5004,6 +5033,10 @@ async fn events(
                     .await;
                     let event = match heard {
                         Ok(Heard::Event(Ok(published))) => {
+                            // What this connection stands at, for a catch-up after a lag.
+                            if published.id != 0 {
+                                last = last.max(published.id);
+                            }
                             // A ring this client may not be told of is passed over.
                             if not_for(&app, &published, &listener).await {
                                 continue;
@@ -5029,8 +5062,22 @@ async fn events(
                                 None => continue,
                             }
                         }
-                        // A client that fell too far behind is cut off. It reconnects, and what
-                        // it missed is given to it then; of what turns showed it asks anew.
+                        // A client that fell too far behind and asked to be caught up is not cut
+                        // off: it is told so, given the newest of what it missed from the kept
+                        // events, and goes on live (feature `compact_resume`). Of what turns
+                        // showed it asks anew: the next `live` event's `lseq` shows it the gap.
+                        Ok(Heard::Event(Err(RecvError::Lagged(_)))) if compact => {
+                            let caught = app.hub.resume(Some(last));
+                            live = caught.live;
+                            last = caught.head;
+                            first =
+                                catch_up(&app, caught.missed, caught.truncated, &listener).await;
+                            continue;
+                        }
+                        Ok(Heard::Shown(Err(RecvError::Lagged(_)))) if compact => continue,
+                        // Any other client that fell too far behind is cut off, as always. It
+                        // reconnects, and what it missed is given to it then; of what turns showed
+                        // it asks anew.
                         Ok(
                             Heard::Event(Err(RecvError::Lagged(_) | RecvError::Closed))
                             | Heard::Shown(Err(RecvError::Lagged(_) | RecvError::Closed)),
@@ -5043,12 +5090,33 @@ async fn events(
                                 .data(beat.to_string())
                         }
                     };
-                    return Some((Ok(event), (first, live, watched, closing)));
+                    return Some((Ok(event), (first, live, watched, closing, last)));
                 }
             }
         },
     );
     Sse::new(stream)
+}
+
+/// What a connection is given of a gap: the marker, then the newest of what it missed, each with
+/// its own number, in order, then the word to look at everything that ends every replay (feature
+/// `compact_resume`): the marker only says where the catch-up starts.
+async fn catch_up(
+    app: &App,
+    missed: Vec<Arc<Published>>,
+    truncated: bool,
+    listener: &str,
+) -> VecDeque<SseEvent> {
+    let (given, skipped) = crate::catch_up::compacted(missed);
+    let mut out = VecDeque::with_capacity(given.len() + 2);
+    out.push_back(unnumbered(&crate::catch_up::marker(truncated, skipped)));
+    for published in &given {
+        if !not_for(app, published, listener).await {
+            out.push_back(numbered(published));
+        }
+    }
+    out.push_back(unnumbered(&json!({ "type": "agent-roster" })));
+    out
 }
 
 /// Marks the chats a connection watches live as open, for their agents' lanes, every
@@ -5135,6 +5203,106 @@ mod tests {
     use axum::http::HeaderValue;
 
     use super::*;
+
+    /// Issue 882: a stream that falls too far behind is cut off as always, unless it asked to be
+    /// caught up (`compact=1`); then it is told so on the same stream and goes on.
+    #[tokio::test]
+    async fn a_stream_that_falls_behind_is_cut_unless_it_asked_to_be_caught_up() {
+        use futures_util::StreamExt;
+
+        /// The next part the stream sends, waited for at most 5 s; `None` once it ended.
+        async fn next(body: &mut axum::body::BodyDataStream) -> Option<String> {
+            tokio::time::timeout(Duration::from_secs(5), body.next())
+                .await
+                .expect("the stream says something within 5 s")
+                .map(|part| String::from_utf8(part.unwrap().to_vec()).unwrap())
+        }
+
+        let place = crate::unkept::at_the_port::place("compact-lag");
+        let app = place.app().await;
+        for compact in [false, true] {
+            let query = EventsQuery {
+                last_event_id: None,
+                live: None,
+                rows: None,
+                compact: compact.then(|| "1".to_string()),
+            };
+            let answer = events(
+                State(app.clone()),
+                Extension(Principal::Administrator),
+                HeaderMap::new(),
+                Query(query),
+            )
+            .await
+            .into_response();
+            let mut body = answer.into_body().into_data_stream();
+            // Until the word to look at everything, the stream is as before.
+            loop {
+                let part = next(&mut body).await.expect("the replay and its word");
+                if part.contains("\"agent-roster\"") && !part.contains("event_id") {
+                    assert!(
+                        !part.contains("resync"),
+                        "a fresh stream is told no catch-up: {part}"
+                    );
+                    break;
+                }
+            }
+            // Then it falls behind: more events are given out than it may wait for, while it
+            // reads nothing.
+            let now = app.clock.now_ms();
+            for n in 0..5_000 {
+                app.hub.publish(json!({ "type": "flood", "n": n }), now);
+            }
+            if compact {
+                let part = next(&mut body)
+                    .await
+                    .expect("a stream that asked is not cut off");
+                let marker: Value =
+                    serde_json::from_str(part.trim_start_matches("data: ").trim()).unwrap();
+                assert_eq!(
+                    (&marker["type"], &marker["resync"], &marker["truncated"]),
+                    (&json!("agent-roster"), &json!(true), &json!(false)),
+                    "{part}"
+                );
+                // The catch-up ends with the plain word, as every replay does, and it goes on
+                // live after it.
+                let after = app
+                    .hub
+                    .publish(json!({ "type": "after the catch-up" }), now);
+                let (mut ended, mut heard) = (false, false);
+                for _ in 0..6_000 {
+                    let Some(part) = next(&mut body).await else {
+                        break;
+                    };
+                    if part.contains("\"agent-roster\"")
+                        && !part.contains("resync")
+                        && !part.contains("event_id")
+                    {
+                        ended = true;
+                    }
+                    if part.contains(&format!("\"event_id\":{after}")) {
+                        heard = true;
+                        break;
+                    }
+                }
+                assert!(ended, "the catch-up ends with the plain agent-roster");
+                assert!(heard, "the stream goes on live after the catch-up");
+            } else {
+                // A stream that did not ask ends, as always: the app reconnects.
+                let mut ended = false;
+                for _ in 0..6_000 {
+                    match next(&mut body).await {
+                        None => {
+                            ended = true;
+                            break;
+                        }
+                        Some(part) => assert!(!part.contains("resync"), "{part}"),
+                    }
+                }
+                assert!(ended, "a stream that did not ask is cut off");
+            }
+        }
+    }
 
     #[tokio::test]
     async fn experience_watch_signals_follow_device_identity_and_the_refused_agent() {

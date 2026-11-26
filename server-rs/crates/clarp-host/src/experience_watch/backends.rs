@@ -205,8 +205,11 @@ pub(super) fn findings(
         };
         let silent = match tally.silent {
             0 => String::new(),
-            1 => " 1 more ended without words on another agent's message; it is not counted.".to_owned(),
-            n => format!(" {n} more ended without words on another agent's message; they are not counted."),
+            1 => " 1 more ended without words on another agent's message; it is not counted."
+                .to_owned(),
+            n => format!(
+                " {n} more ended without words on another agent's message; they are not counted."
+            ),
         };
         seen.add(
             KIND,

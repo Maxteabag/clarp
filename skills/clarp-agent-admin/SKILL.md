@@ -140,6 +140,12 @@ helper, `parent` (its maker's counts and state), so a watcher of `/events`
 needs no read for it; and `transcript-updated` carries the conversation's
 `head_revision` and `conversation_id`, so a reader that already holds that
 revision skips `GET /log`.
+On a Host with feature `compact_resume` (contract 201), a watcher that opens
+`/events?compact=1` and resumes with `Last-Event-ID` (or falls behind) is sent
+`agent-roster` with `resync: true` first, then only the newest `transcript-updated` per
+chat and `agent-activity` per agent of what it missed; on
+`truncated: true` read the snapshot again. Without `Last-Event-ID` there is
+no replay. Without `compact=1` the stream is as before.
 On a Host with feature `events_gzip` (contract 198), a watcher of `/events`
 whose HTTP client decodes gzip as it streams can add `gzip=1` to get the same
 events in a fraction of the bytes; without the feature, or without decoding

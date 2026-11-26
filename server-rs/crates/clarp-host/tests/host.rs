@@ -55,6 +55,8 @@ mod codex_chat_lane;
 mod codex_counts;
 #[path = "host/codex_own_provider.rs"]
 mod codex_own_provider;
+#[path = "host/compact_resume.rs"]
+mod compact_resume;
 #[path = "host/compaction_outcome.rs"]
 mod compaction_outcome;
 #[path = "host/config_named.rs"]

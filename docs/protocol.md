@@ -1256,13 +1256,17 @@ Connection rules:
 - Send `Last-Event-ID` (browsers do this automatically). The server replays
   every durable event after that id before going live, paging until caught up,
   so a reconnect loses nothing. Without it the server replays the last few
-  minutes.
+  minutes. On a stream opened with `compact=1` (feature `compact_resume`, below)
+  the replay is compacted and told first, and without `Last-Event-ID` there is
+  none; a stream without it is replayed as described here.
 - After the replay the server always sends `{"type": "agent-roster"}`. Treat
   it as "call `/agents/snapshot` now".
 - The server sends a `heartbeat` event (`event: heartbeat`) every few seconds when nothing else happens. If nothing arrives
   for 25 s, reconnect with exponential backoff (250 ms to 5 s).
 - The server closes the stream when a client falls too far behind. Reconnect;
-  the replay fills the gap.
+  the replay fills the gap. A stream opened with `compact=1` (feature `compact_resume`) is
+  not closed: it is sent the catch-up below on the same stream and goes on. A
+  stream without it is closed, as always.
 
 Event types and payloads:
 
@@ -1411,6 +1415,44 @@ Measured with the apps' way of listening and `gzip=1` (`server-rs/tools/build wi
 
 A connection without `rows=1` gets `rows_from` on `transcript-updated` and nothing more. A Host
 without the feature ignores `rows=1`: send it only where `GET /server-info` lists `events_rows`.
+
+#### A compacted catch-up, and no cut (feature `compact_resume`, Rust Host contract 201)
+
+With many agents working, a phone that fell a few seconds behind was cut off, and its reconnect
+was replayed every event the Host had kept since its last one: measured on 26 Nov 2026, 7 to 13
+MB every one to four minutes with 105 agents, which made it fall behind again. A client that asks
+with `GET /events?compact=1` (only where `GET /server-info` lists the feature) is caught up
+instead:
+
+- **A resume that missed events** (`Last-Event-ID`, and the Host gave out events after it, or no
+  longer knows what came after it) is sent first
+  `{"type": "agent-roster", "resync": true, "truncated": <bool>, "skipped": <n>}`, without an SSE
+  `id:`, then what it missed, compacted (below), each event with its own `id:` in order, then the
+  plain `{"type": "agent-roster"}`, then the live events. `truncated: true` when the Host no longer holds
+  everything after that id (it is older than the oldest event kept, or from before the Host last
+  started): read the snapshot and the open chats again. `skipped` counts the missed events that
+  are not sent.
+- **A connection that falls too far behind** is not closed: it is sent the same marker, then the
+  compacted events it missed from the kept ones, then the plain `agent-roster`, then goes on live. `truncated: true` when the
+  kept events no longer reach back to the last one it was sent. Its `live` item ops are not
+  caught up: the next `live` event's `lseq` shows the gap, and `GET /live` fills it as always.
+- **A catch-up starts with the marker and ends with the plain nudge, as every replay does**: the
+  rule that a replay ends with the plain `agent-roster` holds for every stream; the marker only adds
+  where it starts. After a catch-up that was not `truncated` the client already holds what changed,
+  so it need not read the snapshot again on that nudge.
+- **Compacted**: of the missed events, only the newest `transcript-updated` of each chat
+  (also across a new conversation of it: its `conversation_id` and `head_revision` are the newest) and the newest
+  `agent-activity` of each agent are sent; every other event (states, notifications, clips,
+  decisions, queue, roster) is sent as before, in order.
+- **A connection without `Last-Event-ID`** is sent no replay, only the plain `agent-roster`: it
+  reads the snapshot anyway. A resume that missed nothing gets the plain `agent-roster` as before.
+
+A stream opened without `compact=1` is exactly as before: every kept event after its
+`Last-Event-ID` (or of the last few minutes, without one) is replayed, then the plain
+`agent-roster`, which older apps take as the end of the replay, and it is closed when it falls too
+far behind. The marker is never sent to it: an app that takes the first id-less `agent-roster` as
+the end of the replay would end it at the marker. A Host without the feature ignores `compact=1`
+and behaves the same way.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,

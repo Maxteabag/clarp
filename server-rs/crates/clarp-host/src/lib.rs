@@ -27,6 +27,7 @@ pub mod bound_privacy;
 pub mod calendar;
 pub mod calls;
 pub mod carried;
+pub mod catch_up;
 mod chat_view;
 pub(crate) mod child;
 pub mod chip;

@@ -30,8 +30,23 @@ pub struct Published {
 }
 
 struct Recent {
+    /// The first number this run of the Host gave out: a number below it is an earlier run's.
+    first_id: u64,
     next_id: u64,
     events: VecDeque<Arc<Published>>,
+}
+
+/// Where a connection takes up the events after the last one it was sent (feature
+/// `compact_resume`, issue 882): the kept events after it, the receiver for everything from
+/// here on, with no gap and no repeat between them, and whether the kept events reach back to
+/// it (`truncated` when they do not, or when the number is another run's).
+pub struct Resumed {
+    pub missed: Vec<Arc<Published>>,
+    pub live: broadcast::Receiver<Arc<Published>>,
+    pub truncated: bool,
+    /// The number of the newest event given out: where a connection that was given nothing
+    /// stands.
+    pub head: u64,
 }
 
 /// What an agent's turn shows right now, as it is sent to those who asked to be shown
@@ -113,6 +128,7 @@ impl Hub {
             // hex signs, as the Python Host's name of a run has.
             epoch: format!("{now_ms:012x}"),
             recent: Mutex::new(Recent {
+                first_id: (seconds << 20).max(1),
                 next_id: (seconds << 20).max(1),
                 events: VecDeque::new(),
             }),
@@ -331,6 +347,40 @@ impl Hub {
             .collect();
         (missed, self.live.subscribe())
     }
+
+    /// Takes up the events after `after` (`None`: nothing is missed; the connection stands at
+    /// the newest), judged under the same lock that takes them.
+    pub fn resume(&self, after: Option<u64>) -> Resumed {
+        let recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
+        let head = recent.next_id.saturating_sub(1);
+        let Some(after) = after else {
+            return Resumed {
+                missed: Vec::new(),
+                live: self.live.subscribe(),
+                truncated: false,
+                head,
+            };
+        };
+        let missed: Vec<Arc<Published>> = recent
+            .events
+            .iter()
+            .filter(|event| event.id > after)
+            .cloned()
+            .collect();
+        let oldest = recent
+            .events
+            .front()
+            .map_or(recent.next_id, |event| event.id);
+        // A number this run never gave out (an earlier run's, or one it has not reached), or
+        // one older than what is kept: what came after it is not all here.
+        let truncated = after < recent.first_id || after >= recent.next_id || oldest > after + 1;
+        Resumed {
+            missed,
+            live: self.live.subscribe(),
+            truncated,
+            head,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -414,6 +464,37 @@ mod tests {
         assert!(second.for_one(&wanted(&["claire"])).is_some());
         assert_eq!(second.for_one(&wanted(&["mike"])), None);
         assert!(watching.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_resume_says_whether_the_kept_events_reach_back_to_it() {
+        let hub = Hub::new(1_700_000_000_000);
+        let first = hub.publish(roster("one"), 1_700_000_000_000);
+        let second = hub.publish(roster("two"), 1_700_000_000_001);
+        let whole = hub.resume(Some(first));
+        assert_eq!(
+            whole.missed.iter().map(|e| e.id).collect::<Vec<_>>(),
+            vec![second]
+        );
+        assert!(!whole.truncated);
+        assert_eq!(whole.head, second);
+        assert!(!hub.resume(Some(second)).truncated, "nothing missed");
+        assert!(hub.resume(Some(second)).missed.is_empty());
+        // No cursor: nothing is missed, and the connection stands at the newest.
+        let fresh = hub.resume(None);
+        assert!(fresh.missed.is_empty() && !fresh.truncated);
+        assert_eq!(fresh.head, second);
+        // A number of an earlier run, or one this run never gave.
+        assert!(hub.resume(Some(first - 1)).truncated);
+        assert!(hub.resume(Some(second + 1)).truncated);
+        // Forgotten: the run went on past what it keeps.
+        hub.publish(roster("much later"), 1_700_000_000_000 + KEEP_MS + 5);
+        let cut = hub.resume(Some(first));
+        assert_eq!((cut.missed.len(), cut.truncated), (1, true));
+        // What is heard after a resume follows what it was given, with no gap.
+        let mut taken = hub.resume(Some(cut.head));
+        let next = hub.publish(roster("after"), 1_700_000_000_000 + KEEP_MS + 6);
+        assert_eq!(taken.live.try_recv().unwrap().id, next);
     }
 
     #[test]
