@@ -72,14 +72,20 @@ fn summary(name: &str, events: &[Event]) -> String {
 }
 
 pub(super) fn startup_check(out: String) {
+    let out_start = out.clone();
     let burst_from = Rc::new(Cell::new(0usize));
     let burst_from2 = burst_from.clone();
     let stages: Vec<Stage> = vec![
-        ("settled", Box::new(move |_, _, _| {
+        ("settled", Box::new(move |_, window, _| {
             // The first five seconds: portraits, updates and the open chat.
             if perf::now() < Duration::from_secs(5) {
                 return false;
             }
+            // Nothing was pressed: no notice asks the reader to retry
+            // anything (the shared voice player is taken over quietly).
+            let error = window.get_error().to_string();
+            check(error.is_empty(), &format!("a fresh start shows no error before any action: {error:?}"));
+            shot(&out_start, "startup-settled");
             let stats = perf::stats();
             let at = |d: Option<Duration>| d.map_or("never".to_owned(), |d| format!("{} ms", d.as_millis()));
             println!(

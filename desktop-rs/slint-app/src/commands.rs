@@ -68,7 +68,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
     let engine = app.engine.borrow();
     let selected = engine.selected_session();
     Facts {
-        attention: !engine.next_attention_session().is_empty(),
+        attention: !crate::triage::attention_queue(&engine).is_empty(),
         agent: !selected.is_empty() && !selected.starts_with("pair:"),
         rows: window.get_chats().row_count() > 0,
         can_send: engine.can_send(selected),
@@ -661,13 +661,14 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             window.set_sidebar_visible(true);
         }
         // Snooze: the explorer's row under the keyboard, else the open chat.
-        "snooze-chat" | "snooze-chat-hour" | "snooze-chat-morning" | "wake-chat" | "snooze-toggle" => {
+        "snooze-chat" | "snooze-chat-hour" | "snooze-chat-today" | "snooze-chat-morning" | "wake-chat" | "snooze-toggle" => {
             let target = if window.get_sidebar_focused() && !window.get_sidebar_cursor().is_empty() { window.get_sidebar_cursor().to_string() } else { selected.clone() };
             if target.is_empty() || target.starts_with("pair:") {
                 return false;
             }
             let how = match action {
                 "snooze-chat-hour" => "hour",
+                "snooze-chat-today" => "today",
                 "snooze-chat-morning" => "morning",
                 "wake-chat" => "wake",
                 "snooze-toggle" if crate::triage::is_snoozed(&app.engine.borrow(), &target) => "wake",

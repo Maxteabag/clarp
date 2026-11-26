@@ -13,7 +13,7 @@ use std::time::Duration;
 use slint::Model;
 use slint::platform::Key;
 
-use super::{Rect, Stage, check, explorer_row, labelled, rect, report, run_stages, shot, within};
+use super::{Rect, Stage, check, chips_fit, explorer_row, labelled, rect, report, run_stages, shot, within};
 use crate::headless;
 
 /// The explorer's list, as drawn.
@@ -78,6 +78,7 @@ fn in_view(name: &'static str, what: &'static str, next: impl Fn(&crate::AppWind
 
 pub fn explorer_check(out: String) {
     let out2 = out.clone();
+    let out_chips = out.clone();
     let pressed = Rc::new(Cell::new(0usize));
     let pressed2 = pressed.clone();
     // When the last J went (the stage's clock).
@@ -101,6 +102,9 @@ pub fn explorer_check(out: String) {
                 &format!("the explorer makes only the rows in view: {made} of {} chats", names.len()),
             );
             check(cursor_in_view(window), "the cursor starts in view");
+            // A big fleet's counts make the chips long: they wrap, none cut.
+            chips_fit("with a fleet of 180");
+            shot(&out_chips, "explorer-chips");
             true
         })),
         ("down", Box::new(move |_, window, elapsed| {

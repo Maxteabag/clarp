@@ -468,25 +468,36 @@ impl Coordinator {
         crate::platform::runtime::handle().spawn(async move { coordinator.tick(generation).await });
     }
 
-    pub fn command(&self, action: &str, muted: bool) {
+    /// `asked` is true only for the reader's own playback control (a stop,
+    /// pause or resume they pressed); only then does a failed hand-over say
+    /// so. Mute kept in step with the settings, and the stop a sent message
+    /// makes, run quietly: at start no window owns the player yet, and a
+    /// reader who pressed nothing must not be told to retry anything.
+    pub fn command(&self, action: &str, muted: bool, asked: bool) {
         if self.owner() {
             control_locally(&self.shared, &self.sink, action, muted);
             return;
         }
         let (connection, service, generation) = {
-            let state = lock(&self.shared);
+            let mut state = lock(&self.shared);
+            if action == "mute" {
+                // Whoever takes the player over next starts with this.
+                state.initially_muted = muted;
+            }
             (state.connection.clone(), state.service.clone(), state.generation)
         };
         let Some(connection) = connection.filter(|_| !service.is_empty()) else { return };
         let (coordinator, action) = (self.clone(), action.to_owned());
         crate::platform::runtime::handle().spawn(async move {
-            let reply = Self::call(&connection, &service, "control", &(action, muted)).await;
+            let reply = Self::call(&connection, &service, "control", &(action.clone(), muted)).await;
             if lock(&coordinator.shared).generation != generation {
                 return;
             }
             if let Err(error) = reply {
-                eprintln!("AudioCoordinator: control failed: {error}");
-                (coordinator.sink)(Event::Error("The audio owner changed; please retry the playback control".into()));
+                eprintln!("AudioCoordinator: control {action} failed: {error}");
+                if asked {
+                    (coordinator.sink)(Event::Error("The audio owner changed; please retry the playback control".into()));
+                }
             }
             coordinator.tick(generation).await;
         });

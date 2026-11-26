@@ -179,7 +179,8 @@ pub fn open_chat(app: &Rc<App>, window: &AppWindow, session: &str) {
 
 /// Ctrl+J / N: the next chat that wants the user.
 pub fn next_attention(app: &Rc<App>, window: &AppWindow) {
-    let session = app.engine.borrow().next_attention_session();
+    // A snoozed chat waits its turn out: Ctrl+J passes it by.
+    let session = crate::triage::attention_queue(&app.engine.borrow()).into_iter().next().unwrap_or_default();
     if !session.is_empty() {
         open_chat(app, window, &session);
     }

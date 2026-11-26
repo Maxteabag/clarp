@@ -121,6 +121,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("list-snoozed", ""),
         ("snooze-chat", ""),
         ("snooze-chat-hour", ""),
+        ("snooze-chat-today", ""),
         ("snooze-chat-morning", ""),
         ("wake-chat", ""),
         ("list-rooms", ""),

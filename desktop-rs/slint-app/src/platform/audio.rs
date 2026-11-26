@@ -356,7 +356,7 @@ impl Audio {
     /// Mute belongs to the shared journal once coordinated.
     pub fn set_muted(&mut self, muted: bool) {
         if let Some(coordinator) = self.coordinator.as_ref().filter(|c| c.configured()) {
-            coordinator.command("mute", muted);
+            coordinator.command("mute", muted, false);
             return;
         }
         let changed = self.player.muted() != muted;
@@ -607,7 +607,7 @@ impl Audio {
             self.notices.push(Notice::Error("Another Clarp window is recording. Stop that recording before starting here.".into()));
             return;
         }
-        self.silence();
+        self.quiet();
         match super::audio_input::start() {
             Ok(capture) => {
                 self.capture = Some(capture);
@@ -653,15 +653,27 @@ impl Audio {
         }
     }
 
-    /// Stops speech in whichever window plays it.
+    /// The reader's Stop voice: stops speech in whichever window plays it.
     pub fn silence(&mut self) {
         self.playback_command("stop");
     }
 
-    /// "stop", "pause", "resume" or "toggle", in whichever window plays.
+    /// Stops speech because something else began (a message sent, a
+    /// recording started); never reports a failed hand-over, since the reader
+    /// pressed no playback control.
+    pub fn quiet(&mut self) {
+        self.control("stop", false);
+    }
+
+    /// "stop", "pause", "resume" or "toggle", in whichever window plays,
+    /// pressed by the reader.
     pub fn playback_command(&mut self, action: &str) {
+        self.control(action, true);
+    }
+
+    fn control(&mut self, action: &str, asked: bool) {
         if let Some(coordinator) = self.coordinator.as_ref().filter(|c| c.configured()) {
-            coordinator.command(action, false);
+            coordinator.command(action, false, asked);
             return;
         }
         let effects = self.player_command(action);

@@ -1,10 +1,10 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, Focus, FocusRing, ChatLook, Motion, Look, VimBridge, SendFlight, ChromeText } from "theme.slint";
-import { Sidebar, ChatRow } from "sidebar.slint";
+import { Sidebar, ChatRow, RowMenu, RowChoice } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge, ComposerKeys, WaitingTurn } from "composer.slint";
 export { MentionRow, MentionBridge, ComposerKeys, WaitingTurn }
-import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook } from "transcript.slint";
+import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook, TableFit } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror, ChatMenu, ChatChoice } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
@@ -40,7 +40,7 @@ import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.s
 export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, TransitChoice, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow }
 
-export { ScrollBook, MeasureRow, VimBridge, DraftMirror, ChatMenu, ChatChoice }
+export { ScrollBook, MeasureRow, VimBridge, DraftMirror, ChatMenu, ChatChoice, RowMenu, RowChoice, TableFit }
 export { Palette, Focus, ChatLook, Motion, SendFlight, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }

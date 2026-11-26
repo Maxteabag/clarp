@@ -159,6 +159,18 @@ export struct MeasureRow {
     batch: int,
 }
 
+// A wide table's columns (table_fit.rs): which show and how wide, with
+// the scrolled part from a column on; the first column always shows.
+export global TableFit {
+    // Each column's width in px (0 out of view): columns' characters,
+    // first scrolled column, the room, a character's and a cell's padding.
+    pure callback widths([int], int, float, float, float) -> [float];
+    // The last column shown from a first one.
+    pure callback last([int], int, float, float, float) -> int;
+    // The furthest first column: the last column then shows.
+    pure callback end([int], float, float, float) -> int;
+}
+
 // The chat's row heights, kept by the app per pane (scroll_book.rs): the
 // scrollbar's size and place come from them, not from the list's estimate.
 export global ScrollBook {
@@ -670,24 +682,38 @@ export component Block inherits VerticalLayout {
         }
     }
     // A table keeps its text whole: each column is at least as wide as its
-    // text needs (to a cap, past which a cell wraps), and the columns share
-    // what room is left. Wider than the chat, it scrolls sideways inside
-    // its block: a sideways wheel or Shift+wheel, its bar's drag, or a
-    // click on "→ N columns" (to its end and back), and a fade on the
-    // edge says more is there. A plain wheel still scrolls the chat.
+    // text needs (to a cap, past which a cell wraps), and the columns shown
+    // fill the block to its right edge (table_fit.rs). Wider than the chat,
+    // its first column stays put, so every row keeps its label, and the
+    // rest scroll sideways a whole column at a time, so none is ever cut:
+    // a sideways wheel or Shift+wheel, the bar's drag, a click on the bar's
+    // track (a page), or "→ N more" (a page, then back to the start). A
+    // fade on an edge says more is there; a plain wheel still scrolls the
+    // chat.
     if root.block.kind == "table": table-box := Rectangle {
         property <length> char: root.body-size * 0.62;
         property <length> pad: 12px;
         property <int> count: root.block.columns.length;
         property <length> natural: root.block.table-chars * self.char + self.count * self.pad + 2px;
-        property <bool> wide: self.natural > self.width + 0.5px;
-        property <length> span: Math.max(0px, self.natural - self.width);
-        property <length> offset: 0px;
-        changed span => { self.offset = Math.min(self.offset, self.span); }
+        property <float> room: Math.max(0px, self.width - 2px) / 1px;
+        // The furthest the scrolled part can start: 1 when it all fits.
+        property <int> end: TableFit.end(root.block.columns, self.room, self.char / 1px, self.pad / 1px);
+        property <bool> wide: self.end > 1;
+        // The first scrolled column asked for, and as it can be now.
+        property <int> first: 1;
+        property <int> from: Math.max(1, Math.min(self.first, self.end));
+        property <int> last: TableFit.last(root.block.columns, self.from, self.room, self.char / 1px, self.pad / 1px);
+        property <[float]> sizes: TableFit.widths(root.block.columns, self.from, self.room, self.char / 1px, self.pad / 1px);
+        property <int> page: Math.max(1, self.last - self.from + 1);
+        // A sideways wheel's travel not yet a column's step.
+        property <length> nudge;
+        function go(to: int) { self.first = Math.max(1, Math.min(to, self.end)); self.nudge = 0px; }
+        function next-page() { self.go(self.last < self.count - 1 ? self.last + 1 : 1); }
         // The chat sets its width; it asks for its natural one.
         min-width: 0px;
         preferred-width: self.natural;
         accessible-role: AccessibleRole.table;
+        accessible-id: "table";
         accessible-label: self.count + " columns";
         VerticalLayout {
             spacing: 0px;
@@ -704,27 +730,35 @@ export component Block inherits VerticalLayout {
                     scroll-event(event) => {
                         let along = event.delta-x != 0px ? event.delta-x : event.modifiers.shift ? event.delta-y : 0px;
                         if (along == 0px) { return reject; }
-                        table-box.offset = Math.clamp(table-box.offset - along, 0px, table-box.span);
+                        // A notch of the wheel is a column; a touchpad's
+                        // small steps add up to one.
+                        table-box.nudge += along;
+                        if (table-box.nudge <= -24px) {
+                            table-box.go(table-box.from + 1);
+                        } else if (table-box.nudge >= 24px) {
+                            table-box.go(table-box.from - 1);
+                        }
                         accept
                     }
                 }
                 table-grid := VerticalLayout {
-                    x: -table-box.offset;
-                    width: Math.max(table-view.width, table-box.natural);
+                    width: table-view.width;
                     for table-row in root.block.rows: HorizontalLayout {
                         spacing: 0px;
-                        for cell[column] in table-row.cells: Rectangle {
-                            // Each column at least its text's width; what
-                            // is left is shared by that width, so rows
-                            // line up and no cell is cut.
-                            property <int> want: column < root.block.columns.length ? root.block.columns[column] : 4;
-                            horizontal-stretch: self.want;
-                            min-width: self.want * table-box.char + table-box.pad;
-                            preferred-width: self.min-width;
-                            border-width: 1px;
+                        alignment: start;
+                        for cell[column] in table-row.cells: cell-box := Rectangle {
+                            // Its width from table_fit.rs: 0 out of view.
+                            property <length> size: column < table-box.sizes.length ? table-box.sizes[column] * 1px : 0px;
+                            horizontal-stretch: 0;
+                            min-width: self.size;
+                            max-width: self.size;
+                            preferred-width: self.size;
+                            border-width: self.size > 0px ? 1px : 0px;
                             border-color: Palette.rule;
-                            background: table-row.header ? Palette.raised : transparent;
-                            VerticalLayout {
+                            accessible-role: text;
+                            accessible-id: table-row.header ? "table-head:" + column : "";
+                            background: table-row.header ? Palette.raised : column == 0 && table-box.wide ? Palette.window : transparent;
+                            if cell-box.size > 0px: VerticalLayout {
                                 padding: 6px;
                                 StyledText {
                                     text: cell;
@@ -738,18 +772,22 @@ export component Block inherits VerticalLayout {
                         }
                     }
                 }
-                // More to the right (or left): that edge fades.
-                Rectangle {
-                    visible: table-box.wide && table-box.offset < table-box.span - 0.5px;
-                    x: parent.width - self.width;
-                    width: 28px;
-                    background: @linear-gradient(90deg, Palette.window.with-alpha(0) 0%, Palette.window.with-alpha(0.9) 100%);
+                // The fixed first column's edge, and a fade where columns
+                // are out of view (after it, or at the right).
+                if table-box.wide && table-box.sizes.length > 0: Rectangle {
+                    x: table-box.sizes[0] * 1px - 1px;
+                    width: 2px;
+                    background: table-box.from > 1 ? Palette.border : Palette.rule;
                 }
-                Rectangle {
-                    visible: table-box.wide && table-box.offset > 0.5px;
-                    x: 0;
-                    width: 28px;
-                    background: @linear-gradient(90deg, Palette.window.with-alpha(0.9) 0%, Palette.window.with-alpha(0) 100%);
+                if table-box.wide && table-box.from > 1 && table-box.sizes.length > 0: Rectangle {
+                    x: table-box.sizes[0] * 1px + 1px;
+                    width: 18px;
+                    background: @linear-gradient(90deg, Palette.window.with-alpha(0.7) 0%, Palette.window.with-alpha(0) 100%);
+                }
+                if table-box.wide && table-box.last < table-box.count - 1: Rectangle {
+                    x: parent.width - self.width;
+                    width: 18px;
+                    background: @linear-gradient(90deg, Palette.window.with-alpha(0) 0%, Palette.window.with-alpha(0.7) 100%);
                 }
             }
             Rectangle {
@@ -758,21 +796,25 @@ export component Block inherits VerticalLayout {
                 min-width: 0px;
                 accessible-role: AccessibleRole.button;
                 accessible-id: "table-scroll";
-                accessible-label: table-box.count + " columns, scroll sideways";
-                accessible-action-default => { table-box.offset = table-box.offset < table-box.span / 2 ? table-box.span : 0px; }
+                accessible-label: table-box.count + " columns, " + (table-box.from + 1) + " to " + (table-box.last + 1) + " shown";
+                accessible-value: table-box.from;
+                accessible-action-default => { table-box.next-page(); }
+                accessible-action-increment => { table-box.go(table-box.from + 1); }
+                accessible-action-decrement => { table-box.go(table-box.from - 1); }
                 hint := Text {
                     x: 0;
                     height: parent.height;
-                    text: table-box.offset < table-box.span / 2 ? "→ " + table-box.count + " columns" : "← back to the start";
+                    text: table-box.last < table-box.count - 1 ? "→ " + (table-box.count - 1 - table-box.last) + " more" : "← back to the start";
                     color: hint-touch.has-hover ? Palette.accent : Palette.muted;
                     font-size: ChatText.detail;
                     vertical-alignment: center;
                     hint-touch := TouchArea {
                         mouse-cursor: pointer;
-                        clicked => { table-box.offset = table-box.offset < table-box.span / 2 ? table-box.span : 0px; }
+                        clicked => { table-box.next-page(); }
                     }
                 }
-                // The bar: where the view is in the table, draggable.
+                // The bar: which columns show, of all after the first. A
+                // click on the track pages that way; the thumb drags.
                 track := Rectangle {
                     x: hint.preferred-width + 8px;
                     width: Math.max(0px, parent.width - self.x);
@@ -781,23 +823,33 @@ export component Block inherits VerticalLayout {
                     border-radius: 2px;
                     background: Palette.rule;
                     thumb := Rectangle {
-                        x: table-box.span > 0px ? (track.width - self.width) * (table-box.offset / table-box.span) : 0px;
-                        width: Math.min(track.width, Math.max(24px, track.width * (table-view.width / table-box.natural)));
+                        width: Math.min(track.width, Math.max(24px, track.width * table-box.page / Math.max(1, table-box.count - 1)));
+                        x: table-box.end > 1 ? (track.width - self.width) * (table-box.from - 1) / (table-box.end - 1) : 0px;
+                        animate x { duration: 120ms; easing: ease-out; }
                         height: parent.height;
                         border-radius: 2px;
                         background: drag.has-hover || drag.pressed ? Palette.muted : Palette.faint;
                     }
                     drag := TouchArea {
-                        y: -5px;
-                        height: 14px;
-                        mouse-cursor: ew-resize;
-                        property <length> start;
+                        y: -6px;
+                        height: 16px;
+                        mouse-cursor: pointer;
+                        property <bool> dragging;
                         pointer-event(event) => {
-                            if (event.kind == PointerEventKind.down) { self.start = table-box.offset; }
+                            if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                                if (self.mouse-x < thumb.x) {
+                                    table-box.go(table-box.from - table-box.page);
+                                } else if (self.mouse-x > thumb.x + thumb.width) {
+                                    table-box.go(table-box.from + table-box.page);
+                                } else {
+                                    self.dragging = true;
+                                }
+                            }
+                            if (event.kind == PointerEventKind.up) { self.dragging = false; }
                         }
                         moved => {
-                            if (self.pressed && track.width > thumb.width) {
-                                table-box.offset = Math.clamp(self.start + (self.mouse-x - self.pressed-x) * (table-box.span / (track.width - thumb.width)), 0px, table-box.span);
+                            if (self.pressed && self.dragging && track.width > thumb.width) {
+                                table-box.go(1 + Math.round((self.mouse-x - thumb.width / 2) / (track.width - thumb.width) * (table-box.end - 1)));
                             }
                         }
                     }

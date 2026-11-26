@@ -467,6 +467,51 @@ fn width_before() -> f32 {
     WIDTH_BEFORE.with(Cell::get)
 }
 
+thread_local! {
+    /// The wide table's first scrolled column when last looked at.
+    static WIDE_FIRST: Cell<usize> = const { Cell::new(0) };
+}
+
+/// The wide table's header cells drawn now, in order: (column, box), and
+/// the table's box.
+fn table_columns_shown(window: &crate::AppWindow) -> (Vec<(usize, Rect)>, Option<Rect>) {
+    use i_slint_backend_testing::ElementQuery;
+    let mut columns: Vec<(usize, Rect)> = ElementQuery::from_root(window)
+        .match_predicate(|e| e.accessible_id().is_some_and(|a| a.starts_with("table-head:")) && e.size().width > 0.5)
+        .find_all()
+        .into_iter()
+        .filter_map(|e| Some((e.accessible_id()?.trim_start_matches("table-head:").parse().ok()?, rect(&e))))
+        .collect();
+    columns.sort_by_key(|c| c.0);
+    let table = ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().is_some_and(|a| a == "table") && e.size().width > 0.0).find_first().map(|e| rect(&e));
+    (columns, table)
+}
+
+/// No column is cut: after the first, the columns shown follow on without
+/// a gap, each whole inside the table, and the last reaches its right edge.
+fn table_whole(columns: &[(usize, Rect)], table: Option<Rect>, when: &str) {
+    let Some(table) = table else {
+        check(false, &format!("{when}: the table is drawn"));
+        return;
+    };
+    let follow = columns.windows(2).skip(1).all(|w| w[1].0 == w[0].0 + 1 && (w[1].1.0 - (w[0].1.0 + w[0].1.2)).abs() < 1.5);
+    check(columns.len() >= 3 && follow, &format!("{when}: whole columns follow the first without a gap: {columns:?}"));
+    let inside = columns.iter().all(|(_, c)| c.0 >= table.0 - 0.5 && c.0 + c.2 <= table.0 + table.2 + 0.5);
+    check(inside, &format!("{when}: every column shown is whole inside the table {table:?}: {columns:?}"));
+    let right = columns.last().map_or(0.0, |(_, c)| c.0 + c.2);
+    check((table.0 + table.2 - right).abs() < 3.0, &format!("{when}: the columns reach the table's right edge {}: {right}", table.0 + table.2));
+}
+
+/// A wheel turned at (x, y), as a mouse sends it.
+fn scroll_at(window: &crate::AppWindow, x: f32, y: f32, delta_x: f32, delta_y: f32) {
+    use slint::platform::WindowEvent;
+    let position = slint::LogicalPosition::new(x, y);
+    let window = window.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x, delta_y });
+    window.dispatch_event(WindowEvent::PointerExited);
+}
+
 /// A drawn element's box in the window: (x, y, width, height).
 type Rect = (f32, f32, f32, f32);
 
@@ -2364,6 +2409,7 @@ fn sidebar_check(out: String) {
     let out7 = out.clone();
     let out8 = out.clone();
     let (out9, out10, out11) = (out.clone(), out.clone(), out.clone());
+    let (out12, out13) = (out.clone(), out.clone());
     // `session` gets activity newer than every chat in `order`.
     fn news(app: &crate::App, order: &[String], session: &str, text: &str) {
         let newest = order.iter().filter_map(|s| app.engine.borrow().roster().find(s).map(|a| a.last_activity)).max().unwrap_or(0);
@@ -2853,8 +2899,128 @@ fn sidebar_check(out: String) {
             run_command(window, "list-all");
             true
         })),
+        ("row menu", Box::new(|_, window, elapsed| {
+            if window.get_scope() != "all" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            // Right-click on Mike's row: its menu snoozes him.
+            let Some(row) = widest_labelled(window, "Mike") else {
+                check(elapsed < Duration::from_secs(5), "Mike's row is drawn");
+                return elapsed >= Duration::from_secs(5);
+            };
+            right_click_at(window, row.0 + row.2 / 2.0, row.1 + row.3 / 2.0);
+            true
+        })),
+        ("row menu open", Box::new(move |_, window, elapsed| {
+            use slint::ComponentHandle;
+            let menu = window.global::<crate::RowMenu>();
+            if menu.get_session() != "mike" || !spoken_drawn("row-menu:hour") {
+                check(elapsed < Duration::from_secs(3), "a right-click on a chat's row opens its menu with the snooze choices");
+                return elapsed >= Duration::from_secs(3);
+            }
+            let values: Vec<String> = menu.get_choices().iter().map(|c| c.value.to_string()).collect();
+            let today = crate::triage::presets(false).iter().any(|(v, _)| v == "today");
+            check(values.contains(&"today".to_owned()) == today && values.contains(&"morning".to_owned()) && values.contains(&"message".to_owned()),
+                &format!("it offers an hour, later today (until 20:00), tomorrow morning and the next message: {values:?}"));
+            shot(&out12, "sidebar-10-row-menu");
+            invoke_spoken("row-menu:hour");
+            true
+        })),
+        ("snoozed sinks", Box::new(move |_, window, elapsed| {
+            use slint::ComponentHandle;
+            let shown = sessions(window);
+            let menu_closed = window.global::<crate::RowMenu>().get_session().is_empty();
+            if !menu_closed || window.get_triage_snoozed() != 1 || shown.last() != Some(&"mike".to_owned()) || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), &format!("snoozed for an hour, Mike leaves the top for the bottom of the list: {shown:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            // The snooze mark sits on the name's line, so the preview keeps
+            // its width; the chips all fit the explorer, wrapping if need be.
+            let mark = spoken_rect("row-snoozed");
+            let row = widest_labelled(window, "Mike");
+            if let (Some(mark), Some(row)) = (mark, row) {
+                check(mark.1 + mark.3 <= row.1 + row.3 / 2.0 + 4.0, &format!("the z mark is on the name's line, not the preview's: mark {mark:?}, row {row:?}"));
+            } else {
+                check(false, &format!("the snoozed row shows its z mark ({mark:?}) on its row ({row:?})"));
+            }
+            chips_fit("with a snoozed chat");
+            shot(&out13, "sidebar-11-snoozed-at-bottom");
+            if let Some(row) = row {
+                right_click_at(window, row.0 + row.2 / 2.0, row.1 + row.3 / 2.0);
+            }
+            true
+        })),
+        ("wake from the menu", Box::new(|_, window, elapsed| {
+            if !spoken_drawn("row-menu:wake") {
+                check(elapsed < Duration::from_secs(3), "a snoozed chat's menu offers to wake it");
+                return elapsed >= Duration::from_secs(3);
+            }
+            invoke_spoken("row-menu:wake");
+            let _ = window;
+            true
+        })),
+        ("woken from the menu", Box::new(|_, window, elapsed| {
+            if window.get_triage_snoozed() != 0 {
+                check(elapsed < Duration::from_secs(5), "Wake now ends the snooze");
+                return elapsed >= Duration::from_secs(5);
+            }
+            true
+        })),
     ];
     run_stages(stages);
+}
+
+/// The widest drawn element labelled `label` (a chat's row): its box.
+fn widest_labelled(window: &crate::AppWindow, label: &str) -> Option<Rect> {
+    use i_slint_backend_testing::ElementQuery;
+    let label = label.to_owned();
+    ElementQuery::from_root(window)
+        .match_predicate(move |e| e.accessible_label().is_some_and(|l| l == label.as_str()) && e.size().width > 0.0)
+        .find_all()
+        .iter()
+        .map(rect)
+        .max_by(|a, b| a.2.total_cmp(&b.2))
+}
+
+/// The box of the element with accessible id `id`, drawn.
+fn spoken_rect(id: &str) -> Option<Rect> {
+    use i_slint_backend_testing::ElementQuery;
+    let window = crate::window()?;
+    let id = id.to_owned();
+    ElementQuery::from_root(&window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0).find_first().map(|e| rect(&e))
+}
+
+/// Presses the drawn element with accessible id `id`, as a screen reader.
+fn invoke_spoken(id: &str) {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return };
+    let id = id.to_owned();
+    if let Some(e) = ElementQuery::from_root(&window).match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0).find_first() {
+        e.invoke_accessible_default_action();
+    }
+}
+
+/// Every triage chip is whole inside the explorer's chip area.
+fn chips_fit(when: &str) {
+    let Some(area) = spoken_rect("explorer-scopes") else {
+        check(false, &format!("{when}: the triage chips are drawn"));
+        return;
+    };
+    for id in ["scope-needs-you", "scope-working", "scope-done", "scope-unread", "scope-snoozed"] {
+        let chip = spoken_rect(id);
+        let whole = chip.is_some_and(|c| c.0 >= area.0 - 0.5 && c.0 + c.2 <= area.0 + area.2 + 0.5 && c.1 >= area.1 - 0.5 && c.1 + c.3 <= area.1 + area.3 + 0.5);
+        check(whole, &format!("{when}: the {id} chip is whole inside the explorer {area:?}: {chip:?}"));
+    }
+}
+
+/// A right click at (x, y), as a mouse sends it.
+fn right_click_at(window: &crate::AppWindow, x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let position = slint::LogicalPosition::new(x, y);
+    let window = window.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Right });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Right });
 }
 
 /// Runs a command as its key or the switcher would.
@@ -2895,6 +3061,7 @@ fn transcript_check(out: String) {
     let out3 = out.clone();
     let out_wide = out.clone();
     let out_wide_start = out.clone();
+    let out_wide_wheel = out.clone();
     let offset = Rc::new(Cell::new(0.0f32));
     let offset2 = offset.clone();
     let stages: Vec<Stage> = vec![
@@ -3152,14 +3319,74 @@ fn transcript_check(out: String) {
                 check(t.0 >= c.0 - 0.5 && t.0 + t.2 <= c.0 + c.2 + 0.5, &format!("the table stays inside the chat, its rest a scroll away: table {t:?}, chat {c:?}"));
             }
             check(scroll.as_ref().and_then(|e| e.accessible_label()).is_some_and(|l| l.starts_with("8 columns")), "it names its eight columns");
+            let (columns, table) = table_columns_shown(window);
+            check(columns.first().is_some_and(|c| c.0 == 0), &format!("the first column shows: {columns:?}"));
+            table_whole(&columns, table, "at the start");
             shot(&out_wide_start, "transcript-wide-table-start");
-            scroll.map(|e| e.invoke_accessible_default_action());
+            // A sideways wheel over the table moves it a column.
+            if let Some(table) = table {
+                scroll_at(window, table.0 + table.2 / 2.0, table.1 + table.3 / 2.0, -40.0, 0.0);
+            }
+            WIDE_FIRST.with(|f| f.set(columns.get(1).map_or(0, |c| c.0)));
             true
         })),
-        ("wide table end", Box::new(move |_, _, elapsed| {
-            if elapsed < Duration::from_millis(400) {
+        ("wide table wheel", Box::new(move |_, window, elapsed| {
+            let (columns, table) = table_columns_shown(window);
+            let before = WIDE_FIRST.with(Cell::get);
+            let now = columns.get(1).map_or(0, |c| c.0);
+            if now != before + 1 {
+                check(elapsed < Duration::from_secs(3), &format!("a sideways wheel moves the table one column on: first scrolled column {before} → {now} ({columns:?})"));
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(columns.first().is_some_and(|c| c.0 == 0), &format!("scrolled, the first column still shows: {columns:?}"));
+            table_whole(&columns, table, "after the wheel");
+            shot(&out_wide_wheel, "transcript-wide-table-scrolled");
+            // A click on the bar's track, right of its thumb: a page on.
+            use i_slint_backend_testing::ElementQuery;
+            let bar = ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().is_some_and(|a| a == "table-scroll") && e.size().width > 0.0).find_first();
+            if let Some(bar) = bar.map(|b| rect(&b)) {
+                click_at(window, bar.0 + bar.2 - 3.0, bar.1 + bar.3 / 2.0);
+            }
+            WIDE_FIRST.with(|f| f.set(now));
+            true
+        })),
+        ("wide table track", Box::new(move |_, window, elapsed| {
+            let (columns, table) = table_columns_shown(window);
+            let before = WIDE_FIRST.with(Cell::get);
+            let last = columns.last().map_or(0, |c| c.0);
+            if columns.get(1).map_or(0, |c| c.0) <= before {
+                check(elapsed < Duration::from_secs(3), &format!("a click on the bar's track pages the table on: {columns:?}"));
+                return elapsed >= Duration::from_secs(3);
+            }
+            table_whole(&columns, table, "after a click on the track");
+            let _ = last;
+            true
+        })),
+        ("wide table end", Box::new(move |_, window, elapsed| {
+            // "→ N more" pages on to the last column.
+            let (columns, table) = table_columns_shown(window);
+            if columns.last().map_or(0, |c| c.0) != 7 {
+                if elapsed > Duration::from_secs(4) {
+                    check(false, &format!("paging on reaches the last column: {columns:?}"));
+                    return true;
+                }
+                use i_slint_backend_testing::ElementQuery;
+                // Every fourth look (400 ms), so the last page has drawn
+                // before the next is asked for.
+                let tick = WIDE_FIRST.with(|f| {
+                    f.set(f.get() + 1);
+                    f.get()
+                });
+                if tick % 4 == 0 {
+                    ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().is_some_and(|a| a == "table-scroll") && e.size().width > 0.0).find_first().map(|e| e.invoke_accessible_default_action());
+                }
                 return false;
             }
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            table_whole(&columns, table, "at the end");
+            check(columns.first().is_some_and(|c| c.0 == 0), &format!("at the end, the first column still shows: {columns:?}"));
             shot(&out_wide, "transcript-wide-table-end");
             true
         })),

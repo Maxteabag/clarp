@@ -121,11 +121,39 @@ pub fn label(snooze: &Snooze) -> String {
     if at.date_naive() == Local::now().date_naive() { at.format("%H:%M").to_string() } else { at.format("%a %H:%M").to_string() }
 }
 
+/// Later today: 18:00 before 15:00, else three hours on at the next full
+/// hour; None once that would be tomorrow.
+fn later_today(now: chrono::DateTime<Local>) -> Option<chrono::DateTime<Local>> {
+    let at = if now.hour() < 15 {
+        now.with_hour(18)?.with_minute(0)?.with_second(0)?.with_nanosecond(0)?
+    } else {
+        (now + Duration::hours(4)).with_minute(0)?.with_second(0)?.with_nanosecond(0)?
+    };
+    (at.date_naive() == now.date_naive()).then_some(at)
+}
+
+/// The snooze presets, in order (value, words), for a chat snoozed or
+/// not: a snoozed chat can wake first.
+pub fn presets(snoozed: bool) -> Vec<(String, String)> {
+    let mut list = Vec::new();
+    if snoozed {
+        list.push(("wake".to_owned(), "Wake now".to_owned()));
+    }
+    list.push(("hour".into(), "For an hour".into()));
+    if let Some(at) = later_today(Local::now()) {
+        list.push(("today".into(), format!("Later today, {}", at.format("%H:%M"))));
+    }
+    list.push(("morning".into(), "Until tomorrow 08:00".into()));
+    list.push(("message".into(), "Until its next message".into()));
+    list
+}
+
 /// When a snooze of `how` started now ends: "message" (0: its next
-/// message), "hour", or "morning" (08:00 tomorrow).
+/// message), "hour", "today" (later today) or "morning" (08:00 tomorrow).
 pub fn until_for(how: &str) -> i64 {
     match how {
         "hour" => now_ms() + 3_600_000,
+        "today" => later_today(Local::now()).map_or_else(|| now_ms() + 3 * 3_600_000, |t| t.timestamp_millis()),
         "morning" => {
             let tomorrow = Local::now() + Duration::days(1);
             tomorrow
@@ -137,6 +165,43 @@ pub fn until_for(how: &str) -> i64 {
         }
         _ => 0,
     }
+}
+
+/// Fills the row's right-click menu for `session` and opens it.
+pub fn open_row_menu(app: &App, window: &crate::AppWindow, session: &str) {
+    use slint::ComponentHandle;
+    if session.is_empty() || session.starts_with("pair:") {
+        return;
+    }
+    let engine = app.engine.borrow();
+    let Some(row) = engine.roster().rows().iter().find(|r| r.session == session).cloned() else { return };
+    let snooze = snooze_of(&engine, &row);
+    let title = match &snooze {
+        Some(s) => format!("{}: snoozed until {}", row.name, label(s)),
+        None => format!("Snooze {}", row.name),
+    };
+    let choices: Vec<crate::RowChoice> = presets(snooze.is_some()).into_iter().map(|(value, label)| crate::RowChoice { value: value.into(), label: label.into() }).collect();
+    let menu = window.global::<crate::RowMenu>();
+    menu.set_title(title.into());
+    menu.set_choices(slint::ModelRc::new(slint::VecModel::from(choices)));
+    menu.set_session(session.into());
+}
+
+pub fn wire(window: &crate::AppWindow) {
+    use slint::ComponentHandle;
+    let menu = window.global::<crate::RowMenu>();
+    menu.on_opened(|session| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            open_row_menu(&app, &window, &session);
+        }
+    });
+    menu.on_pick(|session, how| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            window.global::<crate::RowMenu>().set_session(slint::SharedString::new());
+            set(&app, &session, &how);
+            crate::pump_now(&app);
+        }
+    });
 }
 
 /// Snoozes `session` (`how` as `until_for`), or wakes it (`how` "wake").
@@ -156,6 +221,11 @@ pub fn set(app: &App, session: &str, how: &str) {
         engine.settings_mut().set(SETTING, Value::Object(map));
     }
     app.refresh(&[clarp_engine::Change::Roster]);
+}
+
+/// The chats Ctrl+J visits, in order, less the snoozed ones.
+pub fn attention_queue(engine: &Engine) -> Vec<String> {
+    engine.attention_queue().into_iter().filter(|session| !is_snoozed(engine, session)).collect()
 }
 
 /// Whether `session` is snoozed now.
@@ -264,5 +334,15 @@ mod tests {
         assert!(until_for("hour") > now_ms());
         assert!(until_for("morning") > now_ms());
         assert_eq!(until_for("message"), 0);
+    }
+
+    #[test]
+    fn later_today_is_the_evening_or_a_few_hours_on_and_never_tomorrow() {
+        let at = |h, m| Local.with_ymd_and_hms(2026, 11, 26, h, m, 0).single().unwrap();
+        assert_eq!(later_today(at(9, 10)).map(|t| t.hour()), Some(18));
+        assert_eq!(later_today(at(16, 20)).map(|t| (t.hour(), t.minute())), Some((20, 0)));
+        assert_eq!(later_today(at(21, 5)), None, "past 20:00 later today would be tomorrow");
+        assert!(presets(true).first().is_some_and(|(v, _)| v == "wake"));
+        assert!(!presets(false).iter().any(|(v, _)| v == "wake"));
     }
 }

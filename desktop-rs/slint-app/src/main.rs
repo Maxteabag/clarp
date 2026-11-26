@@ -24,6 +24,7 @@ mod pair;
 mod panes;
 mod queue_strip;
 mod triage;
+mod table_fit;
 mod perf;
 mod motion;
 mod scroll_book;
@@ -269,11 +270,22 @@ impl App {
             }
             chain
         };
+        // A snoozed chat (with its sub-agents) leaves the top of the list
+        // until it wakes: below every chat that is not snoozed, in order.
+        let mut visible = visible;
+        if scope != "snoozed" && !snoozes.is_empty() {
+            let put_off = |row: &&clarp_core::roster::AgentRow| {
+                let top = ancestors(row).last().cloned().unwrap_or_else(|| row.session.clone());
+                snoozes.contains_key(&top)
+            };
+            let (later, now): (Vec<_>, Vec<_>) = visible.into_iter().partition(put_off);
+            visible = now.into_iter().chain(later).collect();
+        }
         let mut unfolded = self.unfolded.borrow().clone();
         if let Some(open) = rows.iter().find(|r| r.session == selected) {
             unfolded.extend(ancestors(open));
         }
-        let queue = engine.attention_queue();
+        let queue: Vec<String> = engine.attention_queue().into_iter().filter(|s| !snoozes.contains_key(s)).collect();
         laps.lap("queue");
         let mut folded_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
         // Of those, the helpers still at work.
@@ -601,7 +613,7 @@ impl App {
                     }
                 }
                 Change::Silence => {
-                    platform::audio::with(platform::audio::Audio::silence);
+                    platform::audio::with(platform::audio::Audio::quiet);
                 }
                 Change::Endpoint => {
                     let endpoint = self.engine.borrow().endpoint();
@@ -1167,6 +1179,8 @@ fn main() {
     // ---- profile and overview
     profile_view::wire(&window);
     chat_menu::wire(&window);
+    triage::wire(&window);
+    table_fit::wire(&window);
     overview_view::wire(&window);
     voice_view::wire(&window);
     font_view::wire(&window);

@@ -539,6 +539,7 @@ pub const ENTRIES: &[Entry] = &[
     e("list-snoozed", "Agents: snoozed", "view", "Shows the chats you snoozed, with when each comes back.", &["sidebar list", "filter", "later", "put off", "triage", "scope"]),
     e("snooze-chat", "Snooze chat until its next message", "agent", "Takes the chat out of Needs you until it gets a new message. Kept on this device.", &["snooze", "later", "remind", "hide", "defer", "triage"]),
     e("snooze-chat-hour", "Snooze chat for an hour", "agent", "Takes the chat out of Needs you for an hour. Kept on this device.", &["snooze", "later", "1 hour", "remind", "defer", "triage"]),
+    e("snooze-chat-today", "Snooze chat until later today", "agent", "Takes the chat out of Needs you until this evening (18:00), or a few hours on late in the day. Kept on this device.", &["snooze", "later", "today", "evening", "remind", "defer", "triage"]),
     e("snooze-chat-morning", "Snooze chat until tomorrow morning", "agent", "Takes the chat out of Needs you until 08:00 tomorrow. Kept on this device.", &["snooze", "tomorrow", "morning", "later", "defer", "triage"]),
     e("wake-chat", "Wake snoozed chat", "agent", "Ends the chat's snooze: it is back in Needs you if it waits for you.", &["unsnooze", "wake", "snooze", "back", "triage"]),
     e("snooze-toggle", "Snooze or wake chat", "agent", "Snoozes the chat until its next message, or wakes it when snoozed.", &["snooze", "wake", "toggle", "later", "triage"]),

@@ -64,11 +64,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     // Snooze, kept on this device (triage.rs).
     let snooze = engine.roster().rows().iter().find(|r| r.session == session).and_then(|row| crate::triage::snooze_of(&engine, row));
     menu.set_snooze_label(snooze.as_ref().map_or_else(|| "Off".to_owned(), |s| format!("Until {}", crate::triage::label(s))).into());
-    let snooze_choices: Vec<(&str, &str)> = if snooze.is_some() {
-        vec![("wake", "Wake now"), ("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
-    } else {
-        vec![("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
-    };
+    let presets = crate::triage::presets(snooze.is_some());
+    let snooze_choices: Vec<(&str, &str)> = presets.iter().map(|(v, l)| (v.as_str(), l.as_str())).collect();
     menu.set_snooze_choices(choices(&snooze_choices, ""));
 }
 

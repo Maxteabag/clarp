@@ -50,6 +50,24 @@ export struct ChatRow {
     moved: string,
 }
 
+// A chat row's right-click menu: snooze (or wake) the chat. Rust fills
+// the choices for `session` when it opens (triage.rs); "" is closed.
+export struct RowChoice {
+    value: string,
+    label: string,
+}
+
+export global RowMenu {
+    in-out property <string> session;
+    in property <string> title;
+    in property <[RowChoice]> choices;
+    // Where it opens, in the explorer.
+    in-out property <length> x;
+    in-out property <length> y;
+    callback opened(string);
+    callback pick(string, string);
+}
+
 // A small labelled toggle, like the QML scope chips; `count` after the
 // label when above 0.
 component Chip inherits Rectangle {
@@ -59,7 +77,7 @@ component Chip inherits Rectangle {
     property <string> words: root.count > 0 ? root.label + " " + root.count : root.label;
     callback clicked();
     height: 24px;
-    width: text.preferred-width + 18px;
+    width: text.preferred-width + 14px;
     border-radius: 12px;
     background: root.on ? Palette.accent : touch.has-hover ? Palette.hover : Palette.control;
     accessible-role: button;
@@ -119,6 +137,8 @@ component Row inherits Rectangle {
     changed cursor-place => { if (self.cursor && self.seeking) { root.reveal(self.y, self.height); } }
     init => { if (self.cursor && self.seeking) { root.reveal(self.y, self.height); } }
     callback clicked();
+    // A right-click: where, in the window.
+    callback menu(length, length);
     // The process indicator was clicked: its bottom right, in the window.
     callback processes(length, length);
     callback done-toggled(string);
@@ -135,7 +155,14 @@ component Row inherits Rectangle {
     accessible-role: list-item;
     // "Rachel on laptopstudio" when the row names its Host (as on iOS).
     accessible-label: root.chat.host != "" ? root.chat.name + " on " + root.chat.host : root.chat.name;
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
     HorizontalLayout {
         padding-left: 10px + root.chat.depth * 18px;
         padding-right: 10px;
@@ -265,7 +292,18 @@ component Row inherits Rectangle {
                         font-size: 11 * Look.unit;
                     }
                 }
-                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
+                // A snoozed row says until when in place of its time, so
+                // the preview below keeps its full width.
+                if !root.compact && root.chat.snoozed == "": Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
+                if !root.compact && root.chat.snoozed != "": Text {
+                    horizontal-stretch: 0;
+                    text: "z " + root.chat.snoozed;
+                    color: Palette.faint;
+                    font-size: 11 * Look.unit;
+                    accessible-role: text;
+                    accessible-id: "row-snoozed";
+                    accessible-label: "Snoozed until " + root.chat.snoozed;
+                }
             }
             if !root.compact: HorizontalLayout {
                 spacing: 6px;
@@ -277,15 +315,6 @@ component Row inherits Rectangle {
                     horizontal-stretch: 1;
                 }
                 if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12 * Look.unit; }
-                // Snoozed: out of Needs you until then.
-                if root.chat.snoozed != "": Text {
-                    text: "z " + root.chat.snoozed;
-                    color: Palette.faint;
-                    font-size: 11 * Look.unit;
-                    accessible-role: text;
-                    accessible-id: "row-snoozed";
-                    accessible-label: "Snoozed until " + root.chat.snoozed;
-                }
                 if root.chat.queued > 0: RevealText { text: root.chat.queued + (root.chat.queue-paused ? " queued · paused" : " queued"); color: Palette.warning; font-size: 11 * Look.unit; }
                 if root.chat.unread: Rectangle {
                     width: 8px;
@@ -474,26 +503,42 @@ export component Sidebar inherits Rectangle {
         // Minimal UI keeps the list alone: scope, rooms and the archive stay
         // in Ctrl+K.
         // Triage: Working, Needs you and Done split the fleet by where each
-        // chat stands; Snoozed lists the chats put off (triage.rs). A row
-        // wider than the explorer scrolls sideways.
-        if !root.minimal: scopes := Flickable {
+        // chat stands; Snoozed lists the chats put off (triage.rs). Chips
+        // that do not fit the explorer's width wrap onto the next line, so
+        // none is ever cut.
+        if !root.minimal: scopes := Rectangle {
             vertical-stretch: 0;
-            height: 24px;
-            content-width: Math.max(self.width, chips.preferred-width + 20px);
-            content-height: self.height;
+            property <length> gap: 4px;
+            property <length> line: 26px;
+            property <length> room: self.width - 20px;
+            // Each chip follows the one before it, or starts a new line.
+            property <length> x1: c0.x + c0.width + self.gap;
+            property <bool> w1: self.x1 + c1.width > self.room;
+            property <length> x2: (self.w1 ? 0px : self.x1) + c1.width + self.gap;
+            property <bool> w2: self.x2 + c2.width > self.room;
+            property <length> x3: (self.w2 ? 0px : self.x2) + c2.width + self.gap;
+            property <bool> w3: self.x3 + c3.width > self.room;
+            property <length> x4: (self.w3 ? 0px : self.x3) + c3.width + self.gap;
+            property <bool> w4: self.x4 + c4.width > self.room;
+            property <length> x5: (self.w4 ? 0px : self.x4) + c4.width + self.gap;
+            property <bool> w5: self.x5 + c5.width > self.room;
+            property <int> l1: self.w1 ? 1 : 0;
+            property <int> l2: self.l1 + (self.w2 ? 1 : 0);
+            property <int> l3: self.l2 + (self.w3 ? 1 : 0);
+            property <int> l4: self.l3 + (self.w4 ? 1 : 0);
+            property <int> l5: self.l4 + (self.w5 ? 1 : 0);
+            height: (self.l5 + 1) * self.line - 2px;
             accessible-role: AccessibleRole.list;
             accessible-id: "explorer-scopes";
-            chips := HorizontalLayout {
+            Rectangle {
                 x: 10px;
-                height: 24px;
-                spacing: 5px;
-                alignment: start;
-                Chip { label: "All"; on: root.scope == "all"; clicked => { root.choose-scope("all"); } }
-                Chip { label: "Needs you"; count: root.triage-needs; on: root.scope == "needs-you"; accessible-id: "scope-needs-you"; clicked => { root.choose-scope("needs-you"); } }
-                Chip { label: "Working"; count: root.triage-working; on: root.scope == "working"; accessible-id: "scope-working"; clicked => { root.choose-scope("working"); } }
-                Chip { label: "Done"; on: root.scope == "done"; accessible-id: "scope-done"; clicked => { root.choose-scope("done"); } }
-                Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.choose-scope("unread"); } }
-                if root.triage-snoozed > 0 || root.scope == "snoozed": Chip { label: "Snoozed"; count: root.triage-snoozed; on: root.scope == "snoozed"; accessible-id: "scope-snoozed"; clicked => { root.choose-scope("snoozed"); } }
+                width: scopes.room;
+                c0 := Chip { x: 0px; y: 0px; label: "All"; on: root.scope == "all"; clicked => { root.choose-scope("all"); } }
+                c1 := Chip { x: scopes.w1 ? 0px : scopes.x1; y: scopes.l1 * scopes.line; label: "Needs you"; count: root.triage-needs; on: root.scope == "needs-you"; accessible-id: "scope-needs-you"; clicked => { root.choose-scope("needs-you"); } }
+                c2 := Chip { x: scopes.w2 ? 0px : scopes.x2; y: scopes.l2 * scopes.line; label: "Working"; count: root.triage-working; on: root.scope == "working"; accessible-id: "scope-working"; clicked => { root.choose-scope("working"); } }
+                c3 := Chip { x: scopes.w3 ? 0px : scopes.x3; y: scopes.l3 * scopes.line; label: "Done"; on: root.scope == "done"; accessible-id: "scope-done"; clicked => { root.choose-scope("done"); } }
+                c4 := Chip { x: scopes.w4 ? 0px : scopes.x4; y: scopes.l4 * scopes.line; label: "Unread"; on: root.scope == "unread"; accessible-id: "scope-unread"; clicked => { root.choose-scope("unread"); } }
+                c5 := Chip { x: scopes.w5 ? 0px : scopes.x5; y: scopes.l5 * scopes.line; label: "Snoozed"; count: root.triage-snoozed; on: root.scope == "snoozed"; accessible-id: "scope-snoozed"; clicked => { root.choose-scope("snoozed"); } }
             }
         }
         // Each label is its own row, not one row's text swapped: the swap
@@ -569,6 +614,13 @@ export component Sidebar inherits Rectangle {
                 fold-toggled => { root.fold-toggled(row.session); }
                 restore => { root.restore(row.session); }
                 processes(x, y) => { root.processes(row.session, x, y); }
+                menu(x, y) => {
+                    if (!row.archived && root.shown-kind == "chats") {
+                        RowMenu.x = x - root.absolute-position.x;
+                        RowMenu.y = y - root.absolute-position.y;
+                        RowMenu.opened(row.session);
+                    }
+                }
             }
           }
           }
@@ -614,5 +666,62 @@ export component Sidebar inherits Rectangle {
         label: "Explorer";
         active: root.explorer-active;
         surface: Palette.raised;
+    }
+    // The row's right-click menu, over the list; a click elsewhere or Esc
+    // closes it.
+    if RowMenu.session != "": Rectangle {
+        TouchArea {
+            clicked => { RowMenu.session = ""; }
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) { RowMenu.session = ""; }
+            }
+        }
+        FocusScope {
+            init => { self.focus(); }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) { RowMenu.session = ""; return accept; }
+                reject
+            }
+        }
+        row-menu := Rectangle {
+            width: Math.min(230px, parent.width - 16px);
+            height: row-menu-list.preferred-height;
+            x: Math.max(8px, Math.min(RowMenu.x, parent.width - self.width - 8px));
+            y: Math.max(8px, Math.min(RowMenu.y, parent.height - self.height - 8px));
+            border-radius: 2px;
+            border-width: 1px;
+            border-color: Palette.border;
+            background: Palette.window;
+            accessible-role: list;
+            accessible-id: "row-menu";
+            accessible-label: RowMenu.title;
+            // Clicks inside stay inside.
+            TouchArea { }
+            row-menu-list := VerticalLayout {
+                padding: 3px;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    height: 22px;
+                    Text {
+                        text: RowMenu.title;
+                        color: Palette.faint;
+                        font-size: 11 * Look.unit;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                for choice in RowMenu.choices: Rectangle {
+                    height: 26px;
+                    background: item-touch.has-hover ? Palette.hover : transparent;
+                    accessible-role: button;
+                    accessible-id: "row-menu:" + choice.value;
+                    accessible-label: choice.label;
+                    accessible-action-default => { RowMenu.pick(RowMenu.session, choice.value); }
+                    Text { x: 10px; text: choice.label; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; height: parent.height; }
+                    item-touch := TouchArea { clicked => { RowMenu.pick(RowMenu.session, choice.value); } }
+                }
+            }
+        }
     }
 }

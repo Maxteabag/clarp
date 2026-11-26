@@ -113,6 +113,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("list-snoozed", &[], "Agents: snoozed", false, Always, false),
             b("snooze-chat", &[], "Snooze chat", false, Agent, false),
             b("snooze-chat-hour", &[], "Snooze chat for an hour", false, Agent, false),
+            b("snooze-chat-today", &[], "Snooze chat until later today", false, Agent, false),
             b("snooze-chat-morning", &[], "Snooze chat until morning", false, Agent, false),
             b("wake-chat", &[], "Wake chat", false, Agent, false),
             b("list-rooms", &[], "Agent conversations", false, Always, false),
