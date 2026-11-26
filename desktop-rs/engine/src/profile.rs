@@ -22,6 +22,9 @@ pub(crate) struct Profile {
     prompt_cursor: String,
     prompts_have_more: bool,
     prompts_loading: bool,
+    /// The Host answered the prompt history with 404: it has none to offer,
+    /// and the profile leaves the section out. A later answer brings it back.
+    prompts_missing: bool,
     loading: bool,
     error: String,
     generation: u64,
@@ -72,6 +75,11 @@ impl Engine {
     }
     pub fn profile_prompts_loading(&self) -> bool {
         self.profile.prompts_loading
+    }
+    /// Whether the Host offers prompt history (an older or other Host may
+    /// answer 404); the profile shows the section only then.
+    pub fn profile_prompts_offered(&self) -> bool {
+        !self.profile.prompts_missing
     }
     pub fn profile_loading(&self) -> bool {
         self.profile.loading
@@ -404,6 +412,7 @@ impl Engine {
             } else {
                 profile.prompts = incoming;
             }
+            profile.prompts_missing = false;
             profile.prompts_have_more = json::boolean(&page, "has_more");
             profile.prompt_cursor = json::string(&page, "next_before");
             profile.prompts_loading = false;
@@ -450,7 +459,10 @@ impl Engine {
         } else if let Some(rest) = tag.strip_prefix("profile:") {
             if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) == Some(self.profile.generation) {
                 self.profile.loading = false;
-                self.profile.error = detail.to_owned();
+                // A Host without plans has none to show: no error.
+                if status != 404 {
+                    self.profile.error = load_failed("the plan", message, status);
+                }
                 self.changes.push(Change::Profile);
             }
         } else if tag.starts_with("profile-heartbeat:") {
@@ -460,7 +472,14 @@ impl Engine {
             let request = self.profile.prompt_history_requests.remove(tag);
             if request.is_some_and(|(_, generation, _)| generation == self.profile.prompt_history_generation) {
                 self.profile.prompts_loading = false;
-                self.profile.error = detail.to_owned();
+                // A Host without prompt history (the Rust Host has no
+                // `/identity/prompt-history`) does not offer it: the section
+                // goes, and nothing is wrong.
+                if status == 404 {
+                    self.profile.prompts_missing = true;
+                } else {
+                    self.profile.error = load_failed("the prompt history", message, status);
+                }
                 self.changes.push(Change::Profile);
             }
         } else if tag.starts_with("voices:") {
@@ -476,4 +495,14 @@ impl Engine {
         }
         true
     }
+}
+
+/// A failed profile request in plain words, said once: what could not load
+/// and what the Host said, without the status twice.
+fn load_failed(what: &str, message: &str, status: u16) -> String {
+    if status == 0 {
+        return format!("Could not load {what}: {message}");
+    }
+    let said = message.strip_prefix(&format!("HTTP {status}")).unwrap_or(message).trim();
+    if said.is_empty() { format!("Could not load {what} (the Host answered {status})") } else { format!("Could not load {what}: {said} (the Host answered {status})") }
 }
