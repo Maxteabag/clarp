@@ -102,11 +102,21 @@ pub struct Desk {
 
 impl Desk {
     pub fn new(path: PathBuf) -> Self {
+        Self::start(path, None)
+    }
+
+    /// The index at `path`, where it was at `former` before: that one is thrown away once the
+    /// index at `path` has opened, and the history is read into the new one.
+    pub fn replacing(path: PathBuf, former: PathBuf) -> Self {
+        Self::start(path, Some(former))
+    }
+
+    fn start(path: PathBuf, former: Option<PathBuf>) -> Self {
         let (tx, rx) = mpsc::channel::<Command>();
         let at = path.clone();
         let spawned = std::thread::Builder::new()
             .name("search-index".to_string())
-            .spawn(move || Writer::new(at).serve(&rx));
+            .spawn(move || Writer::new(at, former).serve(&rx));
         if let Err(why) = spawned {
             eprintln!("clarp-host: the search index has no thread: {why}");
         }
@@ -196,14 +206,23 @@ struct Writer {
 }
 
 impl Writer {
-    fn new(path: PathBuf) -> Self {
+    fn new(path: PathBuf, former: Option<PathBuf>) -> Self {
         let mut writer = Self {
             path,
             index: None,
             began_anew: false,
         };
         // Made at once, so a search finds a file to read from the start.
-        let _ = writer.index();
+        let opened = writer.index().is_ok();
+        if let Some(former) = former.filter(|former| opened && *former != writer.path)
+            && former.exists()
+        {
+            clarp_store_sqlite::search::discard(&former);
+            eprintln!(
+                "clarp-host: the search index moved to {}; it is read in anew",
+                writer.path.display()
+            );
+        }
         writer
     }
 

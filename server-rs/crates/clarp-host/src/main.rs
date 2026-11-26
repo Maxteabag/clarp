@@ -191,6 +191,9 @@ async fn serve(config: Config) -> Result<(), String> {
     std::fs::create_dir_all(&config.data_dir)
         .and_then(|()| std::fs::create_dir_all(&config.run_dir))
         .map_err(|error| format!("the Host's directories cannot be made: {error}"))?;
+    // Before anything in them is opened: what SQLite writes there from now on is written in
+    // place, without compression (issue 848).
+    clarp_host::data_flags::tell(&clarp_host::data_flags::at_start(&config.data_dir));
 
     if let Err(reason) = clarp_host::calls::generation::bootstrap(&config.data_dir) {
         eprintln!(
@@ -447,7 +450,13 @@ async fn serve(config: Config) -> Result<(), String> {
         sign_ins: Arc::default(),
         door: Arc::default(),
         connector: Arc::new(clarp_host::connector::Connector::told(&config)),
-        search: Arc::new(clarp_host::search::Desk::new(
+        // The index in its own folder (issue 848), made anew there once: the one beside the
+        // fleet's file before is removed once the new one has opened.
+        search: Arc::new(clarp_host::search::Desk::replacing(
+            config
+                .data_dir
+                .join(clarp_host::data_flags::SEARCH_FOLDER)
+                .join(clarp_host::search::SEARCH_DB),
             config.data_dir.join(clarp_host::search::SEARCH_DB),
         )),
         ears: {
