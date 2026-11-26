@@ -10,12 +10,20 @@
 //!   whose tool's account is used up with no seat to move to (`backend_quota` is `exhausted`).
 //! - `switching_account`: a turn waits for an account while the Host moves its tool to another
 //!   one: after a usage limit, or after a sign-in that ran out.
-//! - `restarting`: its process is starting or starting again, including a wait before
+//! - `restarting`: its process is starting again after an attempt failed, including a wait before
 //!   another attempt or reopening after a Host restart.
 //! - `unresponsive`: a turn runs and nothing came of it for
 //!   [`UNRESPONSIVE_AFTER_MS`].
-//! - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
-//! - `ok`: it can answer now.
+//! - `busy`: a message of the owner's said now could neither be read into the running turn nor
+//!   take its place, and waits for it ([`Why`]); `queue_ahead` others run before it.
+//! - `ok`: it can answer now. That includes a turn at work that the owner's word steers into,
+//!   that makes way for it, or that he may take over: ordinary work is the chat's preview and
+//!   activity to show, not a reason the agent cannot answer (Peter via Hazel, 26 Nov 2026).
+//!
+//! `queue_ahead` counts what runs before a message of the owner's said now
+//! (`Agent::ahead_of_owner`): his own earlier words, a front desk's relay of them, a card he
+//! answered, never another agent's message or automation, which wait behind his word. It is 0
+//! in `ok`, where nothing keeps him waiting.
 //!
 //! All of it is decided from what the Host already holds ([`decide`]); nothing is asked of the
 //! agent. The snapshot's row and the live event are made by the same function, so a patched
@@ -95,9 +103,56 @@ impl Availability {
     }
 }
 
+/// What a message of the owner's said now waits for, where it can neither be read into the
+/// running turn nor take its place (`Worker::owner_waits`, the same terms as the send's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    /// The tool compacts its conversation: a compaction is never cut.
+    Compacting,
+    /// The agent moves to another backend: its summary for the move runs, or the move holds
+    /// the queue.
+    Moving,
+    /// A Codex native goal's own turn: the owner's goal at work, which a cut would pause.
+    Goal,
+}
+
+impl Why {
+    /// What waits for a running turn that cannot be cut, by who started it; `None` for a turn
+    /// this does not know to name, which is then not guessed at.
+    pub fn uncut(origin: &clarp_kernel::turn::Origin) -> Option<Self> {
+        use clarp_kernel::turn::{COMPACTION, Origin, TRANSIT_SUMMARY};
+        match origin {
+            Origin::Trigger { name } if name == COMPACTION => Some(Self::Compacting),
+            Origin::Trigger { name } if name == TRANSIT_SUMMARY => Some(Self::Moving),
+            Origin::NativeGoal => Some(Self::Goal),
+            _ => None,
+        }
+    }
+
+    /// The Host's words for it, as the agent's activity names the same (`wire`).
+    fn text(self) -> &'static str {
+        match self {
+            Self::Compacting => "Compacting",
+            Self::Moving => "Moving to another backend",
+            Self::Goal => "Working on its goal",
+        }
+    }
+}
+
+/// Whether a message of the owner's said now would wait, and how many run before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OwnerWaits {
+    /// What it waits for; `None` where it is read in, goes first, or may take over now.
+    pub why: Option<Why>,
+    /// The waiting messages that run before it (`Agent::ahead_of_owner`).
+    pub ahead: usize,
+}
+
 /// What the decision reads of one agent, all of it held by the Host already.
 pub struct Facts<'a> {
     pub status: &'a Status,
+    /// What keeps a message of the owner's said now waiting, read on the agent's thread.
+    pub owner_waits: OwnerWaits,
     /// Why the agent's thread cannot answer at all now (`agent::View::broken`).
     pub broken: Option<&'a str>,
     /// The row's `backend_quota`: what it says of the tool's account.
@@ -120,7 +175,7 @@ pub struct Facts<'a> {
 /// Whether the agent can answer now, and if not why and until when.
 pub fn decide(facts: &Facts<'_>) -> Availability {
     let status = facts.status;
-    let queue_ahead = status.queue_depth;
+    let queue_ahead = facts.owner_waits.ahead;
     let live = status.live.as_ref();
     let at = |state: &'static str, text: String, since_ms: i64, back_at_ms: Option<i64>| {
         at_state(state, text, since_ms, back_at_ms, queue_ahead)
@@ -214,7 +269,16 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         );
     }
     let Some(live) = live else {
-        return at("ok", String::new(), rested_since(facts), None);
+        if let Some(why) = facts.owner_waits.why {
+            // A move holds the queue while nothing runs.
+            return at(
+                "busy",
+                waits_text(why, queue_ahead),
+                rested_since(facts),
+                None,
+            );
+        }
+        return at_state("ok", String::new(), rested_since(facts), None, 0);
     };
     if let Some(parked) = &live.parked {
         let back = match parked.wait {
@@ -223,7 +287,9 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         };
         return at("restarting", "Restarting".into(), parked.since_ms, back);
     }
-    if live.starting && !live.stopping {
+    // A process started again after an attempt failed. A turn's first start is ordinary work:
+    // its own message waits for nothing else, and the owner's word cuts or steers past another's.
+    if live.starting && !live.stopping && live.failed_attempts > 0 {
         let back = live.moved_at_ms.saturating_add(facts.start_ms);
         return at(
             "restarting",
@@ -245,14 +311,28 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         shown.last_alive_ms = Some(alive);
         return shown;
     }
-    let text = match queue_ahead {
-        0 => "Busy".to_string(),
-        1 => "Busy · 1 message ahead of you".to_string(),
-        many => format!("Busy · {many} messages ahead of you"),
+    // A turn at work that the owner's word steers into, makes way for, or that he may take
+    // over keeps nobody waiting: its preview and activity say what it does.
+    let Some(why) = facts.owner_waits.why else {
+        return at_state("ok", String::new(), live.started_at_ms, None, 0);
     };
-    let mut shown = at("busy", text, live.started_at_ms, None);
+    let mut shown = at(
+        "busy",
+        waits_text(why, queue_ahead),
+        live.started_at_ms,
+        None,
+    );
     shown.last_alive_ms = alive;
     shown
+}
+
+/// What the owner's message waits for, and how many run before it where any do.
+fn waits_text(why: Why, ahead: usize) -> String {
+    match ahead {
+        0 => why.text().to_string(),
+        1 => format!("{} · 1 message ahead of you", why.text()),
+        many => format!("{} · {many} messages ahead of you", why.text()),
+    }
 }
 
 fn at_state(
@@ -308,6 +388,7 @@ fn of(member: &Member, view: &crate::agent::View, at: &At) -> Availability {
     let backend_quota = quota.of(view.backend, &member.record.model);
     decide(&Facts {
         status: &view.status,
+        owner_waits: view.owner_waits,
         broken: view.broken.as_deref(),
         backend_quota: &backend_quota,
         bound: member.record.bound(),
@@ -563,7 +644,18 @@ mod tests {
     }
 
     fn decided(status: &Status, quota: &Value, alive: Option<i64>) -> Availability {
+        waiting(status, quota, alive, OwnerWaits::default())
+    }
+
+    /// As [`decided`], with what keeps a message of the owner's waiting.
+    fn waiting(
+        status: &Status,
+        quota: &Value,
+        alive: Option<i64>,
+        owner_waits: OwnerWaits,
+    ) -> Availability {
         decide(&Facts {
+            owner_waits,
             status,
             broken: None,
             backend_quota: quota,
@@ -578,24 +670,78 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_agent_can_answer_and_one_at_work_is_busy_behind_its_queue() {
+    fn ordinary_work_keeps_nobody_waiting_and_only_a_turn_the_owner_cannot_reach_says_why() {
         let ok = decided(&idle(), &Value::Null, None);
         assert_eq!((ok.state, ok.text.as_str(), ok.since_ms), ("ok", "", 5));
         assert_eq!(ok.to_json()["back_at_ms"], Value::Null);
+        // A healthy turn at work, with other agents' messages queued behind it: the owner's
+        // word steers in, goes first or may take over. Nothing replaces the preview.
         let mut status = idle();
         status.live = Some(running(NOW - 1_000));
-        let busy = decided(&status, &Value::Null, Some(NOW - 500));
-        assert_eq!((busy.state, busy.text.as_str()), ("busy", "Busy"));
-        assert_eq!(busy.last_alive_ms, Some(NOW - 500));
-        status.queue_depth = 1;
-        let one = decided(&status, &Value::Null, Some(NOW - 500));
-        assert_eq!(one.text, "Busy · 1 message ahead of you");
         status.queue_depth = 25;
-        let many = decided(&status, &Value::Null, Some(NOW - 500));
+        let working = decided(&status, &Value::Null, Some(NOW - 500));
         assert_eq!(
-            (many.text.as_str(), many.queue_ahead, many.since_ms),
-            ("Busy · 25 messages ahead of you", 25, NOW - 1_000)
+            (
+                working.state,
+                working.text.as_str(),
+                working.queue_ahead,
+                working.back_at_ms
+            ),
+            ("ok", "", 0, None)
         );
+        let ahead = |ahead| OwnerWaits { why: None, ahead };
+        assert_eq!(
+            waiting(&status, &Value::Null, None, ahead(2)).to_json()["queue_ahead"],
+            0,
+            "nothing keeps him waiting, so nothing is ahead of him"
+        );
+        // A turn that can neither take his word now nor be cut: what it waits for, and what
+        // truly runs before it, not the raw queue.
+        let blocked = |why, ahead| OwnerWaits {
+            why: Some(why),
+            ahead,
+        };
+        let compacting = waiting(
+            &status,
+            &Value::Null,
+            Some(NOW - 500),
+            blocked(Why::Compacting, 0),
+        );
+        assert_eq!(
+            (
+                compacting.state,
+                compacting.text.as_str(),
+                compacting.queue_ahead,
+                compacting.since_ms,
+                compacting.back_at_ms
+            ),
+            ("busy", "Compacting", 0, NOW - 1_000, None)
+        );
+        assert_eq!(compacting.last_alive_ms, Some(NOW - 500));
+        let one = waiting(&status, &Value::Null, None, blocked(Why::Goal, 1));
+        assert_eq!(
+            (one.text.as_str(), one.queue_ahead),
+            ("Working on its goal · 1 message ahead of you", 1)
+        );
+        let two = waiting(&status, &Value::Null, None, blocked(Why::Moving, 2));
+        assert_eq!(
+            (two.text.as_str(), two.queue_ahead),
+            ("Moving to another backend · 2 messages ahead of you", 2)
+        );
+        // A move that holds the queue keeps him waiting while nothing runs.
+        let held = waiting(&idle(), &Value::Null, None, blocked(Why::Moving, 0));
+        assert_eq!(
+            (held.state, held.text.as_str(), held.since_ms),
+            ("busy", "Moving to another backend", 5)
+        );
+        // Only the turns that cannot be cut are named; any other is not guessed at.
+        use clarp_kernel::turn::{COMPACTION, TRANSIT_SUMMARY};
+        let trigger = |name: &str| Origin::Trigger { name: name.into() };
+        assert_eq!(Why::uncut(&trigger(COMPACTION)), Some(Why::Compacting));
+        assert_eq!(Why::uncut(&trigger(TRANSIT_SUMMARY)), Some(Why::Moving));
+        assert_eq!(Why::uncut(&Origin::NativeGoal), Some(Why::Goal));
+        assert_eq!(Why::uncut(&Origin::User), None);
+        assert_eq!(Why::uncut(&trigger("schedule")), None);
     }
 
     #[test]
@@ -610,7 +756,7 @@ mod tests {
         );
         assert_eq!((shown.last_alive_ms, shown.since_ms), (Some(quiet), NOW));
         let just = decided(&status, &Value::Null, Some(quiet + 1));
-        assert_eq!(just.state, "busy");
+        assert_eq!(just.state, "ok");
         if let Some(live) = status.live.as_mut() {
             live.activity = Activity::Tool {
                 name: "Bash".into(),
@@ -633,8 +779,13 @@ mod tests {
         };
         live.parked = Some(parked(wait, failures::USAGE_LIMIT, NOW - 30_000));
         status.live = Some(live.clone());
-        status.queue_depth = 3;
-        let limit = decided(&status, &Value::Null, None);
+        // Seven wait, three of them before the owner's word.
+        status.queue_depth = 7;
+        let three_ahead = OwnerWaits {
+            why: None,
+            ahead: 3,
+        };
+        let limit = waiting(&status, &Value::Null, None, three_ahead);
         assert_eq!(
             (
                 limit.state,
@@ -751,6 +902,7 @@ mod tests {
         // Where another seat has room, the Host moves the tool to it: a switch, for a while.
         let switch = |ended_at_ms: i64| {
             decide(&Facts {
+                owner_waits: OwnerWaits::default(),
                 status: &refused(failures::USAGE_LIMIT, "Usage limit reached", ended_at_ms),
                 broken: None,
                 backend_quota: &Value::Null,
@@ -788,6 +940,7 @@ mod tests {
         let near = json!({"state": "near", "resets_at": "2030-03-17T19:00:00Z"});
         assert_eq!(decided(&idle(), &near, None).state, "ok");
         let bound = decide(&Facts {
+            owner_waits: OwnerWaits::default(),
             status: &idle(),
             broken: None,
             backend_quota: &used_up,
@@ -835,13 +988,14 @@ mod tests {
                 Some(NOW - 3_000 + START_DEFAULT_MS)
             )
         );
-        // A cold start has the same estimate.
+        // A turn's first start is ordinary work, not a restart.
         live.failed_attempts = 0;
         status.live = Some(live);
-        assert_eq!(decided(&status, &Value::Null, None).state, "restarting");
+        assert_eq!(decided(&status, &Value::Null, None).state, "ok");
         // An agent being opened after the Host started; one made since is not restarting.
         let opening = |created_at_ms: i64| {
             decide(&Facts {
+                owner_waits: OwnerWaits::default(),
                 status: &idle(),
                 broken: Some(crate::agent::OPENING),
                 backend_quota: &Value::Null,

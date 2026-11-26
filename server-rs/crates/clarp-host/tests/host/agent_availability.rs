@@ -66,47 +66,12 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
         .unwrap();
     assert_eq!(shown(&row["availability"]), shown(&idle), "{row}");
 
+    // Ordinary healthy work keeps nobody waiting: the owner's word steers in or may take over,
+    // and the preview says what it does. Nothing replaces it, also with a message queued.
     host.send(&session, "sleep 60", "long");
-    wait_for("the row to say busy", || {
-        availability_of(&host, &session)["state"] == "busy"
-    });
-    wait_for("the agent to be busy", || {
-        told(&heard, &session)
-            .is_some_and(|event| event["fields"]["availability"]["state"] == "busy")
-    });
-    let event = told(&heard, &session).unwrap();
-    assert_eq!(event["agent_id"], row["agent_id"], "{event}");
-    assert_eq!(
-        shown(&event["fields"]["availability"]),
-        json!(["busy", "Busy", null, 0]),
-        "{event}"
-    );
-
-    // A message that waits behind the turn: one ahead of the next.
+    wait_for("the turn to run", || host.state(&session) == "thinking");
     host.send(&session, "after it", "second");
-    wait_for("one message ahead", || {
-        told(&heard, &session)
-            .is_some_and(|event| event["fields"]["availability"]["queue_ahead"] == 1)
-    });
-    let event = told(&heard, &session).unwrap();
-    let now = availability_of(&host, &session);
-    assert_eq!(
-        shown(&event["fields"]["availability"]),
-        json!(["busy", "Busy · 1 message ahead of you", null, 1]),
-        "{event}"
-    );
-    assert_eq!(
-        shown(&event["fields"]["availability"]),
-        shown(&now),
-        "{now}"
-    );
-    assert_eq!(
-        now["queue_ahead"],
-        host.get(&format!("/agents/{session}"))["queued_turn_count"]
-    );
-    assert!(now["last_alive_ms"].as_i64().is_some(), "{now}");
-    // Nothing more is told while nothing an app shows changes.
-    let count = || {
+    let counted = || {
         heard
             .lock()
             .unwrap()
@@ -114,9 +79,85 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
             .filter(|event| event["kind"] == "availability" && event["session"] == session.as_str())
             .count()
     };
-    let before = count();
     std::thread::sleep(Duration::from_secs(1));
-    assert_eq!(count(), before);
+    let working = availability_of(&host, &session);
+    assert_eq!(
+        shown(&working),
+        json!(["ok", "", null, 0]),
+        "ordinary work: {working}"
+    );
+    assert_eq!(counted(), 0, "nothing is told of ordinary work");
+    host.post("/stop", json!({ "session": session }));
+}
+
+/// A turn the owner can neither steer into nor take over (the tool's compaction) keeps his
+/// message waiting: the row says why, and how many truly run before a new one; the event an
+/// app patches its row with says the same as a fresh read of the row.
+#[test]
+fn a_turn_that_cannot_take_the_owners_word_says_why_and_what_runs_before_it() {
+    let place = Place::new("availability-not-cuttable");
+    let claude = place.root.join("claude");
+    program(&claude, super::compaction_outcome::CLAUDE);
+    std::fs::write(place.root.join("modes"), r#"["stall"]"#).unwrap();
+    let home = place.root.join("home");
+    let world = [
+        ("HOME", home.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Shorty", "backend": "claude" }));
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(&session, "first turn", "first");
+    wait_for("the first turn to establish a session", || {
+        host.state(&session) == "done"
+    });
+    let heard = host.listen();
+    host.post("/compact", json!({ "session": session }));
+    let compacting = json!(["busy", "Compacting", null, 0]);
+    wait_for("the compaction to keep the owner waiting", || {
+        shown(&availability_of(&host, &session)) == compacting
+    });
+    let same_as_the_row = |expected: &Value| {
+        wait_for("the event to say what the row says", || {
+            told(&heard, &session).is_some_and(|event| {
+                let told = &event["fields"]["availability"];
+                let row = availability_of(&host, &session);
+                shown(told) == *expected
+                    && shown(&row) == *expected
+                    && told["since_ms"] == row["since_ms"]
+            })
+        });
+    };
+    same_as_the_row(&compacting);
+    // The owner's own message waits for it and runs first: one ahead of his next.
+    host.post(
+        "/send",
+        json!({ "session": session, "text": "after it", "client_msg_id": "mine",
+                "while_busy": "steer" }),
+    );
+    let one = json!(["busy", "Compacting · 1 message ahead of you", null, 1]);
+    same_as_the_row(&one);
+    let snapshot = host.get("/agents/snapshot");
+    let row = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session.as_str())
+        .unwrap();
+    assert_eq!(shown(&row["availability"]), one, "{row}");
+    // Automation left for later waits behind his word: it is in the queue, not ahead of him.
+    let later = host.post(
+        "/send",
+        json!({ "session": session, "text": "routine", "client_msg_id": "routine",
+                "queue_if_busy": true, "origin": "automation" }),
+    );
+    assert_eq!(later["queued"], true, "{later}");
+    wait_for("both to wait", || {
+        host.get(&format!("/agents/{session}"))["queued_turn_count"] == 2
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(shown(&availability_of(&host, &session)), one);
+    host.post("/stop", json!({ "session": session }));
 }
 
 #[test]

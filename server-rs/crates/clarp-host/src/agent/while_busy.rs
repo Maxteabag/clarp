@@ -97,6 +97,34 @@ impl Worker {
         }
     }
 
+    /// What keeps a message of the owner's said now from being read into the running turn or
+    /// taking its place, and how many waiting messages run before it (issue 918, the agent's
+    /// `availability`): the same terms as [`Worker::plan_while_busy`] and the send's own
+    /// admission read. A turn the owner's word steers into, makes way for, or that he may take
+    /// over keeps nobody waiting. One that can neither take his words now nor be cut (the
+    /// tool's compaction, a summary for a move, a native goal's own turn) does, and so does a
+    /// backend move that holds the queue.
+    pub(super) fn owner_waits(&self) -> crate::availability::OwnerWaits {
+        use crate::availability::{OwnerWaits, Why};
+        let Some(actor) = self.actor.as_ref() else {
+            return OwnerWaits::default();
+        };
+        let why = if actor.transit_holds_queue() {
+            Some(Why::Moving)
+        } else if actor.live_turn().is_some()
+            && !actor.live_cuttable()
+            && (self.never_takes_words() || !actor.steerable())
+        {
+            actor.live_origin().and_then(Why::uncut)
+        } else {
+            None
+        };
+        OwnerWaits {
+            why,
+            ahead: actor.ahead_of_owner(),
+        }
+    }
+
     /// Whether the running turn's tool cannot take words during this turn at all: its backend
     /// has no steering, its lane is off by the owner's setting, a terminal is open on its tool,
     /// the turn runs in a process of its own beside the lane (an exec turn, a turn on its own

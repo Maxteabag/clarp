@@ -1105,6 +1105,30 @@ impl Agent {
             && !self.joins.values().any(|held| held.join.uuid == join.uuid)
     }
 
+    /// How many waiting messages run before a message of the owner's said now (issue 918): those
+    /// in front of the place his word takes in the mailbox ([`crate::user_word::slot`]: his own
+    /// earlier words, a front desk's relay of them, a card he answered, a take-over), less those
+    /// the live turn reads in and those a Stop holds, which do not run before it. Another
+    /// agent's message or automation waits behind his word and is not counted.
+    pub fn ahead_of_owner(&self) -> usize {
+        let at = crate::user_word::slot(
+            self.mailbox
+                .iter()
+                .map(|waiting| waiting.user_word || waiting.admission == Admission::Direct),
+        );
+        self.mailbox
+            .iter()
+            .take(at)
+            .filter(|waiting| {
+                let held = self.paused
+                    && (self.import_held
+                        || (waiting.admission != Admission::Direct
+                            && !self.unheld.contains(&waiting.id)));
+                !held && !self.joins.contains_key(&waiting.id)
+            })
+            .count()
+    }
+
     /// The user's words that wait and were said before `turn`, oldest first, and are not yet
     /// given to the live turn: a message of the user's steers into the live turn only once none
     /// of these waits (issue 839), so the tool reads the user's messages in the order they were
@@ -4102,6 +4126,51 @@ mod tests {
         assert!(!a.agent.owner_goes_first(&Origin::User));
         // A free agent has nothing to make way.
         assert!(!Driven::new().agent.owner_goes_first(&Origin::User));
+    }
+
+    /// Issue 918: what precedes a message of the owner's said now is what the mailbox puts in
+    /// front of his word, not every waiting message: another agent's messages and automation
+    /// wait behind it, his own earlier words and a front desk's relay of them go first, and what
+    /// a Stop holds does not run before it.
+    #[test]
+    fn only_what_goes_before_the_owners_word_is_ahead_of_him() {
+        let peer = |message_seq, user_word| Command::Accept {
+            message_seq,
+            origin: Origin::Agent {
+                agent_id: "a-peer".into(),
+            },
+            admission: Admission::Later,
+            coordination: Some("a-peer".into()),
+            user_word,
+        };
+        let mut a = Driven::new();
+        assert_eq!(a.agent.ahead_of_owner(), 0, "nothing waits");
+        a.background(10);
+        a.send(peer(11, false)).unwrap();
+        a.send(peer(12, false)).unwrap();
+        assert_eq!(a.waiting(), vec![2, 3]);
+        assert_eq!(
+            a.agent.ahead_of_owner(),
+            0,
+            "other agents' messages wait behind the owner's word"
+        );
+        a.user(13);
+        assert_eq!(a.waiting(), vec![4, 2, 3]);
+        assert_eq!(a.agent.ahead_of_owner(), 1, "his own earlier word");
+        a.send(peer(14, true)).unwrap();
+        assert_eq!(a.waiting(), vec![4, 5, 2, 3]);
+        assert_eq!(
+            a.agent.ahead_of_owner(),
+            2,
+            "and a front desk's relay of it"
+        );
+        // A Stop holds what waited; a relay of his word after it is not held, and runs first.
+        a.send(stop()).unwrap();
+        assert!(a.agent.is_paused());
+        assert_eq!(a.agent.ahead_of_owner(), 0, "what a Stop holds");
+        a.send(peer(15, true)).unwrap();
+        assert_eq!(a.waiting(), vec![4, 5, 6, 2, 3]);
+        assert_eq!(a.agent.ahead_of_owner(), 1);
     }
 
     /// Peter, 25 Nov 2026: the owner's message is steered into a running turn that is not his

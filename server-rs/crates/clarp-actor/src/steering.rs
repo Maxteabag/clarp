@@ -725,6 +725,18 @@ impl Actor {
         self.recorder.agent().live_cuttable()
     }
 
+    /// Who started the live turn, where one runs: what an owner's message that cannot take its
+    /// place waits for (issue 918).
+    pub fn live_origin(&self) -> Option<&Origin> {
+        self.recorder.agent().live().map(|live| live.origin())
+    }
+
+    /// How many waiting messages run before a message of the owner's said now
+    /// ([`clarp_kernel::agent::Agent::ahead_of_owner`]).
+    pub fn ahead_of_owner(&self) -> usize {
+        self.recorder.agent().ahead_of_owner()
+    }
+
     /// Whether the live turn was last found to take a message of the owner's now
     /// ([`Actor::tell_steerable`]).
     pub fn steerable(&self) -> bool {

@@ -742,6 +742,9 @@ pub struct View {
     pub speech: Arc<SpeechBook>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
+    /// What keeps a message of the owner's said now waiting, and what runs before it
+    /// ([`Worker::owner_waits`]): read on the agent's thread with the status above.
+    pub(crate) owner_waits: crate::availability::OwnerWaits,
 }
 
 impl View {
@@ -1715,6 +1718,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         books: Arc::default(),
         speech: Arc::default(),
         broken: Some(OPENING.to_string()),
+        owner_waits: Default::default(),
     }));
     let now_ms = setup.clock.now_ms();
     let alive = Arc::new(AtomicI64::new(0));
@@ -2361,6 +2365,14 @@ impl Worker {
             self.setup
                 .hub
                 .show(event, now, trace.zip(view.working.as_ref()));
+        }
+        // Whether the owner's word would wait follows whether the turn takes it now, which
+        // moves without the status (issue 918): the row and its event are told of it.
+        if view.broken.is_none() && self.owner_waits() != view.owner_waits {
+            self.publish_view();
+            self.setup
+                .hub
+                .availability_moved(&self.setup.record.agent_id);
         }
     }
 
@@ -5806,6 +5818,7 @@ impl Worker {
             books: self.books.clone(),
             speech: self.speech.clone(),
             broken: None,
+            owner_waits: self.owner_waits(),
         }));
         // An agent that was being opened can answer now (`availability`).
         if prior.broken.is_some() {
@@ -6733,6 +6746,7 @@ mod mailbox_tests {
             books: Arc::default(),
             speech: Arc::default(),
             broken: None,
+            owner_waits: Default::default(),
         }));
         (
             AgentHandle {

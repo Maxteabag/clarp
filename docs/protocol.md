@@ -2479,10 +2479,10 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
 ```json
 "availability": {
   "state": "busy",
-  "text": "Busy · 25 messages ahead of you",
+  "text": "Compacting · 2 messages ahead of you",
   "since_ms": 1795670000000,
   "back_at_ms": null,
-  "queue_ahead": 25,
+  "queue_ahead": 2,
   "last_alive_ms": 1795670004000
 }
 ```
@@ -2496,31 +2496,42 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
   - `switching_account`: its turn waits while the Host moves its tool to another account, after a
     usage limit or after a sign-in that ran out; or its last turn was refused for a usage limit
     and another seat takes the next (shown for two minutes).
-  - `restarting`: its process is starting or starting again, or the agent is reopening after
-    a Host restart.
+  - `restarting`: its process is starting again after an attempt failed (or waits to), or the
+    agent is reopening after a Host restart. A turn's first start is ordinary work: `ok`.
   - `unresponsive`: a running turn has shown no sign of life (output, a tool event, or the
     process starting) for 180 s.
-  - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
-  - `ok`: it can answer now.
+  - `busy`: a message the user sends now can neither be read into the running turn nor take its
+    place, and waits for it: the tool's compaction, its summary for a move to another backend,
+    or a Codex native goal's own turn, where that turn does not take the user's words now; or a
+    move to another backend holds the queue.
+  - `ok`: it can answer now. That includes a turn at work that the user's message steers into,
+    that makes way for it, or that the user may take over (issue 839, `send_while_busy`):
+    ordinary work, whoever it is for, is shown by the chat's preview and activity, not here.
 - `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
   limit", or "Waiting for account" when the pool holds a launch without a known cause;
   `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";
-  `restarting` "Restarting"; `unresponsive` "Not responding"; `busy` "Busy · N messages ahead of
-  you" ("Busy · 1 message ahead of you", and just "Busy" when `queue_ahead` is 0); `ok` "" (show
-  nothing). The app adds the time part: from `back_at_ms` ("· back in ~20 s", "· back at 14:05")
+  `restarting` "Restarting"; `unresponsive` "Not responding"; `busy` what the message waits for,
+  "Compacting", "Moving to another backend" or "Working on its goal", followed by " · N messages
+  ahead of you" (" · 1 message ahead of you") when `queue_ahead` is not 0; `ok` "" (show
+  nothing). There is no generic "Busy". The app adds the time part: from `back_at_ms` ("· back in ~20 s", "· back at 14:05")
   or, in `unresponsive`, from `last_alive_ms` ("· last sign of life 4 min ago").
 - `since_ms`: when this state began. `back_at_ms`: when the Host expects the agent to answer
   again, or `null` when it cannot tell (a usage limit's reset; for a process start, the median of
   that tool's last starts on this Host, else 20 s after the start). Both are the Host's clock in
   epoch ms: count with the offset to the Host's clock, so a value never goes stale.
-- `queue_ahead`: messages that will be read before a new one (`queued_turn_count`).
-- `last_alive_ms`: the running turn's last sign of life, set in `busy` and `unresponsive`, else
-  `null`.
+- `queue_ahead`: the waiting messages the Host takes before a message the user sends now: the
+  user's own earlier ones, a front desk's relay of the user's word, a card the user answered, a
+  take-over (feature `queue_user_first`), less those a Stop holds or the running turn reads in.
+  Other agents' messages and automation wait behind the user's word and are not counted, so this
+  is not `queued_turn_count`. It is 0 in `ok`, where nothing keeps the user waiting.
+- `last_alive_ms`: the running turn's last sign of life, set in `busy` (while a turn runs) and
+  `unresponsive`, else `null`.
 
 **Live.** An `agent-roster` event of kind `availability` carries `session`, `agent_id` and
 `fields: {"availability": {...}}` whenever `state`, `text`, `back_at_ms` or `queue_ahead` changes,
 never for a sign of life alone. Patch the row as for other `fields` (`roster_fields`). The Host
-looks at an agent as soon as its status or queue moves, and at every agent every 15 s (a turn that
+looks at an agent as soon as its status or queue moves, or whether the running turn takes the
+user's words now changes, and at every agent every 15 s (a turn that
 fell silent, an account that changed). Snapshot rows and roster events use the same cached quota observation. A new observation
 wakes the roster watcher.
 
