@@ -66,7 +66,11 @@ pub fn mark(dir: &Path, flag: IFlags) -> Result<Marked, Errno> {
         Err(why) => return Err(why),
     }
     let kept = rustix::fs::ioctl_getflags(&folder).is_ok_and(|now| now.contains(flag));
-    Ok(if kept { Marked::Set } else { Marked::Unsupported })
+    Ok(if kept {
+        Marked::Set
+    } else {
+        Marked::Unsupported
+    })
 }
 
 /// What a filesystem without such flags answers.
@@ -194,7 +198,10 @@ mod tests {
             // ext4, tmpfs, xfs: nothing changes and nothing fails.
             Marked::Unsupported => {
                 assert!(!carries(&place.0, no_compression()));
-                assert_eq!(mark(&place.0, no_compression()).unwrap(), Marked::Unsupported);
+                assert_eq!(
+                    mark(&place.0, no_compression()).unwrap(),
+                    Marked::Unsupported
+                );
             }
         }
     }

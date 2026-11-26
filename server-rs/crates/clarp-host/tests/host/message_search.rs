@@ -330,7 +330,10 @@ fn an_index_left_beside_the_fleets_file_is_removed_and_read_anew_in_its_own_fold
     wait_for("the old index removed", || !data.join("search.db").exists());
     assert!(index_file(&place).is_file());
     let hits = found(&host, "q=lanterns", 2);
-    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
+    assert!(
+        hits.iter().all(|hit| hit["session"] == ada.as_str()),
+        "{hits:?}"
+    );
 }
 
 #[test]
