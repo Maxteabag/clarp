@@ -562,6 +562,7 @@ pub const ENTRIES: &[Entry] = &[
     e("refresh-agents", "Refresh agents", "view", "Fetches the agent list from the Host now, also while it is retrying after a failure.", &["reload", "refresh", "roster", "sync", "agent list", "contacts", "stale"]),
     e("agent-processes", "Background processes", "agent", "Shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.", &["processes", "jobs", "background jobs", "tasks", "running", "helpers", "kill", "stop job", "output", "logs", "show processes"]),
     e("overview", "Agent overview", "view", "Shows every agent and what it is doing.", &["dashboard", "summary", "all agents", "status", "fleet"]),
+    e("agent-profile", "Agent profile", "agent", "Opens the open agent's profile: its artifacts and images, files, terminal, voice, plan, prompt history, model and backend.", &["profile", "agent info", "details", "about agent", "artifacts", "media", "images", "agent model", "backend"]),
     e("chats", "Chats", "destination", "Goes to the chats.", &["conversations", "messages", "home", "main"]),
     e("updates", "Updates", "destination", "Goes to the updates feed.", &["feed", "activity", "news", "attention", "inbox"]),
     e("teams", "Teams", "destination", "Goes to the teams.", &["groups", "team", "crews", "squads"]),

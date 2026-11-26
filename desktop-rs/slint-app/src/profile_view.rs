@@ -1,10 +1,9 @@
-//! The agent profile (AgentProfilePanel.qml with its MediaGallery), and the
+//! The agent profile (AgentProfilePanel.qml), and the
 //! layering of this group's dialogs: the profile and the overview open the
 //! voice and orchestrator dialogs over themselves, and closing one returns
 //! to the dialog below it.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use clarp_engine::Change;
@@ -14,7 +13,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use clarp_core::transit::{self, Step};
 
 use crate::{
-    App, AppWindow, MediaItem, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
+    App, AppWindow, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
 };
 
 /// The overlays this group owns.
@@ -25,10 +24,10 @@ struct State {
     session: String,
     /// The dialogs below the one shown, to return to.
     below: Vec<String>,
+    /// The region that had the keyboard when the profile opened.
+    origin: &'static str,
     model_ids: Vec<String>,
     effort_ids: Vec<String>,
-    /// Decoded images by `file://` URL, so a refresh does not decode again.
-    images: HashMap<String, slint::Image>,
 }
 
 thread_local! {
@@ -87,10 +86,15 @@ pub fn close(app: &App, window: &AppWindow) {
     }
     let below = STATE.with(|s| s.borrow_mut().below.pop());
     match below {
-        Some(name) => commands::open_overlay(app, window, &name),
+        Some(name) => {
+            commands::open_overlay(app, window, &name);
+            // Back on the profile from its voices: its keys again.
+            if name == "profile" {
+                hold_keyboard(window);
+            }
+        }
         None => commands::close_overlay(app, window),
     }
-    window.global::<ProfileBridge>().set_viewing(-1);
     window.global::<ProfileBridge>().set_confirm("".into());
 }
 
@@ -132,12 +136,377 @@ pub fn transit_enter(window: &AppWindow) {
     }
 }
 
+// ---- the keyboard in the profile ------------------------------------------------
+
+/// The profile's sections by digit, as its cards' titles show them: a digit
+/// puts the cursor on the section's first row. The ids are rows or cards
+/// of `stops`.
+pub const SECTIONS: &[(&str, &str)] = &[
+    // Both open the one Publications overlay: everything, or its images.
+    ("publications", "Publications"),
+    ("images", "Images"),
+    ("files", "Files"),
+    ("terminal", "Terminal"),
+    ("voice", "Voice"),
+    ("plan", "Plan"),
+    ("history", "History"),
+    ("model", "Model"),
+    ("backend", "Backend"),
+];
+
+/// A row the keyboard can be on: its id (the `Spot` that draws it in
+/// profile.slint) and its card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stop {
+    pub id: String,
+    pub card: &'static str,
+}
+
+/// What the profile shows that the keyboard can reach, top to bottom.
+#[derive(Debug, Clone, Default)]
+pub struct Shown {
+    pub chat_view: bool,
+    pub agent_messages: bool,
+    pub tool_activity: bool,
+    pub backend: bool,
+    pub plan: bool,
+    pub prompts_shown: bool,
+    pub prompts: usize,
+    pub prompts_more: bool,
+    pub mcp: usize,
+    pub schedules: usize,
+}
+
+/// Every row the keyboard walks, in the order the profile draws them.
+pub fn stops(shown: &Shown) -> Vec<Stop> {
+    let mut out = Vec::new();
+    let mut add = |id: String, card: &'static str| out.push(Stop { id, card });
+    for id in ["files", "terminal", "voice"] {
+        add(id.into(), "chat");
+    }
+    for (on, id) in [(shown.chat_view, "chat-view"), (shown.agent_messages, "agent-messages"), (shown.tool_activity, "tool-activity")] {
+        if on {
+            add(id.into(), "chat");
+        }
+    }
+    if shown.backend {
+        add("backend".into(), "backend");
+    }
+    if shown.plan {
+        add("plan".into(), "plan");
+    }
+    if shown.prompts_shown {
+        for index in 0..shown.prompts {
+            add(format!("prompt:{index}"), "history");
+        }
+        if shown.prompts_more {
+            add("history-more".into(), "history");
+        } else if shown.prompts == 0 {
+            add("history".into(), "history");
+        }
+    }
+    for id in ["model", "effort"] {
+        add(id.into(), "model");
+    }
+    for id in ["heartbeat", "dreaming", "push-alerts"] {
+        add(id.into(), "autonomy");
+    }
+    for index in 0..shown.mcp {
+        add(format!("mcp:{index}"), "mcp");
+    }
+    add("compact".into(), "context");
+    for id in ["publications", "images"] {
+        add(id.into(), "publications");
+    }
+    add("queue".into(), "queue");
+    for index in 0..shown.schedules {
+        add(format!("schedule:{index}"), "schedules");
+    }
+    for id in ["relaunch", "release"] {
+        add(id.into(), "actions");
+    }
+    out
+}
+
+/// Where `step` rows (or, with `by_card`, cards) from `cursor` lands: the
+/// first row before the cursor has one; rows stop at the ends, cards go round.
+pub fn moved(stops: &[Stop], cursor: &str, step: i32, by_card: bool) -> Option<String> {
+    if stops.is_empty() {
+        return None;
+    }
+    let at = stops.iter().position(|s| s.id == cursor);
+    if !by_card {
+        let next = match at {
+            None if step > 0 => 0,
+            None => stops.len().checked_sub(1)?,
+            Some(i) => (i as i64 + step as i64).clamp(0, stops.len() as i64 - 1) as usize,
+        };
+        return stops.get(next).map(|s| s.id.clone());
+    }
+    let mut cards: Vec<&str> = Vec::new();
+    for stop in stops {
+        if !cards.contains(&stop.card) {
+            cards.push(stop.card);
+        }
+    }
+    let here = at.map(|i| stops[i].card);
+    let index = match here.and_then(|c| cards.iter().position(|x| *x == c)) {
+        None if step > 0 => 0,
+        None => cards.len().checked_sub(1)?,
+        Some(i) => (i as i64 + step as i64).rem_euclid(cards.len() as i64) as usize,
+    };
+    let card = cards.get(index)?;
+    stops.iter().find(|s| s.card == *card).map(|s| s.id.clone())
+}
+
+/// The first row of section `digit` (1 is the first), if the profile shows it.
+pub fn section(stops: &[Stop], digit: usize) -> Option<String> {
+    let (key, _) = SECTIONS.get(digit.checked_sub(1)?)?;
+    stops.iter().find(|s| s.id == *key || s.card == *key).map(|s| s.id.clone())
+}
+
+fn shown_now(window: &AppWindow) -> Shown {
+    let bridge = window.global::<ProfileBridge>();
+    let info = bridge.get_info();
+    Shown {
+        chat_view: info.chat_view_shown,
+        agent_messages: info.agent_messages_shown,
+        tool_activity: info.tool_activity_applies,
+        backend: info.backend_shown,
+        plan: info.plan_shown,
+        prompts_shown: info.prompts_shown,
+        prompts: bridge.get_prompts().row_count(),
+        prompts_more: info.prompts_more,
+        mcp: if info.mcp_shown { bridge.get_mcp().row_count() } else { 0 },
+        schedules: bridge.get_schedules().row_count(),
+    }
+}
+
+/// The profile takes the window's focus, so no key reaches the composer
+/// behind it; the window's keys still read every key first.
+fn hold_keyboard(window: &AppWindow) {
+    let bridge = window.global::<ProfileBridge>();
+    bridge.set_focus_request(bridge.get_focus_request().wrapping_add(1));
+}
+
+/// Whether the profile has the keyboard: the keymap's "profile" context.
+/// Not while its Backend picker shows ("transit"), nor while one of its
+/// choices has the keyboard after a click (its own arrows open and move it).
+pub fn keyboard(app: &App, window: &AppWindow) -> bool {
+    let bridge = window.global::<ProfileBridge>();
+    app.overlay.borrow().as_str() == "profile" && bridge.get_transit_step().is_empty() && !bridge.get_choice_focused()
+}
+
+/// Where closing the profile gives the keyboard back (the switcher says,
+/// for a profile opened from it).
+pub fn set_origin(region: &'static str) {
+    STATE.with(|s| s.borrow_mut().origin = region);
+}
+
+/// Closing the profile gives the keyboard back where it was; false where
+/// another surface takes it (Updates, Teams, Settings).
+pub fn give_back(app: &App, window: &AppWindow) -> bool {
+    if window.get_surface() != "chats" {
+        return false;
+    }
+    match STATE.with(|s| std::mem::take(&mut s.borrow_mut().origin)) {
+        "sidebar" => window.invoke_focus_sidebar(),
+        "search" => window.invoke_focus_search(),
+        "pane" => app.focus_transcript(),
+        _ => app.focus_composer(),
+    }
+    true
+}
+
+/// The agent's publications, in the one overlay that lists them all (the
+/// gallery's): `filter` 0 is everything, 1 its images. Its Escape comes back
+/// to the profile (`resume`).
+pub fn open_publications(window: &AppWindow, filter: i32) {
+    let publications = window.global::<crate::PublicationsBridge>();
+    publications.invoke_open_for_profile();
+    publications.invoke_choose_filter(filter);
+}
+
+/// Back on the profile from a dialog opened over it (the publications):
+/// it shows with its keys and is brought up to date.
+pub fn resume(app: &App, window: &AppWindow) {
+    commands::open_overlay(app, window, "profile");
+    hold_keyboard(window);
+    app.refresh(&[Change::Profile]);
+}
+
+/// One of the profile's choices one step on (Left/Right, Enter goes round).
+fn step_choice(window: &AppWindow, id: &str, step: i32, round: bool) {
+    let bridge = window.global::<ProfileBridge>();
+    let mut info = bridge.get_info();
+    let (current, count) = match id {
+        "chat-view" => (info.chat_view_index, bridge.get_chat_view_choices().row_count()),
+        "agent-messages" => (info.agent_messages_index, bridge.get_agent_message_choices().row_count()),
+        "tool-activity" => (info.tool_activity_index, bridge.get_tool_activity_choices().row_count()),
+        "model" => (info.model_index, bridge.get_models().row_count()),
+        "effort" => (info.effort_index, bridge.get_efforts().row_count()),
+        _ => return,
+    };
+    if count == 0 {
+        return;
+    }
+    let next = if round { (current.max(0) + step).rem_euclid(count as i32) } else { (current + step).clamp(0, count as i32 - 1) };
+    if next == current {
+        return;
+    }
+    match id {
+        "chat-view" => info.chat_view_index = next,
+        "agent-messages" => info.agent_messages_index = next,
+        "tool-activity" => info.tool_activity_index = next,
+        "model" => info.model_index = next,
+        _ => info.effort_index = next,
+    }
+    // Shown at once; the Host's answer refreshes it.
+    bridge.set_info(info);
+    match id {
+        "chat-view" => bridge.invoke_set_chat_view(next),
+        "agent-messages" => bridge.invoke_set_agent_messages(next),
+        "tool-activity" => bridge.invoke_set_tool_activity(next),
+        "model" => bridge.invoke_set_model(next),
+        _ => bridge.invoke_set_effort(next),
+    }
+}
+
+fn index_of(id: &str, prefix: &str) -> Option<usize> {
+    id.strip_prefix(prefix).and_then(|n| n.parse().ok())
+}
+
+/// Enter on the cursor's row: what a click on it does.
+fn enter(window: &AppWindow, id: &str) {
+    let bridge = window.global::<ProfileBridge>();
+    let info = bridge.get_info();
+    match id {
+        "files" => bridge.invoke_open_files(),
+        "terminal" => bridge.invoke_open_terminal(),
+        "voice" => bridge.invoke_voice(),
+        "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort" => step_choice(window, id, 1, true),
+        "backend" if info.backend_enabled => bridge.invoke_open_transit(),
+        "history-more" if !info.prompts_loading => bridge.invoke_load_older(),
+        "heartbeat" => bridge.invoke_set_heartbeat(!info.heartbeat),
+        "dreaming" => bridge.invoke_set_dreaming(!info.dreaming),
+        "push-alerts" => bridge.invoke_set_push_alerts(!info.push_alerts),
+        "compact" if !info.compacting => bridge.set_confirm("compact".into()),
+        "queue" => bridge.invoke_queue(),
+        "relaunch" => bridge.invoke_relaunch(),
+        "release" => bridge.set_confirm("release".into()),
+        "publications" => open_publications(window, 0),
+        "images" => open_publications(window, 1),
+        _ => {
+            if let Some(server) = index_of(id, "mcp:").and_then(|i| bridge.get_mcp().row_data(i)) {
+                bridge.invoke_set_mcp(server.name, !server.on);
+            } else if let Some(schedule) = index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)) {
+                bridge.invoke_set_schedule(schedule.id, !schedule.on);
+            }
+        }
+    }
+}
+
+/// A key of the keymap's "profile" context (`digit` for profile-section).
+/// The confirmation over the profile takes Enter; Escape is the dialogs'
+/// own (`escape`).
+pub fn key(window: &AppWindow, action: &str, digit: Option<usize>) {
+    let bridge = window.global::<ProfileBridge>();
+    if !bridge.get_confirm().is_empty() {
+        if action == "profile-enter" {
+            match bridge.get_confirm().as_str() {
+                "compact" => bridge.invoke_compact(),
+                "release" => bridge.invoke_release(),
+                _ => {}
+            }
+        }
+        return;
+    }
+    let stops = stops(&shown_now(window));
+    let cursor = bridge.get_cursor().to_string();
+    let next = match action {
+        "profile-section" => digit.and_then(|d| section(&stops, d)),
+        "profile-down" => moved(&stops, &cursor, 1, false),
+        "profile-up" => moved(&stops, &cursor, -1, false),
+        "profile-next-card" => moved(&stops, &cursor, 1, true),
+        "profile-previous-card" => moved(&stops, &cursor, -1, true),
+        "profile-left" | "profile-right" => {
+            step_choice(window, &cursor, if action == "profile-left" { -1 } else { 1 }, false);
+            None
+        }
+        "profile-enter" if stops.iter().any(|s| s.id == cursor) => {
+            enter(window, &cursor);
+            None
+        }
+        // Nothing chosen yet: Enter starts at the top.
+        "profile-enter" => moved(&stops, "", 1, false),
+        _ => None,
+    };
+    if let Some(next) = next {
+        set_cursor(window, &next);
+    }
+}
+
+/// Puts the keyboard's cursor on row `id`.
+fn set_cursor(window: &AppWindow, id: &str) {
+    window.global::<ProfileBridge>().set_cursor(id.into());
+}
+
+/// The shortcut bar while the profile has the keyboard: what the keys do
+/// on the cursor's row, in the user's keys.
+pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
+    let overrides = commands::overrides(app);
+    let key = |action: &str| crate::keymap::shown("profile", action, &overrides).unwrap_or_default();
+    let pair = |a: &str, b: &str| format!("{}/{}", key(a), key(b)).trim_matches('/').to_owned();
+    let bridge = window.global::<ProfileBridge>();
+    let info = bridge.get_info();
+    let mut out: Vec<(String, String)> = Vec::new();
+    let confirm = bridge.get_confirm();
+    if !confirm.is_empty() {
+        out.push((key("profile-enter"), if confirm == "release" { "Release" } else { "Compact" }.into()));
+        out.push((key("escape"), "Cancel".into()));
+    } else {
+        let cursor = bridge.get_cursor().to_string();
+        let on = |flag: bool| if flag { "Turn off" } else { "Turn on" };
+        let entry: Option<String> = match cursor.as_str() {
+            "files" => Some("Open files".into()),
+            "terminal" => Some("Open terminal".into()),
+            "voice" => Some("Voice".into()),
+            "backend" if info.backend_enabled => Some("Change backend".into()),
+            "history-more" if !info.prompts_loading => Some("Load older".into()),
+            "heartbeat" => Some(on(info.heartbeat).into()),
+            "dreaming" => Some(on(info.dreaming).into()),
+            "push-alerts" => Some(on(info.push_alerts).into()),
+            "compact" if !info.compacting => Some("Compact".into()),
+            "queue" => Some("Manage queue".into()),
+            "relaunch" => Some("Relaunch".into()),
+            "release" => Some("Release…".into()),
+            "publications" => Some("All publications".into()),
+            "images" => Some("Images".into()),
+            id if id.starts_with("mcp:") => index_of(id, "mcp:").and_then(|i| bridge.get_mcp().row_data(i)).map(|s| on(s.on).into()),
+            id if id.starts_with("schedule:") => index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)).map(|s| on(s.on).into()),
+            _ => None,
+        };
+        let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort");
+        out.push(("1-9".into(), "Sections".into()));
+        out.push((pair("profile-up", "profile-down"), "Move".into()));
+        out.push((key("profile-next-card"), "Next card".into()));
+        if choice {
+            out.push((pair("profile-left", "profile-right"), "Change".into()));
+        }
+        if let Some(label) = entry {
+            out.push((key("profile-enter"), label));
+        }
+        out.push((key("escape"), "Close".into()));
+    }
+    out.into_iter().filter(|(keys, _)| !keys.is_empty()).map(|(keys, label)| crate::Hint { keys: keys.into(), label: label.into() }).collect()
+}
+
 pub fn owns(app: &App) -> bool {
     OWNED.contains(&app.overlay.borrow().as_str())
 }
 
-/// Escape closes the innermost thing: a confirmation, the image viewer or
-/// the overview's menu first, then the dialog.
+/// Escape closes the innermost thing: a confirmation or the overview's menu
+/// first, then the dialog.
 pub fn escape(app: &App, window: &AppWindow) {
     let bridge = window.global::<ProfileBridge>();
     let overview = window.global::<crate::OverviewBridge>();
@@ -146,8 +515,6 @@ pub fn escape(app: &App, window: &AppWindow) {
         let session = session();
         app.engine.borrow_mut().transit_back(&session);
         fill(app, window, &session);
-    } else if overlay == "profile" && bridge.get_viewing() >= 0 {
-        bridge.set_viewing(-1);
     } else if overlay == "profile" && !bridge.get_confirm().is_empty() {
         bridge.set_confirm("".into());
     } else if overlay == "overview" && !overview.get_menu().is_empty() {
@@ -178,38 +545,6 @@ pub(crate) fn file_path(url: &str) -> Option<std::path::PathBuf> {
     }
     use std::os::unix::ffi::OsStringExt;
     Some(std::ffi::OsString::from_vec(bytes).into())
-}
-
-/// A cached image file as a Slint image, decoded once.
-pub fn image(url: &str) -> slint::Image {
-    if url.is_empty() {
-        return slint::Image::default();
-    }
-    STATE.with(|s| {
-        let mut state = s.borrow_mut();
-        if let Some(image) = state.images.get(url) {
-            return image.clone();
-        }
-        // Cached files have no extension: decode by content.
-        let loaded = file_path(url).map(|p| std::fs::read(&p).map_err(|e| e.to_string()).and_then(|bytes| image::load_from_memory(&bytes).map_err(|e| e.to_string())));
-        let image = match loaded {
-            Some(Ok(decoded)) => {
-                let rgba = decoded.to_rgba8();
-                let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
-                slint::Image::from_rgba8(buffer)
-            }
-            Some(Err(error)) => {
-                eprintln!("clarp-slint: cannot load {url}: {error}");
-                slint::Image::default()
-            }
-            None => {
-                eprintln!("clarp-slint: not a local file: {url}");
-                slint::Image::default()
-            }
-        };
-        state.images.insert(url.to_owned(), image.clone());
-        image
-    })
 }
 
 pub fn reduced_motion(app: &App) -> bool {
@@ -260,6 +595,12 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
     if session.is_empty() || session.starts_with("pair:") {
         return;
     }
+    // Where the keyboard was, to give it back on closing (not over another
+    // of this group's dialogs, which keeps its own).
+    if app.overlay.borrow().is_empty() {
+        let origin = commands::keyboard_region(app, window);
+        STATE.with(|s| s.borrow_mut().origin = origin);
+    }
     STATE.with(|s| s.borrow_mut().session = session.to_owned());
     {
         let mut engine = app.engine.borrow_mut();
@@ -267,12 +608,14 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
             engine.select(session);
         }
         engine.load_agent_profile(session);
+        // Its images' sources also resolve the chat's own image links.
         engine.load_media(session);
     }
     let bridge = window.global::<ProfileBridge>();
     bridge.set_confirm("".into());
-    bridge.set_viewing(-1);
+    set_cursor(window, "");
     show(app, window, "profile");
+    hold_keyboard(window);
     pump_now(app);
     refresh(app, window, &[Change::Profile]);
 }
@@ -300,7 +643,6 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
                 | Change::Roster
                 | Change::AgentMutated(_)
                 | Change::Launch
-                | Change::Media
                 | Change::Updates
                 | Change::Teams
                 | Change::Avatars
@@ -309,6 +651,10 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     });
     if relevant {
         fill(app, window, &session);
+        // The bar says what Enter does to the row as it is now ("Turn off").
+        if keyboard(app, window) {
+            commands::show_hints(app, window);
+        }
     }
 }
 
@@ -422,7 +768,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .collect();
     bridge.set_schedules(ModelRc::new(VecModel::from(schedules)));
 
-    // Artifacts and images.
+    // The latest artifacts (the menu's checks read them; the Publications
+    // overlay draws them).
     let artifacts: Vec<ProfileArtifact> = engine
         .artifacts_for_session(session)
         .iter()
@@ -433,16 +780,6 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         })
         .collect();
     bridge.set_artifacts(ModelRc::new(VecModel::from(artifacts)));
-    let media: Vec<(String, String, bool)> = engine
-        .media_for_session(session)
-        .iter()
-        .map(|asset| {
-            let id = text(asset, "asset_id");
-            let source = engine.media_source(&id).unwrap_or_default().to_owned();
-            let loading = source.is_empty() && text(asset, "mime_type").starts_with("image/");
-            (first(&[text(asset, "caption"), text(asset, "source_name")], "Image"), source, loading)
-        })
-        .collect();
 
     let transit_row = backend_row(&engine, session, &name, &backend, &value("model"));
 
@@ -503,9 +840,6 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         error: engine.profile_error().into(),
     };
     drop(engine);
-    let media: Vec<MediaItem> =
-        media.into_iter().map(|(caption, source, loading)| MediaItem { id: SharedString::new(), caption: caption.into(), image: image(&source), loading }).collect();
-    bridge.set_media(ModelRc::new(VecModel::from(media)));
     bridge.set_info(info);
     bridge.set_transit_step(transit_row.picker.step.into());
     bridge.set_transit_title(transit_row.picker.title.into());
@@ -829,4 +1163,42 @@ pub fn wire(window: &AppWindow) {
             close(app, window);
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(stops: &[Stop]) -> Vec<&str> {
+        stops.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    /// Every section the profile shows has a digit, and every row a stop:
+    /// Up/Down walk them all, Tab the cards, a digit its section's first row.
+    #[test]
+    fn the_keyboard_reaches_every_section() {
+        let shown = Shown { backend: true, plan: true, prompts_shown: true, prompts: 2, prompts_more: true, mcp: 1, schedules: 1, ..Shown::default() };
+        let all = stops(&shown);
+        let found: Vec<Option<String>> = (1..=SECTIONS.len()).map(|d| section(&all, d)).collect();
+        let want = ["publications", "images", "files", "terminal", "voice", "plan", "prompt:0", "model", "backend"];
+        assert_eq!(found, want.map(|w| Some(w.to_owned())));
+        assert_eq!(section(&all, 10), None);
+        assert!(ids(&all).contains(&"history-more") && ids(&all).contains(&"mcp:0") && ids(&all).contains(&"schedule:0") && ids(&all).contains(&"release"));
+        // Rows stop at the ends; nothing chosen, Down is the first.
+        assert_eq!(moved(&all, "", 1, false).as_deref(), Some("files"));
+        assert_eq!(moved(&all, "files", -1, false).as_deref(), Some("files"));
+        assert_eq!(moved(&all, "release", 1, false).as_deref(), Some("release"));
+        assert_eq!(moved(&all, "publications", 1, false).as_deref(), Some("images"));
+        // Cards go round.
+        assert_eq!(moved(&all, "terminal", 1, true).as_deref(), Some("backend"));
+        assert_eq!(moved(&all, "model", 1, true).as_deref(), Some("heartbeat"));
+        assert_eq!(moved(&all, "relaunch", 1, true).as_deref(), Some("files"));
+        assert_eq!(moved(&all, "files", -1, true).as_deref(), Some("relaunch"));
+        // A section the profile does not show: the digit does nothing.
+        let plain = stops(&Shown::default());
+        assert_eq!(section(&plain, 6), None, "no plan");
+        assert_eq!(section(&plain, 9), None, "no backend row");
+        assert_eq!(section(&plain, 1).as_deref(), Some("publications"), "always there, empty or not");
+        assert_eq!(section(&plain, 2).as_deref(), Some("images"));
+    }
 }

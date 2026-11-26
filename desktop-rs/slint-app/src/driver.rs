@@ -589,6 +589,7 @@ pub fn start_check(name: &str, out: String) {
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
         "backend-row" => profile_checks::backend_row_check(out),
+        "profile-keys" => profile_checks::profile_keys_check(out),
         "artifacts" => {
             row_overlap_checks::watch();
             artifact_checks::artifacts_check(out)

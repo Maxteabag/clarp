@@ -144,6 +144,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("refresh", "F5"),
         ("refresh-agents", "Shift+F5"),
         ("overview", "Ctrl+Shift+O"),
+        ("agent-profile", "Ctrl+I"),
         ("agent-processes", "Ctrl+Shift+P"),
         ("chats", "Ctrl+1"),
         ("updates", "Ctrl+2"),

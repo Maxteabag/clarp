@@ -1,9 +1,9 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, Focus, FocusRing } from "theme.slint";
 import { ComboBox, ScrollView, Switch } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { AgentAvatar, StatusPill, AvatarArt } from "avatar.slint";
 import { IconButton, TextButton, SectionTitle, InfoRow, ToggleRow, Busy } from "agent_controls.slint";
-import { MediaGallery, MediaItem, MediaViewer } from "media.slint";
+import { PublicationsBridge } from "publications.slint";
 
 export struct ProfileInfo {
     session: string,
@@ -104,16 +104,15 @@ export global ProfileBridge {
     in property <[NamedItem]> teams;
     in property <[NamedItem]> mcp;
     in property <[NamedItem]> schedules;
+    // The agent's latest artifacts (not drawn: the Publications overlay
+    // lists them all; the chat's ⋯ menu checks read them).
     in property <[ProfileArtifact]> artifacts;
-    in property <[MediaItem]> media;
     in property <[string]> models;
     in property <[string]> efforts;
     // appearance/reducedMotion: activity animations hold still.
     in property <bool> reduced-motion;
     // A confirmation over the profile: "compact", "release" or "".
     in-out property <string> confirm;
-    // The image the viewer shows, or -1.
-    in-out property <int> viewing: -1;
     callback close();
     callback open-for-pane(string);
     callback open-files();
@@ -128,7 +127,8 @@ export global ProfileBridge {
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
     callback set-agent-messages(int);
-    // Bumped to bring the profile's Artifacts into view.
+    // Bumped to bring the profile's Publications card into view (the chat's
+    // ⋯ menu's Artifacts).
     in-out property <int> artifacts-request;
     callback set-tool-activity(int);
     callback set-chat-view(int);
@@ -152,10 +152,66 @@ export global ProfileBridge {
     callback confirm-transit();
     // The keyboard's place in the picker: the choice Up/Down reached (-1: none).
     in-out property <int> transit-cursor: -1;
+    // The keyboard in the profile (profile_view::stops): the row it is on
+    // ("" none).
+    in-out property <string> cursor;
+    // Bumped to give the profile the window's focus (nothing types behind it).
+    in-out property <int> focus-request;
+    // A choice in the profile has the keyboard after a click: its own keys.
+    in-out property <bool> choice-focused;
+    // The cursor's row, to scroll into view: its top in the window and height.
+    in-out property <length> reveal-y;
+    in-out property <length> reveal-height;
+    in-out property <int> reveal-request;
+}
+
+// A row the keyboard can be on: lit while the cursor is on it, and
+// scrolled into view when it gets there.
+component Spot inherits Rectangle {
+    in property <string> spot;
+    property <bool> on: Focus.mode == "profile" && ProfileBridge.cursor == root.spot;
+    border-radius: 2px;
+    background: root.on ? Palette.hover : transparent;
+    border-width: root.on ? 1px : 0px;
+    border-color: Palette.focus;
+    changed on => {
+        if (root.on) {
+            ProfileBridge.reveal-y = root.absolute-position.y;
+            ProfileBridge.reveal-height = root.height;
+            ProfileBridge.reveal-request += 1;
+        }
+    }
+    HorizontalLayout {
+        @children
+    }
+}
+
+// The digit that jumps to a section, beside its title while the profile
+// has the keyboard.
+component KeyBadge inherits Rectangle {
+    in property <string> text;
+    visible: Focus.mode == "profile";
+    width: self.visible ? label.preferred-width + 8px : 0px;
+    height: 13 * Look.unit;
+    border-radius: 2px;
+    border-width: 1px;
+    border-color: Palette.border;
+    accessible-role: none;
+    label := Text {
+        text: root.text;
+        color: Palette.muted;
+        font-family: "JetBrains Mono";
+        font-size: 9 * Look.unit;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
 }
 
 component Card inherits VerticalLayout {
     in property <string> title;
+    // Its section's digit (profile_view::SECTIONS), shown while the profile
+    // has the keyboard.
+    in property <string> key;
     // An optional icon before the title (the Artifacts card's, which the
     // chat's ⋯ menu shares).
     in property <image> icon;
@@ -165,6 +221,7 @@ component Card inherits VerticalLayout {
         spacing: 6px;
         if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
         SectionTitle { text: root.title; horizontal-stretch: 1; }
+        if root.key != "": KeyBadge { text: root.key; y: (parent.height - self.height) / 2; }
     }
     @children
 }
@@ -191,6 +248,8 @@ component Confirm inherits Modal {
             IconButton { icon: @image-url("icons/check.svg"); tip: root.yes-tip; clicked => { root.accepted(); } }
         }
     }
+    // Enter answers yes from the keyboard (profile_view::key).
+    FocusRing { shown: Focus.mode == "profile"; }
 }
 
 // AgentProfilePanel.qml: everything about one agent, and the settings that
@@ -212,6 +271,21 @@ export component AgentProfile inherits Modal {
     changed info => {
         model-box.current-index = root.info.model-index;
         effort-box.current-index = root.info.effort-index;
+    }
+    // Holds the keyboard while no choice has it (the window reads the keys).
+    holder := FocusScope { width: 0; height: 0; }
+    property <int> focus-request: ProfileBridge.focus-request;
+    changed focus-request => { holder.focus(); }
+    // The cursor's row, scrolled into view with a little room around it.
+    property <int> reveal-request: ProfileBridge.reveal-request;
+    changed reveal-request => {
+        let top = ProfileBridge.reveal-y - profile-scroll.absolute-position.y;
+        let bottom = top + ProfileBridge.reveal-height;
+        if (top < 0) {
+            profile-scroll.content-y = Math.min(0px, profile-scroll.content-y - top + 8px);
+        } else if (bottom > profile-scroll.visible-height) {
+            profile-scroll.content-y = Math.max(profile-scroll.visible-height - profile-scroll.content-height, profile-scroll.content-y - (bottom - profile-scroll.visible-height) - 8px);
+        }
     }
     VerticalLayout {
         HorizontalLayout {
@@ -286,65 +360,93 @@ export component AgentProfile inherits Modal {
                     HorizontalLayout {
                         spacing: 4px;
                         alignment: start;
-                        IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
-                        IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
-                        IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
-                    }
-                    if root.info.chat-view-shown: HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.chat-view-choices;
-                            current-index: root.info.chat-view-index;
-                            accessible-label: "Chat view";
-                            selected => { ProfileBridge.set-chat-view(self.current-index); }
+                        Spot {
+                            spot: "files";
+                            IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
+                            KeyBadge { text: "3"; y: (parent.height - self.height) / 2; }
+                        }
+                        Spot {
+                            spot: "terminal";
+                            IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
+                            KeyBadge { text: "4"; y: (parent.height - self.height) / 2; }
+                        }
+                        Spot {
+                            spot: "voice";
+                            IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
+                            KeyBadge { text: "5"; y: (parent.height - self.height) / 2; }
                         }
                     }
-                    if root.info.agent-messages-shown: HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.agent-message-choices;
-                            current-index: root.info.agent-messages-index;
-                            accessible-label: "Messages between agents";
-                            selected => { ProfileBridge.set-agent-messages(self.current-index); }
+                    if root.info.chat-view-shown: Spot {
+                        spot: "chat-view";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.chat-view-choices;
+                                current-index: root.info.chat-view-index;
+                                accessible-label: "Chat view";
+                                selected => { ProfileBridge.set-chat-view(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
                         }
                     }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.tool-activity-choices;
-                            current-index: root.info.tool-activity-index;
-                            enabled: root.info.tool-activity-applies;
-                            accessible-label: "Tool activity";
-                            selected => { ProfileBridge.set-tool-activity(self.current-index); }
+                    if root.info.agent-messages-shown: Spot {
+                        spot: "agent-messages";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.agent-message-choices;
+                                current-index: root.info.agent-messages-index;
+                                accessible-label: "Messages between agents";
+                                selected => { ProfileBridge.set-agent-messages(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
+                        }
+                    }
+                    Spot {
+                        spot: "tool-activity";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.tool-activity-choices;
+                                current-index: root.info.tool-activity-index;
+                                enabled: root.info.tool-activity-applies;
+                                accessible-label: "Tool activity";
+                                selected => { ProfileBridge.set-tool-activity(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
                         }
                     }
                 }
                 if root.info.backend-shown: Card {
                     title: "BACKEND";
-                    HorizontalLayout {
-                        spacing: 8px;
-                        // The card's title already says BACKEND (#724): the row is the value alone, as on iOS.
-                        Text {
-                            text: root.info.backend-value;
-                            color: root.info.backend-enabled ? Palette.text : Palette.muted;
-                            font-size: 12 * Look.unit;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                            accessible-label: "Backend, " + root.info.backend-value;
-                        }
-                        if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
-                        IconButton {
-                            icon: @image-url("icons/swap.svg");
-                            tip: "Change backend";
-                            enabled: root.info.backend-enabled;
-                            clicked => { ProfileBridge.open-transit(); }
+                    key: "9";
+                    Spot {
+                        spot: "backend";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            // The card's title already says BACKEND (#724): the row is the value alone, as on iOS.
+                            Text {
+                                text: root.info.backend-value;
+                                color: root.info.backend-enabled ? Palette.text : Palette.muted;
+                                font-size: 12 * Look.unit;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                accessible-label: "Backend, " + root.info.backend-value;
+                            }
+                            if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                            IconButton {
+                                icon: @image-url("icons/swap.svg");
+                                tip: "Change backend";
+                                enabled: root.info.backend-enabled;
+                                clicked => { ProfileBridge.open-transit(); }
+                            }
                         }
                     }
                     if root.info.backend-detail != "": Text {
@@ -356,17 +458,21 @@ export component AgentProfile inherits Modal {
                 }
                 if root.info.plan-shown: Card {
                     title: "CURRENT PLAN";
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: root.info.plan-title != "" ? root.info.plan-title : "Loading plan…";
-                            color: Palette.text;
-                            font-size: 13 * Look.unit;
-                            font-weight: 600;
-                            horizontal-stretch: 1;
+                    key: "6";
+                    Spot {
+                        spot: "plan";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.info.plan-title != "" ? root.info.plan-title : "Loading plan…";
+                                color: Palette.text;
+                                font-size: 13 * Look.unit;
+                                font-weight: 600;
+                                horizontal-stretch: 1;
+                            }
+                            if !root.info.plan-loading: Text { text: root.info.plan-progress; color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
+                            if root.info.plan-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
                         }
-                        if !root.info.plan-loading: Text { text: root.info.plan-progress; color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
-                        if root.info.plan-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
                     }
                     for task in ProfileBridge.plan: HorizontalLayout {
                         spacing: 8px;
@@ -383,71 +489,90 @@ export component AgentProfile inherits Modal {
                 }
                 if root.info.prompts-shown: Card {
                     title: "PROMPT HISTORY";
-                    for prompt in ProfileBridge.prompts: Rectangle {
-                        border-radius: 2px;
-                        background: Palette.raised;
-                        border-width: 1px;
-                        border-color: Palette.border;
-                        VerticalLayout {
-                            padding: 7px;
-                            spacing: 4px;
-                            Text { text: prompt.text; color: Palette.text; font-size: 12 * Look.unit; wrap: word-wrap; }
-                            Text { text: prompt.meta; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; overflow: elide; }
+                    key: "7";
+                    for prompt[index] in ProfileBridge.prompts: Spot {
+                        spot: "prompt:" + index;
+                        Rectangle {
+                            border-radius: 2px;
+                            background: Palette.raised;
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            VerticalLayout {
+                                padding: 7px;
+                                spacing: 4px;
+                                Text { text: prompt.text; color: Palette.text; font-size: 12 * Look.unit; wrap: word-wrap; }
+                                Text { text: prompt.meta; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; overflow: elide; }
+                            }
                         }
                     }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        if ProfileBridge.prompts.length == 0 && !root.info.prompts-loading: Text {
-                            text: "No authenticated prompts recorded yet";
-                            color: Palette.muted;
-                            font-size: 11 * Look.unit;
-                            vertical-alignment: center;
-                        }
-                        Rectangle { horizontal-stretch: 1; }
-                        if root.info.prompts-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
-                        if root.info.prompts-more: TextButton {
-                            text: "Load older";
-                            enabled: !root.info.prompts-loading;
-                            clicked => { ProfileBridge.load-older(); }
+                    Spot {
+                        spot: "history";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            if ProfileBridge.prompts.length == 0 && !root.info.prompts-loading: Text {
+                                text: "No authenticated prompts recorded yet";
+                                color: Palette.muted;
+                                font-size: 11 * Look.unit;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            if root.info.prompts-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                            if root.info.prompts-more: Spot {
+                                spot: "history-more";
+                                TextButton {
+                                    text: "Load older";
+                                    enabled: !root.info.prompts-loading;
+                                    clicked => { ProfileBridge.load-older(); }
+                                }
+                            }
                         }
                     }
                 }
                 Card {
                     title: "MODEL & EFFORT";
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Model"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
-                        model-box := ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.models;
-                            current-index: root.info.model-index;
-                            accessible-label: "Model";
-                            selected => { ProfileBridge.set-model(self.current-index); }
+                    key: "8";
+                    Spot {
+                        spot: "model";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Model"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                            model-box := ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.models;
+                                current-index: root.info.model-index;
+                                accessible-label: "Model";
+                                selected => { ProfileBridge.set-model(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
                         }
                     }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Effort"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
-                        effort-box := ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.efforts;
-                            current-index: root.info.effort-index;
-                            accessible-label: "Effort";
-                            selected => { ProfileBridge.set-effort(self.current-index); }
+                    Spot {
+                        spot: "effort";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: "Effort"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                            effort-box := ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.efforts;
+                                current-index: root.info.effort-index;
+                                accessible-label: "Effort";
+                                selected => { ProfileBridge.set-effort(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
                         }
                     }
                 }
                 Card {
                     title: "AUTONOMY & NOTIFICATIONS";
-                    ToggleRow { label: "Heartbeat"; note: root.info.heartbeat-note; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
+                    Spot { spot: "heartbeat"; ToggleRow { label: "Heartbeat"; note: root.info.heartbeat-note; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } } }
                     // The heartbeat's recent checks, under its switch.
                     for line in ProfileBridge.heartbeat-history: HorizontalLayout {
                         spacing: 8px;
                         Rectangle { width: 6px; height: 6px; y: (parent.height - self.height) / 2; border-radius: 2px; background: Palette.chrome-text; }
                         Text { text: line; color: Palette.text; font-size: 11 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                     }
-                    ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
-                    ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
+                    Spot { spot: "dreaming"; ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
+                    Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
                 }
                 if ProfileBridge.teams.length > 0: Card {
                     title: "TEAMS";
@@ -459,10 +584,13 @@ export component AgentProfile inherits Modal {
                 }
                 if root.info.mcp-shown: Card {
                     title: "MCP SERVERS";
-                    for server in ProfileBridge.mcp: ToggleRow {
-                        label: server.name;
-                        checked: server.on;
-                        toggled(on) => { ProfileBridge.set-mcp(server.name, on); }
+                    for server[index] in ProfileBridge.mcp: Spot {
+                        spot: "mcp:" + index;
+                        ToggleRow {
+                            label: server.name;
+                            checked: server.on;
+                            toggled(on) => { ProfileBridge.set-mcp(server.name, on); }
+                        }
                     }
                 }
                 Card {
@@ -482,69 +610,74 @@ export component AgentProfile inherits Modal {
                     if root.info.context-used != "": InfoRow { label: "Used"; value: root.info.context-used; }
                     HorizontalLayout {
                         alignment: start;
-                        TextButton {
-                            text: "Compact context";
-                            enabled: !root.info.compacting;
-                            clicked => { ProfileBridge.confirm = "compact"; }
-                        }
-                    }
-                }
-                Card {
-                    title: "IMAGES";
-                    MediaGallery {
-                        items: ProfileBridge.media;
-                        compact: false;
-                        reduced-motion: ProfileBridge.reduced-motion;
-                        view(index) => { ProfileBridge.viewing = index; }
-                    }
-                    if ProfileBridge.media.length == 0: Text { text: "No images in this chat yet"; color: Palette.muted; font-size: 11 * Look.unit; }
-                }
-                artifacts-card := Card {
-                    title: "ARTIFACTS";
-                    icon: @image-url("icons/artifacts.svg");
-                    for artifact in ProfileBridge.artifacts: Rectangle {
-                        border-radius: 2px;
-                        background: Palette.raised;
-                        border-width: 1px;
-                        border-color: Palette.border;
-                        VerticalLayout {
-                            padding: 7px;
-                            spacing: 2px;
-                            HorizontalLayout {
-                                Text { text: artifact.title; color: Palette.text; font-size: 12 * Look.unit; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
-                                Text { text: artifact.kind; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
+                        Spot {
+                            spot: "compact";
+                            TextButton {
+                                text: "Compact context";
+                                enabled: !root.info.compacting;
+                                clicked => { ProfileBridge.confirm = "compact"; }
                             }
-                            if artifact.summary != "": Text { text: artifact.summary; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; overflow: elide; max-height: 48 * Look.unit; }
                         }
                     }
-                    if ProfileBridge.artifacts.length == 0: Text { text: "No artifacts for this agent yet"; color: Palette.muted; font-size: 11 * Look.unit; }
+                }
+                // One way to what the agent published: the Publications
+                // overlay, every kind and older ones too (no partial list here).
+                artifacts-card := Card {
+                    title: "PUBLICATIONS";
+                    icon: @image-url("icons/artifacts.svg");
+                    Text {
+                        text: "Everything this agent published: reports, files, images, recordings and decisions, older ones too.";
+                        color: Palette.muted;
+                        font-size: 11 * Look.unit;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 6px;
+                        Spot {
+                            spot: "publications";
+                            TextButton { text: "All publications"; clicked => { PublicationsBridge.open-for-profile(); PublicationsBridge.choose-filter(0); } }
+                            KeyBadge { text: "1"; y: (parent.height - self.height) / 2; }
+                        }
+                        Spot {
+                            spot: "images";
+                            TextButton { text: "Images"; clicked => { PublicationsBridge.open-for-profile(); PublicationsBridge.choose-filter(1); } }
+                            KeyBadge { text: "2"; y: (parent.height - self.height) / 2; }
+                        }
+                    }
                 }
                 Card {
                     title: "QUEUED MESSAGES";
-                    HorizontalLayout {
+                    Spot {
+                        spot: "queue";
                         Text { text: root.info.queue-text; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
                         IconButton { icon: @image-url("icons/queue.svg"); tip: "Manage"; clicked => { ProfileBridge.queue(); } }
                     }
                 }
                 if ProfileBridge.schedules.length > 0: Card {
                     title: "SCHEDULED TASKS";
-                    for schedule in ProfileBridge.schedules: ToggleRow {
-                        label: schedule.name;
-                        checked: schedule.on;
-                        toggled(on) => { ProfileBridge.set-schedule(schedule.id, on); }
+                    for schedule[index] in ProfileBridge.schedules: Spot {
+                        spot: "schedule:" + index;
+                        ToggleRow {
+                            label: schedule.name;
+                            checked: schedule.on;
+                            toggled(on) => { ProfileBridge.set-schedule(schedule.id, on); }
+                        }
                     }
                 }
                 Card {
                     title: "CHAT ACTIONS";
                     HorizontalLayout {
-                        IconButton { icon: @image-url("icons/relaunch.svg"); tip: "Relaunch"; clicked => { ProfileBridge.relaunch(); } }
+                        Spot { spot: "relaunch"; IconButton { icon: @image-url("icons/relaunch.svg"); tip: "Relaunch"; clicked => { ProfileBridge.relaunch(); } } }
                         Rectangle { horizontal-stretch: 1; }
-                        IconButton { icon: @image-url("icons/release.svg"); tip: "Release…"; danger: true; clicked => { ProfileBridge.confirm = "release"; } }
+                        Spot { spot: "release"; IconButton { icon: @image-url("icons/release.svg"); tip: "Release…"; danger: true; clicked => { ProfileBridge.confirm = "release"; } } }
                     }
                 }
             }
         }
     }
+    // The window's keys reach the profile's rows: the ring says so.
+    FocusRing { shown: Focus.mode == "profile"; }
 }
 
 // The Backend picker (clarp-ios#140's sheet): the backends, dimmed with
@@ -633,7 +766,7 @@ component TransitPicker inherits Modal {
     }
 }
 
-// The profile's confirmations and its image viewer, over the whole window.
+// The profile's confirmations and its Backend picker, over the whole window.
 export component ProfileLayers inherits Rectangle {
     if ProfileBridge.transit-step != "": TransitPicker {
         width: root.width;
@@ -654,11 +787,5 @@ export component ProfileLayers inherits Rectangle {
         message: "The contact, history, files, and artifacts remain.";
         yes-tip: "Release";
         accepted => { ProfileBridge.release(); }
-    }
-    if ProfileBridge.viewing >= 0 && ProfileBridge.viewing < ProfileBridge.media.length: MediaViewer {
-        width: root.width;
-        height: root.height;
-        item: ProfileBridge.media[ProfileBridge.viewing];
-        dismissed => { ProfileBridge.viewing = -1; }
     }
 }

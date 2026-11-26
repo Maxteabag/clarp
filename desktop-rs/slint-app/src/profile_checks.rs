@@ -47,10 +47,10 @@ fn ready(app: &crate::App) -> bool {
 
 /// `--check profile --out DIR`: the pane header opens Rachel's profile;
 /// heartbeat, model, older prompts, files, terminal, voices (preview and
-/// choice), the image viewer and compacting reach the Host; Escape closes
-/// the innermost layer first, and a click outside closes the profile.
+/// choice) and compacting reach the Host; Escape closes the innermost layer
+/// first, and a click outside closes the profile.
 pub(super) fn profile_check(out: String) {
-    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let (out1, out2, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone());
     let folder = scratch();
     let folder2 = folder.clone();
     let folder3 = folder.clone();
@@ -84,8 +84,7 @@ pub(super) fn profile_check(out: String) {
         ("open", Box::new(move |app, window, elapsed| {
             let bridge = window.global::<ProfileBridge>();
             let info = bridge.get_info();
-            let media_ready = bridge.get_media().row_count() == 2 && bridge.get_media().row_data(0).is_some_and(|m| !m.loading);
-            if window.get_overlay() != "profile" || info.plan_loading || info.prompts_loading || !media_ready || info.portrait.size().width == 0 || elapsed < Duration::from_millis(300) {
+            if window.get_overlay() != "profile" || info.plan_loading || info.prompts_loading || info.portrait.size().width == 0 || elapsed < Duration::from_millis(300) {
                 return false;
             }
             check(info.name == "Rachel" && info.session == "rachel" && info.backend == "claude", &format!("the profile is Rachel's: {} {}", info.name, info.backend));
@@ -99,7 +98,6 @@ pub(super) fn profile_check(out: String) {
             check(bridge.get_schedules().row_data(0).is_some_and(|s| s.name == "Nightly tidy" && s.on), "its scheduled task");
             check(info.mcp_shown && bridge.get_mcp().row_data(0).is_some_and(|m| m.name == "github" && !m.on), "the Host's MCP servers");
             check(bridge.get_artifacts().row_count() == 2, "its artifacts");
-            check(bridge.get_media().row_data(0).is_some_and(|m| m.image.size().width == 8), "its images, fetched and shown");
             check(info.portrait.size().width > 0, "and its portrait");
             check(app.engine.borrow().selected_session() == "rachel", "the profile's chat is selected");
             shot(&out1, "profile-01");
@@ -176,24 +174,7 @@ pub(super) fn profile_check(out: String) {
                 return false;
             }
             check(true, "Escape closes the voices, back to the profile");
-            // Choosing an image in the gallery opens the viewer.
-            window.global::<ProfileBridge>().set_viewing(0);
-            true
-        })),
-        ("viewer", Box::new(move |_, _window, elapsed| {
-            if elapsed < Duration::from_millis(300) {
-                return false;
-            }
-            shot(&out3, "profile-03-media");
-            headless::press(Key::Escape);
-            true
-        })),
-        ("viewer closed", Box::new(|_, window, _| {
             let bridge = window.global::<ProfileBridge>();
-            if bridge.get_viewing() != -1 {
-                return false;
-            }
-            check(window.get_overlay() == "profile", "Escape closes the image viewer first");
             bridge.set_confirm("compact".into());
             bridge.invoke_compact();
             true
@@ -820,4 +801,227 @@ pub(super) fn backend_row_check(out: String) {
         })),
     ];
     run_stages(stages);
+}
+
+/// The shortcut bar as drawn: "keys label" each.
+fn bar(window: &crate::AppWindow) -> Vec<String> {
+    window.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()
+}
+
+/// `--check profile-keys --out DIR`: the agent profile from the keyboard.
+/// Ctrl+I opens it from the composer and from the chat (vim mode's Normal
+/// mode), Ctrl+K lists it with its key; inside, digits jump to sections,
+/// Right changes a choice, Tab goes to the next card and Enter acts on the
+/// row (Files opens the folder; 1 and 2 open the one Publications overlay,
+/// everything or its images, and Escape comes back), nothing typed reaches
+/// the composer behind it, and Escape gives the keyboard back where it was. A user's own Ctrl+I
+/// keeps running what they bound it to.
+pub(super) fn profile_keys_check(out: String) {
+    let folder = scratch();
+    let folder2 = folder.clone();
+    let shown_before = std::rc::Rc::new(std::cell::Cell::new(true));
+    let shown_after = shown_before.clone();
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(move |app, _window, _| {
+            if !ready(app) {
+                return false;
+            }
+            let catalog = json!({"providers": {"claude": {"label": "Claude", "models": [
+                {"id": "opus", "label": "Opus", "supported_efforts": ["low", "high"]},
+                {"id": "sonnet", "label": "Sonnet", "supported_efforts": ["medium"]}]}}});
+            let rachel = json!({"session": "rachel", "set": {"cwd": folder, "model": "opus", "effort": "high"}});
+            check(control("/__control/catalog", &catalog).is_ok() && control("/__control/agent", &rachel).is_ok(), "the Host takes a model catalog and Rachel's folder");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("catalog", Box::new(move |app, _window, _| {
+            let engine = app.engine.borrow();
+            let moved = engine.roster().find("rachel").is_some_and(|a| a.working_directory == folder2 && a.model == "opus");
+            if !engine.model_catalog_loaded() || !moved || engine.connection_state() != "live" || !report().composer_focused {
+                return false;
+            }
+            drop(engine);
+            headless::press_with(&[Key::Control], "i");
+            true
+        })),
+        ("opened", Box::new(|app, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(crate::commands::context(app, window) == "profile", "Ctrl+I in the composer opens the profile, which has the keyboard");
+            check(bar(window).contains(&"1-9 Sections".to_owned()) && bar(window).contains(&"Esc Close".to_owned()), &format!("the bar names its keys: {:?}", bar(window)));
+            // Letters and digits are the profile's, never the draft's.
+            headless::type_text("x");
+            headless::press("3");
+            true
+        })),
+        ("files row", Box::new(move |app, window, elapsed| {
+            let bridge = window.global::<ProfileBridge>();
+            if bridge.get_cursor() != "files" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(!app.active_draft().contains('x') && !report().composer_focused, &format!("nothing typed reaches the composer behind it: {:?}", app.active_draft()));
+            check(bar(window).contains(&"Enter Open files".to_owned()), &format!("3 is Files, and the bar says what Enter does there: {:?}", bar(window)));
+            shot(&out, "profile-keys-01-files");
+            headless::press(Key::Return);
+            true
+        })),
+        ("files opened", Box::new(|_, _window, _| {
+            if !recorded("CLARP_TEST_OPEN_URL").iter().any(|u| u.starts_with("file:///")) {
+                return false;
+            }
+            check(true, "Enter on Files opens the agent's folder");
+            headless::press("8");
+            true
+        })),
+        ("model row", Box::new(|_, window, _| {
+            if window.global::<ProfileBridge>().get_cursor() != "model" {
+                return false;
+            }
+            check(bar(window).iter().any(|h| h.ends_with(" Change")), &format!("8 is the model, which Left and Right change: {:?}", bar(window)));
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("model changed", Box::new(|_, window, _| {
+            if posts("/agent-llm").is_empty() {
+                return false;
+            }
+            check(last_body("/agent-llm") == json!({"session": "rachel", "model": "sonnet", "effort": ""}), &format!("Right picks the next model: {}", last_body("/agent-llm")));
+            headless::press(Key::Tab);
+            true
+        })),
+        ("next card", Box::new(|_, window, _| {
+            let bridge = window.global::<ProfileBridge>();
+            if bridge.get_cursor() == "model" {
+                return false;
+            }
+            check(bridge.get_cursor() == "heartbeat", &format!("Tab goes on to the next card's first row: {}", bridge.get_cursor()));
+            headless::press("1");
+            true
+        })),
+        ("publications row", Box::new(|_, window, _| {
+            if window.global::<ProfileBridge>().get_cursor() != "publications" {
+                return false;
+            }
+            check(bar(window).contains(&"Enter All publications".to_owned()), &format!("1 is the publications: {:?}", bar(window)));
+            headless::press(Key::Return);
+            true
+        })),
+        ("publications", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != crate::publications_view::OVERLAY || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let filters: Vec<(String, bool)> = window.global::<crate::PublicationsBridge>().get_filters().iter().map(|f| (f.label.to_string(), f.chosen)).collect();
+            check(filters.first().is_some_and(|(label, chosen)| label == "All" && *chosen), &format!("Enter opens the one Publications overlay, everything shown: {filters:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("back from the publications", Box::new(|app, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(crate::commands::context(app, window) == "profile", "Escape comes back to the profile, with its keys");
+            headless::press("2");
+            headless::press(Key::Return);
+            true
+        })),
+        ("images", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != crate::publications_view::OVERLAY || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let chosen: Vec<String> = window.global::<crate::PublicationsBridge>().get_filters().iter().filter(|f| f.chosen).map(|f| f.label.to_string()).collect();
+            check(chosen.len() == 1 && chosen[0] != "All", &format!("2 opens the same overlay at its images: {chosen:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("profile again", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed to the composer", Box::new(|app, window, _| {
+            if !window.get_overlay().is_empty() || !report().composer_focused {
+                return false;
+            }
+            check(!app.active_draft().contains('x'), "Escape closes it, the composer has the keyboard back and its draft as it was");
+            app.focus_transcript();
+            true
+        })),
+        ("in the chat", Box::new(|app, window, _| {
+            if !report().transcript_focused || crate::commands::context(app, window) != "pane" {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "i");
+            true
+        })),
+        ("opened from the chat", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(true, "Ctrl+I in the chat opens the profile (vim mode on)");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("back to the chat", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() || !report().transcript_focused {
+                return false;
+            }
+            check(true, "Escape gives the keyboard back to the chat");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("switcher", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("agent profile");
+            true
+        })),
+        ("found", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "agent profile" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let rows: Vec<crate::SwitcherRow> = window.get_switcher_rows().iter().collect();
+            let at = rows.iter().position(|r| r.label == "Agent profile");
+            check(at.is_some_and(|i| rows[i].key.as_str() == keymap_display("Ctrl+I")), &format!("Ctrl+K lists Agent profile with its key: {:?}", rows.iter().take(3).map(|r| (r.label.to_string(), r.key.to_string())).collect::<Vec<_>>()));
+            if let Some(i) = at {
+                window.invoke_switcher_moved(i as i32);
+            }
+            headless::press(Key::Return);
+            true
+        })),
+        ("from Ctrl+K", Box::new(|app, window, elapsed| {
+            if window.get_overlay() != "profile" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(crate::commands::context(app, window) == "profile", "and opens it with the keyboard");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("a user's own Ctrl+I", Box::new(move |app, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            shown_before.set(window.get_shortcuts_visible());
+            app.engine.borrow_mut().settings_mut().set("keymap/bindings", json!({"shortcut-bar": {"main": {"add": ["Ctrl+I"]}}}));
+            headless::press_with(&[Key::Control], "i");
+            true
+        })),
+        ("kept", Box::new(move |app, window, elapsed| {
+            if window.get_shortcuts_visible() == shown_after.get() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_shortcuts_visible() != shown_after.get() && window.get_overlay().is_empty(), "a user who bound Ctrl+I keeps what they bound");
+            headless::press_with(&[Key::Control], "i");
+            app.engine.borrow_mut().settings_mut().set("keymap/bindings", json!({}));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+fn keymap_display(key: &str) -> String {
+    crate::keymap::display(key)
 }

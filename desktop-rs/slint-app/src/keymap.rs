@@ -82,6 +82,8 @@ fn parent(state: &str) -> Option<&'static str> {
         "navigation" | "composer" | "search" => "workspace",
         "pane" | "sidebar" => "navigation",
         "modal" | "launch" | "blocked" | "hints" => "root",
+        // The agent profile: Escape closes it, as any dialog.
+        "profile" => "modal",
         _ => return None,
     })
 }
@@ -117,7 +119,9 @@ fn state(name: &str) -> Vec<Binding> {
             b("wake-chat", &[], "Wake chat", false, Agent, false),
             b("list-rooms", &[], "Agent conversations", false, Always, false),
             b("list-archive", &[], "Archived agents", false, Always, false),
-            b("agent-profile", &[], "Agent profile", false, Agent, false),
+            // Everything about the open agent, from anywhere, typing
+            // included (no text field uses Ctrl+I).
+            b("agent-profile", &["Ctrl+I"], "Agent profile", true, Agent, false),
             b("manage-queue", &[], "Message queue", false, Agent, false),
             b("toggle-queue", &[], "Show/hide queue", false, Always, false),
             b("dismiss-error", &[], "Dismiss conversation error", false, Always, false),
@@ -309,6 +313,19 @@ fn state(name: &str) -> Vec<Binding> {
             b("transit-enter", &["Return"], "Choose", true, Always, false),
             b("escape", &["Escape"], "Back", true, Always, false),
         ],
+        // The agent profile from the keyboard: a cursor walks its rows, Tab its
+        // cards; a digit jumps to a section (the cards' titles show which);
+        // Enter acts on the row, Left and Right change a choice.
+        "profile" => vec![
+            b("profile-section", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Sections", true, Always, false),
+            b("profile-down", &["Down", "J"], "Next", false, Always, false),
+            b("profile-up", &["Up", "K"], "Previous", false, Always, false),
+            b("profile-next-card", &["Tab"], "Next card", false, Always, false),
+            b("profile-previous-card", &["Shift+Tab"], "Previous card", false, Always, false),
+            b("profile-enter", &["Return"], "Open", true, Always, false),
+            b("profile-left", &["Left"], "Change", false, Always, false),
+            b("profile-right", &["Right"], "Change", false, Always, false),
+        ],
         // Link hints show: digits pick a link (the bar says which), Enter
         // opens a number that also starts a longer one; any other key
         // cancels.
@@ -322,7 +339,7 @@ fn state(name: &str) -> Vec<Binding> {
     }
 }
 
-pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "settings-search", "updates", "teams", "launch", "modal", "transit", "blocked", "hints"];
+pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "settings-search", "updates", "teams", "launch", "modal", "profile", "transit", "blocked", "hints"];
 
 /// What the guards test.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -378,6 +395,7 @@ pub const CONTEXTS: &[(&str, &str)] = &[
     ("updates", "Updates"),
     ("teams", "Teams"),
     ("launch", "New agent hub"),
+    ("profile", "Agent profile"),
     ("transit", "Backend picker"),
 ];
 
@@ -421,7 +439,7 @@ pub fn actions() -> Vec<(&'static str, &'static str)> {
     let mut out = Vec::new();
     for name in STATES {
         for entry in state(name) {
-            let own = entry.native || entry.action.starts_with("hint-") || entry.action == "artifact-choose";
+            let own = entry.native || entry.action.starts_with("hint-") || entry.action == "artifact-choose" || entry.action == "profile-section";
             if seen.insert(entry.action) && !own {
                 out.push((entry.action, entry.label));
             }
@@ -465,9 +483,43 @@ fn with_changes(chain: &[&str], action: &str, defaults: Vec<String>, overrides: 
     added
 }
 
+/// Whether the user added `key` to `action` in a context on `chain`.
+fn user_added(chain: &[&str], overrides: &Overrides, action: &str, key: &str) -> bool {
+    overrides.get(action).is_some_and(|contexts| chain.iter().any(|c| contexts.get(*c).is_some_and(|ch| ch.add.iter().any(|k| k == key))))
+}
+
+/// A key the user gave one action is no other action's default there: a
+/// default that came later (Ctrl+I for the profile) never takes a key the
+/// user already uses.
+fn yield_to_user(chain: &[&str], overrides: &Overrides, bindings: &mut [Binding]) {
+    if overrides.is_empty() {
+        return;
+    }
+    let taken: HashSet<String> = bindings.iter().flat_map(|b| b.keys.iter().filter(|k| user_added(chain, overrides, b.action, k)).cloned().collect::<Vec<_>>()).collect();
+    if taken.is_empty() {
+        return;
+    }
+    for binding in bindings.iter_mut() {
+        let action = binding.action;
+        binding.keys.retain(|k| !taken.contains(k) || user_added(chain, overrides, action, k));
+    }
+}
+
+/// Whether one of `action`'s default keys went to another action the user
+/// bound it to (`yield_to_user`).
+pub fn yields(action: &str, overrides: &Overrides) -> bool {
+    let defaults: Vec<String> = STATES.iter().flat_map(|name| state(name)).filter(|b| b.action == action).flat_map(|b| b.keys).collect();
+    overrides.iter().any(|(other, contexts)| other != action && contexts.values().any(|ch| ch.add.iter().any(|k| defaults.contains(k))))
+}
+
 /// Bindings in effect in `state`, nearest state first; `facts` None ignores
-/// the guards (for conflict checks).
+/// the guards (for conflict checks). With facts (what runs and what the bar
+/// shows), the user's own keys win over other actions' defaults.
 pub fn resolve(state_name: &str, overrides: &Overrides, facts: Option<Facts>) -> Vec<Binding> {
+    resolve_with(state_name, overrides, facts, facts.is_some())
+}
+
+fn resolve_with(state_name: &str, overrides: &Overrides, facts: Option<Facts>, yielding: bool) -> Vec<Binding> {
     let chain = chain(state_name);
     let (mut result, mut seen) = (Vec::new(), HashSet::new());
     for name in &chain {
@@ -488,6 +540,9 @@ pub fn resolve(state_name: &str, overrides: &Overrides, facts: Option<Facts>) ->
         entry.keys = with_changes(&chain, entry.action, Vec::new(), overrides);
         entry.hint = false;
         result.push(entry);
+    }
+    if yielding {
+        yield_to_user(&chain, overrides, &mut result);
     }
     result.retain(|entry| !entry.keys.is_empty() && facts.is_none_or(|facts| facts.allows(entry.guard)));
     result
@@ -536,13 +591,13 @@ pub fn keys_in(state_name: &str, action: &str, overrides: &Overrides) -> Vec<Str
 /// The key to show for `action` in `state` (the user's first), spelled
 /// for people.
 pub fn shown(state_name: &str, action: &str, overrides: &Overrides) -> Option<String> {
-    keys_in(state_name, action, overrides).first().map(|k| display(k))
+    resolve_with(state_name, overrides, None, true).into_iter().find(|b| b.action == action).and_then(|b| b.keys.first().map(|k| display(k)))
 }
 
 /// `shown`, or `default` for an action the user never changed: what the
 /// cards and their hints spell on every rebuild, without resolving the map.
 pub fn shown_or(state_name: &str, action: &str, overrides: &Overrides, default: &str) -> String {
-    if overrides.contains_key(action) { shown(state_name, action, overrides).unwrap_or_default() } else { default.to_owned() }
+    if overrides.contains_key(action) || yields(action, overrides) { shown(state_name, action, overrides).unwrap_or_default() } else { default.to_owned() }
 }
 
 /// Whether the user bound `chord` themselves in `state` (or further out,
@@ -900,7 +955,10 @@ pub fn import(text: &str) -> Result<Overrides, String> {
             canonical.entry(action.clone()).or_default().insert(context.clone(), keys);
         }
     }
-    if let Some(clash) = clashes(&canonical).first() {
+    // The user's key against another action's default is no conflict: the
+    // user's wins (`yield_to_user`), as it does for keys kept in settings.
+    let mine = |clash: &Clash| clash.actions.iter().filter(|a| user_added(&chain(clash.state), &canonical, a, &clash.key)).count();
+    if let Some(clash) = clashes(&canonical).iter().find(|c| mine(c) != 1) {
         return Err(format!("Conflict in {}: {}", context_name(clash.state), display(&clash.key)));
     }
     Ok(canonical)
@@ -1349,5 +1407,43 @@ mod tests {
                 name = parent(current);
             }
         }
+    }
+
+    /// Ctrl+I opens the agent profile wherever an agent is open, the
+    /// composer included; inside the profile digits, arrows, Tab and Enter
+    /// are its own, Escape closes it. A user who already had Ctrl+I keeps it.
+    #[test]
+    fn ctrl_i_opens_the_profile_and_the_profile_has_its_keys() {
+        let none = Overrides::new();
+        for state in ["pane", "composer", "sidebar", "search", "settings", "updates"] {
+            assert_eq!(action_for(state, "Ctrl+I", &none, all()), Some("agent-profile"), "{state}");
+        }
+        assert_eq!(action_for("pane", "Ctrl+I", &none, Facts::default()), None, "no agent, no profile");
+        assert!(hints("composer", &none, all()).iter().any(|b| b.action == "agent-profile" && b.keys[0] == "Ctrl+I"));
+        for state in ["launch", "modal", "transit", "hints"] {
+            assert_ne!(action_for(state, "Ctrl+I", &none, all()), Some("agent-profile"), "{state}: dialogs keep their keys");
+        }
+        assert_eq!(action_for("profile", "3", &none, all()), Some("profile-section"));
+        assert_eq!(action_for("profile", "Down", &none, all()), Some("profile-down"));
+        assert_eq!(action_for("profile", "K", &none, all()), Some("profile-up"));
+        assert_eq!(action_for("profile", "Tab", &none, all()), Some("profile-next-card"));
+        assert_eq!(action_for("profile", "Shift+Tab", &none, all()), Some("profile-previous-card"));
+        assert_eq!(action_for("profile", "Return", &none, all()), Some("profile-enter"));
+        assert_eq!(action_for("profile", "Escape", &none, all()), Some("escape"));
+        assert_eq!(action_for("profile", "Ctrl+I", &none, all()), None, "the chats' keys stay out of the dialog");
+        assert!(clashes(&none).is_empty(), "{:?}", clashes(&none));
+        assert!(actions().iter().any(|(a, _)| *a == "profile-down") && !actions().iter().any(|(a, _)| *a == "profile-section"));
+        // Bound to something else before Ctrl+I was the profile's: the
+        // user's binding runs, from settings and from an exported profile.
+        let mine = from_settings(&json!({"mute": {"main": {"add": ["Ctrl+I"]}}}));
+        assert_eq!(action_for("composer", "Ctrl+I", &mine, all()), Some("mute"));
+        assert!(!hints("pane", &mine, all()).iter().any(|b| b.action == "agent-profile"), "the bar does not offer a key that runs something else");
+        assert!(yields("agent-profile", &mine) && shown("pane", "agent-profile", &mine).is_none());
+        assert_eq!(import(&export(&mine)).unwrap(), mine);
+        // And rebinding the profile works as for any action.
+        let moved = take_over(&none, "agent-profile", "main", "Ctrl+Alt+P").unwrap();
+        assert_eq!(action_for("pane", "Ctrl+Alt+P", &moved, all()), Some("agent-profile"));
+        let gone = remove(&none, "agent-profile", "main", "Ctrl+I");
+        assert_eq!(action_for("composer", "Ctrl+I", &gone, all()), None);
     }
 }

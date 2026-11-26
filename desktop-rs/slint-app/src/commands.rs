@@ -39,6 +39,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
         if !app.switcher.borrow().open && crate::profile_view::transit_open(app, window) {
             return "transit";
         }
+        // The agent profile: its rows, sections and layers by key.
+        if !app.switcher.borrow().open && crate::profile_view::keyboard(app, window) {
+            return "profile";
+        }
         return "modal";
     }
     match window.get_surface().as_str() {
@@ -102,6 +106,12 @@ pub fn overrides(app: &App) -> keymap::Overrides {
 
 pub fn overrides_of(engine: &clarp_engine::Engine) -> keymap::Overrides {
     engine.settings().get("keymap/bindings").map(keymap::from_settings).unwrap_or_default()
+}
+
+/// The region that has the keyboard now, or the one that last had it (a
+/// dialog gives the keyboard back to it).
+pub fn keyboard_region(app: &App, window: &AppWindow) -> &'static str {
+    region(app, window).unwrap_or_else(|| LAST_REGION.with(std::cell::Cell::get))
 }
 
 /// The region that has the keyboard, if one does (none while the window
@@ -216,6 +226,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     }
     if state == "fonts" {
         hints = crate::font_view::hints();
+    }
+    if state == "profile" {
+        hints = crate::profile_view::hints(app, window);
     }
     if state == "hints" && crate::link_hints::count() == 0 {
         hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
@@ -388,6 +401,12 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
         show_hints(&app, &window);
         return true;
     }
+    // The digit is the profile's section (the cards' titles show which).
+    if action == "profile-section" {
+        crate::profile_view::key(&window, action, chord.parse().ok());
+        show_hints(&app, &window);
+        return true;
+    }
     let ran = run(&app, &window, action);
     show_hints(&app, &window);
     ran
@@ -492,6 +511,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "transit-down" => crate::profile_view::transit_move(window, 1),
         "transit-up" => crate::profile_view::transit_move(window, -1),
         "transit-enter" => crate::profile_view::transit_enter(window),
+        "profile-down" | "profile-up" | "profile-next-card" | "profile-previous-card" | "profile-enter" | "profile-left" | "profile-right" => {
+            crate::profile_view::key(window, action, None);
+        }
         "overview" => crate::overview_view::open(app, window),
         // The selected agent's background work, or every job on Updates.
         "agent-processes" => crate::processes_view::toggle(app, window),
@@ -1163,6 +1185,14 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             crate::processes_view::set_origin(restore);
             return;
         }
+        // The profile keeps the keyboard; closing it gives the keyboard
+        // back where it was before the switcher.
+        switcher::Kind::Command if item.target == "agent-profile" => {
+            run(app, window, &item.target);
+            crate::profile_view::set_origin(if restore { "composer" } else { "pane" });
+            show_hints(app, window);
+            return;
+        }
         switcher::Kind::Command if item.target == "new-contact" => {
             crate::launch_view::open_contacts(app, window, Some(restore));
             return;
@@ -1251,6 +1281,11 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
         return;
     }
     if closed == crate::processes_view::OVERLAY && crate::processes_view::give_back(app, window) {
+        show_hints(app, window);
+        return;
+    }
+    // The profile gives the keyboard back where it was when it opened.
+    if closed == "profile" && crate::profile_view::give_back(app, window) {
         show_hints(app, window);
         return;
     }
