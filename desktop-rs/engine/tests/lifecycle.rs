@@ -242,6 +242,8 @@ fn the_turn_queue_loads_and_follows_its_actions() {
     d.engine.send_queued_turn("q1");
     d.until("sent", |e| e.turn_queue("rachel").len() == 1);
     assert!(d.engine.turn_queue_refusal("rachel").is_empty(), "the next Send now answers it");
+    // It says whether to speak the answer, as the composer's send does.
+    assert!(host.requests("POST", "/turn-queue/q1/send").iter().all(|r| r["body"]["synthesize_audio"].is_boolean()));
     assert_eq!(d.engine.turn_queue("rachel")[0]["queue_id"], "q2");
     d.engine.delete_queued_turn("q2");
     d.until("deleted", |e| e.turn_queue("rachel").is_empty() && !e.turn_queue_loading());
@@ -254,6 +256,42 @@ fn the_turn_queue_loads_and_follows_its_actions() {
     host.control("/__control/event", json!({"type": "queue-updated", "session": "mike", "count": 0}));
     d.settle(Duration::from_millis(300));
     assert_eq!(host.requests("GET", "/turn-queue").len(), loads + 1, "another chat's queue is not loaded");
+}
+
+#[test]
+fn send_now_steers_and_stops_the_turn_where_it_cannot_be_steered() {
+    let host = Host::start("queue-steer");
+    host.control("/__control/queue-steer", json!({"on": true}));
+    host.control("/__control/agent", json!({"session": "rachel", "set": {"busy": true, "latest_state": "thinking", "queued_turn_count": 5}}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("busy", |e| e.roster().find("rachel").is_some_and(|a| a.busy));
+    d.engine.load_turn_queue("rachel");
+    d.until("queue loaded", |e| !e.turn_queue_loading() && e.turn_queue("rachel").len() == 2);
+    // The Host's queue wins over the count the roster held.
+    assert_eq!(d.engine.queue_count("rachel"), 2, "the count follows the Host's queue");
+
+    // The turn cannot take it: the steer is refused, and the turn stops for
+    // it. Nothing says it was not sent.
+    host.control("/__control/fail", json!({"path": "/turn-queue/q1/steer", "status": 409}));
+    d.engine.send_queued_turn("q1");
+    d.until("taken over", |e| e.turn_queue("rachel").len() == 1);
+    assert_eq!(host.requests("POST", "/turn-queue/q1/steer").len(), 1);
+    assert_eq!(host.requests("POST", "/turn-queue/q1/take-over").len(), 1);
+    assert!(host.requests("POST", "/turn-queue/q1/send").is_empty(), "not the plain send a turn refuses");
+    assert!(d.engine.turn_queue_refusal("rachel").is_empty());
+    assert_eq!(d.engine.queue_count("rachel"), 1);
+
+    // Refused every way: it waits on, and says so calmly.
+    for verb in ["steer", "take-over", "send"] {
+        host.control("/__control/fail", json!({"path": format!("/turn-queue/q2/{verb}"), "status": 409}));
+    }
+    d.engine.send_queued_turn("q2");
+    d.until("still waiting", |e| !e.turn_queue_refusal("rachel").is_empty());
+    assert_eq!(d.engine.turn_queue_refusal("rachel"), clarp_core::queue_line::STILL_WAITING);
+    for verb in ["steer", "take-over", "send"] {
+        assert_eq!(host.requests("POST", &format!("/turn-queue/q2/{verb}")).len(), 1, "{verb} tried once");
+    }
 }
 
 #[test]
