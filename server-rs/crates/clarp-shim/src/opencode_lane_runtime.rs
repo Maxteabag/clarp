@@ -147,18 +147,18 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     println!("ready");
     io::stdout().flush()?;
     let result = lane.serve();
+    // An idle lane that took a retirement leaves for good from here, whatever follows: it says
+    // so at once, so the Host that asked counts its place now rather than after the server's
+    // end (up to END_GRACE, issue 908). It answers nothing else from here, and still lets go
+    // of its locks only once the server has been reaped.
+    if let Some(mut stream) = lane.retire_reply.take() {
+        let _ = write(&mut stream, &json!({"ok": true, "state": lane.inspect()}));
+    }
     lane.end(Some(1), None, Some(SERVER_GONE));
-    let retired = lane
-        .retire_reply
-        .take()
-        .map(|stream| (stream, lane.inspect()));
     // The server is ended and reaped before the session's lock and the owner lock are let go.
     lane.serve.end();
     drop(lane);
     drop(lock);
-    if let Some((mut stream, state)) = retired {
-        let _ = write(&mut stream, &json!({"ok": true, "state": state}));
-    }
     result
 }
 

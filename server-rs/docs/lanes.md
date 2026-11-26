@@ -146,15 +146,33 @@ as before.
 - **Only a lane that left counts as a place** (issue 908). An idle lane asked to leave counts
   once it said it goes, or its socket went after it was asked. One that refuses (a turn claimed
   it after it was looked at), says nothing for half a second with its socket still there, or had
-  gone before it was asked counts as it was. Where the limits could be met, they are checked again
-  once the lanes were asked: if one of those that had to leave did not, the lane does not start,
-  even when those that left would have paid for it.
+  gone before it was asked counts as it was; so does one some start merely chose. Where the
+  limits could be met, they are checked again once the lanes were asked: if one of those that
+  had to leave did not, the lane does not start, even when those that left would have paid for
+  it. An idle lane that takes the ask says so at once, before its tool ends: Codex, Muse and
+  OpenCode as soon as they have taken it for good (Muse's end takes up to 2 s, OpenCode's server
+  up to 5 s), Claude Code by removing its socket first. Each still lets go of its owner lock only
+  once its tool has been reaped, and a busy or claimed lane still refuses.
+- **Only the lane looked at is asked** (issue 908). A lane is known by the instance a look
+  reached: its socket file, the same before and after the connection was made, and the process
+  that listened on it. The ask to leave goes only to that instance: its file is looked at before
+  connecting, and the connection is checked to have reached that file and that process before
+  the ask is sent, so a lane that took its name meanwhile is never asked. Marks are kept by
+  instance, so an ask or an answer about the old lane never touches the mark of the new one.
 - **A lane leaving is chosen once, and counted once** (issue 908). Which idle lanes leave is
-  chosen under one gate per run folder (`lane/gate.rs`), held only while a start chooses. A lane
-  a start chose is marked, so no other start chooses it; one that did not leave is unmarked once
-  asked, and one that left stays marked until its socket is gone, so a start whose look at the
-  lanes came before it left does not count it again. The asks are made outside the gate, and
-  nobody waits there.
+  chosen under one gate per run folder (`lane/gate.rs`), held only while a start chooses or
+  settles. A lane a start chose is marked, so no other start chooses it; one that did not leave
+  is unmarked once asked, and one that left stays marked while any look that may have counted it
+  is still open. The asks are made outside the gate, and nobody waits there.
+- **What a start looked at is reconciled before it decides** (issue 908). A start is counted at
+  the gate from when it begins to look at the lanes. When it chooses, and again when it settles
+  after its asks, what it saw is reconciled with what the gate kept since: a lane it counted
+  that has left, for any start, no longer counts; a lane another start was let start that its
+  look does not show counts at its tool's typical size. A lane let start keeps counting so until
+  it says it is ready (it listens, and every later look sees it), or its launch fails or is given
+  up, which gives the place back at once. So two starts never take one place: a start that comes
+  while another's lane is still starting does not start beside it over the limits, and a start
+  whose look came before others made room still finds the room they left for it.
 - **With every place busy, an optional lane does not start** (issue 786). Where no idle lane
   may leave for it, or those that may would not pay for it, a chat turn's lane is not started: a
   Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread

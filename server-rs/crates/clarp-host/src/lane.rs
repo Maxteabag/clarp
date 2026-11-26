@@ -510,12 +510,15 @@ pub(crate) fn turn_file(run: &Path, agent_id: &str) -> PathBuf {
 }
 
 /// Whether a lane that runs is used as it is or must make way for a new one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum Place {
     /// The lane that runs is the one wanted, or still runs work for the same thread: use it.
     Kept,
-    /// No lane runs now, room has been made, and a new one may start.
-    Free,
+    /// No lane runs now, room has been made, and a new one may start. Its place is counted for
+    /// every other start from here: the start keeps the admission while it launches the lane,
+    /// says [`gate::Admission::visible`] once the lane is ready, and drops it where the launch
+    /// fails or is given up, which gives the place back.
+    Free(gate::Admission),
     /// No place is free within both limits, and the lane is not one a turn needs: it does not
     /// start, and the turn runs in a process of its own (issue 786).
     Full,
@@ -697,8 +700,9 @@ impl Endpoint {
             )));
         }
         std::fs::create_dir_all(run)?;
-        if make_room(run, self, room, needed) || needed {
-            Ok(Place::Free)
+        // A needed lane is let start whatever room was made, and counts.
+        if let Some(admission) = make_room(run, self, room, needed) {
+            Ok(Place::Free(admission))
         } else {
             // Said, so a turn that ran cold for want of a place is known in the Host's log.
             eprintln!(
@@ -740,6 +744,16 @@ impl Endpoint {
 
     pub(crate) fn inspect(&self) -> io::Result<Status> {
         self.ask(&Lifecycle::Inspect)
+    }
+
+    /// What the lane answers what it is, and which instance of it answered ([`gate::Instance`]):
+    /// `None` where its socket file changed while the connection was made.
+    fn inspect_seen(&self) -> io::Result<(Status, Option<gate::Instance>)> {
+        let before = gate::identity(&self.socket);
+        let stream = self.connect(&Lifecycle::Inspect, RPC_TIMEOUT)?;
+        let seen = gate::Instance::reached(&self.socket, before, &stream);
+        let state = replied(&mut BufReader::new(stream), self.tool)?;
+        Ok((state, seen))
     }
 
     /// One request, and the state the lane answers with, read as `T`.
@@ -1000,14 +1014,28 @@ impl Endpoint {
     /// Asks an idle lane to leave so another may start in its place, and waits for no exit: the
     /// new lane holds no lock of the old one's (another agent's), so it need not wait for the
     /// old tool to end. A lane that refuses (a turn claimed it since it was looked at) says so
-    /// at once. One that takes the ask removes its socket first, as every lane leaving does, and
-    /// answers at once (Codex, Muse, OpenCode) or once its tool has gone (Claude Code, up to its
-    /// own 2 s limit); nothing is waited for beyond [`REFUSAL_LOOK`] (issue 908). Whether it
-    /// left for this ask: it said it goes, or its socket went after it was asked. One that
-    /// refused, said nothing with its socket still there, or had gone before the ask (another
-    /// start's place, or its own idle time) did not.
-    fn asked_to_leave(&self) -> bool {
-        let Ok(stream) = self.connect(&Lifecycle::Retire, LEAVING_LOOK) else {
+    /// at once. One that takes the ask says so at once once it has taken it for good (Codex,
+    /// Muse, OpenCode), or removes its socket first and answers once its tool has gone (Claude
+    /// Code, up to its own 2 s limit); nothing is waited for beyond [`REFUSAL_LOOK`] (issue 908).
+    ///
+    /// Only the lane `seen` is asked: the instance a look reached, by its socket file and the
+    /// process that listened on it. Its file is looked at before the connection is made, and the
+    /// connection itself is checked to have reached that file and that process before the ask is
+    /// sent, so a lane that took its name meanwhile is never asked. Whether it left for this
+    /// ask: it said it goes, or its socket file went after it was asked. One that refused, said
+    /// nothing with its socket still there, or had gone before the ask (another start's place,
+    /// or its own idle time) did not.
+    fn asked_to_leave(&self, seen: gate::Instance) -> bool {
+        if !seen.is_at(&self.socket) {
+            return false;
+        }
+        let Ok(stream) = UnixStream::connect(&self.socket) else {
+            return false;
+        };
+        if !seen.is_reached_by(&self.socket, &stream) {
+            return false;
+        }
+        let Ok(stream) = Self::send(stream, &Lifecycle::Retire, LEAVING_LOOK) else {
             return false;
         };
         let until = Instant::now() + REFUSAL_LOOK;
@@ -1015,18 +1043,18 @@ impl Endpoint {
         let mut said = String::new();
         loop {
             match input.read_line(&mut said) {
-                Ok(0) => return !self.socket.exists(),
+                Ok(0) => return !seen.is_at(&self.socket),
                 Ok(_) => return replied::<Status>(&mut said.as_bytes(), self.tool).is_ok(),
                 Err(error) if unanswered(&error) => {
                     // On its way out: its socket is gone, and its answer may wait for its exit.
-                    if !self.socket.exists() {
+                    if !seen.is_at(&self.socket) {
                         return true;
                     }
                     if Instant::now() >= until {
                         return false;
                     }
                 }
-                Err(_) => return !self.socket.exists(),
+                Err(_) => return !seen.is_at(&self.socket),
             }
         }
     }
@@ -1163,7 +1191,15 @@ impl Endpoint {
 
     /// One request sent, its answer to be read within `wait`.
     fn connect(&self, request: &impl Serialize, wait: Duration) -> io::Result<UnixStream> {
-        let mut stream = UnixStream::connect(&self.socket)?;
+        Self::send(UnixStream::connect(&self.socket)?, request, wait)
+    }
+
+    /// One request sent on a connection made, its answer to be read within `wait`.
+    fn send(
+        mut stream: UnixStream,
+        request: &impl Serialize,
+        wait: Duration,
+    ) -> io::Result<UnixStream> {
         stream.set_read_timeout(Some(wait.max(Duration::from_millis(1))))?;
         stream.set_write_timeout(Some(RPC_TIMEOUT))?;
         serde_json::to_writer(&mut stream, request).map_err(io::Error::other)?;
@@ -1264,87 +1300,142 @@ pub(crate) fn once_more<T>(
 /// may leave makes room for it, within the limits or in the place of idle lanes: a start that
 /// will not happen ends no lane. A `needed` lane starts whatever the answer, so it sends away
 /// what it may, toward the limits. Only a lane that left counts as a place: one that refused,
-/// said nothing, or had gone before it was asked does not, and a plan within the limits is
-/// checked against the limits again once they were asked, never taken as paid. Answers whether
-/// the new lane has its place: `false` when no place could be made.
-fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
-    let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
-    let gate = gate::of(run);
-    let new = own.tool.typical_bytes();
-    // His start is counted at the gate before it looks at the lanes: a start of the agents' own
-    // that chooses meanwhile leaves room for it. Nobody waits for it.
-    let first = for_owner.then(|| gate.owner_first(new));
-    let (mut live, mut held, growing, idle) = idle_in_order(run, &own.socket, for_owner);
-    // What lanes started moments ago will still take is not free, whatever the machine says now.
-    let room = Room {
-        free: room.free.map(|free| Free {
-            available: free.available.saturating_sub(growing),
-            ..free
-        }),
-        ..room
-    };
-    live += 1;
-    held = held.saturating_add(new);
-    let start = held;
-    // The limits with the new lane counted, and the owner's starts still choosing beside it.
-    let fits = |live: usize, held: u64, ahead: gate::Ahead| {
-        room.fits(
-            live + ahead.count,
-            held.saturating_add(ahead.bytes),
-            new.saturating_add(ahead.bytes),
-            start - held,
-        )
-    };
-    let planned = gate.choose(first, |seen| {
-        let ahead = seen.ahead;
-        // A lane another start chose, or that has gone since it was looked at, is no place.
-        let idle: Vec<Leaving> = idle
-            .into_iter()
-            .filter(|(_, _, _, lane)| seen.free(&lane.socket))
-            .collect();
-        let wanted = new.saturating_add(ahead.bytes);
-        let within = |live: usize, held: u64| fits(live, held, ahead);
-        let Some(plan) = to_leave(&idle, live, held, wanted, &within, needed) else {
-            return (None, Vec::new());
+/// said nothing, or had gone before it was asked does not, nor one some start merely chose, and
+/// a plan within the limits is checked against the limits again once they were asked, never
+/// taken as paid.
+///
+/// What a start looked at may be stale by the time it chooses or settles: other starts may have
+/// sent lanes it counted away, and been let start lanes it does not see yet. Both are reconciled
+/// at the [`gate`] from what it keeps of every start, so two starts never take one place and no
+/// lane that left is counted again. The place a start is given counts for every other start
+/// until its lane listens or its launch fails ([`gate::Admission`]). `None` when no place could
+/// be made; a `needed` lane is always given one.
+fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> Option<gate::Admission> {
+    Start::look(run, own, room).finish(needed)
+}
+
+/// A start's look at the lanes, made once it was counted at the gate.
+struct Start<'a> {
+    own: &'a Endpoint,
+    room: Room,
+    look: gate::Look,
+    looked: Looked,
+    /// What the new lane counts at.
+    new: u64,
+}
+
+impl<'a> Start<'a> {
+    /// Counts the start at the gate (his start ahead of the agents' own from now), then looks
+    /// at every lane of `run`.
+    fn look(run: &Path, own: &'a Endpoint, room: Room) -> Self {
+        let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
+        let new = own.tool.typical_bytes();
+        let look = gate::of(run).look(for_owner.then_some(new));
+        let looked = idle_in_order(run, &own.socket, for_owner);
+        // What lanes started moments ago will still take is not free, whatever the machine says
+        // now.
+        let room = Room {
+            free: room.free.map(|free| Free {
+                available: free.available.saturating_sub(looked.growing),
+                ..free
+            }),
+            ..room
         };
-        let chosen: Vec<Leaving> = idle.into_iter().take(plan.leaving()).collect();
-        let sockets = chosen.iter().map(|lane| lane.3.socket.clone()).collect();
-        (Some((plan, ahead, chosen)), sockets)
-    });
-    let Some((plan, ahead, chosen)) = planned else {
-        return false;
-    };
-    // Only a lane that left counts as a place: one that said it goes, or whose socket went
-    // after it was asked. One that refused (a turn claimed it), said nothing, or had gone
-    // before the ask, counts as it was.
-    let (mut left, mut paid) = (0usize, 0u64);
-    let mut asked = Vec::with_capacity(chosen.len());
-    for (_, _, memory, lane) in &chosen {
-        let went = lane.asked_to_leave();
-        if went {
-            live -= 1;
-            held = held.saturating_sub(*memory);
-            left += 1;
-            paid = paid.saturating_add(pays(lane, *memory));
+        Self {
+            own,
+            room,
+            look,
+            looked,
+            new,
         }
-        asked.push((lane.socket.as_path(), went));
     }
-    gate.asked(asked);
-    match plan {
-        // Within the limits only: those that left are checked as they are, and a plan that
-        // needed more of them to leave never turns into one that pays.
-        Plan::Fits(_) | Plan::Toward(_) => fits(live, held, ahead),
-        Plan::Paid(_) => {
-            let placed = left > 0 && paid >= new.saturating_add(ahead.bytes);
-            if placed {
-                eprintln!(
-                    "clarp-host: over the lanes' limits, {left} idle lane(s) left to make room for the {} lane of {}",
-                    own.tool.name(),
-                    own.agent().unwrap_or("an agent"),
-                );
+
+    /// Chooses, asks, and settles: the admission of the new lane, or `None`.
+    fn finish(self, needed: bool) -> Option<gate::Admission> {
+        let Self {
+            own,
+            room,
+            mut look,
+            looked,
+            new,
+        } = self;
+        // The new lane counted among what was looked at.
+        let live = looked.lanes.len() + 1;
+        let start = looked.held.saturating_add(new);
+        // The limits with `live` lanes holding `held`, and the lanes still to come beside them.
+        let fits = |live: usize, held: u64, coming: gate::Coming| {
+            room.fits(
+                live + coming.count,
+                held.saturating_add(coming.bytes),
+                new.saturating_add(coming.bytes),
+                start.saturating_sub(held),
+            )
+        };
+        let Looked { lanes, idle, .. } = looked;
+        let planned = look.choose(&lanes, |seen| {
+            // Lanes counted that have left since, for any start, no longer count.
+            let live = live - seen.since.left;
+            let held = start.saturating_sub(seen.since.freed);
+            let coming = seen.coming();
+            // A lane another start chose, or that has gone since it was looked at, is no place.
+            let idle: Vec<Leaving> = idle
+                .into_iter()
+                .filter(|leaving| seen.free(&leaving.lane.socket, leaving.seen))
+                .collect();
+            let wanted = new.saturating_add(seen.ahead.bytes);
+            let within = |live: usize, held: u64| fits(live, held, coming);
+            let Some(plan) = to_leave(&idle, live, held, wanted, &within, needed) else {
+                return (None, Vec::new());
+            };
+            let chosen: Vec<Leaving> = idle.into_iter().take(plan.leaving()).collect();
+            let marks = chosen
+                .iter()
+                .map(|leaving| (leaving.lane.socket.clone(), leaving.seen))
+                .collect();
+            (Some((plan, chosen)), marks)
+        });
+        let ownership = (own.socket.as_path(), new);
+        let Some((plan, chosen)) = planned else {
+            return look.settle(&lanes, &[], |_, _| false, ownership, needed);
+        };
+        // Only a lane that left counts as a place: one that said it goes, or whose socket went
+        // after it was asked. One that refused (a turn claimed it), said nothing, or had gone
+        // before the ask, counts as it was.
+        let (mut left, mut paid) = (0usize, 0u64);
+        let mut asked = Vec::with_capacity(chosen.len());
+        for leaving in &chosen {
+            let went = leaving.lane.asked_to_leave(leaving.seen);
+            if went {
+                left += 1;
+                paid = paid.saturating_add(pays(&leaving.lane, leaving.memory));
             }
-            placed
+            asked.push((leaving.lane.socket.clone(), leaving.seen, went));
         }
+        let admitted = look.settle(
+            &lanes,
+            &asked,
+            |since, ahead| match plan {
+                // Within the limits only, as they are now: the lanes that left, its own among
+                // them, and the lanes other starts were let start meanwhile. A plan that needed
+                // more of them to leave never turns into one that pays.
+                Plan::Fits(_) | Plan::Toward(_) => fits(
+                    live - since.left,
+                    start.saturating_sub(since.freed),
+                    ahead.and(since.starting),
+                ),
+                Plan::Paid(_) => left > 0 && paid >= new.saturating_add(ahead.bytes),
+            },
+            ownership,
+            needed,
+        );
+        if matches!(plan, Plan::Paid(_)) && admitted.is_some() {
+            eprintln!(
+                "clarp-host: over the lanes' limits, {left} idle lane(s) left to make room for the {} lane of {}",
+                own.tool.name(),
+                own.agent().unwrap_or("an agent"),
+            );
+        }
+        admitted
     }
 }
 
@@ -1383,13 +1474,13 @@ fn to_leave(
 ) -> Option<Plan> {
     let (mut would_live, mut would_hold) = (live, held);
     let (mut paid, mut pays_at) = (0u64, None);
-    for (count, (_, _, memory, lane)) in idle.iter().enumerate() {
+    for (count, leaving) in idle.iter().enumerate() {
         if fits(would_live, would_hold) {
             return Some(Plan::Fits(count));
         }
         would_live -= 1;
-        would_hold = would_hold.saturating_sub(*memory);
-        paid = paid.saturating_add(pays(lane, *memory));
+        would_hold = would_hold.saturating_sub(leaving.memory);
+        paid = paid.saturating_add(pays(&leaving.lane, leaving.memory));
         if pays_at.is_none() && paid >= new {
             pays_at = Some(count + 1);
         }
@@ -1410,9 +1501,29 @@ fn pays(lane: &Endpoint, weighed: u64) -> u64 {
     weighed.max(lane.tool.typical_bytes())
 }
 
-/// An idle lane that may be asked to leave: whether it is the owner's, how long it has been
-/// idle, what it weighed, and where it listens.
-type Leaving = (bool, u64, u64, Endpoint);
+/// An idle lane that may be asked to leave.
+struct Leaving {
+    /// It is the owner's.
+    his: bool,
+    idle_ms: u64,
+    /// What it weighed.
+    memory: u64,
+    lane: Endpoint,
+    /// The instance of it that was looked at, and is the only one asked.
+    seen: gate::Instance,
+}
+
+/// The lanes of a run folder as one start looked at them.
+struct Looked {
+    /// Every lane that answered, as counted.
+    lanes: Vec<gate::Counted>,
+    /// What they weigh together.
+    held: u64,
+    /// What those started moments ago may still grow by.
+    growing: u64,
+    /// The idle ones that may leave, in the order they leave.
+    idle: Vec<Leaving>,
+}
 
 /// How long after its start a lane is still taken to grow: Codex loads the conversation on its
 /// first turn, which a weighing before it does not show.
@@ -1436,26 +1547,47 @@ fn still_to_grow(lane: &Endpoint, state: &Status) -> u64 {
     }
 }
 
-/// The lanes of the run folder but `skip`: how many answer and what they weigh together, and of
+/// The lanes of the run folder but `skip`: each that answers, what they weigh together, and of
 /// them the idle ones that may leave, in the order they leave (the owner's rule of 25 Nov 2026):
 /// the agents' own first, then his, each longest idle first. His are among them only `for_owner`.
-fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> (usize, u64, u64, Vec<Leaving>) {
-    let mut idle = Vec::new();
-    let (mut live, mut held, mut growing) = (0usize, 0u64, 0u64);
-    for (lane, state) in answering(run, skip) {
+/// One whose socket file changed while it was asked counts, and is not asked to leave: which lane
+/// answered is not known.
+fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> Looked {
+    let mut looked = Looked {
+        lanes: Vec::new(),
+        held: 0,
+        growing: 0,
+        idle: Vec::new(),
+    };
+    for (lane, state, seen) in answering(run, skip) {
         let memory = weight(&lane, &state);
-        live += 1;
-        held = held.saturating_add(memory);
-        growing = growing.saturating_add(still_to_grow(&lane, &state));
-        if state.claim.is_none() && state.available {
+        looked.lanes.push(gate::Counted {
+            socket: lane.socket.clone(),
+            id: seen.map(|seen| seen.id),
+            bytes: memory,
+        });
+        looked.held = looked.held.saturating_add(memory);
+        looked.growing = looked.growing.saturating_add(still_to_grow(&lane, &state));
+        if let Some(seen) = seen
+            && state.claim.is_none()
+            && state.available
+        {
             let his = lane.agent().is_some_and(|agent| owners(run, agent));
             if for_owner || !his {
-                idle.push((his, state.idle_ms, memory, lane));
+                looked.idle.push(Leaving {
+                    his,
+                    idle_ms: state.idle_ms,
+                    memory,
+                    lane,
+                    seen,
+                });
             }
         }
     }
-    idle.sort_by_key(|(his, idle_ms, _, _)| (*his, std::cmp::Reverse(*idle_ms)));
-    (live, held, growing, idle)
+    looked
+        .idle
+        .sort_by_key(|leaving| (leaving.his, std::cmp::Reverse(leaving.idle_ms)));
+    looked
 }
 
 /// In auto, with less free than the reserve: idle lanes leave, in the order room is made (the
@@ -1469,14 +1601,14 @@ pub(crate) fn shed(run: &Path, settings: &Settings, memory: Option<Memory>) -> u
     if memory.available >= reserve {
         return 0;
     }
-    let (_, _, _, idle) = idle_in_order(run, Path::new(""), true);
+    let idle = idle_in_order(run, Path::new(""), true).idle;
     let (mut freed, mut left) = (0u64, 0usize);
-    for (_, _, weighed, lane) in idle {
+    for leaving in idle {
         if memory.available.saturating_add(freed) >= reserve {
             break;
         }
-        if lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
-            freed = freed.saturating_add(weighed);
+        if leaving.lane.ask::<Status>(&Lifecycle::Retire).is_ok() {
+            freed = freed.saturating_add(leaving.memory);
             left += 1;
         }
     }
@@ -1530,17 +1662,17 @@ pub(crate) fn watch_pressure(run: &Path) {
     }
 }
 
-/// Every lane in the run folder but `skip` that answers what it is, with its answer. A socket
-/// nothing answers on (a lane that has left) is passed over.
-fn answering(run: &Path, skip: &Path) -> Vec<(Endpoint, Status)> {
+/// Every lane in the run folder but `skip` that answers what it is, with its answer and the
+/// instance that answered. A socket nothing answers on (a lane that has left) is passed over.
+fn answering(run: &Path, skip: &Path) -> Vec<(Endpoint, Status, Option<gate::Instance>)> {
     lanes_in(run)
         .into_iter()
         .filter(|lane| lane.socket != skip)
         // Asked, not locked: taking another lane's owner lock, even for a moment, could make
         // a lane of that agent that starts in that moment fail (review of 23 Nov 2026).
         .filter_map(|lane| {
-            let state = lane.inspect().ok()?;
-            Some((lane, state))
+            let (state, seen) = lane.inspect_seen().ok()?;
+            Some((lane, state, seen))
         })
         .collect()
 }

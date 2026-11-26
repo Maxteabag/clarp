@@ -10,7 +10,9 @@ use super::*;
 /// A stand-in Muse. `exec` refuses a session a `serve` holds (`lock-<session>`), as Muse does, and
 /// answers `exec-<word>`. `serve` speaks MSP: a word `ask-<x>` is answered `lane-ask-<x>` at once;
 /// `hold-<x>` is answered `lane-hold-<x>` once the file `release-<x>` exists, unless it is
-/// interrupted first. What it was asked is noted in files beside it.
+/// interrupted first. While the file `slow-end` exists, a `serve` whose input has ended takes 1.8 s
+/// to end, as Muse writes its session log to its end. What it was asked is noted in files beside
+/// it.
 const MUSE: &str = r#"#!/usr/bin/env python3
 import json
 import os
@@ -164,6 +166,9 @@ for line in sys.stdin:
     emit({"id": request_id, "result": result})
     if after:
         after()
+if (root / "slow-end").exists():
+    note("slow-end", "serve")
+    time.sleep(1.8)
 if session:
     (root / ("lock-" + session)).unlink(missing_ok=True)
 "#;
@@ -419,4 +424,75 @@ fn a_muse_turn_refused_for_a_changed_login_runs_on_a_lane_under_the_new_one() {
         "exec never met a held session"
     );
     assert_eq!(cold(), before, "no turn started without a lane");
+}
+
+/// Issue 908. An idle Muse lane asked to leave says it goes as soon as it has taken the ask,
+/// while Muse still ends in order (here in 1.8 s of the 2 it is given): a Host making room counts
+/// its place then. Before, the answer came only after Muse had ended, so a start that gives an
+/// ask half a second counted no place. The lane still lets go of its owner lock only once Muse
+/// has been reaped.
+#[test]
+fn an_idle_muse_lane_asked_to_leave_says_it_goes_before_muse_has_ended() {
+    let place = Place::new("muse-lane-slow-end");
+    let _lanes = Lanes(place.root.clone());
+    let muse = place.root.join("muse");
+    program(&muse, MUSE);
+    let config = place.root.join("config");
+    std::fs::create_dir_all(config.join("clarp-host")).unwrap();
+    std::fs::write(
+        config.join("clarp-host/config.toml"),
+        "muse_chat_lane = true\ncodex_lane_idle_minutes = 15\n",
+    )
+    .unwrap();
+    let world = [
+        ("CLARP_MUSE_PROGRAM", muse.to_str().unwrap()),
+        ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+    ];
+    let host = place.start_in("the-owners-token", &[], &world);
+    let made = host.post(
+        "/agents",
+        json!({"name": "Muse", "session": "muser", "backend": "muse"}),
+    );
+    assert_eq!(made["session"], "muser", "{made}");
+    // The first turn runs on exec, and the lane starts beside it.
+    host.send("muser", "ask-one", "one");
+    answered(&host, "muser", "exec-ask-one");
+    let run = place.root.join("run");
+    let mut socket = None;
+    wait_for("the lane to be up and idle", || {
+        socket = std::fs::read_dir(&run)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.to_string_lossy().ends_with("-mus.sock"))
+            .filter(|path| {
+                lane_said(path, "inspect")
+                    .is_some_and(|said| said["ok"] == true && said["state"]["available"] == true)
+            });
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    std::fs::write(place.root.join("slow-end"), "").unwrap();
+    let began = Instant::now();
+    let said = lane_said(&socket, "retire").expect("the lane answers the ask");
+    let answered_in = began.elapsed();
+    assert_eq!(said["ok"], true, "{said}");
+    assert!(
+        answered_in < Duration::from_secs(1),
+        "answered after {answered_in:?}"
+    );
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(socket.with_extension("lock"))
+        .unwrap();
+    assert!(
+        lock.try_lock_shared().is_err(),
+        "Muse still ends, and the lane holds its owner lock"
+    );
+    wait_for("the lane to let go once Muse has ended", || {
+        lock.try_lock_shared().is_ok()
+    });
+    assert_eq!(noted(&place, "slow-end"), "serve\n");
 }

@@ -106,15 +106,20 @@ impl Lane {
         )?;
         // Kept: the lane that runs is the one wanted. Full: every place runs work, so none starts;
         // nothing waits, the turn runs on exec, and the next warm start may try again (#786).
-        if matches!(place, Place::Kept | Place::Full) {
+        let Place::Free(admission) = place else {
             return Ok(None);
-        }
+        };
         options[key::OPTIONS_DIGEST] = json!(digest);
         let config = profile
             .dir
             .join(format!("muse-lane-{}.json", crate::ids::hex(8)));
         let result = self.spawn(launcher, profile, &options, &config);
         let _ = std::fs::remove_file(config);
+        // Ready: it listens, and every later look sees it. A launch that failed gives its place
+        // back as the admission is dropped.
+        if matches!(result, Ok(Some(_))) {
+            admission.visible();
+        }
         result
     }
 

@@ -192,18 +192,18 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     if let Slot::Running { spool, .. } = &mut lane.slot {
         let _ = spool.lost("Muse serve disconnected", crate::now_ms());
     }
-    let retired = lane
-        .retire_reply
-        .take()
-        .map(|stream| (stream, lane.inspect()));
+    // An idle lane that took a retirement leaves for good from here, whatever follows: it says
+    // so at once, so the Host that asked counts its place now rather than after Muse's end (up
+    // to EXIT_CLEAN_LIMIT, issue 908). It answers nothing else from here, and still lets go of
+    // its locks only once Muse has been reaped.
+    if let Some(mut stream) = lane.retire_reply.take() {
+        let _ = write(&mut stream, &json!({"ok": true, "state": lane.inspect()}));
+    }
     // Muse leaves in order when its input ends, its session log written to its end; one that
     // does not within the bound is ended where it stands, and its lock on the session with it.
     lane.server.close(EXIT_CLEAN_LIMIT);
     drop(lane);
     drop(lock);
-    if let Some((mut stream, state)) = retired {
-        let _ = write(&mut stream, &json!({"ok": true, "state": state}));
-    }
     result
 }
 

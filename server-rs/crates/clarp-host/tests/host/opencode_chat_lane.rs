@@ -46,10 +46,11 @@ use super::*;
 /// only as the session is aborted (an answer to later words, told after a Stop). Each step's word is noted as it begins.
 /// While the file `locked-turn-once` exists, the first
 /// server a turn of its own starts ends before it listens, its database locked, and while
-/// `locked-once` exists the first server a lane starts does. What it was asked is noted in files
-/// beside it.
+/// `locked-once` exists the first server a lane starts does. While the file `slow-end` exists, a
+/// server asked to end takes three seconds to, as OpenCode may take up to five. What it was asked
+/// is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
-import base64, json, os, queue, random, re, string, sys, threading, time
+import base64, json, os, queue, random, re, signal, string, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -81,6 +82,14 @@ if turn_locked.exists() or lane_locked.exists():
         sys.exit(1)
 pid = os.getpid()
 note("starts", str(pid))
+def end_slowly(signum, frame):
+    # Asked to end with the file slow-end there: it takes three seconds, then ends as asked.
+    if (root / "slow-end").exists():
+        note("slow-end", str(pid))
+        time.sleep(3)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(pid, signal.SIGTERM)
+signal.signal(signal.SIGTERM, end_slowly)
 PASSWORD = os.environ["OPENCODE_SERVER_PASSWORD"]
 sessions_file = root / "sessions"
 listeners = []
@@ -616,16 +625,6 @@ fn lane_named(message: &str) -> bool {
             && rest[..12].bytes().all(|b| b.is_ascii_hexdigit())
             && rest[12..].bytes().all(|b| b.is_ascii_alphanumeric())
     })
-}
-
-/// What a lane answers one request with, or `None` when no lane answers on the socket.
-fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
-    let mut stream = std::os::unix::net::UnixStream::connect(socket).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    writeln!(stream, "{}", json!({ "op": op })).ok()?;
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).ok()?;
-    serde_json::from_str(&line).ok()
 }
 
 fn lane_state(socket: &std::path::Path) -> Option<Value> {
@@ -2366,4 +2365,52 @@ fn a_provider_out_of_free_usage_ends_the_turn_as_a_usage_limit_on_a_cold_lane_to
     }
     assert_eq!(world.lines("refused"), ["refused-cold", "refused-lane"]);
     asked(&host, "refused", "ask-after");
+}
+
+/// Issue 908. An idle lane asked to leave says it goes as soon as it has taken the ask, while its
+/// server still ends (here in three seconds; OpenCode's own end may take five): a Host making
+/// room counts its place then, not once the server has gone. Before, the answer came only after
+/// the server had ended, so a start that gives an ask half a second counted no place. The lane
+/// still lets go of its owner lock only once its server has been reaped.
+#[test]
+fn an_idle_lane_asked_to_leave_says_it_goes_before_its_slow_server_has_ended() {
+    let world = world("opencode-lane-slow-end", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "slow", "opencode");
+    asked(&host, "slow", "ask-one");
+    lane_ready(&socket);
+    let lane_pid = lane_state(&socket).unwrap()["pid"].to_string();
+    std::fs::write(world.place.root.join("slow-end"), "").unwrap();
+    let began = Instant::now();
+    let said = lane_said(&socket, "retire").expect("the lane answers the ask");
+    let answered = began.elapsed();
+    assert_eq!(said["ok"], true, "{said}");
+    assert!(
+        answered < Duration::from_secs(1),
+        "answered after {answered:?}"
+    );
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(socket.with_extension("lock"))
+        .unwrap();
+    assert!(
+        lock.try_lock_shared().is_err(),
+        "its server still ends, and the lane holds its owner lock"
+    );
+    wait_for("the lane to let go once its server has ended", || {
+        lock.try_lock_shared().is_ok()
+    });
+    assert!(
+        world.lines("slow-end").contains(&lane_pid),
+        "the lane's server took its time: {:?}",
+        world.lines("slow-end")
+    );
+    assert!(
+        began.elapsed() >= Duration::from_secs(3),
+        "{:?}",
+        began.elapsed()
+    );
 }

@@ -171,15 +171,20 @@ impl Lane {
         )?;
         // Kept: the lane that runs is the one wanted. Full: every place runs work, so none
         // starts, and the turns run on their own servers until a place is free (#786).
-        if matches!(place, Place::Kept | Place::Full) {
+        let Place::Free(admission) = place else {
             return Ok(None);
-        }
+        };
         let options = self.options(profile, start, settings.idle_ms)?;
         let file = profile
             .dir
             .join(format!("opencode-lane-{}.json", crate::ids::hex(8)));
         let result = self.spawn(launcher, profile, start, &options, &file);
         let _ = std::fs::remove_file(file);
+        // Ready: it listens, and every later look sees it. A launch that failed, or did not get
+        // this far, gives its place back as the admission is dropped.
+        if matches!(result, Ok(Some(_))) {
+            admission.visible();
+        }
         result
     }
 

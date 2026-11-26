@@ -238,9 +238,9 @@ impl Lane {
         )?;
         // Kept: the lane wanted is there. Full: every place runs work, so none is started and
         // the agent's turns run in processes of their own until a place is free (issue 786).
-        if matches!(place, Place::Kept | Place::Full) {
+        let Place::Free(admission) = place else {
             return Ok(None);
-        }
+        };
         let mut lane_order = order.clone();
         lane_order.stdin_file = self.endpoint.socket().with_extension("stdin");
         let owned: Vec<PathBuf> = crate::mcp::configure(&mut lane_order, mcp.0, mcp.1.as_deref())
@@ -266,9 +266,14 @@ impl Lane {
         let file = run.join(format!("claude-lane-{}.json", crate::ids::hex(8)));
         let started = self.spawn(launcher, run, &lane_order, &options, &file);
         let _ = std::fs::remove_file(file);
-        if started.is_err() {
-            for owned in &owned {
-                let _ = std::fs::remove_file(owned);
+        match &started {
+            // Ready: it listens, and every later look sees it.
+            Ok(_) => admission.visible(),
+            // The admission is dropped with the attempt, which gives its place back.
+            Err(_) => {
+                for owned in &owned {
+                    let _ = std::fs::remove_file(owned);
+                }
             }
         }
         started.map(Some)

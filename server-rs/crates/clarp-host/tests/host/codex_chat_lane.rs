@@ -408,16 +408,6 @@ pub(super) fn lane_agent(host: &Host, place: &Place, session: &str) -> std::path
     place.root.join("run").join(format!("{id}-cxg.sock"))
 }
 
-/// What a lane answers one request with, or `None` when no lane answers on the socket.
-fn lane_said(socket: &std::path::Path, op: &str) -> Option<Value> {
-    let mut stream = std::os::unix::net::UnixStream::connect(socket).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
-    writeln!(stream, "{}", json!({ "op": op })).ok()?;
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).ok()?;
-    serde_json::from_str(&line).ok()
-}
-
 pub(super) fn lane_lives(socket: &std::path::Path) -> bool {
     lane_said(socket, "inspect").is_some_and(|said| said["ok"] == true)
 }

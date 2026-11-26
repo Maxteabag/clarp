@@ -108,19 +108,24 @@ impl Lane {
             settings.room(),
             want == crate::lane::Want::Needed,
         )?;
-        match place {
+        let admission = match place {
             Place::Kept => return Ok(None),
             // Every place runs work and no goal needs this lane: the chat turn runs in a
             // process of its own instead (issue 786).
             Place::Full => return Err(crate::lane::NoPlace::error()),
-            Place::Free => {}
-        }
+            Place::Free(admission) => admission,
+        };
         let config = profile
             .dir
             .join(format!("native-goal-{}.json", crate::ids::hex(8)));
         let home = bound(login).map(|own| own.home.as_path());
         let result = self.spawn(launcher, profile, &options, &config, home);
         let _ = std::fs::remove_file(config);
+        // Ready: it listens, and every later look sees it. A launch that failed gives its place
+        // back as the admission is dropped.
+        if matches!(result, Ok(Some(_))) {
+            admission.visible();
+        }
         result
     }
 
