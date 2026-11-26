@@ -93,7 +93,7 @@ where
     let seconds = (left_ms + 999) / 1000;
     Some(if seconds < 60 {
         // Rounded up to 5 s: a calm count, not a stopwatch.
-        format!("back in ~{} s", seconds.div_ceil(5) * 5)
+        format!("back in ~{} s", (seconds + 4) / 5 * 5)
     } else if seconds < 3600 {
         format!("back in ~{} min", (seconds + 30) / 60)
     } else {
