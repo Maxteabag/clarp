@@ -2266,7 +2266,8 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
 `fields: {"availability": {...}}` whenever `state`, `text`, `back_at_ms` or `queue_ahead` changes,
 never for a sign of life alone. Patch the row as for other `fields` (`roster_fields`). The Host
 looks at an agent as soon as its status or queue moves, and at every agent every 15 s (a turn that
-fell silent, an account that changed).
+fell silent, an account that changed). Snapshot rows and roster events use the same cached quota observation. A new observation
+wakes the roster watcher.
 
 **A Host that stops.** Just before the Host stops (SIGTERM: an update or an install), every event
 stream is sent one last frame and then ends:

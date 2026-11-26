@@ -126,6 +126,13 @@ fn an_event_stream_open_when_the_host_is_told_to_stop_ends_at_once() {
         heard.extend_from_slice(&chunk[..count]);
     }
 
+    // A FIFO without a reader stalls the optional restart timestamp write.
+    let mark = place.root.join("data/host-stopped-at-ms");
+    nix::unistd::mkfifo(
+        &mark,
+        nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+    )
+    .unwrap();
     let stopping = Instant::now();
     terminate(&host);
     // The stream's last chunk comes, and its connection is closed.
@@ -144,6 +151,13 @@ fn an_event_stream_open_when_the_host_is_told_to_stop_ends_at_once() {
             Err(error) => panic!("the stream did not end after the stop: {error}"),
         }
     }
+    assert_eq!(
+        String::from_utf8_lossy(&heard)
+            .matches("host-updating")
+            .count(),
+        1,
+        "the stream received one update frame before closing"
+    );
     let ended = stopping.elapsed();
     // A few hundred milliseconds; a second allows for a loaded build machine.
     assert!(
