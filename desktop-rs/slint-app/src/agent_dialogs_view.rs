@@ -306,6 +306,14 @@ pub fn wire(window: &AppWindow) {
         app.engine.borrow_mut().send_queued_turn(&id);
         pump_now(app);
     }));
+    globals.on_queue_steer(|id| with_window(|app, _| {
+        app.engine.borrow_mut().steer_queued_turn(&id);
+        pump_now(app);
+    }));
+    globals.on_queue_take_over(|id| with_window(|app, _| {
+        app.engine.borrow_mut().take_over_queued_turn(&id);
+        pump_now(app);
+    }));
     globals.on_queue_delete(|id| with_window(|app, _| {
         app.engine.borrow_mut().delete_queued_turn(&id);
         pump_now(app);

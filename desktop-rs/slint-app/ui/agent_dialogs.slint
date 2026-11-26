@@ -45,6 +45,9 @@ export global AgentDialogs {
     callback queue-refresh();
     callback queue-save(string, string);
     callback queue-send(string);
+    // The queue strip's Steer now and take-over Send now (`queue_steer`).
+    callback queue-steer(string);
+    callback queue-take-over(string);
     callback queue-delete(string);
     callback cancel();
 }

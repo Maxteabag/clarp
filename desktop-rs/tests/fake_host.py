@@ -190,6 +190,10 @@ live_features = False
 # partial: true (older history still being indexed); `page` caps a page
 # below the limit asked, so a check can page with a few rows.
 message_search = {"on": False, "partial": False, "page": 0}
+# Steer now and take over for waiting messages (feature queue_steer): off
+# until /__control/queue-steer turns it on. Then GET /turn-queue items carry
+# `steerable` (a `waiting` item of the user's while its agent works).
+queue_steer = {"on": False}
 # One agent's change in its roster event (feature roster_fields, Rust Host
 # contract 182) and the read of one row, GET /agents/<session> (agent_row,
 # 183): off until /__control/roster-rows turns them on.
@@ -1700,6 +1704,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("stalled_turn")
             if message_search["on"]:
                 features.append("message_search")
+            if queue_steer["on"]:
+                features.append("queue_steer")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
             if chat_view.get("helper"):
@@ -1778,8 +1784,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"messages": team_messages.get(team, [])})
         if url.path == "/turn-queue":
             with state_lock:
-                paused = any(a["session"] == query.get("session", "") and a.get("queue_paused") for a in agents)
-                return self.reply(200, {"items": turn_queue.get(query.get("session", ""), []), "paused": paused})
+                session = query.get("session", "")
+                paused = any(a["session"] == session and a.get("queue_paused") for a in agents)
+                busy = any(a["session"] == session and a.get("busy") for a in agents)
+                items = [dict(i) for i in turn_queue.get(session, [])]
+                if queue_steer["on"]:
+                    for item in items:
+                        item.setdefault("kind", "waiting")
+                        item["steerable"] = busy and item["kind"] == "waiting"
+                return self.reply(200, {"items": items, "paused": paused})
         if url.path == "/attention":
             return self.reply(200, {"items": attention})
         if url.path == "/background-jobs":
@@ -2465,6 +2478,9 @@ class Handler(BaseHTTPRequestHandler):
             global spoken_when_asked
             spoken_when_asked = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/queue-steer":
+            queue_steer["on"] = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/message-search":
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
@@ -2857,6 +2873,23 @@ class Handler(BaseHTTPRequestHandler):
                     if t["team_id"] == team:
                         t.update({"name": body.get("name", t["name"]), "leader": body.get("leader", "")})
             return self.reply(200, {"ok": True})
+        if url.path.startswith("/turn-queue/") and (url.path.endswith("/steer") or url.path.endswith("/take-over")):
+            # Steer now / take over (queue_steer): refused as /__control/fail
+            # says (`code` names the refusal), else the item leaves the queue.
+            item = url.path.split("/")[2]
+            failure = failures.get(url.path)
+            if failure and failure[1] > 0:
+                failure[1] -= 1
+                words = {404: "not waiting", 409: "the running turn cannot be cut"}.get(failure[0], "refused")
+                return self.reply(failure[0], {"error": words, "code": "turn_not_cuttable" if failure[0] == 409 else "not_waiting"})
+            with state_lock:
+                for session, items in turn_queue.items():
+                    turn_queue[session] = [i for i in items if i["queue_id"] != item]
+            for session in list(turn_queue):
+                broadcast({"type": "queue-updated", "session": session})
+            if url.path.endswith("/steer"):
+                return self.reply(202, {"ok": True, "queued": False})
+            return self.reply(202, {"ok": True, "taken_over": True})
         if url.path.startswith("/turn-queue/") and url.path.endswith("/send"):
             item = url.path.split("/")[2]
             # /__control/fail on this path: refused as the Host refuses a

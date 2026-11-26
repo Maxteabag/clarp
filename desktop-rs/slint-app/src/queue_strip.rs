@@ -30,6 +30,8 @@ fn item_id(item: &Value) -> String {
 /// `session`'s waiting messages as the strip lists them, once its queue
 /// is the loaded one (else none: the composer's count line stands in).
 pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
+    // Steer and take over need the Host's `queue_steer` and a running turn.
+    let steering = engine.turn_queue_steer(session) && engine.roster().find(session).is_some_and(|a| a.busy);
     engine
         .turn_queue(session)
         .iter()
@@ -37,10 +39,15 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
         .take(SHOWN)
         .map(|item| {
             let text = item.as_object().map(|o| json::string(o, "text")).unwrap_or_default();
+            // Only a message that met the busy agent may steer; one its
+            // sender asked to wait (`kind: later`) is left for later.
+            let waiting_kind = item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting");
             WaitingTurn {
                 id: item_id(item).into(),
                 text: text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().into(),
                 reading: item.get("status").and_then(Value::as_str) == Some("started"),
+                steer: steering && waiting_kind && item.get("steerable").and_then(Value::as_bool) == Some(true),
+                take_over: steering,
             }
         })
         .collect()
@@ -48,7 +55,11 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
 
 /// The first message of `session`'s that Send now can still hand over.
 pub fn first_waiting(engine: &Engine, session: &str) -> Option<String> {
-    waiting(engine, session).into_iter().find(|w| !w.reading).map(|w| w.id.to_string())
+    first(engine, session).map(|w| w.id.to_string())
+}
+
+fn first(engine: &Engine, session: &str) -> Option<WaitingTurn> {
+    waiting(engine, session).into_iter().find(|w| !w.reading)
 }
 
 /// Loads the open chat's queue while it has waiting messages, again when
@@ -84,11 +95,19 @@ pub fn send_first(app: &App) -> bool {
     let (session, first) = {
         let engine = app.engine.borrow();
         let session = engine.selected_session().to_owned();
-        let first = first_waiting(&engine, &session);
+        let first = first(&engine, &session);
         (session, first)
     };
-    let Some(id) = first.filter(|_| !session.is_empty()) else { return false };
-    app.engine.borrow_mut().send_queued_turn(&id);
+    let Some(item) = first.filter(|_| !session.is_empty()) else { return false };
+    // The strip's first choice for it: Steer now where offered, else Send now.
+    let mut engine = app.engine.borrow_mut();
+    if item.steer {
+        engine.steer_queued_turn(&item.id);
+    } else if item.take_over {
+        engine.take_over_queued_turn(&item.id);
+    } else {
+        engine.send_queued_turn(&item.id);
+    }
     true
 }
 

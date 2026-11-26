@@ -26,7 +26,13 @@ pub(crate) struct TurnQueue {
     /// `queue-updated` on the same refusal.
     refused: String,
     refused_session: String,
+    /// The Host lists `queue_steer`: a waiting message can be read into the
+    /// running turn (`/steer`) or stop it and run now (`/take-over`).
+    steer: bool,
 }
+
+/// The Host feature that offers Steer now and Take over.
+pub const STEER_FEATURE: &str = "queue_steer";
 
 impl Engine {
     /// The loaded queue's items when it is `session`'s, else none.
@@ -54,6 +60,26 @@ impl Engine {
     pub fn turn_queue_refusal(&self, session: &str) -> String {
         on_peer!(self.peer_ref(session), |engine, local| engine.turn_queue_refusal(local));
         if session.is_empty() || session != self.queue.refused_session { String::new() } else { self.queue.refused.clone() }
+    }
+    /// The Host offers Steer now (`queue_steer`) for `session`'s queue.
+    pub fn turn_queue_steer(&self, session: &str) -> bool {
+        on_peer!(self.peer_ref(session), |engine, local| engine.turn_queue_steer(local));
+        self.queue.steer
+    }
+    pub(crate) fn queue_server_info(&mut self, info: &Object) {
+        let has = info
+            .get("capabilities")
+            .and_then(|c| c.get("features"))
+            .and_then(Value::as_array)
+            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(STEER_FEATURE)));
+        if has != self.queue.steer {
+            self.queue.steer = has;
+            // Its items gain or lose `steerable`: read them again.
+            let session = self.queue.session.clone();
+            if !session.is_empty() {
+                self.load_turn_queue(&session);
+            }
+        }
     }
     pub fn turn_queue_error(&self) -> &str {
         on_peer!(self.queue_peer_ref(), |engine, _local| engine.turn_queue_error());
@@ -88,7 +114,7 @@ impl Engine {
         if self.queue.refused_session == self.queue.session {
             self.queue.refused.clear();
         }
-        if path.ends_with("/send") {
+        if path.ends_with("/send") || path.ends_with("/steer") || path.ends_with("/take-over") {
             self.queue.sends.insert(tag.clone());
         }
         match method {
@@ -126,6 +152,27 @@ impl Engine {
             let mut body = json!({});
             self.ask_voice(&mut body);
             self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), body);
+        }
+    }
+
+    /// Reads a waiting message into the running turn now (`queue_steer`).
+    pub fn steer_queued_turn(&mut self, queue_id: &str) {
+        on_peer!(self.queue_peer_mut(), |engine, _local| engine.steer_queued_turn(queue_id));
+        if !queue_id.is_empty() {
+            let mut body = json!({});
+            self.ask_voice(&mut body);
+            self.queue_action("POST", &format!("{}/steer", Self::queue_item_path(queue_id)), body);
+        }
+    }
+
+    /// Stops the running turn and runs this waiting message now
+    /// (`queue_steer`).
+    pub fn take_over_queued_turn(&mut self, queue_id: &str) {
+        on_peer!(self.queue_peer_mut(), |engine, _local| engine.take_over_queued_turn(queue_id));
+        if !queue_id.is_empty() {
+            let mut body = json!({});
+            self.ask_voice(&mut body);
+            self.queue_action("POST", &format!("{}/take-over", Self::queue_item_path(queue_id)), body);
         }
     }
 
@@ -177,7 +224,9 @@ impl Engine {
             self.queue.loading = false;
         } else if tag.starts_with("queue-action:") {
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
-            if self.queue.sends.remove(tag) && status == 409 {
+            // Refused in the Host's words: a turn still runs, the message is
+            // not steerable, another sender's, or already gone (404).
+            if self.queue.sends.remove(tag) && matches!(status, 404 | 409) {
                 self.queue.refused = if message.trim().is_empty() { "a turn still runs".to_owned() } else { message.trim().to_owned() };
                 self.queue.refused_session = session.clone();
                 self.changes.push(Change::Queue(session));
