@@ -1,15 +1,17 @@
 //! `--check agent-availability` (#918, feature `agent_availability`): when
 //! the Host says an agent cannot answer now (`availability` on its snapshot
 //! row, then live in an `agent-roster` event of kind `availability`), the
-//! open chat's header subtitle carries one short line with why and for how
-//! long ("Restarting · ~20 s"); there is no banner. Busy shows there only
-//! while the running turn answers other agents ("Answering other agents · 1
-//! ahead of you"): on the user's own turn the header says "working" and the
-//! working indicator is as it was. No sign of life shows over the user's
-//! turn too. The chat list's row keeps its own line, as before ("Restarting
-//! · back in ~20 s", "Busy · 1 message ahead of you"). `ok` takes both away. A `host-updating` event
-//! puts "Host updating" on every agent until the desktop reconnects. A Host
-//! without the feature shows nothing new, whatever its rows carry.
+//! open chat's header carries one short line under the agent's name, beside
+//! its avatar ("Restarting · ~20 s"); there is no banner, and the name is no
+//! longer on the frame's border. Busy shows there only while the running
+//! turn answers other agents ("Answering other agents · 1 ahead of you"):
+//! on the user's own turn the header says "working" and the working
+//! indicator at the bottom is drawn as before. No sign of life shows over
+//! the user's turn too. The chat list's row keeps its own line, as before
+//! ("Restarting · back in ~20 s", "Busy · 1 message ahead of you"). `ok`
+//! takes both away. A `host-updating` event puts "Host updating" on every
+//! agent until the desktop reconnects. A Host without the feature shows
+//! nothing new, whatever its rows carry.
 
 use std::time::Duration;
 
@@ -26,17 +28,39 @@ fn activity(window: &crate::AppWindow, session: &str) -> String {
     window.get_chats().iter().find(|c| c.session == session).map(|c| c.activity.to_string()).unwrap_or_default()
 }
 
-/// The header's line as drawn: the frame's info text of the open pane.
-fn header_info() -> String {
+/// The drawn element of the open pane with accessible id `prefix<pane id>`
+/// and a size: its accessible label, or None.
+fn drawn(prefix: &str) -> Option<String> {
     use i_slint_backend_testing::ElementQuery;
-    let Some(window) = crate::window() else { return String::new() };
-    let id = format!("pane-info:{}", view().id);
+    let window = crate::window()?;
+    let id = format!("{prefix}{}", view().id);
     ElementQuery::from_root(&window)
-        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0 && e.size().height > 0.0)
         .find_first()
         .and_then(|e| e.accessible_label())
         .map(|l| l.to_string())
-        .unwrap_or_default()
+}
+
+/// The header's subtitle as drawn under the agent's name ("" when none).
+fn header_info() -> String {
+    drawn("pane-subtitle:").unwrap_or_default()
+}
+
+/// The pane ids drawn now, for a check that found none it looked for.
+fn drawn_ids() -> Vec<String> {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return vec!["no window".into()] };
+    ElementQuery::from_root(&window)
+        .match_predicate(|e| e.accessible_id().is_some_and(|a| a.starts_with("pane-")))
+        .find_all()
+        .into_iter()
+        .filter_map(|e| Some(format!("{}={:?} {}x{}", e.accessible_id()?, e.accessible_label().unwrap_or_default(), e.size().width, e.size().height)))
+        .collect()
+}
+
+/// The bottom working indicator ("Working…", `TypingIndicator`) as drawn.
+fn indicator_drawn() -> bool {
+    super::labelled("Agent is working").is_some_and(|(_, _, width, height)| width > 0.0 && height > 0.0)
 }
 
 /// A row's `availability` as the Host writes it: its text without the
@@ -94,7 +118,9 @@ fn shows(name: &'static str, header_prefix: &'static str, row_prefix: &'static s
         }
         check(row.starts_with(row_prefix), &format!("{name}: the chat row reads {row_prefix:?}, as before: {row:?}"));
         check(line.starts_with(header_prefix), &format!("{name}: the pane's line reads {header_prefix:?}: {line:?}"));
-        check(header.contains(header_prefix), &format!("{name}: the header shows it: {header:?}"));
+        check(header.contains(header_prefix), &format!("{name}: the header shows it under the name: {header:?} (drawn: {:?})", if header.is_empty() { drawn_ids() } else { vec![] }));
+        check(drawn("pane-name:").as_deref() == Some("Agent profile"), &format!("{name}: the agent's name is drawn beside its avatar: {:?}", drawn("pane-name:")));
+        check(drawn("pane-info:").is_none(), &format!("{name}: and not on the frame's border: {:?}", drawn("pane-info:")));
         check(!header.contains("working"), &format!("{name}: it takes the place of the header's working: {header:?}"));
         shot(&out, shot_name);
         true
@@ -145,18 +171,23 @@ pub fn agent_availability_check(out: String) {
         // ---- quiet: an idle agent that cannot answer says why, in short
         shows("restarting", "Restarting · ~", "Restarting · back in ~", out.clone(), "availability-02-restarting"),
         // ---- the user's own turn: busy is the working indicator's
-        ("own turn", Box::new(|_, _, _| {
+        ("own turn", Box::new(|app, _, _| {
+            // The working indicator at the bottom of the chat shows with
+            // this setting (Settings: show "Working…" until the reply is
+            // ready); it is on here so the check sees it drawn.
+            app.engine.borrow_mut().set_show_when_ready(true);
             let sent = rachel_turn(Some("user"), availability("ok", "", None, 0));
             check(sent.is_ok(), &format!("Rachel works on the user's message: {sent:?}"));
             true
         })),
         ("own turn working", Box::new(|_, _, elapsed| {
             let (pane, header) = (view(), header_info());
-            if (!pane.busy || !header.contains("working")) && elapsed < Duration::from_secs(5) {
+            if (!pane.busy || !header.contains("working") || !indicator_drawn()) && elapsed < Duration::from_secs(5) {
                 return false;
             }
-            check(pane.availability.is_empty() && header.contains("working"), &format!("the header says working: {header:?}"));
-            WORKING.with(|w| w.set(Some(pane.working)));
+            check(pane.availability.is_empty() && header.contains("working"), &format!("the header says working: {header:?} (drawn: {:?})", drawn_ids()));
+            check(pane.working && indicator_drawn(), &format!("the working indicator is drawn at the bottom: {} {}", pane.working, indicator_drawn()));
+            WORKING.with(|w| w.set(Some(pane.working && indicator_drawn())));
             let sent = rachel_event(availability("busy", "Busy · 1 message ahead of you", None, 1));
             check(sent.is_ok(), &format!("the Host says Rachel is busy: {sent:?}"));
             true
@@ -170,8 +201,8 @@ pub fn agent_availability_check(out: String) {
             check(pane.availability.is_empty(), &format!("busy on the user's own turn is no line: {:?}", pane.availability));
             check(header.contains("working") && !header.contains("Busy") && !header.contains("Answering"), &format!("the header says working, as before: {header:?}"));
             check(row.starts_with("Busy · 1 message ahead of you"), &format!("the chat row keeps its line, as before: {row:?}"));
-            let before = WORKING.with(std::cell::Cell::get);
-            check(before == Some(pane.working), &format!("the working indicator is as it was: {before:?} then {}", pane.working));
+            let (before, now) = (WORKING.with(std::cell::Cell::get), pane.working && indicator_drawn());
+            check(before == Some(true) && now, &format!("the working indicator is drawn, as it was: {before:?} then {now}"));
             shot(&out_own, "availability-03-own-turn");
             true
         })),
@@ -182,6 +213,10 @@ pub fn agent_availability_check(out: String) {
             true
         })),
         shows("other agents", "Answering other agents · 1 ahead of you", "Busy · 1 message ahead of you", out.clone(), "availability-04-other-agents"),
+        ("other agents indicator", Box::new(|_, _, _| {
+            check(view().working && indicator_drawn(), "the working indicator stays as it is while it answers other agents");
+            true
+        })),
         // ---- no sign of life shows over the user's own turn
         ("silent", Box::new(|_, _, _| {
             let silent = json!({"state": "unresponsive", "text": "Not responding", "since_ms": now(), "back_at_ms": null,

@@ -4,6 +4,7 @@ import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
+import { AgentAvatar } from "avatar.slint";
 import { KeyHint } from "artifacts.slint";
 
 // Typing in one pane shows in the others on the same chat: the text goes
@@ -84,6 +85,11 @@ export struct PaneView {
     id: string,
     session: string,
     name: string,
+    // The chat header's avatar: the agent's portrait (empty until made),
+    // else its symbol or initial.
+    portrait: image,
+    initial: string,
+    symbol: string,
     workspace-kind: string,
     workspace-label: string,
     model: string,
@@ -218,6 +224,12 @@ export component Pane inherits Rectangle {
     // The header's quiet line: what is set, joined by dots, none trailing.
     property <string> header-info: root.join-info(root.join-info(root.join-info(root.pane.host, root.pane.moved), root.pane.moving),
         root.pane.availability != "" ? root.pane.availability : root.join-info(root.pane.status, root.pane.busy ? "working" : ""));
+    // An agent's chat has a header inside its frame: its avatar, its name
+    // and under the name the quiet line (`header-info`), where why it
+    // cannot answer now shows (#918; Peter, 26 Nov 2026). A pair room and
+    // an empty pane keep the frame's title.
+    property <bool> agent-header: root.pane.session != "" && !root.pane.pair;
+    property <length> header-height: root.agent-header ? 38px : 0px;
     pure function join-info(a: string, b: string) -> string {
         return a == "" ? b : b == "" ? a : a + "  ·  " + b;
     }
@@ -530,9 +542,9 @@ export component Pane inherits Rectangle {
             accessible-role: list;
             accessible-id: "chat:" + root.pane.id;
             x: Frame.side;
-            y: Frame.top;
+            y: Frame.top + root.header-height;
             width: parent.width - 2 * Frame.side;
-            height: parent.height - Frame.top - Frame.bottom;
+            height: parent.height - Frame.top - Frame.bottom - root.header-height;
             rows: root.pane.messages;
             pane-id: root.pane.id;
             measure: root.pane.measure;
@@ -548,19 +560,68 @@ export component Pane inherits Rectangle {
             reached-top => { root.load-older(); }
             journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
           }
+          // The agent's header: avatar, name (its profile one click away)
+          // and the quiet line under it: its Host where there are several,
+          // a move, its status, working, or why it cannot answer now. The
+          // folder, model and effort are in its profile (the owner's
+          // rubric: no detail every reader has to read past).
+          if root.agent-header: Rectangle {
+            x: Frame.side;
+            y: Frame.top;
+            width: parent.width - 2 * Frame.side;
+            height: root.header-height;
+            background: root.background;
+            header-avatar := AgentAvatar {
+              x: 8px;
+              y: (parent.height - self.height) / 2;
+              size: 28px;
+              portrait: root.pane.portrait;
+              name: root.pane.name;
+              initial: root.pane.initial;
+              symbol: root.pane.symbol;
+              initial-color: Palette.chrome-text;
+            }
+            header-name := Text {
+              x: header-avatar.x + header-avatar.width + 10px;
+              // Fixed, so the name never moves when the line comes or goes.
+              y: 3px;
+              height: 17px;
+              width: Math.min(self.preferred-width, parent.width - self.x - 8px);
+              text: root.pane.name;
+              color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
+              font-size: 12 * Look.unit;
+              font-weight: 700;
+              vertical-alignment: center;
+              overflow: elide;
+              accessible-role: button;
+              accessible-id: "pane-name:" + root.pane.id;
+              accessible-label: "Agent profile";
+              accessible-action-default => { ProfileBridge.open-for-pane(root.pane.id); }
+              name-touch := TouchArea { mouse-cursor: pointer; clicked => { ProfileBridge.open-for-pane(root.pane.id); } }
+            }
+            if root.header-info != "": Text {
+              x: header-name.x;
+              y: 20px;
+              height: 15px;
+              width: parent.width - self.x - 8px;
+              text: root.header-info;
+              color: root.pane.availability != "" ? Palette.warning : Palette.muted;
+              font-size: 11 * Look.unit;
+              vertical-alignment: center;
+              overflow: elide;
+              accessible-role: text;
+              accessible-id: "pane-subtitle:" + root.pane.id;
+              accessible-label: root.header-info;
+            }
+          }
           // In the composer letters type: Ctrl+H is the way back to the chat.
-          // The agent's name sits on the right of the frame's border (there is
-          // no separate header), with only what matters while reading: its
-          // Host where there are several, a move, its status, working. The
-          // folder, model and effort are one click away in its profile (the
-          // owner's rubric: no detail every reader has to read past).
+          // The frame's title carries the keyboard region; an agent's name
+          // and line are in its header above, a pair room's or an empty
+          // pane's name on the right of the border.
           PaneFrame {
-            info-name: root.pane.session == "" ? "No agent selected" : root.pane.name;
-            info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
-                : root.header-info;
-            info-color: root.pane.session != "" && !root.pane.pair && root.pane.availability != "" ? Palette.warning : Palette.muted;
+            info-name: root.pane.session == "" ? "No agent selected" : root.agent-header ? "" : root.pane.name;
+            info: root.agent-header ? "" : root.pane.workspace-label;
             info-id: "pane-info:" + root.pane.id;
-            info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
             // In vim mode the title says the mode, as Vim's last line does.
             key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
             label: "Chat";

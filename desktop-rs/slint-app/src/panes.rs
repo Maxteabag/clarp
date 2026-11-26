@@ -664,6 +664,9 @@ impl App {
     fn header(&self, engine: &Engine, view: &mut PaneView, session: &str) {
         let agent = engine.roster().find(session);
         view.name = if session.is_empty() { SharedString::new() } else { engine.chat_name(session).into() };
+        // The header's avatar without its portrait (`header_portrait`).
+        view.initial = crate::view::initial(&view.name);
+        view.symbol = agent.map(|a| a.avatar_symbol.clone()).unwrap_or_default().into();
         // The status line starts with the Host badge, then a moved agent's
         // "Moved to …" (#651, Host contract 125).
         view.host = engine.host_badge(session).into();
@@ -770,6 +773,17 @@ impl App {
         let Some(agent) = engine.roster().find(session) else { return String::new() };
         let Some(since) = clarp_core::stall::stop_offered(agent) else { return String::new() };
         clarp_core::stall::indicator(since, chrono::Utc::now().timestamp_millis(), agent.queued_turn_count > 0)
+    }
+
+    /// The chat header's portrait: the one the chat list draws (its size,
+    /// already made), or none for an empty pane or a pair room.
+    fn header_portrait(&self, session: &str) -> slint::Image {
+        if session.is_empty() || session.starts_with("pair:") {
+            return slint::Image::default();
+        }
+        let sizes = crate::avatar_view::sizes(self);
+        let compact = crate::window().is_some_and(|w| w.get_explorer_compact());
+        crate::avatar_view::portrait(self, session, if compact { sizes.compact } else { sizes.row })
     }
 
     /// Why the open chat's agent cannot answer the user now (#918), the
@@ -1384,11 +1398,17 @@ impl App {
                 self.messages(pane);
             }
             let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) | Change::Queue(s) if *s == session));
+            // A portrait made since: the header's avatar takes it.
+            if !(composer || everything) && changes.iter().any(|c| matches!(c, Change::Avatars)) {
+                pane.view.portrait = self.header_portrait(&session);
+            }
             if composer || everything {
                 let engine = self.engine.borrow();
                 let mut view = pane.view.clone();
                 self.header(&engine, &mut view, &session);
                 Self::composer(&engine, &mut view, &session);
+                drop(engine);
+                view.portrait = self.header_portrait(&session);
                 pane.view = view;
             }
             pane.view = self.pane_view(pane);
