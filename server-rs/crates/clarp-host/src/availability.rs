@@ -189,7 +189,11 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
             _ => {}
         }
     }
-    if facts.broken.is_some() {
+    // An agent being opened is starting again after the Host started; one being made now is
+    // not: it is opened in a moment and can answer.
+    let made_now =
+        facts.broken == Some(crate::agent::OPENING) && facts.created_at_ms >= facts.host_started_ms;
+    if facts.broken.is_some() && !made_now {
         return at(
             "restarting",
             "Restarting".into(),
@@ -808,20 +812,24 @@ mod tests {
         live.failed_attempts = 0;
         status.live = Some(live);
         assert_eq!(decided(&status, &Value::Null, None).state, "busy");
-        // An agent being opened after the Host started.
-        let opening = decide(&Facts {
-            status: &idle(),
-            broken: Some(crate::agent::OPENING),
-            backend_quota: &Value::Null,
-            bound: false,
-            spare_seat: false,
-            last_alive_ms: None,
-            start_ms: START_DEFAULT_MS,
-            created_at_ms: 5,
-            host_started_ms: 7,
-            now_ms: NOW,
-        });
-        assert_eq!((opening.state, opening.since_ms), ("restarting", 7));
+        // An agent being opened after the Host started; one made since is not restarting.
+        let opening = |created_at_ms: i64| {
+            decide(&Facts {
+                status: &idle(),
+                broken: Some(crate::agent::OPENING),
+                backend_quota: &Value::Null,
+                bound: false,
+                spare_seat: false,
+                last_alive_ms: None,
+                start_ms: START_DEFAULT_MS,
+                created_at_ms,
+                host_started_ms: 7,
+                now_ms: NOW,
+            })
+        };
+        let reopened = opening(5);
+        assert_eq!((reopened.state, reopened.since_ms), ("restarting", 7));
+        assert_eq!(opening(8).state, "ok");
     }
 
     #[test]

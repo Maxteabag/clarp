@@ -44,6 +44,12 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
     );
     let heard = host.listen();
     let session = host.new_agent("Avail");
+    // A new agent is never shown as restarting while it is being opened.
+    let idle = availability_of(&host, &session);
+    assert_ne!(idle["state"], "restarting", "{idle}");
+    wait_for("the new agent to be opened", || {
+        availability_of(&host, &session)["state"] == "ok"
+    });
     let idle = availability_of(&host, &session);
     assert_eq!(
         shown(&idle),
