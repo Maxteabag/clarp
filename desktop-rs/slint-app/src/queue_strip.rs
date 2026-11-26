@@ -103,21 +103,9 @@ pub fn chip(waiting: &[WaitingTurn]) -> Chip {
 /// from the Host every 30 seconds while anything of it waits, so an entry
 /// already sent or cleared never lingers.
 pub fn tick(app: &App) {
-    let session = {
-        let Ok(engine) = app.engine.try_borrow() else { return };
-        let session = engine.selected_session().to_owned();
-        // The line shows while the count says something waits: that count
-        // is what a stale read would leave wrong.
-        let waits = engine.queue_count(&session) > 0;
-        let due = engine.turn_queue_older_than(&session, std::time::Duration::from_secs(clarp_core::queue_line::REREAD_SECS));
-        if session.is_empty() || session.starts_with("pair:") || !waits || !due {
-            return;
-        }
-        session
-    };
-    if let Ok(mut engine) = app.engine.try_borrow_mut() {
-        engine.load_turn_queue(&session);
-    }
+    // `follow` reads it again once its last read is 30 seconds old; the
+    // clock makes sure that happens with nothing else to refresh the window.
+    follow(app);
 }
 
 /// The first message of `session`'s that Send now can still hand over.
@@ -150,7 +138,7 @@ pub fn follow(app: &App) {
     // Read again when the count changes, and every half minute while
     // anything shows, so the strip follows the Host even when an event
     // that emptied it never came.
-    let fresh = LAST_READ.with(|t| t.get().is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30)));
+    let fresh = LAST_READ.with(|t| t.get().is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(clarp_core::queue_line::REREAD_SECS)));
     if loaded == session && FOLLOWED.with(|f| *f.borrow() == key) && fresh {
         return;
     }
