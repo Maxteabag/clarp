@@ -19,11 +19,12 @@ const DRAIN: Duration = Duration::from_secs(5);
 const RESTART_MARK_BUDGET: Duration = Duration::from_millis(100);
 
 /// Close every event stream immediately when the Host is asked to stop (issue 880).
-/// The planned restart frame uses the estimate loaded at startup.
+/// The planned restart frame uses the estimate loaded at startup. It runs as a task of its own
+/// while the rest of the start goes on beside it (issue 935).
 pub(super) async fn serve(
     listener: TcpListener,
     router: Router,
-    app: &clarp_host::edge::App,
+    app: clarp_host::edge::App,
     restart_ms: i64,
 ) -> io::Result<()> {
     let hub = &app.hub;
