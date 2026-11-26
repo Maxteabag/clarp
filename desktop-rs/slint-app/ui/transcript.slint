@@ -695,7 +695,12 @@ export component Block inherits VerticalLayout {
         property <length> pad: 12px;
         property <int> count: root.block.columns.length;
         property <length> natural: root.block.table-chars * self.char + self.count * self.pad + 2px;
-        property <float> room: Math.max(0px, self.width - 2px) / 1px;
+        // The room the columns share, copied when the width changes rather
+        // than bound to it: the cells' widths come from it, and a binding
+        // would make the block's width depend on itself.
+        property <float> room;
+        init => { self.room = Math.max(0px, self.width - 2px) / 1px; }
+        changed width => { self.room = Math.max(0px, self.width - 2px) / 1px; }
         // The furthest the scrolled part can start: 1 when it all fits.
         property <int> end: TableFit.end(root.block.columns, self.room, self.char / 1px, self.pad / 1px);
         property <bool> wide: self.end > 1;
