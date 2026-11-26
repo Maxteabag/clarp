@@ -3320,7 +3320,8 @@ impl Worker {
                     break;
                 }
             }
-            let plan = self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
+            let plan =
+                self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
             if matches!(plan, Plan::Direct(_)) {
                 *admission = Admission::Direct;
             }

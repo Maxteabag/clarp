@@ -703,9 +703,7 @@ impl Actor {
         match self.backend.steers() {
             Steers::No => true,
             Steers::Stdin => !live.steering.stream.can_join() || live.steering.input_skipped,
-            Steers::Words => {
-                live.steering.lane_end.is_some() || !live.steering.stream.can_join()
-            }
+            Steers::Words => live.steering.lane_end.is_some() || !live.steering.stream.can_join(),
         }
     }
 

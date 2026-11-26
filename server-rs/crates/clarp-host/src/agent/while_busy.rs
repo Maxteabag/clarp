@@ -49,7 +49,8 @@ impl Worker {
         let Some(actor) = self.actor.as_ref() else {
             return Plan::AsAlways;
         };
-        let owners = admission == Admission::Queue && message.origin.is_user_send() && !coordination;
+        let owners =
+            admission == Admission::Queue && message.origin.is_user_send() && !coordination;
         if !owners || actor.live_turn().is_none() {
             return Plan::AsAlways;
         }

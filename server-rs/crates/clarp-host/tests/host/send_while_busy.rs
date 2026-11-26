@@ -108,7 +108,10 @@ fn the_owner_sets_what_send_does_while_the_agent_works_and_every_app_is_told() {
     });
     let changed = host.post("/send-settings", json!({"while_busy": "after_turn"}));
     assert_eq!(changed, json!({"while_busy": "after_turn"}));
-    assert_eq!(host.get("/send-settings"), json!({"while_busy": "after_turn"}));
+    assert_eq!(
+        host.get("/send-settings"),
+        json!({"while_busy": "after_turn"})
+    );
     wait_for("the change told to the apps", || {
         events.lock().unwrap().iter().any(|event| {
             event["type"] == "send-settings-updated" && event["while_busy"] == "after_turn"
@@ -123,7 +126,10 @@ fn the_owner_sets_what_send_does_while_the_agent_works_and_every_app_is_told() {
         let (status, refused) = host.ask("POST", "/send-settings", Some(&body));
         assert_eq!(status, 400, "{body}: {refused}");
     }
-    assert_eq!(host.get("/send-settings"), json!({"while_busy": "after_turn"}));
+    assert_eq!(
+        host.get("/send-settings"),
+        json!({"while_busy": "after_turn"})
+    );
     // A request from an agent's own turn is refused, as for the owner's other settings.
     let body = json!({"while_busy": "take_over"}).to_string();
     let headers = [("X-Clarp-Turn", "a-turn")];
@@ -136,7 +142,10 @@ fn the_owner_sets_what_send_does_while_the_agent_works_and_every_app_is_told() {
         body.as_bytes(),
     );
     assert_eq!(answered.status, 403);
-    assert_eq!(host.get("/send-settings"), json!({"while_busy": "after_turn"}));
+    assert_eq!(
+        host.get("/send-settings"),
+        json!({"while_busy": "after_turn"})
+    );
     let changed = host.post("/send-settings", json!({"while_busy": "take_over"}));
     assert_eq!(changed["while_busy"], "take_over");
     // A send names a value of the three, or none.
@@ -210,7 +219,9 @@ fn a_busy_send_waits_or_takes_over_as_it_asks_and_without_asking_waits_as_always
 
     // Take over: the running turn stops now and the send runs next.
     host.send(&session, "sleep 60", "long-again");
-    wait_for("the turn to run again", || host.state(&session) == "thinking");
+    wait_for("the turn to run again", || {
+        host.state(&session) == "thinking"
+    });
     let taken = send_while_busy(&host, &session, "taken", "taken", "take_over");
     assert_eq!(taken["while_busy"], "take_over", "{taken}");
     assert!(taken.get("fallback").is_none(), "{taken}");
@@ -274,7 +285,10 @@ fn after_the_turn_waits_where_the_turn_could_take_it_and_steer_is_read_in_at_onc
     // It is not read in: it waits while the turn goes on, and can still be steered by hand.
     std::thread::sleep(Duration::from_millis(700));
     assert!(waiting(&host, &session, "later"));
-    assert_eq!(rows_saying(&host, &session, "assistant", "answered both"), 0);
+    assert_eq!(
+        rows_saying(&host, &session, "assistant", "answered both"),
+        0
+    );
     let (status, steered) = host.ask("POST", "/turn-queue/later/steer", None);
     assert_eq!(status, 202, "{steered}");
     wait_for("the answer to both", || {

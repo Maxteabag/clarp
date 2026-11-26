@@ -181,8 +181,6 @@ mod question_cards;
 mod queue_provenance;
 #[path = "host/queue_steer.rs"]
 mod queue_steer;
-#[path = "host/send_while_busy.rs"]
-mod send_while_busy;
 #[path = "host/queue_together.rs"]
 mod queue_together;
 #[path = "host/quota_near.rs"]
@@ -205,6 +203,8 @@ mod render_spec_export;
 mod roster_fields;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
+#[path = "host/send_while_busy.rs"]
+mod send_while_busy;
 #[path = "host/source_trace.rs"]
 mod source_trace;
 #[path = "host/speech_unset.rs"]
