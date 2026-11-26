@@ -377,8 +377,16 @@ pub fn buttons_check(out: String) {
             check(drawn(&format!("queue-manage:{}", app_now().active_id())), "Manage stays on the line");
             check(drawn("queue-send:q3"), "and Send now for the first");
             check_window_size_free(window, "with the strip folded");
-            shot(&out8, "buttons-08-queue-folded");
             check(crate::queue_strip::shown(&app_now().engine.borrow()), "the queue shows by default");
+            true
+        })),
+        // The saved frame is the last one drawn: the folded line is drawn
+        // by now, then Hide queue (Ctrl+K) takes the strip away.
+        ("folded shot", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            shot(&out8, "buttons-08-queue-folded");
             crate::commands::run(&app_now(), window, "toggle-queue");
             true
         })),
