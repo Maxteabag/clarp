@@ -139,6 +139,19 @@ newer message, as above, and their message runs next. Those are the user's actio
 from the app; do not call them for the user, and do not use them for your own
 messages, which they refuse.
 
+What the user's Send does while an agent works is one owner setting on a Rust Host
+from contract 201 (feature `send_while_busy`): `GET /send-settings` says `while_busy`,
+`steer` (the default), `after_turn` or `take_over`; the apps send it with the user's
+messages. With `steer`, a user message the running turn's tool cannot take at all
+(no steering for that backend, a turn running beside its lane, a terminal open on the
+tool, a turn whose input already ended) stops that turn and runs next, just like a take-over,
+so you can get a turn ended as stopped for a newer message even behind the user's own
+turn. With `after_turn` it waits for the turn; with `take_over` it stops the turn.
+A message that names a file or begins with `/` waits wherever the tool takes only words.
+This acts only on the user's own sends. Your messages, a schedule's and an
+automation's wait as above, whatever `while_busy` they name. The setting is the
+owner's (`POST /send-settings`, refused from an agent's turn); do not change it unless asked to.
+
 Messages from agents keep a turn each. The user's own messages that waited while you were
 busy (because your tool could not take them into the running turn) do not: on a Rust Host from contract 169 (feature `queued_read_together`) they reach you
 together in one prompt that says so, numbered `[1]`, `[2]`, … in the order sent. Read all of

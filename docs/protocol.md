@@ -1320,6 +1320,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
 | `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only, and only to a Live-capable client: an iPhone's VoIP registration or an Android phone's push row declares `agent_live_v1`); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
+| `send-settings-updated` | `while_busy` | The owner changed what Send does while the agent works (feature `send_while_busy`, Rust Host contract 201): `steer`, `after_turn` or `take_over`. Send it with the user's sends from now on. |
 | `lane-settings-updated` | `codex_chat_lane`, `claude_chat_lane`, `muse_chat_lane`, `opencode_chat_lane`, `most`, `memory_mb`, `idle_minutes`; contracts 186 to 193 also carried `pressure_cpu_percent`, `pressure_io_percent`, `pressure_memory_percent` | The owner changed the settings of lanes on this Host (feature `lane_settings`, Rust Host contract 178). Read `GET /lane-settings` again, for what the lanes hold as well. See [the owner's settings of lanes](#the-owners-settings-of-lanes-lane-settings-feature-lane_settings-rust-host-contract-178). |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
@@ -1802,6 +1803,60 @@ follow as for a send or a Stop. Which to offer: the live turn's `steerable` ([Li
 items](live-items.md) §1.4), also on `GET /turn-queue` as `steerable`: `true`, offer steer on
 the owner's waiting messages; `false` while a turn runs, offer take-over. An older Host has
 neither: offer nothing.
+
+**What Send does while the agent works** (Rust Host contract 201, feature `send_while_busy`,
+issue 920). One owner setting of the Host's, the same in every app:
+
+- `GET /send-settings` answers `{"while_busy": "steer"}`. The value is `steer` (Steer now, the
+  default), `after_turn` (After the turn) or `take_over` (Stop and send). A full device, the
+  Host's token and a limited device may read it.
+- `POST /send-settings` with `{"while_busy": "..."}` (the owner's token or a full device; a
+  request with an agent's turn token is refused 403 `agents_may_not`) answers the setting and
+  sends every client `{"type": "send-settings-updated", "while_busy": "..."}` when it changed.
+  Another value, or none, is refused 400.
+
+`POST /send` takes `while_busy` (one of the three; another value is refused 400). An app that
+knows the feature sends the setting's value with every send, or the user's choice for that one
+send. Without it a busy send behaves exactly as before. Only the user's own send said to the
+agent acts on it (origin `user` or `oracle`, not `queue_if_busy`, not another agent's, a
+schedule's or an automation's send, which wait as before whatever they name), and only while
+a turn runs:
+
+- `steer`: read into the running turn as above. Where the turn's tool cannot take words during
+  this turn at all (a backend without steering, a Codex, Muse or OpenCode turn whose chat lane
+  is off or that runs in a process of its own beside the lane, a terminal open on the agent's
+  tool, a Claude Code or `agy-acp` turn whose result came), the turn is stopped and the send runs
+  next, as a take-over. Where the tool will take words but not yet (its process or lane not
+  ready), the send waits and is read in as soon as the turn says `steerable`; if the turn ends
+  first it runs next. Where the tool takes words but not this send (on `agy-acp`, a send that
+  names a file or begins with `/`), it waits for its own turn.
+- `after_turn`: waits for the running turn and runs next, also where it could be read in, and
+  also behind a turn that is not a person's. It stays a waiting message: the user can still
+  steer it or have it take over (`POST /turn-queue/<id>/steer`, `/take-over`), and a later
+  send that is read into the turn takes it in first, as the user's older words always go first.
+- `take_over`: stops the running turn now and runs the send next, as `POST
+  /turn-queue/<id>/take-over` does: the queue is not held, and a cut turn that was not a
+  person's leaves the agent its note.
+
+A turn that cannot be cut (a Codex native goal's own turn, the tool's compaction or summary for
+a move) is waited for, whatever was asked. Where a conversation fork answers the user beside
+the agent's own turn (feature `conversation_fork`), `steer` keeps that; `after_turn` waits.
+
+The send's answer then carries `while_busy`, what the Host did (`steer`, `after_turn` or
+`take_over`), and, where that is not what was asked, `fallback`:
+
+```json
+{"ok": true, "queued": true, "while_busy": "take_over",
+ "fallback": {"from": "steer", "to": "take_over", "reason": "not_steerable",
+              "text": "This agent can't take a message mid-turn: stopped and sent"}}
+```
+
+`reason` is `not_steerable` (the tool cannot take words in this turn), `not_words` (a file or
+`/` command, `to: after_turn`) or `not_cuttable` (the turn cannot be stopped, `to: after_turn`);
+show `text` for a reason you do not know. `while_busy: "steer"` with `queued: true` means it
+waits to be read in. A send that found no turn running, or that is not the user's own,
+carries neither field. An older Host has no `/send-settings` and ignores `while_busy`: keep the
+behavior above and show no setting.
 
 **The user's word goes first** (feature `queue_user_first`). An agent takes one
 queued item each time a turn ends. An item that carries the user's own word is
