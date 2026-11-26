@@ -108,6 +108,18 @@ fn shown<'a>(shelves: &'a [Shelf<'a>], now: i64) -> Vec<Shown<'a>> {
     shown
 }
 
+/// Agent IDs counted by the badge, in the same order as the inbox. The
+/// original badge examined at most 50 pages of 200, including archived rows.
+pub fn blocking_agents(shelves: &[Shelf<'_>], now: i64) -> Vec<String> {
+    shown(shelves, now)
+        .into_iter()
+        .take(10_000)
+        .take_while(|row| row.bucket == "blocking")
+        .filter(|row| row.artifact.archived_at.is_none())
+        .map(|row| row.artifact.agent_id.clone())
+        .collect()
+}
+
 /// The name of a list: another whenever anything that is shown of it is another. Every
 /// change of what an artifact holds moves its `updated_at`, so that stands for the rest.
 fn name_of(shown: &[Shown<'_>]) -> String {

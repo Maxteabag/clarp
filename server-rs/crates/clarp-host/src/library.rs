@@ -1759,24 +1759,7 @@ pub(crate) fn badge(app: &App) -> Vec<String> {
     let waiting = decisions::attention(&shelves, true, false, now);
     let mut items: Vec<String> = waiting.iter().map(agent_of).collect();
     items.extend(app.janitors.pending(app, false).iter().map(agent_of));
-    let mut cursor = String::new();
-    // As many pages as a list of Updates can sensibly have: a list that changes under the
-    // count is counted again the next time.
-    for _ in 0..50 {
-        let Ok(page) = updates::page(&shelves, 200, &cursor, now) else {
-            break;
-        };
-        let blocking = page.artifacts.iter().filter(|row| {
-            row["attention_bucket"] == "blocking"
-                && row["archived_at"].is_null()
-                && row["type"] != "workflow_run"
-        });
-        items.extend(blocking.map(agent_of));
-        match page.next_cursor {
-            Some(next) => cursor = next,
-            None => break,
-        }
-    }
+    items.extend(updates::blocking_agents(&shelves, now));
     items
 }
 
