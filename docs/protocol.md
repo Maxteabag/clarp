@@ -1828,12 +1828,12 @@ a turn runs:
   tool, a Claude Code or `agy-acp` turn whose result came), the turn is stopped and the send runs
   next, as a take-over. Where the tool will take words but not yet (its process or lane not
   ready), the send waits and is read in as soon as the turn says `steerable`; if the turn ends
-  first it runs next. Where the tool takes words but not this send (on `agy-acp`, a send that
-  names a file or begins with `/`), it waits for its own turn.
+  first it runs next. A send that names an attached file or begins with `/` waits for its
+  own turn.
 - `after_turn`: waits for the running turn and runs next, also where it could be read in, and
   also behind a turn that is not a person's. It stays a waiting message: the user can still
-  steer it or have it take over (`POST /turn-queue/<id>/steer`, `/take-over`), and a later
-  send that is read into the turn takes it in first, as the user's older words always go first.
+  steer it or have it take over (`POST /turn-queue/<id>/steer`, `/take-over`). Newer sends
+  wait behind it in the user's message order.
 - `take_over`: stops the running turn now and runs the send next, as `POST
   /turn-queue/<id>/take-over` does: the queue is not held, and a cut turn that was not a
   person's leaves the agent its note.

@@ -282,6 +282,10 @@ fn after_the_turn_waits_where_the_turn_could_take_it_and_steer_is_read_in_at_onc
     let after = send_while_busy(&host, &session, "later", "later", "after_turn");
     assert_eq!(after["queued"], true, "{after}");
     assert_eq!(after["while_busy"], "after_turn", "{after}");
+    // A newer send cannot pull the older message into this turn.
+    let newer = send_while_busy(&host, &session, "newer", "newer", "steer");
+    assert_eq!(newer["while_busy"], "steer", "{newer}");
+    assert!(waiting(&host, &session, "newer"));
     // It is not read in: it waits while the turn goes on, and can still be steered by hand.
     std::thread::sleep(Duration::from_millis(700));
     assert!(waiting(&host, &session, "later"));

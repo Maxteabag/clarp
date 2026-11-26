@@ -75,12 +75,10 @@ impl Worker {
             WhileBusy::TakeOver => take_over(Done::as_asked(WhileBusy::TakeOver)),
             WhileBusy::AfterTurn => Plan::Wait(Done::as_asked(WhileBusy::AfterTurn)),
             WhileBusy::Steer => {
-                let backend = &self.setup.backend;
+                let text = message.text.trim();
                 // A send the tool would not take as words (a file it names, a `/` command)
                 // waits for its own turn, as it always has.
-                if backend.steers() != clarp_backend::Steers::No
-                    && !backend.steers_message(&message.text)
-                {
+                if text.starts_with('/') || !clarp_backend::agy_acp::attached(text).is_empty() {
                     Plan::Wait(Done::fell_back(
                         asked,
                         WhileBusy::AfterTurn,
@@ -135,18 +133,19 @@ impl Worker {
             self.steer_pending.clear();
             return;
         };
-        if actor.live_turn().is_none() {
-            self.steer_pending.clear();
-            return;
-        }
+        let live = actor.live_turn();
+        self.steer_pending.retain(|(into, _)| Some(*into) == live);
         if !actor.steerable() {
             return;
         }
         let mut still = Vec::new();
         let mut done = clarp_actor::Outputs::default();
-        for turn in std::mem::take(&mut self.steer_pending) {
+        for (into, turn) in std::mem::take(&mut self.steer_pending) {
             match actor.steer_waiting(turn, true, now) {
-                Ok((clarp_actor::Steered::NotSteerable, _)) => still.push(turn),
+                Ok((clarp_actor::Steered::NotSteerable, out)) => {
+                    still.push((into, turn));
+                    done.absorb(out);
+                }
                 Ok((_, out)) => done.absorb(out),
                 Err(error) => eprintln!(
                     "clarp-host: agent {}: a waiting message was not read into the turn: {error}",

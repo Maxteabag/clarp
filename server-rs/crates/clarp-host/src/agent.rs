@@ -179,7 +179,7 @@ mod native_goal;
 mod opencode_lane;
 mod while_busy;
 
-use clarp_kernel::while_busy::{Done as BusyDone, Reason, WhileBusy};
+use clarp_kernel::while_busy::{Done as BusyDone, WhileBusy};
 pub use while_busy::{Busy, Plan};
 
 enum Ask {
@@ -1808,7 +1808,7 @@ struct Worker {
     exec_turn: Option<TurnId>,
     /// The owner's messages that wait to be read into the running turn once it can take them
     /// ([`Worker::steer_when_can`]).
-    steer_pending: Vec<TurnId>,
+    steer_pending: Vec<(TurnId, TurnId)>,
     /// The attempt the Muse lane gave back: it runs on exec.
     muse: muse_lane::State,
     /// The agent's OpenCode lane, for an agent of OpenCode or DeepSeek (issue 763).
@@ -2717,7 +2717,9 @@ impl Worker {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
-            if !actor.transit_resume_pending() && let Some((turn, since)) = actor.waits_for_an_account() {
+            if !actor.transit_resume_pending()
+                && let Some((turn, since)) = actor.waits_for_an_account()
+            {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
                 let resets = actor.waits_until_reset();
@@ -2923,7 +2925,9 @@ impl Worker {
         match crate::agent_transit::carry(actor, &self.setup.record, change, now) {
             Ok((Ok(changed), out)) => {
                 self.after(out);
-                if self.pooled.take().is_some() && let Some(pool) = self.setup.pool() {
+                if self.pooled.take().is_some()
+                    && let Some(pool) = self.setup.pool()
+                {
                     pool.disowned(&self.setup.record.agent_id);
                     self.held = None;
                 }
@@ -3606,7 +3610,7 @@ impl Worker {
             && marks.coordination.is_none()
             && !transit_holds_queue
             // The owner asked for it to wait for the running turn (feature `send_while_busy`).
-            && !matches!(while_busy, Busy::Planned(Plan::Wait(_)))
+            && !matches!(while_busy, Busy::Planned(Plan::Wait(_) | Plan::Steer))
             && let Some(actor) = self.actor.as_ref()
             && let Some(goes) = actor.owner_goes_first(&message.origin)?
             && !(can_offer_steering && actor.can_steer(message))
@@ -3622,13 +3626,6 @@ impl Worker {
             *admission = Admission::Direct;
             made_way = goes.note.map(|note| (note, goes.coordination));
             can_offer_steering = false;
-            if *while_busy == Busy::Planned(Plan::Steer) {
-                *while_busy = Busy::Planned(Plan::Direct(BusyDone::fell_back(
-                    WhileBusy::Steer,
-                    WhileBusy::TakeOver,
-                    Reason::NotSteerable,
-                )));
-            }
         } else if let Ask::Send {
             message,
             reservation: None,
@@ -3744,7 +3741,7 @@ impl Worker {
                 message,
                 admission,
                 reservation,
-                marks,
+                mut marks,
                 while_busy,
                 answer,
             } => {
@@ -3763,6 +3760,9 @@ impl Worker {
                     let _ = answer.send(Err(Unavailable::new(why.into())));
                     return Ok(());
                 }
+                let waits = matches!(while_busy, Busy::Planned(Plan::Wait(_)));
+                marks.wait_for_turn = waits;
+                let live = actor.live_turn();
                 let held = crate::held::Held::new(&thread, "a send's commit");
                 let mut sent = actor
                     .send_marked(&message, admission, reservation, &marks, now)
@@ -3787,7 +3787,6 @@ impl Worker {
                         && message.origin.is_user_send()
                         && marks.coordination.is_none();
                     // One the owner asked to wait for the running turn waits for it.
-                    let waits = matches!(while_busy, Busy::Planned(Plan::Wait(_)));
                     let forked = if sent.queued
                         && !transit_holds_queue
                         && direct_user
@@ -3828,8 +3827,11 @@ impl Worker {
                     // once the turn can take it.
                     sent.while_busy = match while_busy {
                         Busy::Planned(Plan::Steer) if sent.queued || forked => {
-                            if steer.is_none() && !forked && !self.steer_pending.contains(&turn) {
-                                self.steer_pending.push(turn);
+                            if steer.is_none()
+                                && !forked
+                                && let Some(live) = live
+                            {
+                                self.steer_pending.push((live, turn));
                             }
                             Some(BusyDone::as_asked(WhileBusy::Steer))
                         }
@@ -3841,6 +3843,7 @@ impl Worker {
                         out.actions.push(action);
                     } else if forked {
                     } else if sent.queued
+                        && !waits
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
                         && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
                         && let Some(program) = clarp_backend::program(&self.setup.record.backend)

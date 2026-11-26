@@ -1072,6 +1072,8 @@ pub struct Marks {
     pub trace_named: bool,
     /// The verified decision answer or front-desk relay carries the user's word.
     pub user_word: bool,
+    /// The user asked for the running turn to finish before this message is read.
+    pub wait_for_turn: bool,
 }
 
 /// A send refused: the trace it names belongs to another message of the agent.
@@ -3181,6 +3183,13 @@ impl Actor {
 }
 
 fn message_at(log: &dyn AgentLog, message_seq: Seq) -> Result<Message, ActorError> {
+    read_message_at(log, message_seq)
+}
+
+fn read_message_at<T: serde::de::DeserializeOwned>(
+    log: &dyn AgentLog,
+    message_seq: Seq,
+) -> Result<T, ActorError> {
     let stored = log
         .read_after(message_seq.saturating_sub(1), Kinds::ALL, 1)?
         .into_iter()
@@ -3894,6 +3903,7 @@ impl Actor {
             },
             trace_named: marks.trace_named,
             user_word: marks.user_word,
+            wait_for_turn: marks.wait_for_turn,
         };
         let (sent, mut out) = self.take(message, admission, with, reservation, &marks, now_ms)?;
         if !sent.duplicate
@@ -4007,9 +4017,14 @@ impl Actor {
             })?;
             with.push(NewItem::new(kind::TRACE, now_ms, owner).keyed(trace_key(trace)));
         }
-        let encoded = if let Some(reservation) = reservation {
+        let encoded = if reservation.is_some() || marks.wait_for_turn {
             serde_json::to_value(message).and_then(|mut row| {
-                row["_call_opening"] = reservation;
+                if let Some(reservation) = reservation {
+                    row["_call_opening"] = reservation;
+                }
+                if marks.wait_for_turn {
+                    row["_wait_for_turn"] = true.into();
+                }
                 serde_json::to_vec(&row)
             })
         } else {
@@ -4757,10 +4772,11 @@ impl Actor {
     ) -> Result<(Reworded, Outputs), ActorError> {
         let unreadable = |error: serde_json::Error| JournalError::Encode(error.to_string());
         let anew = |kept: &[u8]| {
-            let mut message: Message = serde_json::from_slice(kept).map_err(unreadable)?;
-            message.text = text.to_string();
+            let mut message: serde_json::Value =
+                serde_json::from_slice(kept).map_err(unreadable)?;
+            message["text"] = text.into();
             if let Some(speak) = speak {
-                message.speak = speak;
+                message["speak"] = speak.into();
             }
             serde_json::to_vec(&message).map_err(unreadable)
         };

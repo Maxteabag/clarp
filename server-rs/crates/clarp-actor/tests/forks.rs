@@ -222,6 +222,7 @@ impl World {
             coordination: Some("a-boss".to_string()),
             trace_named: true,
             user_word: false,
+            wait_for_turn: false,
         };
         let now = self.tick();
         let (_, out) = actor

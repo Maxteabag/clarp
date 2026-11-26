@@ -147,7 +147,8 @@ messages. With `steer`, a user message the running turn's tool cannot take at al
 tool, a turn whose input already ended) stops that turn and runs next, just like a take-over,
 so you can get a turn ended as stopped for a newer message even behind the user's own
 turn. With `after_turn` it waits for the turn; with `take_over` it stops the turn.
-A message that names a file or begins with `/` waits wherever the tool takes only words.
+A message that names an attached file or begins with `/` waits. If the running turn
+can neither take words nor be stopped, the message waits for it to finish.
 This acts only on the user's own sends. Your messages, a schedule's and an
 automation's wait as above, whatever `while_busy` they name. The setting is the
 owner's (`POST /send-settings`, refused from an agent's turn); do not change it unless asked to.

@@ -3114,8 +3114,17 @@ impl Fleet {
         self.store
             .put_together(&writes)
             .map_err(|error| Unavailable::new(error.to_string()))?;
+        use clarp_kernel::while_busy::{KEY, WhileBusy};
+        let before = WhileBusy::stored(self.settings.get(KEY).map(String::as_str));
         self.settings.extend(settings);
+        let after = WhileBusy::stored(self.settings.get(KEY).map(String::as_str));
         self.publish();
+        if after != before {
+            self.works.hub.publish(
+                serde_json::json!({"type": crate::send_settings::CHANGED, "while_busy": after.name()}),
+                self.now_ms(),
+            );
+        }
         Ok(())
     }
 

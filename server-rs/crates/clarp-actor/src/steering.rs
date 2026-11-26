@@ -559,7 +559,18 @@ impl Actor {
             else {
                 break;
             };
-            let message = message_at(self.recorder.log(), message_seq)?;
+            #[derive(serde::Deserialize)]
+            struct WaitingWords {
+                #[serde(flatten)]
+                message: Message,
+                #[serde(default, rename = "_wait_for_turn")]
+                wait_for_turn: bool,
+            }
+            let waiting: WaitingWords = super::read_message_at(self.recorder.log(), message_seq)?;
+            if waiting.wait_for_turn {
+                break;
+            }
+            let message = waiting.message;
             let Some(uuid) = message.trace_id.as_deref().and_then(takeover::prompt_uuid) else {
                 break;
             };

@@ -49,18 +49,8 @@ pub(crate) async fn set(
         .as_str()
         .and_then(WhileBusy::named)
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, NOT_A_VALUE))?;
-    let before = kept(&app);
-    // Kept once it is chosen, also where it is the default, so the owner's choice holds.
-    if app.fleet.directory().setting(KEY) != Some(wanted.name()) {
-        app.fleet
-            .set(vec![(KEY.to_owned(), wanted.name().to_owned())])
-            .await?;
-    }
-    if wanted != before {
-        app.hub.publish(
-            json!({ "type": CHANGED, "while_busy": wanted.name() }),
-            app.clock.now_ms(),
-        );
-    }
+    app.fleet
+        .set(vec![(KEY.to_owned(), wanted.name().to_owned())])
+        .await?;
     Ok(Json(told(wanted)))
 }

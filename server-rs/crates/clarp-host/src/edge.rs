@@ -3930,6 +3930,7 @@ async fn send_as(
         coordination,
         trace_named: made.trace_named,
         user_word,
+        wait_for_turn: false,
     };
     let sent = member
         .agent

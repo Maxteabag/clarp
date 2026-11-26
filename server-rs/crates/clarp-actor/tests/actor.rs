@@ -6187,6 +6187,7 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
         coordination: Some("a-boss".to_string()),
         trace_named: true,
         user_word: false,
+        wait_for_turn: false,
     };
     (message, marks)
 }
@@ -7876,6 +7877,7 @@ fn a_chat_once_read_as_a_helpers_keeps_the_turns_other_agents_gave_it() {
         coordination: Some("a-self".to_string()),
         trace_named: true,
         user_word: false,
+        wait_for_turn: false,
     };
     let (_, out) = actor
         .send_marked(&wake, Admission::Queue, None, &housekeeping, world.tick())
