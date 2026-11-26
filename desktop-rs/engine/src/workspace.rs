@@ -50,15 +50,30 @@ impl Engine {
     /// Runs a layout change: the view hears of it, the active pane's chat
     /// becomes the selection, every shown pane's chat loads, and the layout
     /// is saved.
+    ///
+    /// A change that leaves the active pane empty (a new workspace, the last
+    /// chat closed, a move to an empty pane) is the user's choice: roster
+    /// snapshots and reconnects keep it empty until a chat is chosen.
+    /// Signals queued before the change (a restored layout's) do not count.
     pub fn with_panes<R>(&mut self, change: impl FnOnce(&mut PaneTree) -> R) -> R {
+        let earlier = self.panes.tree.take_signals();
         let result = change(&mut self.panes.tree);
-        self.pane_signals();
+        let signals = self.panes.tree.take_signals();
+        if signals.contains(&Signal::ActivePaneChanged) && self.panes.tree.active_session().is_empty() {
+            self.waiting_for_session_choice = true;
+        }
+        self.apply_pane_signals(earlier.into_iter().chain(signals));
         self.start_pane_write();
         result
     }
 
     fn pane_signals(&mut self) {
-        for signal in self.panes.tree.take_signals() {
+        let signals = self.panes.tree.take_signals();
+        self.apply_pane_signals(signals);
+    }
+
+    fn apply_pane_signals(&mut self, signals: impl IntoIterator<Item = Signal>) {
+        for signal in signals {
             match signal {
                 Signal::TreeChanged | Signal::WorkspaceSaveWarningChanged => self.changes.push(Change::Panes),
                 Signal::ActivePaneChanged => {

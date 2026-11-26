@@ -280,3 +280,71 @@ fn panes_changed_while_disconnected_are_reconciled_from_the_new_stream_only() {
     assert_eq!(live_reads(&host, "rachel"), rachel_live, "no /live from the screen before the drop");
     assert_eq!(log_reads(&host, "rachel").len(), rachel_log, "no /log for a chat hidden meanwhile");
 }
+
+#[test]
+fn a_new_empty_workspace_stays_empty_through_snapshots_and_a_reconnect() {
+    let host = viewport_host("viewport-empty-workspace");
+    let mut d = showing_rachel(&host);
+    let first_workspace = d.engine.panes().active_workspace().to_owned();
+
+    // A new workspace (Ctrl+T): no chat, the list only.
+    d.engine.with_panes(|p| p.create_workspace("Workspace 2"));
+    assert_eq!(d.engine.selected_session(), "");
+    d.until("nothing shown", |e| e.viewport_effective().is_some_and(|(_, v)| v.is_empty()));
+    assert_eq!(posts(&host).last().unwrap()["body"]["visible"], json!([]));
+    let selects = host.requests("POST", "/select").len();
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+
+    // A roster change brings a snapshot: the user's empty workspace stays.
+    host.control("/__control/add-agent", json!({"session": "nina", "persona": "Nina"}));
+    d.until("the snapshot with nina", |e| e.roster().find("nina").is_some());
+    d.until("a roster snapshot", |_| host.requests("GET", "/agents/snapshot").len() > snapshots);
+    d.settle(Duration::from_millis(400));
+    assert_eq!(d.engine.selected_session(), "", "no chat chosen for the user");
+    assert_eq!(d.engine.panes().active_session(), "");
+    assert_eq!(host.requests("POST", "/select").len(), selects, "no Host focus moved");
+    assert_eq!(posts(&host).last().unwrap()["body"]["visible"], json!([]));
+    assert_eq!(d.engine.viewport_effective().unwrap().1, Vec::<String>::new());
+
+    // A reconnect, with its own snapshot: still empty.
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+    host.control("/__control/outage", json!({"seconds": 0.5}));
+    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    d.until("live again", |e| e.connection_state() == "live");
+    d.until("the reconnect's snapshot", |_| host.requests("GET", "/agents/snapshot").len() > snapshots);
+    d.settle(Duration::from_millis(400));
+    assert_eq!(d.engine.selected_session(), "");
+    assert_eq!(d.engine.panes().active_session(), "");
+    assert_eq!(events_queries(&host).last().unwrap()["visible"], "", "reopened with the list only");
+    assert_eq!(host.requests("POST", "/select").len(), selects);
+
+    // The user picks a chat: it opens in the new workspace.
+    d.engine.select("mike");
+    d.until("mike shown", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["mike"]));
+    assert_eq!(d.engine.panes().active_session(), "mike");
+
+    // Back to the first workspace: its chat is the selection again, and a
+    // snapshot after that keeps it.
+    d.engine.with_panes(|p| p.switch_workspace(&first_workspace));
+    assert_eq!(d.engine.selected_session(), "rachel");
+    d.until("rachel shown", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["rachel"]));
+    host.control("/__control/add-agent", json!({"session": "omar", "persona": "Omar"}));
+    d.until("the snapshot with omar", |e| e.roster().find("omar").is_some());
+    d.settle(Duration::from_millis(300));
+    assert_eq!(d.engine.selected_session(), "rachel");
+}
+
+#[test]
+fn a_lost_chat_is_replaced_after_an_empty_workspace_was_left() {
+    let host = viewport_host("viewport-empty-then-lost");
+    let mut d = showing_rachel(&host);
+    let first_workspace = d.engine.panes().active_workspace().to_owned();
+    d.engine.with_panes(|p| p.create_workspace("Workspace 2"));
+    d.until("nothing shown", |e| e.viewport_effective().is_some_and(|(_, v)| v.is_empty()));
+    // Leaving the empty workspace ends the choice: a chat that goes away
+    // is replaced by another, as before.
+    d.engine.with_panes(|p| p.switch_workspace(&first_workspace));
+    assert_eq!(d.engine.selected_session(), "rachel");
+    d.engine.archive_agent("rachel");
+    d.until("a chat chosen in place of the archived one", |e| !e.selected_session().is_empty() && e.selected_session() != "rachel");
+}
