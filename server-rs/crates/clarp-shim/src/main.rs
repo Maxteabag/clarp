@@ -1346,7 +1346,10 @@ fn run(args: Args) -> Result<u8, String> {
         .process_group(0)
         .env(SOCKET_ENV, &args.socket);
     if let Some(cwd) = &args.cwd {
-        command.current_dir(cwd);
+        // `PWD` goes with the folder: a tool that takes its folder from `PWD` before the
+        // process's own (`opencode run` does) would otherwise work in the Host's folder, and
+        // an OpenCode session made there is one the agent's lane never hears from (#915).
+        command.current_dir(cwd).env("PWD", cwd);
     }
     let mut child = match command.spawn() {
         Ok(child) => child,

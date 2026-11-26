@@ -434,6 +434,45 @@ fn a_tool_whose_folder_is_gone_is_recorded_as_a_missing_folder() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// The tool runs in the agent's folder by `PWD` too, not only by its process's folder: the
+/// Host's own `PWD` (its folder, never the agent's) must not reach it. `opencode run` takes its
+/// folder from `PWD` first, and a session it made in the Host's folder was one the agent's lane
+/// never heard from again (#915). `env` prints the environment as given; a shell would mend
+/// `PWD` itself and hide the fault.
+#[test]
+fn the_tool_is_given_its_folder_as_pwd() {
+    let dir = std::env::temp_dir().join(format!("clarp-shim-pwd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let agent = dir.join("workspace");
+    std::fs::create_dir_all(&agent).unwrap();
+    let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
+    let status = shim_in(&dir)
+        .env("PWD", &dir)
+        .current_dir(&dir)
+        .args([
+            "--spool",
+            spool.to_str().unwrap(),
+            "--socket",
+            socket.to_str().unwrap(),
+            "--cwd",
+            agent.to_str().unwrap(),
+            "--",
+            "/usr/bin/env",
+        ])
+        .status()
+        .unwrap();
+    assert_eq!(status.code(), Some(0));
+    let pwd: Vec<_> = records(&spool)
+        .into_iter()
+        .filter_map(|r| match r.entry {
+            Entry::Out(line) => line.strip_prefix("PWD=").map(str::to_owned),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pwd, [agent.to_str().unwrap()]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn the_message_is_given_to_the_tool_after_its_start_is_on_record() {
     let mut running = start_with(

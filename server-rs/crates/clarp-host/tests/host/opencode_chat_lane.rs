@@ -1950,3 +1950,56 @@ fn a_steer_stored_only_after_the_go_on_message_runs_once() {
     let own = prompted(&world);
     assert_eq!(own.iter().filter(|w| *w == "tardy-s").count(), 1, "{own:?}");
 }
+
+/// Issue 915, reproduction (diagnosis only, not for landing). A cold agent's first turn runs on
+/// its own server while its lane starts beside it; four messages sent meanwhile wait, and run
+/// together as the next turn, on the lane. That turn must end, the queue must empty, and a message
+/// sent after it must be answered once, as its own turn.
+#[test]
+fn issue_915_the_queued_messages_turn_on_a_cold_lane_ends() {
+    let world = world("opencode-915", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "w2", "opencode");
+
+    host.send("w2", "hold-long", "long");
+    wait_for("the first turn", || {
+        world.place.root.join("holding-long").exists()
+    });
+    for (n, word) in ["ask-alpha", "ask-bravo", "ask-charlie", "ask-delta"]
+        .iter()
+        .enumerate()
+    {
+        let sent = host.send("w2", word, &format!("q{n}"));
+        assert_eq!(sent["queued"], true, "{sent}");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    lane_ready(&socket);
+    std::fs::write(world.place.root.join("release-long"), "").unwrap();
+    wait_for("the queued messages answered", || {
+        [
+            "said-ask-alpha",
+            "said-ask-bravo",
+            "said-ask-charlie",
+            "said-ask-delta",
+        ]
+        .iter()
+        .all(|said| answers(&host, "w2", said) == 1)
+    });
+    let began = Instant::now();
+    wait_within(
+        "the queued-messages turn to end",
+        Duration::from_secs(30),
+        || host.state("w2") == "done",
+    );
+    eprintln!(
+        "915: ended {:?} after its answers; servers {:?}",
+        began.elapsed(),
+        world.servers()
+    );
+    let queue = host.get("/turn-queue?session=w2");
+    assert!(queue["items"].as_array().unwrap().is_empty(), "{queue}");
+    asked(&host, "w2", "ask-after");
+    assert_eq!(answers(&host, "w2", "said-ask-after"), 1);
+}
