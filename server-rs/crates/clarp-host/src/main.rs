@@ -4,6 +4,7 @@
 //! rejoins the turns that are running), and serves the apps. Stopping it stops none of the
 //! turns: they belong to their shims, and the next Host finds them.
 
+mod ingress;
 mod shutdown;
 
 use std::process::ExitCode;
@@ -172,7 +173,45 @@ impl Clock for FixtureClock {
     }
 }
 
+/// How long each step of a start took, from the moment `serve` began, said in one line of the
+/// journal once the Host answers (issue 935): a start that keeps the apps waiting is told by its
+/// steps, not guessed from the lines around it.
+struct Steps {
+    began: std::time::Instant,
+    marks: Vec<(&'static str, u128)>,
+}
+
+impl Steps {
+    fn new() -> Self {
+        Self {
+            began: std::time::Instant::now(),
+            marks: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, step: &'static str) {
+        self.marks.push((step, self.began.elapsed().as_millis()));
+    }
+
+    fn line(&self) -> String {
+        let steps: Vec<String> = self
+            .marks
+            .iter()
+            .map(|(step, ms)| format!("{step}={ms}"))
+            .collect();
+        format!(
+            "clarp-host: its start, ms since it began: {}",
+            steps.join(" ")
+        )
+    }
+}
+
 async fn serve(config: Config) -> Result<(), String> {
+    let mut steps = Steps::new();
+    // The socket its unit holds across a restart, taken before the Host starts any process, so
+    // that none inherits it (issue 935).
+    let inherited = ingress::inherited(config.listen)?;
+    let held_by_unit = inherited.is_some();
     // Capture the configured store paths before any child can be launched.
     clarp_host::child_environment();
     let config = Arc::new(config);
@@ -194,6 +233,7 @@ async fn serve(config: Config) -> Result<(), String> {
     // Before anything in them is opened: what SQLite writes there from now on is written in
     // place, without compression (issue 848).
     clarp_host::data_flags::tell(&clarp_host::data_flags::at_start(&config.data_dir));
+    steps.mark("directories");
 
     if let Err(reason) = clarp_host::calls::generation::bootstrap(&config.data_dir) {
         eprintln!(
@@ -202,7 +242,9 @@ async fn serve(config: Config) -> Result<(), String> {
         );
     }
 
+    steps.mark("generation");
     clarp_host::once::sweep_routing(&config.run_dir, std::time::SystemTime::now());
+    steps.mark("routing");
     let mut store = tables
         .open(&config.data_dir.join("fleet.db"))
         .map_err(|error| error.to_string())?;
@@ -247,6 +289,7 @@ async fn serve(config: Config) -> Result<(), String> {
         setting,
         config.data_dir.clone(),
     );
+    steps.mark("store");
     let mut hub = Hub::new(clock.now_ms());
     hub.capture = Some(capture.clone());
     let hub = Arc::new(hub);
@@ -258,11 +301,10 @@ async fn serve(config: Config) -> Result<(), String> {
     );
     // The Host listens before its agents are opened: a turn that is rejoined, and every turn
     // after it, is told where the agent's own tools find the Host.
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .map_err(|error| format!("{}: {error}", config.listen))?;
+    let listener = ingress::listen(config.listen, inherited).await?;
     // The first line says where the Host listens: with port 0 only the Host knows.
     let address = listener.local_addr().map_err(|error| error.to_string())?;
+    steps.mark("bound");
     let revisions = Arc::new(Revisions::new());
     // What is to be pushed is taken from the first moment on; it goes out once the fleet,
     // which knows the phones, is there.
@@ -338,7 +380,9 @@ async fn serve(config: Config) -> Result<(), String> {
     };
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
+    steps.mark("stores");
     let fleet = fleet::start(works, store)?;
+    steps.mark("fleet");
     for pool in &pools {
         pool.attach(fleet.clone());
     }
@@ -396,6 +440,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
+    steps.mark("ears");
     let client_events =
         clarp_host::client_events::Desk::new(config.data_dir.join("client-events.sqlite"));
     client_events.age_out(clock.clone());
@@ -485,7 +530,9 @@ async fn serve(config: Config) -> Result<(), String> {
     }
     // Where this Host keeps the machine's tools, the chosen skills are linked to its release
     // before it answers; anywhere else this writes nothing.
+    steps.mark("app");
     clarp_host::managed_skills::at_start(&app).await;
+    steps.mark("skills");
     // The Host answers when it knows its agents: what they are doing, what runs for them. A
     // request that comes earlier waits at the door for that moment, it is not given half a view.
     let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -499,15 +546,20 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    steps.mark("door");
     app.mouth.start_voice_names().await;
+    steps.mark("voice_names");
     clarp_host::profile::migrate_at_start(&app).await;
+    steps.mark("voice_shapes");
     clarp_host::media_manage::import_history(&app)
         .await
         .map_err(|e| e.words().to_owned())?;
+    steps.mark("gallery");
     clarp_host::portrait_generation::recover(&app)
         .await
         .map_err(|e| e.0)?;
     clarp_host::media_manage::recover(&app).await;
+    steps.mark("media");
     // The janitors a Host has of its own are installed, each once, paused.
     if let Err(why) = clarp_host::janitors::install(&app).await {
         eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
@@ -518,7 +570,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // What recovers, later, the call of an agent that does not answer now.
     let recovering = clarp_host::calls::opening::Recovering(app.clone());
     app.mouth.held.recovered_by(Arc::new(recovering));
+    steps.mark("janitors");
     app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
+    steps.mark("calls");
     app.mouth.bindings_ready.notify_one();
     clarp_host::calls::resume(&app);
     let staging = app.clone();
@@ -584,10 +638,16 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::keeper::run(&app);
     // And an idle agent's own label that outlived its time is taken back.
     clarp_host::labels::run(&app);
+    steps.mark("serving");
     eprintln!("clarp-host listens on {address}");
     // What could not be read of what it keeps, in one line: the door shows the same counts.
     // Said after where it listens, which is the Host's first line.
     eprintln!("{}", app.fleet.left_out().line());
+    if held_by_unit {
+        eprintln!(
+            "clarp-host: its port is held by its socket unit: what comes in while it restarts waits for it"
+        );
+    }
     if app.config.peers.is_none() {
         eprintln!("clarp-host: started without --peers: this Host has no peers");
     }
@@ -630,6 +690,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::availability::run(&app);
     clarp_host::availability::host_started(&app.config.data_dir, app.clock.now_ms());
     let restart_ms = clarp_host::availability::restart_estimate(&app.config.data_dir);
+    // Said last of its start, after every line the start has always said.
+    eprintln!("{}", steps.line());
     shutdown::serve(listener, router, &app, restart_ms)
         .await
         .map_err(|error| error.to_string())
