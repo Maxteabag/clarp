@@ -1335,7 +1335,7 @@ It is on the agent's row in `GET /agents/snapshot` and `GET /agents/archived`, i
 away before this contract. The `agent-roster` event of kind `archive-changed` carries
 `archived` (whether the agent is away now) and, while it is, `archived_by`. An agent that moves
 to another Host keeps it. The Host writes one line to its log for each archive and restore:
-`clarp-host: agent archived|restored: <session> (<agent_id>) by <session> (<agent_id>)|owner`.
+`clarp-host: agent archived|restored: <session> (<agent_id>) by <session> (<agent_id>)|owner|host at <ISO time>`.
 An older Host sends no `archived_by`: show nothing about who.
 
 #### A gzipped stream (feature `events_gzip`, Rust Host contract 198)

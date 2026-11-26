@@ -310,11 +310,11 @@ fn any_agent_puts_away_any_agent_and_the_host_keeps_and_logs_who() {
 
     // Each one is in the Host's log: what, which agent, and who asked.
     let heard = || host.heard.lock().unwrap().clone();
-    let owners = format!("clarp-host: agent archived: {ben} ({ben_id}) by owner");
+    let owners = format!("clarp-host: agent archived: {ben} ({ben_id}) by owner at ");
     wait_for("the lines", || heard().contains(&owners));
     let heard = heard();
     for what in ["archived", "restored"] {
-        let line = format!("clarp-host: agent {what}: {ben} ({ben_id}) by {ada} ({ada_id})");
+        let line = format!("clarp-host: agent {what}: {ben} ({ben_id}) by {ada} ({ada_id}) at ");
         assert!(heard.contains(&line), "{line}\n{heard}");
     }
     // What was refused was not done, and is not written as done.

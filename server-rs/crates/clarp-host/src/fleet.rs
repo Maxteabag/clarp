@@ -4304,7 +4304,7 @@ impl Fleet {
         // Each archive and restore is a line in the Host's log: what, which agent, and who.
         if let Some(archiver) = &archiver {
             eprintln!(
-                "clarp-host: agent {}: {} ({}) by {archiver}",
+                "clarp-host: agent {}: {} ({}) by {archiver} at {}",
                 if record.archived_at_ms.is_some() {
                     "archived"
                 } else {
@@ -4312,6 +4312,7 @@ impl Fleet {
                 },
                 record.session,
                 record.agent_id,
+                wire::iso(self.now_ms()),
             );
         }
         if roster_kind == Some("archive-changed") {
