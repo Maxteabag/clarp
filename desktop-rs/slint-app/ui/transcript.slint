@@ -61,6 +61,9 @@ export struct LiveRow {
     status: string,
     title: string,
     meta: string,
+    // A finished work row's time and tools ("Worked for 11s · 3 tools"):
+    // shown in the meta place on hover and while the row is open (#888).
+    hint: string,
     secondary: string,
     // Keep the second line even while it is empty (an explanation coming).
     reserve: bool,
@@ -364,6 +367,10 @@ component LiveItem inherits Rectangle {
     // away is not drawn at all (the list keeps only those on screen).
     property <bool> shimmering: root.live.shimmer != "" && root.live.letters.length > 0 && !root.measuring
         && !ChatLook.reduced-motion && ChatLook.window-shown;
+    // A finished turn's work row: one faint line naming what opens.
+    property <bool> quiet: root.live.kind == "fold" && !root.running;
+    property <string> side: root.live.meta != "" ? root.live.meta
+        : root.live.hint != "" && (touch.has-hover || root.live.expanded) ? root.live.hint : "";
     property <color> mark: root.live.status == "failed" ? Palette.danger
         : root.live.status == "interrupted" || root.live.status == "stalled" ? Palette.warning
         : root.running ? Palette.accent : Palette.success;
@@ -372,15 +379,18 @@ component LiveItem inherits Rectangle {
     border-color: Palette.accent;
     background: root.live.kind == "plan" || root.live.kind == "diff" ? Palette.raised : transparent;
     accessible-role: list-item;
-    accessible-label: root.live.title + (root.live.meta != "" ? " " + root.live.meta : "");
+    accessible-label: root.live.title + (root.live.meta != "" ? " " + root.live.meta : "") + (root.live.hint != "" ? ", " + root.live.hint : "");
     // Reports where it is, as a card does, so J/K reach it.
     Timer {
         interval: 150ms;
         running: root.live.expandable && !root.measuring;
         triggered => { ArtifactBridge.card-shown(root.live.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
-    if root.live.expandable: TouchArea {
-        mouse-cursor: pointer;
+    // Present on every row so its hover can show the hint; it takes a
+    // click only where there is something to open.
+    touch := TouchArea {
+        enabled: root.live.expandable;
+        mouse-cursor: root.live.expandable ? pointer : default;
         clicked => { ArtifactBridge.open(root.live.key); }
     }
     VerticalLayout {
@@ -408,9 +418,10 @@ component LiveItem inherits Rectangle {
                 text: root.live.title;
                 color: root.live.status == "stalled" ? Palette.warning
                     : root.live.shimmer == "accent" ? Palette.accent
+                    : root.quiet ? Palette.faint
                     : root.live.shimmer == "muted" || root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted
                     : Palette.chrome-text;
-                font-size: ChatText.label;
+                font-size: root.quiet ? ChatText.detail : ChatText.label;
                 font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                 font-italic: root.live.kind == "reasoning";
                 overflow: elide;
@@ -444,8 +455,8 @@ component LiveItem inherits Rectangle {
                     }
                 }
             }
-            if root.live.meta != "": Text {
-                text: root.live.meta;
+            if root.side != "": Text {
+                text: root.side;
                 color: root.live.status == "failed" ? Palette.danger : Palette.faint;
                 font-size: ChatText.detail;
                 font-family: Palette.code-family;

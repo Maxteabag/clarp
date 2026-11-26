@@ -55,7 +55,9 @@ fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_in_history() {
         assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
         let read = read(&folded.folds[0]);
         assert_eq!(read.first().map(String::as_str), Some("row live-ack"), "{read:?}");
-        assert!(read[1].starts_with("Worked for 3m 5s"), "{read:?}");
+        assert_eq!(read[1], "1 step", "the exploration opens as one step: {read:?}");
+        let fold = folded.folds[0].pieces.iter().find_map(|p| match p { Piece::Entry(e) if e.kind == clarp_core::live_present::Kind::Fold => Some(e), _ => None }).expect("a work row");
+        assert!(fold.hint.starts_with("Worked for 3m 5s"), "the time on hover: {:?}", fold.hint);
         assert_eq!(read.last().map(String::as_str), Some("row live-answer"), "{read:?}");
         assert!(folded.stripped_calls.contains("exploration-call-1-call-2"), "the cell is the fold's, not the row's");
     }
@@ -109,6 +111,6 @@ fn speech_is_recognised_in_any_letter_case() {
                         "worked_ms": 4_000, "tool_count": 1}}),
     ].iter().map(row).collect();
     let folded = present(&rows, None, &options(&[]));
-    assert_eq!(read(&folded.folds[0]), ["row a-ack", "Worked for 4s · 1 tool", "row a-done"]);
+    assert_eq!(read(&folded.folds[0]), ["row a-ack", "1 step", "row a-done"]);
     assert!(!folded.hidden_rows.contains("a-ack"));
 }

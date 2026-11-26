@@ -1,8 +1,9 @@
 //! `--check quiet-chat`: the quiet chat (#653). Under Tool activity
 //! Grouped (the default) a running turn reads as one work row,
 //! `Working · 3 tools` (the calls it folds so far, the running one too; a
-//! call that failed keeps its row and is not counted), that shimmers and opens in place; settled, its time is
-//! the Host's /log summary's once it lands, the live turn's until then. Hide when done leaves the finished turn's work row out and keeps
+//! call that failed keeps its row and is not counted), that shimmers and opens in place; settled, it is one
+//! faint line naming the steps it opens to, its time (the Host's /log summary's once it lands, the live
+//! turn's until then) on hover and opened (#888). Hide when done leaves the finished turn's work row out and keeps
 //! its messages and what failed or stopped. Driven by the fake Host
 //! replaying the recorded `turn-full` stream, as `--check live` is.
 
@@ -141,8 +142,8 @@ pub fn quiet_chat_check(out: String) {
                 return false;
             }
             let titles = titles();
-            check(titles.first().map(String::as_str) == Some("Worked for 12s · 3 tools"), &format!("settled: the 3 folded calls (the failed and the stopped one keep their rows), the time the live turn's until /log sums it up: {titles:?}"));
-            check(titles == ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
+            check(titles.first().map(String::as_str) == Some("4 steps"), &format!("settled: one quiet line naming the 4 steps it opens to (the failed and the stopped one keep their rows): {titles:?}"));
+            check(titles == ["4 steps", "Ran npm test", "", "Stopped npm test"], &format!("the commentary stays folded; the reply and what failed or stopped show: {titles:?}"));
             check(live_row("live:cl:msg_01:1").is_none() && live_row("live:cl:msg_02:0").is_some(), "the final reply never folds");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::HIDE_WHEN_DONE);
             // Set on the engine directly: apply it now, no Host event will.
@@ -192,7 +193,8 @@ pub fn quiet_chat_check(out: String) {
             }
             let at = |id: &str| ids.iter().position(|i| i == id);
             let fold = live_row("live:fold:t-heard").unwrap_or_default();
-            check(fold.live.title == "Worked for 6s · 2 tools", &format!("the work row counts the two folded calls: {:?}", fold.live.title));
+            check(fold.live.title == "3 steps", &format!("the work row names what it opens to (#888): {:?}", fold.live.title));
+            check(fold.live.hint == "Worked for 6s · 2 tools", &format!("its time and the two folded calls, on hover and opened: {:?}", fold.live.hint));
             check(at("h-ack").is_some() && at("h-ack") < at("live:fold:t-heard") && at("live:fold:t-heard") < at("h-final"), &format!("the acknowledgment heard, then the work row, then the reply: {ids:?}"));
             check(at("h-note").is_none() && at("h-tool1").is_none() && at("h-tool2").is_none(), &format!("the plain commentary and the tools fold: {ids:?}"));
             app_now().focus_transcript();

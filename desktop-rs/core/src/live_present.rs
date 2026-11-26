@@ -54,6 +54,10 @@ pub struct Entry {
     pub title: String,
     /// The right side: elapsed, duration, exit code, diff stats.
     pub meta: String,
+    /// What a finished work row knows beyond what it opens to ("Worked for
+    /// 11s · 3 tools"): said on hover and once the row is open, never as its
+    /// text (#888).
+    pub hint: String,
     /// The second line: the explanation, or with explanations off the command.
     pub secondary: String,
     /// Keep a line for an explanation that has not arrived.
@@ -496,12 +500,21 @@ pub(crate) fn logged_summary<'a>(rows: &'a [Message], turn_id: &str) -> Option<&
     rows.iter().rev().filter(|m| !turn_id.is_empty() && m.trace_id == turn_id).find_map(|m| m.turn.as_ref())
 }
 
-/// The work row's title (#653, Arnie's ruling for every client): the count
+/// A finished work row's text: only what it opens to, one row a step
+/// ("3 steps"). How long the turn worked and what it ran is the row's hint
+/// (`work_title`), on hover and in the opened fold: as the row's text over
+/// every answer it was information the reader did not need (#888).
+pub fn steps_title(steps: usize) -> String {
+    plural(steps, "step", "steps")
+}
+
+/// The work row's words (#653, Arnie's ruling for every client): the count
 /// is the calls the row folds (failed or killed ones keep their own rows
 /// and are not counted), the time the /log summary's worked_ms.
 /// "Worked for 11s · 3 tools", "Worked for 11s" with no folded call,
 /// "3 tools" without a worked time, "Working · 2 tools" while it runs.
-/// None: neither a worked time nor a folded call, so no work row.
+/// None: neither a worked time nor a folded call. While the turn runs this
+/// is the row's text; once it has finished, its hint (`steps_title`).
 pub fn work_title(running: bool, worked_ms: Option<i64>, calls: usize) -> Option<String> {
     let count = (calls > 0).then(|| plural(calls, "tool", "tools"));
     Some(match (running, worked_ms, count) {
@@ -648,7 +661,14 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
         // message the running turn read is counted, not timed: it is not Working.
         let running = !settled && last;
         let has_work = !folded.is_empty() || (settled && had_calls) || (working && options.fold_running);
-        if let Some(title) = work_title(running, worked_ms, calls).filter(|_| has_work) {
+        // Finished work is one quiet line naming what opens ("3 steps"), with
+        // the time and tools as its hint; nothing to open, no line (#888).
+        let (title, hint) = if running {
+            (work_title(true, worked_ms, calls), String::new())
+        } else {
+            ((!folded.is_empty()).then(|| steps_title(folded.len())), work_title(false, worked_ms, calls).unwrap_or_default())
+        };
+        if let Some(title) = title.filter(|_| has_work) {
             let key = key.to_owned();
             let open = options.expanded.contains(&key) && !folded.is_empty() && !(settled && options.hide_settled);
             let started_at_ms = folded.iter().filter_map(|i| entries[*i].started_at_ms).min();
@@ -667,6 +687,7 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
                 kind: Kind::Fold,
                 status: if settled { text(turn, "status").to_owned() } else if running { "running".to_owned() } else { "completed".to_owned() },
                 title,
+                hint,
                 expandable: !folded.is_empty(),
                 expanded: open,
                 ..Entry::default()

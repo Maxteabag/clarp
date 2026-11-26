@@ -206,7 +206,8 @@ fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let p = present(&view, &[], &options(&[], 1759480012000));
     // The commentary (not spoken) folds with the reasoning and the tools (#653); the
     // row counts the calls it opens to, never the summary's tool count.
-    assert_eq!(titles(&p), ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["4 steps", "Ran npm test", "", "Stopped npm test"], "one quiet line naming what opens (#888)");
+    assert_eq!(p.entries[0].hint, "Worked for 12s · 3 tools", "the time and the tools, on hover and opened");
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:msg_01:1", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning, the commentary and the tools fold");
@@ -256,7 +257,7 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let p = present(&view, &[durable], &options(&[], 0));
     // The row carries both messages, the answer among them: it shows once, in the
     // answer's place, and never folds.
-    assert_eq!(titles(&p), ["Worked for 12s · 3 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["3 steps", "Ran npm test", "", "Stopped npm test"]);
     assert_eq!(p.entries[2].row, "live-abc", "the row that holds the answer stays in view, where the answer was");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
@@ -294,14 +295,14 @@ fn commentary_between_tools_folds_into_the_work_row_and_opens_in_place() {
     let view = commentary_turn();
     let p = present(&view, &[], &options(&[], 0));
     let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
-    assert_eq!(read(&p), ["Worked for 12s · 3 tools", "All green."], "the commentary folds; the answer never does");
+    assert_eq!(read(&p), ["5 steps", "All green."], "the commentary folds; the answer never does");
     assert_eq!(p.entries[0].items, ["cl:m:0", "cl:c1", "cl:c2", "cl:m:1", "cl:c3"]);
     let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
-    assert_eq!(read(&open), ["Worked for 12s · 3 tools", "Building it first.", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
+    assert_eq!(read(&open), ["5 steps", "Building it first.", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
     let hidden = present(&view, &[], &Options { hide_settled: true, ..options(&[], 0) });
     assert_eq!(read(&hidden), ["All green."], "Hide when done: the folded commentary goes with the work row");
     let always = present(&view, &[], &Options { show_commentary: true, ..options(&[], 0) });
-    assert_eq!(read(&always), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "Always visible keeps the commentary in its place");
+    assert_eq!(read(&always), ["Building it first.", "3 steps", "Built. Now the tests.", "All green."], "Always visible keeps the commentary in its place");
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
@@ -322,7 +323,8 @@ const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
 fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     let (view, rows) = real_turn();
     let p = present(&view, &rows, &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 16s · 1 tool", "Ran sleep 60", ""], "the folded calls: the failed one stays out");
+    assert_eq!(titles(&p), ["3 steps", "Ran sleep 60", ""], "what opens: the two thoughts and the tool that worked");
+    assert_eq!(p.entries[0].hint, "Worked for 16s · 1 tool", "the folded calls: the failed one stays out");
     let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
     assert_eq!(kinds, [Kind::Fold, Kind::Tool, Kind::Message]);
     let fold = &p.entries[0];
@@ -347,7 +349,7 @@ fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
     assert_eq!(
         titles(&open),
         [
-            "Worked for 16s · 1 tool",
+            "3 steps",
             "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
             "Ran sleep 60",
             "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
@@ -726,14 +728,14 @@ fn a_spoken_acknowledgment_stays_above_the_work_row() {
     let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
     let mut opts = options(&[], 0);
     let p = present(&heard_turn(), &[], &opts);
-    assert_eq!(read(&p), ["On it, checking the build.", "Worked for 8s · 3 tools", "All green."], "the words heard, the work row, the reply");
+    assert_eq!(read(&p), ["On it, checking the build.", "4 steps", "All green."], "the words heard, the work row, the reply");
     assert!(p.entries[0].spoken);
     opts.hide_settled = true;
     assert_eq!(read(&present(&heard_turn(), &[], &opts)), ["On it, checking the build.", "All green."], "Hide when done keeps it");
     opts.hide_settled = false;
     opts.expanded.insert("live:fold:tr-h".to_owned());
     let open = present(&heard_turn(), &[], &opts);
-    assert_eq!(read(&open), ["On it, checking the build.", "Worked for 8s · 3 tools", "Ran git status", "Ran make build", "Looking at the build log now.", "Ran make test", "All green."], "opened, the rest in place");
+    assert_eq!(read(&open), ["On it, checking the build.", "4 steps", "Ran git status", "Ran make build", "Looking at the build log now.", "Ran make test", "All green."], "opened, the rest in place");
     assert!(clarp_core::text::has_speech("Sure. <speak>On it.</speak>") && !clarp_core::text::has_speech("<speak> </speak>") && !clarp_core::text::has_speech("speak plainly"));
 }
 
@@ -876,10 +878,10 @@ fn a_zero_length_thought_shows_nothing() {
     }
 }
 
-/// The work row counts the calls it opens to (Arnie's ruling for every client): every
-/// call failed, it says the time alone; no time and no folded call, there is no row.
+/// A finished work row names only what it opens to (#888): every call failed,
+/// nothing folds and there is no row; no time and no folded call, no row either.
 #[test]
-fn the_work_row_counts_folded_calls_and_says_its_time() {
+fn a_work_row_stands_only_for_what_it_opens_to() {
     let s = SPOKEN_STARTED;
     let failed = |id: &str, call: &str, ordinal: i64| json!({"id": id, "kind": "tool", "rev": 2, "conv": "c-n", "turn_id": "tr-n",
         "status": "failed", "ordinal": ordinal, "started_at_ms": s + ordinal * 100, "ended_at_ms": s + ordinal * 100 + 50,
@@ -896,8 +898,7 @@ fn the_work_row_counts_folded_calls_and_says_its_time() {
     // Every call failed: the time, no count, nothing to open; the failed calls in their rows.
     let timed = json!({"turn_id": "tr-n", "status": "completed", "started_at_ms": s, "ended_at_ms": s + 11_000, "worked_ms": 11_000, "tool_count": 2});
     let p = present(&view(timed, vec![failed("oc:f1", "f1", 1), failed("oc:f2", "f2", 2), answer.clone()]), &[], &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 11s", "Ran ls /gone", "Ran ls /gone", ""]);
-    assert!(!p.entries[0].expandable);
+    assert_eq!(titles(&p), ["Ran ls /gone", "Ran ls /gone", ""], "nothing folds, so no row (#888)");
     // Neither a time nor a folded call: no row.
     let untimed = json!({"turn_id": "tr-n", "status": "completed", "tool_count": 2});
     let p = present(&view(untimed, vec![failed("oc:f1", "f1", 1), answer]), &[], &options(&[], 0));
@@ -962,7 +963,7 @@ fn the_working_line_goes_below_a_message_read_into_the_running_turn() {
     // What ran before the message folds above it, Working goes below it
     // (#843): the order the settled turn keeps.
     assert_eq!(shown_order(&read, &rows), ["u-go", "live:fold:tr-s@u-steer", "u-steer", "live:fold:tr-s"], "Working below the steered message");
-    assert_eq!(titles(&read), ["2 tools", "Working"]);
+    assert_eq!(titles(&read), ["2 steps", "Working"]);
     // Each step in its row keeps the place its time gives it, running or
     // not: both began before the message.
     let open = options(&[], 0);

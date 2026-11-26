@@ -858,7 +858,7 @@ pub(super) fn row_overlap_check(out: String) {
             upsert(serde_json::json!([summed(text_row("b-final", "2026-10-05T10:05:06Z", "t-b", "final", &answer(4)), "t-b", 6_000, 1)]));
             agent_state("idle");
         }),
-        moment("the turn settles and folds behind Worked for 6s", 1500, || has_row("b-final"), move |_, _| {
+        moment("the turn settles and folds behind its steps row", 1500, || has_row("b-final"), move |_, _| {
             shot3();
             upsert(serde_json::json!([{"id": "c-prompt", "role": "user", "timestamp": "2026-10-05T10:07:00Z", "text": "Thanks. Anything else?", "origin": "user", "trace_id": "t-c"}]));
             agent_state("thinking");

@@ -131,8 +131,7 @@ fn allowed(lines: &[&str], line: usize) -> Option<bool> {
 /// Known, waiting for approval: screen text today's app draws that the
 /// rubric refuses, each kept as it is until its fix is approved one by one
 /// (issue #888). File, the literal as written, the catalogue entry.
-const WAITING: &[(&str, &str, &str)] = &[
-];
+const WAITING: &[(&str, &str, &str)] = &[];
 
 #[test]
 fn the_desktop_draws_no_text_the_rubric_refuses() {

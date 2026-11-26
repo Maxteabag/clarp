@@ -1,6 +1,6 @@
 //! Finished turns fold in history (docs/live-items.md §7.6, §9): over the
-//! recorded `/log` rows each settled turn shows one `Worked for N · K tools`
-//! row, N and K from the Host's turn summary; opened, one row per tool;
+//! recorded `/log` rows each settled turn shows one quiet `N steps` row, its
+//! hint the Host's worked time and tool count; opened, one row per step;
 //! what failed or stopped and every message, commentary too, stay outside
 //! it, in their places. Without `log_turn_summary` history keeps its rows.
 
@@ -83,7 +83,7 @@ fn a_chat_opened_cold_folds_its_settled_turn_from_log() {
     assert_eq!(fold.key, format!("live:fold:{T1}"), "the live fold's key, so the takeover is in place");
     assert_eq!(fold.prompt.as_deref(), Some(T1_PROMPT));
     // The Host's summary on the turn's last row: worked_ms 16337, 2 tools.
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")]);
+    assert_eq!(read(fold), ["Ran sleep 60", "1 step", &format!("row {T1_ANSWER}")]);
     let failed = entry(fold, &format!("live:log:{FAILED_CALL}"));
     assert_eq!((failed.kind, failed.status.as_str()), (Kind::Tool, "failed"), "the failed tool stays in view");
     // Refused by the agent's runtime: why, in plain words, in place of the
@@ -125,7 +125,8 @@ fn the_work_row_reads_the_log_summary_not_the_live_turn() {
     }
     let base = Options { open_turn: T3.to_owned(), busy: true, ..options(&[]) };
     let folded = present(&rows, Some(&view), &base);
-    assert_eq!(read(&folded.folds[0])[0], "Worked for 11s · 1 tool");
+    let fold = &folds(&folded.folds[0])[0];
+    assert_eq!((fold.title.as_str(), fold.hint.as_str()), ("3 steps", "Worked for 11s · 1 tool"), "the summary's time, on hover (#888)");
 }
 
 #[test]
@@ -133,7 +134,7 @@ fn an_open_fold_shows_one_row_per_tool() {
     let rows = real_rows(false);
     let folded = present(&rows, None, &options(&[&format!("live:fold:{T1}")]));
     let fold = &folded.folds[0];
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 1 tool", "Ran sleep 60", &format!("row {T1_ANSWER}")]);
+    assert_eq!(read(fold), ["Ran sleep 60", "1 step", "Ran sleep 60", &format!("row {T1_ANSWER}")]);
     assert!(entry(fold, &format!("live:fold:{T1}")).expanded);
     assert_eq!(entry(fold, "live:log:toolu_01NHjm6d6UD9Xncd1t3gSZKG").status, "completed");
 }
@@ -161,14 +162,15 @@ fn a_turn_seen_live_folds_in_history_as_it_did_live() {
     let keys: Vec<&str> = folded.folds.iter().map(|f| f.key.as_str()).collect();
     assert_eq!(keys, [format!("live:fold:{T1}"), format!("live:fold:{T2}")], "the two finished turns fold; the open one is live's");
     let first = &folded.folds[0];
-    assert_eq!(read(first), ["Worked for 16s · 1 tool", "Ran sleep 60", &format!("row {T1_ANSWER}")], "the Host's worked time and tool count");
+    assert_eq!(read(first), ["3 steps", "Ran sleep 60", &format!("row {T1_ANSWER}")], "one quiet line naming what opens (#888)");
+    assert_eq!(folds(first)[0].hint, "Worked for 16s · 1 tool", "the Host's worked time and tool count, on hover");
     let failed = entry(first, &format!("live:cl:{FAILED_CALL}"));
     assert_eq!((failed.status.as_str(), failed.meta.as_str()), ("failed", "exit 1 · 0.0s"), "the live item's key and look");
     let open = present(&rows, Some(&view), &Options { expanded: [format!("live:fold:{T1}")].into(), ..base });
     assert_eq!(
         read(&open.folds[0]),
         [
-            "Worked for 16s · 1 tool",
+            "3 steps",
             "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
             "Ran sleep 60",
             "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
@@ -188,9 +190,10 @@ fn several_finished_turns_each_fold_and_the_open_turn_is_left_alone() {
     assert_eq!(second.key, format!("live:fold:{T2}"));
     assert_eq!(second.next.as_deref(), Some("u-clarp-admin-3c48398b85b08a09"));
     // It ended before the Host summed turns up: no worked time is guessed.
-    assert_eq!(read(second), ["3 tools", "row live-567165763b2310817088"]);
+    assert_eq!(read(second), ["3 steps", "row live-567165763b2310817088"]);
+    assert_eq!(folds(second)[0].hint, "3 tools");
     let open = present(&rows, None, &Options { open_turn: T3.to_owned(), busy: true, ..options(&[&format!("live:fold:{T2}")]) });
-    assert_eq!(read(&open.folds[1]), ["3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
+    assert_eq!(read(&open.folds[1]), ["3 steps", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
     assert!(!folded.hidden_rows.contains("msg-e60c25b9161ac8b660ca"), "the open turn's running tool row is live's");
     // Without live items the chat's last turn, the agent still working,
     // is not over: it does not fold either.
@@ -242,10 +245,10 @@ fn commentary_between_tools_folds_and_spoken_commentary_stays_above_the_work_row
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
-    assert_eq!(read(fold), ["Worked for 1m 12s · 3 tools", "row a6"], "the commentary folds with the work (#653); the answer never");
+    assert_eq!(read(fold), ["5 steps", "row a6"], "the commentary folds with the work (#653); the answer never");
     assert_eq!(sorted(&folded.hidden_rows), ["a1", "a2", "a3", "a4", "a5"]);
     let open = present(&rows, None, &options(&["live:fold:t1"]));
-    assert_eq!(read(&open.folds[0]), ["Worked for 1m 12s · 3 tools", "row a1", "Ran make build", "Ran make lint", "row a4", "Ran make test", "row a6"], "it opens in place");
+    assert_eq!(read(&open.folds[0]), ["5 steps", "row a1", "Ran make build", "Ran make lint", "row a4", "Ran make test", "row a6"], "it opens in place");
     assert_eq!(sorted(&open.hidden_rows), ["a2", "a3", "a5"], "open, the commentary rows show where they were, the tools as tool rows");
     // Hide when done: the work row goes, the folded commentary and tools with it.
     let hidden = present(&rows, None, &Options { hide_settled: true, ..options(&[]) });
@@ -256,13 +259,13 @@ fn commentary_between_tools_folds_and_spoken_commentary_stays_above_the_work_row
     let mut spoken_rows = rows.clone();
     spoken_rows[4].text = "<speak>Built. Now the tests.</speak>".to_owned();
     let folded = present(&spoken_rows, None, &options(&[]));
-    assert_eq!(read(&folded.folds[0]), ["row a4", "Worked for 1m 12s · 3 tools", "row a6"]);
+    assert_eq!(read(&folded.folds[0]), ["row a4", "4 steps", "row a6"]);
     assert!(!folded.hidden_rows.contains("a4"));
     let hidden = present(&spoken_rows, None, &Options { hide_settled: true, ..options(&[]) });
     assert_eq!(read(&hidden.folds[0]), ["row a4", "row a6"], "what was spoken shows, Hide when done too");
     // Always visible: the commentary stays in its place.
     let always = present(&rows, None, &Options { show_commentary: true, ..options(&[]) });
-    assert_eq!(read(&always.folds[0]), ["row a1", "Worked for 1m 12s · 3 tools", "row a4", "row a6"]);
+    assert_eq!(read(&always.folds[0]), ["row a1", "3 steps", "row a4", "row a6"]);
 }
 
 #[test]
@@ -275,7 +278,8 @@ fn a_tool_that_never_finished_in_a_settled_turn_shows_interrupted() {
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
-    assert_eq!(read(fold), ["Worked for 4s · 1 tool", "Stopped make test"], "the stopped call stays out of the count");
+    assert_eq!(read(fold), ["1 step", "Stopped make test"], "the stopped call stays out of the count");
+    assert_eq!(folds(fold)[0].hint, "Worked for 4s · 1 tool");
     assert_eq!(entry(fold, "live:fold:t1").status, "interrupted");
     // A turn from before the Host marked them: a tool left running in a
     // turn that is over was stopped too.
@@ -308,10 +312,10 @@ fn a_reply_carrying_text_and_tools_shows_its_text_and_folds_its_tools() {
     first["text"] = json!("Building first.");
     let rows = turn(&[prompt("u1", "2026-10-03T10:00:00Z", "t1"), first, text_row("a2", "2026-10-03T10:00:06Z", "Done.")]);
     let folded = present(&rows, None, &options(&[]));
-    assert_eq!(read(&folded.folds[0]), ["1 tool", "row a2"]);
+    assert_eq!(read(&folded.folds[0]), ["2 steps", "row a2"], "its text and its tool");
     assert!(folded.hidden_rows.contains("a1"), "its text is commentary: it folds with its tool (#653)");
     let open = present(&rows, None, &options(&["live:fold:t1"]));
-    assert_eq!(read(&open.folds[0]), ["1 tool", "row a1", "Ran make build", "row a2"]);
+    assert_eq!(read(&open.folds[0]), ["2 steps", "row a1", "Ran make build", "row a2"]);
     assert!(open.stripped_calls.contains("c1") && !open.hidden_rows.contains("a1"), "opened, its text shows in place, its tool as the tool row");
 }
 
@@ -328,7 +332,7 @@ fn tool_rows_landing_after_the_next_prompt_fold_with_their_turn() {
     assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
     let fold = &folded.folds[0];
     assert_eq!(fold.next.as_deref(), Some("u-next"));
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")]);
+    assert_eq!(read(fold), ["Ran sleep 60", "1 step", &format!("row {T1_ANSWER}")]);
     assert_eq!(sorted(&folded.hidden_rows), T1_TOOLS);
 }
 
@@ -350,7 +354,7 @@ fn the_phase_says_what_is_commentary_and_the_summary_that_the_turn_is_over() {
         summed(of_turn(tool_row("a2", "2026-10-03T10:00:04Z", "c1", "make build", "ok"), "t1", None), "t1", "completed", 4_000, 1),
     ]);
     let folded = present(&rows, None, &Options { busy: true, ..options(&[]) });
-    assert_eq!(read(&folded.folds[0]), ["Worked for 4s · 1 tool"]);
+    assert_eq!(read(&folded.folds[0]), ["2 steps"]);
     assert_eq!(sorted(&folded.hidden_rows), ["a1", "a2"], "the commentary folds with the work (#653)");
 }
 
@@ -459,12 +463,12 @@ fn the_work_row_counts_the_calls_it_folds_not_the_summary() {
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
-    assert_eq!(folds(fold)[0].title, "Worked for 4s · 1 tool", "the folded build, not the summary's 9 nor the failed test");
+    assert_eq!((folds(fold)[0].title.as_str(), folds(fold)[0].hint.as_str()), ("1 step", "Worked for 4s · 1 tool"), "the folded build, not the summary's 9 nor the failed test");
     assert_eq!(entry(fold, "live:log:c2").status, "failed", "the failed call keeps its row");
 }
 
 #[test]
-fn a_turn_whose_every_call_failed_says_only_how_long_it_worked() {
+fn a_turn_whose_every_call_failed_has_no_work_row() {
     let rows = turn(&[
         prompt("u1", "2026-10-03T10:00:00Z", "t1"),
         of_turn(tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "failed"), "t1", None),
@@ -473,12 +477,8 @@ fn a_turn_whose_every_call_failed_says_only_how_long_it_worked() {
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
-    let rows = folds(fold);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].title, "Worked for 11s", "no folded call: no count");
-    assert!(!rows[0].expandable, "it folds nothing, so nothing opens");
-    assert_eq!(read(fold).len(), 3, "the row and both failed calls: {:?}", read(fold));
-    assert!(matches!(&fold.pieces[0], Piece::Entry(e) if e.kind == Kind::Fold), "it stands where the work began: {:?}", read(fold));
+    assert!(folds(fold).is_empty(), "nothing folds, so nothing opens and there is no row (#888): {:?}", read(fold));
+    assert_eq!(read(fold).len(), 2, "both failed calls in view: {:?}", read(fold));
 }
 
 #[test]
@@ -510,7 +510,7 @@ fn a_spoken_acknowledgment_in_history_stays_above_the_work_row() {
     ]);
     let quiet = Options { ..options(&[]) };
     let folded = present(&rows, None, &quiet);
-    assert_eq!(read(&folded.folds[0]), ["row a0", "Worked for 6s · 2 tools", "row a4"]);
+    assert_eq!(read(&folded.folds[0]), ["row a0", "3 steps", "row a4"]);
     assert!(folded.hidden_rows.contains("a2") && !folded.hidden_rows.contains("a0"));
     let hidden = present(&rows, None, &Options { hide_settled: true, ..quiet });
     assert_eq!(read(&hidden.folds[0]), ["row a0", "row a4"], "Hide when done keeps the words heard");
@@ -529,7 +529,7 @@ fn a_note_to_the_user_never_folds_away() {
     let folded = present(&rows, None, &options(&[]));
     assert_eq!(folded.folds.len(), 1);
     assert!(!folded.hidden_rows.contains("note-a-tell-1"), "the note stays: {:?}", sorted(&folded.hidden_rows));
-    assert_eq!(read(&folded.folds[0]), ["Ran sleep 60", "Worked for 16s · 1 tool", &format!("row {T1_ANSWER}")], "the fold is as without the note");
+    assert_eq!(read(&folded.folds[0]), ["Ran sleep 60", "1 step", &format!("row {T1_ANSWER}")], "the fold is as without the note");
 }
 
 /// A row's text was written before its tool calls: settled, the turn reads

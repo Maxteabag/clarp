@@ -546,7 +546,7 @@ pub fn live_check(out: String) {
             }
             check(status() == "■ Interrupted", &format!("the status line says Interrupted: {:?}", status()));
             check(!view().live_busy, "and the agent is no longer busy");
-            check(titles() == ["Worked for 12s · 3 tools", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools, counting the calls it opens to; under Always visible the commentary, the answer and what failed or stopped stay: {:?}", titles()));
+            check(titles() == ["3 steps", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools, counting the calls it opens to; under Always visible the commentary, the answer and what failed or stopped stay: {:?}", titles()));
             let commentary = live_row("live:cl:msg_01:1").unwrap_or_default();
             check(message_text(&commentary) == "Let me look at the parser and its tests.", &format!("Always visible keeps the commentary in its place: {:?}", message_text(&commentary)));
             let stopped = live_row("live:cl:msg_02:0").unwrap_or_default();
@@ -596,7 +596,7 @@ pub fn live_check(out: String) {
             if !landed || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(titles() == ["Worked for 12s · 3 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
+            check(titles() == ["3 steps", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
             let shown = rows(&crate::window().expect("window"));
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
             check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 2) && at("live:cl:toolu_03") == Some(i - 1)), "the durable row, carrying the answer, stays in view where the answer was, below the work row");
@@ -672,7 +672,7 @@ pub fn live_check(out: String) {
             if !landed || probe_titles().is_empty() || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(probe_titles() == ["Worked for 16s · 1 tool", "Ran sleep 60"], &format!("the real settled turn folds after its rows took the tools over: {:?}", probe_titles()));
+            check(probe_titles() == ["3 steps", "Ran sleep 60"], &format!("the real settled turn folds after its rows took the tools over: {:?}", probe_titles()));
             let failed = live_row(&format!("live:{REAL_FAILED}")).unwrap_or_default();
             check(failed.live.status == "failed" && failed.live.meta == "exit 1 · 0.0s", &format!("the failed tool stays in view: {:?} {:?}", failed.live.status, failed.live.meta));
             // The runtime refused it: its reason, in plain words, replaces the explanation (#813).
@@ -713,7 +713,7 @@ pub fn live_check(out: String) {
             check(
                 titles
                     == [
-                        "Worked for 16s · 1 tool",
+                        "3 steps",
                         "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
                         "Ran sleep 60",
                         "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
@@ -750,10 +750,10 @@ pub fn live_check(out: String) {
             let order = [at(REAL_FOLD), at(&format!("live:{REAL_FAILED}")), at(REAL_ANSWER_ROW), at(BETWEEN_FOLD), at(REAL_PREVIOUS_ANSWER), at(REAL_NEXT_PROMPT), at(REAL_RUNNING)];
             check(order.iter().all(Option::is_some) && order.windows(2).all(|w| w[0] < w[1]), &format!("strict order: each earlier turn's fold, failed tool and answer, then the prompt, then the new turn: {order:?}"));
             let fold = live_row(REAL_FOLD).unwrap_or_default();
-            check(fold.live.title == "Worked for 16s · 1 tool" && !fold.live.expanded, &format!("the turn seen live stays folded in history, with the Host's worked time: {:?}", fold.live.title));
+            check(fold.live.title == "3 steps" && fold.live.hint == "Worked for 16s · 1 tool" && !fold.live.expanded, &format!("the turn seen live stays folded in history, the Host's worked time its hint: {:?} {:?}", fold.live.title, fold.live.hint));
             check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
             let between = live_row(BETWEEN_FOLD).unwrap_or_default();
-            check(between.live.title == "3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
+            check(between.live.title == "3 steps" && !between.live.expanded, &format!("the turn in between, only ever in /log and ended before the Host summed turns up, folds the same without a worked time: {:?}", between.live.title));
             check(activity_rows().is_empty(), &format!("no finished turn shows its tools as 'Show · 1 tool call' rows: {:?}", activity_rows()));
             *running_at1.borrow_mut() = at(REAL_RUNNING).unwrap_or(usize::MAX);
             *before3.borrow_mut() = crate::view::sync_stats();
@@ -791,7 +791,7 @@ pub fn live_check(out: String) {
             let from = shown.iter().position(|r| r.live.key == BETWEEN_FOLD).unwrap_or(0);
             let turn: Vec<String> = shown[from..].iter().take_while(|r| r.id != REAL_PREVIOUS_ANSWER).map(|r| r.live.title.to_string()).collect();
             check(
-                turn == ["3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
+                turn == ["3 steps", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
                 &format!("O opens it to one row per tool, as the live fold opens: {turn:?}"),
             );
             check(activity_rows().is_empty(), "and no activity rows");
@@ -820,7 +820,7 @@ pub fn live_check(out: String) {
             if !open || live_row(REAL_FOLD).is_none() || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(titles() == ["Worked for 16s · 1 tool", "Ran sleep 60", ""], &format!("settled, before its rows land: the fold, the failed tool, the answer: {:?}", titles()));
+            check(titles() == ["3 steps", "Ran sleep 60", ""], &format!("settled, before its rows land: the fold, the failed tool, the answer: {:?}", titles()));
             // The next message, sent after the turn settled.
             control("/__control/upsert", &json!({"session": "anchor", "turns": [{"id": ANCHOR_NEXT, "role": "user", "text": "And now the next step.", "timestamp": "2026-10-03T11:49:30.000Z", "trace_id": ANCHOR_TURN}]})).is_ok()
         })),
@@ -869,7 +869,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let fold = live_row(REAL_FOLD).unwrap_or_default();
-            check(fold.live.title == "Worked for 16s · 1 tool" && !fold.live.expanded, &format!("the retired turn keeps ONE fold row in history: {:?}", fold.live.title));
+            check(fold.live.title == "3 steps" && !fold.live.expanded, &format!("the retired turn keeps ONE fold row in history: {:?}", fold.live.title));
             check(live_rows().iter().filter(|r| r.live.kind == "fold").count() == 1, "one fold");
             check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
             check(activity_rows().is_empty(), &format!("its tool rows are not shown as 'Show · 1 tool call': {:?}", activity_rows()));
@@ -905,7 +905,7 @@ pub fn live_check(out: String) {
             let titles = titles();
             check(
                 titles.starts_with(&[
-                    "Worked for 16s · 1 tool".to_owned(),
+                    "3 steps".to_owned(),
                     "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th".to_owned(),
                     "Ran sleep 60".to_owned(),
                     "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa".to_owned(),
@@ -984,7 +984,7 @@ pub fn live_check(out: String) {
             let order = anchor_order(&[REAL_PROMPT, ANCHOR_NEXT, &before, ANCHOR_QUEUED, &working]);
             check(in_order(&order), &format!("running: the work so far, the message, Working: {order:?}"));
             let title = |key: &str| live_row(key).map(|r| r.live.title.to_string()).unwrap_or_default();
-            check(title(&before) == "1 tool" && title(&working) == "Working · 1 tool", &format!("the work so far is counted, Working holds what runs after: {:?} {:?}", title(&before), title(&working)));
+            check(title(&before) == "1 step" && title(&working) == "Working · 1 tool", &format!("the work so far is counted, Working holds what runs after: {:?} {:?}", title(&before), title(&working)));
             shot(&out23, "live-12c-anchor-steered-grouped");
             // The turn settles: both steps done, the read row still named.
             let started = ANCHOR_STARTED;
@@ -1008,7 +1008,7 @@ pub fn live_check(out: String) {
             let order = anchor_order(&[REAL_PROMPT, ANCHOR_NEXT, &before, ANCHOR_QUEUED, &working]);
             check(in_order(&order), &format!("settled, the same order: {order:?}"));
             let title = |key: &str| live_row(key).map(|r| r.live.title.to_string()).unwrap_or_default();
-            check(title(&before) == "1 tool" && title(&working) == "Worked for 14s · 1 tool", &format!("the worked time on the last work row: {:?} {:?}", title(&before), title(&working)));
+            check(title(&before) == "1 step" && title(&working) == "1 step", &format!("one quiet line for each part (#888): {:?} {:?}", title(&before), title(&working)));
             shot(&out24, "live-12d-anchor-steered-settled");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
             crate::pump();

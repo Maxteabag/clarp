@@ -256,11 +256,12 @@ pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
 /// What a live row is built from: an equal signature builds an equal row.
 pub(crate) fn signature(entry: &Entry) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         entry.rev,
         entry.status,
         entry.title,
         entry.meta,
+        entry.hint,
         entry.secondary,
         entry.expanded,
         entry.more,
@@ -332,6 +333,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             status: entry.status.clone().into(),
             title: entry.title.clone().into(),
             meta: entry.meta.clone().into(),
+            hint: entry.hint.clone().into(),
             secondary: entry.secondary.clone().into(),
             reserve: entry.reserve_secondary,
             explaining: entry.explaining,
