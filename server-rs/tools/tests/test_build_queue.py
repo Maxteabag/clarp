@@ -1,5 +1,6 @@
 """A target belongs to the effective dev/test profile of its last build."""
 import fcntl
+import inspect
 import os
 from pathlib import Path
 import runpy
@@ -13,12 +14,23 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'build-queue.py'
 queue = runpy.run_path(str(SCRIPT))
 
 
+def places(root):
+    """Where the tool works, moved into a test's own directory: this version's copies in root, the older tools' in
+    root/.legacy. The jobs a test starts in processes of their own are given it as PLACES."""
+    legacy = root / '.legacy'
+    return dict(ROOT=root, COPY_LOCKS=root / '.copy-locks', STAGES=root / '.stage', LEGACY_ROOT=legacy,
+                LEGACY_SLOT=legacy / 'lock', LEGACY_HOLDER=legacy / 'holder', LEGACY_EVICTION=legacy / 'eviction-lock')
+
+
+PLACES = inspect.getsource(places)
+
+
 def at(root, monkeypatch):
     """The tool's functions, working in root instead of the build machine's /var/tmp/clarp-build."""
     names = queue['main'].__globals__
-    for name, value in (('ROOT', root), ('COPY_LOCKS', root / '.copy-locks'), ('LEGACY_SLOT', root / 'lock'),
-                        ('LEGACY_HOLDER', root / 'holder'), ('LEGACY_EVICTION', root / 'eviction-lock')):
+    for name, value in places(root).items():
         monkeypatch.setitem(names, name, value)
+    (root / '.legacy').mkdir(exist_ok=True)
     return names
 
 
@@ -161,7 +173,7 @@ def held_elsewhere():
         os.close(fd)
 
 
-def test_a_seed_never_comes_from_a_target_in_use_nor_while_an_older_build_runs(tmp_path, monkeypatch, held_elsewhere, capsys):
+def test_a_seed_never_comes_from_a_target_in_use(tmp_path, monkeypatch, held_elsewhere, capsys):
     if not reflinks(tmp_path):
         return  # without clones nothing is ever copied; the test above holds that
     at(tmp_path, monkeypatch)
@@ -169,16 +181,11 @@ def test_a_seed_never_comes_from_a_target_in_use_nor_while_an_older_build_runs(t
     lane(tmp_path, 'newer', 2 * 10**18)
     here = lane(tmp_path, 'here', 10**17, target=False)
     with queue['directory'](tmp_path) as root, queue['directory'](here) as workspace:
-        # A build of the tools before 26 Nov 2026 holds the machine-wide slot and names no copy: none is shown idle.
-        let_go = held_elsewhere(tmp_path / 'lock')
-        assert queue['seed_target'](root, 'here', workspace) is None
-        assert 'older tools' in capsys.readouterr().out
-        let_go()
         # The best source has a job of its own running (or a drop): the next is taken, without waiting.
         held_elsewhere(tmp_path / '.copy-locks/newer.lock')
         assert queue['seed_target'](root, 'here', workspace) == 'older'
         assert (here / 'target/debug/deps/libserde-1111111111111111.rlib').read_text() == 'older'
-        (here / 'target').rename(tmp_path / 'discard')
+        (here / 'target').rename(tmp_path / '.discard')
         # Every good source in use: a cold build, and it says so.
         held_elsewhere(tmp_path / '.copy-locks/older.lock')
         assert queue['seed_target'](root, 'here', workspace) is None
@@ -186,11 +193,37 @@ def test_a_seed_never_comes_from_a_target_in_use_nor_while_an_older_build_runs(t
         assert not (here / 'target').exists()
 
 
+def test_the_older_tools_targets_seed_only_while_none_of_their_builds_or_housekeeping_runs(tmp_path, monkeypatch, held_elsewhere, capsys):
+    if not reflinks(tmp_path):
+        return
+    at(tmp_path, monkeypatch)
+    legacy = tmp_path / '.legacy'
+    lane(legacy, 'other', 2 * 10**18)
+    lane(legacy, 'here', 10**18)
+    here = lane(tmp_path, 'here', 10**17, target=False)
+    with queue['directory'](tmp_path) as root, queue['directory'](here) as workspace:
+        # One of their builds holds their slot; their eviction or drop holds their eviction lock. Neither is waited for.
+        for lock in ('lock', 'eviction-lock'):
+            let_go = held_elsewhere(legacy / lock)
+            started = time.monotonic()
+            assert queue['seed_target'](root, 'here', workspace) is None
+            assert time.monotonic() - started < 1
+            assert "in use (the older tools' copies); building cold" in capsys.readouterr().out
+            assert not (here / 'target').exists()
+            let_go()
+        # Idle: this checkout's own old target first, and it stays theirs, untouched.
+        assert queue['seed_target'](root, 'here', workspace) == 'here (older tools)'
+        assert (here / 'target/debug/deps/libserde-1111111111111111.rlib').read_text() == 'here'
+    assert (legacy / 'here/server-rs/target/debug/deps/libserde-1111111111111111.rlib').read_text() == 'here'
+
+
 def test_room_is_made_only_from_targets_not_in_use(tmp_path, monkeypatch, held_elsewhere, capsys):
     names = at(tmp_path, monkeypatch)
     for name, stamp in (('oldest', 10**17), ('old', 10**18), ('recent', 2 * 10**18)):
         lane(tmp_path, name, stamp)
     here = lane(tmp_path, 'here', 3 * 10**18)
+    # The older tools' copies are theirs to free, whatever they hold.
+    lane(tmp_path / '.legacy', 'ancient', 10)
     monkeypatch.chdir(here)
     # Room enough once two targets are gone.
     monkeypatch.setitem(names, 'free_after_removal', lambda floor: sum(
@@ -198,29 +231,69 @@ def test_room_is_made_only_from_targets_not_in_use(tmp_path, monkeypatch, held_e
     real = names['shutil'].disk_usage
     monkeypatch.setattr(names['shutil'], 'disk_usage', lambda path: real(path)._replace(free=0))
     with queue['directory'](tmp_path) as root:
-        let_go = held_elsewhere(tmp_path / 'lock')
-        assert not queue['make_room'](root, 'here', 100)
-        assert 'targets in use kept=all (a build of older tools is running)' in capsys.readouterr().err
-        let_go()
-        assert all((tmp_path / n / 'server-rs/target').exists() for n in ('oldest', 'old', 'recent'))
         held_elsewhere(tmp_path / '.copy-locks/oldest.lock', fcntl.LOCK_SH)
         assert queue['make_room'](root, 'here', 100)
         out = capsys.readouterr().out
         assert 'removed targets=old,recent, targets in use kept=oldest' in out
     assert (tmp_path / 'oldest/server-rs/target').exists() and (here / 'target').exists()
+    assert (tmp_path / '.legacy/ancient/server-rs/target').exists()
 
 
-def start(root, name, *command, mode='--build-debug'):
-    """One job of checkout `name`, run by the tool as tools/build runs it on the build machine."""
-    wrapper = (
-        'import runpy, sys\nfrom pathlib import Path\n'
-        'names = runpy.run_path(sys.argv[1])["main"].__globals__\nroot = Path(sys.argv[2])\n'
-        'names.update(ROOT=root, COPY_LOCKS=root / ".copy-locks", LEGACY_SLOT=root / "lock", '
-        'LEGACY_HOLDER=root / "holder", LEGACY_EVICTION=root / "eviction-lock")\n'
-        'sys.exit(names["main"](sys.argv[3:]))\n')
+def staged(root, name, machine, marker):
+    """What tools/build on `machine` uploads for checkout `name`: its stage, with `marker` in its sources."""
+    stage = root / '.stage' / f'{name}@{machine}.00000000'
+    src = lane(stage, 'src', 0, target=False).parent
+    (src / 'skills/clarp-sub-agents').mkdir(parents=True)
+    (src / 'skills/clarp-sub-agents/run.py').write_text('')
+    (src / 'skills/clarp-background-jobs/scripts').mkdir(parents=True)
+    (src / 'skills/clarp-background-jobs/scripts/run_detached_job.sh').write_text('')
+    mark(stage, marker)
+    return stage
+
+
+def test_each_invocation_stages_its_own_upload_from_the_last_finished_one(tmp_path, monkeypatch, held_elsewhere, capsys):
+    at(tmp_path, monkeypatch)
+    stages = tmp_path / '.stage'
+
+    def new(bare=False):
+        queue['new_stage']('a', 'm1', bare=bare)
+        return Path(capsys.readouterr().out.strip())
+    first = new()
+    assert first.parent == stages and first.name.startswith('a@m1.') and not (first / 'src').exists()
+    (first / 'src/server-rs').mkdir(parents=True)
+    (first / 'src/server-rs/marker').write_text('first')
+    # Its job began, so its upload ended; a later one starts from it, as a copy of its own.
+    (first / 'uploaded').touch()
+    second = new()
+    assert (second / 'src/server-rs/marker').read_text() == 'first'
+    (second / 'src/server-rs/marker').write_text('second')
+    assert (first / 'src/server-rs/marker').read_text() == 'first'
+    # The second's client went before its job began (no mark); its job, still alive, holds it.
+    held_elsewhere(second / '.lock')
+    other_machine = staged(tmp_path, 'a', 'm2', 'B')
+    lost = new()  # a third whose client is lost before its job begins: nothing holds it
+    fourth = new()
+    # The basis stays, the held one stays, the lost one goes; another machine's is never touched.
+    assert first.exists() and second.exists() and not lost.exists() and other_machine.exists()
+    assert (fourth / 'src/server-rs/marker').read_text() == 'first'
+    assert not (new(bare=True) / 'src').exists()
+
+
+def mark(stage, marker):
+    (stage / 'src/server-rs/marker').write_text(marker)
+    (stage / 'src/server-rs/Cargo.lock').write_text(f'lock {marker}')
+
+
+def start(root, stage, *command):
+    """One job, run by the tool as tools/build runs it on the build machine."""
+    wrapper = ('import runpy, sys\nfrom pathlib import Path\n' + PLACES +
+               'names = runpy.run_path(sys.argv[1])["main"].__globals__\n'
+               'names.update(places(Path(sys.argv[2])))\nsys.exit(names["main"](sys.argv[3:]))\n')
+    name = stage.name.split('@')[0]
     env = dict(os.environ, CARGO_PROFILE_DEV_DEBUG='line-tables-only', CARGO_PROFILE_TEST_DEBUG='line-tables-only')
-    return subprocess.Popen([sys.executable, '-c', wrapper, str(SCRIPT), str(root), mode, '0', f'agent {name} test', *command],
-                            cwd=root / name / 'server-rs', env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    return subprocess.Popen([sys.executable, '-c', wrapper, str(SCRIPT), str(root), '--build-debug', '0', name, str(stage),
+                             f'agent {name} test', *command],
+                            cwd=stage / 'src/server-rs', env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
 def until(condition, seconds=10):
@@ -230,29 +303,35 @@ def until(condition, seconds=10):
         time.sleep(0.05)
 
 
-def test_checkouts_build_side_by_side_and_one_checkouts_jobs_take_turns(tmp_path, monkeypatch):
+def test_checkouts_build_side_by_side_and_one_checkouts_jobs_take_turns_on_their_own_sources(tmp_path, monkeypatch):
     at(tmp_path, monkeypatch)
     for name in ('a', 'b'):
         lane(tmp_path, name, 10**18)
+    (tmp_path / 'a/server-rs/target/kept').write_text('')
+    a1 = staged(tmp_path, 'a', 'm1', 'A from m1')
+    a2 = staged(tmp_path, 'a', 'm2', 'A from m2')
+    b1 = staged(tmp_path, 'b', 'm1', 'B from m1')
     gate = tmp_path / 'gate'
     gate.mkdir()
-    # A job that says it started, then waits for the test to let it end.
-    job = ['sh', '-c', f'touch {gate}/$0; while [ ! -e {gate}/$0.go ]; do sleep 0.05; done; exit $1']
-    first = start(tmp_path, 'a', *job, 'a1', '0')
-    other = start(tmp_path, 'b', *job, 'b1', '0')
+    # A job that says it started and what it compiles, waits for the test to let it end, and says again.
+    job = ['sh', '-c', f'cat marker > {gate}/$0.seen; touch {gate}/$0; while [ ! -e {gate}/$0.go ]; do sleep 0.05; done; '
+           f'echo >> {gate}/$0.seen; cat marker >> {gate}/$0.seen; exit $1']
+    first = start(tmp_path, a1, *job, 'a1', '0')
+    other = start(tmp_path, b1, *job, 'b1', '0')
     jobs = [first, other]
     try:
         until(lambda: (gate / 'a1').exists() and (gate / 'b1').exists())
-        # The same checkout's next job waits for its copy, and says for whom.
-        second = start(tmp_path, 'a', *job, 'a2', '101')
+        # The same checkout's job from another machine waits for the copy, and says for whom.
+        second = start(tmp_path, a2, *job, 'a2', '101')
         jobs.append(second)
         time.sleep(1)
         assert not (gate / 'a2').exists() and second.poll() is None
+        # That machine uploads again meanwhile: only its own stage changes.
+        mark(a2, 'A from m2, again')
         shown = subprocess.run([sys.executable, '-c',
-                                'import runpy, sys\nfrom pathlib import Path\n'
-                                'names = runpy.run_path(sys.argv[1])["main"].__globals__\nroot = Path(sys.argv[2])\n'
-                                'names.update(ROOT=root, COPY_LOCKS=root / ".copy-locks", LEGACY_SLOT=root / "lock", '
-                                'LEGACY_HOLDER=root / "holder")\nnames["main"](["status"])\n',
+                                'import runpy, sys\nfrom pathlib import Path\n' + PLACES +
+                                'names = runpy.run_path(sys.argv[1])["main"].__globals__\n'
+                                'names.update(places(Path(sys.argv[2])))\nnames["main"](["status"])\n',
                                 str(SCRIPT), str(tmp_path)], capture_output=True, text=True, check=True).stdout
         # Both running copies, with how long; the waiting job holds nothing yet.
         assert sorted(line.split(' since ')[0] for line in shown.splitlines()) == [
@@ -260,15 +339,22 @@ def test_checkouts_build_side_by_side_and_one_checkouts_jobs_take_turns(tmp_path
         assert all(' (for 0m0' in line for line in shown.splitlines())
         (gate / 'a1.go').touch()
         assert first.wait(10) == 0
+        assert (gate / 'a1.seen').read_text() == 'A from m1\nA from m1'
+        assert (a1 / 'out/Cargo.lock').read_text() == 'lock A from m1'
         until(lambda: (gate / 'a2').exists())
         (gate / 'a2.go').touch()
         # A failure comes back as the command's code and marks the copy not good.
         assert second.wait(10) == 101
+        assert (gate / 'a2.seen').read_text() == 'A from m2, again\nA from m2, again'
+        assert (a2 / 'out/Cargo.lock').read_text() == 'lock A from m2, again'
         assert "waiting for this checkout's running job to finish (agent a test since" in second.stdout.read()
         with queue['directory'](tmp_path / 'a') as copy:
             assert queue['last_good_build'](copy) is None
+        # Publishing keeps the copy's target and stamps.
+        assert (tmp_path / 'a/server-rs/target/kept').exists()
         (gate / 'b1.go').touch()
         assert other.wait(10) == 0
+        assert (gate / 'b1.seen').read_text() == 'B from m1\nB from m1'
         with queue['directory'](tmp_path / 'b') as copy:
             assert queue['last_good_build'](copy) is not None
         assert not [n for n in os.listdir(tmp_path / '.copy-locks') if n.endswith('.holder')]

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Run one job of a checkout in its copy on the build machine, and own the copy until the command and its remaining
-children are gone. Jobs of different checkouts run side by side; one checkout's jobs take turns in its copy."""
+"""Run one job of a checkout in its copy on the build machine, and own the copy from publishing its sources until the
+command's remaining children are gone and what the caller fetches is set aside. Jobs of different checkouts run side
+by side; one checkout's jobs take turns in its copy."""
 from collections import Counter
 from contextlib import contextmanager, nullcontext
 import ctypes
@@ -15,14 +16,26 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.parse import quote
 
-ROOT = Path('/var/tmp/clarp-build')
+LEGACY_ROOT = Path('/var/tmp/clarp-build')
+# This version's copies live in a directory of their own on the same volume, where the older tools'
+# housekeeping (eviction, seeding, drop) cannot reach them: it takes every entry of LEGACY_ROOT with a
+# server-rs/ in it for a copy, and .v2 has none. So no new build ever waits for, or runs into, the older tools.
+ROOT = LEGACY_ROOT / '.v2'
 COPY_LOCKS = ROOT / '.copy-locks'
-LEGACY_SLOT = ROOT / 'lock'
-LEGACY_HOLDER = ROOT / 'holder'
-LEGACY_EVICTION = ROOT / 'eviction-lock'
+# Each invocation's upload of a checkout, kept apart from the copy, and from every other invocation's, so that no
+# upload, drop or fetch from any machine, nor a later one from the same machine after its client was lost, can
+# change the sources a job compiles or what it sets aside: a job publishes its stage into the copy while it holds
+# the copy, and holds its stage for as long as it lives (new_stage, job).
+STAGES = ROOT / '.stage'
+# <checkout>@<machine>.<8 of mkdtemp's>; the machine as tools/build gives it, without dots.
+STAGE = re.compile(r'([A-Za-z0-9_-][A-Za-z0-9._-]*)@([A-Za-z0-9-]+)\.([A-Za-z0-9_]{8})')
+LEGACY_SLOT = LEGACY_ROOT / 'lock'
+LEGACY_HOLDER = LEGACY_ROOT / 'holder'
+LEGACY_EVICTION = LEGACY_ROOT / 'eviction-lock'
 CHILDREN = Path(f'/proc/self/task/{os.getpid()}/children')
 
 
@@ -35,7 +48,7 @@ def executable(pid):
 
 
 def place_in(path):
-    if path.is_relative_to(ROOT):
+    if path.is_relative_to(LEGACY_ROOT):
         return None
     # Host tests usually run in "work" below a named fixture. Pytest
     # inserts a per-user parent above its fixtures; never print that parent.
@@ -192,34 +205,14 @@ def own_copy(name, description):
         os.close(fd)
 
 
-# Checkouts whose tools predate 26 Nov 2026 still build with the machine-wide slot (LEGACY_SLOT, held for as
-# long as such a build runs, by a process that takes no copy lock), and free room or seed a target under the
-# eviction lock (LEGACY_EVICTION, exclusive). Their files are left as they are; these two fences keep a build of
-# either version from touching a target the other is using. Both go once no checkout has the old tools.
-
 @contextmanager
-def no_old_build_running():
-    """Yield True while no build of the older tools can run, so another copy's target can be shown to be idle by its
-    copy lock alone. Shared and without waiting: builds of this version never hold each other off here, and one that
-    cannot have it skips its optional housekeeping rather than wait."""
-    with held(LEGACY_SLOT, fcntl.LOCK_SH, wait=False) as free:
-        yield free
-
-
-@contextmanager
-def kept_from_older_housekeeping():
-    """Keep the older tools' eviction, seeding and drop, which take no copy lock, away from this build's target.
-    Shared: builds of this version never hold each other off; it waits only while older tools are freeing room."""
-    fd = open_lock(LEGACY_EVICTION)
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print('Build copy: waiting for a build of older tools to finish freeing build disk.', flush=True)
-            fcntl.flock(fd, fcntl.LOCK_SH)
-        yield
-    finally:
-        os.close(fd)
+def older_tools_idle():
+    """Yield True while no build or housekeeping of the tools before 26 Nov 2026 can run, so that a target of theirs
+    can be cloned as it stands. Their builds hold LEGACY_SLOT for as long as they run, and their eviction, seeding and
+    drop hold LEGACY_EVICTION; both are taken shared here and only without waiting. Their files are left as they are."""
+    with held(LEGACY_SLOT, fcntl.LOCK_SH, wait=False) as no_build, \
+            held(LEGACY_EVICTION, fcntl.LOCK_SH, wait=False) as no_housekeeping:
+        yield no_build and no_housekeeping
 
 
 def drive(checkout, command):
@@ -260,7 +253,7 @@ def status():
     if not running and not old:
         print('builds: none running')
     waiting = 0
-    for marker in ROOT.glob('wait-*-*-*'):
+    for marker in LEGACY_ROOT.glob('wait-*-*-*'):
         _, _, pid, start = marker.name.split('-', 3)
         waiting += process_start(pid) == start
     if waiting:
@@ -388,35 +381,31 @@ def make_room(root, current, floor):
             free = free_after_removal(floor)
     busy = 'none'
     if free < floor:
-        with no_old_build_running() as fenced:
-            if not fenced:
-                busy = 'all (a build of older tools is running)'
-            else:
-                candidates = []
-                for name in os.listdir(root):
-                    if name != current and (built := evictable(root, name)) is not None:
-                        candidates.append((*built, name))
-                kept = []
-                for age, identity, name in sorted(candidates, key=lambda c: (c[0], c[2])):
-                    # A copy whose own job or drop has it is in use: it is left, never waited for. Under its lock the
-                    # target must still be the one found, and not built since, to be removed.
-                    with held(lock_of(name), wait=False) as idle:
-                        if not idle:
-                            kept.append(quote(name, safe=''))
-                            continue
-                        now = evictable(root, name)
-                        if now is None or now[0] != age or not os.path.samestat(now[1], identity):
-                            continue
-                        try:
-                            with directory(name, root) as copy, directory('server-rs', copy) as workspace:
-                                shutil.rmtree('target', dir_fd=workspace)
-                        except (FileNotFoundError, NotADirectoryError):
-                            continue
-                    removed.append(quote(name, safe=''))
-                    free = free_after_removal(floor)
-                    if free >= floor:
-                        break
-                busy = ','.join(kept) or 'none'
+        candidates = []
+        for name in os.listdir(root):
+            if name != current and not name.startswith('.') and (built := evictable(root, name)) is not None:
+                candidates.append((*built, name))
+        kept = []
+        for age, identity, name in sorted(candidates, key=lambda c: (c[0], c[2])):
+            # A copy whose own job or drop has it is in use: it is left, never waited for. Under its lock the
+            # target must still be the one found, and not built since, to be removed.
+            with held(lock_of(name), wait=False) as idle:
+                if not idle:
+                    kept.append(quote(name, safe=''))
+                    continue
+                now = evictable(root, name)
+                if now is None or now[0] != age or not os.path.samestat(now[1], identity):
+                    continue
+                try:
+                    with directory(name, root) as copy, directory('server-rs', copy) as workspace:
+                        shutil.rmtree('target', dir_fd=workspace)
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
+            removed.append(quote(name, safe=''))
+            free = free_after_removal(floor)
+            if free >= floor:
+                break
+        busy = ','.join(kept) or 'none'
     if free < floor:
         try:
             with directory('target') as target, directory('debug', target) as debug:
@@ -486,50 +475,64 @@ def seed_target(root, current, workspace):
     Where the filesystem cannot clone, nothing is copied and the build starts cold: one file is
     cloned first to find out, and the target is cloned only with --reflink=always, never copied.
     The caller holds its own copy; the source is held shared while it is cloned (see below).
-    Returns the source checkout's name, or None.
+    Returns the source checkout's name as printed, or None.
     """
     try:
         os.stat('target', dir_fd=workspace, follow_symlinks=False)
         return None
     except FileNotFoundError:
         pass
-    sources = [found for name in os.listdir(root) if name != current and (found := seed_source(root, name))]
-    if not sources:
-        return None
-    with no_old_build_running() as fenced:
-        if not fenced:
-            print('Build target: a build of older tools is running, so no other target can be shown idle; building cold.',
-                  flush=True)
-            return None
-        in_use = []
-        for found in sorted(sources, reverse=True):
-            name = found[2]
-            # Shared: two new checkouts may clone one target at once. Its own job and a drop take it alone, so none
-            # of them writes or removes it while it is cloned, and a copy that one of them has is left, never waited
-            # for. Under the lock the source must still be as it was found: a build since may have failed.
-            with held(lock_of(name), fcntl.LOCK_SH, wait=False) as idle:
-                if not idle:
-                    in_use.append(quote(name, safe=''))
-                    continue
-                if seed_source(root, name) != found:
-                    continue
-                cloned = clone_target(root, name, workspace)
-                if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
-                    os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
-                    newer_than_the_clone(ROOT / current)
-                    return name
-            try:
-                shutil.rmtree(SEED, dir_fd=workspace)
-            except FileNotFoundError:
-                pass
-            if cloned is None:  # the source went meanwhile
+    in_use = []
+    # First the copies of this version, each held shared while it is cloned: two new checkouts may clone one
+    # target at once, while its own job and a drop take it alone. A copy one of them has is left, never waited for.
+    sources = [found for name in os.listdir(root)
+               if name != current and not name.startswith('.') and (found := seed_source(root, name))]
+    source = clone_first(root, sorted(sources, reverse=True), workspace, lambda name: held(lock_of(name), fcntl.LOCK_SH, wait=False), in_use)
+    source = source and quote(source, safe='')
+    if source is None and os.path.isdir(LEGACY_ROOT):
+        # Then, during the move to .v2, the older tools' copies, this checkout's own first: only while none of their
+        # builds or housekeeping runs, held off for the moment of the clone.
+        with older_tools_idle() as idle, directory(LEGACY_ROOT) as legacy:
+            if idle:
+                sources = [found for name in os.listdir(legacy)
+                           if not name.startswith('.') and (found := seed_source(legacy, name))]
+                ordered = sorted(sources, key=lambda found: (found[2] == current, found[0], found[1]), reverse=True)
+                source = clone_first(legacy, ordered, workspace, lambda name: nullcontext(True), in_use)
+                source = source and f"{quote(source, safe='')} (older tools)"
+            else:
+                in_use.append('the older tools\' copies')
+    if source:
+        newer_than_the_clone(ROOT / current)
+    elif in_use and source is None:
+        print(f"Build target: the good targets are in use ({','.join(in_use)}); building cold.", flush=True)
+    return source or None
+
+
+def clone_first(root, sources, workspace, hold, in_use):
+    """Clone the target of the first of `sources` that `hold` gives without waiting and that is still as it was
+    found (a build since may have failed). Its name, None when none was cloned, or False when cloning failed."""
+    for found in sources:
+        name = found[2]
+        with hold(name) as idle:
+            if not idle:
+                in_use.append(quote(name, safe=''))
                 continue
-            detail = cloned.stderr.strip().splitlines()[-1:]
-            print(f"Build target: could not clone {quote(name, safe='')}'s target ({' '.join(detail)}); building cold.", flush=True)
-            return None
-        if in_use:
-            print(f"Build target: the good targets are in use ({','.join(in_use)}); building cold.", flush=True)
-        return None
+            if seed_source(root, name) != found:
+                continue
+            cloned = clone_target(root, name, workspace)
+            if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
+                os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
+                return name
+        try:
+            shutil.rmtree(SEED, dir_fd=workspace)
+        except FileNotFoundError:
+            pass
+        if cloned is None:  # the source went meanwhile
+            continue
+        detail = cloned.stderr.strip().splitlines()[-1:]
+        print(f"Build target: could not clone {quote(name, safe='')}'s target ({' '.join(detail)}); building cold.", flush=True)
+        return False
+    return None
 
 
 def seed_source(root, name):
@@ -617,10 +620,8 @@ def prepare_debug(workspace, profile):
 @contextmanager
 def build_space(floor, debug=False, outcome=None):
     """Prepare this checkout's target and yield whether the build may run. The caller puts the
-    command's exit code in `outcome` (a dict, under 'code'): only a 0 marks the build good."""
-    if floor is None:  # a job without a Cargo target (fmt)
-        yield True
-        return
+    command's exit code in `outcome` (a dict, under 'code'): only a 0 marks the build good.
+    The caller holds the copy and works in its server-rs/."""
     cwd = Path.cwd()
     if cwd.name != 'server-rs' or cwd.parent.parent != ROOT:
         raise SystemExit('Build workspace is outside the managed build directory.')
@@ -637,7 +638,7 @@ def build_space(floor, debug=False, outcome=None):
             started = time.monotonic()
             source = seed_target(root, cwd.parent.name, workspace)
             if source:
-                print(f"Build target: cloned from {quote(source, safe='')} in {time.monotonic() - started:.1f} s.", flush=True)
+                print(f"Build target: cloned from {source} in {time.monotonic() - started:.1f} s.", flush=True)
             if debug:
                 profile = [os.environ[k] for k in ('CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG')]
                 if prepare_debug(workspace, profile):
@@ -660,15 +661,32 @@ def build_space(floor, debug=False, outcome=None):
             os.replace(temp, STAMP, src_dir_fd=copy, dst_dir_fd=copy)
 
 
-def copy_name():
-    """The checkout whose copy this job runs in: its workspace (server-rs) or fmt's private copy in it."""
-    cwd = Path.cwd()
-    if cwd.parent.parent != ROOT or cwd.parent.name.startswith('.'):
-        raise SystemExit('Build job is outside the managed build directory.')
-    return cwd.parent.name
+# What tools/build uploads to a stage, and so what a job publishes from it into its copy, with the same rules: the
+# paths below the checkout's root, whether what is no longer there goes, and what is never touched in the copy.
+PUBLISHED = (
+    ('server-rs/', ['--delete', '--exclude', 'target/', '--exclude', 'conformance/out/', '--exclude', 'dist/']),
+    ('contract/', ['--delete']),
+    ('skills/clarp-sub-agents/', ['--delete', '--exclude', '__pycache__']),
+    ('scripts/clarp-media-publish.py', []),
+    ('skills/clarp-background-jobs/scripts/run_detached_job.sh', []),
+)
 
 
-def run(who, command, floor=None, debug=False):
+def publish(stage, copy):
+    """Make the copy's sources this job's staged ones. The caller holds the copy. What changed arrives with the time
+    of its arrival and what did not keeps its time, as an upload into the copy did (see tools/build)."""
+    for path, rules in PUBLISHED:
+        # rsync's own meaning of a trailing slash: a directory's contents into the same directory of the copy, a
+        # file into its directory there. (A Path would drop the slash.)
+        into = path if path.endswith('/') else os.path.dirname(path) + '/'
+        (copy / into).mkdir(parents=True, exist_ok=True)
+        done = subprocess.run(['rsync', '-rlpD', '--checksum', *rules, f'{stage}/src/{path}', f'{copy}/{into}'])
+        if done.returncode:
+            raise SystemExit(f'Build copy: could not publish the staged {path} (rsync exit {done.returncode}).')
+
+
+def supervised(command):
+    """Run the command, and kill and reap whatever it leaves behind once it ends or this job is cancelled."""
     # PR_SET_CHILD_SUBREAPER adopts orphaned descendants, including children
     # which start their own process group or session.
     libc = ctypes.CDLL(None, use_errno=True)
@@ -676,23 +694,122 @@ def run(who, command, floor=None, debug=False):
         raise OSError(ctypes.get_errno(), 'cannot supervise build children')
     for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, cancelled)
-    name = copy_name()
-    since = datetime.datetime.now().strftime('%H:%M:%S')
-    with own_copy(name, f'{who} since {since}'), (kept_from_older_housekeeping() if floor is not None else nullcontext()):
-        # The copy stays held until every child is gone: a leftover still writing the target keeps it.
+
+    @contextmanager
+    def reaping():
         try:
-            outcome = {}
-            with build_space(floor, debug, outcome) as ready:
-                if not ready:
-                    return 1
-                child = subprocess.Popen(command)
-                result = child.wait()
-                outcome['code'] = result
-            return result if result >= 0 else 128 - result
+            yield
         finally:
             for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
                 signal.signal(sig, signal.SIG_IGN)
             clean_children()
+    return reaping()
+
+
+def run(command):
+    child = subprocess.Popen(command)
+    result = child.wait()
+    return result if result >= 0 else 128 - result
+
+
+def stages_of(name, machine):
+    """The stage directories of one checkout from one machine."""
+    try:
+        entries = os.listdir(STAGES)
+    except FileNotFoundError:
+        return []
+    return [entry for entry in entries
+            if (found := STAGE.fullmatch(entry)) and found[1] == name and found[2] == machine]
+
+
+def new_stage(name, machine, bare=False):
+    """Make this invocation's stage and print its path. Unless bare (fmt), it starts as a reflink copy of the sources
+    of the newest earlier stage of this checkout and machine whose upload ended (its job marked it), so the upload
+    sends only what changed. Earlier stages that no job holds any more (left by a client that went, or kept as the
+    last basis) are removed; a stage made after this one, and one a job still holds, are not."""
+    if not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9._-]*', name) or not re.fullmatch(r'[A-Za-z0-9-]+', machine):
+        raise SystemExit('A stage needs a plain checkout name and machine.')
+    STAGES.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f'{name}@{machine}.', dir=STAGES))
+    os.chmod(stage, 0o755)
+    os.close(open_lock(stage / '.lock'))  # its time orders the stages
+    made = os.stat(stage / '.lock').st_mtime_ns
+    earlier = []
+    for entry in stages_of(name, machine):
+        try:
+            when = os.stat(STAGES / entry / '.lock').st_mtime_ns
+        except FileNotFoundError:
+            continue
+        if entry != stage.name and when < made:
+            earlier.append((when, entry))
+    uploaded = [(when, entry) for when, entry in earlier if (STAGES / entry / 'uploaded').is_file()]
+    basis = max(uploaded)[1] if uploaded else None
+    if basis and not bare:
+        # A finished upload is never written again: only its job reads it (publish) and writes its out/.
+        copied = subprocess.run(['cp', '-a', '--reflink=auto', str(STAGES / basis / 'src'), str(stage / 'src')],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if copied.returncode:
+            shutil.rmtree(stage / 'src', ignore_errors=True)
+    for _, entry in earlier:
+        if entry == basis:
+            continue
+        with held(STAGES / entry / '.lock', wait=False) as idle:
+            if idle:
+                shutil.rmtree(STAGES / entry, ignore_errors=True)
+    print(stage, flush=True)
+
+
+@contextmanager
+def own_stage(stage, name):
+    """Hold this invocation's stage for the job's whole life, also when its client is gone, so no later invocation
+    removes it. A stage removed before the job held it (its client was gone by then) ends the job here."""
+    found = STAGE.fullmatch(stage.name)
+    if stage.parent != STAGES or not found or found[1] != name:
+        raise SystemExit('Build job is outside the managed build directory.')
+    try:
+        fd = open_lock(stage / '.lock')
+    except FileNotFoundError:
+        raise SystemExit('Build stage was removed before its job began.') from None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        if os.fstat(fd).st_nlink == 0:
+            raise SystemExit('Build stage was removed before its job began.')
+        yield
+    finally:
+        os.close(fd)
+
+
+def job(name, stage, who, command, floor, debug=False):
+    """One job of a checkout: hold its stage and copy, publish the stage into the copy, build, and leave what the
+    caller fetches (the lockfile, and a release's binaries) in the stage's out/, all before the copy is let go."""
+    stage = Path(stage)
+    if not name or name.startswith('.') or '/' in name:
+        raise SystemExit('Build job is outside the managed build directory.')
+    since = datetime.datetime.now().strftime('%H:%M:%S')
+    reaping = supervised(command)
+    with own_stage(stage, name), own_copy(name, f'{who} since {since}'):
+        # The upload ended before this job began: the stage may now serve a later one as its basis.
+        (stage / 'uploaded').touch()
+        copy = ROOT / name
+        out = stage / 'out'
+        try:
+            with reaping:
+                shutil.rmtree(out, ignore_errors=True)
+                out.mkdir()
+                publish(stage, copy)
+                os.chdir(copy / 'server-rs')
+                outcome = {}
+                with build_space(floor, debug, outcome) as ready:
+                    if not ready:
+                        return 1
+                    outcome['code'] = run(command)
+                return outcome['code']
+        finally:
+            # The lockfile is made by the first build; the caller brings it home from here, as this job left it.
+            try:
+                shutil.copyfile(copy / 'server-rs' / 'Cargo.lock', out / 'Cargo.lock')
+            except FileNotFoundError:
+                pass
 
 
 def main(argv):
@@ -700,10 +817,19 @@ def main(argv):
         return drive(argv[1], argv[2:])
     if argv[0] == 'status':
         return status()
-    ROOT.mkdir(exist_ok=True)
+    if argv[0] == 'stage':
+        # stage [--bare] NAME MACHINE
+        bare = argv[1] == '--bare'
+        return new_stage(*argv[1 + bare:3 + bare], bare=bare)
     if argv[0] in ('--build', '--build-debug'):
-        return run(argv[2], argv[3:], int(argv[1]), argv[0] == '--build-debug')
-    return run(argv[0], argv[1:])
+        # --build[-debug] FLOOR NAME STAGE WHO COMMAND...
+        ROOT.mkdir(parents=True, exist_ok=True)
+        return job(argv[2], argv[3], argv[4], argv[5:], int(argv[1]), argv[0] == '--build-debug')
+    if argv[0] == '--fmt':
+        # --fmt NAME STAGE WHO COMMAND...: a job without a copy, in its stage's fmt/
+        with own_stage(Path(argv[2]), argv[1]), supervised(argv[4:]):
+            return run(argv[4:])
+    raise SystemExit('usage: build-queue.py status | stage | --build[-debug] | --fmt | --drive')
 
 
 if __name__ == '__main__':
