@@ -525,6 +525,8 @@ pub struct Agent {
     stop_released: BTreeSet<TurnId>,
     /// The last turn that held the agent and ended.
     last: Option<Settled>,
+    /// The last turn carried the user's word (`live_user_word` while it ran).
+    last_user_word: bool,
     interrupted_since_ms: Option<i64>,
     /// The user's compaction whose turn ended and whose outcome is not said yet: how it ended.
     compaction_owed: Option<Settled>,
@@ -619,6 +621,7 @@ impl Default for Agent {
             unheld: BTreeSet::new(),
             stop_released: BTreeSet::new(),
             last: None,
+            last_user_word: false,
             interrupted_since_ms: None,
             compaction_owed: None,
             last_compaction: None,
@@ -865,6 +868,12 @@ impl Agent {
     /// The last turn that held the agent and ended. A message that was taken back never did.
     pub fn last(&self) -> Option<&Settled> {
         self.last.as_ref()
+    }
+
+    /// The last turn carried the user's word: a front desk's relay of it, or the user's own
+    /// message given back. Such a turn is the user's, whoever sent it.
+    pub fn last_carried_user_word(&self) -> bool {
+        self.last.is_some() && self.last_user_word
     }
 
     /// The first interrupted state since a completed or waiting turn.
@@ -2278,7 +2287,7 @@ impl Agent {
                         }
                     }
                     self.live_worked = false;
-                    self.live_user_word = false;
+                    self.last_user_word = std::mem::take(&mut self.live_user_word);
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -5037,6 +5046,35 @@ mod tests {
         assert_eq!(a.started, [1, 2, 5].map(TurnId));
         // Turns 1 and 2, and the two read into turn 2.
         assert_eq!(a.agent.settled(), 4);
+    }
+
+    #[test]
+    fn the_last_turn_keeps_whether_it_carried_the_users_word() {
+        let mut a = Driven::new();
+        let relay = |a: &mut Driven, message_seq, user_word| {
+            a.send(Command::Accept {
+                message_seq,
+                origin: Origin::Agent {
+                    agent_id: "desk".into(),
+                },
+                admission: Admission::Later,
+                coordination: Some("desk".into()),
+                user_word,
+            })
+            .unwrap();
+        };
+        assert!(!a.agent.last_carried_user_word(), "nothing ended yet");
+        relay(&mut a, 10, true);
+        a.finish(1);
+        assert_eq!(a.agent.last().unwrap().id, TurnId(1));
+        assert!(
+            a.agent.last_carried_user_word(),
+            "a front desk's relay of the user's word is the user's"
+        );
+        relay(&mut a, 11, false);
+        a.finish(2);
+        assert_eq!(a.agent.last().unwrap().id, TurnId(2));
+        assert!(!a.agent.last_carried_user_word(), "an agent's own message");
     }
 
     #[test]

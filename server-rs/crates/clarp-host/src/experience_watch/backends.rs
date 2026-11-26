@@ -78,8 +78,14 @@ pub(crate) fn said<'a>(rows: impl IntoIterator<Item = &'a Entry>, turn: u64) -> 
 /// How a settled turn counts: `None` for one that says nothing of its backend (a Stop, a
 /// usage limit the Hotseat handles, an agent whose folder is gone, a turn whose process
 /// something outside the Host ended, a cut-off, a turn replaced or taken back). `answered` says whether the row that closed it is a reply with words in it
-/// or it left a note.
-pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Option<How> {
+/// or it left a note. `owners_word`: the turn carried the owner's word (a front desk's relay
+/// of it), so it is the owner's whoever sent it.
+pub(crate) fn judged(
+    outcome: &Outcome,
+    origin: &Origin,
+    answered: bool,
+    owners_word: bool,
+) -> Option<How> {
     match outcome {
         Outcome::Completed
             if answered || matches!(origin, Origin::Trigger { name } if name == COMPACTION) =>
@@ -87,8 +93,11 @@ pub(crate) fn judged(outcome: &Outcome, origin: &Origin, answered: bool) -> Opti
             Some(How::Answered)
         }
         // An agent's message answered with silence: the user asked nothing, and an agent may
-        // be told not to reply. A turn of the user's, or one the Host started, still counts.
-        Outcome::Completed if matches!(origin, Origin::Agent { .. }) => Some(How::Silent),
+        // be told not to reply. A turn of the user's, a relay of the user's word, or one the
+        // Host started, still counts.
+        Outcome::Completed if !owners_word && matches!(origin, Origin::Agent { .. }) => {
+            Some(How::Silent)
+        }
         Outcome::Completed => Some(How::Empty),
         Outcome::Failed { kind, .. }
             if kind == USAGE_LIMIT
@@ -269,11 +278,11 @@ mod tests {
      {
         let user = Origin::User;
         assert_eq!(
-            judged(&Outcome::Completed, &user, true),
+            judged(&Outcome::Completed, &user, true, false),
             Some(How::Answered)
         );
         assert_eq!(
-            judged(&Outcome::Completed, &user, false),
+            judged(&Outcome::Completed, &user, false, false),
             Some(How::Empty),
             "done with no reply is a turn that went wrong"
         );
@@ -281,7 +290,7 @@ mod tests {
             name: COMPACTION.into(),
         };
         assert_eq!(
-            judged(&Outcome::Completed, &compaction, false),
+            judged(&Outcome::Completed, &compaction, false, false),
             Some(How::Answered),
             "a compaction says nothing by design"
         );
@@ -289,12 +298,21 @@ mod tests {
             agent_id: "front-desk".into(),
         };
         assert_eq!(
-            judged(&Outcome::Completed, &agent, false),
+            judged(&Outcome::Completed, &agent, false, false),
             Some(How::Silent),
             "an agent's message answered with silence is a choice, not a backend that failed"
         );
         assert_eq!(
-            judged(&Outcome::Completed, &agent, true),
+            judged(&Outcome::Completed, &agent, true, false),
+            Some(How::Answered)
+        );
+        assert_eq!(
+            judged(&Outcome::Completed, &agent, false, true),
+            Some(How::Empty),
+            "a front desk's relay of the owner's word answered with silence went wrong"
+        );
+        assert_eq!(
+            judged(&Outcome::Completed, &agent, true, true),
             Some(How::Answered)
         );
         assert_eq!(
@@ -303,6 +321,7 @@ mod tests {
                 &Origin::Trigger {
                     name: "automation".into()
                 },
+                false,
                 false
             ),
             Some(How::Empty),
@@ -312,38 +331,44 @@ mod tests {
             judged(
                 &failed("process exited 1\nmore", "runner_exit"),
                 &user,
+                false,
                 false
             ),
             Some(crash("process exited 1"))
         );
         assert_eq!(
-            judged(&failed("", ""), &user, false),
+            judged(&failed("", ""), &user, false, false),
             Some(crash("unknown"))
         );
         assert_eq!(
-            judged(&failed("Not logged in", AUTH), &user, false),
+            judged(&failed("Not logged in", AUTH), &user, false, false),
             Some(How::SignIn)
         );
         assert_eq!(
-            judged(&failed("out of credits", USAGE_LIMIT), &user, false),
+            judged(&failed("out of credits", USAGE_LIMIT), &user, false, false),
             None
         );
-        assert_eq!(judged(&failed("stopped", INTERRUPTED), &user, false), None);
+        assert_eq!(
+            judged(&failed("stopped", INTERRUPTED), &user, false, false),
+            None
+        );
         // Ended by a signal from outside the Host: nothing of its backend (issue 829).
         let outside = Outcome::failed(clarp_kernel::failures::ended_from_outside("SIGTERM"));
         assert!(matches!(&outside, Outcome::Failed { kind, .. } if kind == ENDED_FROM_OUTSIDE));
-        assert_eq!(judged(&outside, &user, false), None);
+        assert_eq!(judged(&outside, &user, false, false), None);
         assert_eq!(
             judged(
                 &Outcome::stopped(clarp_kernel::control::Control::by("user")),
                 &user,
+                false,
                 false
             ),
             None,
             "a user's Stop"
         );
         let long = "x".repeat(200);
-        let How::Failed { reason } = judged(&failed(&long, "unknown"), &user, false).unwrap()
+        let How::Failed { reason } =
+            judged(&failed(&long, "unknown"), &user, false, false).unwrap()
         else {
             panic!("failed");
         };

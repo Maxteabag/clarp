@@ -3106,6 +3106,13 @@ impl Actor {
         self.message_at(turn.message_seq)
     }
 
+    /// Whether a turn that ended carried the user's word (a front desk's relay of it): known
+    /// of the last turn that ended, and false of any other.
+    pub fn carried_user_word(&self, turn: &Settled) -> bool {
+        let agent = self.recorder.agent();
+        agent.last().is_some_and(|last| last.id == turn.id) && agent.last_carried_user_word()
+    }
+
     /// What changed of the user sends' delivery since this was last asked: the message ids a
     /// client is told may have changed (`delivery-updated`), each once. What can change no
     /// more and is older than a week is let go.
