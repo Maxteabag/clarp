@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clarp_kernel::agent::Command;
+use clarp_kernel::agent::{Command, TransitCheckpoint};
 use clarp_kernel::takeover::{self, Input, Selection, Start};
 use clarp_kernel::turn::{Turn, TurnId};
 use clarp_spool::{Entry, ShimEvent, SpoolReader};
@@ -22,7 +22,113 @@ pub struct Offer {
     pub first_turn: bool,
 }
 
+/// The active attempt that may be checkpointed once the shim proves its hold fence.
+#[derive(Clone)]
+pub struct TransitOffer {
+    pub turn: TurnId,
+    pub attempt: u32,
+    pub socket: PathBuf,
+    pub session: Option<String>,
+    pub prompt_uuid: String,
+    pub first_turn: bool,
+}
+
 impl Actor {
+    pub fn transit_checkpoint_offer(&self) -> Option<TransitOffer> {
+        let live = self.live.as_ref()?;
+        let agent = self.recorder.agent();
+        if !self.recorder.transit_held()
+            || agent.expected_transit_checkpoint().is_some()
+            || agent.selected_takeover().is_some()
+            || !agent.gathered(live.turn).is_empty()
+            || live.steering.input_skipped
+            || self.fork_runs()
+            || live.in_call
+            || live.opening
+            || live.origin == clarp_kernel::turn::Origin::NativeGoal
+            || matches!(&live.origin, clarp_kernel::turn::Origin::Trigger { name } if name == clarp_kernel::turn::COMPACTION)
+            || live.over
+            || live.message_id != live.last_row
+            || !live.drafts.is_empty()
+            || !live.tools.is_empty()
+            || !live.calls.is_empty()
+            || self.backend.id() != "claude"
+        {
+            return None;
+        }
+        Some(TransitOffer {
+            turn: live.turn,
+            attempt: live.attempt,
+            socket: self.profile.socket_path_of(live.turn, live.attempt),
+            session: agent.backend_session().map(str::to_owned),
+            prompt_uuid: live.steering.prompt_uuid()?.to_owned(),
+            first_turn: agent.fresh_first_turn(),
+        })
+    }
+
+    /// The held spool must be complete and contain no provider work or tool side effects.
+    pub fn expect_transit_checkpoint(
+        &mut self,
+        offer: &TransitOffer,
+        fence: u64,
+        now_ms: i64,
+    ) -> Result<bool, ActorError> {
+        if self
+            .transit_checkpoint_offer()
+            .is_none_or(|current| (current.turn, current.attempt) != (offer.turn, offer.attempt))
+            || !self.quiet_spool(offer.turn, offer.attempt, fence)?
+        {
+            return Ok(false);
+        }
+        let checkpoint = TransitCheckpoint {
+            turn: offer.turn,
+            attempt: offer.attempt,
+            fence,
+        };
+        match self
+            .recorder
+            .handle(Command::ExpectTransitCheckpoint { checkpoint }, now_ms)
+        {
+            Ok(_) => Ok(true),
+            Err(clarp_kernel::journal::JournalError::Refused(_)) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// A durable intent alone cannot resume a turn. Require the exact checkpoint followed by
+    /// proof that the source process is gone, regardless of the earlier socket response.
+    pub(super) fn recover_transit_checkpoint(&mut self, now_ms: i64) -> Result<bool, ActorError> {
+        let Some(checkpoint) = self.recorder.agent().expected_transit_checkpoint() else {
+            return Ok(false);
+        };
+        let spool = self
+            .profile
+            .spool_path_of(checkpoint.turn, checkpoint.attempt);
+        let read = SpoolReader::new(&spool)
+            .read_window(checkpoint.fence, u64::MAX, 3)
+            .map_err(|error| super::io_error(&spool, error))?;
+        if !read.damaged.is_empty()
+            || !matches!(read.records.as_slice(), [marker, exit]
+                if marker.entry == Entry::Shim(ShimEvent::TransitCheckpoint { fence: checkpoint.fence })
+                    && matches!(exit.entry, Entry::Shim(ShimEvent::Exited { signal: Some(9), code: None })))
+        {
+            return Ok(false);
+        }
+        let mut batch = self.recorder.batch();
+        if batch
+            .command(Command::ParkTransitCheckpoint { checkpoint }, now_ms)
+            .is_err()
+        {
+            return Ok(false);
+        }
+        batch.cursor(checkpoint.turn, read.next_offset, now_ms);
+        batch.commit()?;
+        if let Some(live) = self.live.as_mut() {
+            live.over = true;
+        }
+        Ok(true)
+    }
+
     /// Only the head of the normal user mailbox can take over, while the first turn has no
     /// stored or live output. The complete spool still has to be checked under a shim hold.
     pub fn takeover_offer(&self, into: TurnId) -> Result<Option<Offer>, ActorError> {
@@ -86,16 +192,20 @@ impl Actor {
     /// Recheck the running attempt through the shim's exact fence. A missing or damaged
     /// record is uncertain and leaves the follow-up in Part A's queue.
     pub fn takeover_quiet(&self, offer: &Offer, until: u64) -> Result<bool, ActorError> {
-        const MAX_FENCE: u64 = 4 * 1024 * 1024;
-        if until > MAX_FENCE
-            || self.live.as_ref().is_none_or(|live| live.offset > until)
-            || self.takeover_offer(offer.into)?.is_none_or(|current| {
-                (current.from, current.attempt) != (offer.from, offer.attempt)
-            })
+        if self
+            .takeover_offer(offer.into)?
+            .is_none_or(|current| (current.from, current.attempt) != (offer.from, offer.attempt))
         {
             return Ok(false);
         }
-        let path = self.profile.spool_path_of(offer.from, offer.attempt);
+        self.quiet_spool(offer.from, offer.attempt, until)
+    }
+
+    fn quiet_spool(&self, turn: TurnId, attempt: u32, until: u64) -> Result<bool, ActorError> {
+        if until > 4 * 1024 * 1024 || self.live.as_ref().is_none_or(|live| live.offset > until) {
+            return Ok(false);
+        }
+        let path = self.profile.spool_path_of(turn, attempt);
         let read = SpoolReader::new(&path)
             .read_window(0, until, usize::MAX)
             .map_err(|error| super::io_error(&path, error))?;

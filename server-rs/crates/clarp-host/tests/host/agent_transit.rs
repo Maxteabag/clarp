@@ -17,16 +17,22 @@ incoming = json.loads(sys.stdin.readline())
 prompt = incoming["message"]["content"][0]["text"]
 
 def send(kind, **fields):
-    print(json.dumps({"type": kind, "session_id": "claude-before", **fields}), flush=True)
+    print(json.dumps({"type": kind, "session_id": "00000000-0000-4000-8000-000000000001", **fields}), flush=True)
 
 send("system", subtype="init", model="claude-stand-in")
-while (root / "hold").exists():
-    time.sleep(0.05)
+if (root / "quiet-hold").exists():
+    (root / "quiet-ready").touch()
+    while (root / "quiet-hold").exists():
+        time.sleep(0.05)
 call = "toolu_" + str(time.time_ns())
 send("assistant", message={"id": "msg-look", "role": "assistant", "content": [
     {"type": "tool_use", "id": call, "name": "Read", "input": {"file_path": "/work/word.txt"}}]})
 send("user", message={"role": "user", "content": [
     {"type": "tool_result", "tool_use_id": call, "content": "The word in the file is ember."}]})
+if (root / "hold").exists():
+    (root / "source-held").touch()
+    while (root / "hold").exists():
+        time.sleep(0.05)
 answer = "Heard: " + prompt.split("\n")[0]
 send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
                            "content": [{"type": "text", "text": answer}]})
@@ -53,6 +59,8 @@ if "--output-schema" in args:
     text = json.dumps({"summary": "Summary of the older parts."})
 elif "<clarp-turn-resumed>" in prompt and "Continue the parked work." in prompt:
     text = "Codex continued the parked work."
+elif "<clarp-turn-resumed>" in prompt and "Continue the active work." in prompt:
+    text = "Codex continued the active work."
 else:
     text = "Codex heard: " + prompt.strip().splitlines()[-1]
 def say(**fields):
@@ -306,6 +314,9 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
     std::fs::write(&hold, "").unwrap();
     host.send(session, "Finish this on Claude.", "switch-1");
     wait_for("the turn to run", || row(&host, session)["busy"] == true);
+    wait_for("source tool work before Transit", || {
+        setting.place.root.join("source-held").exists()
+    });
     queue_for_transit(&host, session, "switch-2", "First pending message.");
     let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
                      "request_id": "switch-with-queue"});
@@ -332,6 +343,56 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
             "Heard: Finish this on Claude.",
             "Codex heard: First pending message.",
             "Codex heard: Second pending message.",
+        ]
+    );
+}
+
+#[test]
+fn transit_checkpoints_an_active_quiet_attempt_before_resuming_on_the_target() {
+    let setting = Setting::new("agent-transit-active-quiet");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Active", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap();
+    let hold = setting.place.root.join("quiet-hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(session, "Continue the active work.", "active-1");
+    wait_for("the active Claude process", || {
+        setting.place.root.join("quiet-ready").exists()
+    });
+    queue_for_transit(&host, session, "active-2", "After active work.");
+    let done = transit(
+        &host,
+        json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                                    "request_id": "switch-active"}),
+    );
+    assert_eq!(done["phase"], "done", "{done}");
+    assert!(
+        hold.exists(),
+        "the original attempt did not finish the fixture on its own"
+    );
+    wait_for("the target work and queue", || {
+        let a = row(&host, session);
+        a["backend"] == "codex" && a["busy"] == false && a["queued_turn_count"] == 0
+    });
+    let words = host.conversation(session);
+    assert_eq!(
+        words
+            .iter()
+            .filter(|(role, text)| role == "user" && text == "Continue the active work.")
+            .count(),
+        1
+    );
+    let answers: Vec<_> = words
+        .iter()
+        .filter_map(|(role, text)| {
+            (role == "assistant" && !text.is_empty()).then_some(text.as_str())
+        })
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "Codex continued the active work.",
+            "Codex heard: After active work."
         ]
     );
 }
@@ -503,6 +564,9 @@ fn a_failed_transit_returns_waiting_messages_to_the_source_backend() {
     std::fs::write(&hold, "").unwrap();
     host.send(&session, "Take your time.", "bc-2");
     wait_for("the turn to run", || row(&host, &session)["busy"] == true);
+    wait_for("source tool work before Transit", || {
+        setting.place.root.join("source-held").exists()
+    });
     queue_for_transit(
         &host,
         &session,

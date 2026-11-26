@@ -187,7 +187,9 @@ done or failed and prints its last state. From contract 202 (`agent_backend_tran
 an in-flight turn may finish on the source, and queued messages run on the new backend
 after cutover in the usual order. From contract 203 (`agent_backend_transit_account_wait`),
 a turn parked for provider capacity continues on the target without waiting for the old
-account. A user Stop pause is kept. Older Hosts refuse while
+account. From contract 204 (`agent_backend_transit_checkpoint`), Transit can checkpoint a quiet
+active Claude attempt and continue that turn on the target. An attempt that has already
+emitted output or used a tool waits for its ordinary boundary. A user Stop pause is kept. Older Hosts refuse while
 a turn runs or messages wait, as does a model change on the same backend. The command
 waits for completion, so ask another agent or use the app's Backend row to switch an
 agent from its own turn. What is carried is the text

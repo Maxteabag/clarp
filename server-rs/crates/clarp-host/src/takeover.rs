@@ -4,9 +4,10 @@ use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use clarp_actor::takeover::Offer;
+use clarp_actor::takeover::{Offer, TransitOffer};
 use clarp_backend::{agy, history, past};
 use clarp_kernel::takeover::{self, Input};
+use serde_json::Value;
 
 // If the provider history cannot be judged within a modest read, the follow-up waits.
 const TRANSCRIPT_MOST: u64 = 32 * 1024 * 1024;
@@ -75,6 +76,33 @@ pub(super) fn plan(
         }
         _ => None,
     }
+}
+
+/// A quiet stream is insufficient if the provider's native log recorded an answer or tool.
+pub(super) fn native_transit_is_quiet(home: &Path, cwd: &str, offer: &TransitOffer) -> bool {
+    let paths = crate::past::projects(home);
+    let path = match offer.session.as_deref() {
+        Some(session) => match past::claude_source(&paths, cwd, session, true) {
+            Ok(path) => path,
+            Err(_) => return false,
+        },
+        None => None,
+    };
+    let text = match path {
+        Some(path) => match transcript(&path) {
+            Some(text) => text,
+            None => return false,
+        },
+        None => return offer.first_turn,
+    };
+    if text
+        .lines()
+        .any(|line| !line.trim().is_empty() && serde_json::from_str::<Value>(line).is_err())
+    {
+        return false;
+    }
+    let facts = takeover::claude_facts(Some(&text), &offer.prompt_uuid);
+    facts.found && !facts.answered
 }
 
 pub(super) async fn can_use(

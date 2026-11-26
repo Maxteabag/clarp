@@ -539,6 +539,10 @@ enum Ask {
         offer: clarp_actor::takeover::Offer,
         held: clarp_shim::Held,
     },
+    TransitCheckpointHeld {
+        offer: clarp_actor::takeover::TransitOffer,
+        held: clarp_shim::Held,
+    },
     SpoolChanged,
     /// From a turn's thread: nothing answers at the shim of this attempt of the turn any more.
     ShimGone {
@@ -677,6 +681,7 @@ impl Ask {
             Self::LineAnnounced { .. } => "LineAnnounced",
             Self::LinePlayed { .. } => "LinePlayed",
             Self::TakeoverHeld { .. } => "TakeoverHeld",
+            Self::TransitCheckpointHeld { .. } => "TransitCheckpointHeld",
             Self::SpoolChanged => "SpoolChanged",
             Self::ShimGone { .. } => "ShimGone",
             Self::LaunchFailed { .. } => "LaunchFailed",
@@ -1108,7 +1113,8 @@ impl AgentHandle {
                 view.broken.is_some()
                     || view.status.live.as_ref().is_none_or(|live| {
                         live.parked.as_ref().is_some_and(|parked| {
-                            parked.wait.is_for_an_account()
+                            (parked.wait.is_for_an_account()
+                                || parked.kind == clarp_kernel::agent::TRANSIT_CHECKPOINT)
                                 && parked.origin != clarp_kernel::turn::Origin::NativeGoal
                         })
                     })
@@ -2819,6 +2825,30 @@ impl Worker {
         self.setup.hub.waiting_for_user(&record.agent_id, waiting)
     }
 
+    fn request_transit_checkpoint(&self, offer: clarp_actor::takeover::TransitOffer) {
+        let backend = self.setup.record.backend.clone();
+        let Some(program) = clarp_backend::program(&backend) else {
+            return;
+        };
+        let versions = self.setup.versions.clone();
+        let tx = self.tx.clone();
+        self.setup.runtime.spawn(async move {
+            if !crate::takeover::can_use(&backend, program.into(), &versions).await {
+                return;
+            }
+            let socket = offer.socket.clone();
+            let held = tokio::task::spawn_blocking(move || {
+                crate::launcher::takeover_request(
+                    &socket,
+                    clarp_shim::Request::Hold { ms: clarp_shim::HOLD_MOST_MS },
+                ).and_then(|reply| reply.held)
+            }).await;
+            if let Ok(Some(held)) = held {
+                let _ = tx.send(Ask::TransitCheckpointHeld { offer, held });
+            }
+        });
+    }
+
     /// Carries the agent's conversation into another tool and goes on with it: in this
     /// thread, so that nothing starts a turn in between. The agent is opened again on the new
     /// tool before anything else is asked of it.
@@ -3322,7 +3352,11 @@ impl Worker {
                 }
                 match actor.hold_for_transit(held, now) {
                     Ok(out) => {
+                        let offer = held.then(|| actor.transit_checkpoint_offer()).flatten();
                         self.after(out);
+                        if let Some(offer) = offer {
+                            self.request_transit_checkpoint(offer);
+                        }
                         let _ = answer.send(Ok(()));
                         return Ok(());
                     }
@@ -4270,6 +4304,33 @@ impl Worker {
             | Ask::LineEnded { .. }
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
+            Ask::TransitCheckpointHeld { offer, held } => {
+                let acceptable = held.left_ms > 0
+                    && held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0
+                    && crate::takeover::native_transit_is_quiet(
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &offer,
+                    )
+                    && actor.expect_transit_checkpoint(&offer, held.spool, now)?;
+                if !acceptable {
+                    crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
+                    return Ok(());
+                }
+                let receipt = crate::launcher::takeover_request(
+                    &offer.socket,
+                    clarp_shim::Request::CheckpointForTransit { fence: held.spool },
+                );
+                if receipt.and_then(|reply| reply.killed) != Some(true) {
+                    crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
+                }
+                // The socket result alone never starts another writer. Process the physical
+                // exit and its durable checkpoint through the source spool.
+                let _ = self.tx.send(Ask::SpoolChanged);
+                return Ok(());
+            }
             Ask::TakeoverHeld { offer, held } => {
                 let release = || {
                     crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
@@ -6439,6 +6500,7 @@ fn refuse_for(
             Ok(
                 Ask::SpoolChanged
                 | Ask::TakeoverHeld { .. }
+                | Ask::TransitCheckpointHeld { .. }
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged

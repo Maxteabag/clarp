@@ -53,6 +53,8 @@ pub mod kind {
         const NOTE= 4;
         /// The queue item whose row was written in this append. Older readers skip this marker.
         const QUEUE_SHOWN= 5;
+        /// A pending Transit checkpoint intent. Older readers skip it before replaying turns.
+        const TRANSIT_CHECKPOINT_INTENT= 6;
         /// A [`Message`](crate::conversation::Message) to the agent.
         const MESSAGE= 100;
         /// A [`Reply`](crate::conversation::Reply) of the agent.
@@ -349,6 +351,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
     let written_as = match event {
         AgentEvent::Repaired { .. } => kind::NOTE,
+        AgentEvent::TransitCheckpointExpected { .. } => kind::TRANSIT_CHECKPOINT_INTENT,
         _ => kind::AGENT_EVENT,
     };
     let mut item = NewItem::new(written_as, ts_ms, body);
@@ -374,6 +377,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::Reworded { turn, .. }
         | AgentEvent::Compacted { turn, .. }
         | AgentEvent::HeldUnsentForMove { turn } => Some(turn.0),
+        AgentEvent::TransitCheckpointExpected { checkpoint } => Some(checkpoint.turn.0),
         AgentEvent::TakeoverSelected { selected } => Some(selected.start.from.0),
         AgentEvent::TakeoverOffered { from, .. } | AgentEvent::TakeoverCleared { from } => {
             Some(from.0)
@@ -413,7 +417,7 @@ impl Recorder {
                     why: e.to_string(),
                 };
                 match item.kind {
-                    kind::AGENT_EVENT | kind::NOTE => {
+                    kind::AGENT_EVENT | kind::NOTE | kind::TRANSIT_CHECKPOINT_INTENT => {
                         let event: AgentEvent =
                             serde_json::from_slice(&item.body).map_err(corrupt)?;
                         if matches!(event, AgentEvent::StartedAgain { .. }) {

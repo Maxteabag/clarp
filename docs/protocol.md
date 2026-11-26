@@ -1051,6 +1051,12 @@ capacity can switch without waiting for the source account. Its recorded work is
 and the same turn continues on the target before the mailbox starts. A failed carry leaves
 the turn waiting on the source account.
 
+With `agent_backend_transit_checkpoint` (contract 204), a quiet active Claude attempt can be
+checkpointed. The Host verifies the complete held spool and the native transcript for
+absence of provider work, then requires the source exit receipt before starting an attempt
+on the target. An attempt that has emitted output or used a tool waits for its ordinary
+handoff boundary.
+
 **Progress.** The event `agent-transit` `{agent_id, session, transit_id, backend, model, phase,
 error, previous_backend, previous_model, carried}`; `phase` is `reading`, `translating`,
 `registering`, `switching`, then `done` or `failed`; `error` is text on `failed`, else null.

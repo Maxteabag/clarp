@@ -4459,7 +4459,7 @@ impl Actor {
     }
 
     pub fn run_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
-        if self.transit_resume_pending() {
+        if self.transit_resume_pending() || self.recorder.agent().checkpointed_for_transit() {
             return self.retry(now_ms);
         }
         if self.recorder.agent().live().is_some()
@@ -4479,7 +4479,7 @@ impl Actor {
     pub fn busy_for_change(&self) -> Option<(bool, usize)> {
         let agent = self.recorder.agent();
         let live = agent.live().is_some()
-            && !(self.recorder.transit_held() && agent.account_wait_for_transit().is_some());
+            && !(self.recorder.transit_held() && agent.parked_for_transit().is_some());
         let waiting = agent.waiting().count();
         (live || waiting > 0 && !self.recorder.transit_held()).then_some((live, waiting))
     }
@@ -6165,7 +6165,9 @@ impl Actor {
     /// When the turn that waits for its next attempt is to be tried again. `None`: no turn
     /// waits for that.
     pub fn retry_at(&self) -> Option<i64> {
-        if self.moved().is_some() || self.recorder.agent().import_held() {
+        if self.moved().is_some() || self.recorder.agent().import_held()
+            || (self.recorder.transit_held() && self.recorder.agent().checkpointed_for_transit())
+        {
             return None;
         }
         match self.recorder.agent().live() {
@@ -6591,7 +6593,9 @@ impl Actor {
             return Ok(out);
         }
         let mut out = Outputs::default();
-        if self.recorder.agent().import_held() {
+        if self.recorder.agent().import_held()
+            || (self.recorder.transit_held() && self.recorder.agent().checkpointed_for_transit())
+        {
             return Ok(out);
         }
         let Some(Turn::Parked(parked)) = self.recorder.agent().live() else {
@@ -6694,6 +6698,12 @@ impl Actor {
                 return Ok(Stepped::Done);
             }
             out.damaged_lines += read.damaged.len();
+            if read.records.iter().any(|record| record.is_final())
+                && self.recover_transit_checkpoint(now_ms)?
+            {
+                out.changed.status = true;
+                return Ok(Stepped::Done);
+            }
             // Once the terminal record is in this read, a takeover marker cannot arrive
             // between the recovery check and ordinary settlement.
             if read.records.iter().any(|record| record.is_final())

@@ -125,6 +125,8 @@ pub enum Command {
     Resume { by: String },
     /// Run the first eligible message after releasing a transient launch fence.
     RunWaiting,
+    ExpectTransitCheckpoint { checkpoint: TransitCheckpoint },
+    ParkTransitCheckpoint { checkpoint: TransitCheckpoint },
     HoldUnsentForTransit {
         turn: TurnId,
     },
@@ -216,6 +218,16 @@ pub struct ToolSelection {
     pub effort: String,
 }
 
+/// Associates a shim checkpoint with the exact source attempt and its held spool offset.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitCheckpoint {
+    pub turn: TurnId,
+    pub attempt: u32,
+    pub fence: u64,
+}
+
+pub const TRANSIT_CHECKPOINT: &str = "transit_checkpoint";
+
 /// The first attempt to run on the target backend after a committed handoff.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransitAttempt {
@@ -230,6 +242,7 @@ pub enum AgentEvent {
     MoveMarked {
         mark: Option<crate::agent_moves::Mark>,
     },
+    TransitCheckpointExpected { checkpoint: TransitCheckpoint },
     HeldUnsentForMove {
         turn: TurnId,
     },
@@ -532,6 +545,7 @@ pub struct Agent {
     /// again: a record elsewhere that still says the first lost the change.
     changed: Option<(String, String, Option<ToolSelection>)>,
     transit_attempt: Option<TransitAttempt>,
+    transit_checkpoint: Option<TransitCheckpoint>,
     /// When that change was made: what turns ended before it said was said of the tool it
     /// left (which model answered, how full its conversation was).
     changed_at_ms: Option<i64>,
@@ -613,6 +627,7 @@ impl Default for Agent {
             carried_opening: None,
             changed: None,
             transit_attempt: None,
+            transit_checkpoint: None,
             changed_at_ms: None,
             at: 0,
             user_stop_generation: 0,
@@ -889,10 +904,19 @@ impl Agent {
     }
 
     /// A provider-capacity wait has no running process to interrupt.
-    pub fn account_wait_for_transit(&self) -> Option<&Parked> {
+    pub fn expected_transit_checkpoint(&self) -> Option<TransitCheckpoint> {
+        self.transit_checkpoint
+    }
+
+    pub fn checkpointed_for_transit(&self) -> bool {
+        matches!(self.live, Some(Turn::Parked(ref wait)) if wait.kind == TRANSIT_CHECKPOINT)
+    }
+
+    pub fn parked_for_transit(&self) -> Option<&Parked> {
         match self.live.as_ref() {
             Some(Turn::Parked(waiting))
-                if waiting.wait.is_for_an_account() && waiting.origin != Origin::NativeGoal =>
+                if (waiting.wait.is_for_an_account() || waiting.kind == TRANSIT_CHECKPOINT)
+                    && waiting.origin != Origin::NativeGoal =>
             {
                 Some(waiting)
             }
@@ -903,7 +927,7 @@ impl Agent {
     /// Pending resume after a committed switch. A later wait on the target is a new wait.
     pub fn transit_resume(&self) -> Option<TurnId> {
         let next = self.transit_attempt.as_ref()?;
-        let waiting = self.account_wait_for_transit()?;
+        let waiting = self.parked_for_transit()?;
         (next.turn == waiting.id && next.attempt == waiting.attempts.saturating_add(1))
             .then_some(next.turn)
     }
@@ -1481,6 +1505,41 @@ impl Agent {
                 }
                 work.record(AgentEvent::HeldUnsentForMove { turn });
             }
+            Command::ExpectTransitCheckpoint { checkpoint } => {
+                work.agent.require_here()?;
+                let identity = match work.agent.live.as_ref() {
+                    Some(Turn::Starting(source)) => (source.id, source.attempt),
+                    Some(Turn::Running(source)) => (source.id, source.attempt),
+                    _ => return Err(Refusal::TakeoverStale),
+                };
+                if !work.transit_held
+                    || work.agent.stopping.is_some()
+                    || work.agent.live_worked
+                    || identity != (checkpoint.turn, checkpoint.attempt)
+                {
+                    return Err(Refusal::TakeoverStale);
+                }
+                work.record(AgentEvent::TransitCheckpointExpected { checkpoint });
+            }
+            Command::ParkTransitCheckpoint { checkpoint } => {
+                let turn = checkpoint.turn;
+                if work.agent.transit_checkpoint != Some(checkpoint)
+                    || work.agent.stopping.is_some()
+                {
+                    return Err(Refusal::TakeoverStale);
+                }
+                work.must_have_process(turn)?;
+                work.running(turn, now_ms);
+                work.record(AgentEvent::Turn {
+                    turn,
+                    change: TurnEvent::Parked {
+                        wait: Wait::Retry { until_ms: now_ms, resume: true },
+                        kind: TRANSIT_CHECKPOINT.into(),
+                        reason: "provider checkpoint for backend Transit".into(),
+                        at_ms: now_ms,
+                    },
+                });
+            }
             Command::RunWaiting => {
                 work.agent.require_here()?;
             }
@@ -1493,7 +1552,7 @@ impl Agent {
             } => {
                 work.agent.require_here()?;
                 let resume = if work.transit_held {
-                    work.agent.account_wait_for_transit().map(|waiting| TransitAttempt {
+                    work.agent.parked_for_transit().map(|waiting| TransitAttempt {
                         turn: waiting.id,
                         attempt: waiting.attempts.saturating_add(1),
                     })
@@ -1733,6 +1792,9 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
+            AgentEvent::TransitCheckpointExpected { checkpoint } => {
+                self.transit_checkpoint = Some(*checkpoint);
+            }
             AgentEvent::MoveMarked { mark } => {
                 self.moved.clone_from(mark);
                 self.queue_revision += 1;
@@ -2162,6 +2224,9 @@ impl Agent {
             return Ok(());
         }
         if self.live_id() == Some(turn) {
+            if matches!(change, TurnEvent::Parked { .. } | TurnEvent::Settled { .. }) {
+                self.transit_checkpoint = None;
+            }
             let Some(live) = self.live.take() else {
                 return Ok(());
             };
