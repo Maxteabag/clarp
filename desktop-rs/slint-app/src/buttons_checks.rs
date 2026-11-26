@@ -91,7 +91,7 @@ thread_local! {
 const LONG_DRAFT: &str = "sent by the button, a draft long enough to wrap the composer onto several lines: token bucket, leaky bucket, sliding window log, sliding window counter, clock skew, race conditions, failure modes, observability and testing, with an example in every section.";
 
 pub fn buttons_check(out: String) {
-    let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5, out6, out7) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
@@ -317,6 +317,40 @@ pub fn buttons_check(out: String) {
             check(meter == "Claude 91% used  ·  context 850K/1M · 85%", &format!("the meter names the limit and the context: {meter:?}"));
             shot(&out6, "buttons-06-meter-near");
             check(!app_now().active_draft().contains('\n'), "the key did not put a line in the draft");
+            // A Host that offers Steer now (queue_steer).
+            check(control("/__control/queue-steer", &json!({"on": true})).is_ok(), "the Host offers Steer now");
+            app_now().engine.borrow_mut().reconnect();
+            true
+        })),
+        ("steer offered", Box::new(move |_, _, elapsed| {
+            if !drawn("queue-steer:q2") || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(8), "on a Host with queue_steer a waiting message offers Steer now during the turn");
+                return elapsed >= Duration::from_secs(8);
+            }
+            check(drawn("queue-send:q2"), "with Send now (stop the turn, run it now) beside it");
+            shot(&out7, "buttons-07-steer-now");
+            check(control("/__control/fail", &json!({"path": "/turn-queue/q2/steer", "status": 409})).is_ok(), "the Host will refuse the steer");
+            check(press("queue-steer:q2"), "Steer now is pressed");
+            true
+        })),
+        ("steer refused", Box::new(|_, _, elapsed| {
+            let refused = format!("queue-refused:{}", app_now().active_id());
+            if !drawn(&refused) {
+                check(elapsed < Duration::from_secs(5), "a refused steer says the Host's words");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(label(&refused) == "the running turn cannot be cut", &format!("plainly: {:?}", label(&refused)));
+            check(drawn("queue-steer:q2"), "and the message still waits");
+            check(press("queue-send:q2"), "Send now (take over) is pressed");
+            true
+        })),
+        ("taken over", Box::new(|_, _, elapsed| {
+            let taken = requests_posted("/turn-queue/q2/take-over") == 1;
+            if !taken || drawn("queue-send:q2") {
+                check(elapsed < Duration::from_secs(5), &format!("Send now on a steering Host takes the turn over (posted {taken})"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(requests_posted("/turn-queue/q2/send") == 0, "not the plain send");
             true
         })),
     ];

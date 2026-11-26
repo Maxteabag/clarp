@@ -775,6 +775,8 @@ export component Pane inherits Rectangle {
             refused: root.pane.waiting-refused;
             pane-id: root.pane.id;
             send-now(id) => { AgentDialogs.queue-send(id); }
+            steer-now(id) => { AgentDialogs.queue-steer(id); }
+            take-over(id) => { AgentDialogs.queue-take-over(id); }
             manage => { AgentDialogs.queue-open(root.pane.session); }
         }
         // Pair rooms are the Host's read-only projection: no composer.

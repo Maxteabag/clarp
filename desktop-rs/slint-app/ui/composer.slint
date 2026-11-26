@@ -31,6 +31,12 @@ export struct WaitingTurn {
     id: string,
     text: string,
     reading: bool,
+    // On a Host with `queue_steer`, while a turn runs: Steer now reads it
+    // into the turn (`steer`), and Send now stops the turn and runs it
+    // (`take-over`). Otherwise Send now sends it after the turn's tools
+    // allow (`/send`).
+    steer: bool,
+    take-over: bool,
 }
 
 // The keys the composer's buttons name in their tips, as the user bound
@@ -422,6 +428,8 @@ export component QueueStrip inherits Rectangle {
     in property <string> refused;
     in property <string> pane-id;
     callback send-now(string);
+    callback steer-now(string);
+    callback take-over(string);
     callback manage();
     background: Palette.window;
     accessible-role: list;
@@ -493,6 +501,19 @@ export component QueueStrip inherits Rectangle {
                     font-size: 11 * Look.unit;
                     vertical-alignment: center;
                 }
+                // Steer now: read into the running turn, first choice.
+                if !item.reading && item.steer: TipButton {
+                    y: 2px;
+                    width: self.captioned-width;
+                    height: 22px;
+                    icon: @image-url("icons/send.svg");
+                    caption: "Steer now";
+                    label: "Steer now: " + item.text;
+                    tip: index == 0 && ComposerKeys.send-now != "" ? "Read into this turn · " + ComposerKeys.send-now : "Read into this turn";
+                    tint: Palette.accent;
+                    accessible-id: "queue-steer:" + item.id;
+                    clicked => { root.steer-now(item.id); }
+                }
                 if !item.reading: TipButton {
                     y: 2px;
                     width: self.captioned-width;
@@ -500,15 +521,16 @@ export component QueueStrip inherits Rectangle {
                     icon: @image-url("icons/send.svg");
                     caption: "Send now";
                     label: "Send now: " + item.text;
-                    tip: index == 0 && ComposerKeys.send-now != "" ? "Send now · " + ComposerKeys.send-now : "Send now";
-                    tint: Palette.accent;
+                    tip: item.take-over ? "Stop this turn and run it now"
+                        : index == 0 && ComposerKeys.send-now != "" ? "Send now · " + ComposerKeys.send-now : "Send now";
+                    tint: item.steer ? Palette.muted : Palette.accent;
                     accessible-id: "queue-send:" + item.id;
-                    clicked => { root.send-now(item.id); }
+                    clicked => { if (item.take-over) { root.take-over(item.id); } else { root.send-now(item.id); } }
                 }
             }
         }
         if root.refused != "": Text {
-            text: "Not sent yet: " + root.refused + ". It waits for this turn to end.";
+            text: "Not sent now: " + root.refused;
             color: Palette.warning;
             font-size: 11 * Look.unit;
             wrap: word-wrap;

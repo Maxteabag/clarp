@@ -1658,6 +1658,7 @@ impl Engine {
             self.form_events_server_info(object);
             self.stop_server_info(object);
             self.search_server_info(object);
+            self.queue_server_info(object);
             self.artifact_summary_server_info(object);
             self.live_rewatch();
             self.sse.start();

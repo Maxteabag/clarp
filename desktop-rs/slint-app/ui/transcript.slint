@@ -690,7 +690,7 @@ export component Block inherits VerticalLayout {
         accessible-role: AccessibleRole.table;
         accessible-label: self.count + " columns";
         VerticalLayout {
-            spacing: 3px;
+            spacing: 0px;
             table-view := Rectangle {
                 height: table-grid.preferred-height;
                 min-width: 0px;
@@ -699,7 +699,8 @@ export component Block inherits VerticalLayout {
                 border-color: Palette.border;
                 // Only a sideways scroll is the table's: the chat keeps the
                 // plain wheel. Under the cells, so their links still click.
-                if table-box.wide: TouchArea {
+                TouchArea {
+                    enabled: table-box.wide;
                     scroll-event(event) => {
                         let along = event.delta-x != 0px ? event.delta-x : event.modifiers.shift ? event.delta-y : 0px;
                         if (along == 0px) { return reject; }
@@ -738,19 +739,22 @@ export component Block inherits VerticalLayout {
                     }
                 }
                 // More to the right (or left): that edge fades.
-                if table-box.wide && table-box.offset < table-box.span - 0.5px: Rectangle {
+                Rectangle {
+                    visible: table-box.wide && table-box.offset < table-box.span - 0.5px;
                     x: parent.width - self.width;
                     width: 28px;
                     background: @linear-gradient(90deg, Palette.window.with-alpha(0) 0%, Palette.window.with-alpha(0.9) 100%);
                 }
-                if table-box.wide && table-box.offset > 0.5px: Rectangle {
+                Rectangle {
+                    visible: table-box.wide && table-box.offset > 0.5px;
                     x: 0;
                     width: 28px;
                     background: @linear-gradient(90deg, Palette.window.with-alpha(0.9) 0%, Palette.window.with-alpha(0) 100%);
                 }
             }
-            if table-box.wide: Rectangle {
-                height: 14px;
+            Rectangle {
+                visible: table-box.wide;
+                height: table-box.wide ? 17px : 0px;
                 min-width: 0px;
                 accessible-role: AccessibleRole.button;
                 accessible-id: "table-scroll";

@@ -530,7 +530,7 @@ pub const ENTRIES: &[Entry] = &[
     e("ui-larger", "Larger interface", "view", "Draws the whole window one step larger, the chats included.", &["scale up", "bigger window", "increase", "window size", "dpi"]),
     e("ui-smaller", "Smaller interface", "view", "Draws the whole window one step smaller, the chats included.", &["scale down", "smaller window", "shrink window", "window size", "dpi"]),
     e("ui-reset", "Reset interface size", "view", "Returns the whole window to its usual scale.", &["default size", "actual size", "scale", "window size"]),
-    e("send-queued", "Send waiting message now", "agent", "Hands the open chat's first waiting message to the agent now, during its turn, instead of after it.", &["send now", "steer", "queue", "waiting", "interrupt", "now"]),
+    e("send-queued", "Send waiting message now", "agent", "Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.", &["send now", "steer", "queue", "waiting", "interrupt", "now"]),
     e("list-all", "Agents: all chats", "view", "Shows every chat in the explorer.", &["sidebar list", "scope", "everything", "back", "all agents"]),
     e("list-unread", "Agents: unread only", "view", "Shows only chats with unread messages in the explorer.", &["sidebar list", "filter", "new", "unread", "scope"]),
     e("list-working", "Agents: working", "view", "Shows only the chats whose agent is working now in the explorer.", &["sidebar list", "filter", "busy", "running", "active", "triage", "scope"]),
