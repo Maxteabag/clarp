@@ -89,7 +89,7 @@ pub struct Chip {
 pub fn chip(waiting: &[WaitingTurn]) -> Chip {
     use clarp_core::queue_line as words;
     let open = || waiting.iter().filter(|w| !w.reading);
-    if let Some(item) = open().filter(|w| w.steer).last() {
+    if let Some(item) = waiting.iter().rev().find(|w| !w.reading && w.steer) {
         return Chip { kind: "steer", target: item.id.to_string(), label: words::STEER_NOW };
     }
     match open().next() {
