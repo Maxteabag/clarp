@@ -458,3 +458,71 @@ fn a_host_without_prompt_history_leaves_it_out_and_a_real_failure_is_said_once()
     d.until("plan failed", |e| !e.profile_loading());
     assert_eq!(d.engine.profile_error(), "Could not load the plan: Gateway Timeout (the Host answered 500)");
 }
+
+#[test]
+fn publications_read_two_pages_of_each_list_for_one_agent_and_merge_a_file_with_its_artifact() {
+    let host = Host::start("publications");
+    // Rachel (a1) and Mike (a2) publish at the very same times: nothing of
+    // Mike's may show in Rachel's list. Half of Rachel's images are on an
+    // older Host's /media/files/ path.
+    let mut media = Vec::new();
+    let mut artifacts = Vec::new();
+    for i in 0..70_i64 {
+        let url = if i % 2 == 0 { format!("/media/files/r-img-{i}") } else { format!("/media/r-img-{i}") };
+        media.push(json!({"asset_id": format!("r-img-{i}"), "session": "rachel", "mime_type": "image/png",
+                          "caption": format!("Rachel {i}"), "created_at": 1_000 + i * 10, "url": url}));
+        media.push(json!({"asset_id": format!("m-img-{i}"), "session": "mike", "mime_type": "image/png",
+                          "caption": format!("Mike {i}"), "created_at": 1_000 + i * 10, "url": format!("/media/m-img-{i}")}));
+    }
+    for i in 0..45_i64 {
+        artifacts.push(json!({"artifact_id": format!("r-doc-{i}"), "agent_id": "a1", "session": "rachel", "type": "document",
+                              "title": format!("Rachel doc {i}"), "content": "x", "created_at": 1_005 + i * 15}));
+        artifacts.push(json!({"artifact_id": format!("m-doc-{i}"), "agent_id": "a2", "session": "mike", "type": "document",
+                              "title": format!("Mike doc {i}"), "content": "x", "created_at": 1_005 + i * 15}));
+    }
+    // A file artifact naming one of the older images, made later.
+    artifacts.push(json!({"artifact_id": "r-file", "agent_id": "a1", "session": "rachel", "type": "file", "title": "The chart",
+                          "url": "/media/r-img-5", "mime_type": "image/png", "file_name": "chart.png", "created_at": 2_000}));
+    host.control("gallery", json!({"media": media, "artifacts": artifacts}));
+    let mut d = Driver::live(&host);
+    d.engine.set_media_directory(host.dir.join("media"));
+    d.engine.load_publications("rachel");
+    d.until("first pages", |e| {
+        let state = e.publications_state("rachel");
+        state.known && !state.loading && !e.publications("rachel").is_empty()
+    });
+    assert!(d.saw(&Change::Publications));
+    assert!(d.engine.publications_state("rachel").has_more, "one page of each is not the end");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while d.engine.publications_state("rachel").has_more {
+        assert!(Instant::now() < deadline, "older pages never ended");
+        d.engine.load_older_publications("rachel");
+        d.until("an older page", |e| !e.publications_state("rachel").loading);
+    }
+    let state = d.engine.publications_state("rachel");
+    assert_eq!((state.media_error.as_str(), state.artifacts_error.as_str(), state.agent_id.as_str()), ("", "", "a1"));
+    let items = d.engine.publications("rachel").to_vec();
+    assert_eq!(items.len(), 70 + 46 - 1, "every image and artifact once, the file and its image as one");
+    assert!(items.iter().all(|i| !i.key.contains("m-img") && !i.artifact_id.starts_with("m-")), "only Rachel's");
+    assert!(items.windows(2).all(|w| w[0].created_at >= w[1].created_at), "newest first");
+    let chart = items.iter().find(|i| i.key == "media:r-img-5").expect("the file's image");
+    assert_eq!((chart.artifact_id.as_str(), chart.title.as_str(), chart.created_at), ("r-file", "The chart", 2_000));
+    assert_eq!(chart.media_path().as_deref(), Some("/media/r-img-5"));
+    let legacy = items.iter().find(|i| i.key == "media:r-img-0").unwrap();
+    assert_eq!(legacy.media_path().as_deref(), Some("/media/files/r-img-0"), "the Host's own path is kept");
+
+    let media_pages = host.requests("GET", "/media");
+    assert!(media_pages.len() >= 2 && media_pages.iter().all(|r| r["query"]["session"] == "rachel"));
+    assert!(media_pages.iter().any(|r| r["query"]["before"].is_string()), "the second page follows the cursor");
+    let artifact_pages: Vec<Value> = host.requests("GET", "/artifacts").into_iter().filter(|r| r["query"]["order"] == "created").collect();
+    assert!(artifact_pages.len() >= 2);
+    assert!(artifact_pages.iter().all(|r| r["query"]["agent_id"] == "a1" && r["query"].get("session").is_none()), "{artifact_pages:?}");
+    assert!(artifact_pages.iter().any(|r| r["query"]["created_to"].is_string() && r["query"]["offset"].is_string()));
+    d.until("a legacy image cached", |e| e.publication_image("rachel", "r-img-0").is_some());
+    assert_eq!(host.requests("GET", "/media/files/r-img-0").len(), 1, "read where the Host said");
+
+    // A kind with nothing left unread: the end is said only now both lists ended.
+    d.engine.set_publication_kind("rachel", Some(clarp_engine::publications::Kind::Video));
+    assert!(!d.engine.publications_state("rachel").has_more);
+    assert!(d.engine.publications("rachel").iter().all(|i| i.kind != clarp_engine::publications::Kind::Video));
+}

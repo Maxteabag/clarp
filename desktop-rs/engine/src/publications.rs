@@ -93,16 +93,20 @@ pub struct Publication {
     pub session: String,
     pub artifact_id: String,
     pub asset_id: String,
+    /// Where its Host serves the file (its own `/media/` path as the Host
+    /// gave it: `/media/<id>`, or an older Host's `/media/files/<id>`);
+    /// "" without a file.
+    pub media_url: String,
     pub bytes: i64,
     /// A recording's or film's length as its artifact gives it (0: unknown).
     pub duration_ms: i64,
 }
 
 impl Publication {
-    /// The Host path its file is read from, through this engine's
+    /// The Host path its file is read from, through the agent's own Host
     /// connection; None without a published file.
     pub fn media_path(&self) -> Option<String> {
-        (!self.asset_id.is_empty()).then(|| format!("/media/{}", clarp_core::endpoint::percent_encode_segment(&self.asset_id)))
+        (!self.media_url.is_empty()).then(|| self.media_url.clone())
     }
 }
 
@@ -188,14 +192,42 @@ fn number(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0)
 }
 
-/// The published file an artifact stands for: its `url` on this Host's
-/// `/media/`, else its `asset_id`.
+fn plain_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 180 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// A path the Host gave for a published file, if it is one of its own
+/// `/media/` paths: `/media/<id>`, or an older Host's `/media/files/<id>`.
+/// Gives the asset id and the path (without query or fragment).
+pub fn host_media_path(url: &str) -> Option<(String, String)> {
+    let path = url.split(['?', '#']).next().unwrap_or_default();
+    let rest = path.strip_prefix("/media/")?;
+    let id = rest.strip_prefix("files/").unwrap_or(rest);
+    plain_id(id).then(|| (id.to_owned(), path.to_owned()))
+}
+
+/// The canonical path of an asset on its Host.
+fn canonical_media_path(asset_id: &str) -> String {
+    format!("/media/{}", clarp_core::endpoint::percent_encode_segment(asset_id))
+}
+
+/// The published file an artifact stands for (its asset id): its `url` on
+/// its Host's `/media/`, else its `asset_id`.
 pub fn media_link(artifact: &Value) -> Option<String> {
-    let url = text(artifact, "url");
-    let from_url = url.strip_prefix("/media/").map(|id| id.split(['?', '#']).next().unwrap_or_default().to_owned());
-    let id = from_url.filter(|id| !id.is_empty() && !id.contains('/')).unwrap_or_else(|| text(artifact, "asset_id").to_owned());
-    let plain = !id.is_empty() && id.len() <= 180 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-    plain.then_some(id)
+    if let Some((id, _)) = host_media_path(text(artifact, "url")) {
+        return Some(id);
+    }
+    let id = text(artifact, "asset_id");
+    plain_id(id).then(|| id.to_owned())
+}
+
+/// Where the Host serves an asset: the row's own `/media/` path when it
+/// names this asset, else the canonical one.
+fn media_url_of(row: &Value, asset_id: &str) -> String {
+    match host_media_path(text(row, "url")) {
+        Some((id, path)) if id == asset_id => path,
+        _ => canonical_media_path(asset_id),
+    }
 }
 
 /// What kind an artifact is, by its type and (for a file) its MIME type.
@@ -239,6 +271,7 @@ fn from_media(row: &Value) -> Option<Publication> {
         session: text(row, "session").to_owned(),
         artifact_id: String::new(),
         asset_id: id.to_owned(),
+        media_url: media_url_of(row, id),
         bytes: number(row, "size_bytes").max(number(row, "bytes")),
         duration_ms: 0,
     })
@@ -265,6 +298,7 @@ fn from_artifact(row: &Value) -> Option<Publication> {
         created_at: number(row, "created_at"),
         session: text(row, "session").to_owned(),
         artifact_id: id.to_owned(),
+        media_url: if asset.is_empty() { String::new() } else { media_url_of(row, &asset) },
         asset_id: asset,
         bytes: number(row, "size_bytes"),
         duration_ms: number(row, "duration_ms"),
@@ -300,7 +334,8 @@ pub fn merge(media: &[Value], artifacts: &[Value], horizon: Option<i64>) -> Vec<
                     let image = held.kind == Kind::Image;
                     let created_at = held.created_at.max(item.created_at);
                     let bytes = held.bytes.max(item.bytes);
-                    *held = Publication { kind: if image { Kind::Image } else { item.kind }, created_at, bytes, ..item };
+                    let media_url = std::mem::take(&mut held.media_url);
+                    *held = Publication { kind: if image { Kind::Image } else { item.kind }, created_at, bytes, media_url, ..item };
                 } else if item.created_at > held.created_at {
                     let kind = held.kind;
                     *held = Publication { kind: if kind == Kind::Image { kind } else { item.kind }, ..item };
@@ -611,20 +646,21 @@ impl Engine {
     /// Fetches the images that show and are not cached yet.
     fn fetch_publication_images(&mut self, session: &str) {
         let Some(book) = self.publications.books.get(session) else { return };
-        let wanted: Vec<String> = book
+        let wanted: Vec<(String, String)> = book
             .items
             .iter()
-            .filter(|item| item.kind == Kind::Image && !item.asset_id.is_empty())
+            .filter(|item| item.kind == Kind::Image && !item.asset_id.is_empty() && !item.media_url.is_empty())
             .filter(|item| !self.media_cached(&item.asset_id))
-            .map(|item| item.asset_id.clone())
+            .map(|item| (item.asset_id.clone(), item.media_url.clone()))
             .collect();
-        for asset in wanted {
+        for (asset, path) in wanted {
             if self.publications.images.values().any(|(_, id)| *id == asset) {
                 continue;
             }
             let tag = format!("publications-image:{}", uuid::Uuid::new_v4().simple());
-            self.publications.images.insert(tag.clone(), (session.to_owned(), asset.clone()));
-            self.api.get_bytes(&tag, &format!("/media/{}", clarp_core::endpoint::percent_encode_segment(&asset)));
+            self.publications.images.insert(tag.clone(), (session.to_owned(), asset));
+            // Only ever this engine's own Host: get_bytes refuses another origin.
+            self.api.get_bytes(&tag, &path);
         }
     }
 
@@ -760,6 +796,22 @@ mod tests {
         assert_eq!(media_link(&json!({"asset_id": "z9"})).as_deref(), Some("z9"));
         assert_eq!(media_link(&json!({"url": "https://example.com/media/abc"})), None);
         assert_eq!(media_link(&json!({"url": "/media/../x"})), None);
+        assert_eq!(media_link(&json!({"url": "/media/files/m1"})).as_deref(), Some("m1"), "an older Host's path");
+        assert_eq!(media_link(&json!({"url": "//evil.example/media/x"})), None);
+    }
+
+    #[test]
+    fn a_file_is_read_where_its_host_said_and_is_one_item_either_way() {
+        let media = [json!({"asset_id": "m1", "mime_type": "image/png", "url": "/media/files/m1", "created_at": 5})];
+        let artifacts = [artifact("x", "file", 9, json!({"url": "/media/m1", "mime_type": "image/png"}))];
+        let items = merge(&media, &artifacts, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].media_path().as_deref(), Some("/media/files/m1"), "the listed file's own path stays");
+        let alone = merge(&[], &[artifact("v", "video", 3, json!({"url": "/media/files/v1?x=1", "mime_type": "video/mp4"}))], None);
+        assert_eq!(alone[0].key, "media:v1");
+        assert_eq!(alone[0].media_path().as_deref(), Some("/media/files/v1"));
+        let bare = merge(&[json!({"asset_id": "z", "mime_type": "image/png", "created_at": 1})], &[], None);
+        assert_eq!(bare[0].media_path().as_deref(), Some("/media/z"));
     }
 
     #[test]

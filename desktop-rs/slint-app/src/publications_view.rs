@@ -1,9 +1,10 @@
 //! An agent's publications (`clarp_engine::publications`): everything it
 //! published, newest first, a kind at a time if chosen. Images open in the
-//! full-size viewer, which moves between the list's images; everything else
-//! opens as its card would (`artifacts_view::open`): a report in the report
-//! viewer, a form in the browser, a file or film downloaded and opened, a
-//! recording played, a decision answered in its chat.
+//! full-size viewer, which moves between the list's images; recordings and
+//! films play in the in-app player (`playback`), from the agent's own Host
+//! with that Host's token; everything else opens as its card would
+//! (`artifacts_view::open`): a report in the report viewer, a form in the
+//! browser, a file downloaded and opened, a decision answered in its chat.
 //!
 //! The panel is its own overlay. Opened from the profile, closing it goes
 //! back there; a viewer opened from it comes back to it.
@@ -81,6 +82,7 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
         panel.viewer.clear();
     });
     let bridge = window.global::<PublicationsBridge>();
+    close_player(window);
     bridge.set_viewing(-1);
     bridge.set_selected(0);
     app.engine.borrow_mut().load_publications(session);
@@ -93,6 +95,10 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
 /// was opened from there).
 pub fn close(app: &App, window: &AppWindow) {
     let bridge = window.global::<PublicationsBridge>();
+    if bridge.get_playing() {
+        close_player(window);
+        return;
+    }
     if bridge.get_viewing() >= 0 {
         close_image(window);
         return;
@@ -103,8 +109,7 @@ pub fn close(app: &App, window: &AppWindow) {
         std::mem::take(&mut panel.from_profile)
     });
     if from_profile && !crate::profile_view::session().is_empty() {
-        commands::open_overlay(app, window, "profile");
-        app.refresh(&[Change::Profile]);
+        crate::profile_view::resume(app, window);
     } else {
         commands::close_overlay(app, window);
     }
@@ -126,6 +131,10 @@ pub fn give_back(app: &App, window: &AppWindow, closed: &str) -> bool {
 /// Brings the open panel up to date.
 pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     if !is_open(app) {
+        // Closed some other way: what it played stops with it.
+        if *app.overlay.borrow() != "report" {
+            close_player(window);
+        }
         return;
     }
     // The same agent after a reconnect or a peer Host read anew: its list
@@ -349,6 +358,7 @@ fn choose_kind(app: &App, window: &AppWindow, index: i32) {
     if index > Kind::ALL.len() as i32 {
         return;
     }
+    close_player(window);
     let session = session();
     app.engine.borrow_mut().set_publication_kind(&session, kind);
     window.global::<PublicationsBridge>().set_selected(0);
@@ -431,15 +441,60 @@ fn close_image(window: &AppWindow) {
 
 // ---- opening -------------------------------------------------------------------
 
-/// Plays a recording or a film. The artifact's own way for now: a
-/// recording plays in the app, a film downloads and opens in the video
-/// player.
+/// Plays a recording or a film in the in-app player, from the agent's own
+/// Host (`/media/<asset_id>` read with that Host's token; a paired Host's
+/// chat plays from that Host). Only the user's Enter or click gets here,
+/// so it starts playing at once.
 fn play(app: &App, window: &AppWindow, item: &Publication) {
-    if item.artifact_id.is_empty() {
-        eprintln!("clarp-slint: {} has no artifact to play it from", item.key);
+    let Some(path) = item.media_path() else {
+        eprintln!("clarp-slint: {} names no published file to play", item.key);
         return;
+    };
+    let kind = if item.kind == Kind::Video { crate::playback::Kind::Video } else { crate::playback::Kind::Audio };
+    crate::playback::open(
+        app,
+        crate::playback::Request {
+            key: item.key.clone(),
+            session: session(),
+            kind,
+            path,
+            title: item.title.clone(),
+            poster: None,
+            duration_ms: item.duration_ms,
+            autoplay: true,
+        },
+    );
+    window.global::<PublicationsBridge>().set_playing(true);
+}
+
+/// Ends what the panel plays.
+fn close_player(window: &AppWindow) {
+    let bridge = window.global::<PublicationsBridge>();
+    if bridge.get_playing() {
+        crate::playback::close();
+        bridge.set_playing(false);
     }
-    crate::artifacts_view::open(app, window, &item.artifact_id);
+}
+
+/// The window's key (a keyboard-map chord) as the player reads it: the
+/// key's text and Shift.
+fn player_key(chord: &str) -> Option<(String, bool)> {
+    use slint::platform::Key;
+    let (shift, key) = chord.strip_prefix("Shift+").map_or((false, chord), |rest| (true, rest));
+    let named = |k: Key| slint::SharedString::from(k).to_string();
+    let text = match key {
+        "Space" => " ".to_owned(),
+        "Escape" => named(Key::Escape),
+        "Left" => named(Key::LeftArrow),
+        "Right" => named(Key::RightArrow),
+        "Up" => named(Key::UpArrow),
+        "Down" => named(Key::DownArrow),
+        "Home" => named(Key::Home),
+        "End" => named(Key::End),
+        letter if letter.len() == 1 && letter.as_bytes()[0].is_ascii_alphabetic() => letter.to_ascii_lowercase(),
+        _ => return None,
+    };
+    Some((text, shift))
 }
 
 /// Enter on the row at `index`.
@@ -480,7 +535,10 @@ fn activate(app: &App, window: &AppWindow, index: i32) {
 
 /// The hints the shortcut bar shows while the panel has the keyboard.
 pub fn hints(window: &AppWindow) -> Vec<crate::Hint> {
-    let pairs: &[(&str, &str)] = if window.global::<PublicationsBridge>().get_viewing() >= 0 {
+    let bridge = window.global::<PublicationsBridge>();
+    let pairs: &[(&str, &str)] = if bridge.get_playing() {
+        &[("Space", "Play/pause"), ("←/→", "5 s"), ("J/L", "10 s"), ("M", "Mute"), ("F", "Fullscreen"), ("Esc", "Close")]
+    } else if bridge.get_viewing() >= 0 {
         &[("←/→", "Previous / next"), ("Esc", "Back")]
     } else {
         &[("J/K", "Move"), ("Enter", "Open"), ("0-7", "Kind"), ("End", "Older"), ("R", "Reload"), ("Esc", "Close")]
@@ -491,6 +549,17 @@ pub fn hints(window: &AppWindow) -> Vec<crate::Hint> {
 /// A key while the panel shows; false for one it leaves alone.
 pub fn key(app: &Rc<App>, window: &AppWindow, chord: &str) -> bool {
     let bridge = window.global::<PublicationsBridge>();
+    if bridge.get_playing() {
+        // The player's keys; Escape leaves its fullscreen first, then closes it.
+        let used = player_key(chord).is_some_and(|(text, shift)| crate::playback::key_pressed(&text, shift));
+        if !used && matches!(chord, "Escape" | "Q" | "Backspace") {
+            close_player(window);
+        }
+        if !crate::playback::active() {
+            bridge.set_playing(false);
+        }
+        return true;
+    }
     if bridge.get_viewing() >= 0 {
         match chord {
             "Left" | "H" | "K" | "Up" | "PageUp" => move_image(app, window, -1),
@@ -530,6 +599,7 @@ pub fn key(app: &Rc<App>, window: &AppWindow, chord: &str) -> bool {
         }
         "Return" | "O" | "Space" => activate(app, window, at),
         "R" | "F5" => {
+            close_player(window);
             let session = session();
             app.engine.borrow_mut().load_publications(&session);
         }
@@ -569,13 +639,15 @@ pub fn wire(window: &AppWindow) {
     bridge.on_activate(|index| with(|app, window| activate(app, window, index)));
     bridge.on_load_older(|| with(|app, _| load_older(app)));
     bridge.on_reload(|| {
-        with(|app, _| {
+        with(|app, window| {
+            close_player(window);
             let session = session();
             app.engine.borrow_mut().load_publications(&session);
         })
     });
     bridge.on_move_image(|delta| with(|app, window| move_image(app, window, delta)));
     bridge.on_close_image(|| with(|_, window| close_image(window)));
+    bridge.on_close_player(|| with(|_, window| close_player(window)));
 }
 
 #[cfg(test)]

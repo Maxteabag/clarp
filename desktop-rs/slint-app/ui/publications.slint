@@ -5,6 +5,7 @@ import { IconButton, Busy } from "agent_controls.slint";
 import { KeyHint } from "artifacts.slint";
 import { ImageView } from "image_view.slint";
 import { MessageImage } from "transcript.slint";
+import { MediaPlayer, PlaybackBridge } from "playback.slint";
 
 // One thing an agent published: an image, a recording, a film, a report,
 // data, a decision or another artifact.
@@ -47,6 +48,8 @@ export global PublicationsBridge {
     // The image viewer: the index into `images`, -1 while closed.
     in-out property <int> viewing: -1;
     in property <[MessageImage]> images;
+    // A recording or film from the list is open in the in-app player.
+    in-out property <bool> playing;
     callback close();
     // Opens an agent's publications (its session as the window knows it;
     // a paired Host's chat keeps its prefix). Over the profile, closing
@@ -58,6 +61,7 @@ export global PublicationsBridge {
     callback reload();
     callback move-image(int);
     callback close-image();
+    callback close-player();
 }
 
 component Chip inherits Rectangle {
@@ -275,6 +279,29 @@ export component PublicationsPanel inherits Rectangle {
                 KeyHint { y: (parent.height - self.height) / 2; key: "0-7"; label: "Kind"; }
                 KeyHint { y: (parent.height - self.height) / 2; key: "End"; label: "Older"; clicked => { PublicationsBridge.load-older(); } }
                 KeyHint { y: (parent.height - self.height) / 2; key: "Esc"; label: "Close"; clicked => { PublicationsBridge.close(); } }
+            }
+        }
+    }
+    // The in-app player over the list (in fullscreen the window's own
+    // layer shows it instead).
+    if PublicationsBridge.playing && PlaybackBridge.kind != "" && !PlaybackBridge.fullscreen: Rectangle {
+        background: #000000d0;
+        TouchArea { }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 10px;
+            MediaPlayer {
+                vertical-stretch: 1;
+                reduced-motion: PublicationsBridge.reduced-motion;
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 14px;
+                height: 22px;
+                Text { text: PlaybackBridge.title; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; overflow: elide; }
+                KeyHint { key: "Space"; label: "Play/pause"; emphasised: true; clicked => { PlaybackBridge.toggle(); } }
+                KeyHint { key: "←/→"; label: "Seek"; emphasised: true; }
+                KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { PublicationsBridge.close-player(); } }
             }
         }
     }

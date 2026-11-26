@@ -78,6 +78,40 @@ jobs = []
 # job id -> its log's text (GET /background-jobs/<id>); /__control/job-log
 # appends to it.
 job_logs = {}
+# The agent publications fixture (/__control/gallery): {"media": [...],
+# "artifacts": [...]}, or None for the plain fixtures. While set, GET /media
+# pages one chat's images as the Host does (newest first, `before` cursor,
+# `next_before`), GET /artifacts?order=created filters by session, agent_id
+# and type, honours created_to and offset, and each asset's own `url`
+# (canonical or /media/files/<id>) serves a picture.
+gallery = None
+
+
+def gallery_media_page(query):
+    rows = [a for a in gallery["media"] if a.get("session") == query.get("session", "")]
+    rows.sort(key=lambda a: (a.get("created_at", 0), a["asset_id"]), reverse=True)
+    before = query.get("before", "")
+    if before:
+        at, _, ident = before.partition(".")
+        rows = [a for a in rows if (a.get("created_at", 0), a["asset_id"]) < (int(at), ident)]
+    limit = max(1, min(500, int(query.get("limit", "100") or 100)))
+    page, rest = rows[:limit], rows[limit:]
+    cursor = f"{page[-1].get('created_at', 0)}.{page[-1]['asset_id']}" if page and rest else None
+    return {"session": query.get("session", ""), "assets": page, "next_before": cursor, "total": len(rows)}
+
+
+def gallery_artifact_page(query):
+    rows = gallery["artifacts"]
+    for key, field in (("session", "session"), ("agent_id", "agent_id"), ("type", "type")):
+        if query.get(key):
+            rows = [a for a in rows if a.get(field) == query[key]]
+    if query.get("created_to"):
+        rows = [a for a in rows if a.get("created_at", 0) < int(query["created_to"])]
+    rows = sorted(rows, key=lambda a: (a.get("created_at", 0), a["artifact_id"]), reverse=True)
+    offset, limit = int(query.get("offset", "0") or 0), max(1, min(500, int(query.get("limit", "100") or 100)))
+    return {"artifacts": rows[offset:offset + limit]}
+
+
 # /artifacts; /__control/artifacts replaces it.
 artifacts = [
     {"artifact_id": "art1", "title": "Report"},
@@ -1873,6 +1907,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "owner_agent_id": job.get("agent_id", ""), "helper_session": "",
                                     "progress": {"text": job.get("progress_text", ""), "at": None},
                                     "timeline": timeline, "log": log})
+        if url.path == "/artifacts" and gallery is not None and query.get("order") == "created":
+            with state_lock:
+                return self.reply(200, gallery_artifact_page(query))
         if url.path == "/artifacts":
             if artifacts_delay:
                 time.sleep(artifacts_delay)
@@ -2003,6 +2040,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply_bytes(200, data, "audio/mpeg")
         if url.path == "/media/gone":
             return self.reply(404, {"error": "media expired"})
+        if gallery is not None and url.path == "/media":
+            with state_lock:
+                return self.reply(200, gallery_media_page(query))
+        if gallery is not None and any(a.get("url") == url.path for a in gallery["media"]):
+            return self.reply_bytes(200, MEDIA_PNG, "image/png")
         if url.path == "/media/files/m1":
             return self.reply_bytes(200, MEDIA_PNG, "image/png")
         if url.path == "/media":
@@ -2785,6 +2827,12 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 attention[:] = body.get("items", [])
             broadcast({"type": "attention-updated"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/gallery":
+            # Test control: the agent publications fixture (see `gallery`).
+            global gallery
+            with state_lock:
+                gallery = {"media": body.get("media", []), "artifacts": body.get("artifacts", [])}
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifacts":
             # Test control: replace the artifact list and announce each
