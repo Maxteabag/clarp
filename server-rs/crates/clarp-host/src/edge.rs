@@ -5118,7 +5118,9 @@ async fn change_live(
             "live must be a list of sessions or agent ids",
         ));
     };
-    let visible = match body.get("visible").filter(|value| !value.is_null()) {
+    // Absent: the chats on screen stay as they were. Present: a list (`[]` clears the screen);
+    // anything else, `null` included, is refused.
+    let visible = match body.get("visible") {
         None => None,
         Some(value) => match names_in(value) {
             Some(named) => Some(sorted(crate::live_change::followed(named))),
@@ -5300,7 +5302,7 @@ async fn events(
     );
     let watched = wanted.map(|wanted| {
         let marks = if owners {
-            ViewMarks::start(&app, &on_screen(&app, &wanted, previews.as_ref()))
+            ViewMarks::start(&app, &wanted)
         } else {
             ViewMarks(None)
         };
@@ -5572,7 +5574,7 @@ async fn events(
                                 previews.moved(Some(&wanted), on);
                             }
                             let marks = if owners {
-                                ViewMarks::start(&app, &on_screen(&app, &wanted, previews.as_ref()))
+                                ViewMarks::start(&app, &wanted)
                             } else {
                                 ViewMarks(None)
                             };
@@ -5628,31 +5630,6 @@ fn replayed(
             crate::chat_previews::Fate::Preview(_)
         )
     })
-}
-
-/// The sessions of the chats a stream shows whole: those it follows, and on a stream that shows
-/// previews only those of them on screen as well (feature `events_chat_previews`). What the
-/// owner's lanes count as open on his device.
-fn on_screen(
-    app: &App,
-    followed: &HashSet<String>,
-    previews: Option<&crate::chat_previews::Previews>,
-) -> HashSet<String> {
-    let Some(previews) = previews else {
-        return followed.clone();
-    };
-    let directory = app.fleet.directory();
-    directory
-        .members
-        .iter()
-        .chain(&directory.janitors)
-        .map(|member| crate::chat_previews::Chat {
-            session: member.record.session.clone(),
-            agent_id: member.record.agent_id.clone(),
-        })
-        .filter(|chat| previews.full(Some(followed), chat))
-        .map(|chat| chat.session)
-        .collect()
 }
 
 /// What a connection is given of a gap: the marker, then the newest of what it missed, each with

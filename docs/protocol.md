@@ -1575,8 +1575,8 @@ every chat. Use it where `GET /server-info` lists both `events_chat_previews` an
 2. When the screen changes, `POST /events/{stream_id}/live` `{"live": [...], "visible": [...]}`
    with the opener's token. Send both complete sets. The answer is
    `{"ok": true, "stream_id", "live": [...], "visible": [...]}`, the sets as accepted (a body
-   without `visible` keeps the chats on screen the stream had; `visible` that is not a list of
-   texts gets 400). The stream then sends `{"type": "live-changed", "live": [...], "visible":
+   without `visible` keeps the chats on screen the stream had, `"visible": []` clears them, and a
+   `visible` that is not a list of texts, `null` included, gets 400). The stream then sends `{"type": "live-changed", "live": [...], "visible":
    [...]}` where both take effect together. Changes faster than the stream takes them collapse:
    take the newest `live-changed`.
 3. A chat shown whole is sent everything, as on a stream without previews. When a chat becomes
@@ -1611,6 +1611,9 @@ every chat. Use it where `GET /server-info` lists both `events_chat_previews` an
    end with the plain `agent-roster`: read the snapshot then. A send's receipt (the dispatch's
    `agent-state` with `client_msg_id`) is replayed as every other event is. Read the history of a pane on
    screen as usual.
+
+Previews change only what the stream sends. Which chats count as open on the owner's device for
+their agents' lanes is decided by `live` alone, as on a stream without previews.
 
 A reader that may not read an agent (bound privacy) is sent its preview blanked, as its row in
 the snapshot is. A stream without `chat_previews=1` is unchanged. A Host without the feature

@@ -344,6 +344,19 @@ fn a_change_of_screen_moves_chats_between_previews_and_whole_without_reopening()
             &json!("visible must be a list of sessions or agent ids")
         )
     );
+    // `null` is no list either: only a body without `visible` keeps the screen.
+    let (status, refused) = host.ask(
+        "POST",
+        &path,
+        Some(&json!({ "live": [first], "visible": null })),
+    );
+    assert_eq!(
+        (status, &refused["error"]),
+        (
+            400,
+            &json!("visible must be a list of sessions or agent ids")
+        )
+    );
 
     // Rapid changes: the answers say each, the stream takes the newest.
     let from = heard.lock().unwrap().len();
@@ -600,4 +613,67 @@ fn a_reconnect_with_previews_is_replayed_nothing_a_preview_stands_for() {
             .iter()
             .any(|event| event["type"] == "transcript-updated" && event["session"] == listed)
     });
+}
+
+/// Previews change what a stream is sent, never which chats count as open on the owner's device
+/// for their agents' lanes: those are the chats it follows (`live`), named as before, whatever
+/// `visible` says, at the opening and at each `live-changed`. `*` marks no agent.
+#[test]
+fn previews_leave_the_owners_lane_marks_to_what_the_stream_follows() {
+    let place = Place::new("chat-previews-marks");
+    let host = place.start_with_token("the-owners-token");
+    let first = host.new_agent("First");
+    let second = host.new_agent("Second");
+    let id_of = |session: &str| {
+        row_of(&host, session)["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let run = place.root.join("run");
+    let mark = |agent: &str| run.join(format!("{agent}-owner-view.mark"));
+    let (first_id, second_id) = (id_of(&first), id_of(&second));
+    let clear = || {
+        for agent in [&first_id, &second_id] {
+            let _ = std::fs::remove_file(mark(agent));
+        }
+    };
+    clear();
+    // Every chat followed and on screen by `*`: no agent is marked, as `live=*` never was.
+    let every = listen_timed(
+        &host,
+        "/events?token=the-owners-token&live=*&visible=*&live_change=1&chat_previews=1",
+    );
+    wait_for("the stream to open", || opened(&every));
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert!(!mark(&first_id).exists() && !mark(&second_id).exists());
+    // Both followed and none on screen: both are marked, as a stream without previews marks them.
+    let heard = listen_timed(
+        &host,
+        &format!(
+            "/events?token=the-owners-token&live={first},{second}&visible=&live_change=1&chat_previews=1"
+        ),
+    );
+    wait_for("the stream to open", || opened(&heard));
+    wait_for("both followed chats marked", || {
+        mark(&first_id).exists() && mark(&second_id).exists()
+    });
+    // At a change, what it follows from then on: the first, though nothing is on screen.
+    let stream = events(&heard, 0)[0]["stream_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    clear();
+    host.post(
+        &format!("/events/{stream}/live"),
+        json!({ "live": [first], "visible": [] }),
+    );
+    wait_for("the change", || {
+        events(&heard, 0)
+            .iter()
+            .any(|event| event["type"] == "live-changed" && event["live"] == json!([first]))
+    });
+    wait_for("the followed chat marked", || mark(&first_id).exists());
+    std::thread::sleep(Duration::from_millis(1_000));
+    assert!(!mark(&second_id).exists(), "no longer followed, not marked");
 }
