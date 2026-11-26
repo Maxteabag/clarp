@@ -2418,9 +2418,18 @@ impl Actor {
         turn: TurnId,
         now_ms: i64,
     ) -> Result<Outputs, ActorError> {
+        self.hold_unsent(turn, Command::HoldUnsentForMove { turn }, now_ms)
+    }
+
+    fn hold_unsent(
+        &mut self,
+        turn: TurnId,
+        command: Command,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
         let mut batch = self.recorder.batch();
         batch
-            .command(Command::HoldUnsentForMove { turn }, now_ms)
+            .command(command, now_ms)
             .map_err(JournalError::Refused)?;
         // In the same batch, as at a retry: where the next attempt begins.
         batch.cursor(turn, 0, now_ms);
@@ -4431,13 +4440,40 @@ impl Actor {
         Ok((true, out))
     }
 
+    /// Holds dispatch during a backend switch without changing the user's queue pause.
+    pub fn hold_for_transit(&mut self, held: bool, now_ms: i64) -> Result<Outputs, ActorError> {
+        self.recorder.hold_for_transit(held);
+        if !held {
+            return self.run_waiting(now_ms);
+        }
+        let mut out = Outputs::default();
+        if held
+            && let Some(Turn::Parked(waiting)) = self.recorder.agent().live()
+            && waiting.wait.is_for_an_account()
+            && !waiting.ran
+        {
+            let turn = waiting.id;
+            out.absorb(self.hold_unsent(turn, Command::HoldUnsentForTransit { turn }, now_ms)?);
+        }
+        Ok(out)
+    }
+
+    pub fn run_waiting(&mut self, now_ms: i64) -> Result<Outputs, ActorError> {
+        if self.recorder.agent().live().is_some()
+            || self.recorder.agent().waiting().next().is_none()
+        {
+            return Ok(Outputs::default());
+        }
+        self.asked(Command::RunWaiting, now_ms).map(|(_, out)| out)
+    }
+
     /// What stands in the way of changing the agent's tool: whether a turn runs, and how many
     /// messages wait. `None`: nothing.
     pub fn busy_for_change(&self) -> Option<(bool, usize)> {
         let agent = self.recorder.agent();
         let live = agent.live().is_some();
         let waiting = agent.waiting().count();
-        (live || waiting > 0).then_some((live, waiting))
+        (live || waiting > 0 && !agent.transit_held()).then_some((live, waiting))
     }
 
     /// The tools the agent's log last changed it from and to, since it was last started again.
@@ -4446,6 +4482,10 @@ impl Actor {
             .agent()
             .changed()
             .map(|(from, to)| (from.to_string(), to.to_string()))
+    }
+
+    pub fn changed_tool_selection(&self) -> Option<&clarp_kernel::agent::ToolSelection> {
+        self.recorder.agent().changed_selection()
     }
 
     /// What was said in the agent's conversation (since it was last started again), the
@@ -4561,6 +4601,7 @@ impl Actor {
     pub fn change_tool(
         &mut self,
         backend: &str,
+        selection: clarp_kernel::agent::ToolSelection,
         backend_session: Option<String>,
         opening: Option<String>,
         notice: &str,
@@ -4585,6 +4626,7 @@ impl Actor {
         let change = Command::ChangeTool {
             from,
             backend: backend.to_string(),
+            selection: Some(selection),
             backend_session,
             opening,
         };

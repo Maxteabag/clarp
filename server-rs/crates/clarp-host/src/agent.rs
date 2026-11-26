@@ -323,6 +323,10 @@ enum Ask {
         most: usize,
         answer: Answer<Vec<clarp_backend::transit::Said>>,
     },
+    TransitHold {
+        held: bool,
+        answer: Answer<()>,
+    },
     /// Go on with another tool, carrying the conversation ([`crate::agent_transit`]).
     ChangeTool {
         change: crate::agent_transit::Change,
@@ -639,6 +643,7 @@ impl Ask {
             Self::Shown { .. } => "Shown",
             Self::SaidSoFar { .. } => "SaidSoFar",
             Self::ChangeTool { .. } => "ChangeTool",
+            Self::TransitHold { .. } => "TransitHold",
             Self::Import { .. } => "Import",
             Self::TakeUp { .. } => "TakeUp",
             Self::Withdraw { .. } => "Withdraw",
@@ -1091,8 +1096,38 @@ impl AgentHandle {
         self.ask(|answer| Ask::SaidSoFar { most, answer }).await
     }
 
-    /// Goes on with another tool, its conversation carried into it: while no turn runs and
-    /// nothing waits ([`crate::agent_transit`]).
+    pub async fn hold_for_transit(&self, held: bool) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::TransitHold { held, answer }).await
+    }
+
+    /// The hold fences the next launch while an existing turn finishes.
+    pub async fn await_transit_boundary(&self) -> Result<(), Unavailable> {
+        let mut view = self.view.clone();
+        loop {
+            {
+                let view = view
+                    .wait_for(|view| {
+                        view.broken.is_some()
+                            || view.status.live.as_ref().is_none_or(|live| {
+                                live.parked.as_ref().is_some_and(|parked| {
+                                    !parked.ran && parked.wait.is_for_an_account()
+                                })
+                            })
+                    })
+                    .await
+                    .map_err(|_| Unavailable::new("the agent is no longer open".to_string()))?;
+                if let Some(why) = &view.broken {
+                    return Err(Unavailable::new(why.clone()));
+                }
+                if view.status.live.is_none() {
+                    return Ok(());
+                }
+            }
+            self.hold_for_transit(true).await?;
+        }
+    }
+
+    /// Goes on with another tool at the boundary, leaving held messages in the mailbox.
     pub async fn change_tool(
         &self,
         change: crate::agent_transit::Change,
@@ -2547,14 +2582,28 @@ impl Worker {
                 "clarp-host: agent {} runs on {to}, as its log says (its record said {from})",
                 self.setup.record.session
             );
+            let selection = actor.changed_tool_selection().cloned();
             drop(actor);
-            let effort = Some(self.setup.record.effort.clone())
-                .filter(|effort| clarp_backend::efforts(&to).contains(&effort.as_str()))
-                .unwrap_or_default();
-            let model = String::new();
+            let (model, effort) = selection.map_or_else(
+                || {
+                    let effort = Some(self.setup.record.effort.clone())
+                        .filter(|effort| clarp_backend::efforts(&to).contains(&effort.as_str()))
+                        .unwrap_or_default();
+                    (String::new(), effort)
+                },
+                |selection| (selection.model, selection.effort),
+            );
             self.adopt_tool(backend, &to, &model, &effort);
             return self.open();
         }
+        // A re-open in this process must keep an active Transit fenced. Otherwise the
+        // journal's waiting messages can safely go on using the recorded backend.
+        let doing_transit = crate::agent_transit::holds_mailbox(&self.setup.record.agent_id);
+        out.absorb(
+            actor
+                .hold_for_transit(doing_transit, self.now_ms())
+                .map_err(|error| error.to_string())?,
+        );
         self.setup
             .delegation_rejoin
             .reconcile(&mut actor, self.now_ms());
@@ -3263,6 +3312,28 @@ impl Worker {
             }
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::ChangeTool { change, answer } => return self.handle_change_tool(&change, answer),
+            Ask::TransitHold { held, answer } => {
+                let now = self.now_ms();
+                let Some(actor) = self.actor.as_mut() else {
+                    let _ = answer.send(Err(Unavailable::new("the agent is not open".to_string())));
+                    return Ok(());
+                };
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                match actor.hold_for_transit(held, now) {
+                    Ok(out) => {
+                        self.after(out);
+                        let _ = answer.send(Ok(()));
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        let _ = answer.send(Err(unavailable(&error)));
+                        return Err(error);
+                    }
+                }
+            }
             Ask::TakePlans {
                 source,
                 plans,
@@ -4188,6 +4259,7 @@ impl Worker {
             // Answered above, where what they change is published first.
             Ask::Artifact { .. }
             | Ask::ChangeTool { .. }
+            | Ask::TransitHold { .. }
             | Ask::Goal { .. }
             | Ask::Amended { .. }
             | Ask::OpenTerminal { .. }
@@ -6308,6 +6380,7 @@ fn refuse_for(
                 drop(answer.send(Err(refusal())));
             }
             Ok(Ask::ChangeTool { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TransitHold { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakeOver { answer, .. }) => drop(answer.send(Err(refusal()))),

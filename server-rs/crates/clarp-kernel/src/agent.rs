@@ -123,6 +123,11 @@ pub enum Command {
     Repair { by: Control },
     /// Let the mailbox run again.
     Resume { by: String },
+    /// Run the first eligible message after releasing a transient launch fence.
+    RunWaiting,
+    HoldUnsentForTransit {
+        turn: TurnId,
+    },
     /// The agent says, in a few words, what it is busy with beyond its turns: work it left
     /// running. An empty label takes that back.
     Label { text: String },
@@ -185,10 +190,11 @@ pub enum Command {
     /// The agent goes on with another tool, `backend`, after `from`. Its conversation was
     /// written as a session of that tool, which its next turn continues; or, where none was
     /// (`None`), its next turn begins one that opens with the Host's record of it. Only
-    /// while no turn runs and nothing waits.
+    /// while no turn runs and any waiting messages are fenced by Transit.
     ChangeTool {
         from: String,
         backend: String,
+        selection: Option<ToolSelection>,
         backend_session: Option<String>,
         /// Where there is no session: what its next turn opens with, the record of the
         /// conversation as it was carried. `None`: the record is read when the turn begins.
@@ -201,6 +207,13 @@ pub enum Command {
     /// What the user's compaction did, said once its turn has ended (`compaction`): only for
     /// that turn, and only once.
     RecordCompaction { turn: TurnId, said: LastCompaction },
+}
+
+/// Launch settings recorded with the backend switch for restart recovery.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ToolSelection {
+    pub model: String,
+    pub effort: String,
 }
 
 /// What happened to an agent. These, in order, are its history.
@@ -320,6 +333,8 @@ pub enum AgentEvent {
     ChangedTool {
         from: String,
         backend: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        selection: Option<ToolSelection>,
         backend_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         opening: Option<String>,
@@ -444,6 +459,7 @@ pub struct Agent {
     paused: bool,
     /// The destination of a move starts no turn until the handoff resumes it.
     import_held: bool,
+    transit_held: bool,
     /// First turn number after the most recent explicit user Stop.
     user_stop_floor: Option<u64>,
     moved: Option<crate::agent_moves::Mark>,
@@ -506,7 +522,7 @@ pub struct Agent {
     carried_opening: Option<String>,
     /// The tool the agent's log last changed it from and to, since it was last started
     /// again: a record elsewhere that still says the first lost the change.
-    changed: Option<(String, String)>,
+    changed: Option<(String, String, Option<ToolSelection>)>,
     /// When that change was made: what turns ended before it said was said of the tool it
     /// left (which model answered, how full its conversation was).
     changed_at_ms: Option<i64>,
@@ -558,6 +574,7 @@ impl Default for Agent {
             note: None,
             paused: false,
             import_held: false,
+            transit_held: false,
             user_stop_floor: None,
             moved: None,
             settled: 0,
@@ -677,6 +694,15 @@ impl Agent {
 
     pub fn waiting(&self) -> impl Iterator<Item = &Queued> {
         self.mailbox.iter()
+    }
+
+    pub fn transit_held(&self) -> bool {
+        self.transit_held
+    }
+
+    /// Transit jobs belong to the running Host, so their dispatch fence is not replayed.
+    pub(crate) fn hold_for_transit(&mut self, held: bool) {
+        self.transit_held = held;
     }
 
     pub fn import_held(&self) -> bool {
@@ -859,7 +885,13 @@ impl Agent {
     pub fn changed(&self) -> Option<(&str, &str)> {
         self.changed
             .as_ref()
-            .map(|(from, to)| (from.as_str(), to.as_str()))
+            .map(|(from, to, _)| (from.as_str(), to.as_str()))
+    }
+
+    pub fn changed_selection(&self) -> Option<&ToolSelection> {
+        self.changed
+            .as_ref()
+            .and_then(|(_, _, selection)| selection.as_ref())
     }
 
     /// When the agent's log last changed its tool, since it was last started again.
@@ -1405,9 +1437,22 @@ impl Agent {
                 }
                 work.record(AgentEvent::StartedAgain { at_ms: now_ms });
             }
+            Command::HoldUnsentForTransit { turn } => {
+                if !work.agent.transit_held
+                    || !matches!(&work.agent.live, Some(Turn::Parked(waiting))
+                        if waiting.id == turn && !waiting.ran && waiting.wait.is_for_an_account())
+                {
+                    return Err(Refusal::UnsentNotProven(turn));
+                }
+                work.record(AgentEvent::HeldUnsentForMove { turn });
+            }
+            Command::RunWaiting => {
+                work.agent.require_here()?;
+            }
             Command::ChangeTool {
                 from,
                 backend,
+                selection,
                 backend_session,
                 opening,
             } => {
@@ -1415,12 +1460,13 @@ impl Agent {
                 if work.agent.live.is_some() {
                     return Err(Refusal::AtWork);
                 }
-                if !work.agent.mailbox.is_empty() {
+                if !work.agent.transit_held && !work.agent.mailbox.is_empty() {
                     return Err(Refusal::Waiting);
                 }
                 work.record(AgentEvent::ChangedTool {
                     from,
                     backend,
+                    selection,
                     backend_session,
                     opening,
                     at_ms: now_ms,
@@ -1877,6 +1923,7 @@ impl Agent {
             AgentEvent::ChangedTool {
                 from,
                 backend,
+                selection,
                 backend_session,
                 opening,
                 at_ms,
@@ -1885,7 +1932,7 @@ impl Agent {
                 self.bind_session(backend_session.as_deref());
                 self.carried_from = self.backend_session.is_none().then(|| from.clone());
                 self.carried_opening = opening.clone().filter(|_| self.carried_from.is_some());
-                self.changed = Some((from.clone(), backend.clone()));
+                self.changed = Some((from.clone(), backend.clone(), selection.clone()));
             }
             AgentEvent::StartedAgain { .. } => {
                 self.backend_session = None;
@@ -2318,7 +2365,7 @@ impl Work {
     fn start_next_with(&mut self, now_ms: i64, takeover: Option<crate::takeover::Start>) {
         // Keep the replay's ordering check compatible with historical turns that started under
         // an import pause. New decisions must never start one before the handoff.
-        if self.agent.live.is_some() || self.agent.import_held {
+        if self.agent.live.is_some() || self.agent.import_held || self.agent.transit_held {
             return;
         }
         // The message that took over the turn that just ended runs next: sent by hand once
@@ -4112,6 +4159,7 @@ mod tests {
         let change = |session: Option<&str>| Command::ChangeTool {
             from: "claude".to_string(),
             backend: "codex".to_string(),
+            selection: None,
             backend_session: session.map(str::to_string),
             opening: session.is_none().then(|| "the record".to_string()),
         };
@@ -4156,7 +4204,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_transit_is_held_by_a_waiting_message() {
+    fn agent_transit_keeps_a_user_stop_pause_across_the_backend_change() {
         let mut a = Driven::new();
         a.user(10);
         a.send(Command::Stop {
@@ -4168,14 +4216,22 @@ mod tests {
         a.background(11);
         assert_eq!(a.live(), None, "a held mailbox starts nothing");
         assert_eq!(a.waiting(), vec![2]);
-        let changed = a.send(Command::ChangeTool {
+        a.agent.hold_for_transit(true);
+        a.send(Command::ChangeTool {
             from: "claude".to_string(),
             backend: "codex".to_string(),
+            selection: None,
             backend_session: Some("thread-1".to_string()),
             opening: None,
-        });
-        assert_eq!(changed, Err(Refusal::Waiting));
-        assert_eq!(a.agent.changed(), None);
+        })
+        .unwrap();
+        a.agent.hold_for_transit(false);
+        a.send(Command::RunWaiting).unwrap();
+        assert_eq!(a.agent.changed(), Some(("claude", "codex")));
+        assert_eq!(a.live(), None);
+        assert_eq!(a.waiting(), vec![2]);
+        a.send(Command::Resume { by: "user".into() }).unwrap();
+        assert_eq!(a.live(), Some(2));
     }
 
     #[test]

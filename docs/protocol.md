@@ -1037,14 +1037,23 @@ started: `400 {error: "unknown_backend" | "unknown_model" | "same_backend_and_mo
 `400 {error: "invalid effort for backend", valid_efforts}`, `409 {error: "turn_running"}`,
 `409 {error: "messages_waiting"}`, `409 {error: "transit_running"}`, `404` for no such agent.
 
+From contract 202 (`agent_backend_transit_queue`), a change to another backend can start during
+a turn or with messages waiting. The current turn may finish on the source. If it was parked
+for an account and no attempt ever reached the tool, its same message can wait for the target
+instead. The Host holds starts from the mailbox until Transit ends. On success it releases the
+mailbox to the chosen backend. On a failed carry it releases it to the source. The ordinary
+ordering and the user's Stop pause still apply. The two busy refusals remain for a same-backend
+model or effort change. A Host restart before cutover abandons the pending switch and leaves
+the mailbox with its source.
+
 **Progress.** The event `agent-transit` `{agent_id, session, transit_id, backend, model, phase,
 error, previous_backend, previous_model, carried}`; `phase` is `reading`, `translating`,
 `registering`, `switching`, then `done` or `failed`; `error` is text on `failed`, else null.
 On `done`, `carried` is `{turns, user, assistant, omitted, summary}` (`omitted`: the oldest
 things said that did not fit the target's budget and were not carried as they were; `summary`:
 who summarized them, `agent` or `model`, else null; `summary` since contract 161), else null.
-Where the conversation does not fit, `reading` lasts while the summary is written (up to about
-seven minutes). A change of the model
+On contract 202 and later, `reading` can include waiting for the current turn and a separate
+summary reading. A change of the model
 alone (same backend) goes straight to `switching` and `done`, with `carried` null.
 `GET /agent-transit?session=S&transit_id=T` answers the same object at its latest phase; an
 unknown id answers 404. The Host keeps these in memory: after a restart it has forgotten the

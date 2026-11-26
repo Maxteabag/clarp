@@ -33,9 +33,26 @@ send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistan
 send("result", subtype="success", is_error=False, result=answer)
 "#;
 
-/// A stand-in for Codex that only says its version: no turn of it runs here.
-const CODEX: &str =
-    "#!/bin/sh\ncase \"$1\" in --version) echo 'codex-cli 0.167.1'; exit 0;; esac\nexit 1\n";
+/// A stand-in for Codex that identifies answers and reads for a Transit summary.
+const CODEX: &str = r#"#!/usr/bin/env python3
+import json, sys
+
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("codex-cli 0.167.1")
+    sys.exit(0)
+if args[:1] != ["exec"]:
+    sys.exit(1)
+prompt = sys.stdin.read()
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-00000000c0de"
+text = json.dumps({"summary": "Summary of the older parts."}) if "--output-schema" in args else "Codex heard: " + prompt.strip().splitlines()[-1]
+def say(**fields):
+    print(json.dumps(fields), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": text})
+say(type="turn.completed", usage={"input_tokens": 5, "output_tokens": 2})
+"#;
 
 struct Setting {
     place: Place,
@@ -130,8 +147,14 @@ fn talked(host: &Host, session: &str) {
 fn transit(host: &Host, ask: Value) -> Value {
     let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
     assert_eq!(status, 202, "{began}");
-    let id = began["transit_id"].as_str().unwrap().to_string();
-    let session = ask["session"].as_str().unwrap().to_string();
+    finished_transit(
+        host,
+        ask["session"].as_str().unwrap(),
+        began["transit_id"].as_str().unwrap(),
+    )
+}
+
+fn finished_transit(host: &Host, session: &str, id: &str) -> Value {
     let mut last = Value::Null;
     wait_for("the change to end", || {
         last = host.get(&format!("/agent-transit?session={session}&transit_id={id}"));
@@ -251,8 +274,57 @@ fn an_agent_moves_to_codex_with_its_conversation_and_keeps_its_name() {
     assert_eq!(again["conversation_id"], conversation);
 }
 
+fn queue_for_transit(host: &Host, session: &str, id: &str, text: &str) {
+    let queued = host.post(
+        "/send",
+        json!({"session": session, "text": text, "client_msg_id": id,
+               "queue_if_busy": true, "origin": "automation"}),
+    );
+    assert_eq!(queued["queued"], true, "{queued}");
+}
+
 #[test]
-fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
+fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target() {
+    let setting = Setting::new("agent-transit-mailbox");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Switcher", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap();
+    let hold = setting.place.root.join("hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(session, "Finish this on Claude.", "switch-1");
+    wait_for("the turn to run", || row(&host, session)["busy"] == true);
+    queue_for_transit(&host, session, "switch-2", "First pending message.");
+    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                     "request_id": "switch-with-queue"});
+    let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 202, "{began}");
+    queue_for_transit(&host, session, "switch-3", "Second pending message.");
+    assert_eq!(row(&host, session)["backend"], "claude");
+    std::fs::remove_file(hold).unwrap();
+
+    let done = finished_transit(&host, session, began["transit_id"].as_str().unwrap());
+    assert_eq!(done["phase"], "done", "{done}");
+    wait_for("the Codex queue to drain", || {
+        let row = row(&host, session);
+        row["backend"] == "codex" && row["busy"] == false && row["queued_turn_count"] == 0
+    });
+    let answers: Vec<_> = host
+        .conversation(session)
+        .into_iter()
+        .filter_map(|(role, text)| (role == "assistant" && !text.is_empty()).then_some(text))
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "Heard: Finish this on Claude.",
+            "Codex heard: First pending message.",
+            "Codex heard: Second pending message.",
+        ]
+    );
+}
+
+#[test]
+fn a_long_conversation_moves_under_a_summary_without_using_the_source_mailbox() {
     let setting = Setting::new("agent-transit-long");
     let host = setting.start();
     let made = host.post("/agents", json!({"name": "Long", "backend": "claude"}));
@@ -274,12 +346,11 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
                      "request_id": "move-long"});
     let done = transit(&host, ask);
     assert_eq!(done["phase"], "done", "{done}");
-    assert_eq!(done["carried"]["summary"], "agent", "{done}");
+    assert_eq!(done["carried"]["summary"], "model", "{done}");
     let omitted = done["carried"]["omitted"].as_u64().unwrap();
     assert!(omitted > 0, "{done}");
 
-    // The rollout opens with the summary the agent wrote (the stand-in answers with the
-    // first line of what it was asked), then the newest part as it was.
+    // The rollout opens with a separate reading of the older turns, then the newest part.
     let rollouts = setting.rollouts();
     assert_eq!(rollouts.len(), 1, "{rollouts:?}");
     let items: Vec<Value> = std::fs::read_to_string(&rollouts[0])
@@ -294,8 +365,8 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
         "{}",
         &head[..200.min(head.len())]
     );
-    assert!(head.contains("written by the agent itself, just before the move:]"));
-    assert!(head.contains("Heard: [Clarp] You are about to move to Codex."));
+    assert!(head.contains("from Clarp's record:]"));
+    assert!(head.contains("Summary of the older parts."));
     let written = std::fs::read_to_string(&rollouts[0]).unwrap();
     assert!(
         written.contains("Long part 3: "),
@@ -307,8 +378,8 @@ fn a_long_conversation_moves_under_a_summary_the_agent_wrote() {
     );
     assert_eq!(
         written.matches("You are about to move").count(),
-        1,
-        "the summary's own turn is no turn of the conversation"
+        0,
+        "the separate reading does not write a turn into the conversation"
     );
     assert!(
         host.conversation(&session)
@@ -346,29 +417,13 @@ fn a_move_forgets_which_model_answered_on_the_tool_it_left() {
 }
 
 #[test]
-fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
+fn a_failed_transit_returns_waiting_messages_to_the_source_backend() {
     let setting = Setting::new("agent-transit-refused");
     let host = setting.start();
     let made = host.post("/agents", json!({"name": "Stayer", "backend": "claude"}));
     let session = made["session"].as_str().unwrap().to_string();
     talked(&host, &session);
     let conversation = row(&host, &session)["conversation_id"].clone();
-
-    // A turn runs: refused, and nothing is written.
-    let hold = setting.claude.parent().unwrap().join("hold");
-    std::fs::write(&hold, "").unwrap();
-    host.send(&session, "Take your time.", "bc-2");
-    wait_for("the turn to run", || row(&host, &session)["busy"] == true);
-    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
-                     "request_id": "stay-1"});
-    let (status, refused) = host.ask("POST", "/agent-transit", Some(&ask));
-    assert_eq!(status, 409, "{refused}");
-    assert_eq!(refused["error"], "turn_running");
-    assert!(setting.rollouts().is_empty());
-    std::fs::remove_file(&hold).unwrap();
-    wait_for("the agent to be done", || {
-        row(&host, &session)["busy"] == false
-    });
 
     // Codex's index has a column this Host cannot fill: the carry fails and takes back what
     // it wrote; the agent stays on its tool, under its name, and the chat says why.
@@ -382,7 +437,22 @@ fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
     )
     .unwrap();
     drop(db);
-    let failed = transit(&host, ask);
+    let hold = setting.place.root.join("hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(&session, "Take your time.", "bc-2");
+    wait_for("the turn to run", || row(&host, &session)["busy"] == true);
+    queue_for_transit(
+        &host,
+        &session,
+        "bc-later",
+        "Waiting through a failed switch.",
+    );
+    let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                     "request_id": "stay-1"});
+    let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 202, "{began}");
+    std::fs::remove_file(hold).unwrap();
+    let failed = finished_transit(&host, &session, began["transit_id"].as_str().unwrap());
     assert_eq!(failed["phase"], "failed", "{failed}");
     assert!(failed["error"].as_str().unwrap().contains("unknown_now"));
     assert!(setting.rollouts().is_empty());
@@ -400,6 +470,15 @@ fn nothing_changes_while_a_turn_runs_or_when_the_carry_fails() {
         "{:?}",
         host.conversation(&session)
     );
+
+    wait_for("the queue to run on the source", || {
+        host.conversation(&session).iter().any(|(role, text)| {
+            role == "assistant" && text == "Heard: Waiting through a failed switch."
+        })
+    });
+    wait_for("the source to return to idle", || {
+        row(&host, &session)["busy"] == false
+    });
 
     // Asked wrongly: refused before anything is done.
     let refusal = |ask: Value| {

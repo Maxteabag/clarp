@@ -256,7 +256,17 @@ pub(crate) fn carry(
     change.progress.tell("switching");
     let (backend, model) = &change.shown_as;
     let row = done_row(backend, model, from, fitted.summarized);
-    match actor.change_tool(&change.backend, session, opening, &row, now_ms) {
+    match actor.change_tool(
+        &change.backend,
+        clarp_kernel::agent::ToolSelection {
+            model: change.model.clone(),
+            effort: change.effort.clone(),
+        },
+        session,
+        opening,
+        &row,
+        now_ms,
+    ) {
         Ok((Ok(()), out)) => Ok((Ok(changed), out)),
         Ok((Err(why), _)) => {
             if let Some(written) = written {
@@ -292,7 +302,17 @@ fn in_the_same_store(
     change.progress.tell("switching");
     let (backend, model) = &change.shown_as;
     let row = format!("Now on {backend} · {model}. The same conversation goes on.");
-    match actor.change_tool(&change.backend, session.clone(), None, &row, now_ms)? {
+    match actor.change_tool(
+        &change.backend,
+        clarp_kernel::agent::ToolSelection {
+            model: change.model.clone(),
+            effort: change.effort.clone(),
+        },
+        session.clone(),
+        None,
+        &row,
+        now_ms,
+    )? {
         (Ok(()), out) => {
             let changed = Changed {
                 backend_session: session,
@@ -376,6 +396,15 @@ pub fn running_of(agent_id: &str) -> Value {
                 "model": state["model"],
             })
         })
+}
+
+/// Only an actual backend switch fences the mailbox.
+pub(crate) fn holds_mailbox(agent_id: &str) -> bool {
+    let book = book();
+    book.running
+        .get(agent_id)
+        .and_then(|id| book.states.get(id))
+        .is_some_and(|state| state["backend"] != state["previous_backend"])
 }
 
 /// A change's state, as `GET /agent-transit` answers it.
@@ -637,11 +666,13 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     }
     let view = member.agent.view();
     let status = &view.status;
-    if status.live.is_some() {
-        return Err(refused(StatusCode::CONFLICT, "turn_running"));
-    }
-    if status.queue_depth > 0 || !status.waiting.is_empty() {
-        return Err(refused(StatusCode::CONFLICT, "messages_waiting"));
+    if same_backend {
+        if status.live.is_some() {
+            return Err(refused(StatusCode::CONFLICT, "turn_running"));
+        }
+        if status.queue_depth > 0 || !status.waiting.is_empty() {
+            return Err(refused(StatusCode::CONFLICT, "messages_waiting"));
+        }
     }
     let id = crate::ids::uuid();
     let now = app.clock.now_ms();
@@ -690,7 +721,16 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         shown,
     };
     let app = app.clone();
-    tokio::spawn(async move { run(&app, &member, &before, goal).await });
+    let (prepared, ready) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        if !same_backend && let Err(why) = member.agent.hold_for_transit(true).await {
+            fail(&app, &member, &goal, "reading", why.0).await;
+            return;
+        }
+        let _ = prepared.send(());
+        run(&app, &member, &before, goal).await;
+    });
+    let _ = ready.await;
     Ok(id)
 }
 
@@ -768,6 +808,47 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
         }
         return;
     }
+    let result = carry_at_boundary(app, member, before, &goal).await;
+    // The successful change reopens the agent on the new backend before it takes this ask.
+    // On failure it releases the same mailbox to the unchanged backend.
+    let released = member.agent.hold_for_transit(false).await;
+    let carried = match result {
+        Ok(carried) => carried,
+        Err((stage, why)) => return fail(app, member, &goal, stage, why).await,
+    };
+    let counts = json!({
+        "turns": carried.carried,
+        "user": carried.user,
+        "assistant": carried.assistant,
+        "omitted": carried.omitted,
+        "summary": carried.summary,
+    });
+    if let Err(why) = released {
+        eprintln!(
+            "clarp-host: {} could not release the Transit hold: {}",
+            before.session, why.0
+        );
+    }
+    reach(
+        &app.hub,
+        app.clock.now_ms(),
+        &goal.id,
+        "done",
+        &[("carried", counts)],
+    );
+}
+
+async fn carry_at_boundary(
+    app: &App,
+    member: &crate::fleet::Member,
+    before: &AgentRecord,
+    goal: &Goal,
+) -> Result<Changed, (&'static str, String)> {
+    member
+        .agent
+        .await_transit_boundary()
+        .await
+        .map_err(|why| ("reading", why.0))?;
     let progress = {
         let (hub, clock, id) = (app.hub.clone(), app.clock.clone(), goal.id.clone());
         Progress(Arc::new(move |phase| {
@@ -780,7 +861,7 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
     let summary = if same_store {
         None
     } else {
-        summarized(app, member, &goal, budget).await
+        summarized(app, member, budget).await
     };
     let change = Change {
         backend: goal.backend.clone(),
@@ -807,12 +888,12 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
             } else {
                 "messages_waiting"
             };
-            return fail(app, member, &goal, stage, why.to_string()).await;
+            return Err((stage, why.to_string()));
         }
         Ok(Err(Refused::Failed { stage, why })) => {
-            return fail(app, member, &goal, stage, why).await;
+            return Err((stage, why));
         }
-        Err(unavailable) => return fail(app, member, &goal, "reading", unavailable.0).await,
+        Err(unavailable) => return Err(("reading", unavailable.0)),
     };
     // The log has the change: the fleet's record follows it. Should that fail, the agent runs
     // on the new tool all the same, and its record is put right when the Host next opens it.
@@ -827,20 +908,7 @@ async fn run(app: &App, member: &crate::fleet::Member, before: &AgentRecord, goa
             },
         )
         .await;
-    let counts = json!({
-        "turns": carried.carried,
-        "user": carried.user,
-        "assistant": carried.assistant,
-        "omitted": carried.omitted,
-        "summary": carried.summary,
-    });
-    reach(
-        &app.hub,
-        app.clock.now_ms(),
-        &goal.id,
-        "done",
-        &[("carried", counts)],
-    );
+    Ok(carried)
 }
 
 /// The context window Codex's configuration sets (`model_context_window`, in the active
@@ -874,22 +942,16 @@ fn codex_window(config: &toml::Table, model: &str) -> Option<usize> {
 
 // ---- what stands for what does not fit ------------------------------------------------------
 
-/// How long the agent is given to summarize its own conversation, and another model after it.
-const SUMMARY_WITHIN: Duration = Duration::from_secs(240);
+/// How long another model is given to summarize older conversation.
 const MODEL_WITHIN: Duration = Duration::from_secs(180);
 /// How much of the older part of the conversation another model is given to summarize.
 const MODEL_READS: usize = 300_000;
-/// Who summarizes when the agent cannot: the cheap models of two tools, in turn.
-const SUMMARIZERS: [(&str, &str); 2] = [("claude", "haiku"), ("codex", "")];
+/// Summary calls run outside the mailbox so they cannot delay its first turn by joining it.
+const SUMMARIZERS: [(&str, &str); 2] = [("codex", ""), ("claude", "haiku")];
 
-/// The summary of the part of the conversation that does not fit in `budget`: written by the
-/// agent itself, in one more turn on its old tool that only reads; where that cannot be, by a
-/// cheap model from the Host's record. `None` where it all fits, or neither could write one:
-/// the newest part goes alone, under a note that the rest was left out.
 async fn summarized(
     app: &App,
     member: &crate::fleet::Member,
-    goal: &Goal,
     budget: usize,
 ) -> Option<transit::Summary> {
     let said = member.agent.said_so_far(budget).await.ok()?;
@@ -897,73 +959,7 @@ async fn summarized(
     if fitted.from == 0 {
         return None;
     }
-    let newest = &said[fitted.from..];
-    if let Some(text) = by_the_agent(member, goal, newest).await {
-        return Some(transit::Summary {
-            text,
-            by: transit::SummaryBy::Agent,
-        });
-    }
     by_a_model(app, &said[..fitted.from]).await
-}
-
-/// The agent's own summary: one more turn of it, filed as nobody's message, which only reads
-/// (`clarp_kernel::turn::TRANSIT_SUMMARY`). A turn that takes too long is stopped.
-async fn by_the_agent(
-    member: &crate::fleet::Member,
-    goal: &Goal,
-    newest: &[transit::Said],
-) -> Option<String> {
-    use clarp_actor::TurnFate;
-    use clarp_kernel::conversation::Message;
-    use clarp_kernel::turn::{Admission, Origin, TRANSIT_SUMMARY};
-    let begins = newest
-        .iter()
-        .find(|one| !one.text.trim().is_empty())
-        .map_or("", |one| one.text.as_str());
-    let request = crate::ids::hex(8);
-    let (id, marked) = Message::filed(&format!("{TRANSIT_SUMMARY}-{request}"));
-    let message = Message {
-        id: id.clone(),
-        marked,
-        unminted: true,
-        text: transit::summary_turn(&goal.shown.backend, begins),
-        origin: Origin::Trigger {
-            name: TRANSIT_SUMMARY.to_string(),
-        },
-        trace_id: Some(request),
-        ..Message::default()
-    };
-    member.agent.send(message, Admission::Queue).await.ok()?;
-    let began = std::time::Instant::now();
-    loop {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        match member.agent.fate(id.clone()).await.ok()? {
-            TurnFate::Ended { status, text, .. } => {
-                return (status == "completed" && !text.trim().is_empty()).then_some(text);
-            }
-            TurnFate::Waits | TurnFate::Runs if began.elapsed() < SUMMARY_WITHIN => {}
-            TurnFate::Waits | TurnFate::Runs => {
-                eprintln!(
-                    "clarp-host: agent {} did not summarize its conversation in time",
-                    member.record.session
-                );
-                let _ = member.agent.stop("transit".to_string()).await;
-                // Its turn ends before the change is made, or the change finds it busy.
-                for _ in 0..40 {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    if matches!(
-                        member.agent.fate(id.clone()).await,
-                        Ok(TurnFate::Ended { .. } | TurnFate::Gone)
-                    ) {
-                        break;
-                    }
-                }
-                return None;
-            }
-            TurnFate::Unknown | TurnFate::Gone => return None,
-        }
-    }
 }
 
 /// A summary by a cheap model, of the older part of the conversation as the Host recorded it.

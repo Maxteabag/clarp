@@ -605,6 +605,10 @@ impl Recorder {
         &self.agent
     }
 
+    pub fn hold_for_transit(&mut self, held: bool) {
+        self.agent.hold_for_transit(held);
+    }
+
     /// The public queue contains messages whose conversation row does not exist yet.
     pub fn unshown_waiting(&self) -> impl Iterator<Item = &Queued> {
         self.agent.waiting().filter(|queued| {
