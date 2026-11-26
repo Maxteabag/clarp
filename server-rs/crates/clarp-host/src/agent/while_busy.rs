@@ -114,8 +114,9 @@ impl Worker {
     /// where it is read into the turn, or the turn makes way for it (a turn that takes no words,
     /// his own included, is stopped for it under `steer` and `take_over`). Under `after_turn` it
     /// waits for the turn because he chose that order: ordinary work, which the chat's preview
-    /// shows, not a reason the agent cannot answer. A send without `while_busy` (an app before
-    /// feature `send_while_busy`) keeps its older admission, which this does not describe.
+    /// shows, not a reason the agent cannot answer. A plain `POST /send` without `while_busy` keeps
+    /// its own admission (behind his own turn whose tool takes no words it queues), which this
+    /// does not describe.
     pub(super) fn owner_waits(&self) -> crate::availability::OwnerWaits {
         use crate::availability::{OwnerWaits, Why};
         let Some(actor) = self.actor.as_ref() else {

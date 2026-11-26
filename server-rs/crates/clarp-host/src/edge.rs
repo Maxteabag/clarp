@@ -562,13 +562,6 @@ pub const FEATURES: &[(&str, u64)] = &[
     // place of its transcript, activity, state and status lines; `POST /events/{id}/live`
     // sets `visible` with `live` (issues 905 and 913).
     ("events_chat_previews", 212),
-    // `availability` says only what keeps the owner waiting (issue 918): `ok` for a turn at work
-    // that his send, as his apps make it with the `while_busy` setting, is read into or takes
-    // the place of; `busy` with the reason ("Compacting", "Moving to another backend", "Working
-    // on its goal") where it can neither, or a backend move holds the queue; `queue_ahead` what
-    // runs before his word, not the raw queue (`Agent::ahead_of_owner`). A turn's first start
-    // is no longer `restarting`. Same fields as `agent_availability`.
-    ("agent_availability_owner_wait", 213),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

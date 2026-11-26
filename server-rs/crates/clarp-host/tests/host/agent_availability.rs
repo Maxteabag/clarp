@@ -42,10 +42,9 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
         host.get("/server-info")["contract"]["features"]["agent_availability"],
         206
     );
-    assert_eq!(
-        host.get("/server-info")["contract"]["features"]["agent_availability_owner_wait"],
-        213
-    );
+    // The meaning below is contract 213's: no feature of its own.
+    let contract = host.get("/server-info")["contract"]["host"].as_u64();
+    assert!(contract >= Some(213), "{contract:?}");
     let heard = host.listen();
     let session = host.new_agent("Avail");
     // A new agent is never shown as restarting while it is being opened.
@@ -94,6 +93,14 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
     assert_eq!(shown(&availability_of(&host, &session)), ordinary);
     host.post("/send-settings", json!({ "while_busy": "steer" }));
     assert_eq!(counted(), 0, "nothing is told of ordinary work");
+    // A plain `POST /send` without `while_busy` keeps its admission: behind his own turn whose
+    // tool takes no words it queues, as always. The row describes his Send in an app, not this.
+    let plain = host.send(&session, "plain", "plain");
+    assert_eq!(plain["queued"], true, "{plain}");
+    assert!(plain.get("while_busy").is_none(), "{plain}");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(host.state(&session), "thinking", "nothing was cut");
+    assert_eq!(shown(&availability_of(&host, &session)), ordinary);
     // What the row said is what his send does: it takes the turn's place at once.
     let steer = host.post(
         "/send",

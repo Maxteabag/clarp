@@ -173,7 +173,7 @@ curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" \
   "$CLARP_SERVER_URL/agents/ada-1a2b" | jq .availability
 ```
 
-From contract 213 (feature `agent_availability_owner_wait`), `state` says
+From Host contract 213 (`contract.host` in `GET /server-info`), `state` says
 whether the agent can answer its user now: `ok` (it can, also
 while a turn runs that the user's message steers into or takes over), `busy`
 (the user's message would wait for a turn that cannot take it, such as a

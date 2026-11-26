@@ -2475,10 +2475,10 @@ follows a planned restart or a crash, may give out some of those numbers again.
 
 Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `availability`
 (issue 918), so an app can show one calm line with the reason and the expected wait. What
-follows is the meaning from Rust Host contract 213 (feature `agent_availability_owner_wait`):
-the line says only what keeps the user waiting. On a Host with `agent_availability` but not
-`agent_availability_owner_wait`, `busy` ("Busy · N messages ahead of you", or "Busy") is any
-running turn, `queue_ahead` is `queued_turn_count`, and a turn's first start is `restarting`.
+follows is the meaning from Rust Host contract 213 (`contract.host`; no feature of its own): the
+line says only what keeps the user waiting. On a Host with `agent_availability` below 213,
+`busy` ("Busy · N messages ahead of you", or "Busy") is any running turn, `queue_ahead` is
+`queued_turn_count`, and a turn's first start is `restarting`.
 
 ```json
 "availability": {
@@ -2513,8 +2513,9 @@ running turn, `queue_ahead` is `queued_turn_count`, and a turn's first start is 
     message is read into or takes the place of (issue 839, `send_while_busy`; a turn whose tool
     takes no words is stopped for it under `steer` and `take_over`): ordinary work, shown by
     the chat's preview and activity, not here. Under `after_turn` the message waits for the
-    turn because the user chose that order: still `ok`. A send without `while_busy` keeps its
-    older admission, which `availability` does not describe.
+    turn because the user chose that order: still `ok`. A `POST /send` without `while_busy`
+    keeps its admission: behind the user's own turn whose tool takes no words it queues (the
+    user can still take it over from the queue), which `availability` does not describe.
 - `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
   limit", or "Waiting for account" when the pool holds a launch without a known cause;
   `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";
