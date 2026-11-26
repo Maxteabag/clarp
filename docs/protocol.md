@@ -127,7 +127,11 @@ and every other answer sent as it is made; `/events` only when asked with `gzip=
 partial answer, media and files that are no text, answers without a body (`HEAD`, 204, 304) and
 answers above 64 MiB. URLSession and OkHttp ask for gzip and decode it themselves; a client that
 sets `Accept-Encoding` by hand must decode what it asked for. Through the connection relay the
-Host is asked for gzip only where the relay passes the packed body through untouched. The Host's
+Host is asked for gzip only where the relay passes the packed body through untouched
+(`passthrough_encoding`). The relay in `relay/` says so on every request from contract 198, so
+through it the Host packs every relayed answer it negotiates, as it would answer directly: JSON,
+text and scripts of 1 KB or more for a phone that takes gzip (before, those went plain over the
+Host's socket and the relay's edge compressed them), and `/events` only with `gzip=1`. The Host's
 recorded request durations (diagnostics `requests`) include the packing.
 
 ### Unchanged lists: `ETag` and 304 (feature `list_etags`, Rust Host contract 181)
@@ -1264,7 +1268,7 @@ Event types and payloads:
 
 | `type` | Fields | Client action |
 |---|---|---|
-| `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
+| `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them); `rows_from`, and to a `rows=1` connection `rows` and `rows_latest` (feature `events_rows`, below) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`; with `rows`, not when the cache holds `rows_from` or more of that `conversation_id` (merge `rows`). The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
@@ -1346,6 +1350,37 @@ and the signed addresses of agents' pictures go only into push payloads. So no s
 compression window with words an agent read, which would let a watcher of the encrypted lengths
 guess it. An event that ever carries one must stay out of the gzipped stream (or the field out of
 the event), and its review must say so.
+
+#### Rows carried in `transcript-updated` (feature `events_rows`, Rust Host contract 199)
+
+A client that reads `/log` after each `transcript-updated` can have the event carry the rows
+instead. The Host's `transcript-updated` events of one conversation follow one another: each
+carries `rows_from`, the `head_revision` the one before it of the same conversation told (absent on
+the first after the Host starts, and on the first of a new conversation). `GET /events?rows=1` then
+adds, to that connection's events:
+
+- `rows`: what `GET /log?session=&after_revision=<rows_from>&include_automated=1&include_tool_details=0`
+  answers in `turns` as the event is sent (the same rows, fields and delivery state as `/log`);
+- `rows_latest`: that answer's `latest_revision`.
+
+It adds them only when the answer holds all of them (no `has_more`, at most 20 rows, no
+`replace_required`, the event's `conversation_id`), they are at most 16 KB as JSON, and the store
+answers within about 200 ms; otherwise the event goes as before, with `rows_from` alone. The rows
+are read once for every connection that asks, and only for live events, not for the replay after a
+reconnect.
+
+A client that holds the event's `conversation_id` at revision `rows_from` or higher merges `rows`
+by `id` and `revision` (the rules of `/log`) and then holds `rows_latest`; it reads nothing. One
+that holds less than `rows_from` (it missed an event, or holds another conversation), one that was
+sent no `rows`, and one that reads `/log` with other options (`view`, `coordination`,
+`include_automated=0`, `include_tool_details` other than `0`) reads `/log` as before. A row of an
+agent whose words the reader may not read is blanked in the event as in `/log` (bound privacy).
+Measured with the apps' way of listening and `gzip=1` (`server-rs/tools/build wire-read`, issue
+879), one short answer cost such a client 4.4 KB and no `/log` call, against 11.4 KB with nine
+`/log` calls without it.
+
+A connection without `rows=1` gets `rows_from` on `transcript-updated` and nothing more. A Host
+without the feature ignores `rows=1`: send it only where `GET /server-info` lists `events_rows`.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,

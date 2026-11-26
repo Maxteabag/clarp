@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 198;
+pub const HOST_CONTRACT: u64 = 199;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -503,6 +503,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // flushed at each event, so each event is read the moment it comes and what the events
     // repeat is sent once (issue 879). Without `gzip=1` the stream goes plain, as before.
     ("events_gzip", 198),
+    // `GET /events?rows=1`: a `transcript-updated` carries `rows_from` (the head the previous one
+    // of the same conversation told) and, to such a connection, the rows above it (`rows`,
+    // `rows_latest`) where they are at most 20 and 16 KB and read within 200 ms (issue 879).
+    ("events_rows", 199),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -2988,7 +2992,7 @@ async fn import_agent(
 
 // ---- a conversation --------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct LogQuery {
     session: String,
     limit: Option<usize>,
@@ -3014,6 +3018,11 @@ async fn log(
     State(app): State<App>,
     Query(query): Query<LogQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    log_answer(&app, query).await.map(Json)
+}
+
+/// The answer to `GET /log` with this query.
+async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     let mode =
         clarp_kernel::hidden_coordination::Mode::parse(query.coordination.as_deref().unwrap_or(""))
             .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
@@ -3036,7 +3045,7 @@ async fn log(
         // An agent the Host does not have has no conversation: the answer is the one for an
         // agent that has not said anything yet, and not an error.
         let home = std::env::var("HOME").unwrap_or_default();
-        return Ok(Json(wire::no_conversation(&home)));
+        return Ok(wire::no_conversation(&home));
     };
     let limit = query.limit.unwrap_or(100).clamp(1, 5_000);
     let include_automated = !query
@@ -3142,7 +3151,7 @@ async fn log(
     {
         answer["view"] = json!(view);
     }
-    Ok(Json(answer))
+    Ok(answer)
 }
 
 /// `GET /message-tool-details?session=&message_id=`: the cards of one row whole, for an app
@@ -4827,6 +4836,42 @@ struct EventsQuery {
     /// id, with commas between them: `*` for every one, nothing for the status lines alone.
     /// A connection that does not say `live` at all is sent no `live` events.
     live: Option<String>,
+    /// `1`: a `transcript-updated` carries the rows it stands for, where they are few and small
+    /// (feature `events_rows`).
+    rows: Option<String>,
+}
+
+/// The rows a `transcript-updated` stands for, as `/log` answers a delta from its `rows_from`
+/// with `include_automated=1&include_tool_details=0`, put in the event for a connection that
+/// asked (`carried`): read once for every such connection, and not waited for past
+/// `carried::WITHIN`. `None`: the event goes as it is.
+async fn with_rows(app: &App, published: &Published) -> Option<Arc<str>> {
+    if !published.json.contains("\"rows_from\"") {
+        return None;
+    }
+    let read = || rows_of(app.clone(), published.json.clone());
+    app.hub
+        .carried
+        .get(published.id, crate::carried::WITHIN, read)
+        .await
+}
+
+async fn rows_of(app: App, json: String) -> Option<String> {
+    let mut event: Value = serde_json::from_str(&json).ok()?;
+    if event["type"] != "transcript-updated" {
+        return None;
+    }
+    let from = event["rows_from"].as_u64().filter(|from| *from > 0)?;
+    let query = LogQuery {
+        session: event["session"].as_str()?.to_string(),
+        limit: Some(crate::carried::ROWS_MAX),
+        after_revision: Some(from),
+        include_automated: Some("1".to_string()),
+        include_tool_details: Some("0".to_string()),
+        ..LogQuery::default()
+    };
+    let answer = log_answer(&app, query).await.ok()?;
+    crate::carried::carry(&mut event, answer).then(|| event.to_string())
 }
 
 /// What a `live` event is sent as: no number, and no name, as every other event without one.
@@ -4876,6 +4921,10 @@ async fn events(
         .and_then(|value| value.trim().parse().ok())
         .or(query.last_event_id);
     let (missed, live) = app.hub.subscribe(after);
+    let rows = matches!(
+        query.rows.as_deref().map(str::trim),
+        Some("1" | "true" | "yes")
+    );
     // The turns the connection asked to be shown as they run. What they show is never kept:
     // nothing of it is among what was missed.
     let wanted: Option<HashSet<String>> = query.live.map(|live| {
@@ -4951,7 +5000,18 @@ async fn events(
                             if not_for(&app, &published, &listener).await {
                                 continue;
                             }
-                            numbered(&published)
+                            // What it stands for, to a connection that asked for its rows.
+                            let carried = if rows {
+                                with_rows(&app, &published).await
+                            } else {
+                                None
+                            };
+                            match carried {
+                                Some(json) => SseEvent::default()
+                                    .data(&*json)
+                                    .id(published.id.to_string()),
+                                None => numbered(&published),
+                            }
                         }
                         Ok(Heard::Shown(Ok(shown))) => {
                             let wanted = watched.as_ref().map(|(wanted, _, _)| wanted);

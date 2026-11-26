@@ -1679,6 +1679,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         ended: None,
         finished: None,
         transcript_sent: None,
+        transcript_told: None,
         helper_change_session: None,
         transcript_due: None,
         jobs_told: BTreeMap::new(),
@@ -1780,6 +1781,9 @@ struct Worker {
     /// What the agent last finished for its user, as the view shows it.
     finished: Option<Arc<Value>>,
     transcript_sent: Option<Instant>,
+    /// The conversation and head revision the last "the conversation changed" told: where the
+    /// rows the next one stands for begin (`rows_from`, feature `events_rows`, issue 879).
+    transcript_told: Option<(String, u64)>,
     helper_change_session: Option<String>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
@@ -6024,6 +6028,18 @@ impl Worker {
         // The view the apps read: what its row in the snapshot says now.
         let view = self.view.borrow().clone();
         let mut event = wire::transcript_updated(&self.setup.record, &view.status);
+        // What changed since the last word of it: the rows above the revision that one told,
+        // in the same conversation. A connection that asked for rows is sent them in it.
+        let conversation = event["conversation_id"].as_str().unwrap_or("").to_string();
+        let head = view.status.head_revision;
+        if let Some((told_in, told)) = &self.transcript_told
+            && *told_in == conversation
+            && *told > 0
+            && head >= *told
+        {
+            event["rows_from"] = json!(told);
+        }
+        self.transcript_told = Some((conversation, head));
         if let Some(session) = self.helper_change_session.take() {
             event["backend_session_id"] = Value::String(session);
         }

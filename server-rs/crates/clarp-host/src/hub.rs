@@ -68,6 +68,9 @@ pub struct Hub {
     live: broadcast::Sender<Arc<Published>>,
     /// What agents' turns show as they run, for the connections that asked for it.
     shown: broadcast::Sender<Arc<Shown>>,
+    /// The rows each recent `transcript-updated` stands for, read once for every connection that
+    /// asked for them (`rows=1`, feature `events_rows`).
+    pub carried: crate::carried::Reads,
     /// The name of this run of the Host for those who watch a turn.
     epoch: String,
     /// How many requests of each agent wait for the user: what the apps' badge counts.
@@ -102,6 +105,7 @@ impl Hub {
         let seconds = u64::try_from(now_ms / 1_000).unwrap_or(0);
         Self {
             capture: None,
+            carried: crate::carried::Reads::default(),
             shown,
             statuses,
             badge,

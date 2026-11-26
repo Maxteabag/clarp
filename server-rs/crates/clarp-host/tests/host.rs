@@ -79,6 +79,8 @@ mod end_at_answer;
 mod enter_at_start;
 #[path = "host/events_gzip.rs"]
 mod events_gzip;
+#[path = "host/events_rows.rs"]
+mod events_rows;
 #[path = "host/folder_missing.rs"]
 mod folder_missing;
 #[path = "host/goal_ledger.rs"]

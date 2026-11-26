@@ -144,6 +144,9 @@ On a Host with feature `events_gzip` (contract 198), a watcher of `/events`
 whose HTTP client decodes gzip as it streams can add `gzip=1` to get the same
 events in a fraction of the bytes; without the feature, or without decoding
 gzip, leave it out.
+On a Host with feature `events_rows` (contract 199), add `rows=1`: a
+`transcript-updated` then carries `rows` and `rows_latest`, and a watcher that
+holds its `rows_from` revision or more merges them instead of reading `GET /log`.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
