@@ -26,6 +26,19 @@ It reads the Host's HTTP API only (`GET /agents/snapshot`, `GET /log` paged back
 `GET /turn-queue`), one agent at a time, a page of 200 at most, with a pause between requests,
 and stops paging at the window's start. It never writes to the Host, and never opens a store.
 
+What it can judge is what the Host stored and says now: the persisted transcript, the turn ends
+written on its rows, and the current queue. It does not see what a backend was handed natively: a
+backend or tool replay may leave a single stored user row (#933), so a message run twice by its
+backend can read as once here. The report says so (`evidence`); it certifies no native delivery.
+
+Every read it could not make whole is a gap, kept per agent and per source (`gaps`: `log`,
+`turn-queue`, `snapshot`), with the agents requested and the agents read whole (`coverage`). An
+agent with a gap is always in the report, also in a fleet run. A message it could only have called
+lost because the queue was not read is `unconfirmed`, never LOST. Exit: 0 when every read was whole
+and nothing was found, 1 when every read was whole and something was found, 4 when a read was not
+whole (its findings are still listed), 2 for a bad argument, 3 when the Host or its snapshot did not
+answer.
+
 A finding is named by its message id, its trace and a short hash of its text: never the text.
 The JSON report (`--out`) holds ids and is kept off the repository (/var/tmp/week-audit/).
 A finding is a candidate: look at each by hand through the same API before calling it real (a
@@ -59,6 +72,9 @@ DOUBLE_SECONDS = 60
 GRACE_MS = 2 * 60 * 1000
 # What the Host's live state says when a turn waits for a reason of its own.
 WAITING_STATES = ("limited", "waiting", "waiting_for_account", "compacting", "stalled", "queued")
+EVIDENCE = ("persisted transcript (GET /log), the turn ends on its rows and the current queue "
+            "(GET /turn-queue) only; a backend or tool replay can leave one stored user row (#933), "
+            "so no native backend delivery is certified")
 
 
 def token() -> str:
@@ -129,27 +145,56 @@ def short_hash(text) -> str:
     return hashlib.sha256(" ".join(str(text or "").split()).encode()).hexdigest()[:10]
 
 
+def read_gap(source: str, status, body, problem: str = "", **more) -> dict:
+    """A read that was not whole: its source, the HTTP status (0: no answer) and what was wrong,
+    never the body's text."""
+    if not problem:
+        if status != 200:
+            said = body.get("error") if isinstance(body, dict) else body if status == 0 else ""
+            problem = "no answer" if status == 0 else f"HTTP {status}"
+            if said:
+                problem += ": " + " ".join(str(said).split())[:120]
+        else:
+            problem = "not a JSON object"
+    return {"source": source, "status": status, "problem": problem, **more}
+
+
+def rows_of(body) -> list | None:
+    """The rows of one /log page, or None when the page is not a list of objects."""
+    turns = body.get("turns") if isinstance(body, dict) else None
+    if turns is None and isinstance(body, dict):
+        return []
+    if not isinstance(turns, list) or not all(isinstance(row, dict) for row in turns):
+        return None
+    return turns
+
+
 def window_rows(host: Host, session: str, since: int):
     """The conversation from the window's start on, oldest first, read a page at a time the way an
     app pages back, and the rows of the last page that reach before the window (for context).
-    None when the Host does not answer."""
+    None and the gap when a page is not read whole."""
     q = urllib.parse.quote(session)
     base = f"/log?session={q}&limit={PAGE}&include_tool_details=0"
     status, body = host.get(base)
-    if status != 200 or not isinstance(body, dict):
-        return None, {"status": status}
-    page = list(body.get("turns") or [])
+    page = rows_of(body) if status == 200 else None
+    if page is None:
+        return None, read_gap("log", status, body, "" if status != 200 or not isinstance(body, dict)
+                         else "turns is not a list of objects", pages=0)
     rows, pages, overlap = list(page), 1, 0
     twice_in_a_page = sorted(row_id for row_id, count in counted(page).items() if count > 1)
     while body.get("has_more") and page:
         oldest = min((ms_of(row.get("timestamp")) or 0) for row in page)
         if oldest and oldest < since:
             break
-        first = urllib.parse.quote(str(page[0].get("id") or ""))
-        status, body = host.get(f"{base}&before={first}")
-        if status != 200 or not isinstance(body, dict):
-            return None, {"status": status, "pages": pages}
-        page = list(body.get("turns") or [])
+        if not page[0].get("id"):
+            return None, read_gap("log", status, body, "a page says it has more but its first row has no id",
+                             pages=pages)
+        cursor = str(page[0]["id"])
+        status, body = host.get(f"{base}&before={urllib.parse.quote(cursor)}")
+        page = rows_of(body) if status == 200 else None
+        if page is None:
+            return None, read_gap("log", status, body, "" if status != 200 or not isinstance(body, dict)
+                             else "turns is not a list of objects", pages=pages)
         pages += 1
         if not page:
             break
@@ -160,6 +205,9 @@ def window_rows(host: Host, session: str, since: int):
         # twice by the reader, not stored twice: the newer page's copy is kept.
         have = {str(row.get("id")) for row in rows}
         older = [row for row in page if str(row.get("id")) not in have]
+        if not older and str(page[0].get("id") or "") == cursor:
+            # The cursor did not move: paging on would ask for the same page for ever.
+            return None, read_gap("log", status, body, "paging back with before did not move", pages=pages)
         overlap += len(page) - len(older)
         rows = older + rows
     meta = {"pages": pages, "rows_read": len(rows), "conversation_id": body.get("conversation_id", ""),
@@ -189,13 +237,20 @@ def audit_agent(host: Host, session: str, agent: dict, since: int, until: int, n
               "judged_from": iso(since), "came_here": iso(came),
               "messages": 0, "by_origin": {}, "turns": 0, "turn_status": {}, "reasons": {},
               "joined": 0, "waiting": 0, "running": 0, "said_why": 0, "pending": 0,
-              "lost": [], "doubled": [], "stuck": [], "unfinished": [], "repeated": [], "notes": []}
+              "lost": [], "doubled": [], "stuck": [], "unfinished": [], "repeated": [], "notes": [],
+              "unconfirmed": [], "gaps": []}
     if rows is None:
-        result["notes"].append(f"log not read: {meta}")
+        # Nothing of this agent was judged: the gap says so, and keeps the agent in the report.
+        result["gaps"].append(meta)
         return result
     status, queue = host.get(f"/turn-queue?session={urllib.parse.quote(session)}")
-    items = list(queue.get("items") or []) if status == 200 and isinstance(queue, dict) else []
-    paused = bool(queue.get("paused")) if isinstance(queue, dict) else False
+    queue_read = (status == 200 and isinstance(queue, dict) and isinstance(queue.get("items"), list)
+                  and all(isinstance(item, dict) for item in queue["items"]))
+    if not queue_read:
+        result["gaps"].append(read_gap("turn-queue", status, queue, "" if status != 200 or not isinstance(queue, dict)
+                                  else "items is not a list of objects"))
+    items = list(queue["items"]) if queue_read else []
+    paused = bool(queue.get("paused")) if queue_read else False
     live = agent.get("live_activity") or {}
     live_turn = str(live.get("turn_id") or "")
     busy = bool(agent.get("busy"))
@@ -339,8 +394,11 @@ def audit_agent(host: Host, session: str, agent: dict, since: int, until: int, n
         if now - at < GRACE_MS:
             result["pending"] += 1
             continue
-        result["lost"].append({**finding, "kind": "lost", "rows_of_its_trace": len(traced.get(trace, [])),
-                               "next_rows": [rows[j].get("id") for j in range(i + 1, min(i + 3, len(rows)))]})
+        # With the queue unread it may be waiting there: a gap, not a loss.
+        (result["lost"] if queue_read else result["unconfirmed"]).append(
+            {**finding, "kind": "lost" if queue_read else "queue_unread",
+             "rows_of_its_trace": len(traced.get(trace, [])),
+             "next_rows": [rows[j].get("id") for j in range(i + 1, min(i + 3, len(rows)))]})
 
     # Waiting in the queue. An agent that works through a backlog takes up one message at each
     # turn's end: those wait behind it, and their age says nothing (a turn that does not move is
@@ -357,7 +415,7 @@ def audit_agent(host: Host, session: str, agent: dict, since: int, until: int, n
                                     "origin": item.get("origin"), "hash": short_hash(item.get("text")),
                                     "at": iso(enqueued), "minutes": round((now - enqueued) / 60000),
                                     "turns_ended_since": ended_since, "agent_busy": busy})
-    result["queue"] = {"items": len(items), "paused": paused}
+    result["queue"] = {"items": len(items), "paused": paused, "read": queue_read}
     return result
 
 
@@ -409,31 +467,44 @@ def main() -> int:
     if status != 200 or not isinstance(snap, dict):
         print(f"week-audit: no snapshot ({status})", file=sys.stderr)
         return 3
-    agents = {str(row.get("session")): row for row in snap.get("agents") or [] if row.get("session")}
-    chosen = args.session or sorted(agents)
+    listed = snap.get("agents")
+    if not isinstance(listed, list) or not all(isinstance(row, dict) for row in listed):
+        print("week-audit: the snapshot holds no list of agents", file=sys.stderr)
+        return 3
+    agents = {str(row.get("session")): row for row in listed if row.get("session")}
+    chosen = list(dict.fromkeys(args.session)) or sorted(agents)
     report = {"host": str(info.get("name") or args.host), "host_version": info.get("version", ""),
               "since": iso(since), "until": iso(until), "read_at": iso(now), "stuck_minutes": args.stuck_minutes,
-              "agents": {}, "totals": {}}
+              "evidence": EVIDENCE, "agents": {}, "totals": {}}
     for session in chosen:
         agent = agents.get(session)
         if agent is None:
-            report["agents"][session] = {"session": session, "notes": ["not an agent of this Host"]}
+            report["agents"][session] = {"session": session, "notes": ["not an agent of this Host"],
+                                         "gaps": [read_gap("snapshot", 200, None, "not an agent of this Host")]}
             continue
         result = audit_agent(host, session, agent, since, until, now, int(args.stuck_minutes * 60000))
-        if args.session or result["messages"] or result["turns"] or result["lost"] or result["doubled"] or result["stuck"]:
+        if (args.session or result["messages"] or result["turns"] or result["lost"] or result["doubled"]
+                or result["stuck"] or result["gaps"]):
             if agent.get("moved"):
                 result["notes"].append({"kind": "moved", "moved": agent.get("moved")})
             report["agents"][session] = result
     totals = {"agents": 0, "messages": 0, "turns": 0, "joined": 0, "waiting": 0, "running": 0, "said_why": 0,
-              "pending": 0, "lost": 0, "doubled": 0, "stuck": 0, "repeated": 0, "rows_on_two_pages": 0,
-              "turn_status": {}, "reasons": {}}
+              "pending": 0, "lost": 0, "doubled": 0, "stuck": 0, "repeated": 0, "unconfirmed": 0,
+              "rows_on_two_pages": 0, "turn_status": {}, "reasons": {}}
+    gaps = [{"session": session, **found} for session, result in sorted(report["agents"].items())
+            for found in result.get("gaps") or []]
+    incomplete = {found["session"] for found in gaps}
+    report["coverage"] = {"agents_requested": len(chosen), "agents_read_whole": len(set(chosen) - incomplete),
+                          "agents_incomplete": len(incomplete), "complete": not gaps, "gaps": gaps}
     for result in report["agents"].values():
         if "messages" not in result:
+            continue
+        if any(found["source"] == "log" for found in result["gaps"]):
             continue
         totals["agents"] += 1
         for key in ("messages", "turns", "joined", "waiting", "running", "said_why", "pending"):
             totals[key] += result[key]
-        for key in ("lost", "doubled", "stuck", "repeated"):
+        for key in ("lost", "doubled", "stuck", "repeated", "unconfirmed"):
             totals[key] += len(result[key])
         totals["rows_on_two_pages"] += result["read"].get("rows_on_two_pages", 0)
         for key in ("turn_status", "reasons"):
@@ -458,13 +529,24 @@ def main() -> int:
           f"running now {t['running']}, ended in the Host's word {t['said_why']}, just sent {t['pending']}")
     print(f"  sent twice by their sender, each answered by a turn of its own: {t['repeated']}; "
           f"rows the Host gave on two pages when paged back: {t['rows_on_two_pages']}")
+    print(f"  evidence: {EVIDENCE}")
     print(f"LOST {t['lost']}   DOUBLED {t['doubled']}   STUCK {t['stuck']}")
+    c = report["coverage"]
+    if c["complete"]:
+        print(f"COVERAGE complete: {c['agents_read_whole']} of {c['agents_requested']} requested agents read whole")
+    else:
+        print(f"COVERAGE INCOMPLETE: {c['agents_read_whole']} of {c['agents_requested']} requested agents read whole, "
+              f"{c['agents_incomplete']} with gaps; UNCONFIRMED {t['unconfirmed']} (queue not read, not counted lost)")
+        for found in gaps:
+            print(f"  gap: {found['session']} {found['source']} {found['problem']}")
     for session, result in sorted(report["agents"].items()):
-        for key in ("lost", "doubled", "stuck"):
+        for key in ("lost", "doubled", "stuck", "unconfirmed"):
             for finding in result.get(key) or []:
                 print(f"  {key}: {session} {finding.get('kind')} {finding.get('message_id') or finding.get('trace_id')} "
                       f"#{finding.get('hash', '')} {finding.get('at', '')}")
     print(f"report: {out} ({host.requests} requests)")
+    if gaps:
+        return 4
     return 1 if t["lost"] or t["doubled"] or t["stuck"] else 0
 
 

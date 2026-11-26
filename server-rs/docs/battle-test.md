@@ -1409,6 +1409,18 @@ What it learned from its first runs, so that it does not count them as findings:
 * An agent working through a backlog takes up one queued message at each turn's end: an old queued
   message behind a turn that moves is waiting, not stuck.
 
+It judges only what the Host stored and says now: the persisted transcript, the turn ends on its rows
+and the current queue (`evidence` in the report). A backend or tool replay can leave one stored user
+row (#933), so a message its backend ran twice can read as once: it certifies no native delivery.
+
+A read that was not whole is a gap, kept per agent and source (`gaps`: `log`, `turn-queue`,
+`snapshot`; the HTTP status and what was wrong), with `coverage` (`agents_requested`,
+`agents_read_whole`, `agents_incomplete`, `complete`). An agent with a gap stays in a fleet report. A
+message that could only be called lost because the queue was not read is `unconfirmed`, never LOST.
+It exits 0 when every read was whole and nothing was found, 1 for findings on whole reads, 4 when a
+read was not whole (its findings still listed), 2 for a bad argument and 3 when the Host or its
+snapshot did not answer. `tools/tests/test_week_audit.py` holds this on loopback fixtures.
+
 Each finding is named by its message id, its trace and a short hash of its text, never the text. The
 JSON report holds ids and stays off the repository, in `/var/tmp/week-audit/` (mode 0600). Every
 finding is a candidate until it is looked at by hand through the same API: a Host restart, a Stop, a
