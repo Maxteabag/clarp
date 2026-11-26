@@ -140,7 +140,7 @@ from the app; do not call them for the user, and do not use them for your own
 messages, which they refuse.
 
 What the user's Send does while an agent works is one owner setting on a Rust Host
-from contract 201 (feature `send_while_busy`): `GET /send-settings` says `while_busy`,
+from contract 204 (feature `send_while_busy`): `GET /send-settings` says `while_busy`,
 `steer` (the default), `after_turn` or `take_over`; the apps send it with the user's
 messages. With `steer`, a user message the running turn's tool cannot take at all
 (no steering for that backend, a turn running beside its lane, a terminal open on the

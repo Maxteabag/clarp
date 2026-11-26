@@ -41,7 +41,7 @@ pub struct SendResponse {
 pub struct WhileBusyFallback {
     pub from: String,
     pub to: String,
-    /// `not_steerable`, `not_words` or `not_cuttable`.
+    /// `not_steerable`, `not_words` or `turn_not_cuttable`.
     pub reason: String,
     pub text: String,
 }

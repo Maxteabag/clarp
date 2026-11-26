@@ -55,6 +55,9 @@ impl Worker {
             return Plan::AsAlways;
         }
         let cuttable = actor.live_cuttable();
+        // A turn that cannot take words now and cannot be stopped either (the tool's
+        // compaction, a native goal's own turn) is waited for, and the answer says so
+        // (`turn_not_cuttable`).
         // A turn that cannot be cut (the tool's compaction, a native goal's own turn) is waited
         // for, whatever was asked: as a take-over of it is refused.
         let take_over = |done: Done| {
@@ -83,7 +86,7 @@ impl Worker {
                         WhileBusy::AfterTurn,
                         Reason::NotWords,
                     ))
-                } else if self.never_takes_words() {
+                } else if self.never_takes_words() || (!cuttable && !actor.steerable()) {
                     take_over(Done::fell_back(
                         asked,
                         WhileBusy::TakeOver,

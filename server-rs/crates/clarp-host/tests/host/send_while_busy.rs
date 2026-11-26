@@ -95,7 +95,7 @@ fn the_owner_sets_what_send_does_while_the_agent_works_and_every_app_is_told() {
     let host = place.start();
     assert_eq!(
         host.get("/server-info")["contract"]["features"]["send_while_busy"],
-        201
+        204
     );
     assert_eq!(host.get("/send-settings"), json!({"while_busy": "steer"}));
     let events = host.listen();
@@ -349,4 +349,70 @@ fn a_steer_that_is_no_words_waits_for_the_turn_to_end() {
     assert_eq!(host.state(session), "tool", "nothing was cut");
     assert!(waiting(&host, session, "command"));
     host.post("/stop", json!({"session": session}));
+}
+
+/// A Claude Code stand-in whose compaction (`/compact` as its whole message) goes on until it is
+/// stopped; anything else it answers at once.
+const COMPACTING: &str = r#"#!/usr/bin/env python3
+import json, sys, time
+if "--version" in sys.argv:
+    print("2.1.321 (Claude Code)")
+    raise SystemExit(0)
+args = sys.argv[1:]
+blocks = [part.get("text", "") for part in json.loads(sys.stdin.readline())["message"]["content"]]
+named = "--resume" if "--resume" in args else "--session-id"
+session = args[args.index(named) + 1]
+def say(**event):
+    print(json.dumps({**event, "session_id": session}), flush=True)
+say(type="system", subtype="init", model="stand-in")
+if blocks == ["/compact"]:
+    say(type="system", subtype="status", status="compacting")
+    time.sleep(60)
+say(type="assistant", message={"id": "msg_1", "role": "assistant", "model": "stand-in",
+    "content": [{"type": "text", "text": "on it"}]})
+say(type="result", subtype="success", is_error=False, result="on it", num_turns=1)
+"#;
+
+#[test]
+fn a_steer_or_take_over_meets_a_turn_that_cannot_be_stopped_and_waits_for_it() {
+    let place = Place::new("steer-not-cuttable");
+    let claude = place.root.join("claude");
+    program(&claude, COMPACTING);
+    let home = place.root.join("home");
+    let world = [
+        ("HOME", home.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Shorty", "backend": "claude" }));
+    let session = made["session"].as_str().unwrap().to_string();
+    let compacting = || {
+        let snapshot = host.get("/agents/snapshot");
+        snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["session"] == session && row["compacting"] == true)
+    };
+    host.post("/compact", json!({ "session": session }));
+    wait_for("the compaction to run", compacting);
+
+    let steer = send_while_busy(&host, &session, "steered", "steered", "steer");
+    assert_eq!(steer["queued"], true, "{steer}");
+    assert_eq!(steer["while_busy"], "after_turn", "{steer}");
+    assert_eq!(
+        steer["fallback"],
+        json!({"from": "steer", "to": "after_turn", "reason": "turn_not_cuttable",
+               "text": "This turn can't be stopped: your message waits for it"}),
+        "{steer}"
+    );
+    let taken = send_while_busy(&host, &session, "taken", "taken", "take_over");
+    assert_eq!(taken["while_busy"], "after_turn", "{taken}");
+    assert_eq!(taken["fallback"]["from"], "take_over", "{taken}");
+    assert_eq!(taken["fallback"]["reason"], "turn_not_cuttable", "{taken}");
+    // Nothing was cut: the compaction goes on, and both wait for it.
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(compacting(), "the compaction was not cut");
+    assert!(waiting(&host, &session, "steered") && waiting(&host, &session, "taken"));
+    host.post("/stop", json!({ "session": session }));
 }

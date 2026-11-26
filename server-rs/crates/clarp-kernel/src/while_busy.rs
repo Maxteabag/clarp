@@ -55,8 +55,8 @@ pub enum Reason {
     NotSteerable,
     /// The send is no words to read in: it names a file, or begins with `/`.
     NotWords,
-    /// The running turn cannot be stopped for it (the tool's compaction, a native goal's own
-    /// turn): the send waits for it.
+    /// The running turn can neither take it now nor be stopped for it (the tool's compaction,
+    /// a native goal's own turn; a take-over is refused `turn_not_cuttable`): the send waits.
     NotCuttable,
 }
 
@@ -65,7 +65,7 @@ impl Reason {
         match self {
             Self::NotSteerable => "not_steerable",
             Self::NotWords => "not_words",
-            Self::NotCuttable => "not_cuttable",
+            Self::NotCuttable => "turn_not_cuttable",
         }
     }
 }
@@ -101,7 +101,7 @@ impl Done {
                 "This agent can't take a message mid-turn: stopped and sent"
             }
             (Reason::NotWords, _) => "Files and / commands wait for the turn to end",
-            (Reason::NotCuttable, _) => "This turn can't be stopped: sent after it",
+            (Reason::NotCuttable, _) => "This turn can't be stopped: your message waits for it",
             (Reason::NotSteerable, _) => "This agent can't take a message mid-turn: sent after it",
         })
     }
@@ -132,6 +132,15 @@ mod tests {
         assert_eq!(
             waits.text(),
             Some("Files and / commands wait for the turn to end")
+        );
+        let held = Done::fell_back(WhileBusy::Steer, WhileBusy::AfterTurn, Reason::NotCuttable);
+        assert_eq!(
+            held.fallback.map(|(_, why)| why.name()),
+            Some("turn_not_cuttable")
+        );
+        assert_eq!(
+            held.text(),
+            Some("This turn can't be stopped: your message waits for it")
         );
     }
 }
