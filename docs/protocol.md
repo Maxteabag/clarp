@@ -397,9 +397,19 @@ Rules:
   parent marks it reported while it works on) and `reported` again once that
   turn is over; an `agent-roster` event (`kind: helper-state`) is sent at
   each such change. `GET /agent-helper-state` answers the same. `done` stays
-  `done` while the helper works. `child_count` counts live
+  `done` while the helper works. With feature `helper_state_below` (Rust
+  Host contract 210, issue 936) a helper also reads `running` while any
+  helper below it, at any depth, that is not archived reads `running`, and
+  its own state again once the last of them stops: a `done` helper whose own
+  helper still works reads `running`, then `done`. Its own state is not
+  changed (what its parent accepted stays). When a helper starts, stops, is
+  archived or restored, each helper above it that is not at work itself gets
+  an `agent-roster` event (`kind: helper-state`) of its own, after the
+  helper's. An archived helper at work keeps no one above it working; it is
+  still in the snapshot with its own `helper_state` and opens by its session.
+  `child_count` counts live
   agents whose parent is this one and `running_children` those still
-  `running`. Nest helpers under their parent; a done helper is archived
+  `running` (with `helper_state_below`, as their rows read it). Nest helpers under their parent; a done helper is archived
   after the grace period (`[agents] helper_archive_grace_hours`, 24 by
   default). `agent-roster` with `kind: "helper-state"` asks for a refetch; on
   a Host with feature `roster_fields` it carries the helper's and its

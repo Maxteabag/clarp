@@ -204,3 +204,89 @@ fn a_roster_event_carries_what_it_changed_as_the_snapshot_row_has_it() {
     assert!(host.get("/agents/snapshot")["agents"].is_array());
     assert!(host.get("/agents/archived").is_object());
 }
+
+/// A helper is shown at work while a helper below it, at any depth, works, and its own state
+/// again once the last of them stops (issue 936). Its row, the one row, its makers' counts,
+/// `GET /agent-helper-state` and the events about each say the same, and the helper at work
+/// stays in the list and opens by its session throughout.
+#[test]
+fn a_helper_reads_running_while_a_helper_below_it_works() {
+    let place = Place::new("helper-below");
+    let host = place.start_with("", &["--helpers-checked-every-ms", "3600000"]);
+    let heard = host.listen();
+    let root = host.new_agent("Root");
+    let made = |session: &str, parent: &str| {
+        let made = host.post(
+            "/agents",
+            json!({
+                "name": session, "backend": "scripted", "role": "helper", "parent": parent,
+                "session": session,
+            }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+        made["agent_id"].clone()
+    };
+    let middle_id = made("middle", &root);
+    made("leaf", "middle");
+    let mark = |session: &str, state: &str| {
+        let (status, said) = host.ask(
+            "POST",
+            "/agent-helper-state",
+            Some(&json!({ "session": session, "state": state })),
+        );
+        assert_eq!(status, 200, "{said}");
+    };
+    let state_of = |session: &str| {
+        host.get(&format!("/agent-helper-state?session={session}"))["helper_state"].clone()
+    };
+    // What every read says of the three, and that the newest event about the middle helper
+    // says what its row says, with its maker's counts.
+    let check = |middle: &str, running_below_root: usize| {
+        let (rows, root_row) = (snapshot_row(&host, "middle"), snapshot_row(&host, &root));
+        assert_eq!(rows["helper_state"], middle, "{rows}");
+        assert_eq!(state_of("middle"), middle);
+        assert_eq!(
+            root_row["running_children"], running_below_root,
+            "{root_row}"
+        );
+        assert_eq!(root_row["child_count"], 1, "{root_row}");
+        let leaf = snapshot_row(&host, "leaf");
+        assert_eq!(leaf["parent_agent_id"], middle_id, "{leaf}");
+        for session in [root.as_str(), "middle", "leaf"] {
+            wait_for("the one row to be the snapshot's", || {
+                host.get(&format!("/agents/{session}")) == snapshot_row(&host, session)
+            });
+        }
+        wait_for("the middle helper's newest event to be its row", || {
+            carried(&heard, "helper-state", "middle")
+                .is_some_and(|event| event["fields"]["helper_state"] == middle)
+        });
+        let event = carried(&heard, "helper-state", "middle").unwrap();
+        assert_fields_are_the_rows(&event["fields"], &snapshot_row(&host, "middle"));
+        assert_fields_are_the_rows(&event["parent"]["fields"], &snapshot_row(&host, &root));
+        assert_eq!(event["parent"]["session"], root, "{event}");
+    };
+
+    // The middle helper is accepted while the leaf below it works: it reads running.
+    mark("middle", "done");
+    check("running", 1);
+    assert_eq!(snapshot_row(&host, "leaf")["helper_state"], "running");
+    // The leaf is accepted: the middle helper reads its own result again.
+    mark("leaf", "done");
+    check("done", 0);
+    // Opened again, and then put away: a helper put away counts for nobody above it, and opens
+    // by its session all the same.
+    mark("leaf", "running");
+    check("running", 1);
+    host.post(
+        "/agent-archive",
+        json!({ "session": "leaf", "archived": true }),
+    );
+    check("done", 0);
+    let leaf = host.get("/agents/leaf");
+    assert_eq!(
+        (&leaf["helper_state"], leaf["archived_at"].is_i64()),
+        (&json!("running"), true),
+        "{leaf}"
+    );
+}

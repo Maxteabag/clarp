@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 209;
+pub const HOST_CONTRACT: u64 = 210;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -544,6 +544,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `POST /events/{stream_id}/live` from the token that opened it changes the chats it follows;
     // the stream says `live-changed` where the change takes effect (issue 892).
     ("events_live_change", 209),
+    // A helper reads `running` while a helper below it, at any depth and not put away, works,
+    // and its own state again once the last of them stops; its makers count it as working
+    // meanwhile, and each helper above one that starts or stops is told by a `helper-state`
+    // event of its own (issue 936).
+    ("helper_state_below", 210),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1701,8 +1706,12 @@ struct Family {
 }
 
 /// What every agent's row says of the agents it made: counted once for a whole list, over
-/// every agent of the fleet, whichever agents the list shows.
-pub(crate) struct Families(HashMap<String, Family>);
+/// every agent of the fleet, whichever agents the list shows. A helper counts as working while
+/// it works or a helper below it, at any depth, does (issue 936).
+pub(crate) struct Families {
+    families: HashMap<String, Family>,
+    above: crate::fleet::AboveWork,
+}
 
 impl Families {
     pub(crate) fn of(directory: &Directory) -> Self {
@@ -1716,6 +1725,7 @@ impl Families {
     }
 
     fn counted(directory: &Directory, wanted: impl Fn(&str) -> bool) -> Self {
+        let above = crate::fleet::AboveWork::of(directory);
         let mut families: HashMap<String, Family> = HashMap::new();
         for member in &directory.members {
             let record = &member.record;
@@ -1731,14 +1741,23 @@ impl Families {
             if record.is_helper() {
                 family.helper_sessions.push(record.session.clone());
             }
-            if member.shown_helper_state() == Some("running") {
+            if above.helper_state(member) == Some("running") {
                 let view = member.agent.view();
-                let state = wire::state_name(&wire::state_kind(&view.status));
+                // One that works only below itself is at work all the same, and says what it
+                // said itself, if anything: what works below it is on its own row.
+                let below = above.only_below(member);
+                let state = if below {
+                    "background".to_string()
+                } else {
+                    wire::state_name(&wire::state_kind(&view.status))
+                };
                 // What it says it is doing, or what its state says.
                 let said = view.status.label.trim();
                 let mut doing = wire::activity(record, &view.status);
                 let recovering = doing["phase"] == "account_recovery";
-                let mut text = if said.is_empty() {
+                let mut text = if said.is_empty() && below {
+                    String::new()
+                } else if said.is_empty() {
                     if view.can_leave_note
                         && crate::hidden_coordination::hides(directory, &record.agent_id)
                         && let Some(headline) =
@@ -1771,7 +1790,12 @@ impl Families {
                 });
             }
         }
-        Self(families)
+        Self { families, above }
+    }
+
+    /// The helper state the agent is shown in ([`crate::fleet::AboveWork::helper_state`]).
+    pub(crate) fn helper_state<'a>(&self, member: &'a Member) -> Option<&'a str> {
+        self.above.helper_state(member)
     }
 
     /// The agents put away that an agent in the list names as the one that made it. A
@@ -1910,6 +1934,7 @@ pub(crate) fn agent_row(
         None if record.avatar_symbol.is_empty() => faces.of(&record.persona, view.backend),
         None => String::new(),
     });
+    row["helper_state"] = json!(families.helper_state(member));
     busy_with(&mut row, families, member, &view);
     row
 }
@@ -1929,7 +1954,10 @@ pub(crate) fn busy_with(
     // background processes it left running. A job that only mirrors one of its helpers is
     // not a process of its own.
     let none = Family::default();
-    let family = families.0.get(&member.record.agent_id).unwrap_or(&none);
+    let family = families
+        .families
+        .get(&member.record.agent_id)
+        .unwrap_or(&none);
     let helper_sessions: Vec<&str> = family.helper_sessions.iter().map(String::as_str).collect();
     let processes: Vec<helpers::Process> = view
         .jobs

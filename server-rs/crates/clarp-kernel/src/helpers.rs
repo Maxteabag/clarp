@@ -75,6 +75,46 @@ pub fn shown_state(stored: Option<&str>, in_turn: bool) -> Option<&str> {
     }
 }
 
+/// An agent as [`above_work`] reads the fleet: who it is, who made it, and whether it is a
+/// helper at work that is not put away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Line<'a> {
+    pub agent_id: &'a str,
+    pub parent: Option<&'a str>,
+    pub works: bool,
+}
+
+/// The agents with a helper at work below them, at any depth: every maker up the line of each
+/// agent in `lines` that works (issue 936). A maker is walked through once, so a walk ends at
+/// one already counted, and a line that turns back on itself ends too.
+pub fn above_work<'a>(lines: &[Line<'a>]) -> std::collections::HashSet<&'a str> {
+    let parents: std::collections::HashMap<&str, &str> = lines
+        .iter()
+        .filter_map(|line| Some((line.agent_id, line.parent?)))
+        .collect();
+    let mut above = std::collections::HashSet::new();
+    for line in lines.iter().filter(|line| line.works) {
+        let mut maker = line.parent;
+        while let Some(id) = maker
+            && above.insert(id)
+        {
+            maker = parents.get(id).copied();
+        }
+    }
+    above
+}
+
+/// The state a helper is shown in where `below_works` says whether a helper below it, at any
+/// depth, works ([`above_work`]): `running` while one does, whatever it says itself, and what
+/// it says itself ([`shown_state`]) once the last of them stops. Its own state is not changed
+/// by this; an agent that is no helper has none to show.
+pub fn shown_above(own: Option<&str>, below_works: bool) -> Option<&str> {
+    match own {
+        Some(_) if below_works => Some("running"),
+        other => other,
+    }
+}
+
 /// The event that setting a state by hand means, for the states that may be set by hand.
 pub fn marked(state: &str) -> Option<&'static str> {
     match state {
@@ -384,6 +424,45 @@ mod tests {
         assert_eq!(
             work_summary(&[working("h", "reading", "tool")], &processes[..1]),
             "h: reading \u{b7} Build: linking"
+        );
+    }
+
+    #[test]
+    fn every_maker_above_a_helper_at_work_is_counted_and_a_loop_ends() {
+        let line = |agent_id, parent, works| Line {
+            agent_id,
+            parent,
+            works,
+        };
+        // root <- middle <- leaf at work; a second helper of root that does not work.
+        let fleet = [
+            line("root", None, false),
+            line("middle", Some("root"), false),
+            line("leaf", Some("middle"), true),
+            line("idle", Some("root"), false),
+        ];
+        let mut above: Vec<_> = above_work(&fleet).into_iter().collect();
+        above.sort();
+        assert_eq!(above, ["middle", "root"]);
+        let resting = [line("leaf", Some("middle"), false), fleet[1], fleet[0]];
+        assert!(above_work(&resting).is_empty());
+        // Makers that name each other, and one that names itself, still end.
+        let looped = [
+            line("a", Some("b"), false),
+            line("b", Some("a"), false),
+            line("c", Some("a"), true),
+            line("d", Some("d"), true),
+        ];
+        let mut above: Vec<_> = above_work(&looped).into_iter().collect();
+        above.sort();
+        assert_eq!(above, ["a", "b", "d"]);
+        // Shown working while one below works, its own state again after.
+        assert_eq!(shown_above(Some("done"), true), Some("running"));
+        assert_eq!(shown_above(Some("done"), false), Some("done"));
+        assert_eq!(
+            shown_above(None, true),
+            None,
+            "no helper has no state to show"
         );
     }
 }

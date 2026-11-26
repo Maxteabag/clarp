@@ -532,6 +532,41 @@ impl Member {
     }
 }
 
+/// The agents with a helper at work below them, at any depth (issue 936), counted in one walk
+/// over the roster. A helper among them is shown `running` whatever its own state says, until
+/// the last helper at work below it stops; a helper that is put away counts for nobody.
+pub(crate) struct AboveWork(HashSet<String>);
+
+impl AboveWork {
+    pub(crate) fn of(directory: &Directory) -> Self {
+        let lines: Vec<helpers::Line<'_>> = directory
+            .members
+            .iter()
+            .map(|member| helpers::Line {
+                agent_id: &member.record.agent_id,
+                parent: member.record.parent_agent_id.as_deref(),
+                works: member.record.archived_at_ms.is_none()
+                    && member.shown_helper_state() == Some("running"),
+            })
+            .collect();
+        let above = helpers::above_work(&lines);
+        Self(above.into_iter().map(str::to_owned).collect())
+    }
+
+    /// The helper state the agent is shown in, to the apps and to agents alike: its own
+    /// ([`Member::shown_helper_state`]), or `running` while a helper below it works.
+    pub(crate) fn helper_state<'a>(&self, member: &'a Member) -> Option<&'a str> {
+        let below = self.0.contains(&member.record.agent_id);
+        helpers::shown_above(member.shown_helper_state(), below)
+    }
+
+    /// Whether it is shown `running` only for a helper below it: it is not at work itself.
+    pub(crate) fn only_below(&self, member: &Member) -> bool {
+        member.shown_helper_state() != Some("running")
+            && self.helper_state(member) == Some("running")
+    }
+}
+
 pub(crate) struct Adopted {
     pub member: Arc<Member>,
     pub cwd_created: bool,

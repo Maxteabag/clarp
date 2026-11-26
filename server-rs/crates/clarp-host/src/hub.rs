@@ -292,15 +292,33 @@ impl Hub {
 
     /// Numbers an event, keeps it for those who reconnect and sends it to those who listen.
     /// The event is the object a client will read; its number is added to it here.
-    pub fn publish(&self, mut event: Value, now_ms: i64) -> u64 {
+    pub fn publish(&self, event: Value, now_ms: i64) -> u64 {
+        // A helper that starts or stops can move the rows of the helpers above it, which are
+        // shown at work while it works (issue 936): each is told after it, as its own event.
+        let directory = (event["type"] == "agent-roster")
+            .then(|| self.queue_directory())
+            .flatten();
+        let makers = directory
+            .as_deref()
+            .map(|directory| crate::roster_fields::makers_moved(&event, directory))
+            .unwrap_or_default();
+        let id = self.numbered(event, now_ms, directory.as_deref());
+        for session in makers {
+            let told = crate::wire::roster("helper-state", &session);
+            self.numbered(told, now_ms, directory.as_deref());
+        }
+        id
+    }
+
+    fn numbered(&self, mut event: Value, now_ms: i64, directory: Option<&Directory>) -> u64 {
         if let Some(profiles) = self.profiles.get() {
             profiles.add_to(&mut event);
         }
         // What an event about one agent's row changed, as the row has it now (issue 809).
         if event["type"] == "agent-roster"
-            && let Some(directory) = self.queue_directory()
+            && let Some(directory) = directory
         {
-            crate::roster_fields::add_to(&mut event, &directory);
+            crate::roster_fields::add_to(&mut event, directory);
         }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;

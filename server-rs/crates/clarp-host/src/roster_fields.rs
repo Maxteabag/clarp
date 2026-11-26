@@ -68,7 +68,7 @@ fn fields(kind: &str, directory: &Directory, member: &Member) -> Option<Value> {
     let record = &member.record;
     match kind {
         "helper-state" => Some(json!({
-            "helper_state": member.shown_helper_state(),
+            "helper_state": crate::fleet::AboveWork::of(directory).helper_state(member),
             "archived_at": record.archived_at_ms,
         })),
         "mute-changed" => Some(json!({ "muted": record.muted })),
@@ -83,6 +83,41 @@ fn fields(kind: &str, directory: &Directory, member: &Member) -> Option<Value> {
         }
         _ => None,
     }
+}
+
+/// The helpers above the agent of a `helper-state` or `archive-changed` event whose rows its
+/// change may move: a helper is shown `running` while a helper below it works, one that is put
+/// away aside (issue 936), so a helper that starts, stops, or is put away or taken back can move
+/// each maker above it that is not at work itself. Each gets a `helper-state` event of its own,
+/// which carries its row's fields and its own maker's; the walk stops at the first maker that
+/// is no helper or works itself, whose row the helper below it no longer moves.
+pub fn makers_moved(event: &Value, directory: &Directory) -> Vec<String> {
+    let kind = &event["kind"];
+    if event["type"] != "agent-roster" || (kind != "helper-state" && kind != "archive-changed") {
+        return Vec::new();
+    }
+    let Some(mut below) = event["session"]
+        .as_str()
+        .and_then(|session| member(directory, |member| member.record.session == session))
+    else {
+        return Vec::new();
+    };
+    let mut makers: Vec<String> = Vec::new();
+    while let Some(maker) = below.record.parent_agent_id.as_deref().and_then(|parent| {
+        directory
+            .members
+            .iter()
+            .map(|member| &**member)
+            .find(|member| member.record.agent_id == parent)
+    }) {
+        let at_work = maker.shown_helper_state() == Some("running");
+        if !maker.record.is_helper() || at_work || makers.contains(&maker.record.session) {
+            break;
+        }
+        makers.push(maker.record.session.clone());
+        below = maker;
+    }
+    makers
 }
 
 fn member(directory: &Directory, found: impl Fn(&Member) -> bool) -> Option<&Member> {
