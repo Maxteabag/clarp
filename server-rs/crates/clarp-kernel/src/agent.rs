@@ -125,7 +125,7 @@ pub enum Command {
     Resume { by: String },
     /// Run the first eligible message after releasing a transient launch fence.
     RunWaiting,
-    ExpectTransitCheckpoint { checkpoint: TransitCheckpoint },
+    ExpectTransitCheckpoint { checkpoint: TransitCheckpoint, recorded_work: bool },
     ParkTransitCheckpoint { checkpoint: TransitCheckpoint },
     HoldUnsentForTransit {
         turn: TurnId,
@@ -1505,7 +1505,7 @@ impl Agent {
                 }
                 work.record(AgentEvent::HeldUnsentForMove { turn });
             }
-            Command::ExpectTransitCheckpoint { checkpoint } => {
+            Command::ExpectTransitCheckpoint { checkpoint, recorded_work } => {
                 work.agent.require_here()?;
                 let identity = match work.agent.live.as_ref() {
                     Some(Turn::Starting(source)) => (source.id, source.attempt),
@@ -1514,7 +1514,7 @@ impl Agent {
                 };
                 if !work.transit_held
                     || work.agent.stopping.is_some()
-                    || work.agent.live_worked
+                    || (work.agent.live_worked && !recorded_work)
                     || identity != (checkpoint.turn, checkpoint.attempt)
                 {
                     return Err(Refusal::TakeoverStale);

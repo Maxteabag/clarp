@@ -22,6 +22,7 @@ listed below.
 
 | Host contract | Min iOS contract | Host release | What changed |
 |---|---|---|---|
+| `205` (Rust only) | 1 | Transit can carry verified recorded output from a running Claude attempt | Feature `agent_backend_transit_recorded_checkpoint`. The checkpoint can carry finalized text and matched results from completed built-in read tools. The source spool and native transcript have to agree. |
 | `204` (Rust only) | 1 | Transit can checkpoint a quiet active Claude attempt | Feature `agent_backend_transit_checkpoint`. When the shim and native log show that an active attempt has produced no answer or tool activity, Transit can resume the original turn on the target without waiting for its old process to finish. |
 | `203` (Rust only) | 1 | Transit resumes work parked for provider capacity | Feature `agent_backend_transit_account_wait`. Transit carries the active work's recorded progress and resumes the same parked turn on the target before starting the rest of the queue. |
 | `202` (Rust only) | 1 | Backend Transit with waiting messages | Feature `agent_backend_transit_queue`. The current turn may finish on the source backend. The Host holds the mailbox at the turn boundary, switches the agent, and then uses the ordinary queue order and pause rules on the target. |

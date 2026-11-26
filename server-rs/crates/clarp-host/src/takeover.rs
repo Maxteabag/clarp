@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use clarp_actor::takeover::{Offer, TransitOffer};
 use clarp_backend::{agy, history, past};
-use clarp_kernel::takeover::{self, Input};
+use clarp_kernel::takeover::{self, ClaudeCheckpointProgress, Input};
 use serde_json::Value;
 
 // If the provider history cannot be judged within a modest read, the follow-up waits.
@@ -78,31 +78,37 @@ pub(super) fn plan(
     }
 }
 
-/// A quiet stream is insufficient if the provider's native log recorded an answer or tool.
-pub(super) fn native_transit_is_quiet(home: &Path, cwd: &str, offer: &TransitOffer) -> bool {
+/// Read the native history after the exact prompt. Unmatched tool results, extra inputs,
+/// and unrecognized activity refuse the checkpoint.
+pub(super) fn native_transit_progress(
+    home: &Path,
+    cwd: &str,
+    offer: &TransitOffer,
+) -> Option<ClaudeCheckpointProgress> {
     let paths = crate::past::projects(home);
     let path = match offer.session.as_deref() {
-        Some(session) => match past::claude_source(&paths, cwd, session, true) {
-            Ok(path) => path,
-            Err(_) => return false,
-        },
+        Some(session) => past::claude_source(&paths, cwd, session, true).ok()?,
         None => None,
     };
-    let text = match path {
-        Some(path) => match transcript(&path) {
-            Some(text) => text,
-            None => return false,
-        },
-        None => return offer.first_turn,
+    let Some(path) = path else {
+        return offer.first_turn.then(ClaudeCheckpointProgress::default);
     };
-    if text
-        .lines()
-        .any(|line| !line.trim().is_empty() && serde_json::from_str::<Value>(line).is_err())
-    {
-        return false;
+    let text = transcript(&path)?;
+    let mut found = false;
+    let mut progress = ClaudeCheckpointProgress::default();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let event = serde_json::from_str::<Value>(line).ok()?;
+        if event["uuid"].as_str() == Some(offer.prompt_uuid.as_str()) {
+            if found || event["type"] != "user" {
+                return None;
+            }
+            found = true;
+        } else if found {
+            progress.record(&event)?;
+        }
     }
-    let facts = takeover::claude_facts(Some(&text), &offer.prompt_uuid);
-    facts.found && !facts.answered
+    found.then_some(())?;
+    progress.finished()
 }
 
 pub(super) async fn can_use(

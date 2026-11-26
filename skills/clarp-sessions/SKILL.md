@@ -189,7 +189,10 @@ after cutover in the usual order. From contract 203 (`agent_backend_transit_acco
 a turn parked for provider capacity continues on the target without waiting for the old
 account. From contract 204 (`agent_backend_transit_checkpoint`), Transit can checkpoint a quiet
 active Claude attempt and continue that turn on the target. An attempt that has already
-emitted output or used a tool waits for its ordinary boundary. A user Stop pause is kept. Older Hosts refuse while
+emitted output or used a tool waits for its ordinary boundary on contract 204. On contract
+205 (`agent_backend_transit_recorded_checkpoint`), finalized Claude output and matched results
+from completed Read, Glob and Grep calls can transfer before the turn finishes. Other
+tools and unfinished results still wait. A user Stop pause is kept. Older Hosts refuse while
 a turn runs or messages wait, as does a model change on the same backend. The command
 waits for completion, so ask another agent or use the app's Backend row to switch an
 agent from its own turn. What is carried is the text

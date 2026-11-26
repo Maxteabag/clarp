@@ -4,6 +4,7 @@ use super::*;
 /// after looking at a file with a tool, holding the turn while a file `hold` is there.
 const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json
+import os
 import pathlib
 import select
 import sys
@@ -16,9 +17,20 @@ if "--version" in sys.argv:
 root = pathlib.Path(__file__).resolve().parent
 incoming = json.loads(sys.stdin.readline())
 prompt = incoming["message"]["content"][0]["text"]
+session = "00000000-0000-4000-8000-000000000001"
+native = None
+if (root / "recorded-hold").exists():
+    dest = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "fixture"
+    dest.mkdir(parents=True, exist_ok=True)
+    native = dest / (session + ".jsonl")
+    native.write_text(json.dumps(incoming) + "\n")
 
 def send(kind, **fields):
-    print(json.dumps({"type": kind, "session_id": "00000000-0000-4000-8000-000000000001", **fields}), flush=True)
+    row = json.dumps({"type": kind, "session_id": session, **fields})
+    if native is not None and kind in ("assistant", "user"):
+        with native.open("a") as f:
+            f.write(row + "\n")
+    print(row, flush=True)
 
 send("system", subtype="init", model="claude-stand-in")
 if (root / "quiet-hold").exists():
@@ -48,6 +60,10 @@ if (root / "hold").exists():
 answer = "Heard: " + prompt.split("\n")[0]
 send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
                            "content": [{"type": "text", "text": answer}]})
+if (root / "recorded-hold").exists():
+    (root / "recorded-ready").touch()
+    while (root / "recorded-hold").exists():
+        time.sleep(0.05)
 if "Continue the parked work." in prompt:
     send("rate_limit_event", rate_limit_info={"status": "rejected", "rateLimitType": "five_hour"})
     send("result", subtype="success", is_error=True, result="out for now")
@@ -73,6 +89,8 @@ elif "<clarp-turn-resumed>" in prompt and "Continue the parked work." in prompt:
     text = "Codex continued the parked work."
 elif "<clarp-turn-resumed>" in prompt and "Continue the active work." in prompt:
     text = "Codex continued the active work."
+elif "<clarp-turn-resumed>" in prompt and "Continue recorded work." in prompt:
+    text = "Codex continued recorded work."
 else:
     text = "Codex heard: " + prompt.strip().splitlines()[-1]
 def say(**fields):
@@ -411,6 +429,58 @@ fn transit_checkpoints_an_active_quiet_attempt_before_resuming_on_the_target() {
             "Codex heard: After active work."
         ]
     );
+}
+
+#[test]
+fn transit_checkpoints_after_recorded_read_results_and_output() {
+    let setting = Setting::new("agent-transit-recorded-work");
+    let host = setting.start();
+    let made = host.post("/agents", json!({"name": "Recorded", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap();
+    let hold = setting.place.root.join("recorded-hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(session, "Continue recorded work.", "recorded-1");
+    wait_for(
+        "the output to be recorded while its source is still running",
+        || {
+            setting.place.root.join("recorded-ready").exists()
+                && host
+                    .conversation(session)
+                    .iter()
+                    .any(|(_, text)| text == "Heard: Continue recorded work.")
+        },
+    );
+    queue_for_transit(&host, session, "recorded-2", "After recorded work.");
+    let done = transit(
+        &host,
+        json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                                    "request_id": "switch-recorded"}),
+    );
+    assert_eq!(done["phase"], "done", "{done}");
+    assert!(hold.exists(), "the source did not finish on its own");
+    wait_for("the target work and queue", || {
+        let a = row(&host, session);
+        a["backend"] == "codex" && a["busy"] == false && a["queued_turn_count"] == 0
+    });
+    let words = host.conversation(session);
+    let answers: Vec<_> = words
+        .iter()
+        .filter_map(|(role, text)| {
+            (role == "assistant" && !text.is_empty()).then_some(text.as_str())
+        })
+        .collect();
+    assert_eq!(
+        answers,
+        [
+            "Heard: Continue recorded work.",
+            "Codex continued recorded work.",
+            "Codex heard: After recorded work.",
+        ]
+    );
+    let rollouts = setting.rollouts();
+    assert_eq!(rollouts.len(), 1);
+    let carried = std::fs::read_to_string(&rollouts[0]).unwrap();
+    assert!(carried.contains("The word in the file is ember."));
 }
 
 #[test]

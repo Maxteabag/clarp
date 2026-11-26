@@ -4308,16 +4308,17 @@ impl Worker {
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
-                let acceptable = held.left_ms > 0
-                    && held.partial_out == 0
-                    && held.partial_err == 0
-                    && held.partial_reports == 0
-                    && crate::takeover::native_transit_is_quiet(
-                        &crate::config::home(),
-                        &self.setup.record.cwd,
-                        &offer,
+                let whole = held.left_ms > 0 && held.partial_out == 0
+                    && held.partial_err == 0 && held.partial_reports == 0;
+                let acceptable = if whole
+                    && let Some(native) = crate::takeover::native_transit_progress(
+                        &crate::config::home(), &self.setup.record.cwd, &offer,
                     )
-                    && actor.expect_transit_checkpoint(&offer, held.spool, now)?;
+                {
+                    actor.expect_transit_checkpoint(&offer, held.spool, &native, now)?
+                } else {
+                    false
+                };
                 if !acceptable {
                     crate::launcher::takeover_request(&offer.socket, clarp_shim::Request::Release);
                     return Ok(());

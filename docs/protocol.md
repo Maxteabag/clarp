@@ -1057,6 +1057,12 @@ absence of provider work, then requires the source exit receipt before starting 
 on the target. An attempt that has emitted output or used a tool waits for its ordinary
 handoff boundary.
 
+With `agent_backend_transit_recorded_checkpoint` (contract 205), finalized output and
+completed Claude Read, Glob and Grep results can be checkpointed too. The actor must have
+committed the whole held spool to the Host journal, with progress matching the native
+transcript. Pending results, incomplete output, and other tools defer to the ordinary
+handoff boundary.
+
 **Progress.** The event `agent-transit` `{agent_id, session, transit_id, backend, model, phase,
 error, previous_backend, previous_model, carried}`; `phase` is `reading`, `translating`,
 `registering`, `switching`, then `done` or `failed`; `error` is text on `failed`, else null.

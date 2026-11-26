@@ -3,6 +3,8 @@
 //! These rules interpret the input the actor has read. The actor owns the decision
 //! to hold the tool and the spool fence that bounds the input.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
@@ -127,6 +129,135 @@ pub fn claude_output(event: &Value) -> bool {
             .as_array()
             .is_some_and(|parts| parts.iter().any(|part| output(&part["type"]))),
         _ => false,
+    }
+}
+
+/// Completed, cross-checked Claude output at a potential Transit boundary.
+/// Only synchronous read tools are eligible while the original attempt is still running.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ClaudeCheckpointProgress {
+    text: Vec<String>,
+    calls: BTreeMap<String, (String, Value, Option<(Value, bool)>)>,
+    open_blocks: BTreeSet<u64>,
+    streamed_calls: BTreeSet<String>,
+    streamed_messages: BTreeSet<String>,
+}
+
+impl ClaudeCheckpointProgress {
+    pub fn has_work(&self) -> bool {
+        !self.text.is_empty() || !self.calls.is_empty()
+    }
+
+    fn read_tool(name: &str) -> bool {
+        matches!(name, "Read" | "Glob" | "Grep")
+    }
+
+    pub fn record(&mut self, event: &Value) -> Option<()> {
+        match event["type"].as_str()? {
+            "system" if event["subtype"] == "init" => Some(()),
+            "stream_event" => self.record_stream(&event["event"]),
+            "assistant" => {
+                if let Some(id) = event["message"]["id"].as_str() {
+                    self.streamed_messages.remove(id);
+                }
+                for block in event["message"]["content"].as_array()? {
+                    match block["type"].as_str()? {
+                        "text" => self.text.push(block["text"].as_str()?.to_owned()),
+                        "thinking" | "redacted_thinking" => {}
+                        "tool_use" => {
+                            let id = block["id"].as_str()?.to_owned();
+                            let name = block["name"].as_str()?;
+                            let input = block.get("input")?;
+                            if !Self::read_tool(name) || !input.is_object() {
+                                return None;
+                            }
+                            if self
+                                .calls
+                                .insert(id, (name.to_owned(), input.clone(), None))
+                                .is_some()
+                            {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    }
+                }
+                Some(())
+            }
+            "user" => {
+                for block in event["message"]["content"].as_array()? {
+                    if block["type"] != "tool_result" {
+                        return None;
+                    }
+                    let id = block["tool_use_id"].as_str()?;
+                    let receipt = self.calls.get_mut(id)?;
+                    let result = block.get("content")?.clone();
+                    let error = block["is_error"].as_bool().unwrap_or(false);
+                    if receipt.2.replace((result, error)).is_some() {
+                        return None;
+                    }
+                }
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    fn record_stream(&mut self, event: &Value) -> Option<()> {
+        match event["type"].as_str()? {
+            "message_start" => self
+                .streamed_messages
+                .insert(event["message"]["id"].as_str()?.to_owned())
+                .then_some(()),
+            "message_delta" | "message_stop" => Some(()),
+            "content_block_start" => {
+                let block = &event["content_block"];
+                match block["type"].as_str()? {
+                    "text" | "thinking" | "redacted_thinking" => {}
+                    "tool_use" if Self::read_tool(block["name"].as_str()?) => {
+                        self.streamed_calls.insert(block["id"].as_str()?.to_owned());
+                    }
+                    _ => return None,
+                }
+                self.open_blocks
+                    .insert(event["index"].as_u64()?)
+                    .then_some(())
+            }
+            "content_block_delta" => {
+                let understood = matches!(
+                    event["delta"]["type"].as_str(),
+                    Some("text_delta" | "input_json_delta" | "thinking_delta" | "signature_delta")
+                );
+                (understood && self.open_blocks.contains(&event["index"].as_u64()?)).then_some(())
+            }
+            "content_block_stop" => self
+                .open_blocks
+                .remove(&event["index"].as_u64()?)
+                .then_some(()),
+            _ => None,
+        }
+    }
+
+    pub fn matches_hook(&self, name: &str, data: &Value) -> bool {
+        matches!(name, "PreToolUse" | "PostToolUse")
+            && data["tool_use_id"]
+                .as_str()
+                .and_then(|id| self.calls.get(id))
+                .is_some_and(|(tool, _, _)| data["tool_name"].as_str() == Some(tool.as_str()))
+    }
+
+    pub fn finished(mut self) -> Option<Self> {
+        if !self.open_blocks.is_empty()
+            || !self
+                .streamed_calls
+                .iter()
+                .all(|id| self.calls.contains_key(id))
+            || self.calls.values().any(|(_, _, result)| result.is_none())
+        {
+            return None;
+        }
+        self.streamed_calls.clear();
+        Some(self)
     }
 }
 

@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 204;
+pub const HOST_CONTRACT: u64 = 205;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -361,6 +361,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("agent_backend_transit_queue", 202),
     ("agent_backend_transit_account_wait", 203),
     ("agent_backend_transit_checkpoint", 204),
+    ("agent_backend_transit_recorded_checkpoint", 205),
     // The `turn` object of a row that closes a turn that did not complete carries `reason`:
     // the Host's sentence of why it ended (issue 729).
     ("turn_end_reason", 162),

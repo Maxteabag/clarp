@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clarp_kernel::agent::{Command, TransitCheckpoint};
-use clarp_kernel::takeover::{self, Input, Selection, Start};
+use clarp_kernel::takeover::{self, ClaudeCheckpointProgress, Input, Selection, Start};
 use clarp_kernel::turn::{Turn, TurnId};
 use clarp_spool::{Entry, ShimEvent, SpoolReader};
 
@@ -49,7 +49,6 @@ impl Actor {
             || live.origin == clarp_kernel::turn::Origin::NativeGoal
             || matches!(&live.origin, clarp_kernel::turn::Origin::Trigger { name } if name == clarp_kernel::turn::COMPACTION)
             || live.over
-            || live.message_id != live.last_row
             || !live.drafts.is_empty()
             || !live.tools.is_empty()
             || !live.calls.is_empty()
@@ -72,13 +71,22 @@ impl Actor {
         &mut self,
         offer: &TransitOffer,
         fence: u64,
+        native: &ClaudeCheckpointProgress,
         now_ms: i64,
     ) -> Result<bool, ActorError> {
         if self
             .transit_checkpoint_offer()
             .is_none_or(|current| (current.turn, current.attempt) != (offer.turn, offer.attempt))
-            || !self.quiet_spool(offer.turn, offer.attempt, fence)?
         {
+            return Ok(false);
+        }
+        let recorded_work = native.has_work();
+        let safe = if recorded_work {
+            self.recorded_transit_spool(offer, fence, native)?
+        } else {
+            self.quiet_spool(offer.turn, offer.attempt, fence)?
+        };
+        if !safe {
             return Ok(false);
         }
         let checkpoint = TransitCheckpoint {
@@ -86,14 +94,60 @@ impl Actor {
             attempt: offer.attempt,
             fence,
         };
-        match self
-            .recorder
-            .handle(Command::ExpectTransitCheckpoint { checkpoint }, now_ms)
-        {
+        match self.recorder.handle(
+            Command::ExpectTransitCheckpoint {
+                checkpoint,
+                recorded_work,
+            },
+            now_ms,
+        ) {
             Ok(_) => Ok(true),
             Err(clarp_kernel::journal::JournalError::Refused(_)) => Ok(false),
             Err(error) => Err(error.into()),
         }
+    }
+
+    /// The completed results must agree with the native log and must already be journaled.
+    /// A behind actor, a half-written frame or a tool that may still make a change defers.
+    fn recorded_transit_spool(
+        &self,
+        offer: &TransitOffer,
+        fence: u64,
+        native: &ClaudeCheckpointProgress,
+    ) -> Result<bool, ActorError> {
+        if fence > 4 * 1024 * 1024
+            || self.live.as_ref().is_none_or(|live| live.offset != fence)
+            || self.recorder.spool_offset(offer.turn) != fence
+        {
+            return Ok(false);
+        }
+        let path = self.profile.spool_path_of(offer.turn, offer.attempt);
+        let read = SpoolReader::new(&path)
+            .read_window(0, fence, usize::MAX)
+            .map_err(|error| super::io_error(&path, error))?;
+        if read.next_offset != fence || !read.damaged.is_empty() {
+            return Ok(false);
+        }
+        let mut progress = ClaudeCheckpointProgress::default();
+        let mut spawned = false;
+        for record in &read.records {
+            match &record.entry {
+                Entry::Shim(ShimEvent::Session { .. } | ShimEvent::InputOpen { .. }) => {}
+                Entry::Shim(ShimEvent::Spawned { .. }) => spawned = true,
+                Entry::Out(line) if line.trim().is_empty() => {}
+                Entry::Out(line) => {
+                    let Ok(event) = serde_json::from_str(line) else {
+                        return Ok(false);
+                    };
+                    if progress.record(&event).is_none() {
+                        return Ok(false);
+                    }
+                }
+                Entry::Hook { name, data } if native.matches_hook(name, data) => {}
+                _ => return Ok(false),
+            }
+        }
+        Ok(spawned && progress.finished().as_ref() == Some(native))
     }
 
     /// A durable intent alone cannot resume a turn. Require the exact checkpoint followed by
