@@ -1307,35 +1307,45 @@ WantedBy=default.target
 EOF
 # The unit is kept with the release it starts, for a rollback to put back as it was. Pruning then
 # keeps the release installed now, the one installed before it, the last one that ran steady, and
-# every release a skill's link still leads into (issue 935). The Host moves the links over beside
-# its start, and a turn reads its skills through them meanwhile; a reconciliation that failed or
-# was cut off, or an install with --files-only, can leave them in an older release. The Host
-# records those releases in its install record (data/install.json, linked_releases) whenever it
-# changes a link; a Host from before records none, and then the three above are kept. Older
-# ones go.
+# every release a skill's link may still lead into (issue 935). The Host moves the links over
+# beside its start, and a turn reads its skills through them meanwhile; a reconciliation that
+# failed or was cut off, or installs with --files-only, can leave them in an older release. The
+# Host names those releases in its install record (data/install.json, linked_releases): before it
+# changes a link, every one a link may lead into while they move, and after, exactly those they
+# lead into. Where a Host keeps the tools' skills and its record names none (no Host of this kind
+# has run yet, a Host from before wrote it, or a folder could not be listed), every release is
+# kept. Older ones go.
 cp "$units/$host_unit" "$releases/$version/.$host_unit.new"
 mv -f "$releases/$version/.$host_unit.new" "$releases/$version/$host_unit"
 cp "$units/$socket_unit" "$releases/$version/.$socket_unit.new"
 mv -f "$releases/$version/.$socket_unit.new" "$releases/$version/$socket_unit"
 steady_version="$(kept_value "$releases/steady" version)"
-linked_versions=" $(python3 - "$share/data/install.json" "$releases" <<'PY' 2> /dev/null | tr '\n' ' '
+keeps_links=0
+[ "$accounts" = select ] && [ -n "$skills" ] && keeps_links=1
+linked_versions=" $(python3 - "$share/data/install.json" "$releases" "$keeps_links" <<'PY' 2> /dev/null || echo '*'
 import json, os, sys
-record, releases = sys.argv[1:3]
+record, releases, keeps = sys.argv[1:4]
 try:
     with open(record, "rb") as said:
         linked = json.load(said).get("linked_releases")
 except (OSError, ValueError, AttributeError):
+    linked = None
+if not isinstance(linked, list):
+    # Not known where the links lead: a Host that keeps the tools' skills may need any release.
+    print("*" if keeps == "1" else "")
     raise SystemExit
 releases = os.path.realpath(releases)
-for path in linked if isinstance(linked, list) else []:
+names = []
+for path in linked:
     if isinstance(path, str) and os.path.dirname(os.path.realpath(path)) == releases:
-        print(os.path.basename(os.path.realpath(path)))
+        names.append(os.path.basename(os.path.realpath(path)))
+print(" ".join(names))
 PY
 ) "
 for old in "$releases"/*/; do
     old="$(basename "$old")"
     case "$old" in "$version"|"$previous"|"$steady_version") continue ;; esac
-    case "$linked_versions" in *" $old "*) continue ;; esac
+    case "$linked_versions" in *" $old "*|" * ") continue ;; esac
     rm -rf "${releases:?}/${old:?}"
 done
 # This installer itself, for a rollback on a machine with no checkout at hand.
