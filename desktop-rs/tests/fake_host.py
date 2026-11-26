@@ -2886,7 +2886,7 @@ class Handler(BaseHTTPRequestHandler):
                 for session, items in turn_queue.items():
                     turn_queue[session] = [i for i in items if i["queue_id"] != item]
             for session in list(turn_queue):
-                broadcast({"type": "queue-updated", "session": session})
+                broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue[session])})
             if url.path.endswith("/steer"):
                 return self.reply(202, {"ok": True, "queued": False})
             return self.reply(202, {"ok": True, "taken_over": True})
@@ -2898,7 +2898,7 @@ class Handler(BaseHTTPRequestHandler):
             if failure and failure[1] > 0:
                 failure[1] -= 1
                 session = next((s for s, items in turn_queue.items() if any(i["queue_id"] == item for i in items)), "")
-                broadcast({"type": "queue-updated", "session": session})
+                broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue.get(session, []))})
                 return self.reply(failure[0], {"error": "agent is still working"})
             with state_lock:
                 for session, items in turn_queue.items():
