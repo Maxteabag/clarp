@@ -349,7 +349,7 @@ pub fn buttons_check(out: String) {
                 return elapsed >= Duration::from_secs(5);
             }
             check(label(&refused) == "the running turn cannot be cut", &format!("plainly: {:?}", label(&refused)));
-            check(drawn("queue-steer:q2"), "and the message still waits");
+            check(!drawn("queue-steer:q2") && drawn("queue-send:q2"), "and the message still waits, offering Stop and send instead of Steer now");
             check(press("queue-send:q2"), "Send now (take over) is pressed");
             true
         })),
@@ -426,7 +426,7 @@ pub fn buttons_check(out: String) {
             check(label(&format!("send-chip:{pane}")) == "1 waiting", &format!("the chip counts it: {:?}", label(&format!("send-chip:{pane}"))));
             check(label(&act) == "Steer now", &format!("and offers Steer now: {:?}", label(&act)));
             check(!drawn("queue-send:q6"), "the queue strip stays away while the chip says what waits");
-            shot(&out9, "buttons-08-send-chip");
+            shot(&out9, "buttons-09-send-chip");
             check(press(&act), "Steer now on the chip is pressed");
             true
         })),
@@ -453,7 +453,7 @@ pub fn buttons_check(out: String) {
             let sent = sends().last().cloned().unwrap_or_default();
             check(sent["body"]["while_busy"] == "steer", &format!("the send carried the setting: {:?}", sent["body"]["while_busy"]));
             check(label(&notice) == "This agent can't take a message mid-turn: stopped and sent", &format!("in the Host's words: {:?}", label(&notice)));
-            shot(&out10, "buttons-09-send-chip-fallback");
+            shot(&out10, "buttons-10-send-chip-fallback");
             true
         })),
         ("chip notice goes", Box::new(|_, _, elapsed| {

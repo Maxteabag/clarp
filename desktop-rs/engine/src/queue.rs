@@ -32,6 +32,15 @@ pub(crate) struct TurnQueue {
     /// The Host lists `queue_steer`: a waiting message can be read into the
     /// running turn (`/steer`) or stop it and run now (`/take-over`).
     steer: bool,
+    /// Steer now tags in flight, by the message they steer.
+    steer_ids: HashMap<String, String>,
+    /// Messages the Host refused to steer (409, `not_steerable`): they
+    /// offer Stop and send instead, whatever a later read says.
+    unsteerable: std::collections::HashSet<String>,
+}
+
+fn queue_item_id(item: &Value) -> &str {
+    item.get("queue_id").and_then(Value::as_str).filter(|id| !id.is_empty()).or_else(|| item.get("id").and_then(Value::as_str)).unwrap_or_default()
 }
 
 /// The Host feature that offers Steer now and Take over.
@@ -190,7 +199,9 @@ impl Engine {
         if !queue_id.is_empty() {
             let mut body = json!({});
             self.ask_voice(&mut body);
-            self.queue_action("POST", &format!("{}/steer", Self::queue_item_path(queue_id)), body);
+            if let Some(tag) = self.queue_action("POST", &format!("{}/steer", Self::queue_item_path(queue_id)), body) {
+                self.queue.steer_ids.insert(tag, queue_id.to_owned());
+            }
         }
     }
 
@@ -202,6 +213,20 @@ impl Engine {
             let mut body = json!({});
             self.ask_voice(&mut body);
             self.queue_action("POST", &format!("{}/take-over", Self::queue_item_path(queue_id)), body);
+        }
+    }
+
+    /// The messages the Host refused to steer read as not steerable; ones
+    /// gone from the queue are forgotten.
+    fn mark_unsteerable(&mut self) {
+        let unsteerable = &mut self.queue.unsteerable;
+        unsteerable.retain(|id| self.queue.items.iter().any(|item| queue_item_id(item) == id));
+        for item in self.queue.items.iter_mut() {
+            if unsteerable.contains(queue_item_id(item))
+                && let Some(object) = item.as_object_mut()
+            {
+                object.insert("steerable".to_owned(), Value::Bool(false));
+            }
         }
     }
 
@@ -221,6 +246,7 @@ impl Engine {
                 return true;
             }
             self.queue.items = json::array(object, "items");
+            self.mark_unsteerable();
             self.queue.paused = json::boolean(object, "paused");
             // The Host's queue is the truth: a count the agent list kept from
             // an older revision follows it (a stale strip never lingers).
@@ -234,6 +260,7 @@ impl Engine {
             self.queue.error.clear();
             self.changes.push(Change::Queue(session.to_owned()));
         } else if tag.starts_with("queue-action:") {
+            self.queue.steer_ids.remove(tag);
             self.queue.sends.remove(tag);
             self.queue.take_over_on_refusal.remove(tag);
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
@@ -257,6 +284,14 @@ impl Engine {
             }
             self.queue.loading = false;
         } else if tag.starts_with("queue-action:") {
+            // Steer now refused (409, not steerable): that message offers
+            // Stop and send from now on.
+            if let Some(queue_id) = self.queue.steer_ids.remove(tag)
+                && status == 409
+            {
+                self.queue.unsteerable.insert(queue_id);
+                self.mark_unsteerable();
+            }
             // Send now refused because a turn runs after all: it takes over.
             if let Some(queue_id) = self.queue.take_over_on_refusal.remove(tag)
                 && status == 409

@@ -70,6 +70,14 @@ fn the_hosts_fallback_shows_in_the_chip_and_the_chip_counts_what_waits() {
     let chip = d.engine.send_chip("rachel").unwrap();
     assert_eq!(chip.count, 2);
     assert_eq!(chip.action, Some(ChipAction::Steer("q1".into())));
+
+    // The Host cannot steer it after all (409): the chip offers Stop and send.
+    host.control("/__control/fail", json!({"path": "/turn-queue/q1/steer", "status": 409}));
+    d.engine.steer_queued_turn("q1");
+    d.until("Stop and send", |e| e.send_chip("rachel").is_some_and(|c| c.action == Some(ChipAction::TakeOver("q1".into()))));
+    d.engine.load_turn_queue("rachel");
+    d.settle(std::time::Duration::from_millis(300));
+    assert_eq!(d.engine.send_chip("rachel").unwrap().action, Some(ChipAction::TakeOver("q1".into())), "a later read keeps it");
 }
 
 #[test]
