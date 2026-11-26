@@ -93,7 +93,7 @@ pub(super) fn profile_check(out: String) {
             check(info.plan_title == "Ship it" && bridge.get_plan().row_count() == 1, "and the current plan");
             check(bridge.get_prompts().row_count() == 20 && info.prompts_more, "the first 20 prompts, with more to load");
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();
-            check(models == ["Harness default", "Opus", "Sonnet"] && info.model_index == 1, &format!("the catalog's models, Opus current: {models:?} {}", info.model_index));
+            check(models == ["Default", "Opus", "Sonnet"] && info.model_index == 1, &format!("the catalog's models, Opus current: {models:?} {}", info.model_index));
             let efforts: Vec<String> = bridge.get_efforts().iter().map(|m| m.to_string()).collect();
             check(efforts.len() == 3 && info.effort_index == 2, &format!("Opus's efforts, High current: {efforts:?} {}", info.effort_index));
             check(bridge.get_schedules().row_data(0).is_some_and(|s| s.name == "Nightly tidy" && s.on), "its scheduled task");
@@ -254,7 +254,7 @@ pub(super) fn profile_check(out: String) {
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();
             check(
                 models.last().is_some_and(|m| m == "opus-preview") && info.model_index as usize == models.len() - 1,
-                &format!("the model box shows the model the agent runs, not the harness default: {models:?} {}", info.model_index),
+                &format!("the model box shows the model the agent runs, not the default: {models:?} {}", info.model_index),
             );
             check(texts(|t| t == "THIS CHAT").len() == 1, &format!("one THIS CHAT section: {:?}", texts(|t| t == "THIS CHAT")));
             // Rachel's session is "rachel": it only repeats her name, and the
@@ -275,7 +275,7 @@ pub(super) fn profile_check(out: String) {
             if window.get_overlay() != "profile" || info.error.is_empty() || info.prompts_loading || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            let said = "Could not load the plan: Gateway Timeout (the Host answered 500)";
+            let said = "Could not load the plan: Gateway Timeout";
             check(info.error.as_str() == said, &format!("a real failure in plain words: {}", info.error));
             check(info.prompts_shown, "prompt history is back once the Host answers it");
             let error = boxes(move |t| t == said);

@@ -216,7 +216,7 @@ impl Engine {
     /// the Host refused because a turn still runs (409) is its refusal, in
     /// the Host's words: the message waits on.
     pub(crate) fn queue_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        let detail = clarp_core::ui_text::failure(message, status);
         if let Some(rest) = tag.strip_prefix("turn-queue:") {
             if rest.split(':').next().and_then(|g| g.parse::<u64>().ok()) != Some(self.queue.generation) {
                 return true;

@@ -233,7 +233,7 @@ fn ready_presentation_retains_canonical_stream_and_reveals_final() {
     log(&mut source, json!([turn("live", "assistant", "live", "Partial updated", 3)]), LoadKind::Delta);
     let after = present(source.rows(), &mut settings, None);
     assert!(diff(&before.rows, &after.rows).is_empty(), "a hidden stream announces nothing");
-    source.show_transient_thinking("Agent");
+    source.show_transient_thinking();
     assert_eq!(present(source.rows(), &mut settings, None).rows.len(), 1);
     settings.show_when_ready = false;
     let all = present(source.rows(), &mut settings, None);

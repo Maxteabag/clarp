@@ -35,7 +35,7 @@ pub async fn exchange(base: &Url, code: &str, device_name: &str) -> Result<Strin
     let status = response.status();
     let body = response.bytes().await.map_err(|error| format!("Could not read the pairing reply: {error}"))?;
     if !status.is_success() {
-        return Err(error_message(&body, &format!("Pairing failed with HTTP {}", status.as_u16())));
+        return Err(error_message(&body, &format!("Pairing failed: {}", clarp_core::ui_text::failure("", status.as_u16()))));
     }
     match serde_json::from_slice::<Value>(&body) {
         Ok(Value::Object(reply)) => device_token(&reply),

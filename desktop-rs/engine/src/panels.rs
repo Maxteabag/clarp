@@ -14,7 +14,7 @@ impl Engine {
 
     /// True when a panel owned the failure; the rest become the engine's error.
     pub(crate) fn panels_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        let detail = clarp_core::ui_text::failure(message, status);
         if self.artifact_summary_failure(tag, message, status) {
             return true;
         }

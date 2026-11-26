@@ -276,9 +276,9 @@ fn spawned_lifecycle_never_becomes_transcript_tool() {
 fn new_durable_rows_clear_running_activity() {
     let mut h = Harness::new("s");
     h.log(json!({"conversation_id": "c", "turns": []}), LoadKind::Tail);
-    h.model.show_transient_thinking("Rachel");
+    h.model.show_transient_thinking();
     h.sync();
-    assert_eq!(h.bodies(), ["Rachel is working"]);
+    assert_eq!(h.bodies(), ["Working"], "the header names the agent; the row does not again");
     h.log(json!({"conversation_id": "c", "turns": [turn("m1", 1)]}), LoadKind::Delta);
     assert_eq!(h.ids(), ["m1"]);
 }
@@ -289,7 +289,7 @@ fn cache_snapshot_keeps_only_durable_rows_and_restores() {
     h.log(json!({"conversation_id": "c", "latest_revision": 4, "has_more": true, "turns": [
         turn("m1", 1), {"id": "live", "role": "assistant", "kind": "live", "text": "par", "revision": 4}]}), LoadKind::Tail);
     h.optimistic("p", "pending");
-    h.model.show_transient_thinking("");
+    h.model.show_transient_thinking();
     h.sync();
     let snapshot = h.model.cache_snapshot();
     let ids: Vec<&str> = snapshot["turns"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();

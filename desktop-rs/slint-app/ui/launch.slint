@@ -651,11 +651,11 @@ export component StartAgentDialog inherits Modal {
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Label { text: "Harness"; }
+                    Label { text: "Backend"; }
                     ComboBox {
                         model: StartAgent.backend-labels;
                         current-index <=> StartAgent.backend-index;
-                        accessible-label: "Harness";
+                        accessible-label: "Backend";
                         selected => { StartAgent.backend-chosen(self.current-index); }
                     }
                 }

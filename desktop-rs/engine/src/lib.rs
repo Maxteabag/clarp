@@ -1688,8 +1688,8 @@ impl Engine {
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
-        eprintln!("Engine: {tag} failed: {detail}");
+        let detail = clarp_core::ui_text::failure(message, status);
+        eprintln!("Engine: {tag} failed: {message} (status {status})");
         self.stop_failure(tag);
         if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
@@ -1710,7 +1710,7 @@ impl Engine {
         }
         if tag.starts_with("composer-upload:") {
             self.finish_upload(tag, None);
-            self.set_error(&if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() });
+            self.set_error(&clarp_core::ui_text::failure(message, status));
             return;
         }
         if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
@@ -1747,7 +1747,7 @@ impl Engine {
             }
             return;
         }
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        let detail = clarp_core::ui_text::failure(message, status);
         self.set_error(&detail);
         self.error_source = tag.to_owned();
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
@@ -1877,9 +1877,8 @@ impl Engine {
                 if self.live_owns(&session) {
                     return;
                 }
-                let persona = self.roster.find(&session).map(|a| display_name(a).to_owned()).unwrap_or(session.clone());
                 if state == "thinking" {
-                    self.with_conversation(&session, |c| c.show_transient_thinking(&persona));
+                    self.with_conversation(&session, Conversation::show_transient_thinking);
                 } else if matches!(state.as_str(), "tool" | "waiting" | "interrupted" | "done" | "idle" | "stopped") {
                     self.with_conversation(&session, Conversation::clear_running_activity);
                 }

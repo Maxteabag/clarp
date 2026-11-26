@@ -259,6 +259,17 @@ pub fn clock(ms: i64) -> String {
     }
 }
 
+/// How long a reasoning item thought, when both ends are known.
+fn thought_ms(item: &Object) -> Option<i64> {
+    Some(int(item, "ended_at_ms")? - int(item, "started_at_ms")?)
+}
+
+/// A finished thought that took under half a second: it would read
+/// "Thought for 0s" and tells the reader nothing, so it shows nothing (CL-071).
+pub fn zero_thought(item: &Object) -> bool {
+    text(item, "kind") == "reasoning" && is_terminal(text(item, "status")) && thought_ms(item).is_some_and(|ms| ms < 500)
+}
+
 /// "12s", "1m 12s", "2h 3m".
 pub fn worked(ms: i64) -> String {
     let seconds = (ms.max(0) + 500) / 1000;
@@ -295,7 +306,8 @@ pub fn status_line(view: &LiveView, host_now_ms: i64) -> Option<StatusLine> {
             let extra = if more > 0 { format!(" +{more}") } else { String::new() };
             (format!("● {label}{}{extra}", since(started)), true)
         }
-        "thinking" => (format!("◌ {}{}", if headline.is_empty() { "Thinking" } else { headline }, since(turn_started)), true),
+        // Never the thought itself: cut to fit, it reads as half a sentence (CL-079).
+        "thinking" => (format!("◌ Thinking{}", since(turn_started)), true),
         "responding" => (format!("◌ Responding{}", since(turn_started)), true),
         "compacting" => (format!("◌ Compacting{}", since(turn_started)), true),
         // Held for the machine: an ordinary working turn (no words of its own).
@@ -348,7 +360,7 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let items: Vec<&Object> = view
         .items()
         .into_iter()
-        .filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind")))
+        .filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind")) && !zero_thought(i))
         .filter(|i| !(options.veil && turn.is_some_and(|t| view.veiled(t, i))))
         .collect();
     let durable = durable(rows);
@@ -604,12 +616,27 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
     // summary's tool count; with no time and no folded call there is no row. A running
     // turn folds the same way when the reader groups it: `Working · N tools`, the
     // calls so far. Always visible keeps commentary in its place.
+    let spoken = |entry: &Entry| entry.kind == Kind::Message && entry.spoken && entry.phase == "commentary";
+    // A settled turn that used no tool shows its answer only (CL-081): no
+    // "Worked for" row, and its thinking and unspoken commentary go with the
+    // row they would have folded under. Spoken commentary (the user heard it)
+    // and Always visible commentary keep their places.
+    if settled && !entries.iter().any(|e| matches!(e.kind, Kind::Tool | Kind::Explore)) {
+        entries.retain(|e| match e.kind {
+            Kind::Reasoning => false,
+            Kind::Message => e.phase != "commentary" || spoken(e) || options.show_commentary,
+            _ => true,
+        });
+        return entries;
+    }
     if settled || options.fold_running {
-        let spoken = |entry: &Entry| entry.kind == Kind::Message && entry.spoken && entry.phase == "commentary";
+        // Thinking never stays out of the fold in a settled turn, stopped or
+        // not: a left-over "Thought for 1s" row tells the reader nothing (CL-071).
         let stays = |entry: &Entry| {
-            matches!(entry.status.as_str(), "failed" | "interrupted")
-                || (settled && matches!(entry.status.as_str(), "running" | "pending"))
-                || (entry.kind == Kind::Message && (entry.phase != "commentary" || entry.spoken || options.show_commentary))
+            (entry.kind != Kind::Reasoning || !settled)
+                && (matches!(entry.status.as_str(), "failed" | "interrupted")
+                    || (settled && matches!(entry.status.as_str(), "running" | "pending"))
+                    || (entry.kind == Kind::Message && (entry.phase != "commentary" || entry.spoken || options.show_commentary)))
         };
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
         let calls: usize = folded.iter().map(|&i| match entries[i].kind {
@@ -739,11 +766,12 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
         "reasoning" => {
             entry.kind = Kind::Reasoning;
             let title = text(item, "title");
-            let head = if is_terminal(&status) {
-                let ms = int(item, "ended_at_ms").unwrap_or(0) - int(item, "started_at_ms").unwrap_or(0);
-                format!("Thought for {}", worked(ms))
-            } else {
-                "Thinking".to_owned()
+            // A thought whose length is unknown says so by saying none; one
+            // under half a second is never shown (`zero_thought`).
+            let head = match (is_terminal(&status), thought_ms(item)) {
+                (true, Some(ms)) => format!("Thought for {}", worked(ms)),
+                (true, None) => "Thought".to_owned(),
+                (false, _) => "Thinking".to_owned(),
             };
             entry.title = if title.is_empty() { head } else { format!("{head}: {title}") };
             let body: Vec<String> = text(item, "text").lines().map(str::to_owned).collect();

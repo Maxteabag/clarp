@@ -259,7 +259,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let line = status();
-            check(line.starts_with("◌ Thinking: Finding the flaky test · 0:0"), &format!("the status line names the reasoning title, timed from turn_started_ms: {line:?}"));
+            check(line.starts_with("◌ Thinking · 0:0"), &format!("the status line says Thinking, never the thought, timed from turn_started_ms: {line:?}"));
             check(view().live_busy, "the status line says the agent works");
             check(view().live_stop_key == "Ctrl+.", &format!("it names the interrupt key: {:?}", view().live_stop_key));
             check(titles() == ["Thinking: Finding the flaky test"], &format!("one reasoning row: {:?}", titles()));

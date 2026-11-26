@@ -330,7 +330,7 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     // Model and effort, as the catalog lists them. What the agent runs
     // (its roster row) is always among them: a model or effort the catalog
     // does not list (one set with /agent-llm, a provider's own) is added,
-    // so the box says "Harness default" only when the agent runs it.
+    // so the box says "Default" only when the agent runs it.
     let mut models = engine.models_for_backend(&backend);
     with_current(&mut models, &value("model"));
     let model_ids: Vec<String> = models.iter().map(|m| text(m, "id")).collect();

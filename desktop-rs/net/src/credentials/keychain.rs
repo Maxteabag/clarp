@@ -44,7 +44,7 @@ fn run(arguments: &[&str], input: Option<&str>) -> Result<Output, String> {
         .map_err(|error| format!("{SECURITY}: {error}"))?;
     if let Some(input) = input {
         // Dropped after writing: EOF ends `security -i`.
-        let written = child.stdin.take().ok_or("no stdin for the Keychain tool")?.write_all(input.as_bytes());
+        let written = child.stdin.take().ok_or("the Keychain tool took no input")?.write_all(input.as_bytes());
         if let Err(error) = written {
             let _ = child.kill();
             let _ = child.wait();

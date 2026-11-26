@@ -1,5 +1,5 @@
 //! The visual rubric's text rules, as code: words a reader of the app should
-//! never meet.
+//! never meet, and the plain words a failed request is told in.
 //!
 //! `breaks` names what a piece of screen text does wrong; the source check
 //! (`core/tests/ui_text.rs`) runs it over every string the desktop draws, in
@@ -61,4 +61,26 @@ pub fn breaks(text: &str) -> Vec<String> {
         found.push("an em dash".to_owned());
     }
     found
+}
+
+/// A failed request in plain words: the Host's own sentence where it sent
+/// one, else what the status means to the reader; never the status number.
+/// `status` 0: the Host was not reached, and `message` says why.
+pub fn failure(message: &str, status: u16) -> String {
+    let message = message.trim();
+    let only_status = message.is_empty() || message.to_ascii_uppercase().starts_with("HTTP ");
+    if status == 0 || !only_status {
+        return if message.is_empty() { "The Host could not be reached".to_owned() } else { message.to_owned() };
+    }
+    match status {
+        401 | 403 => "The Host refused this",
+        404 | 410 => "The Host does not have that",
+        408 | 504 => "The Host did not answer in time",
+        409 | 412 => "That changed meanwhile; try again",
+        413 => "That is too large for the Host",
+        429 => "The Host is busy; try again shortly",
+        400..=499 => "The Host could not take that",
+        _ => "Something went wrong on the Host",
+    }
+    .to_owned()
 }

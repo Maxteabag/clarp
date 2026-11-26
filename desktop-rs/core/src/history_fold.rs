@@ -359,7 +359,7 @@ fn turn(
         .flat_map(|(_, items)| items.iter())
         .filter_map(|i| Some((i.get("tool")?.get("call_id")?.as_str()?, *i)))
         .collect();
-    let mut reasoning: Vec<&Object> = retired.iter().flat_map(|(_, items)| items.iter().copied()).filter(|i| i.get("kind").and_then(Value::as_str) == Some("reasoning")).collect();
+    let mut reasoning: Vec<&Object> = retired.iter().flat_map(|(_, items)| items.iter().copied()).filter(|i| i.get("kind").and_then(Value::as_str) == Some("reasoning") && !live_present::zero_thought(i)).collect();
     let ordinal = |i: &Object| i.get("ordinal").and_then(Value::as_i64).unwrap_or(0);
 
     // The turn's items in the order they were written: each row's text,
@@ -495,7 +495,11 @@ fn turn(
     cuts.sort_by_key(|c| c.at_ms);
     let shown: Vec<&Object> = items.iter().collect();
     let parts = live_present::arrange_parts(&id, &summary, true, &shown, &at, &cuts, rows_of, &live_options);
-    if tool_count == 0 && !parts.iter().flatten().any(|e| e.kind == live_present::Kind::Fold) {
+    // A turn with nothing to fold reads as its rows, unless the answer-only
+    // rule (CL-081) left something out: then the rows it kept are placed and
+    // the rest hidden, as live shows it.
+    let kept = parts.iter().map(Vec::len).sum::<usize>();
+    if tool_count == 0 && !parts.iter().flatten().any(|e| e.kind == live_present::Kind::Fold) && kept == items.len() {
         return Vec::new();
     }
     let opened = parts.iter().flatten().any(|e| e.kind == live_present::Kind::Fold && options.expanded.contains(&e.key));

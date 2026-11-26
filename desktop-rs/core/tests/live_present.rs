@@ -55,7 +55,7 @@ fn the_status_line_names_the_tool_with_its_elapsed_time_from_the_host_clock() {
     assert_eq!(line.text, "● Searching tokenize · 0:12 +1");
     assert!(line.busy);
     let line = status_line(&turn_full(after(4)), 1759480000000 + 3_400).unwrap();
-    assert_eq!(line.text, "◌ Thinking: Finding the flaky test · 0:03", "thinking ticks from turn_started_ms");
+    assert_eq!(line.text, "◌ Thinking · 0:03", "thinking ticks from turn_started_ms, never the thought itself (CL-079)");
     assert_eq!(status_line(&turn_full(after(6)), 1759480004300).unwrap().text, "◌ Responding · 0:04");
     let ended = status_line(&turn_full(after(23)), 1759480099999).unwrap();
     assert_eq!(ended.text, "■ Interrupted");
@@ -802,10 +802,10 @@ fn a_spoken_acknowledgment_stays_above_the_work_and_the_answer_while_live_holds_
     assert_eq!(shown_order(&hidden, &rows), ["u-voice", "live:oc:ack", "live-answer"]);
 }
 
-/// A settled turn of thinking and its answer, no tool: the fold stays above
-/// the answer (the answer is never taken for an acknowledgment).
+/// A settled turn of thinking and its answer, no tool, shows the answer only
+/// (CL-081): no "Worked for" row and no "Thought for" row.
 #[test]
-fn a_turn_of_thinking_and_its_answer_keeps_the_fold_above_the_answer() {
+fn a_turn_of_thinking_and_its_answer_shows_the_answer_only() {
     let s = SPOKEN_STARTED;
     let snapshot = json!({"conv": "c-think", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-t", "lseq": 12, "server_now_ms": s + 10_000,
         "activity": {"state": "idle", "turn_id": "tr-think", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": s + 5_000, "turn_started_ms": null},
@@ -821,8 +821,61 @@ fn a_turn_of_thinking_and_its_answer_keeps_the_fold_above_the_answer() {
     for expanded in [&[][..], &["live:fold:tr-think"][..]] {
         let p = present(&view, &[], &options(expanded, 0));
         let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
-        assert_eq!(kinds.first(), Some(&Kind::Fold), "the fold first: {:?}", titles(&p));
-        assert_eq!(kinds.last(), Some(&Kind::Message), "the answer last: {:?}", titles(&p));
+        assert_eq!(kinds, [Kind::Message], "the answer alone: {:?}", titles(&p));
+        assert_eq!(p.entries[0].text, "Yes, that works.");
+    }
+}
+
+/// A tool-less turn's unspoken commentary goes with the answer-only rule;
+/// spoken commentary (the user heard it) and Always visible keep their place.
+#[test]
+fn a_tool_less_turn_keeps_only_commentary_the_user_heard_or_asked_to_see() {
+    let s = SPOKEN_STARTED;
+    let item = |id: &str, ordinal: i64, phase: &str, text: &str| json!({"id": id, "kind": "message", "rev": 1, "conv": "c-q", "turn_id": "tr-q",
+        "status": "completed", "ordinal": ordinal, "started_at_ms": s + ordinal * 100, "ended_at_ms": s + ordinal * 100 + 50, "phase": phase, "text": text});
+    let snapshot = json!({"conv": "c-q", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-q", "lseq": 9, "server_now_ms": s + 10_000,
+        "activity": {"state": "idle", "turn_id": "tr-q"},
+        "turn": {"turn_id": "tr-q", "status": "interrupted", "started_at_ms": s, "ended_at_ms": s + 6_000, "worked_ms": 6_000, "tool_count": 0},
+        "items": [
+            {"id": "oc:t", "kind": "reasoning", "rev": 2, "conv": "c-q", "turn_id": "tr-q", "status": "interrupted", "ordinal": 1,
+             "started_at_ms": s + 50, "ended_at_ms": s + 1_200, "title": "The user wants a 500-word", "text": "The user wants a 500-word essay"},
+            item("oc:note", 2, "commentary", "Let me check."),
+            item("oc:heard", 3, "commentary", "<speak>On it.</speak>"),
+            item("oc:a", 4, "final", "TOKYO"),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    let p = present(&view, &[], &options(&[], 0));
+    let texts: Vec<&str> = p.entries.iter().map(|e| e.text.as_str()).collect();
+    assert!(p.entries.iter().all(|e| !matches!(e.kind, Kind::Fold | Kind::Reasoning)), "no work row, no thought row, stopped or not: {:?}", titles(&p));
+    assert_eq!(texts, ["On it.", "TOKYO"], "the heard commentary and the answer");
+    let always = present(&view, &[], &Options { show_commentary: true, ..options(&[], 0) });
+    let texts: Vec<&str> = always.entries.iter().map(|e| e.text.as_str()).collect();
+    assert_eq!(texts, ["Let me check.", "On it.", "TOKYO"], "Always visible keeps the commentary");
+}
+
+/// A thought under half a second would read "Thought for 0s": it shows
+/// nothing, in a running turn and a settled one (CL-071). A longer one keeps
+/// its row and its time.
+#[test]
+fn a_zero_length_thought_shows_nothing() {
+    let s = SPOKEN_STARTED;
+    let thought = |id: &str, ordinal: i64, ms: i64| json!({"id": id, "kind": "reasoning", "rev": 2, "conv": "c-z", "turn_id": "tr-z", "status": "completed",
+        "ordinal": ordinal, "started_at_ms": s + ordinal * 1_000, "ended_at_ms": s + ordinal * 1_000 + ms, "title": "The user wants me to run s", "text": "x"});
+    let tool = json!({"id": "oc:t", "kind": "tool", "rev": 2, "conv": "c-z", "turn_id": "tr-z", "status": "completed", "ordinal": 5,
+        "started_at_ms": s + 5_000, "ended_at_ms": s + 5_500, "tool": {"name": "bash", "call_id": "k1", "category": "exec", "group": null, "label": "sleep 20"}});
+    for status in ["running", "completed"] {
+        let snapshot = json!({"conv": "c-z", "session": "rachel", "agent_id": "agent-1", "epoch": "boot-z", "lseq": 9, "server_now_ms": s + 10_000,
+            "activity": {"state": if status == "running" { "tool" } else { "idle" }, "turn_id": "tr-z"},
+            "turn": {"turn_id": "tr-z", "status": status, "started_at_ms": s, "ended_at_ms": s + 6_000, "worked_ms": 6_000, "tool_count": 1},
+            "items": [thought("oc:z", 1, 120), thought("oc:long", 2, 2_000), tool.clone()]});
+        let mut view = LiveView::new();
+        view.apply_snapshot(snapshot.as_object().unwrap());
+        let open = present(&view, &[], &options(&["live:fold:tr-z"], 0));
+        let titles = titles(&open);
+        assert!(titles.iter().all(|t| !t.starts_with("Thought for 0s") && !t.starts_with("Thought for 1s")), "{status}: {titles:?}");
+        assert!(titles.iter().any(|t| t == "Thought for 2s: The user wants me to run s"), "{status}: {titles:?}");
+        assert!(open.entries.iter().all(|e| !e.items.contains(&"oc:z".to_owned())), "{status}: the short thought is in no row");
     }
 }
 

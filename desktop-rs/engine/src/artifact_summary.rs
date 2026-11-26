@@ -494,7 +494,7 @@ impl Engine {
             self.changes.push(Change::Updates);
             return true;
         }
-        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        let detail = clarp_core::ui_text::failure(message, status);
         self.hydration_failed(&id, &key, &detail)
     }
 

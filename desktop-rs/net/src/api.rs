@@ -303,11 +303,10 @@ fn request_error(error: &reqwest::Error, timeout: Option<Duration>) -> String {
     }
 }
 
+/// A failure with no words of the Host's own, in plain words: the reader
+/// never sees the status number (`ui_text::failure`).
 fn http_status_text(status: reqwest::StatusCode) -> String {
-    match status.canonical_reason() {
-        Some(reason) => format!("HTTP {} {reason}", status.as_u16()),
-        None => format!("HTTP {}", status.as_u16()),
-    }
+    clarp_core::ui_text::failure("", status.as_u16())
 }
 
 /// The header the Host reads a client's name and contract from.

@@ -191,10 +191,10 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
             http.get(url).headers(headers)
         };
         let failure = match tokio::time::timeout(timing.watchdog, request.send()).await {
-            Err(_) => Some("Event stream timed out".to_owned()),
+            Err(_) => Some("The Host stopped sending updates".to_owned()),
             Ok(Err(error)) => Some(error.to_string()),
             Ok(Ok(response)) if !response.status().is_success() => {
-                Some(format!("Event stream failed: HTTP {}", response.status().as_u16()))
+                Some(format!("Live updates failed: {}", clarp_core::ui_text::failure("", response.status().as_u16())))
             }
             Ok(Ok(mut response)) => {
                 if !set_connected(&state, &sink, run, true) {

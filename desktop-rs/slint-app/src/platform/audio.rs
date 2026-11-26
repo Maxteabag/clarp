@@ -523,13 +523,13 @@ impl Audio {
             }
             ApiReply::Failed { tag, message, status } if tag == self.download_tag => {
                 self.download_tag.clear();
-                let error = if status > 0 { format!("{message} (HTTP {status})") } else { message };
+                let error = clarp_core::ui_text::failure(&message, status);
                 let effects = self.player.downloaded(Err(error));
                 self.apply(effects);
             }
             ApiReply::Json { tag, object } if tag.starts_with("transcribe:") => self.transcribed(&tag, Ok(object)),
             ApiReply::Failed { tag, message, status } if tag.starts_with("transcribe:") => {
-                let error = if status > 0 { format!("{message} (HTTP {status})") } else { message };
+                let error = clarp_core::ui_text::failure(&message, status);
                 self.transcribed(&tag, Err(error));
             }
             ApiReply::Failed { tag, message, .. } if tag.starts_with("clip-ack:") => {

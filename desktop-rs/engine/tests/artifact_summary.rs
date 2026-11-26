@@ -275,12 +275,12 @@ fn only_the_old_hosts_exact_refusal_falls_back() {
     let mut d = Driver::new(&host.base);
     d.connect();
     d.until("the list fails", |e| !e.updates_error().is_empty() && !e.updates_loading());
-    assert!(d.engine.updates_error().contains("HTTP 400"), "another 400 is the user's to see: {:?}", d.engine.updates_error());
+    assert_eq!(d.engine.updates_error(), "Gateway Timeout", "another 400 is the user's to see, in the Host's words and without the status");
     assert_eq!(list_representations(&host), ["summary-v1"], "and is not taken for the old Host");
     assert!(d.engine.artifact_summary_enabled());
     host.control("/__control/fail", json!({"path": "/artifacts", "status": 500}));
     d.engine.load_updates();
-    d.until("fails again", |e| e.updates_error().contains("HTTP 500") && !e.updates_loading());
+    d.until("fails again", |e| list_representations(&host).len() == 2 && !e.updates_error().is_empty() && !e.updates_loading());
     d.engine.load_updates();
     d.until("listed", |e| e.updates_error().is_empty() && !e.update_artifacts().is_empty() && !e.updates_loading());
     assert!(list_representations(&host).iter().all(|r| r == "summary-v1"), "{:?}", list_representations(&host));

@@ -232,7 +232,7 @@ impl Engine {
                     if is_permanent(status) {
                         entry.stopped = true;
                     }
-                    Err(if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() })
+                    Err(clarp_core::ui_text::failure(message, status))
                 }
             };
             let status = match result {

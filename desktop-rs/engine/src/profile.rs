@@ -498,11 +498,7 @@ impl Engine {
 }
 
 /// A failed profile request in plain words, said once: what could not load
-/// and what the Host said, without the status twice.
+/// and what the Host said, never the status number.
 fn load_failed(what: &str, message: &str, status: u16) -> String {
-    if status == 0 {
-        return format!("Could not load {what}: {message}");
-    }
-    let said = message.strip_prefix(&format!("HTTP {status}")).unwrap_or(message).trim();
-    if said.is_empty() { format!("Could not load {what} (the Host answered {status})") } else { format!("Could not load {what}: {said} (the Host answered {status})") }
+    format!("Could not load {what}: {}", clarp_core::ui_text::failure(message, status))
 }

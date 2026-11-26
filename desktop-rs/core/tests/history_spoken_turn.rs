@@ -73,10 +73,11 @@ fn at(seconds: i64) -> String {
     chrono::DateTime::from_timestamp_millis(1791100000000 + seconds * 1000).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
-/// A turn without tool calls folds its commentary in history as live does, so the
-/// commentary does not reappear when history takes the turn over from live (#653).
+/// A turn without tool calls shows its answer only, in history as live does
+/// (CL-081): no "Worked for" row, and the unspoken commentary does not
+/// reappear when history takes the turn over from live (#653).
 #[test]
-fn a_turn_without_tools_folds_its_commentary_in_history_as_live_does() {
+fn a_turn_without_tools_shows_its_answer_only_in_history_as_live_does() {
     let rows: Vec<Message> = [
         json!({"id": "u-n", "role": "user", "text": "Is it fine?", "timestamp": at(0), "trace_id": "tr-n"}),
         json!({"id": "a-note", "role": "assistant", "phase": "commentary", "text": "Let me check.", "timestamp": at(1), "trace_id": "tr-n"}),
@@ -84,12 +85,13 @@ fn a_turn_without_tools_folds_its_commentary_in_history_as_live_does() {
                "turn": {"turn_id": "tr-n", "status": "completed", "started_at_ms": 1791100000000_i64, "ended_at_ms": 1791100003000_i64,
                         "worked_ms": 3_000, "tool_count": 0}}),
     ].iter().map(row).collect();
-    let folded = present(&rows, None, &options(&[]));
-    assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
-    assert_eq!(read(&folded.folds[0]), ["Worked for 3s", "row a-final"]);
-    assert!(folded.hidden_rows.contains("a-note"));
-    let open = present(&rows, None, &options(&["live:fold:tr-n"]));
-    assert_eq!(read(&open.folds[0]), ["Worked for 3s", "row a-note", "row a-final"], "it opens in place");
+    for expanded in [&[][..], &["live:fold:tr-n"][..]] {
+        let folded = present(&rows, None, &options(expanded));
+        let read: Vec<String> = folded.folds.iter().flat_map(read).collect();
+        assert!(read.iter().all(|r| !r.starts_with("Worked for")), "{read:?}");
+        assert!(!read.iter().any(|r| r == "row a-note"), "{read:?}");
+        assert!(folded.hidden_rows.contains("a-note"));
+    }
 }
 
 /// Speech is matched in any letter case: a commentary marked `<SPEAK>` was heard and

@@ -226,6 +226,8 @@ pub fn running(status: &str) -> String {
 
 /// What the live activity (`GET /live`'s `activity`) says runs now, in
 /// plain words: the Host's headline, else the tool's label, else the step.
+/// Thinking is only "Thinking": the thought cut to fit reads as half a
+/// sentence (CL-079).
 pub fn status_words(activity: &Object) -> String {
     let text = |o: &Object, key: &str| o.get(key).and_then(Value::as_str).unwrap_or_default().trim().to_owned();
     let headline = text(activity, "headline");
@@ -247,7 +249,6 @@ pub fn status_words(activity: &Object) -> String {
         "limited" if held_for_the_machine(activity) => "Working".to_owned(),
         "waiting" | "limited" | "background" if !headline.is_empty() => headline,
         "limited" => limited_words(activity).to_owned(),
-        "thinking" if !headline.is_empty() => headline,
         _ => step_words(&state, "").unwrap_or_default().to_owned(),
     }
 }

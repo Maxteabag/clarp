@@ -456,5 +456,5 @@ fn a_host_without_prompt_history_leaves_it_out_and_a_real_failure_is_said_once()
     host.control("fail", json!({"path": "/task-plan", "status": 500}));
     d.engine.load_agent_profile("rachel");
     d.until("plan failed", |e| !e.profile_loading());
-    assert_eq!(d.engine.profile_error(), "Could not load the plan: Gateway Timeout (the Host answered 500)");
+    assert_eq!(d.engine.profile_error(), "Could not load the plan: Gateway Timeout");
 }

@@ -543,12 +543,13 @@ impl Conversation {
         self.remove_where(|m| m.activity);
     }
 
-    pub fn show_transient_thinking(&mut self, persona: &str) {
-        let persona = if persona.is_empty() { "Agent" } else { persona };
+    /// The chat's header already names the agent: the row says only that it
+    /// works, never "Theo is working" (CL-070).
+    pub fn show_transient_thinking(&mut self) {
         let event = json!({
             "activity_status": "running",
             "activity_action": "thinking",
-            "activity_summary": format!("{persona} is working"),
+            "activity_summary": "Working",
         });
         self.apply_activity_event(event.as_object().expect("literal object"));
     }
