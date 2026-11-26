@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use clarp_actor::conversation::Which;
-use clarp_actor::{ByHand, ImportedRow, TakenOver};
+use clarp_actor::{ByHand, ImportedRow, Steered, TakenOver};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::contacts::{self, Launch};
@@ -493,11 +493,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     // may read that have the words, newest first, paged, from an index kept as rows change,
     // `partial` while older history is still being read into it (issue 803).
     ("message_search", 196),
-    // The live turn says whether a message of the owner's sent now is read into it
-    // (`steerable`, also on `GET /turn-queue`), and `POST /turn-queue/<id>/take-over` has one
-    // of the owner's waiting messages take over a turn that cannot be steered: the turn ends as
-    // stopped for a newer message and that message runs next; the queue is not held (issue 867).
-    ("turn_take_over", 197),
+    // The live turn says whether its tool takes a message of the owner's into it now
+    // (`steerable`, also on `GET /turn-queue`). `POST /turn-queue/<id>/steer` reads one of the
+    // owner's waiting messages into it now, older ones first; `POST /turn-queue/<id>/take-over`
+    // has one take over a running turn: the turn ends as stopped for a newer message and that
+    // message runs next; the queue is not held (issue 867).
+    ("queue_steer", 197),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -896,6 +897,7 @@ pub fn router(app: App) -> Router {
         .route("/turn-queue/resume", post(resume))
         .route("/turn-queue/{id}", delete(take_back).put(reword))
         .route("/turn-queue/{id}/send", post(send_by_hand))
+        .route("/turn-queue/{id}/steer", post(steer_waiting))
         .route("/turn-queue/{id}/take-over", post(take_over))
         .route("/pairing/identity", get(pairing_identity))
         .route("/pairing/exchange", post(pairing_exchange))
@@ -4539,14 +4541,74 @@ async fn send_by_hand(
     }
 }
 
+/// A refusal of a waiting message's steer or take-over: a code an app acts on, and words.
+fn queue_refusal(status: StatusCode, code: &str, words: &str) -> ApiError {
+    ApiError::custom(status, words, json!({ "error": words, "code": code }))
+}
+
+/// What waits under an id no longer, or is being read into the running turn already.
+fn not_waiting_coded() -> ApiError {
+    queue_refusal(
+        StatusCode::NOT_FOUND,
+        "not_waiting",
+        "queued message not found",
+    )
+}
+
+/// Another sender's waiting message: only the owner's own is steered or takes over.
+fn not_the_owners() -> ApiError {
+    queue_refusal(
+        StatusCode::CONFLICT,
+        "not_the_owners",
+        "only the owner's own message can be steered or take over a turn",
+    )
+}
+
+/// `POST /turn-queue/<id>/steer`: its user has one waiting message of theirs read into the
+/// running turn now (issue 867), as a send of it would be: the user's older waiting messages
+/// go in first, oldest first. Its `/log` row then carries `read_into` with `at: steer`. Where
+/// the turn cannot take it now (none runs, its tool takes no steered words, not yet or not
+/// any more), it waits on, untouched.
+async fn steer_waiting(
+    State(app): State<App>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+        return Err(not_waiting_coded());
+    };
+    match member.agent.steer(waiting.turn).await? {
+        Steered::Done => {
+            let answer = json!({
+                "ok": true,
+                "session": member.record.session,
+                "queued": false,
+            });
+            Ok((StatusCode::ACCEPTED, Json(answer)).into_response())
+        }
+        Steered::NotWaiting => Err(not_waiting_coded()),
+        Steered::NotTheOwners => Err(not_the_owners()),
+        Steered::LeftForLater => Err(queue_refusal(
+            StatusCode::CONFLICT,
+            "left_for_later",
+            "a message left for later waits for a turn of its own",
+        )),
+        Steered::NotSteerable => Err(queue_refusal(
+            StatusCode::CONFLICT,
+            "not_steerable",
+            "the running turn cannot take a message now",
+        )),
+    }
+}
+
 /// `POST /turn-queue/<id>/take-over`: its user has one waiting message of theirs take over
 /// the running turn (issue 867). That turn ends as stopped, for a newer message, and the
 /// message runs next, at once, in the same conversation. The queue is not held, as a Stop
-/// holds it; what else waits goes on after it. With no turn running it runs now, as one sent
-/// by hand. A message already being read into the turn cannot take it over.
+/// holds it; what else waits goes on after it. With no turn running there is nothing to take
+/// over: the message is sent as any other. A message already being read into the turn cannot
+/// take it over.
 async fn take_over(State(app): State<App>, Path(id): Path<String>) -> Result<Response, ApiError> {
     let Some((member, waiting)) = waiting_named(&app, &id).await? else {
-        return Err(not_waiting());
+        return Err(not_waiting_coded());
     };
     match member
         .agent
@@ -4559,15 +4621,18 @@ async fn take_over(State(app): State<App>, Path(id): Path<String>) -> Result<Res
                 "session": member.record.session,
                 "taken_over": true,
             });
-            Ok(Json(answer).into_response())
+            Ok((StatusCode::ACCEPTED, Json(answer)).into_response())
         }
-        TakenOver::NotWaiting => Err(not_waiting()),
-        TakenOver::NotTheOwners => Err(ApiError::new(
+        TakenOver::NotWaiting => Err(not_waiting_coded()),
+        TakenOver::NotTheOwners => Err(not_the_owners()),
+        TakenOver::NoTurn => Err(queue_refusal(
             StatusCode::CONFLICT,
-            "only the owner's own message can take over a turn",
+            "no_turn_running",
+            "no turn runs: send the message instead",
         )),
-        TakenOver::Uncuttable => Err(ApiError::new(
+        TakenOver::Uncuttable => Err(queue_refusal(
             StatusCode::CONFLICT,
+            "turn_not_cuttable",
             "the running turn cannot be taken over; stop it instead",
         )),
     }

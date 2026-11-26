@@ -169,6 +169,8 @@ mod publish_window;
 mod question_cards;
 #[path = "host/queue_provenance.rs"]
 mod queue_provenance;
+#[path = "host/queue_steer.rs"]
+mod queue_steer;
 #[path = "host/queue_together.rs"]
 mod queue_together;
 #[path = "host/quota_near.rs"]
@@ -211,8 +213,6 @@ mod stop_events;
 mod stop_resume;
 #[path = "host/stop_text.rs"]
 mod stop_text;
-#[path = "host/take_over.rs"]
-mod take_over;
 #[path = "host/takeover_b.rs"]
 mod takeover_b;
 #[path = "host/teams_runtime.rs"]

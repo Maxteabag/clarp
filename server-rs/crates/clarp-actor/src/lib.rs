@@ -495,8 +495,7 @@ pub enum ByHand {
 /// What became of a waiting message its user had take over the running turn (issue 867).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TakenOver {
-    /// The running turn was told to stop for it, and it runs next; or nothing ran, and its
-    /// turn has begun.
+    /// The running turn was told to stop for it, and it runs next.
     Done,
     /// It does not wait: it ran, was taken back, never was, or is being read into the turn.
     NotWaiting,
@@ -504,6 +503,24 @@ pub enum TakenOver {
     NotTheOwners,
     /// The running turn is not one a waiting message may cut.
     Uncuttable,
+    /// No turn runs: there is nothing to take over.
+    NoTurn,
+}
+
+/// What became of a waiting message its user had read into the running turn (issue 867).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steered {
+    /// It is given to the running turn's tool now, after the user's older waiting words.
+    Done,
+    /// It does not wait: it ran, was taken back, never was, or is being read in already.
+    NotWaiting,
+    /// It is not the owner's own message.
+    NotTheOwners,
+    /// The owner left it for later (`queue_if_busy`): it waits for a turn of its own.
+    LeftForLater,
+    /// The running turn cannot take it now: none runs, its tool takes no steered words, or
+    /// not yet, or not any more. It waits on.
+    NotSteerable,
 }
 
 /// How far a queue item has gone before its conversation row is written.
@@ -4800,6 +4817,7 @@ impl Actor {
             Err(JournalError::Refused(Refusal::Uncuttable)) => {
                 return refused(TakenOver::Uncuttable);
             }
+            Err(JournalError::Refused(Refusal::NoTurn)) => return refused(TakenOver::NoTurn),
             Err(JournalError::Refused(_)) => return refused(TakenOver::NotWaiting),
             Err(error) => return Err(error.into()),
         };

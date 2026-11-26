@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ActorError, ByHand, Changed, ImportedRow, JoinedRead, Kept, Outputs, Profile,
-    QueueState, Sent, ShimOrder, Status, TakenOver, TurnFate, Waiting,
+    QueueState, Sent, ShimOrder, Status, Steered, TakenOver, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -357,6 +357,11 @@ enum Ask {
         speak: Option<bool>,
         answer: Answer<ByHand>,
     },
+    /// The owner's waiting message is read into the running turn now (issue 867).
+    Steer {
+        turn: TurnId,
+        answer: Answer<Steered>,
+    },
     /// The owner's waiting message takes over the running turn (issue 867).
     TakeOver {
         turn: TurnId,
@@ -639,6 +644,7 @@ impl Ask {
             Self::Withdraw { .. } => "Withdraw",
             Self::SendNow { .. } => "SendNow",
             Self::TakeOver { .. } => "TakeOver",
+            Self::Steer { .. } => "Steer",
             Self::Reword { .. } => "Reword",
             Self::Note { .. } => "Note",
             Self::KeeperEvents { .. } => "KeeperEvents",
@@ -1152,6 +1158,12 @@ impl AgentHandle {
             answer,
         })
         .await
+    }
+
+    /// The owner's waiting message is read into the running turn now, after the user's older
+    /// waiting words, where the turn's tool takes it now (issue 867).
+    pub async fn steer(&self, turn: TurnId) -> Result<Steered, Unavailable> {
+        self.ask(|answer| Ask::Steer { turn, answer }).await
     }
 
     /// The owner's waiting message takes over the running turn: that turn ends as stopped for
@@ -3367,6 +3379,8 @@ impl Worker {
                     && marks.coordination.is_some();
                 direct_user || desk_relay
             }
+            // The owner asks for a waiting message of theirs to be read in (issue 867).
+            Ask::Steer { .. } => true,
             _ => false,
         };
         if can_offer_steering {
@@ -3934,6 +3948,14 @@ impl Worker {
                     self.queue_edit = Some(QueueEdit::Changed);
                 }
                 answered(sent, answer)?
+            }
+            Ask::Steer { turn, answer } => {
+                if let Err(why) = actor.require_here() {
+                    let _ = answer.send(Err(unavailable(&why)));
+                    return Ok(());
+                }
+                let steered = actor.steer_waiting(turn, can_offer_steering, now);
+                answered(steered, answer)?
             }
             Ask::TakeOver { turn, by, answer } => {
                 if let Err(why) = actor.require_here() {
@@ -6273,6 +6295,7 @@ fn refuse_for(
             Ok(Ask::Withdraw { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::SendNow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakeOver { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Steer { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Reword { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Note { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {

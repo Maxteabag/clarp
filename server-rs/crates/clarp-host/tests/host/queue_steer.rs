@@ -1,13 +1,16 @@
-//! A waiting message of the owner's takes over a running turn that cannot be steered (issue
-//! 867, feature `turn_take_over`), and the live turn says whether it can be. One file a piece,
-//! declared in `host.rs`.
+//! A waiting message of the owner's is read into the running turn, or takes over one that
+//! cannot take it, and the live turn says whether it can (issue 867, feature `queue_steer`).
+//! One file a piece, declared in `host.rs`.
 
 use super::*;
 
-/// A Claude Code stand-in whose first turn reads one more message on its input: it says it
-/// read it, and answers both.
+/// A Claude Code stand-in. Its turn on "work" says nothing until the file `go` exists (so it
+/// is not bound to its session, and takes nothing on its input yet), then reads one more message
+/// on its input, says it read it, and answers both. Anything else is answered at once. While it
+/// waits it has printed a line on its stderr, so its turn is not a quiet one a waiting message takes over in
+/// the tool's own way (`Actor::takeover_quiet`): the message waits until it is steered.
 const CLAUDE: &str = r#"#!/usr/bin/env python3
-import json, pathlib, sys
+import json, pathlib, sys, time
 
 if "--version" in sys.argv:
     print("2.1.321 (Claude Code)")
@@ -24,7 +27,21 @@ def prompt():
     record = json.loads(sys.stdin.readline())
     return record["uuid"], record["message"]["content"][0]["text"]
 
+def answer(text, *uids):
+    say("assistant", message={"id": "msg_" + uids[-1], "role": "assistant",
+        "content": [{"type": "text", "text": text}]})
+    say("result", subtype="success", is_error=False, result=text, user_message_uuids=list(uids))
+
 uid, text = prompt()
+if "work" not in text:
+    say("system", subtype="init")
+    say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
+    answer("answered: " + text.strip().splitlines()[-1], uid)
+    raise SystemExit(0)
+print("warming up", file=sys.stderr, flush=True)
+(root / "started").touch()
+while not (root / "go").exists():
+    time.sleep(0.05)
 say("system", subtype="init")
 say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
 say("assistant", message={"id": "msg_work", "role": "assistant",
@@ -32,10 +49,7 @@ say("assistant", message={"id": "msg_work", "role": "assistant",
 (root / "working").touch()
 steered, words = prompt()
 say("user", isReplay=True, uuid=steered, message={"role": "user", "content": []})
-say("assistant", message={"id": "msg_" + steered, "role": "assistant",
-    "content": [{"type": "text", "text": "answered both"}]})
-say("result", subtype="success", is_error=False, result="answered both",
-    user_message_uuids=[uid, steered])
+answer("answered both", uid, steered)
 "#;
 
 fn steerable(host: &Host, session: &str) -> (Value, Value) {
@@ -59,7 +73,7 @@ fn a_waiting_message_takes_over_a_turn_that_cannot_be_steered_and_runs_next_once
     let place = Place::new("take-over");
     let host = place.start();
     assert_eq!(
-        host.get("/server-info")["contract"]["features"]["turn_take_over"],
+        host.get("/server-info")["contract"]["features"]["queue_steer"],
         197
     );
     let session = host.new_agent("Taker");
@@ -76,10 +90,22 @@ fn a_waiting_message_takes_over_a_turn_that_cannot_be_steered_and_runs_next_once
 
     // A message that does not wait cannot take over.
     let (status, refused) = host.ask("POST", "/turn-queue/nothing-such/take-over", None);
-    assert_eq!(status, 404, "{refused}");
+    assert_eq!(
+        (status, &refused["code"]),
+        (404, &json!("not_waiting")),
+        "{refused}"
+    );
+    // Nor is it read into a turn whose tool takes nothing on its input: it waits on.
+    let (status, refused) = host.ask("POST", "/turn-queue/now/steer", None);
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("not_steerable")),
+        "{refused}"
+    );
     assert_eq!(host.state(&session), "thinking", "nothing was cut");
 
-    let taken = host.post("/turn-queue/now/take-over", json!({}));
+    let (status, taken) = host.ask("POST", "/turn-queue/now/take-over", None);
+    assert_eq!(status, 202, "{taken}");
     assert_eq!(taken["taken_over"], true, "{taken}");
     // The cut turn ends as stopped, long before its sixty seconds (a wait gives up after
     // thirty), and the message runs next.
@@ -92,8 +118,10 @@ fn a_waiting_message_takes_over_a_turn_that_cannot_be_steered_and_runs_next_once
     // It ran once, as one message.
     assert_eq!(rows_saying(&host, &session, "user", "now this"), 1);
     assert_eq!(rows_saying(&host, &session, "assistant", "now this"), 1);
-    // It no longer waits: taking over again finds nothing.
+    // It no longer waits: taking over again, or steering it, finds nothing.
     let (status, again) = host.ask("POST", "/turn-queue/now/take-over", None);
+    assert_eq!(status, 404, "{again}");
+    let (status, again) = host.ask("POST", "/turn-queue/now/steer", None);
     assert_eq!(status, 404, "{again}");
     // The queue goes on by itself: the next message runs at once.
     let next = host.send(&session, "and on", "on");
@@ -116,13 +144,17 @@ fn only_the_owners_waiting_message_takes_over() {
                 "origin": "schedule", "queue_if_busy": true }),
     );
     let (status, refused) = host.ask("POST", "/turn-queue/sched/take-over", None);
-    assert_eq!(status, 409, "{refused}");
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("not_the_owners")),
+        "{refused}"
+    );
     assert_eq!(host.state(&session), "thinking", "nothing was cut");
     host.post("/stop", json!({ "session": session }));
 }
 
 #[test]
-fn a_turn_whose_tool_reads_its_input_says_it_is_steerable_while_it_can_be() {
+fn a_waiting_message_is_read_into_the_running_turn_once_it_can_take_it() {
     let place = Place::new("steerable");
     let claude = place.root.join("claude");
     program(&claude, CLAUDE);
@@ -137,16 +169,62 @@ fn a_turn_whose_tool_reads_its_input_says_it_is_steerable_while_it_can_be() {
     // At rest nothing runs, and nothing is steerable.
     assert_eq!(steerable(&host, &session).0, false);
     host.send(&session, "work", "work");
+    wait_for("the turn's tool to start", || {
+        place.root.join("started").exists()
+    });
+    // Its tool has not said it is at work: it takes nothing yet, and what is sent waits.
+    assert_eq!(steerable(&host, &session).0, false);
+    let waits = host.send(&session, "more", "more");
+    assert_eq!(waits["queued"], true, "{waits}");
+    let (status, refused) = host.ask("POST", "/turn-queue/more/steer", None);
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("not_steerable")),
+        "{refused}"
+    );
+    // A message the owner left for later is not read in, however the turn stands.
+    let later = host.post(
+        "/send",
+        json!({ "session": session, "text": "later", "client_msg_id": "later",
+                "queue_if_busy": true }),
+    );
+    assert_eq!(later["queued"], true, "{later}");
+    let (status, refused) = host.ask("POST", "/turn-queue/later/steer", None);
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("left_for_later")),
+        "{refused}"
+    );
+    let (status, refused) = host.ask("POST", "/turn-queue/nothing-such/steer", None);
+    assert_eq!(
+        (status, &refused["code"]),
+        (404, &json!("not_waiting")),
+        "{refused}"
+    );
+
+    // The tool is at work, and says it can be steered: the waiting message is read in on
+    // request, and the turn ends with the answer to both.
+    std::fs::write(place.root.join("go"), "").unwrap();
     wait_for("the turn at work", || place.root.join("working").exists());
     wait_for("the turn to say it can be steered", || {
         steerable(&host, &session) == (json!(true), json!(true))
     });
-    // A message sent now is read into it, and the turn ends with the answer to both.
-    host.send(&session, "more", "more");
-    wait_for("the turn to end", || host.state(&session) == "done");
-    assert_eq!(
-        rows_saying(&host, &session, "assistant", "answered both"),
-        1
-    );
+    let (status, steered) = host.ask("POST", "/turn-queue/more/steer", None);
+    assert_eq!(status, 202, "{steered}");
+    assert_eq!(steered["queued"], false, "{steered}");
+    wait_for("the answer to both", || {
+        rows_saying(&host, &session, "assistant", "answered both") == 1
+    });
+    let more = host
+        .turns(&session)
+        .into_iter()
+        .find(|row| row["role"] == "user" && row["text"] == "more")
+        .unwrap();
+    assert_eq!(more["read_into"]["at"], "steer", "{more}");
+    // The message left for later runs as a turn of its own after it.
+    wait_for("the later message's own turn", || {
+        rows_saying(&host, &session, "assistant", "answered: later") == 1
+    });
+    wait_for("the agent at rest", || host.state(&session) == "done");
     assert_eq!(steerable(&host, &session).0, false, "no turn runs");
 }

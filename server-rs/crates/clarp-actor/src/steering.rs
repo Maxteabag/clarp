@@ -612,10 +612,62 @@ impl Actor {
         // The turn that runs is the one shown first, so that it is the one told.
         self.show_turn(now_ms);
         let steerable =
-            offered && self.turn_takes_words() && self.recorder.agent().live_takes_words();
+            offered && self.turn_takes_words() && self.recorder.agent().live_takes_steers();
         self.steerable = steerable;
         let events = self.shown.set_turn_steerable(steerable, now_ms);
         self.shown_events.extend(events);
+    }
+
+    /// The owner's waiting message is read into the running turn now, as a send of it would
+    /// be (issue 867): the user's older words that wait go in first, oldest first, and then
+    /// it. `offered`: whether the Host offers this tool's turns steered words at all, as for
+    /// [`Actor::tell_steerable`]. A message that cannot go in now waits on, untouched; older
+    /// words that went in before it stay read.
+    pub fn steer_waiting(
+        &mut self,
+        turn: TurnId,
+        offered: bool,
+        now_ms: i64,
+    ) -> Result<(super::Steered, Outputs), ActorError> {
+        use super::Steered;
+        let agent = self.recorder.agent();
+        let Some(waiting) = agent.waiting().find(|waiting| waiting.id == turn) else {
+            return Ok((Steered::NotWaiting, Outputs::default()));
+        };
+        if agent.joins().contains_key(&turn) {
+            return Ok((Steered::NotWaiting, Outputs::default()));
+        }
+        if !waiting.origin.is_user_send() {
+            return Ok((Steered::NotTheOwners, Outputs::default()));
+        }
+        // Only what was said to the agent joins a running turn: a message left for later
+        // waits for a turn of its own, as the kernel holds it (`Command::Join`).
+        if waiting.admission != clarp_kernel::turn::Admission::Queue {
+            return Ok((Steered::LeftForLater, Outputs::default()));
+        }
+        let message_seq = waiting.message_seq;
+        let takes = offered && agent.live_takes_steers();
+        let message = message_at(self.recorder.log(), message_seq)?;
+        let uuid = message
+            .trace_id
+            .as_deref()
+            .and_then(takeover::prompt_uuid)
+            .filter(|uuid| takes && self.takes_now(uuid, &message.text));
+        let Some(uuid) = uuid else {
+            return Ok((Steered::NotSteerable, Outputs::default()));
+        };
+        let mut out = Outputs::default();
+        out.actions.extend(self.steer_older(turn, now_ms)?);
+        let steered = match self.steer_active(turn, uuid, &message.text, now_ms)? {
+            Some(action) => {
+                out.actions.push(action);
+                Steered::Done
+            }
+            None => Steered::NotSteerable,
+        };
+        out.changed.queue = !out.actions.is_empty();
+        out.changed.status = !out.actions.is_empty();
+        Ok((steered, out))
     }
 
     /// Whether the Host must say if it offers this tool's turns steered words for

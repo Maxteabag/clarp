@@ -130,13 +130,14 @@ older one still waits. Either way, send it once: the queue shows it until it is
 read.
 
 Whether a message sent now would be read into an agent's running turn or wait for
-it to end: on a Rust Host from contract 197 (feature `turn_take_over`),
-`GET /turn-queue?session=<agent>` says `steerable: true` while it would be read in,
-`false` while it would wait. The user can have one of their own waiting messages
-take over a turn that cannot take it (`POST /turn-queue/<id>/take-over`): that turn
-ends as stopped for a newer message, as above, and their message runs next. That is
-the user's action, from the app; do not call it for them, and do not use it for
-your own messages, which it refuses.
+it to end: on a Rust Host from contract 197 (feature `queue_steer`),
+`GET /turn-queue?session=<agent>` says `steerable: true` while its running turn takes
+one now, `false` while it would wait. The user can have one of their own waiting
+messages read into the turn (`POST /turn-queue/<id>/steer`), or take over a turn that
+cannot take it (`POST /turn-queue/<id>/take-over`): that turn ends as stopped for a
+newer message, as above, and their message runs next. Those are the user's actions,
+from the app; do not call them for the user, and do not use them for your own
+messages, which they refuse.
 
 Messages from agents keep a turn each. The user's own messages that waited while you were
 busy (because your tool could not take them into the running turn) do not: on a Rust Host from contract 169 (feature `queued_read_together`) they reach you

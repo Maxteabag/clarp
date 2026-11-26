@@ -109,7 +109,7 @@ pub enum Command {
     /// The owner's waiting message takes over (issue 867): the live turn ends as stopped for
     /// it, as for a newer message of the owner's said direct (`owner_preempts`), and it runs
     /// the moment that turn is over, ahead of everything, held by nothing. Nothing is paused.
-    /// With no turn running it runs at once, as one sent by hand.
+    /// Only while a turn runs: with none, the message is sent as any other.
     TakeOver { turn: TurnId, by: String },
     /// The words of a waiting message were written anew, at `message_seq`: its turn answers
     /// those. It keeps its place among what waits.
@@ -390,6 +390,8 @@ pub enum Refusal {
     /// The live turn is not one a waiting message may cut: a native goal's own turn (a Stop
     /// pauses its goal first), or the tool's compaction or its summary for a move.
     Uncuttable,
+    /// No turn runs: there is nothing to take over.
+    NoTurn,
 }
 
 impl std::fmt::Display for Refusal {
@@ -414,6 +416,7 @@ impl std::fmt::Display for Refusal {
             Self::Waiting => write!(f, "messages wait for the agent"),
             Self::NotTheOwners(turn) => write!(f, "turn {} is not the owner's message", turn.0),
             Self::Uncuttable => write!(f, "the live turn cannot be cut by a waiting message"),
+            Self::NoTurn => write!(f, "no turn runs"),
         }
     }
 }
@@ -1012,14 +1015,22 @@ impl Agent {
     /// unread. The owner's message steers into a turn that is not his only then; else that
     /// turn makes way for it (issue 839).
     pub fn live_takes_words(&self) -> bool {
+        self.live_takes_steers()
+            && !self.paused
+            && self.older_words_waiting(TurnId(self.next_turn)).is_empty()
+    }
+
+    /// Whether the live turn can be given a message of the user's on its input now, as far as
+    /// the agent's state says: a process runs it, nothing ends or moves it, and no message a
+    /// Stop let go waits to run before newer ones (issue 867, `steerable`). The user's older
+    /// words that wait do not stop it: a steer reads them in first, oldest first.
+    pub fn live_takes_steers(&self) -> bool {
         self.moved.is_none()
             && self.live.as_ref().is_some_and(Turn::has_process)
             && self.stopping.is_none()
             && self.selected_takeover.is_none()
-            && !self.paused
             && !self.import_held
             && self.stop_released.is_empty()
-            && self.older_words_waiting(TurnId(self.next_turn)).is_empty()
     }
 
     /// A message goes into the prompt of the turn that is being started only as the next of
@@ -1286,6 +1297,9 @@ impl Agent {
                             if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY)
                 }) {
                     return Err(Refusal::Uncuttable);
+                }
+                if agent.live.is_none() {
+                    return Err(Refusal::NoTurn);
                 }
                 // Recorded as a send by hand, which an older build replays the same way.
                 work.record(AgentEvent::SentNow {
@@ -3519,7 +3533,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_after_a_take_over_holds_the_message_and_with_nothing_running_it_runs_at_once() {
+    fn a_stop_after_a_take_over_holds_the_message_and_with_nothing_running_none_is_taken_over() {
         let mut a = Driven::new();
         a.user(10);
         a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
@@ -3529,15 +3543,9 @@ mod tests {
         a.send(stop()).unwrap();
         assert_eq!(a.finish(1), vec![], "held");
         assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
-        // Nothing runs now: taking over runs it at once, as a send by hand, and the hold stays.
-        assert_eq!(
-            a.send(take_over(2)).unwrap(),
-            vec![Effect::StartTurn {
-                turn: TurnId(2),
-                message_seq: 11
-            }]
-        );
-        assert!(a.agent.is_paused());
+        // Nothing runs now: there is nothing to take over, and nothing changes.
+        assert_eq!(a.send(take_over(2)), Err(Refusal::NoTurn));
+        assert!(a.agent.is_paused() && a.agent.holds(TurnId(2)));
     }
 
     #[test]
