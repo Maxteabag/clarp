@@ -129,35 +129,70 @@ fn serve(client: Client, request: &Value, stop: &Mutex<Stop>) -> Result<()> {
     }
 }
 
+/// How long the turn's server waits before each new start after one that ended before it said
+/// where it listens: two servers opening OpenCode's database at the same moment (the lane's,
+/// started beside the agent's turn, and the turn's own) can find it locked, and one of them ends
+/// at once (issue 908 for the lane's).
+const START_AGAIN_AFTER: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(1)];
+
+fn stop_requested(stop: &Mutex<Stop>) -> bool {
+    stop.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .requested
+}
+
+/// Starts `opencode serve` behind `password`: the server, and where it listens if it said so.
+fn start_server(
+    binary: &str,
+    password: &str,
+    stop: &Arc<Mutex<Stop>>,
+) -> Result<(Server, Option<u16>)> {
+    let child = Command::new(binary)
+        .args(["serve", "--hostname", "127.0.0.1", "--port", "0"])
+        .env("OPENCODE_SERVER_PASSWORD", password)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()?;
+    let mut server = Server(child, stop.clone());
+    let stdout = server.0.stdout.take().ok_or("missing server stdout")?;
+    let listens = port(stdout);
+    Ok((server, listens))
+}
+
 pub fn run(binary: &str) -> Result<u8> {
     let stop = stop_handle()?;
     let req: Value = serde_json::from_reader(io::stdin().lock())?;
     let mut random = [0u8; 24];
     std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
     let password = STANDARD.encode(random);
-    let child = Command::new(binary)
-        .args(["serve", "--hostname", "127.0.0.1", "--port", "0"])
-        .env("OPENCODE_SERVER_PASSWORD", &password)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .spawn()?;
-    let mut server = Server(child, stop.clone());
-    let stdout = server.0.stdout.take().ok_or("missing server stdout")?;
-    if let Some(port) = port(stdout) {
+    let (mut server, mut listens) = start_server(binary, &password, &stop)?;
+    // A server that ended before it listened is started again before the turn falls back to
+    // `opencode run`, which tells nothing of OpenCode's retries: a provider's refusal of the
+    // account (a free tier's limit) would keep that turn waiting out OpenCode's retry, told
+    // nothing, where the server's events end it at once (issue 923).
+    for wait in START_AGAIN_AFTER {
+        if listens.is_some() || stop_requested(&stop) {
+            break;
+        }
+        drop(server);
+        eprintln!(
+            "clarp-shim: OpenCode: the turn's server ended before it listened; started once more"
+        );
+        std::thread::sleep(wait);
+        (server, listens) = start_server(binary, &password, &stop)?;
+    }
+    if let Some(port) = listens {
         let client = Client::new(
             port,
             &password,
             std::env::current_dir()?.display().to_string(),
         );
         serve(client, &req, &stop)?;
+        drop(server);
         Ok(0)
     } else {
         drop(server);
-        if stop
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .requested
-        {
+        if stop_requested(&stop) {
             return Err("turn stopped".into());
         }
         let mut args = opencode::command(

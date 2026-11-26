@@ -36,8 +36,11 @@ use super::*;
 /// session fails the second and third; `wrap-<x>` comes as the run ends, and a run of its own
 /// compacts the context and answers OpenCode's own message to go on, all of it stored and none of
 /// its events told. The session lists its stored messages in the order it stored them. It tells the sessions that run (`/session/status`) and a session's answers, each with the
-/// message it answers. While the file `slow-delete` exists a delete takes two seconds. What it
-/// was asked is noted in files beside it.
+/// message it answers. While the file `slow-delete` exists a delete takes two seconds. A word
+/// `refused-<x>` is refused as a provider refuses an account out of free usage: a retry OpenCode
+/// announces, until the session is aborted. While the file `locked-turn-once` exists, the first
+/// server a turn of its own starts ends before it listens, its database locked. What it was asked
+/// is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
 import base64, json, os, queue, random, re, string, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +53,20 @@ def note(name, text):
 if "--version" in sys.argv:
     print("1.18.33"); sys.exit(0)
 assert sys.argv[1:] == ["serve", "--hostname", "127.0.0.1", "--port", "0"], sys.argv
+# While the file locked-turn-once exists, the first server a turn of its own starts (its driver is
+# `opencode-turn`) ends at once, as OpenCode does when another server holds its database, and the
+# file goes.
+turn_locked = root / "locked-turn-once"
+if turn_locked.exists():
+    try:
+        parent = Path(f"/proc/{os.getppid()}/cmdline").read_bytes().split(b"\0")
+    except OSError:
+        parent = []
+    if b"opencode-turn" in parent:
+        turn_locked.unlink()
+        note("locked", str(os.getpid()))
+        sys.stderr.write("\x1b[91mError: \x1b[0mUnexpected error\n\ndatabase is locked\n")
+        sys.exit(1)
 pid = os.getpid()
 note("starts", str(pid))
 PASSWORD = os.environ["OPENCODE_SERVER_PASSWORD"]
@@ -105,6 +122,17 @@ def step(sid, word, parent, kept=False, quiet=False):
         history.append({"id": mid, "role": "assistant", "parentID": parent})
     if not quiet:
         emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "assistant", "parentID": parent}}})
+    if word.startswith("refused-"):
+        # The provider refused the account (a free tier's limit): OpenCode 1.18 tells a retry with
+        # an action for the user, and retries until the session is aborted.
+        note("refused", word)
+        emit({"type": "session.status", "properties": {"sessionID": sid, "status": {
+            "type": "retry", "attempt": 1, "message": "Free usage exceeded, subscribe to Go",
+            "action": {"reason": "free_tier_limit", "provider": "opencode", "title": "Free limit reached",
+                       "message": "Subscribe to OpenCode Go", "label": "subscribe", "link": "https://opencode.ai/go"},
+            "next": int(time.time() * 1000) + 3600000}}})
+        aborted.wait(60)
+        return False
     emit(part(sid, mid, id=mid + "s", type="step-start"))
     if word.startswith("die-"):
         note("died", word)
@@ -347,7 +375,7 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken|compact|compactq|wrap|after|tardy)-[a-z0-9]+", text)))
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken|compact|compactq|wrap|after|tardy|refused)-[a-z0-9]+", text)))
             word = words[0]
             if "messageID" in body:
                 note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
@@ -2002,4 +2030,64 @@ fn issue_915_the_queued_messages_turn_on_a_cold_lane_ends() {
     assert!(queue["items"].as_array().unwrap().is_empty(), "{queue}");
     asked(&host, "w2", "ask-after");
     assert_eq!(answers(&host, "w2", "said-ask-after"), 1);
+}
+
+/// Issue 923. On a cold lane the turn's own server can find OpenCode's database locked by the
+/// lane's, starting beside it, and end before it says where it listens. It is started again, not
+/// left to `opencode run`, which tells none of OpenCode's retries: a provider that refuses the
+/// account (a free tier's limit) ends the turn at once, as a failed turn of a usage limit, on the
+/// first turn as on a lane turn, and the turn after runs.
+#[test]
+fn a_provider_out_of_free_usage_ends_the_turn_as_a_usage_limit_on_a_cold_lane_too() {
+    let world = world("opencode-refused", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    std::fs::write(world.place.root.join("locked-turn-once"), "").unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "refused", "opencode");
+    let failed = |id: &str| {
+        let rows = host.turns("refused");
+        let at = rows
+            .iter()
+            .position(|row| row["id"] == format!("u-{id}"))
+            .unwrap_or_else(|| panic!("no row of {id}: {rows:?}"));
+        rows[at..]
+            .iter()
+            .find(|row| row["turn"].is_object())
+            .cloned()
+    };
+
+    for (word, on) in [
+        ("refused-cold", "its own server"),
+        ("refused-lane", "the lane"),
+    ] {
+        host.send("refused", word, word);
+        wait_within(
+            &format!("the refused turn on {on} to end"),
+            Duration::from_secs(20),
+            || failed(word).is_some(),
+        );
+        let end = failed(word).unwrap();
+        assert_eq!(end["turn"]["status"], "failed", "{end}");
+        assert_eq!(end["turn"]["kind"], "usage_limit", "{end}");
+        let said = host.turns("refused");
+        let why = said
+            .iter()
+            .find(|row| row["id"] == format!("marker-u-{word}"))
+            .unwrap_or_else(|| panic!("no failure row: {said:?}"));
+        assert_eq!(why["failure_kind"], "usage_limit", "{why}");
+        assert!(
+            why.to_string().contains("Free usage exceeded"),
+            "the provider's words: {why}"
+        );
+        if word == "refused-cold" {
+            assert!(
+                !world.place.root.join("locked-turn-once").exists(),
+                "the turn's first server never found the database locked"
+            );
+            lane_ready(&socket);
+        }
+    }
+    assert_eq!(world.lines("refused"), ["refused-cold", "refused-lane"]);
+    asked(&host, "refused", "ask-after");
 }
