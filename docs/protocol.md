@@ -2216,6 +2216,68 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
   (issue 819), so neither the maker's row nor `parent.fields` carries that helper's words. `GET /agents/{session}`
   of such an agent answers 200 with that row, never 403.
 
+### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 204)
+
+Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `availability`
+(issue 918), so an app can show one calm line with the reason and the expected wait:
+
+```json
+"availability": {
+  "state": "busy",
+  "text": "Busy · 25 messages ahead of you",
+  "since_ms": 1795670000000,
+  "back_at_ms": null,
+  "queue_ahead": 25,
+  "last_alive_ms": 1795670004000
+}
+```
+
+- `state`, one at a time, in this order of precedence:
+  - `usage_limit`: no account can take the agent's turn now. Its turn waits for an account and no
+    other seat would take it, or it is idle and its row's `backend_quota` says `exhausted`.
+  - `switching_account`: its turn waits while the Host moves its tool to another account, after a
+    usage limit or after a sign-in that ran out.
+  - `restarting`: its process is starting again (an attempt after a failed one, the wait before
+    the next attempt), or the agent is being opened after the Host started.
+  - `unresponsive`: a turn that thinks or writes has shown no sign of life (output, its start)
+    for 180 s. A turn that runs a tool, waits for an approval or a background task, compacts or
+    is retried by its own tool is not counted as silent.
+  - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
+  - `ok`: it can answer now.
+- `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
+  limit"; `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";
+  `restarting` "Restarting"; `unresponsive` "Not responding"; `busy` "Busy · N messages ahead of
+  you" ("Busy · 1 message ahead of you", and just "Busy" when `queue_ahead` is 0); `ok` "" (show
+  nothing). The app adds the time part: from `back_at_ms` ("· back in ~20 s", "· back at 14:05")
+  or, in `unresponsive`, from `last_alive_ms` ("· last sign of life 4 min ago").
+- `since_ms`: when this state began. `back_at_ms`: when the Host expects the agent to answer
+  again, or `null` when it cannot tell (a usage limit's reset; for a process start, the median of
+  that tool's last starts on this Host, else 20 s after the start). Both are the Host's clock in
+  epoch ms: count with the offset to the Host's clock, so a value never goes stale.
+- `queue_ahead`: messages that will be read before a new one (`queued_turn_count`).
+- `last_alive_ms`: the running turn's last sign of life, set in `busy` and `unresponsive`, else
+  `null`.
+
+**Live.** An `agent-roster` event of kind `availability` carries `session`, `agent_id` and
+`fields: {"availability": {...}}` whenever `state`, `text`, `back_at_ms` or `queue_ahead` changes,
+never for a sign of life alone. Patch the row as for other `fields` (`roster_fields`). The Host
+looks at an agent as soon as its status or queue moves, and at every agent every 15 s (a turn that
+fell silent, an account that changed).
+
+**A Host that stops.** Just before the Host stops (SIGTERM: an update or an install), every event
+stream is sent one last frame and then ends:
+
+```json
+{"type": "host-updating", "text": "Host updating", "since_ms": 1795670000000, "back_at_ms": 1795670045000}
+```
+
+It has no `event_id`. `back_at_ms` is the Host's own last measured restart (from the stop to
+listening again), else 45 s. Until the app has reconnected and read the snapshot, show "Host
+updating · back in ~40 s" on every agent of that Host. A snapshot never says the Host is updating:
+when it answers, it is up.
+
+An older Host sends no `availability` and no `host-updating`: show nothing new.
+
 ### The sync algorithm
 
 A client that follows these steps never shows a duplicated, missing, or

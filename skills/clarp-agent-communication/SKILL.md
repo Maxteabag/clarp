@@ -148,6 +148,28 @@ A helper agent (one created with `--parent`) reports to its parent the same
 way. That message moves the helper to `reported`; a message from the parent
 back to it moves it to `running` again. See `clarp-sub-agents`.
 
+## Whether another agent can answer now
+
+On a Rust Host that lists feature `agent_availability` in `GET /server-info`
+(contract 204), every agent's row says whether it can answer now, why not, and
+until when:
+
+```bash
+curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" \
+  "$CLARP_SERVER_URL/agents/ada-1a2b" | jq .availability
+```
+
+`state` is `ok` (it answers now), `busy` (a turn runs; `queue_ahead` messages
+are read before yours), `unresponsive` (a turn that thinks or writes has shown
+no sign of life for 3 minutes; `last_alive_ms`), `restarting` (its process
+starts again), `switching_account` (the Host moves it to another account) or
+`usage_limit` (no account can take its turn now). `text` is the line the apps
+show, `back_at_ms` when the Host expects it to answer (epoch ms, or `null`).
+Use it to decide, not to refuse: a message to an agent that cannot answer now
+still waits in its queue and runs later. When the work cannot wait for
+`back_at_ms`, ask another agent, or tell the user why through their front desk.
+An older Host has no `availability`: read `busy` and `queued_turn_count`.
+
 ## When the user does not see the turn
 
 A turn another agent's message started is coordination: the user may choose to
