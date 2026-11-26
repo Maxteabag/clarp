@@ -29,7 +29,7 @@ url.workspace = true
 qrcode = { version = "=0.14.1", default-features = false }
 http.workspace = true
 jiff = { workspace = true, features = ["tz-system"] }
-nix = { workspace = true, features = ["feature", "fs"] }
+nix = { workspace = true, features = ["feature", "fs", "resource"] }
 pty-process.workspace = true
 regex.workspace = true
 ring.workspace = true
