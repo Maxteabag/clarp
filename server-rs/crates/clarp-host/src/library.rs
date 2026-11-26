@@ -479,17 +479,23 @@ impl Fleet {
         )
     }
 
-    /// Include the requested Janitor only on reads of its own shelf.
+    /// Published and moved artifacts both take their session and id from the maker
+    /// of their shelf. Read just the matching shelf when either key is supplied.
     fn scoped(app: &App, session: &str, id: &str) -> Self {
-        let mut fleet = Self::of(app);
-        let dir = app.fleet.directory();
-        if let Some(m) = dir.janitor(if session.is_empty() { id } else { session })
-            && (session.is_empty() || m.record.session == session)
-            && (id.is_empty() || m.record.agent_id == id)
-        {
-            fleet.0.push((m.clone(), m.agent.view()));
+        if session.is_empty() && id.is_empty() {
+            return Self::of(app);
         }
-        fleet
+        let dir = app.fleet.directory();
+        let janitor = dir.janitor(if session.is_empty() { id } else { session });
+        Self(
+            dir.members
+                .iter()
+                .chain(janitor)
+                .filter(|member| session.is_empty() || member.record.session == session)
+                .filter(|member| id.is_empty() || member.record.agent_id == id)
+                .map(|member| (member.clone(), member.agent.view()))
+                .collect(),
+        )
     }
 
     /// The roster and the one janitor whose shelf holds this decision (its exact id): a card of
