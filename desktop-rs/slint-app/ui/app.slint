@@ -26,6 +26,8 @@ import { AgentProfile, ProfileLayers, ProfileBridge, ProfileInfo, PlanItem, Prom
 import { MediaItem } from "media.slint";
 import { MediaPlayer, PlaybackBridge } from "playback.slint";
 export { PlaybackBridge }
+import { PublicationsPanel, PublicationsBridge, PublicationRow, PublicationFilter } from "publications.slint";
+export { PublicationsBridge, PublicationRow, PublicationFilter }
 import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
 import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
@@ -957,6 +959,11 @@ export component AppWindow inherits Window {
         }
         ProfileLayers {
             visible: root.overlay == "profile";
+            width: parent.width;
+            height: parent.height;
+        }
+        PublicationsPanel {
+            visible: root.overlay == "publications";
             width: parent.width;
             height: parent.height;
         }

@@ -27,6 +27,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if !app.switcher.borrow().open && *app.overlay.borrow() == crate::processes_view::OVERLAY {
         return "processes";
     }
+    // An agent's publications move, filter and open with their own keys.
+    if !app.switcher.borrow().open && *app.overlay.borrow() == crate::publications_view::OVERLAY {
+        return "publications";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -207,6 +211,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     if state == "processes" {
         hints = crate::processes_view::hints();
     }
+    if state == "publications" {
+        hints = crate::publications_view::hints(window);
+    }
     if state == "fonts" {
         hints = crate::font_view::hints();
     }
@@ -303,6 +310,11 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     }
     if state == "fonts" {
         let used = crate::font_view::key(&app, &window, &chord);
+        show_hints(&app, &window);
+        return used;
+    }
+    if state == "publications" {
+        let used = crate::publications_view::key(&app, &window, &chord);
         show_hints(&app, &window);
         return used;
     }
@@ -1228,6 +1240,11 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
     window.set_overlay("".into());
     if closed == "report" {
         app.engine.borrow_mut().set_artifact_in_view(None);
+    }
+    // A viewer opened from an agent's publications goes back to them.
+    if crate::publications_view::give_back(app, window, &closed) {
+        show_hints(app, window);
+        return;
     }
     if closed == crate::help_view::OVERLAY && crate::help_view::give_back(app, window) {
         show_hints(app, window);

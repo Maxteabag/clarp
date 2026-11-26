@@ -60,6 +60,7 @@ mod cells_view;
 mod orchestrator_view;
 mod overview_view;
 mod profile_view;
+mod publications_view;
 mod avatar_view;
 mod voice_view;
 mod font_view;
@@ -556,6 +557,7 @@ impl App {
         whole.lap("launch");
         // ---- profile and overview
         profile_view::refresh(self, &window, changes);
+        publications_view::refresh(self, &window, changes);
         whole.lap("profile");
         whole.done("refresh");
         if self.active_messages().is_some_and(|m| m.row_count() > 0) {
@@ -1197,6 +1199,7 @@ fn main() {
     window.on_team_deleted(|| with_window(|app, window| teams_view::deleted(app, window)));
     // ---- profile and overview
     profile_view::wire(&window);
+    publications_view::wire(&window);
     chat_menu::wire(&window);
     overview_view::wire(&window);
     voice_view::wire(&window);
