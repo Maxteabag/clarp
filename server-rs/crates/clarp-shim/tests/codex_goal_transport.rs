@@ -118,7 +118,7 @@ printf '%s\n' \
             json!({"type":"turn.started"}),
             json!({"type":"steer.open"}),
             // A delta is not kept; the user's words are a receipt, once, and no item.
-            json!({"type":"steer.read","id":"steer-1"}),
+            json!({"type":"steer.read","id":"steer-1","confirmed":true}),
             json!({"type":"item.completed","item":{"type":"agent_message","id":"item","text":"done"}}),
             json!({"type":"turn.completed","usage":null}),
         ]
