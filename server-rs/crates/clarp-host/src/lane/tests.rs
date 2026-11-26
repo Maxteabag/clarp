@@ -160,11 +160,20 @@ fn a_lane_is_named_by_its_agent_and_tool_in_the_run_folder() {
     );
 }
 
+/// How long a quiet lane says nothing when asked to leave before it hangs up.
+const QUIET_FOR: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// A lane process as the Host sees it: it answers `inspect` with `status`, holds its owner lock
 /// until it is retired, and refuses `retire` while it holds a claim. Every op it was asked is
 /// kept, in order. With `"refuses": true` in `status` it says it is idle and refuses `retire`
 /// all the same (a turn claimed it after it was looked at); with `"quiet": true` it takes
-/// `retire` and never answers it, its socket staying where it is.
+/// `retire`, says nothing for [`QUIET_FOR`], longer than e6a9915e's half second, and hangs up,
+/// its socket staying where it is. Asked to leave while idle, it goes as a lane's process does:
+/// by default its socket goes before it says so (Codex, Claude Code); with `"answers_after_ms"`
+/// it is a Muse or OpenCode lane started before issue 908, which keeps its socket while its tool
+/// ends for that long, lets go, says it goes, and only then removes its socket; with
+/// `"lingers_ms"` it is one started since, which says it goes at once, its tool ending for that
+/// long before it lets go and its socket goes.
 struct FakeLane {
     endpoint: Endpoint,
     asked: Arc<Mutex<Vec<String>>>,
@@ -188,7 +197,6 @@ impl FakeLane {
         let socket = endpoint.socket().to_owned();
         std::thread::spawn(move || {
             let mut owner = Some(owner);
-            let mut unanswered = Vec::new();
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let mut line = String::new();
@@ -197,10 +205,33 @@ impl FakeLane {
                 let op = request["op"].as_str().unwrap().to_owned();
                 seen.lock().unwrap().push(op.clone());
                 if op == "retire" && status["quiet"] == json!(true) {
-                    unanswered.push(stream);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(QUIET_FOR);
+                        drop(stream);
+                    });
                     continue;
                 }
                 let busy = !status["claim"].is_null() || status["refuses"] == json!(true);
+                let goes = |stream: &mut std::os::unix::net::UnixStream| {
+                    let mut frame = json!({"ok": true, "state": status}).to_string();
+                    frame.push('\n');
+                    stream.write_all(frame.as_bytes()).unwrap();
+                };
+                let ending = |ms: &Value| std::time::Duration::from_millis(ms.as_u64().unwrap());
+                if op == "retire" && !busy && !status["answers_after_ms"].is_null() {
+                    std::thread::sleep(ending(&status["answers_after_ms"]));
+                    owner.take();
+                    goes(&mut stream);
+                    let _ = std::fs::remove_file(&socket);
+                    return;
+                }
+                if op == "retire" && !busy && !status["lingers_ms"].is_null() {
+                    goes(&mut stream);
+                    std::thread::sleep(ending(&status["lingers_ms"]));
+                    owner.take();
+                    let _ = std::fs::remove_file(&socket);
+                    return;
+                }
                 let reply = match op.as_str() {
                     "retire" if busy => {
                         json!({"ok": false, "error": "the Codex lane still owns live work"})
@@ -1389,9 +1420,11 @@ fn a_lane_that_left_for_one_start_is_no_place_for_another() {
 
 #[test]
 fn a_lane_that_says_nothing_when_asked_to_leave_is_no_place() {
-    // Over a count of one, a busy lane and an idle one that takes the ask to leave and never
-    // answers, its socket still there. bd4a41ad2 counted it as gone after 500 ms, and the new
-    // lane started beside it. It did not leave: the lane does not start.
+    // Over a count of one, a busy lane and an idle one that takes the ask to leave and says
+    // nothing until it hangs up, its socket still there. bd4a41ad2 counted it as gone after
+    // 500 ms, and the new lane started beside it. It did not leave: the lane does not start.
+    // (One silent until the 30 s bound of a request ends the same way, and is not waited for
+    // here.)
     let run = run_dir("quiet");
     let mut said = status("t", "d", 100_000, false);
     said["quiet"] = json!(true);
@@ -1401,6 +1434,71 @@ fn a_lane_that_says_nothing_when_asked_to_leave_is_no_place() {
     assert_eq!(quiet.asked().last().unwrap(), "retire");
     assert!(quiet.endpoint.socket().exists());
     std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn in_a_mixed_rollout_lanes_from_before_and_since_both_leave_and_silence_or_refusal_does_not() {
+    // A Host update leaves running lanes with the shim they started with. A Muse or OpenCode lane
+    // from before issue 908 keeps its socket while its tool ends, and says it goes only then,
+    // past half a second. e6a9915e stopped listening after 500 ms and counted it as not left:
+    // with it among the lanes that had to leave, the new lane did not start and its turn ran
+    // cold. Its answer is waited for within a request's bound, as before 908, and counts.
+    const ENDING: std::time::Duration = std::time::Duration::from_millis(800);
+    let ending = json!(800);
+    let lane = |run: &Path, agent: &str, idle_ms: u64, key: &str| {
+        let mut said = status("t", "d", idle_ms, false);
+        said[key] = if key.ends_with("_ms") {
+            ending.clone()
+        } else {
+            json!(true)
+        };
+        FakeLane::start(run, agent, said)
+    };
+    // A count of two: the busy lane and the one about to start. Both idle lanes must leave, the
+    // one from before asked first.
+    let run = run_dir("mixed");
+    let lanes = [
+        lane(&run, "before", 100_000, "answers_after_ms"),
+        lane(&run, "since", 90_000, "lingers_ms"),
+    ];
+    let _busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
+    let began = std::time::Instant::now();
+    assert!(make_room(&run, &own_of(&run), counted(2), false).is_some());
+    assert!(began.elapsed() >= ENDING, "the late answer was waited for");
+    assert_eq!(retired(&lanes), [0, 1]);
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // A lane started since counts by its answer, at once, while its tool is still ending and
+    // its socket still there.
+    let run = run_dir("mixed-early");
+    let since = lane(&run, "since", 90_000, "lingers_ms");
+    let _busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
+    let began = std::time::Instant::now();
+    assert!(make_room(&run, &own_of(&run), counted(2), false).is_some());
+    assert!(began.elapsed() < ENDING, "{:?}", began.elapsed());
+    assert!(since.endpoint.socket().exists());
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // Beside a lane from before that left, one that refuses or says nothing past half a second
+    // still did not leave: the lane does not start.
+    for (case, run) in [
+        ("refuses", run_dir("mixed-refuses")),
+        ("quiet", run_dir("mixed-quiet")),
+    ] {
+        let lanes = [
+            lane(&run, "before", 100_000, "answers_after_ms"),
+            lane(&run, case, 90_000, case),
+        ];
+        let _busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
+        assert!(
+            make_room(&run, &own_of(&run), counted(2), false).is_none(),
+            "{case}"
+        );
+        assert_eq!(retired(&lanes), [0, 1], "{case}");
+        assert!(lanes[0].endpoint.released().unwrap(), "{case}: it left");
+        assert!(lanes[1].endpoint.socket().exists(), "{case}");
+        std::fs::remove_dir_all(&run).unwrap();
+    }
 }
 
 #[test]
@@ -1503,10 +1601,11 @@ fn only_the_lane_looked_at_is_asked_to_leave_and_no_answer_about_it_touches_its_
     // A lane is looked at, leaves, and a new lane of the same agent takes its socket's name.
     let run = run_dir("instance");
     let old = FakeLane::start(&run, "a", status("t", "d", 100_000, false));
-    let looked = seen(&old);
     // A second name keeps the old socket file's inode taken, so the new one cannot reuse it:
-    // in this test both lanes are of this process, so their inodes alone tell them apart.
+    // in this test both lanes are of this process, so their files alone tell them apart. The
+    // look comes after it, as a new name changes the file's ctime.
     std::fs::hard_link(old.endpoint.socket(), run.join("a-old.keep")).unwrap();
+    let looked = seen(&old);
     old.endpoint
         .ask::<Status>(&clarp_shim::lane::Lifecycle::Retire)
         .unwrap();

@@ -428,9 +428,9 @@ fn a_muse_turn_refused_for_a_changed_login_runs_on_a_lane_under_the_new_one() {
 
 /// Issue 908. An idle Muse lane asked to leave says it goes as soon as it has taken the ask,
 /// while Muse still ends in order (here in 1.8 s of the 2 it is given): a Host making room counts
-/// its place then. Before, the answer came only after Muse had ended, so a start that gives an
-/// ask half a second counted no place. The lane still lets go of its owner lock only once Muse
-/// has been reaped.
+/// its place then. Before, the answer came only after Muse had ended, and a start making room
+/// waited that long for it (a lane from before still answers so, and is still waited for). The
+/// lane still lets go of its owner lock only once Muse has been reaped.
 #[test]
 fn an_idle_muse_lane_asked_to_leave_says_it_goes_before_muse_has_ended() {
     let place = Place::new("muse-lane-slow-end");

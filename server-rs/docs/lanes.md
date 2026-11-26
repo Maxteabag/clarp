@@ -145,20 +145,40 @@ as before.
   left to make room`).
 - **Only a lane that left counts as a place** (issue 908). An idle lane asked to leave counts
   once it said it goes, or its socket went after it was asked. One that refuses (a turn claimed
-  it after it was looked at), says nothing for half a second with its socket still there, or had
-  gone before it was asked counts as it was; so does one some start merely chose. Where the
+  it after it was looked at), says nothing with its socket still there (until the 30 s bound of
+  any request to a lane, or until it hangs up), or had gone before it was asked counts as it
+  was; so does one some start merely chose. Where the
   limits could be met, they are checked again once the lanes were asked: if one of those that
   had to leave did not, the lane does not start, even when those that left would have paid for
   it. An idle lane that takes the ask says so at once, before its tool ends: Codex, Muse and
   OpenCode as soon as they have taken it for good (Muse's end takes up to 2 s, OpenCode's server
   up to 5 s), Claude Code by removing its socket first. Each still lets go of its owner lock only
   once its tool has been reaped, and a busy or claimed lane still refuses.
+  - *Lanes from before.* A Host update leaves running lanes as they are, with the shim they were
+    started with. A Muse or OpenCode lane started before this keeps its socket and says it goes
+    only once its tool has ended and been reaped (up to 2 s for Muse; 5 s for OpenCode's server,
+    more where it has to be killed). Its answer is waited for on the same connection, within the
+    same 30 s bound every retirement had before, and counts once it comes; such a start takes
+    that long. Those lanes leave as their idle time runs out or the Host retires them, and lanes
+    started since answer at once.
+  - *Memory held twice for a moment.* A lane that answers at once is counted as gone while its
+    tool is still ending, so the lane started in its place can run beside it for that long
+    (Claude Code and Muse up to 2 s, OpenCode's server up to 5 s, more where it has to be killed),
+    and the machine's memory holds both. The count and the budget are kept by what the lanes say,
+    not by that overlap; a lane from before, which answers only once reaped, adds none.
 - **Only the lane looked at is asked** (issue 908). A lane is known by the instance a look
   reached: its socket file, the same before and after the connection was made, and the process
   that listened on it. The ask to leave goes only to that instance: its file is looked at before
   connecting, and the connection is checked to have reached that file and that process before
   the ask is sent, so a lane that took its name meanwhile is never asked. Marks are kept by
-  instance, so an ask or an answer about the old lane never touches the mark of the new one.
+  instance, so an ask or an answer about the old lane never touches the mark of the new one, and
+  a lane counted by a look is matched to the marks by the same instance. The socket file is told
+  by its device, inode and ctime, so a new socket given the old one's inode number again is
+  another file unless both were made within one tick of the file system's clock; the process
+  that listens (read from the connection, `SO_PEERCRED`) must match too. Only a lane whose inode
+  number, ctime tick and process id were all reused would be taken for the old one. A mark is
+  forgotten once its file changed or went, or the process that listened on it is gone (and, for
+  a lane that left, no look that may have counted it is still open).
 - **A lane leaving is chosen once, and counted once** (issue 908). Which idle lanes leave is
   chosen under one gate per run folder (`lane/gate.rs`), held only while a start chooses or
   settles. A lane a start chose is marked, so no other start chooses it; one that did not leave
@@ -203,6 +223,12 @@ as before.
   lane were already there: where one place can be made, the helper's runs per turn and his takes
   it; where two can, both start. Neither waits for the other. A start of the agents' own that
   chose before his reached the gate keeps what it chose.
+  - *Where his start is counted.* His turn makes the agent his when its launch is carried out
+    (`<agent>-owner-turn.mark`). His start reaches the gate later: once the agent's own lane was
+    found unusable and has let go of its owner lock (kept, retired, or none there), and the run
+    folder exists, as room is about to be made (`make_room`, before the other lanes are looked
+    at). Until then nothing is kept for it: a helper's start that chooses in that time does not
+    leave room for his.
 - **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
   that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
   at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on

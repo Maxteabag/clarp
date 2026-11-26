@@ -413,10 +413,8 @@ pub(crate) const LEAVE_WAIT: Duration = Duration::from_secs(15);
 /// once, and the lane starts for the next turn (issue 860). Retirements, and any wait no turn
 /// stands behind, keep [`LEAVE_WAIT`].
 pub(crate) const TURN_LEAVE_WAIT: Duration = Duration::from_secs(3);
-/// How long a lane asked to leave for another's room is given to refuse: a refusal comes at
-/// once, and an ask taken by a Claude lane is answered only once its tool has gone.
-const REFUSAL_LOOK: Duration = Duration::from_millis(500);
-/// How often a lane asked to leave for another's room is looked at for its socket going.
+/// How often a lane asked to leave for another's room is looked at for its socket going, while
+/// its answer is waited for.
 const LEAVING_LOOK: Duration = Duration::from_millis(20);
 /// How long a lane ended by its process id is given to have let go of its owner lock.
 const ENDED_WAIT: Duration = Duration::from_secs(2);
@@ -1014,17 +1012,23 @@ impl Endpoint {
     /// Asks an idle lane to leave so another may start in its place, and waits for no exit: the
     /// new lane holds no lock of the old one's (another agent's), so it need not wait for the
     /// old tool to end. A lane that refuses (a turn claimed it since it was looked at) says so
-    /// at once. One that takes the ask says so at once once it has taken it for good (Codex,
-    /// Muse, OpenCode), or removes its socket first and answers once its tool has gone (Claude
-    /// Code, up to its own 2 s limit); nothing is waited for beyond [`REFUSAL_LOOK`] (issue 908).
+    /// at once. One that takes the ask says so at once once it has taken it for good (Codex, and
+    /// Muse and OpenCode lanes started by this Host), or removes its socket first and answers
+    /// once its tool has gone (Claude Code, up to its own 2 s limit). A Muse or OpenCode lane
+    /// started by a Host from before issue 908, which a Host update leaves running, keeps its
+    /// socket and says it goes only once its tool has ended and been reaped (Muse up to 2 s,
+    /// OpenCode's server up to 5 s, and more where it must be killed): its answer is waited for
+    /// on the same connection, within the bound of any request to a lane ([`RPC_TIMEOUT`]), as
+    /// every retirement was before. The socket going is looked at meanwhile, every
+    /// [`LEAVING_LOOK`].
     ///
     /// Only the lane `seen` is asked: the instance a look reached, by its socket file and the
     /// process that listened on it. Its file is looked at before the connection is made, and the
     /// connection itself is checked to have reached that file and that process before the ask is
     /// sent, so a lane that took its name meanwhile is never asked. Whether it left for this
     /// ask: it said it goes, or its socket file went after it was asked. One that refused, said
-    /// nothing with its socket still there, or had gone before the ask (another start's place,
-    /// or its own idle time) did not.
+    /// nothing with its socket still there (until the bound, or until it hung up), or had gone
+    /// before the ask (another start's place, or its own idle time) did not.
     fn asked_to_leave(&self, seen: gate::Instance) -> bool {
         if !seen.is_at(&self.socket) {
             return false;
@@ -1038,19 +1042,21 @@ impl Endpoint {
         let Ok(stream) = Self::send(stream, &Lifecycle::Retire, LEAVING_LOOK) else {
             return false;
         };
-        let until = Instant::now() + REFUSAL_LOOK;
+        let until = Instant::now() + RPC_TIMEOUT;
         let mut input = BufReader::new(stream);
-        let mut said = String::new();
+        // Bytes, kept across the looks: an answer may arrive in parts.
+        let mut said = Vec::new();
         loop {
-            match input.read_line(&mut said) {
+            match input.read_until(b'\n', &mut said) {
                 Ok(0) => return !seen.is_at(&self.socket),
-                Ok(_) => return replied::<Status>(&mut said.as_bytes(), self.tool).is_ok(),
+                Ok(_) => return replied::<Status>(&mut said.as_slice(), self.tool).is_ok(),
                 Err(error) if unanswered(&error) => {
                     // On its way out: its socket is gone, and its answer may wait for its exit.
                     if !seen.is_at(&self.socket) {
                         return true;
                     }
-                    if Instant::now() >= until {
+                    // Silence is no answer, nor is more than any answer can be.
+                    if Instant::now() >= until || said.len() as u64 > MAX_STATE {
                         return false;
                     }
                 }
@@ -1563,7 +1569,7 @@ fn idle_in_order(run: &Path, skip: &Path, for_owner: bool) -> Looked {
         let memory = weight(&lane, &state);
         looked.lanes.push(gate::Counted {
             socket: lane.socket.clone(),
-            id: seen.map(|seen| seen.id),
+            seen,
             bytes: memory,
         });
         looked.held = looked.held.saturating_add(memory);

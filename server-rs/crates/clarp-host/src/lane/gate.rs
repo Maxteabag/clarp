@@ -8,11 +8,12 @@
 //!   it settles: a lane it counted that has left for any start no longer counts, and a lane
 //!   another start was let start that its look does not show counts, until that lane listens
 //!   where every later look sees it, or its launch failed. Two starts never take one place.
-//! - A lane some start has chosen to leave is marked by the socket instance that start looked at,
-//!   so no other start chooses it. Being chosen is no exit: the lane counts as it was. One that
-//!   did not leave (it refused, or said nothing) is unmarked once asked; one that left stays
-//!   marked until no look that may have counted it is still open. A replacement lane that took
-//!   the same name is another instance, and no ask or answer about the old one touches its mark.
+//! - A lane some start has chosen to leave is marked by the instance that start looked at (its
+//!   socket file and the process that listened on it, [`Instance`]), so no other start chooses it.
+//!   Being chosen is no exit: the lane counts as it was. One that did not leave (it refused, or
+//!   said nothing) is unmarked once asked; one that left stays marked until no look that may
+//!   have counted it is still open. A replacement lane that took the same name is another
+//!   instance, and no ask or answer about the old one touches its mark.
 //! - A start for one of the owner's agents is counted at the gate, with what its lane counts at,
 //!   from the moment it begins to look. A start of the agents' own that chooses while his has not
 //!   leaves room for his as if his lane were already there, so where one place can be made, it is
@@ -24,28 +25,49 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
-/// Which socket file a lane listens on, by its device and inode: a lane that leaves and one that
-/// later takes its name are told apart.
-pub(super) type Id = (u64, u64);
-
-pub(super) fn identity(socket: &Path) -> Option<Id> {
-    std::fs::symlink_metadata(socket)
-        .ok()
-        .map(|meta| (meta.dev(), meta.ino()))
+/// Which socket file a lane listens on: its device and inode, and when that inode last changed
+/// (its ctime, set as the lane bound the socket and made it its own). A socket file removed and
+/// one that later takes its name are told apart even where the new one was given the old one's
+/// inode number again, unless both were made within one tick of the file system's clock; the
+/// process that listens tells those apart ([`Instance`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct Id {
+    dev: u64,
+    ino: u64,
+    changed: (i64, i64),
 }
 
-/// The process that listens on the other end of a connection to a lane.
+pub(super) fn identity(socket: &Path) -> Option<Id> {
+    std::fs::symlink_metadata(socket).ok().map(|meta| Id {
+        dev: meta.dev(),
+        ino: meta.ino(),
+        changed: (meta.ctime(), meta.ctime_nsec()),
+    })
+}
+
+/// The process that listens on the other end of a connection to a lane: the one that bound and
+/// listened on its socket, as the kernel recorded it then.
 fn peer(stream: &UnixStream) -> Option<i32> {
     rustix::net::sockopt::socket_peercred(stream)
         .ok()
         .map(|cred| cred.pid.as_raw_nonzero().get())
 }
 
+/// Whether the process `pid` still exists, one not yet reaped included. Where that cannot be
+/// told, it is taken to.
+fn alive(pid: i32) -> bool {
+    rustix::process::Pid::from_raw(pid)
+        .is_none_or(|pid| rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH))
+}
+
 /// The lane one look reached: its socket file, the same before and after the connection was
-/// made, and the process that listened on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// made, and the process that listened on it. Lanes are known by it end to end: what a start
+/// counted, the marks of those chosen, the ask to leave, and what an answer touches. Two
+/// instances are one only where the socket file has the same device, inode and ctime and the
+/// same process listens on it (or that process could not be told on either).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct Instance {
-    pub id: Id,
+    id: Id,
     pid: Option<i32>,
 }
 
@@ -72,6 +94,12 @@ impl Instance {
     pub(super) fn is_reached_by(&self, socket: &Path, stream: &UnixStream) -> bool {
         self.is_at(socket) && peer(stream) == self.pid
     }
+
+    /// Whether this instance may still be there: its socket file is still its own, and the
+    /// process that listened on it still exists. Read under the gate, so it asks nothing.
+    fn is_there(&self, socket: &Path) -> bool {
+        self.is_at(socket) && self.pid.is_none_or(alive)
+    }
 }
 
 /// A lane as a start counted it: where it listens, which instance answered (`None` where that
@@ -79,7 +107,7 @@ impl Instance {
 #[derive(Debug, Clone)]
 pub(super) struct Counted {
     pub socket: PathBuf,
-    pub id: Option<Id>,
+    pub seen: Option<Instance>,
     pub bytes: u64,
 }
 
@@ -135,7 +163,7 @@ struct State {
     looks: BTreeSet<u64>,
     /// The owner's starts that have not chosen yet, by their look: what their lanes count at.
     ahead: HashMap<u64, u64>,
-    marks: HashMap<Id, Mark>,
+    marks: HashMap<Instance, Mark>,
     /// By the look that admitted it.
     admitted: HashMap<u64, Admitted>,
 }
@@ -151,12 +179,13 @@ impl State {
         let now = self.at;
         let oldest = self.looks.first().copied();
         let none_before = |at: u64| oldest.is_none_or(|oldest| oldest > at);
-        self.marks.retain(|id, mark| {
-            if identity(&mark.socket) == Some(*id) {
+        self.marks.retain(|instance, mark| {
+            if instance.is_there(&mark.socket) {
                 return true;
             }
-            // Chosen and not left, and gone by itself or taken by another lane: its start's ask
-            // finds no such lane, and nothing counts it as gone.
+            // Chosen and not left, and gone by itself or taken by another lane (its file changed
+            // or removed, or the process that listened on it gone): its start's ask finds no such
+            // lane, and nothing counts it as gone.
             if !mark.left {
                 return false;
             }
@@ -170,8 +199,8 @@ impl State {
         let mut since = Since::default();
         for lane in lanes {
             if lane
-                .id
-                .and_then(|id| self.marks.get(&id))
+                .seen
+                .and_then(|seen| self.marks.get(&seen))
                 .is_some_and(|mark| mark.left)
             {
                 since.left += 1;
@@ -210,7 +239,7 @@ impl State {
 
 /// What a start sees when it chooses.
 pub(super) struct Seen<'a> {
-    marks: &'a HashMap<Id, Mark>,
+    marks: &'a HashMap<Instance, Mark>,
     /// The owner's starts it leaves room for: none for a start of his own.
     pub ahead: Coming,
     pub since: Since,
@@ -220,7 +249,7 @@ impl Seen<'_> {
     /// Whether the lane of `socket`, as the look reached it, may still be chosen: that instance
     /// is still there, and no start chose it.
     pub(super) fn free(&self, socket: &Path, seen: Instance) -> bool {
-        seen.is_at(socket) && !self.marks.contains_key(&seen.id)
+        seen.is_at(socket) && !self.marks.contains_key(&seen)
     }
 
     /// Every lane still to come that the start leaves room for.
@@ -279,7 +308,7 @@ pub(super) struct Look {
     /// The owner's starts this one left room for when it chose.
     ahead: Vec<u64>,
     /// The lanes it chose and has not settled yet.
-    chosen: Vec<Id>,
+    chosen: Vec<Instance>,
 }
 
 impl Look {
@@ -307,9 +336,9 @@ impl Look {
         };
         let (decided, chosen) = choose(&seen);
         for (socket, instance) in chosen {
-            self.chosen.push(instance.id);
+            self.chosen.push(instance);
             state.marks.insert(
-                instance.id,
+                instance,
                 Mark {
                     socket,
                     left: false,
@@ -340,15 +369,15 @@ impl Look {
             if *left {
                 state
                     .marks
-                    .entry(instance.id)
+                    .entry(*instance)
                     .or_insert_with(|| Mark {
                         socket: socket.clone(),
                         left: false,
                         gone_at: None,
                     })
                     .left = true;
-            } else if state.marks.get(&instance.id).is_some_and(|mark| !mark.left) {
-                state.marks.remove(&instance.id);
+            } else if state.marks.get(instance).is_some_and(|mark| !mark.left) {
+                state.marks.remove(instance);
             }
         }
         self.chosen.clear();
@@ -381,9 +410,9 @@ impl Drop for Look {
         let mut state = self.gate.state();
         state.looks.remove(&self.at);
         state.ahead.remove(&self.at);
-        for id in self.chosen.drain(..) {
-            if state.marks.get(&id).is_some_and(|mark| !mark.left) {
-                state.marks.remove(&id);
+        for instance in self.chosen.drain(..) {
+            if state.marks.get(&instance).is_some_and(|mark| !mark.left) {
+                state.marks.remove(&instance);
             }
         }
     }

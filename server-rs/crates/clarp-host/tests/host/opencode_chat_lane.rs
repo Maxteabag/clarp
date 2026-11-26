@@ -2370,8 +2370,9 @@ fn a_provider_out_of_free_usage_ends_the_turn_as_a_usage_limit_on_a_cold_lane_to
 /// Issue 908. An idle lane asked to leave says it goes as soon as it has taken the ask, while its
 /// server still ends (here in three seconds; OpenCode's own end may take five): a Host making
 /// room counts its place then, not once the server has gone. Before, the answer came only after
-/// the server had ended, so a start that gives an ask half a second counted no place. The lane
-/// still lets go of its owner lock only once its server has been reaped.
+/// the server had ended, and a start making room waited that long for it (a lane from before
+/// still answers so, and is still waited for). The lane still lets go of its owner lock only once
+/// its server has been reaped.
 #[test]
 fn an_idle_lane_asked_to_leave_says_it_goes_before_its_slow_server_has_ended() {
     let world = world("opencode-lane-slow-end", "");
