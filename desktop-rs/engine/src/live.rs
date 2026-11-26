@@ -47,6 +47,12 @@ pub(crate) struct Live {
     pub turn_summaries: bool,
     /// A user row read into another turn names it (`read_into`, contract 189).
     pub read_into: bool,
+    /// The Host packs `/events` with gzip on request (`events_gzip`, contract
+    /// 198): the stream asks for it with `gzip=1`, and the HTTP client
+    /// (which sends `Accept-Encoding: gzip`) unpacks it as it arrives.
+    pub events_gzip: bool,
+    /// Whether the stream's query carries `gzip=1` now.
+    gzip_asked: bool,
     /// A turn that did not complete says why on its end (`turn_end_reason`).
     pub turn_reasons: bool,
     /// The Host speaks an answer only when its send asks for it
@@ -174,6 +180,7 @@ impl Engine {
         self.live.explanation_setting = has("tool_explanation_setting");
         self.live.turn_summaries = has("log_turn_summary");
         self.live.read_into = has("read_into");
+        self.live.events_gzip = has("events_gzip");
         self.live.turn_reasons = has(clarp_core::turn_reason::FEATURE);
         self.live.spoken_when_asked = has("spoken_when_asked");
         if enabled != self.live.enabled {
@@ -310,10 +317,16 @@ impl Engine {
     /// running stream reopens (resuming by event id) only when they changed.
     pub(crate) fn sync_live_subscription(&mut self, reopen: bool) {
         let wanted = self.live.enabled.then(|| self.live_sessions());
-        if wanted == self.live.subscribed {
+        let gzip = self.live.events_gzip;
+        if wanted == self.live.subscribed && gzip == self.live.gzip_asked {
             return;
         }
-        self.sse.set_query(wanted.iter().map(|s| ("live".to_owned(), s.clone())).collect());
+        let mut query: Vec<(String, String)> = wanted.iter().map(|s| ("live".to_owned(), s.clone())).collect();
+        if gzip {
+            query.push(("gzip".to_owned(), "1".to_owned()));
+        }
+        self.sse.set_query(query);
+        self.live.gzip_asked = gzip;
         let before: std::collections::HashSet<String> = self.live.subscribed.iter().flat_map(|s| s.split(',')).map(str::to_owned).collect();
         self.live.subscribed = wanted;
         if reopen && self.sse.running() {
