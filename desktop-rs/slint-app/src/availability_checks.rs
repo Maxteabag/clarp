@@ -33,6 +33,9 @@ fn restarting() -> serde_json::Value {
         "since_ms": now(), "back_at_ms": now() + 19_000, "queue_ahead": 0, "last_alive_ms": null}}})
 }
 
+/// How long the Host is down while it updates.
+const OUTAGE_S: f64 = 4.0;
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
@@ -96,6 +99,10 @@ pub fn availability_check(out: String) {
         ("host updating", Box::new(|_, _, _| {
             let sent = control("/__control/event", &json!({"type": "host-updating", "text": "Host updating", "since_ms": now(), "back_at_ms": now() + 39_500}));
             check(sent.is_ok(), &format!("the Host says it updates: {sent:?}"));
+            // Then it goes down, as a restart does: no snapshot answers
+            // meanwhile (one that did would rightly clear the line).
+            let down = control("/__control/outage", &json!({"seconds": OUTAGE_S}));
+            check(down.is_ok(), &format!("the Host goes down: {down:?}"));
             true
         })),
         shows("host updating", "Host updating · back in ~40 s", out.clone(), "availability-04-host-updating"),
@@ -104,6 +111,7 @@ pub fn availability_check(out: String) {
             check(!lines.is_empty() && lines.iter().all(|l| l.starts_with("Host updating")), &format!("every row says the Host updates: {lines:?}"));
             true
         })),
+        ("host back", Box::new(|_, _, elapsed| elapsed > Duration::from_secs_f64(OUTAGE_S + 0.5))),
         ("reconnect", Box::new({
             let mut asked = false;
             move |app, _, elapsed| {
