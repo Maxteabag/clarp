@@ -1001,15 +1001,14 @@ pub fn live_check(out: String) {
         })),
         ("anchor steered settled", Box::new(move |app, _window, elapsed| {
             let working = format!("live:fold:{ANCHOR_TURN}");
-            if !live_row(&working).is_some_and(|r| r.live.hint.starts_with("Worked")) || elapsed < Duration::from_millis(600) {
+            if !live_row(&working).is_some_and(|r| r.live.title.starts_with("Worked")) || elapsed < Duration::from_millis(600) {
                 return false;
             }
             let before = format!("live:fold:{ANCHOR_TURN}@{ANCHOR_QUEUED}");
             let order = anchor_order(&[REAL_PROMPT, ANCHOR_NEXT, &before, ANCHOR_QUEUED, &working]);
             check(in_order(&order), &format!("settled, the same order: {order:?}"));
             let title = |key: &str| live_row(key).map(|r| r.live.title.to_string()).unwrap_or_default();
-            let hint = live_row(&working).map(|r| r.live.hint.to_string()).unwrap_or_default();
-            check(title(&before) == "1 step" && title(&working) == "1 step" && hint == "Worked for 14s · 1 tool", &format!("a quiet line for each part, the worked time the last one's hint (#888): {:?} {:?} {hint:?}", title(&before), title(&working)));
+            check(title(&before) == "1 tool" && title(&working) == "Worked for 14s · 1 tool", &format!("the worked time on the last work row: {:?} {:?}", title(&before), title(&working)));
             shot(&out24, "live-12d-anchor-steered-settled");
             app.engine.borrow_mut().set_activity_mode(clarp_core::presentation::ALWAYS_VISIBLE);
             crate::pump();
