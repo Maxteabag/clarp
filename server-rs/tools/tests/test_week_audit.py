@@ -42,7 +42,8 @@ def log(*rows) -> tuple:
 
 
 EMPTY_QUEUE = (200, {"items": [], "paused": False, "revision": 1, "steerable": False})
-DOWN = (503, {"error": "unavailable"})
+SECRET = "words of the Host that stay out of the report"
+DOWN = (503, {"error": SECRET})
 
 
 @pytest.fixture
@@ -90,6 +91,7 @@ def audit(host, tmp_path, *args):
 def test_an_agent_whose_log_is_not_read_stays_in_a_fleet_report_and_fails_it(host, tmp_path):
     _, answers = host
     agents(answers, "quiet", "unread")
+    answers[("/agents/snapshot", "")][1]["agents"].append({"backend": "claude"})  # no session
     answers[("/log", "quiet")] = log()
     answers[("/turn-queue", "quiet")] = EMPTY_QUEUE
     answers[("/log", "unread")] = DOWN
@@ -98,11 +100,32 @@ def test_an_agent_whose_log_is_not_read_stays_in_a_fleet_report_and_fails_it(hos
 
     assert run.returncode == 4, run.stdout
     assert report["agents"]["unread"]["gaps"] == [
-        {"source": "log", "status": 503, "problem": "HTTP 503: unavailable", "pages": 0}]
+        {"source": "log", "status": 503, "problem": "HTTP error status", "pages": 0}]
     coverage = report["coverage"]
-    assert (coverage["agents_requested"], coverage["agents_read_whole"], coverage["agents_incomplete"]) == (2, 1, 1)
-    assert not coverage["complete"]
-    assert "COVERAGE INCOMPLETE" in run.stdout and "gap: unread log HTTP 503" in run.stdout
+    assert (coverage["agents_requested"], coverage["agents_read_whole"], coverage["agents_incomplete"]) == (3, 1, 2)
+    assert [(found["source"], found["problem"]) for found in coverage["gaps"]] == [
+        ("snapshot", "a roster entry has no session"), ("log", "HTTP error status")]
+    assert "COVERAGE INCOMPLETE" in run.stdout and "gap: unread log HTTP error status" in run.stdout
+    # The Host's own error text is not kept: only the source, the status and a fixed sentence.
+    assert SECRET not in run.stdout and SECRET not in (tmp_path / "report.json").read_text()
+
+
+@pytest.mark.parametrize("page, code, problem", [
+    ({"has_more": False}, 4, "no turns list"),
+    ({"turns": None, "has_more": False}, 4, "no turns list"),
+    ({"turns": [], "has_more": True}, 4, "an empty page says it has more"),
+    ({"turns": [], "has_more": False}, 0, None),  # an agent with nothing yet is read whole
+])
+def test_a_log_page_is_whole_only_with_its_turns_list(host, tmp_path, page, code, problem):
+    _, answers = host
+    agents(answers, "a")
+    answers[("/log", "a")] = (200, page)
+    answers[("/turn-queue", "a")] = EMPTY_QUEUE
+
+    run, report = audit(host, tmp_path, "--session", "a")
+
+    assert run.returncode == code, run.stdout
+    assert [found["problem"] for found in report["coverage"]["gaps"]] == ([problem] if problem else [])
 
 
 @pytest.mark.parametrize("queue, code, lost, unconfirmed", [

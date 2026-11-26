@@ -1414,8 +1414,10 @@ and the current queue (`evidence` in the report). A backend or tool replay can l
 row (#933), so a message its backend ran twice can read as once: it certifies no native delivery.
 
 A read that was not whole is a gap, kept per agent and source (`gaps`: `log`, `turn-queue`,
-`snapshot`; the HTTP status and what was wrong), with `coverage` (`agents_requested`,
-`agents_read_whole`, `agents_incomplete`, `complete`). An agent with a gap stays in a fleet report. A
+`snapshot`; the HTTP status and a fixed sentence of what was wrong, never the Host's own text), with
+`coverage` (`agents_requested`, `agents_read_whole`, `agents_incomplete`, `complete`). A `/log` page is
+whole only with its `turns` list, and an empty one only when it claims no more. An agent with a gap,
+and a roster entry without a session, stays in a fleet report. A
 message that could only be called lost because the queue was not read is `unconfirmed`, never LOST.
 It exits 0 when every read was whole and nothing was found, 1 for findings on whole reads, 4 when a
 read was not whole (its findings still listed), 2 for a bad argument and 3 when the Host or its
