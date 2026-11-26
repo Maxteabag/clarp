@@ -194,6 +194,12 @@ message_search = {"on": False, "partial": False, "page": 0}
 # until /__control/queue-steer turns it on. Then GET /turn-queue items carry
 # `steerable` (a `waiting` item of the user's while its agent works).
 queue_steer = {"on": False}
+# What Send does while the agent works (feature send_while_busy, #920): off
+# until /__control/send-while-busy turns it on. Then GET/POST /send-settings
+# answer {"while_busy": ...}, a POST broadcasts send-settings-updated, and a
+# /send answer carries what was done (`while_busy`) and, once after the
+# control sets one, a `fallback`.
+send_busy = {"on": False, "while_busy": "steer", "fallback": None}
 # One agent's change in its roster event (feature roster_fields, Rust Host
 # contract 182) and the read of one row, GET /agents/<session> (agent_row,
 # 183): off until /__control/roster-rows turns them on.
@@ -1711,6 +1717,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("message_search")
             if queue_steer["on"]:
                 features.append("queue_steer")
+            if send_busy["on"]:
+                features.append("send_while_busy")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
             if chat_view.get("helper"):
@@ -2022,6 +2030,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, tool_explanation_settings)
         if url.path == "/coordination-settings":
             return self.reply(200, {"coordination_visibility": coordination["visibility"]})
+        if url.path == "/send-settings":
+            if not send_busy["on"]:
+                return self.reply(404, {"error": "not found"})
+            record({"method": "GET", "path": url.path})
+            return self.reply(200, {"while_busy": send_busy["while_busy"]})
         if url.path == "/lane-settings":
             if not lanes["on"]:
                 return self.reply(404, {"error": "not found"})
@@ -2489,6 +2502,26 @@ class Handler(BaseHTTPRequestHandler):
             global spoken_when_asked
             spoken_when_asked = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/send-while-busy":
+            # Test control: send_while_busy on or off (read from /server-info
+            # on connecting), the Host's setting, and the next send's fallback.
+            send_busy["on"] = bool(body.get("on", send_busy["on"]))
+            if "while_busy" in body:
+                send_busy["while_busy"] = body["while_busy"]
+            if "fallback" in body:
+                send_busy["fallback"] = body["fallback"]
+            return self.reply(200, {"ok": True})
+        if url.path == "/send-settings":
+            if not send_busy["on"]:
+                return self.reply(404, {"error": "not found"})
+            record({"method": "POST", "path": url.path, "body": body})
+            value = body.get("while_busy")
+            if value not in ("steer", "after_turn", "take_over"):
+                return self.reply(400, {"error": "while_busy must be steer, after_turn or take_over"})
+            send_busy["while_busy"] = value
+            self.reply(200, {"while_busy": value})
+            broadcast({"type": "send-settings-updated", "while_busy": value})
+            return
         if url.path == "/__control/queue-steer":
             queue_steer["on"] = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
@@ -3031,7 +3064,14 @@ class Handler(BaseHTTPRequestHandler):
                 for agent in agents:
                     if agent["session"] == session:
                         agent["head_revision"] = revision
-            self.reply(200, {"ok": True})
+            answer = {"ok": True}
+            if send_busy["on"] and body.get("while_busy"):
+                answer["while_busy"] = body["while_busy"]
+                if send_busy["fallback"]:
+                    answer["fallback"] = send_busy["fallback"]
+                    answer["while_busy"] = send_busy["fallback"].get("to", body["while_busy"])
+                    send_busy["fallback"] = None
+            self.reply(200, answer)
             broadcast({"type": "agent-state", "session": session, "kind": "thinking", "ts": int(time.time() * 1000)})
             broadcast({"type": "transcript-updated", "session": session})
             broadcast({"type": "user-notification", "session": session, "persona": "Rachel", "preview": "Echo"})

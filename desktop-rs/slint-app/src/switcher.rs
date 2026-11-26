@@ -85,6 +85,9 @@ pub struct Toggles {
     pub preview_versions: bool,
     /// The queue strip shows: its command says Hide queue, else Show queue.
     pub queue_shown: bool,
+    /// The connected Host lets Send's choice while the agent works be set
+    /// (`send_while_busy`): one command per choice.
+    pub send_while_busy: bool,
 }
 
 /// The commands; the settings come from the settings page (`settings`).
@@ -155,6 +158,9 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("release-agent", "Ctrl+Shift+R"),
         ("stop-agent", "Ctrl+."),
         ("talk", "Ctrl+Shift+Space"),
+        ("send-busy-steer", ""),
+        ("send-busy-after-turn", ""),
+        ("send-busy-take-over", ""),
     ]
     .into_iter()
     .map(|(action, key)| command(action, key))
@@ -163,6 +169,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
     if let Some(queue) = rows.iter_mut().find(|c| c.target == "toggle-queue") {
         queue.label = if toggles.queue_shown { "Hide queue" } else { "Show queue" }.into();
     }
+    rows.retain(|c| !c.target.starts_with("send-busy-") || toggles.send_while_busy);
     rows
 }
 
@@ -421,7 +428,7 @@ mod tests {
 
     #[test]
     fn every_command_is_described_with_aliases() {
-        for item in commands(Toggles { preview_versions: true, ..Toggles::default() }) {
+        for item in commands(Toggles { preview_versions: true, send_while_busy: true, ..Toggles::default() }) {
             let entry = crate::catalogue::find(&item.target);
             assert!(entry.is_some_and(|e| !e.description.is_empty() && e.aliases.len() >= 2), "{} ({}) needs a catalogue entry", item.label, item.target);
             assert_eq!(item.description, entry.map(|e| e.description).unwrap_or_default());

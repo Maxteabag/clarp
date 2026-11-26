@@ -36,6 +36,7 @@ mod host_status;
 pub mod lifecycle;
 mod live;
 mod queue;
+mod send_settings;
 mod stop;
 pub mod search;
 mod panels;
@@ -180,6 +181,8 @@ enum Message {
     PeerCredential { base: String, token: String, generation: u64 },
     /// Peers that could not be reached are tried again.
     PeersDue(u64),
+    /// The chip's line for a send the Host handled otherwise is over.
+    SendNoticeDue { session: String, token: u64 },
 }
 
 pub struct Config {
@@ -280,6 +283,7 @@ pub struct Engine {
     pending_log_mode: HashMap<String, String>,
     coordination: coordination::Coordination,
     lanes: lanes::Lanes,
+    send_settings: send_settings::SendSettings,
     transits: transit::Transits,
     chat_view: chat_view::ChatView,
     /// One agent's change patched or read alone (issue 841).
@@ -442,6 +446,7 @@ impl Engine {
             pending_log_mode: HashMap::new(),
             coordination: coordination::Coordination::default(),
             lanes: lanes::Lanes::default(),
+            send_settings: Default::default(),
             transits: transit::Transits::default(),
             chat_view: chat_view::ChatView::default(),
             roster_rows: roster_rows::RosterRows::default(),
@@ -528,6 +533,7 @@ impl Engine {
                 Message::SearchCache(chats) => self.search_cache_read(chats),
                 Message::FormEventsDue { key, token } => self.form_events_due(&key, token),
                 Message::PeerCredential { base, token, generation } => self.peer_credential(&base, token, generation),
+                Message::SendNoticeDue { session, token } => self.send_notice_due(&session, token),
                 Message::PeersDue(generation) => self.peers_due(generation),
             }
         }
@@ -925,6 +931,7 @@ impl Engine {
         // The features are read again from /server-info.
         self.reset_live();
         self.reset_lanes();
+        self.reset_send_settings();
         self.reset_form_events();
         self.reset_artifact_summary();
         self.reset_render_specs();
@@ -1529,6 +1536,11 @@ impl Engine {
             "session": session, "text": trimmed, "client_msg_id": client_id, "client": "desktop",
             "synthesize_audio": !self.muted, "hands_free": hands_free, "queue_if_busy": queue_if_busy,
         });
+        // What Send does while the agent works, where the Host offers the
+        // choice (`send_while_busy`); an older Host gets today's body.
+        if let Some(mode) = self.send_while_busy_value(queue_if_busy) {
+            body["while_busy"] = json!(mode.as_str());
+        }
         if !trace.is_empty() {
             body["trace_id"] = json!(trace);
         }
@@ -1634,7 +1646,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) || self.roster_rows_json(tag, object) {
+        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.send_settings_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) || self.roster_rows_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1656,6 +1668,7 @@ impl Engine {
             self.mutate_roster(|r| r.set_availability_feature(clarp_core::availability::offered_by(object)));
             self.coordination_server_info(object);
             self.lanes_server_info(object);
+            self.send_settings_server_info(object);
             self.transit_server_info(object);
             self.chat_view_server_info(object);
             self.roster_rows_server_info(object);
@@ -1685,6 +1698,7 @@ impl Engine {
             // the chat that sent it, even after its timer marked it failed.
             if let Some(session) = self.send_answered(client_id) {
                 self.with_conversation(&session, |c| c.confirm_delivery(client_id));
+                self.send_settings_send_answer(&session, object);
                 self.request_delta(&session);
             }
         }
@@ -1695,7 +1709,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.send_settings_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
@@ -1874,6 +1888,7 @@ impl Engine {
             }
             "live" => self.live_event(event),
             "lane-settings-updated" => self.lanes_event(),
+            "send-settings-updated" => self.send_settings_event(event),
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));
                 self.stop_state_event(&session, event);

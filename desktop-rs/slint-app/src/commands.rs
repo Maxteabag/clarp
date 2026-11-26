@@ -497,6 +497,19 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 return false;
             }
         }
+        // What Send does while the agent works (`send_while_busy`), one command per choice.
+        "send-busy-steer" | "send-busy-after-turn" | "send-busy-take-over" => {
+            use clarp_core::send_while_busy::WhileBusy;
+            let mode = match action {
+                "send-busy-steer" => WhileBusy::Steer,
+                "send-busy-after-turn" => WhileBusy::AfterTurn,
+                _ => WhileBusy::TakeOver,
+            };
+            if !app.engine.borrow().send_while_busy_offered() {
+                return false;
+            }
+            app.engine.borrow_mut().set_while_busy(mode);
+        }
         // The value editor puts the old value back.
         "escape" if matches!(app.overlay.borrow().as_str(), crate::look::EDITOR | crate::look::CONFIRM) => crate::look::cancel_editor(app, window),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
@@ -858,7 +871,7 @@ fn focus_sidebar(app: &App, window: &AppWindow) {
 // ---- the quick switcher ------------------------------------------------------
 
 fn toggles(app: &App) -> switcher::Toggles {
-    switcher::Toggles { preview_versions: crate::preview_view::enabled(), queue_shown: crate::queue_strip::shown(&app.engine.borrow()) }
+    switcher::Toggles { preview_versions: crate::preview_view::enabled(), queue_shown: crate::queue_strip::shown(&app.engine.borrow()), send_while_busy: app.engine.borrow().send_while_busy_offered() }
 }
 
 /// Ctrl+Shift+X, its command and its setting: the Host's tool explanations

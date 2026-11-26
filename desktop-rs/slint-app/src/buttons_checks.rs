@@ -94,7 +94,8 @@ thread_local! {
 const LONG_DRAFT: &str = "sent by the button, a draft long enough to wrap the composer onto several lines: token bucket, leaky bucket, sliding window log, sliding window counter, clock skew, race conditions, failure modes, observability and testing, with an example in every section.";
 
 pub fn buttons_check(out: String) {
-    let (out1, out2, out3, out4, out5, out6, out7, out8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5, out6, out7, out8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let (out9, out10) = (out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
@@ -407,6 +408,60 @@ pub fn buttons_check(out: String) {
                 return elapsed >= Duration::from_secs(3);
             }
             check(crate::queue_strip::shown(&app.engine.borrow()), "the setting is on again");
+            // A Host that lets Send steer while the agent works (`send_while_busy`, #920).
+            let set = control("/__control/send-while-busy", &json!({"on": true}))
+                .and_then(|()| control("/__control/turn-queue", &json!({"session": "rachel", "items": [{"queue_id": "q6", "text": "use the other file", "kind": "waiting", "origin": "user"}]})))
+                .and_then(|()| control("/__control/agent", &json!({"session": "rachel", "set": {"latest_state": "thinking", "busy": true, "queued_turn_count": 1}})));
+            check(set.is_ok(), &format!("the Host offers Send while working, one message waits: {set:?}"));
+            app_now().engine.borrow_mut().reconnect();
+            true
+        })),
+        ("send chip", Box::new(move |_, _, elapsed| {
+            let pane = app_now().active_id();
+            let act = format!("send-chip-act:{pane}");
+            if !drawn(&act) || elapsed < Duration::from_millis(400) {
+                check(elapsed < Duration::from_secs(8), "while the agent works the chip above the message field says what waits, with Steer now");
+                return elapsed >= Duration::from_secs(8);
+            }
+            check(label(&format!("send-chip:{pane}")) == "1 waiting", &format!("the chip counts it: {:?}", label(&format!("send-chip:{pane}"))));
+            check(label(&act) == "Steer now", &format!("and offers Steer now: {:?}", label(&act)));
+            check(!drawn("queue-send:q6"), "the queue strip stays away while the chip says what waits");
+            shot(&out9, "buttons-08-send-chip");
+            check(press(&act), "Steer now on the chip is pressed");
+            true
+        })),
+        ("chip steered", Box::new(|_, _, elapsed| {
+            if requests_posted("/turn-queue/q6/steer") != 1 {
+                check(elapsed < Duration::from_secs(5), "the chip's Steer now reads the message into the turn");
+                return elapsed >= Duration::from_secs(5);
+            }
+            let set = control(
+                "/__control/send-while-busy",
+                &json!({"fallback": {"from": "steer", "to": "take_over", "reason": "not_steerable", "text": "This agent can't take a message mid-turn: stopped and sent"}}),
+            );
+            check(set.is_ok(), "the Host will fall back on the next send");
+            check(app_now().engine.borrow_mut().send_composer("rachel", "one more thing", false), "a message is sent");
+            true
+        })),
+        ("chip says the fallback", Box::new(move |_, _, elapsed| {
+            let pane = app_now().active_id();
+            let notice = format!("send-chip-notice:{pane}");
+            if !drawn(&notice) {
+                check(elapsed < Duration::from_secs(5), "the chip shows what the Host did instead");
+                return elapsed >= Duration::from_secs(5);
+            }
+            let sent = sends().last().cloned().unwrap_or_default();
+            check(sent["body"]["while_busy"] == "steer", &format!("the send carried the setting: {:?}", sent["body"]["while_busy"]));
+            check(label(&notice) == "This agent can't take a message mid-turn: stopped and sent", &format!("in the Host's words: {:?}", label(&notice)));
+            shot(&out10, "buttons-09-send-chip-fallback");
+            true
+        })),
+        ("chip notice goes", Box::new(|_, _, elapsed| {
+            let notice = format!("send-chip-notice:{}", app_now().active_id());
+            if drawn(&notice) {
+                check(elapsed < Duration::from_secs(8), "the Host's line goes after a few seconds");
+                return elapsed >= Duration::from_secs(8);
+            }
             true
         })),
     ];

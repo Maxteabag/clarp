@@ -23,6 +23,7 @@ mod launch;
 mod pair;
 mod panes;
 mod queue_strip;
+mod send_chip;
 mod triage;
 mod perf;
 mod motion;

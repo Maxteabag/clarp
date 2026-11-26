@@ -2,6 +2,7 @@ import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge,
 import { Composer, Attachment, MentionRow, TipButton, ComposerKeys, QueueStrip, WaitingTurn } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
+import { SendChip } from "send_chip.slint";
 import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
 import { KeyHint } from "artifacts.slint";
@@ -129,6 +130,14 @@ export struct PaneView {
     // refused Send now.
     waiting: [WaitingTurn],
     waiting-refused: string,
+    // The chip above the message field (`send_while_busy`): messages
+    // waiting while the agent works, its button ("steer", "take-over" or
+    // "" for none) and the message it acts on; `send-notice` is the Host's
+    // line for a send it handled otherwise, shown for a few seconds.
+    send-chip-count: int,
+    send-chip-action: string,
+    send-chip-id: string,
+    send-notice: string,
     // The composer frame's meter: the context the agent's conversation
     // holds ("21K / 1M · 2%"), and its account's limit when near or used
     // up; "" when unknown. `meter-warn` draws it in the warning colour.
@@ -786,6 +795,19 @@ export component Pane inherits Rectangle {
             take-over(id) => { AgentDialogs.queue-take-over(id); }
             manage => { AgentDialogs.queue-open(root.pane.session); }
         }
+        // While the agent works: what waits, and Steer now (or Stop and
+        // send) for the first; it stands in for the queue strip then.
+        if (root.pane.send-chip-count > 0 || root.pane.send-notice != "") && !root.pane.pair: SendChip {
+            count: root.pane.send-chip-count;
+            action: root.pane.send-chip-action;
+            notice: root.pane.send-notice;
+            pane-id: root.pane.id;
+            act => {
+                if (root.pane.send-chip-action == "steer") { AgentDialogs.queue-steer(root.pane.send-chip-id); }
+                else if (root.pane.send-chip-action == "take-over") { AgentDialogs.queue-take-over(root.pane.send-chip-id); }
+            }
+            open-queue => { AgentDialogs.queue-open(root.pane.session); }
+        }
         // Pair rooms are the Host's read-only projection: no composer.
         composer-box := Rectangle {
           visible: !root.pane.pair;
@@ -808,7 +830,7 @@ export component Pane inherits Rectangle {
             attachments: root.pane.attachments;
             queued: root.pane.queued;
             queue-paused: root.pane.queue-paused;
-            strip-shown: root.pane.waiting.length > 0;
+            strip-shown: root.pane.waiting.length > 0 || root.pane.send-chip-count > 0;
             quota-notice: root.pane.quota-notice;
             stop-notice: root.pane.stop-notice;
             busy: root.pane.busy;

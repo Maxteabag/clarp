@@ -5,6 +5,7 @@
 use std::rc::Rc;
 
 use clarp_core::reading_theme::{self, FontOverride};
+use clarp_core::send_while_busy::WhileBusy;
 use clarp_engine::Change;
 use serde_json::Value;
 
@@ -65,6 +66,33 @@ fn preference(app: &Rc<App>, key: &str, on: bool, timestamps: bool) {
 
 fn chats() -> Vec<Setting> {
     vec![
+        // What Send does while the agent works (`send_while_busy`, #920):
+        // the Host's setting, the same in every app. Listed where the
+        // connected Host offers it; Ctrl+K lists each choice.
+        Setting::choice(
+            e(
+                "send-while-busy",
+                "Send while the agent works",
+                "chats",
+                "What Send does while the agent is working: read your message into the turn, wait for the turn to end, or stop the turn and send.",
+                &["steer", "steer now", "interrupt", "after the turn", "stop and send", "take over", "while busy", "while working", "queue", "send"],
+            ),
+            "CHATS",
+            |_| WhileBusy::ALL.iter().map(|mode| Choice::new(mode.as_str(), mode.label()).about(mode.about())).collect(),
+            |app| app.engine.borrow().while_busy().as_str().to_owned(),
+            |app, _, value| {
+                if let Some(mode) = WhileBusy::parse(value) {
+                    app.engine.borrow_mut().set_while_busy(mode);
+                }
+            },
+        )
+        .default(WhileBusy::Steer.as_str())
+        .detail(|app| {
+            let engine = app.engine.borrow();
+            let error = engine.send_settings_error();
+            if error.is_empty() { engine.while_busy().label().to_owned() } else { format!("{}  ·  {error}", engine.while_busy().label()) }
+        })
+        .when(|app| app.engine.borrow().send_while_busy_offered()),
         Setting::toggle(
             keyed(e("timestamps", "Timestamps", "chats", "Shows the time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
             "CHATS",

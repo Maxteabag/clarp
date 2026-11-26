@@ -47,6 +47,7 @@ pub mod readability;
 pub mod render_spec;
 pub mod roster;
 pub mod settings;
+pub mod send_while_busy;
 pub mod sidebar;
 pub mod sse;
 pub mod stall;

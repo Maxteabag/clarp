@@ -741,6 +741,7 @@ impl App {
         let waiting = if listed { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
         view.waiting = ModelRc::new(VecModel::from(waiting));
         view.waiting_refused = engine.turn_queue_refusal(session).into();
+        crate::send_chip::fill(engine, view, session);
         let (meter, warn) = crate::queue_strip::meter(engine, session);
         view.meter = meter.into();
         view.meter_warn = warn;

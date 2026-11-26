@@ -1,0 +1,125 @@
+import { Palette, Look } from "theme.slint";
+
+// The chip just above the message field while the agent works with
+// messages waiting (feature `send_while_busy`, #920): "1 waiting · Steer
+// now". Its button reads the first waiting message into the running turn
+// (`steer`), or, where it cannot be, stops the turn and runs it
+// (`take-over`). The count opens the queue. A send the Host handled
+// otherwise shows the Host's line here for a few seconds (`notice`), then
+// the chip returns to its count.
+export component SendChip inherits Rectangle {
+    in property <int> count;
+    // "steer", "take-over" or "" (the count alone).
+    in property <string> action;
+    in property <string> notice;
+    in property <string> pane-id;
+    callback act();
+    callback open-queue();
+    property <bool> noticing: root.notice != "";
+    height: 30px;
+    background: transparent;
+    accessible-role: groupbox;
+    accessible-id: "send-chip:" + root.pane-id;
+    accessible-label: root.noticing ? root.notice : root.count + " waiting";
+    HorizontalLayout {
+        alignment: start;
+        padding-left: 10px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        pill := Rectangle {
+            border-radius: self.height / 2;
+            background: Palette.raised;
+            border-width: 1px;
+            border-color: Palette.rule;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: #00000055;
+            drop-shadow-offset-y: 2px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: root.noticing || root.action == "" ? 12px : 3px;
+                spacing: 7px;
+                if root.noticing: Image {
+                    source: @image-url("icons/check.svg");
+                    width: 13px;
+                    height: 13px;
+                    y: (parent.height - self.height) / 2;
+                    colorize: Palette.success;
+                }
+                if root.noticing: Text {
+                    text: root.notice;
+                    color: Palette.text;
+                    font-size: 12 * Look.unit;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    accessible-role: text;
+                    accessible-id: "send-chip-notice:" + root.pane-id;
+                    accessible-label: root.notice;
+                }
+                if !root.noticing: Rectangle {
+                    width: count-row.preferred-width;
+                    accessible-role: button;
+                    accessible-id: "send-chip-count:" + root.pane-id;
+                    accessible-label: "Show the " + root.count + " waiting";
+                    accessible-action-default => { root.open-queue(); }
+                    count-row := HorizontalLayout {
+                        spacing: 7px;
+                        Image {
+                            source: @image-url("icons/queue.svg");
+                            width: 13px;
+                            height: 13px;
+                            y: (parent.height - self.height) / 2;
+                            colorize: Palette.muted;
+                        }
+                        Text {
+                            text: root.count + " waiting";
+                            color: count-touch.has-hover ? Palette.text : Palette.muted;
+                            font-size: 12 * Look.unit;
+                            vertical-alignment: center;
+                        }
+                    }
+                    count-touch := TouchArea { mouse-cursor: pointer; clicked => { root.open-queue(); } }
+                }
+                if !root.noticing && root.action != "": Text {
+                    text: "·";
+                    color: Palette.faint;
+                    font-size: 12 * Look.unit;
+                    vertical-alignment: center;
+                }
+                if !root.noticing && root.action != "": Rectangle {
+                    y: 3px;
+                    height: parent.height - 6px;
+                    width: act-row.preferred-width + 20px;
+                    border-radius: self.height / 2;
+                    background: root.action == "steer"
+                        ? (act-touch.has-hover ? Palette.accent.brighter(0.15) : Palette.accent)
+                        : (act-touch.has-hover ? Palette.danger-surface.brighter(0.3) : Palette.danger-surface);
+                    accessible-role: button;
+                    accessible-id: "send-chip-act:" + root.pane-id;
+                    accessible-label: root.action == "steer" ? "Steer now" : "Stop and send";
+                    accessible-action-default => { root.act(); }
+                    act-row := HorizontalLayout {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        spacing: 5px;
+                        Image {
+                            source: root.action == "steer" ? @image-url("icons/send.svg") : @image-url("icons/stop.svg");
+                            width: 12px;
+                            height: 12px;
+                            y: (parent.height - self.height) / 2;
+                            colorize: root.action == "steer" ? Palette.accent-text : Palette.danger;
+                        }
+                        Text {
+                            text: root.action == "steer" ? "Steer now" : "Stop and send";
+                            color: root.action == "steer" ? Palette.accent-text : Palette.danger;
+                            font-size: 12 * Look.unit;
+                            font-weight: 650;
+                            vertical-alignment: center;
+                        }
+                    }
+                    act-touch := TouchArea { mouse-cursor: pointer; clicked => { root.act(); } }
+                }
+            }
+        }
+    }
+}
