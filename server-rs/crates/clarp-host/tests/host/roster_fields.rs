@@ -224,10 +224,10 @@ fn a_helper_reads_running_while_a_helper_below_it_works() {
             }),
         );
         assert_eq!(made["session"], session, "{made}");
-        made["agent_id"].clone()
     };
-    let middle_id = made("middle", &root);
+    made("middle", &root);
     made("leaf", "middle");
+    let middle_id = snapshot_row(&host, "middle")["agent_id"].clone();
     let mark = |session: &str, state: &str| {
         let (status, said) = host.ask(
             "POST",
