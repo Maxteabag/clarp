@@ -1107,7 +1107,6 @@ impl Engine {
         }
         self.mutate_roster(|r| r.apply_snapshot(object));
         self.changes.push(Change::Roster);
-        self.send_while_working_snapshot(object);
         self.archived.apply_snapshot(object);
         if !self.archived.take_ops().is_empty() {
             self.changes.push(Change::Archive);
@@ -1536,7 +1535,7 @@ impl Engine {
         if !trace.is_empty() {
             body["trace_id"] = json!(trace);
         }
-        self.send_while_working_once(&mut body);
+        self.send_while_working_field(&mut body);
         if !transcription.is_empty() {
             body["transcription_id"] = json!(transcription);
         }

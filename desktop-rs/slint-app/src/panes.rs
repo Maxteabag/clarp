@@ -739,7 +739,9 @@ impl App {
         // Hidden by the reader's setting (Show the queue off): no line at all.
         let listed = (view.queued > 0 || engine.queue_count(session) > 0) && crate::queue_strip::shown(engine);
         let waiting = if listed { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
-        let chip = if listed { crate::queue_strip::chip(engine, session) } else { Default::default() };
+        // The line also says what the Host did with a send instead while
+        // nothing waits, so it is asked whenever the line may show.
+        let chip = if crate::queue_strip::shown(engine) { crate::queue_strip::chip(engine, session) } else { Default::default() };
         view.chip_kind = chip.kind.into();
         view.chip_target = chip.target.into();
         view.chip_label = chip.label.into();

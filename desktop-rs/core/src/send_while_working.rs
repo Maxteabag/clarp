@@ -6,30 +6,26 @@
 //! the waiting line shows. Send's menu offers the two other choices for one
 //! message.
 //!
-//! The Host's names are the working contract of 26 Nov until the Host
-//! settles them: each is one constant, so a rename is one line. Only a Host
-//! that lists `FEATURE` in `/server-info` is read; an older one shows no
-//! setting. Every word lives here, the same in the iOS and Android apps.
+//! The Host's contract is #920's (Maximus, 26 Nov 2026): each name is one
+//! constant here. Only a Host that lists `FEATURE` in `/server-info` is
+//! read or sent `while_busy`; an older one shows no setting and sends as
+//! before. Every word lives here, the same in the iOS and Android apps.
 
 use serde_json::Value;
 
 use crate::json::Object;
 
 /// The Host's feature name in `/server-info` (`capabilities.features`).
-pub const FEATURE: &str = "send_while_working";
-/// The snapshot's `settings` object, and the setting's field in it (absent:
-/// Steer now).
-pub const SETTINGS: &str = "settings";
-pub const FIELD: &str = "send_while_working";
-/// The event the Host sends when a setting changes.
-pub const EVENT: &str = "settings-changed";
-/// `PUT {WRITE_FIELD: value}`.
-pub const WRITE_PATH: &str = "/settings/send-while-working";
-pub const WRITE_FIELD: &str = "value";
-/// One send's own choice (`POST /send`), instead of the setting.
-pub const SEND_FIELD: &str = "send_while_working";
-/// Where the Host applied Stop and send instead: `{mode, reason_code,
-/// text}` on the send's answer and on the chat's `queue-updated`.
+pub const FEATURE: &str = "send_while_busy";
+/// `GET` answers `{FIELD: value}`; `POST {FIELD: value}` changes it.
+pub const PATH: &str = "/send-settings";
+/// The setting's field, in the settings, the event and every `POST /send`
+/// (the setting, or the one send's own choice from Send's menu).
+pub const FIELD: &str = "while_busy";
+/// The event every client is sent when it changes: `{type, FIELD}`.
+pub const EVENT: &str = "send-settings-updated";
+/// On a send's answer where the Host did otherwise than asked: `{from, to,
+/// reason: not_steerable | not_words, text}`; `text` is shown as sent.
 pub const FALLBACK_FIELD: &str = "fallback";
 
 /// The setting's title (Settings › Chats).
@@ -59,7 +55,7 @@ impl Mode {
         match self {
             Mode::Steer => "steer",
             Mode::AfterTurn => "after_turn",
-            Mode::StopAndSend => "stop_and_send",
+            Mode::StopAndSend => "take_over",
         }
     }
 
@@ -102,26 +98,15 @@ pub fn offered_by(info: &Object) -> bool {
         .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)))
 }
 
-/// The setting in a snapshot, event or answer (`settings.send_while_working`,
-/// the field itself, or a `{key, value}` change); None when it says none or
-/// a value this app does not know.
+/// The setting in the settings, the event or a write's answer; None when it
+/// says none or a value this app does not know.
 pub fn read(object: &Object) -> Option<Mode> {
-    let keyed = object.get("key").and_then(Value::as_str);
-    let value = object
-        .get(SETTINGS)
-        .and_then(|settings| settings.get(FIELD))
-        .or_else(|| object.get(FIELD))
-        .or_else(|| object.get(WRITE_FIELD).filter(|_| keyed.is_none_or(|k| k == FIELD)));
-    value.and_then(Value::as_str).and_then(Mode::from_wire)
-}
-
-/// A snapshot's setting: absent is Steer now.
-pub fn from_snapshot(object: &Object) -> Mode {
-    read(object).unwrap_or_default()
+    object.get(FIELD).and_then(Value::as_str).and_then(Mode::from_wire)
 }
 
 /// The words for a fallback the Host reported (`FALLBACK_FIELD`): its own
-/// text, one line, else `CANT_STEER`. None when it reported none.
+/// text, one line, as it was sent, else `CANT_STEER`. None when it
+/// reported none.
 pub fn fallback(object: &Object) -> Option<String> {
     let found = object.get(FALLBACK_FIELD)?.as_object()?;
     let text = found.get("text").and_then(Value::as_str).unwrap_or_default();
@@ -166,24 +151,23 @@ mod tests {
         }
         assert_eq!(Mode::default(), Mode::Steer);
         assert_eq!(Mode::from_wire("later"), None);
-        assert_eq!(read(&object(json!({SETTINGS: {FIELD: "after_turn"}}))), Some(Mode::AfterTurn));
-        assert_eq!(read(&object(json!({"key": FIELD, "value": "stop_and_send"}))), Some(Mode::StopAndSend));
-        assert_eq!(read(&object(json!({"key": "other", "value": "stop_and_send"}))), None);
+        assert_eq!(read(&object(json!({FIELD: "after_turn"}))), Some(Mode::AfterTurn));
+        assert_eq!(read(&object(json!({"type": EVENT, FIELD: "take_over"}))), Some(Mode::StopAndSend));
+        assert_eq!(read(&object(json!({FIELD: "stop_and_send"}))), None);
         assert_eq!(read(&object(json!({}))), None);
-        assert_eq!(from_snapshot(&object(json!({SETTINGS: {}}))), Mode::Steer);
     }
 
     #[test]
     fn the_feature_gates_it() {
-        assert!(offered_by(&object(json!({"capabilities": {"features": ["queue_steer", FEATURE]}}))));
+        assert!(offered_by(&object(json!({"capabilities": {"features": ["queue_steer", "send_while_busy"]}}))));
         assert!(!offered_by(&object(json!({"capabilities": {"features": ["queue_steer"]}}))));
     }
 
     #[test]
     fn a_fallback_says_the_hosts_reason_or_cant_steer() {
-        let with_words = object(json!({FALLBACK_FIELD: {"mode": "stop_and_send", "reason_code": "not_steerable", "text": "Codex can't\nbe steered"}}));
-        assert_eq!(fallback(&with_words).as_deref(), Some("Codex can't be steered"));
-        let coded = object(json!({FALLBACK_FIELD: {"mode": "stop_and_send", "reason_code": "not_steerable"}}));
+        let with_words = object(json!({FALLBACK_FIELD: {"from": "steer", "to": "take_over", "reason": "not_steerable", "text": "This agent can't take a message\nmid-turn: stopped and sent"}}));
+        assert_eq!(fallback(&with_words).as_deref(), Some("This agent can't take a message mid-turn: stopped and sent"));
+        let coded = object(json!({FALLBACK_FIELD: {"from": "steer", "to": "after_turn", "reason": "not_words"}}));
         assert_eq!(fallback(&coded).as_deref(), Some(CANT_STEER));
         assert_eq!(fallback(&object(json!({}))), None);
         assert_eq!(failure(true, "not_steerable"), "Couldn't steer it in. This turn can't take it now. It waits for the next turn.");

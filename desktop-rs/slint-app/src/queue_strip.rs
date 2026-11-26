@@ -104,7 +104,8 @@ pub fn chip(engine: &Engine, session: &str) -> Chip {
     let items = engine.turn_queue(session);
     let own: Vec<&Value> = items.iter().filter(|item| own_waiting(item)).collect();
     if own.is_empty() {
-        return Chip::default();
+        // Nothing waits: only what the Host did with a send instead, if it said.
+        return Chip { reason: engine.send_while_working_reason(session), ..Chip::default() };
     }
     let acting = engine.turn_queue_acting(session) || engine.stopping_for_waiting(session);
     let count = own.len() as i32;

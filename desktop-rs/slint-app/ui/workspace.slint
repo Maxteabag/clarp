@@ -784,7 +784,7 @@ export component Pane inherits Rectangle {
             }
         }
         // The messages waiting behind the turn: one line, "1 waiting · Steer now".
-        if (root.pane.chip-count > 0 || root.pane.waiting-refused != "") && !root.pane.pair: QueueStrip {
+        if (root.pane.chip-count > 0 || root.pane.chip-reason != "" || root.pane.waiting-refused != "") && !root.pane.pair: QueueStrip {
             items: root.pane.waiting;
             count: root.pane.chip-count;
             busy: root.pane.busy;

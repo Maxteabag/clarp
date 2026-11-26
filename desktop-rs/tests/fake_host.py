@@ -194,11 +194,12 @@ message_search = {"on": False, "partial": False, "page": 0}
 # until /__control/queue-steer turns it on. Then GET /turn-queue items carry
 # `steerable` (a `waiting` item of the user's while its agent works).
 queue_steer = {"on": False}
-# Send while working (#920, the working contract): off until
-# /__control/send-while-working turns it on. Then the snapshot carries
-# settings.send_while_working, PUT /settings/send-while-working {value}
-# changes it and sends settings-changed.
-send_while_working = {"on": False, "value": "steer"}
+# Send while working (#920, feature send_while_busy): off until
+# /__control/send-while-working turns it on. Then GET /send-settings says
+# {while_busy}, POST /send-settings {while_busy} changes it and sends
+# send-settings-updated; `fallback` (a control option) is put on the next
+# /send's answer once.
+send_while_working = {"on": False, "value": "steer", "fallback": None}
 # One agent's change in its roster event (feature roster_fields, Rust Host
 # contract 182) and the read of one row, GET /agents/<session> (agent_row,
 # 183): off until /__control/roster-rows turns them on.
@@ -1717,7 +1718,7 @@ class Handler(BaseHTTPRequestHandler):
             if queue_steer["on"]:
                 features.append("queue_steer")
             if send_while_working["on"]:
-                features.append("send_while_working")
+                features.append("send_while_busy")
             if chat_view.get("grows"):
                 features.append("conversation_view_grows")
             if chat_view.get("helper"):
@@ -1758,8 +1759,6 @@ class Handler(BaseHTTPRequestHandler):
                 snapshot = {"agents": agents, "personas": personas,
                             "tool_explanations": tool_explanation_settings,
                             "available_mcp_servers": [{"name": "github", "description": "GitHub"}]}
-                if send_while_working["on"]:
-                    snapshot["settings"] = {"send_while_working": send_while_working["value"]}
                 return self.reply(200, snapshot)
         if url.path.startswith("/agents/") and roster_rows["row"] and url.path.count("/") == 2:
             # One agent's row, exactly as the snapshot has it.
@@ -1797,6 +1796,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/teams/") and url.path.endswith("/messages"):
             team = url.path.split("/")[2]
             return self.reply(200, {"messages": team_messages.get(team, [])})
+        if url.path == "/send-settings" and send_while_working["on"]:
+            return self.reply(200, {"while_busy": send_while_working["value"]})
         if url.path == "/turn-queue":
             with state_lock:
                 session = query.get("session", "")
@@ -2511,7 +2512,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if url.path == "/__control/send-while-working":
             send_while_working["on"] = bool(body.get("on", True))
+            send_while_working["fallback"] = body.get("fallback")
             return self.reply(200, {"ok": True})
+        if url.path == "/send-settings" and send_while_working["on"]:
+            value = body.get("while_busy")
+            if value not in ("steer", "after_turn", "take_over"):
+                return self.reply(400, {"error": "while_busy must be steer, after_turn or take_over"})
+            send_while_working["value"] = value
+            broadcast({"type": "send-settings-updated", "while_busy": value})
+            return self.reply(200, {"while_busy": value})
         if url.path == "/__control/message-search":
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
@@ -3044,7 +3053,13 @@ class Handler(BaseHTTPRequestHandler):
                 for agent in agents:
                     if agent["session"] == session:
                         agent["head_revision"] = revision
-            self.reply(200, {"ok": True})
+            answer = {"ok": True}
+            if send_while_working["on"] and body.get("while_busy"):
+                answer["while_busy"] = body["while_busy"]
+                if send_while_working["fallback"]:
+                    answer["fallback"], send_while_working["fallback"] = send_while_working["fallback"], None
+                    answer["while_busy"] = answer["fallback"].get("to", answer["while_busy"])
+            self.reply(200, answer)
             broadcast({"type": "agent-state", "session": session, "kind": "thinking", "ts": int(time.time() * 1000)})
             broadcast({"type": "transcript-updated", "session": session})
             broadcast({"type": "user-notification", "session": session, "persona": "Rachel", "preview": "Echo"})
@@ -3109,13 +3124,6 @@ def do_PUT(self):
     record({"method": "PUT", "path": url.path, "body": body})
     if not self.authorized():
         return self.reply(401, {"error": "unauthorized"})
-    if url.path == "/settings/send-while-working" and send_while_working["on"]:
-        value = body.get("value")
-        if value not in ("steer", "after_turn", "stop_and_send"):
-            return self.reply(400, {"error": "value must be steer, after_turn or stop_and_send"})
-        send_while_working["value"] = value
-        broadcast({"type": "settings-changed", "settings": {"send_while_working": value}})
-        return self.reply(200, {"ok": True, "settings": {"send_while_working": value}})
     if url.path.startswith("/turn-queue/"):
         item = url.path.split("/")[2]
         with state_lock:

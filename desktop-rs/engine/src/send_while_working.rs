@@ -1,9 +1,10 @@
-//! Send while working on the engine (issue 920; names and words in
-//! `clarp_core::send_while_working`): whether the Host offers the setting,
-//! its value (the snapshot's, the event's, or this desktop's write while the
-//! Host answers), the Host's reason for a send it stopped and sent instead
-//! of steering, per chat, and the waiting line's Stop and send while it
-//! runs. Without the feature nothing here changes what a send does.
+//! Send while working on the engine (issue 920, feature `send_while_busy`;
+//! names and words in `clarp_core::send_while_working`): whether the Host
+//! offers the setting, its value (`GET /send-settings` on connecting, its
+//! event, or this desktop's write while the Host answers), the `while_busy`
+//! every send carries (the setting, or one send's own choice), the Host's
+//! words for a send it did otherwise, per chat, and the waiting line's Stop
+//! and send while it runs. Without the feature nothing here changes a send.
 
 use std::collections::{HashMap, HashSet};
 
@@ -13,7 +14,8 @@ use serde_json::json;
 
 use crate::{Change, Engine};
 
-const WRITE_TAG: &str = "send-while-working";
+const WRITE_TAG: &str = "send-settings-write";
+const READ_TAG: &str = "send-settings";
 
 #[derive(Default)]
 pub(crate) struct SendWhileWorking {
@@ -66,7 +68,7 @@ impl Engine {
         }
         self.send_while_working.mode = Some(mode);
         self.changes.push(Change::Preferences);
-        self.api.put_json(WRITE_TAG, sww::WRITE_PATH, json!({ sww::WRITE_FIELD: mode.wire() }));
+        self.api.post_json(WRITE_TAG, sww::PATH, json!({ sww::FIELD: mode.wire() }), None);
     }
 
     /// The next send to `session` goes as `mode` (Send's menu during a
@@ -78,10 +80,12 @@ impl Engine {
         }
     }
 
-    /// The send being made carries its own choice, once.
-    pub(crate) fn send_while_working_once(&mut self, body: &mut serde_json::Value) {
-        if let Some(mode) = self.send_while_working.once.take() {
-            body[sww::SEND_FIELD] = json!(mode.wire());
+    /// Every send to a Host with the feature says what to do while the
+    /// agent works: its own choice from Send's menu, once, else the setting.
+    pub(crate) fn send_while_working_field(&mut self, body: &mut serde_json::Value) {
+        let once = self.send_while_working.once.take();
+        if self.send_while_working.feature {
+            body[sww::FIELD] = json!(once.unwrap_or_else(|| self.send_while_working()).wire());
         }
     }
 
@@ -124,6 +128,8 @@ impl Engine {
         }
     }
 
+    /// `/server-info` answered: with the feature, its setting is read
+    /// (again after every reconnect, for a change missed meanwhile).
     pub(crate) fn send_while_working_server_info(&mut self, info: &Object) {
         let feature = sww::offered_by(info);
         if feature != self.send_while_working.feature {
@@ -133,12 +139,8 @@ impl Engine {
             }
             self.changes.push(Change::Preferences);
         }
-    }
-
-    /// The snapshot carries the value (absent: Steer now).
-    pub(crate) fn send_while_working_snapshot(&mut self, object: &Object) {
-        if object.contains_key(sww::SETTINGS) {
-            self.send_while_working_mode(sww::from_snapshot(object));
+        if feature {
+            self.api.get(READ_TAG, sww::PATH, &[]);
         }
     }
 
@@ -166,9 +168,12 @@ impl Engine {
             }
             self.settle_for_waiting(session, false);
         } else if kind == "agent-state" {
-            let state = json::string(event, "kind");
-            if matches!(state.as_str(), "done" | "idle" | "interrupted" | "stopped" | "failed") {
-                self.settle_for_waiting(session, true);
+            // A turn stopped for a send runs that send next: its words stay
+            // until that turn is done.
+            match json::string(event, "kind").as_str() {
+                "done" | "idle" | "failed" => self.settle_for_waiting(session, true),
+                "interrupted" | "stopped" => self.settle_for_waiting(session, false),
+                _ => {}
             }
         }
     }
@@ -189,10 +194,12 @@ impl Engine {
     }
 
     pub(crate) fn send_while_working_json(&mut self, tag: &str, object: &Object) -> bool {
-        if tag != WRITE_TAG {
+        if tag != WRITE_TAG && tag != READ_TAG {
             return false;
         }
-        self.send_while_working.before_write = None;
+        if tag == WRITE_TAG {
+            self.send_while_working.before_write = None;
+        }
         if let Some(mode) = sww::read(object) {
             self.send_while_working_mode(mode);
         }
@@ -200,6 +207,10 @@ impl Engine {
     }
 
     pub(crate) fn send_while_working_failure(&mut self, tag: &str, message: &str) -> bool {
+        if tag == READ_TAG {
+            // Unread, the setting shows its default; the Host still applies its own.
+            return true;
+        }
         if tag != WRITE_TAG {
             return false;
         }

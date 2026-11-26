@@ -304,23 +304,28 @@ fn send_while_working_is_the_hosts_and_the_line_stops_a_turn_it_cannot_steer() {
     let mut d = Driver::new(&host.base);
     d.connect();
     d.until("offered and busy", |e| e.send_while_working_offered() && e.roster().find("rachel").is_some_and(|a| a.busy));
-    assert_eq!(d.engine.send_while_working(), Mode::Steer, "the snapshot's settings say Steer now");
+    d.until("read", |_| !host.requests("GET", "/send-settings").is_empty());
+    assert_eq!(d.engine.send_while_working(), Mode::Steer, "GET /send-settings says Steer now");
 
-    // Written to the Host with PUT, and the Host's event agrees.
+    // Written to the Host, and the Host's event agrees.
     d.engine.set_send_while_working(Mode::AfterTurn);
-    d.until("written", |_| !host.requests("PUT", "/settings/send-while-working").is_empty());
-    assert_eq!(host.requests("PUT", "/settings/send-while-working")[0]["body"], json!({"value": "after_turn"}));
+    d.until("written", |_| !host.requests("POST", "/send-settings").is_empty());
+    assert_eq!(host.requests("POST", "/send-settings")[0]["body"], json!({"while_busy": "after_turn"}));
     d.settle(Duration::from_millis(300));
     assert_eq!(d.engine.send_while_working(), Mode::AfterTurn);
 
-    // Send's menu: one message goes its own way; the next follows the setting.
-    d.engine.send_next_as("rachel", Mode::StopAndSend);
+    // Every send says while_busy: Send's menu's choice for one message,
+    // then the setting again. The Host's words for a fallback show as sent.
+    host.control("/__control/send-while-working", json!({"on": true, "fallback": {"from": "steer", "to": "take_over", "reason": "not_steerable", "text": "This agent can't take a message mid-turn: stopped and sent"}}));
+    d.engine.send_next_as("rachel", Mode::Steer);
     d.engine.send_to("rachel", "this one now", false);
     d.engine.send_to("rachel", "and this as set", false);
     d.until("both sent", |_| host.requests("POST", "/send").len() >= 2);
     let sends = host.requests("POST", "/send");
-    assert_eq!(sends[sends.len() - 2]["body"]["send_while_working"], "stop_and_send");
-    assert!(sends[sends.len() - 1]["body"].get("send_while_working").is_none());
+    assert_eq!(sends[sends.len() - 2]["body"]["while_busy"], "steer");
+    assert_eq!(sends[sends.len() - 1]["body"]["while_busy"], "after_turn");
+    d.until("fallback said", |e| !e.send_while_working_reason("rachel").is_empty());
+    assert_eq!(d.engine.send_while_working_reason("rachel"), "This agent can't take a message mid-turn: stopped and sent");
 
     // The line's Steer now, refused: the plain Stop, not a take-over.
     d.engine.load_turn_queue("rachel");
