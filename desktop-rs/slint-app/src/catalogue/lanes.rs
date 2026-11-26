@@ -150,6 +150,7 @@ pub(super) fn register() -> Vec<Setting> {
         "kept-ceiling",
         "Most kept in auto",
         "In auto, how many kept processes the connected Host holds at most, however much memory is free.",
+        // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["ceiling", "cap", "most lanes", "auto", "how many", "kept processes", "maximum"],
         "ceiling",
         (1.0, 64.0),
@@ -161,6 +162,7 @@ pub(super) fn register() -> Vec<Setting> {
         "kept-most",
         "Most kept processes",
         "How many kept processes the connected Host holds, of every tool together.",
+        // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["lanes", "most lanes", "limit", "how many", "kept processes", "maximum"],
         "most",
         (1.0, 32.0),
@@ -171,6 +173,7 @@ pub(super) fn register() -> Vec<Setting> {
         "kept-memory",
         "Memory they may hold",
         "How much memory the kept processes may hold together on the connected Host.",
+        // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["memory", "ram", "lane memory", "budget", "kept processes", "megabytes"],
         "memory_mb",
         (256.0, 16384.0),

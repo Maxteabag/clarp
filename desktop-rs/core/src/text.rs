@@ -212,6 +212,7 @@ fn drop_vox_for_display(text: &str) -> String {
     static VOX_EDGE: LazyLock<Regex> =
         LazyLock::new(|| re(r"(?s)^([\s,.;:!?…—–-]*)(.*?)([\s,.;:!?…—–-]*)$"));
     static VOX_RUN: LazyLock<Regex> =
+        // ui-text: allow (a pattern that reads punctuation, never drawn)
         LazyLock::new(|| re(r"\x{E000}(?:[ \t\x{E001}]*[,;:—–]?[ \t\x{E001}]*\x{E000})+"));
     let marked = VOX_CONTENT
         .replace_all(text, |caps: &Captures| {
