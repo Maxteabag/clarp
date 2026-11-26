@@ -171,6 +171,11 @@ impl Engine {
     /// Sends `session`'s composer (its text and attachments) to `target`'s
     /// chat: an @-mention of another agent (`/send` to its session).
     pub fn send_composer_to(&mut self, session: &str, target: &str, text: &str, queue_if_busy: bool) -> bool {
+        self.send_composer_with_mode(session, target, text, queue_if_busy, None)
+    }
+
+    /// Sends the composer with the choice from Send's menu for this message.
+    pub fn send_composer_with_mode(&mut self, session: &str, target: &str, text: &str, queue_if_busy: bool, mode: Option<clarp_core::send_while_working::Mode>) -> bool {
         let Some(outbound) = clarp_core::attachments::outbound_text(text, &self.attachments(session)) else {
             self.set_error("Wait for attachments to finish uploading or remove them");
             return false;
@@ -181,6 +186,9 @@ impl Engine {
         self.set_draft(session, "");
         self.store_attachments(session, Vec::new());
         self.changes.push(Change::Composer(session.to_owned()));
+        if let Some(mode) = mode {
+            self.send_next_as(target, mode);
+        }
         self.send_to(target, &outbound, queue_if_busy);
         true
     }

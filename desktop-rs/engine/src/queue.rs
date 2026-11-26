@@ -54,10 +54,6 @@ enum Step {
 struct Chain {
     queue_id: String,
     tried: Vec<Step>,
-    /// The waiting line's Steer now (#920): refused, the turn stops (the
-    /// plain Stop, so every waiting message goes on next, read together),
-    /// or with no turn left the message is sent.
-    line: bool,
 }
 
 impl Engine {
@@ -142,6 +138,7 @@ impl Engine {
         }
         if path.ends_with("/send") || path.ends_with("/steer") || path.ends_with("/take-over") {
             self.queue.sends.insert(tag.clone());
+            self.changes.push(Change::Queue(self.queue.session.clone()));
         }
         match method {
             "PUT" => self.api.put_json(&tag, path, body),
@@ -242,23 +239,7 @@ impl Engine {
         let tag = self.queue_action("POST", &format!("{}/{verb}", Self::queue_item_path(queue_id)), body);
         if let Some(tag) = tag.filter(|_| self.queue.steer) {
             tried.push(step);
-            self.queue.chains.insert(tag, Chain { queue_id: queue_id.to_owned(), tried, line: false });
-        }
-    }
-
-    /// The next way to send a refused message now, or None when every way
-    /// was refused.
-    /// The waiting line's Steer now: reads the newest of the user's waiting
-    /// messages into the running turn (the Host reads the older ones in
-    /// first). Refused, it falls back as the line says (`Chain::line`).
-    pub fn steer_from_line(&mut self, queue_id: &str) {
-        on_peer!(self.queue_peer_mut(), |engine, _local| engine.steer_from_line(queue_id));
-        if queue_id.is_empty() {
-            return;
-        }
-        let tag = self.queue_action("POST", &format!("{}/steer", Self::queue_item_path(queue_id)), json!({}));
-        if let Some(tag) = tag {
-            self.queue.chains.insert(tag, Chain { queue_id: queue_id.to_owned(), tried: vec![Step::Steer], line: true });
+            self.queue.chains.insert(tag, Chain { queue_id: queue_id.to_owned(), tried });
         }
     }
 
@@ -269,6 +250,8 @@ impl Engine {
         self.queue.sends.iter().any(|tag| self.queue.action_sessions.get(tag).is_some_and(|s| s == session))
     }
 
+    /// The next way to send a refused message now, or None when every way
+    /// was refused.
     fn next_step(&self, chain: &Chain) -> Option<Step> {
         let steer = self.queued_steerable(&chain.queue_id).then_some(Step::Steer);
         [steer, Some(Step::TakeOver), Some(Step::Send)].into_iter().flatten().find(|step| !chain.tried.contains(step))
@@ -330,34 +313,9 @@ impl Engine {
             // or it ended meanwhile): the next way of sending it now, until
             // none is left; then it waits on, and says so calmly.
             let chain = self.queue.chains.remove(tag);
-            // The line's steer otherwise refused: gone meanwhile (404), its
-            // queue is read again and nothing is said; else it says so.
-            if chain.as_ref().is_some_and(|c| c.line && status != 409) {
-                self.queue.sends.remove(tag);
-                let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
-                if status != 404 {
-                    self.queue.refused = clarp_core::send_while_working::failure(true, "");
-                    self.queue.refused_session = session.clone();
-                    self.changes.push(Change::Queue(session.clone()));
-                }
-                if session == self.queue.session {
-                    self.load_turn_queue(&session);
-                }
-                return true;
-            }
             if let Some(chain) = chain.filter(|_| status == 409) {
                 self.queue.sends.remove(tag);
                 let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
-                if chain.line {
-                    // The line's steer refused: the plain Stop while a turn
-                    // runs, else the message is sent.
-                    if self.roster().find(&session).is_some_and(|a| a.busy) {
-                        self.stop_for_waiting(&session);
-                    } else if session == self.queue.session {
-                        self.queue_step(&chain.queue_id, Step::Send, chain.tried);
-                    }
-                    return true;
-                }
                 if let Some(next) = self.next_step(&chain).filter(|_| session == self.queue.session) {
                     self.queue_step(&chain.queue_id, next, chain.tried);
                 } else {

@@ -295,7 +295,7 @@ fn send_now_steers_and_stops_the_turn_where_it_cannot_be_steered() {
 }
 
 #[test]
-fn send_while_working_is_the_hosts_and_the_line_stops_a_turn_it_cannot_steer() {
+fn busy_send_uses_the_host_setting_or_one_off_and_reports_fallback() {
     use clarp_core::send_while_working::Mode;
     let host = Host::start("send-while-working");
     host.control("/__control/queue-steer", json!({"on": true}));
@@ -317,8 +317,8 @@ fn send_while_working_is_the_hosts_and_the_line_stops_a_turn_it_cannot_steer() {
     // Every send says while_busy: Send's menu's choice for one message,
     // then the setting again. The Host's words for a fallback show as sent.
     host.control("/__control/send-while-working", json!({"on": true, "fallback": {"from": "steer", "to": "take_over", "reason": "not_steerable", "text": "This agent can't take a message mid-turn: stopped and sent"}}));
-    d.engine.send_next_as("rachel", Mode::Steer);
-    d.engine.send_to("rachel", "this one now", false);
+    assert!(d.engine.send_composer_with_mode("rachel", "rachel", "this one now", false, Some(Mode::Steer)));
+    d.until("fallback said", |e| !e.send_while_working_reason("rachel").is_empty());
     d.engine.send_to("rachel", "and this as set", false);
     d.until("both sent", |_| host.requests("POST", "/send").len() >= 2);
     let sends = host.requests("POST", "/send");
@@ -326,18 +326,6 @@ fn send_while_working_is_the_hosts_and_the_line_stops_a_turn_it_cannot_steer() {
     assert_eq!(sends[sends.len() - 1]["body"]["while_busy"], "after_turn");
     d.until("fallback said", |e| !e.send_while_working_reason("rachel").is_empty());
     assert_eq!(d.engine.send_while_working_reason("rachel"), "This agent can't take a message mid-turn: stopped and sent");
-
-    // The line's Steer now, refused: the plain Stop, not a take-over.
-    d.engine.load_turn_queue("rachel");
-    d.until("queue loaded", |e| !e.turn_queue_loading() && e.turn_queue("rachel").len() == 2);
-    host.control("/__control/fail", json!({"path": "/turn-queue/q2/steer", "status": 409}));
-    d.engine.steer_from_line("q2");
-    assert!(d.engine.turn_queue_acting("rachel"), "the line shows its action runs");
-    d.until("stopped", |_| !host.requests("POST", "/stop").is_empty());
-    assert_eq!(host.requests("POST", "/stop")[0]["body"]["session"], "rachel");
-    assert!(host.requests("POST", "/turn-queue/q2/take-over").is_empty());
-    d.until("stop answered", |e| !e.stopping_for_waiting("rachel"));
-    assert!(d.engine.turn_queue_refusal("rachel").is_empty(), "nothing says it failed");
 }
 
 #[test]

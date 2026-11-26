@@ -111,28 +111,7 @@ pub fn read(object: &Object) -> Option<Mode> {
 pub fn fallback(object: &Object) -> Option<String> {
     let found = object.get(FALLBACK_FIELD)?.as_object()?;
     let text = found.get("text").and_then(Value::as_str).unwrap_or_default();
-    Some(reason_line(text))
-}
-
-/// The dim line before Stop and send: the Host's reason on one line, or
-/// `CANT_STEER`.
-pub fn reason_line(text: &str) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.is_empty() { CANT_STEER.to_owned() } else { line }
-}
-
-/// What the waiting line says when its action failed: a title and why,
-/// by the Host's refusal code where it gave one.
-pub fn failure(steer: bool, code: &str) -> String {
-    let title = if steer { "Couldn't steer it in" } else { "Couldn't send" };
-    let why = match code {
-        "not_steerable" => "This turn can't take it now. It waits for the next turn.",
-        "turn_not_cuttable" => "This turn can't be stopped for it now. It waits for the next turn.",
-        "left_for_later" => "It was sent to wait for later.",
-        "not_the_owners" => "Only its sender can do that.",
-        _ => "It waits for the next turn.",
-    };
-    format!("{title}. {why}")
+    if text.trim().is_empty() { None } else { Some(text.to_owned()) }
 }
 
 #[cfg(test)]
@@ -167,11 +146,9 @@ mod tests {
     #[test]
     fn a_fallback_says_the_hosts_reason_or_cant_steer() {
         let with_words = object(json!({FALLBACK_FIELD: {"from": "steer", "to": "take_over", "reason": "not_steerable", "text": "This agent can't take a message\nmid-turn: stopped and sent"}}));
-        assert_eq!(fallback(&with_words).as_deref(), Some("This agent can't take a message mid-turn: stopped and sent"));
+        assert_eq!(fallback(&with_words).as_deref(), Some("This agent can't take a message\nmid-turn: stopped and sent"));
         let coded = object(json!({FALLBACK_FIELD: {"from": "steer", "to": "after_turn", "reason": "not_words"}}));
-        assert_eq!(fallback(&coded).as_deref(), Some(CANT_STEER));
+        assert_eq!(fallback(&coded), None);
         assert_eq!(fallback(&object(json!({}))), None);
-        assert_eq!(failure(true, "not_steerable"), "Couldn't steer it in. This turn can't take it now. It waits for the next turn.");
-        assert_eq!(failure(false, ""), "Couldn't send. It waits for the next turn.");
     }
 }

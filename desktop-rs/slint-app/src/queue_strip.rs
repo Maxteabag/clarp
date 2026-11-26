@@ -98,14 +98,15 @@ fn own_waiting(item: &Value) -> bool {
 
 pub fn chip(engine: &Engine, session: &str) -> Chip {
     use clarp_core::{queue_line as words, send_while_working as sww};
+    let reason = engine.send_while_working_reason(session);
     if !engine.roster().find(session).is_some_and(|a| a.busy) {
-        return Chip::default();
+        return Chip { reason, ..Chip::default() };
     }
     let items = engine.turn_queue(session);
     let own: Vec<&Value> = items.iter().filter(|item| own_waiting(item)).collect();
     if own.is_empty() {
         // Nothing waits: only what the Host did with a send instead, if it said.
-        return Chip { reason: engine.send_while_working_reason(session), ..Chip::default() };
+        return Chip { reason, ..Chip::default() };
     }
     let acting = engine.turn_queue_acting(session) || engine.stopping_for_waiting(session);
     let count = own.len() as i32;
@@ -115,10 +116,11 @@ pub fn chip(engine: &Engine, session: &str) -> Chip {
     if engine.turn_queue_steer(session)
         && let Some(item) = own.iter().rev().find(steerable)
     {
-        return Chip { kind: "steer", target: item_id(item), label: words::STEER_NOW, count, reason: String::new(), acting };
+        return Chip { kind: "steer", target: item_id(item), label: words::STEER_NOW, count, reason, acting };
     }
-    let reason = sww::reason_line(&engine.send_while_working_reason(session));
-    Chip { kind: "stop", target: String::new(), label: words::STOP_AND_SEND, count, reason, acting }
+    let reason = if reason.is_empty() { sww::CANT_STEER.to_owned() } else { reason };
+    let target = if engine.turn_queue_steer(session) { item_id(own[0]) } else { String::new() };
+    Chip { kind: "stop", target, label: words::STOP_AND_SEND, count, reason, acting }
 }
 
 /// Sends a one-off choice's words for `session`'s Host into Send's menu:
@@ -190,8 +192,7 @@ pub fn follow(app: &App) {
 }
 
 /// Does the line's action for the open chat's waiting messages (by key:
-/// Ctrl+Shift+Enter): Steer now, or the plain Stop. False when the line
-/// offers nothing, or its action already runs.
+/// Ctrl+Shift+Enter): Steer now or Stop and send. False when there is no action.
 pub fn send_first(app: &App) -> bool {
     let (session, chip) = {
         let engine = app.engine.borrow();
@@ -199,7 +200,7 @@ pub fn send_first(app: &App) -> bool {
         let chip = chip(&engine, &session);
         (session, chip)
     };
-    act(app, &session, &chip.kind.to_owned(), &chip.target)
+    act(app, &session, chip.kind, &chip.target)
 }
 
 /// The line's action for `session`: Steer now (`target`) or Stop and send.
@@ -208,12 +209,17 @@ pub fn act(app: &App, session: &str, kind: &str, target: &str) -> bool {
         return false;
     }
     let mut engine = app.engine.borrow_mut();
-    if chip(&engine, session).acting {
-        return true;
+    let current = chip(&engine, session);
+    if current.kind != kind || current.target != target {
+        return false;
     }
-    match kind {
-        "steer" => engine.steer_from_line(target),
-        _ => engine.stop_for_waiting(session),
+    if !current.acting {
+        match kind {
+            "steer" => engine.steer_queued_turn(target),
+            "stop" if !target.is_empty() => engine.take_over_queued_turn(target),
+            "stop" => engine.stop_for_waiting(session),
+            _ => return false,
+        }
     }
     true
 }

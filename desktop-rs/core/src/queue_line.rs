@@ -36,7 +36,7 @@ pub const STILL_WAITING: &str = "Still waiting: this turn can't take it or be st
 pub fn refusal_line(words: &str) -> String {
     match words.trim() {
         "" => String::new(),
-        own if own == STILL_WAITING || own.starts_with("Couldn't ") => own.to_owned(),
+        STILL_WAITING => STILL_WAITING.to_owned(),
         words => format!("Not sent now: {words}"),
     }
 }
@@ -52,7 +52,6 @@ mod tests {
         assert_eq!(refusal_line(STILL_WAITING), STILL_WAITING);
         assert_eq!(refusal_line("agent is still working"), "Not sent now: agent is still working");
         assert_eq!(refusal_line("  "), "");
-        assert_eq!(refusal_line("Couldn't steer it in. It waits for the next turn."), "Couldn't steer it in. It waits for the next turn.");
         assert_eq!(action_tip("steer"), "Read into this turn");
     }
 }

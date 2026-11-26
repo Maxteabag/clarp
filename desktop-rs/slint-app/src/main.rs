@@ -838,11 +838,9 @@ fn main() {
         let route = mention_view::route(&mention_view::candidates(&app.engine.borrow()), &session, &text);
         let target = route.as_ref().map_or(session.as_str(), |c| c.session.as_str()).to_owned();
         // Send's menu during a turn: this message's own choice (#920).
-        let once = window().map(|w| w.global::<SendChoice>().get_once().to_string()).unwrap_or_default();
-        if let Some(mode) = clarp_core::send_while_working::Mode::from_wire(&once) {
-            app.engine.borrow_mut().send_next_as(&target, mode);
-        }
-        let sent = app.engine.borrow_mut().send_composer_to(&session, &target, &text, queue);
+        let once = crate::window().map(|w| w.global::<SendChoice>().get_once().to_string()).unwrap_or_default();
+        let mode = clarp_core::send_while_working::Mode::from_wire(&once);
+        let sent = app.engine.borrow_mut().send_composer_with_mode(&session, &target, &text, queue, mode);
         let mut row = SharedString::new();
         if sent {
             app.replace_draft(&session, "", None);

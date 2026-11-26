@@ -60,12 +60,10 @@ impl Engine {
     /// Writes the setting to the connected Host; it shows at once, and a
     /// refusal puts the value back and says so.
     pub fn set_send_while_working(&mut self, mode: Mode) {
-        if !self.send_while_working.feature {
+        if !self.send_while_working.feature || self.send_while_working.before_write.is_some() {
             return;
         }
-        if self.send_while_working.before_write.is_none() {
-            self.send_while_working.before_write = Some(self.send_while_working());
-        }
+        self.send_while_working.before_write = Some(self.send_while_working());
         self.send_while_working.mode = Some(mode);
         self.changes.push(Change::Preferences);
         self.api.post_json(WRITE_TAG, sww::PATH, json!({ sww::FIELD: mode.wire() }), None);
@@ -73,7 +71,7 @@ impl Engine {
 
     /// The next send to `session` goes as `mode` (Send's menu during a
     /// turn), whatever the setting says.
-    pub fn send_next_as(&mut self, session: &str, mode: Mode) {
+    pub(crate) fn send_next_as(&mut self, session: &str, mode: Mode) {
         on_peer!(self.peer_mut(session), |engine, local| engine.send_next_as(local, mode));
         if self.send_while_working.feature {
             self.send_while_working.once = Some(mode);
@@ -85,7 +83,10 @@ impl Engine {
     pub(crate) fn send_while_working_field(&mut self, body: &mut serde_json::Value) {
         let once = self.send_while_working.once.take();
         if self.send_while_working.feature {
-            body[sww::FIELD] = json!(once.unwrap_or_else(|| self.send_while_working()).wire());
+            let mode = once.unwrap_or_else(|| {
+                if body["queue_if_busy"] == true { Mode::AfterTurn } else { self.send_while_working() }
+            });
+            body[sww::FIELD] = json!(mode.wire());
         }
     }
 

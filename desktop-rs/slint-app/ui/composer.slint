@@ -527,7 +527,7 @@ component ChipAction inherits Rectangle {
             height: 12px;
             y: (parent.height - self.height) / 2;
             colorize: Palette.accent-text;
-            rotation-angle: root.spinning ? mod(animation-tick(), 1s) / 1s * 360deg : 0deg;
+            transform-rotation: root.spinning ? mod(animation-tick() / 1s, 1) * 360deg : 0deg;
         }
         Text {
             text: root.text;
@@ -545,7 +545,7 @@ component ChipAction inherits Rectangle {
 // (the user's own waiting messages), a dot and a filled pill. "Steer now"
 // reads them into the running turn, the newest first asked so the Host
 // reads the older ones in first; where the turn cannot take them the pill
-// is "Stop and send", the plain Stop, with a dim line before it saying why.
+// is "Stop and send", with a dim line before it saying why.
 // Ctrl+Shift+Enter does the same; Manage lists and edits them. While the
 // action runs the pill spins and takes no second press. Shown only while a
 // turn runs and the user's own messages wait, and Show queue is on; what
@@ -617,7 +617,7 @@ export component QueueStrip inherits Rectangle {
                         accessible-role: none;
                     }
                     // Why the turn cannot be steered: one dim line, cut short.
-                    if root.chip-kind == "stop" && root.reason != "": Text {
+                    if root.reason != "": Text {
                         text: root.reason;
                         color: Palette.faint;
                         font-size: 11 * Look.unit;
@@ -631,7 +631,7 @@ export component QueueStrip inherits Rectangle {
                         icon: root.acting ? @image-url("icons/refresh.svg") : root.chip-kind == "steer" ? @image-url("icons/steer.svg") : @image-url("icons/stop.svg");
                         spinning: root.acting;
                         text: root.chip-label;
-                        tip: root.chip-kind == "steer" ? "Read into this turn" : root.reason;
+                        tip: root.reason != "" ? root.reason : "Read into this turn";
                         accessible-id: "steer-chip-action:" + root.pane-id;
                         clicked => {
                             if (!root.acting) { root.act(root.chip-kind, root.chip-target); }
