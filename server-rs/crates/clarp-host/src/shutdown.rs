@@ -16,17 +16,17 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 const DRAIN: Duration = Duration::from_secs(5);
+const RESTART_MARK_BUDGET: Duration = Duration::from_millis(100);
 
-/// `hub`: told first when the Host is asked to stop, so that every event stream ends before the
-/// drain begins. A stream never ends by itself, and kept the drain open to its end: apps came
-/// back 6.8 s after a stop, against 1.9 s after a kill (issue 880). `farewell`: what every
-/// stream is sent as its last frame then (`host-updating`, feature `agent_availability`).
+/// Close every event stream immediately when the Host is asked to stop (issue 880).
+/// The planned restart frame uses the estimate loaded at startup.
 pub(super) async fn serve(
     listener: TcpListener,
     router: Router,
-    hub: Arc<clarp_host::hub::Hub>,
-    farewell: impl FnOnce() -> serde_json::Value,
+    app: &clarp_host::edge::App,
+    restart_ms: i64,
 ) -> io::Result<()> {
+    let hub = &app.hub;
     let open = Arc::new(AtomicUsize::new(0));
     let listener = CountingListener {
         listener,
@@ -46,13 +46,27 @@ pub(super) async fn serve(
         biased;
         planned_restart = told_to_stop() => {
             let deadline = tokio::time::Instant::now() + DRAIN;
-            if planned_restart {
-                hub.close_streams_with(&farewell());
+            let stopped_at = planned_restart.then(|| app.clock.now_ms());
+            if let Some(at) = stopped_at {
+                hub.close_streams_with(&clarp_host::availability::host_updating(at, restart_ms));
             } else {
                 hub.close_streams();
             }
             let _ = stop.send(());
-            match tokio::time::timeout_at(deadline, server).await {
+            // Give a healthy disk a short chance to record the stop, concurrently with the
+            // drain. A stalled write cannot hold open the event stream or delay exit beyond
+            // this budget; the runtime does not join its blocking pool at shutdown.
+            let mark = async {
+                if let Some(at) = stopped_at {
+                    let data_dir = app.config.data_dir.clone();
+                    let write = tokio::task::spawn_blocking(move || {
+                        clarp_host::availability::record_stopped(&data_dir, at);
+                    });
+                    let _ = tokio::time::timeout(RESTART_MARK_BUDGET, write).await;
+                }
+            };
+            let (drained, ()) = tokio::join!(tokio::time::timeout_at(deadline, server), mark);
+            match drained {
                 Ok(result) => result,
                 Err(_) => {
                     eprintln!(

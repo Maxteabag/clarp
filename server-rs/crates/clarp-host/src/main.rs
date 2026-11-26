@@ -629,9 +629,8 @@ async fn serve(config: Config) -> Result<(), String> {
     // come back since it was last told to stop is kept, for what it says when it is told again.
     clarp_host::availability::run(&app);
     clarp_host::availability::host_started(&app.config.data_dir, app.clock.now_ms());
-    let (data_dir, clock) = (app.config.data_dir.clone(), app.clock.clone());
-    let farewell = move || clarp_host::availability::host_updating(&data_dir, clock.now_ms());
-    shutdown::serve(listener, router, app.hub.clone(), farewell)
+    let restart_ms = clarp_host::availability::restart_estimate(&app.config.data_dir);
+    shutdown::serve(listener, router, &app, restart_ms)
         .await
         .map_err(|error| error.to_string())
 }

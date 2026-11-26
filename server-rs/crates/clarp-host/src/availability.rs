@@ -352,19 +352,26 @@ fn median(kept: &VecDeque<i64>) -> i64 {
     sorted[sorted.len() / 2].max(1_000)
 }
 
-/// The Host is told to stop: what every event stream is sent as its last frame, with when the
-/// Host expects to be back. Notes the moment, so that the next start measures how long it took.
-pub fn host_updating(data_dir: &Path, now_ms: i64) -> Value {
-    let _ = std::fs::write(data_dir.join(STOPPED_AT), now_ms.to_string());
-    let took = read_ms(&data_dir.join(RESTART_TOOK))
+/// Read the last measured restart at startup, with the default for a fresh Host.
+pub fn restart_estimate(data_dir: &Path) -> i64 {
+    read_ms(&data_dir.join(RESTART_TOOK))
         .filter(|took| (1_000..=RESTART_MEASURED_UP_TO_MS).contains(took))
-        .unwrap_or(RESTART_DEFAULT_MS);
+        .unwrap_or(RESTART_DEFAULT_MS)
+}
+
+/// The terminal frame for a planned restart, built entirely from memory.
+pub fn host_updating(now_ms: i64, restart_ms: i64) -> Value {
     json!({
         "type": "host-updating",
         "text": "Host updating",
         "since_ms": now_ms,
-        "back_at_ms": now_ms.saturating_add(took),
+        "back_at_ms": now_ms.saturating_add(restart_ms),
     })
+}
+
+/// Note the stop for the next start to measure. This can block on the data volume.
+pub fn record_stopped(data_dir: &Path, now_ms: i64) {
+    let _ = std::fs::write(data_dir.join(STOPPED_AT), now_ms.to_string());
 }
 
 /// The Host listens again: how long it was away since it was told to stop is kept, as the
@@ -880,16 +887,18 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("clarp-availability-{}", crate::ids::hex(6)));
         std::fs::create_dir_all(&dir).unwrap();
         let dir = Dir(dir);
-        let first = host_updating(dir.path(), NOW);
+        let first = host_updating(NOW, restart_estimate(dir.path()));
         assert_eq!(first["type"], "host-updating");
         assert_eq!(first["text"], "Host updating");
         assert_eq!(first["back_at_ms"], NOW + RESTART_DEFAULT_MS);
+        record_stopped(dir.path(), NOW);
         host_started(dir.path(), NOW + 12_000);
-        let second = host_updating(dir.path(), NOW + 100_000);
+        let second = host_updating(NOW + 100_000, restart_estimate(dir.path()));
         assert_eq!(second["back_at_ms"], NOW + 100_000 + 12_000);
         // A stop of an hour was no restart: the measure stays.
+        record_stopped(dir.path(), NOW + 100_000);
         host_started(dir.path(), NOW + 100_000 + 3_600_000);
-        let third = host_updating(dir.path(), NOW + 200_000);
+        let third = host_updating(NOW + 200_000, restart_estimate(dir.path()));
         assert_eq!(third["back_at_ms"], NOW + 200_000 + 12_000);
     }
 }

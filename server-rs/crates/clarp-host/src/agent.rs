@@ -2686,9 +2686,7 @@ impl Worker {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
-            if !actor.transit_resume_pending()
-                && let Some((turn, since)) = actor.waits_for_an_account()
-            {
+            if !actor.transit_resume_pending() && let Some((turn, since)) = actor.waits_for_an_account() {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
                 let resets = actor.waits_until_reset();
@@ -2857,13 +2855,9 @@ impl Worker {
             let held = tokio::task::spawn_blocking(move || {
                 crate::launcher::takeover_request(
                     &socket,
-                    clarp_shim::Request::Hold {
-                        ms: clarp_shim::HOLD_MOST_MS,
-                    },
-                )
-                .and_then(|reply| reply.held)
-            })
-            .await;
+                    clarp_shim::Request::Hold { ms: clarp_shim::HOLD_MOST_MS },
+                ).and_then(|reply| reply.held)
+            }).await;
             if let Ok(Some(held)) = held {
                 let _ = tx.send(Ask::TransitCheckpointHeld { offer, held });
             }
@@ -2898,9 +2892,7 @@ impl Worker {
         match crate::agent_transit::carry(actor, &self.setup.record, change, now) {
             Ok((Ok(changed), out)) => {
                 self.after(out);
-                if self.pooled.take().is_some()
-                    && let Some(pool) = self.setup.pool()
-                {
+                if self.pooled.take().is_some() && let Some(pool) = self.setup.pool() {
                     pool.disowned(&self.setup.record.agent_id);
                     self.held = None;
                 }
@@ -4331,16 +4323,13 @@ impl Worker {
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
-                let whole = held.left_ms > 0
-                    && held.partial_out == 0
-                    && held.partial_err == 0
-                    && held.partial_reports == 0;
+                let whole = held.left_ms > 0 && held.partial_out == 0
+                    && held.partial_err == 0 && held.partial_reports == 0;
                 let acceptable = if whole
                     && let Some(native) = crate::takeover::native_transit_progress(
-                        &crate::config::home(),
-                        &self.setup.record.cwd,
-                        &offer,
-                    ) {
+                        &crate::config::home(), &self.setup.record.cwd, &offer,
+                    )
+                {
                     actor.expect_transit_checkpoint(&offer, held.spool, &native, now)?
                 } else {
                     false
