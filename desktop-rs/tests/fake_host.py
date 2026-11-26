@@ -239,7 +239,8 @@ live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without 
 # /events/{id}/live changes its followed and shown chats and sends
 # live-changed on it. Such a stream gets item ops and transcript-updated only
 # for the chats both followed and shown; `refuse` answers the POST 404.
-viewport = {"on": False, "refuse": False}
+viewport = {"on": False, "refuse": False, "hold": False}
+viewport_held = []     # (inbox, chunks) openings held while viewport["hold"]
 viewport_streams = {}  # stream_id -> inbox
 viewport_full = {}     # id(inbox) -> the chats it streams in full
 stream_counter = 0
@@ -2075,9 +2076,16 @@ class Handler(BaseHTTPRequestHandler):
                         shown = {n for n in visible.split(",") if n}
                         live_filters[id(inbox)] = (live_filters[id(inbox)] or set()) & shown
                         viewport_full[id(inbox)] = set(live_filters[id(inbox)])
-                    inbox.put(f"data: {json.dumps({'type': 'stream', 'stream_id': stream_id})}\n\n".encode())
-                    # The replay (none kept here) ends with the plain nudge.
-                    inbox.put(f"data: {json.dumps({'type': 'agent-roster'})}\n\n".encode())
+                    opening = [
+                        f"data: {json.dumps({'type': 'stream', 'stream_id': stream_id})}\n\n".encode(),
+                        # The replay (none kept here) ends with the plain nudge.
+                        f"data: {json.dumps({'type': 'agent-roster'})}\n\n".encode(),
+                    ]
+                    if viewport["hold"]:
+                        viewport_held.append((inbox, opening))
+                    else:
+                        for chunk in opening:
+                            inbox.put(chunk)
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -2198,8 +2206,18 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/viewport":
             # Test control: the two stream features (read from /server-info on
             # connecting), and whether POST /events/{id}/live is refused.
+            # `hold` keeps each new stream's opening (its `stream` event and
+            # nudge) until a call without it sends them.
             viewport["on"] = bool(body.get("on", True))
             viewport["refuse"] = bool(body.get("refuse", False))
+            viewport["hold"] = bool(body.get("hold", False))
+            if not viewport["hold"]:
+                with state_lock:
+                    for inbox, opening in viewport_held:
+                        if inbox in subscribers:
+                            for chunk in opening:
+                                inbox.put(chunk)
+                    viewport_held.clear()
             return self.reply(200, {"ok": True})
         if url.path == "/__control/preview":
             # Test control: a background chat's coalesced preview, unnumbered,

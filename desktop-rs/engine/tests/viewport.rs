@@ -217,10 +217,10 @@ fn a_dropped_stream_comes_back_with_the_screen_and_reads_only_shown_chats() {
     d.settle(Duration::from_millis(200));
     let mike_reads = log_reads(&host, "mike").len();
     host.control("/__control/outage", json!({"seconds": 0.5}));
-    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    d.until("the drop", |e| !e.connected());
     host.control("/__control/upsert", json!({"session": "mike", "turns": [{"id": "m-gap", "role": "assistant", "text": "while away"}]}));
     host.control("/__control/upsert", json!({"session": "rachel", "turns": [{"id": "r-gap", "role": "assistant", "text": "while away"}]}));
-    d.until("live again", |e| e.connection_state() == "live");
+    d.until("live again", |e| e.connected() && e.connection_state() == "live" && !e.outage_active());
     let last = events_queries(&host).last().cloned().unwrap();
     assert_eq!(last["visible"], "rachel", "reopened with the screen: {last}");
     d.until("rachel caught up", |e| e.conversation("rachel").is_some_and(|c| c.rows().iter().any(|m| m.id == "r-gap")));
@@ -266,12 +266,12 @@ fn panes_changed_while_disconnected_are_reconciled_from_the_new_stream_only() {
     d.settle(Duration::from_millis(300));
 
     host.control("/__control/outage", json!({"seconds": 1.0}));
-    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    d.until("the drop", |e| !e.connected());
     let (rachel_live, rachel_log) = (live_reads(&host, "rachel"), log_reads(&host, "rachel").len());
     let (mike_live, mike_log) = (live_reads(&host, "mike"), log_reads(&host, "mike").len());
     // While the stream is down the screen moves from rachel to mike.
     d.engine.select("mike");
-    d.until("live again", |e| e.connection_state() == "live");
+    d.until("live again", |e| e.connected() && e.connection_state() == "live" && !e.outage_active());
     d.until("the new stream applies mike", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["mike"]));
     assert_eq!(events_queries(&host).last().unwrap()["visible"], "mike", "opened with the screen as it is now");
     d.until("mike's live state", |_| live_reads(&host, "mike") > mike_live);
@@ -309,8 +309,8 @@ fn a_new_empty_workspace_stays_empty_through_snapshots_and_a_reconnect() {
     // A reconnect, with its own snapshot: still empty.
     let snapshots = host.requests("GET", "/agents/snapshot").len();
     host.control("/__control/outage", json!({"seconds": 0.5}));
-    d.until("the drop", |e| e.connection_state() == "reconnecting");
-    d.until("live again", |e| e.connection_state() == "live");
+    d.until("the drop", |e| !e.connected());
+    d.until("live again", |e| e.connected() && e.connection_state() == "live" && !e.outage_active());
     d.until("the reconnect's snapshot", |_| host.requests("GET", "/agents/snapshot").len() > snapshots);
     d.settle(Duration::from_millis(400));
     assert_eq!(d.engine.selected_session(), "");
@@ -347,4 +347,56 @@ fn a_lost_chat_is_replaced_after_an_empty_workspace_was_left() {
     assert_eq!(d.engine.selected_session(), "rachel");
     d.engine.archive_agent("rachel");
     d.until("a chat chosen in place of the archived one", |e| !e.selected_session().is_empty() && e.selected_session() != "rachel");
+}
+
+#[test]
+fn an_outage_ends_only_after_the_new_stream_named_its_sets_and_its_shown_chats_caught_up() {
+    let host = viewport_host("viewport-outage");
+    let mut d = showing_rachel(&host);
+    d.engine.set_outage_grace(Duration::from_millis(1500));
+    // mike read once, then hidden: held and followed, but not shown.
+    d.engine.select("mike");
+    d.until("mike's log", |e| e.conversation("mike").is_some_and(|c| c.len() >= 1) && !e.log_pending("mike"));
+    d.engine.select("rachel");
+    d.until("rachel shown again", |e| e.viewport_effective().is_some_and(|(_, v)| v == ["rachel"]));
+    d.settle(Duration::from_millis(300));
+
+    // The next streams hold their opening: connected, but not yet named.
+    host.control("/__control/viewport", json!({"on": true, "hold": true}));
+    host.control("/__control/outage", json!({"seconds": 0.3}));
+    d.until("the drop", |e| !e.connected());
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+    let (rachel_live, rachel_log) = (live_reads(&host, "rachel"), log_reads(&host, "rachel").len());
+    let (mike_live, mike_log) = (live_reads(&host, "mike"), log_reads(&host, "mike").len());
+    host.control("/__control/upsert", json!({"session": "rachel", "turns": [{"id": "r-gap", "role": "assistant", "text": "while away"}]}));
+    host.control("/__control/upsert", json!({"session": "mike", "turns": [{"id": "m-gap", "role": "assistant", "text": "while away"}]}));
+    d.until("the stream is back", |e| e.connected());
+    // No round, and no read from the sets before the drop, until the
+    // stream names what it shows; the grace runs out meanwhile.
+    d.until("out of reach while the stream has not named itself", |e| e.connection_state() == "reconnecting");
+    assert!(d.engine.connected() && d.engine.outage_active() && !d.engine.outage_catching_up());
+    assert_eq!(host.requests("GET", "/agents/snapshot").len(), snapshots, "no roster before the stream's opening");
+    assert_eq!(live_reads(&host, "rachel"), rachel_live, "no /live before the stream's opening");
+    assert_eq!(log_reads(&host, "rachel").len(), rachel_log, "no /log before the stream's opening");
+
+    // The opening comes while rachel's first read fails on the way: the
+    // round reads it again by itself, and only then is the Host live.
+    host.control("/__control/fail", json!({"path": "/log", "status": 502, "count": 1}));
+    host.control("/__control/viewport", json!({"on": true, "hold": false}));
+    d.until_within("caught up and live", Duration::from_secs(15), |e, _| {
+        if e.connection_state() == "live" {
+            assert!(e.conversation("rachel").is_some_and(|c| c.rows().iter().any(|m| m.id == "r-gap")), "rachel caught up before it said live");
+        }
+        e.connection_state() == "live" && !e.outage_active()
+    });
+    assert!(d.engine.error().is_empty(), "{:?}", d.engine.error());
+    assert_ne!(d.engine.roster().display_state("rachel").as_deref(), Some("offline"));
+    d.settle(Duration::from_millis(500));
+    assert_eq!(host.requests("GET", "/agents/snapshot").len(), snapshots + 1, "one roster read for the round and the stream's nudge");
+    assert_eq!(live_reads(&host, "rachel"), rachel_live + 1, "one /live at the boundary");
+    let reads: Vec<Value> = log_reads(&host, "rachel").into_iter().skip(rachel_log).collect();
+    assert_eq!(reads.len(), 2, "the read that failed and its one retry: {reads:?}");
+    assert!(reads.iter().all(|r| r["query"].get("after_revision").is_some()), "from rachel's own revision: {reads:?}");
+    assert_eq!(live_reads(&host, "mike"), mike_live, "a hidden chat reads no /live");
+    assert_eq!(log_reads(&host, "mike").len(), mike_log, "a hidden chat reads no /log");
 }

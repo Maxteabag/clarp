@@ -1071,6 +1071,9 @@ impl Engine {
             return;
         }
         self.snapshot_in_flight = true;
+        // Sent now, it covers every change marked before it (one marked
+        // while an earlier request failed in an outage included).
+        self.snapshot_dirty = false;
         self.snapshot_last = Some(Instant::now());
         self.snapshot_generation += 1;
         self.freshness.started();
