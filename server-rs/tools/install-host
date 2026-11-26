@@ -176,8 +176,9 @@ units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 releases="$share/releases"
 host_unit=clarp-host.service
 # The unit that holds the Host's port while the Host is restarted (issue 935), and the address
-# start_host last started it on: the port in effect. A unit written with --files-only, or anyhow
-# without start_host, is not in effect until start_host starts the socket on it.
+# start_host last started it on with the socket's run (its InvocationID) then: the port in effect.
+# A unit written with --files-only is not in effect until start_host starts the socket on it, and
+# a socket started again by anyone else is a run of its own that start_host did not record.
 socket_unit=clarp-host.socket
 socket_listening="$releases/socket-listening"
 steady_minutes=30
@@ -291,12 +292,15 @@ start_host() {
         return
     fi
     systemctl --user enable --quiet "$socket_unit" "$host_unit"
-    # Only the Host is restarted where the socket listens, as start_host last started it, on
-    # the address its unit says now: what a file on disk says is not what is in effect.
-    local wanted
+    # Only the Host is restarted where the socket's run now is the one start_host last started,
+    # on the address its unit says now: what a file on disk says is not what is in effect, and a
+    # socket started again by anyone else may hold another address.
+    local wanted run
     wanted="$(sed -n 's/^ListenStream=//p' "$units/$socket_unit" | head -1)"
-    if [ "$1" = 0 ] && [ -n "$wanted" ] && systemctl --user is-active --quiet "$socket_unit" &&
-        [ "$(cat "$socket_listening" 2> /dev/null)" = "$wanted" ]; then
+    run="$(systemctl --user show "$socket_unit" -p InvocationID --value 2> /dev/null || true)"
+    if [ "$1" = 0 ] && [ -n "$wanted" ] && [ -n "$run" ] &&
+        systemctl --user is-active --quiet "$socket_unit" &&
+        [ "$(cat "$socket_listening" 2> /dev/null)" = "$wanted $run" ]; then
         systemctl --user restart "$host_unit"
         return
     fi
@@ -317,7 +321,9 @@ start_host() {
     fi
     if [ "$taken" = 1 ]; then
         mkdir -p "$releases"
-        printf '%s\n' "$wanted" > "$socket_listening"
+        run="$(systemctl --user show "$socket_unit" -p InvocationID --value 2> /dev/null || true)"
+        # A socket whose run cannot be told is recorded as none: the next install starts it again.
+        [ -n "$run" ] && printf '%s %s\n' "$wanted" "$run" > "$socket_listening"
         systemctl --user start "$host_unit"
         return
     fi

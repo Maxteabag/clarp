@@ -57,18 +57,14 @@ pub(super) async fn serve(
             // Give a healthy disk a short chance to record the stop, concurrently with the
             // drain. A stalled write cannot hold open the event stream or delay exit beyond
             // this budget; the runtime does not join its blocking pool at shutdown.
-            // And how far its events' numbers may go, so that the next run starts above them
-            // (issue 935).
-            let floor = hub.next_id();
             let mark = async {
-                let data_dir = app.config.data_dir.clone();
-                let write = tokio::task::spawn_blocking(move || {
-                    clarp_host::hub::record_event_floor(&data_dir, floor);
-                    if let Some(at) = stopped_at {
+                if let Some(at) = stopped_at {
+                    let data_dir = app.config.data_dir.clone();
+                    let write = tokio::task::spawn_blocking(move || {
                         clarp_host::availability::record_stopped(&data_dir, at);
-                    }
-                });
-                let _ = tokio::time::timeout(RESTART_MARK_BUDGET, write).await;
+                    });
+                    let _ = tokio::time::timeout(RESTART_MARK_BUDGET, write).await;
+                }
             };
             let (drained, ()) = tokio::join!(tokio::time::timeout_at(deadline, server), mark);
             match drained {

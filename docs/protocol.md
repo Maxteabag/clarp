@@ -2367,9 +2367,17 @@ first says `started`; another run answering in between is a start that failed. A
 contract 210 answers nothing until its start is done and says neither field: its answer is its
 start done.
 
-Where `clarp-host.socket` holds the Host's port (install-host since issue 935), a restart closes
-no connection: what comes in while one Host stops and the next starts waits in the socket's queue
-and is answered by the next Host.
+Where `clarp-host.socket` holds the Host's port (install-host since issue 935), the listener
+survives a restart: a connection made while one Host stops and the next starts waits in the
+socket's queue and is answered by the next Host, never refused. An open event stream still ends
+when its Host stops (its last frame `host-updating`) and is reconnected by the app, with the
+`Last-Event-ID` of the last frame it read.
+
+Event numbers never repeat across runs of a Host: each run reserves its numbers on disk before it
+gives any out, above every number an earlier run may have given out, whether that run stopped,
+failed to record its stop or crashed. A stream resumed with an earlier run's number is therefore
+always told it missed something (`agent-roster` with `resync`, `truncated` on `compact=1`) and
+reads the snapshot again.
 
 ### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
