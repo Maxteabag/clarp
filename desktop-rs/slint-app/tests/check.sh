@@ -102,7 +102,15 @@ SH
 fi
 /usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" "${host_args[@]}" &
 host=$!
-for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
+for _ in $(seq 300); do
+    [ -s "$scratch/port" ] && break
+    kill -0 "$host" 2>/dev/null || break
+    sleep 0.1
+done
+if [ ! -s "$scratch/port" ]; then
+    echo "FAIL fake Host did not publish its listening port" >&2
+    exit 1
+fi
 # all-hosts: a second paired Host, read beside the first.
 if [ "$name" = all-hosts ]; then
     /usr/bin/python3 tests/fake_host.py --port-file "$scratch/peer-port" --log "$scratch/peer.log" --peer &
