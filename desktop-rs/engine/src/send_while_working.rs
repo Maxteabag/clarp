@@ -154,18 +154,15 @@ impl Engine {
         }
     }
 
-    /// The events that change it: the setting's own, a chat's queue (a send
-    /// that fell back says why; a Stop and send has been answered), and a
-    /// turn that has ended.
+    /// The events that change it: the setting's own, a chat's queue (a Stop
+    /// and send has been answered), and a turn that has ended. A fallback is
+    /// said only in the send's answer.
     pub(crate) fn send_while_working_event(&mut self, kind: &str, session: &str, event: &Object) {
         if kind == sww::EVENT {
             if let Some(mode) = sww::read(event) {
                 self.send_while_working_mode(mode);
             }
         } else if kind == "queue-updated" {
-            if let Some(reason) = sww::fallback(event) {
-                self.note_send_reason(session, reason);
-            }
             self.settle_for_waiting(session, false);
         } else if kind == "agent-state" {
             // A turn stopped for a send runs that send next: its words stay

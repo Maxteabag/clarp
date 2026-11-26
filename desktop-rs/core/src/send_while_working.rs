@@ -24,8 +24,9 @@ pub const PATH: &str = "/send-settings";
 pub const FIELD: &str = "while_busy";
 /// The event every client is sent when it changes: `{type, FIELD}`.
 pub const EVENT: &str = "send-settings-updated";
-/// On a send's answer where the Host did otherwise than asked: `{from, to,
-/// reason: not_steerable | not_words, text}`; `text` is shown as sent.
+/// Only on a send's answer, where the Host did otherwise than asked: `{from,
+/// to, reason: not_steerable | not_words | turn_not_cuttable, text}`;
+/// `text` is shown as sent. The answer's `FIELD` says what was done.
 pub const FALLBACK_FIELD: &str = "fallback";
 
 /// The setting's title (Settings › Chats).
