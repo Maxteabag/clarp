@@ -1,5 +1,5 @@
 //! The skills this Host keeps installed for its agents' tools (`GET` and `POST
-//! /managed-skills`), and the links it puts in place at its start.
+//! /managed-skills`), and the links it puts in place beside its start.
 //!
 //! The rules are the kernel's (`clarp_kernel::managed_skills`, held to the Python Host); this
 //! module finds what is on the disk, asks the kernel, and does what it says. One Host keeps a
@@ -303,6 +303,9 @@ fn on_path(name: &str) -> bool {
 struct InstallState {
     skills: Vec<String>,
     skills_off: Vec<String>,
+    /// The releases the links of Clarp's lead into, as the last reconciliation or change left
+    /// them (issue 935): install-host keeps every one of them. A Host from before writes none.
+    linked_releases: Vec<String>,
 }
 
 impl InstallState {
@@ -323,6 +326,11 @@ impl InstallState {
     }
 
     fn keep(&self, path: &Path) -> io::Result<()> {
+        self.keep_marked(path, &mut Steps::none())
+    }
+
+    /// The same, its write, flush and rename each marked.
+    fn keep_marked(&self, path: &Path, steps: &mut Steps) -> io::Result<()> {
         let beside = path.with_file_name(format!(".install.json.{}.next", crate::ids::hex(8)));
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -332,8 +340,12 @@ impl InstallState {
         let write = (|| {
             serde_json::to_writer(&mut file, self)?;
             file.write_all(b"\n")?;
+            steps.mark("write");
             file.sync_all()?;
-            std::fs::rename(&beside, path)
+            steps.mark("sync");
+            std::fs::rename(&beside, path)?;
+            steps.mark("rename");
+            Ok(())
         })();
         if write.is_err() {
             let _ = std::fs::remove_file(beside);
@@ -432,6 +444,7 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
         state.skills =
             rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
         let undo = shelf.apply(&skill, &acts).map_err(disk_error)?;
+        state.linked_releases = shelf.linked_releases(&shelf.written_roots());
         if let Err(error) = state.keep(&path) {
             undo.run();
             return Err(disk_error(error));
@@ -441,53 +454,262 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
     .await?
 }
 
-/// Reconcile the shipped skill tree at every start of the Host that keeps the tools.
+/// Reconciles the shipped skill tree at every start of the Host that keeps the tools (issue
+/// 935), beside the start rather than before it is done. The lock over the tools' links is taken
+/// here, before the start is done, so every `GET` and `POST /managed-skills` (held at the door
+/// until then) comes after the reconciliation and none runs beside it: one writer at a time.
+/// Until the links have moved, a turn reads the release before's skills, which install-host
+/// keeps while a link leads into it (`linked_releases`). A reconciliation that could not put
+/// every link in place is tried again, the lock let go in between, until it has.
 pub async fn at_start(app: &App) {
+    let mut steps = Steps::from(std::time::Instant::now());
     let Some(shelf) = Shelf::of(&app.config) else {
         return;
     };
-    let _one = app.skill_links.lock().await;
-    let path = app.config.data_dir.join("install.json");
-    let seed = app.config.skills_chosen_before.clone();
-    let worked = blocking(move || {
-        let items = shelf.items().map_err(|Malformed| unavailable())?;
-        let mut state = InstallState::load(&path, seed.as_deref()).map_err(disk_error)?;
-        state.skills =
-            rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
-        let roots = shelf.written_roots();
+    steps.mark("shelf");
+    let held = app.skill_links.clone().lock_owned().await;
+    steps.mark("lock");
+    let app = app.clone();
+    tokio::spawn(keep_reconciling(
+        app,
+        std::sync::Arc::new(shelf),
+        held,
+        steps,
+    ));
+}
+
+/// How long each step of one reconciliation took, by the monotonic clock, for its journal line
+/// (issue 935): where a slow one spent its time, on an ordinary start.
+struct Steps {
+    began: Option<std::time::Instant>,
+    last: std::time::Instant,
+    said: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl Steps {
+    fn from(began: std::time::Instant) -> Self {
+        Self {
+            began: Some(began),
+            last: began,
+            said: Vec::new(),
+        }
+    }
+
+    /// Marks that are kept nowhere.
+    fn none() -> Self {
+        Self {
+            began: None,
+            last: std::time::Instant::now(),
+            said: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, step: &'static str) {
+        if self.began.is_none() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        self.said.push((step, now - self.last));
+        self.last = now;
+    }
+
+    /// The whole, from the first mark's beginning, in ms.
+    fn ms(&self) -> u128 {
+        self.began
+            .map_or(0, |began| (self.last - began).as_millis())
+    }
+
+    /// `shelf=0.1 lock=0.0 ...`: each step in ms.
+    fn words(&self) -> String {
+        let said: Vec<String> = self
+            .said
+            .iter()
+            .map(|(step, took)| format!("{step}={:.1}", took.as_secs_f64() * 1000.0))
+            .collect();
+        said.join(" ")
+    }
+}
+
+/// Why a reconciliation was not done.
+enum NotReconciled {
+    /// The release's manifest cannot be read: no try again changes that.
+    Manifest,
+    Disk(io::Error),
+}
+
+/// What one reconciliation did.
+struct Reconciled {
+    linked: usize,
+    unlinked: usize,
+    /// Each skill whose links could not be put right, and why.
+    failed: Vec<String>,
+    releases: usize,
+}
+
+async fn keep_reconciling(
+    app: App,
+    shelf: std::sync::Arc<Shelf>,
+    mut held: tokio::sync::OwnedMutexGuard<()>,
+    mut steps: Steps,
+) {
+    let mut again = std::time::Duration::from_secs(1);
+    let mut first = true;
+    loop {
+        let path = app.config.data_dir.join("install.json");
+        let seed = app.config.skills_chosen_before.clone();
+        let work = shelf.clone();
+        let (done, mut steps_done) = tokio::task::spawn_blocking(move || {
+            steps.mark("enter");
+            let done = work.reconcile(&path, seed.as_deref(), &mut steps);
+            (done, steps)
+        })
+        .await
+        .unwrap_or_else(|panic| {
+            let why = io::Error::other(panic.to_string());
+            (Err(NotReconciled::Disk(why)), Steps::none())
+        });
+        drop(held);
+        steps_done.mark("back");
+        let (ms, marks) = (steps_done.ms(), steps_done.words());
+        match done {
+            Ok(done) if done.failed.is_empty() => {
+                eprintln!(
+                    "clarp-host: skills reconciled in {ms} ms: {} links put in place, {} taken \
+                     away; the links lead into {} releases; steps ms: {marks}",
+                    done.linked, done.unlinked, done.releases
+                );
+                return;
+            }
+            Ok(done) => {
+                // Why each could not be is said at the first try; a try again says how many.
+                if first {
+                    for why in &done.failed {
+                        eprintln!("clarp-host: a skill could not be linked: {why}");
+                    }
+                }
+                eprintln!(
+                    "clarp-host: the skills were reconciled in part in {ms} ms: {} could not be \
+                     put right, tried again in {} s; steps ms: {marks}",
+                    done.failed.len(),
+                    again.as_secs()
+                );
+            }
+            Err(NotReconciled::Manifest) => {
+                eprintln!(
+                    "clarp-host: the skills were not reconciled: {}",
+                    rules::UNAVAILABLE
+                );
+                return;
+            }
+            Err(NotReconciled::Disk(error)) => eprintln!(
+                "clarp-host: the skills were not reconciled: {error}; tried again in {} s; steps \
+                 ms: {marks}",
+                again.as_secs()
+            ),
+        }
+        first = false;
+        tokio::time::sleep(again).await;
+        again = (again * 2).min(std::time::Duration::from_secs(300));
+        steps = Steps::from(std::time::Instant::now());
+        held = app.skill_links.clone().lock_owned().await;
+        steps.mark("lock");
+    }
+}
+
+impl Shelf {
+    /// One reconciliation of the tools' links with the release's on-list, under the lock.
+    fn reconcile(
+        &self,
+        path: &Path,
+        seed: Option<&Path>,
+        steps: &mut Steps,
+    ) -> Result<Reconciled, NotReconciled> {
+        // The tests hold the reconciliation while the file named exists (issue 935).
+        #[cfg(debug_assertions)]
+        if let Some(hold) = std::env::var_os("CLARP_TEST_SKILLS_HELD_WHILE") {
+            while Path::new(&hold).exists() {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            steps.mark("held");
+        }
+        let items = self.items().map_err(|Malformed| NotReconciled::Manifest)?;
+        steps.mark("manifest");
+        let mut state = InstallState::load(path, seed).map_err(NotReconciled::Disk)?;
+        state.skills = rules::enrolled(&state.skills_off, &items)
+            .map_err(|Malformed| NotReconciled::Manifest)?;
+        steps.mark("choices");
+        let roots = self.written_roots();
 
         // Include links left by old releases even when they are absent from the previous
         // on-list. Link ownership is checked before any of them can be removed.
         let mut candidates: BTreeSet<String> = state.skills.iter().cloned().collect();
         for root in &roots {
-            if let Ok(entries) = std::fs::read_dir(shelf.folder(*root)) {
-                candidates.extend(entries.flatten().filter_map(|entry| {
-                    if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
-                        entry.file_name().into_string().ok()
-                    } else {
-                        None
-                    }
-                }));
-            }
+            candidates.extend(self.links_in(*root));
         }
+        steps.mark("roots");
+        let mut done = Reconciled {
+            linked: 0,
+            unlinked: 0,
+            failed: Vec::new(),
+            releases: 0,
+        };
         for skill in candidates {
-            let enabled = state.skills.contains(&skill) && shelf.has_source(&skill);
+            let enabled = state.skills.contains(&skill) && self.has_source(&skill);
             let acts: Vec<(Root, Act)> = roots
                 .iter()
-                .map(|root| (*root, rules::at_start(shelf.link(*root, &skill), enabled)))
+                .map(|root| (*root, rules::at_start(self.link(*root, &skill), enabled)))
                 .collect();
-            if let Err(error) = shelf.apply(&skill, &acts) {
-                eprintln!("clarp-host: a skill could not be linked: {skill}: {error}");
+            match self.apply(&skill, &acts) {
+                Ok(_) => {
+                    for (_, act) in &acts {
+                        match act {
+                            Act::Link => done.linked += 1,
+                            Act::Unlink => done.unlinked += 1,
+                            Act::Leave => {}
+                        }
+                    }
+                }
+                Err(error) => done.failed.push(format!("{skill}: {error}")),
             }
         }
-        state.keep(&path).map_err(disk_error)
-    })
-    .await;
-    if let Err(error) = worked.and_then(|result| result) {
-        eprintln!(
-            "clarp-host: the skills were not reconciled: {}",
-            error.message()
-        );
+        steps.mark("links");
+        state.linked_releases = self.linked_releases(&roots);
+        done.releases = state.linked_releases.len();
+        steps.mark("scan");
+        state
+            .keep_marked(path, steps)
+            .map_err(NotReconciled::Disk)?;
+        Ok(done)
+    }
+
+    /// The names of the links in a tool's folder.
+    fn links_in(&self, root: Root) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.folder(root)) else {
+            return Vec::new();
+        };
+        entries
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_symlink()))
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .collect()
+    }
+
+    /// The releases of Clarp the links in the tools' folders lead into now, resolved: this
+    /// release's and any other a link of Clarp's still reads its skill from. install-host keeps
+    /// each of them, so that no link of Clarp's leads to a release it has taken away.
+    fn linked_releases(&self, roots: &[Root]) -> Vec<String> {
+        let mut releases = BTreeSet::new();
+        for root in roots {
+            for skill in self.links_in(*root) {
+                if matches!(self.link(*root, &skill), Link::Healthy | Link::Outdated) {
+                    let resolved = resolve(&self.place(*root, &skill));
+                    if let Some(release) = resolved.parent().and_then(Path::parent) {
+                        releases.insert(text(release));
+                    }
+                }
+            }
+        }
+        releases.into_iter().collect()
     }
 }
 
