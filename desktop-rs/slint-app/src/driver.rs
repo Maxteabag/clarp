@@ -2912,7 +2912,6 @@ fn sidebar_check(out: String) {
             true
         })),
         ("row menu open", Box::new(move |_, window, elapsed| {
-            use slint::ComponentHandle;
             let menu = window.global::<crate::RowMenu>();
             if menu.get_session() != "mike" || !spoken_drawn("row-menu:hour") {
                 check(elapsed < Duration::from_secs(3), "a right-click on a chat's row opens its menu with the snooze choices");
@@ -2927,7 +2926,6 @@ fn sidebar_check(out: String) {
             true
         })),
         ("snoozed sinks", Box::new(move |_, window, elapsed| {
-            use slint::ComponentHandle;
             let shown = sessions(window);
             let menu_closed = window.global::<crate::RowMenu>().get_session().is_empty();
             if !menu_closed || window.get_triage_snoozed() != 1 || shown.last() != Some(&"mike".to_owned()) || elapsed < Duration::from_millis(300) {
