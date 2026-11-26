@@ -10,9 +10,9 @@
 //!   account is used up with no seat to move to (its row's `backend_quota` says `exhausted`).
 //! - `switching_account`: a turn waits for an account while the Host moves its tool to another
 //!   one: after a usage limit, or after a sign-in that ran out.
-//! - `restarting`: its process is starting again (an attempt after a failed one, a wait before
-//!   the next attempt), or the agent is being opened after the Host started.
-//! - `unresponsive`: a turn runs, no tool of it runs, and nothing came of it for
+//! - `restarting`: its process is starting or starting again, including a wait before
+//!   another attempt or reopening after a Host restart.
+//! - `unresponsive`: a turn runs and nothing came of it for
 //!   [`UNRESPONSIVE_AFTER_MS`].
 //! - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
 //! - `ok`: it can answer now.
@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use clarp_actor::Status;
 use clarp_kernel::failures;
-use clarp_kernel::turn::{Activity, Outcome, Wait};
+use clarp_kernel::turn::{Outcome, Wait};
 use serde_json::{Value, json};
 
 use crate::fleet::Member;
@@ -211,7 +211,7 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         };
         return at("restarting", "Restarting".into(), parked.since_ms, back);
     }
-    if live.starting && (live.failed_attempts > 0 || live.handoff_retry.is_some()) {
+    if live.starting && !live.stopping {
         let back = live.moved_at_ms.saturating_add(facts.start_ms);
         return at(
             "restarting",
@@ -220,13 +220,8 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
             Some(back),
         );
     }
-    let alive = facts.last_alive_ms.filter(|_| !live.starting);
-    // Only a turn that thinks or writes can fall silent: a tool that runs is work however
-    // quiet (its row says what runs), and so is a wait for an approval or a background task, a
-    // compaction, and the tool's own retries at a provider that would not answer.
-    let silent_work =
-        live.tools.is_empty() && matches!(live.activity, Activity::Thinking | Activity::Responding);
-    if let Some(alive) = alive.filter(|_| silent_work && !live.stopping)
+    let alive = facts.last_alive_ms;
+    if let Some(alive) = alive.filter(|_| !live.stopping)
         && facts.now_ms.saturating_sub(alive) >= UNRESPONSIVE_AFTER_MS
     {
         let mut shown = at(
@@ -479,7 +474,7 @@ fn look(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use clarp_actor::LiveStatus;
-    use clarp_kernel::turn::{Origin, Parked, TurnId};
+    use clarp_kernel::turn::{Activity, Origin, Parked, TurnId};
 
     use super::*;
 
@@ -593,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn a_silent_turn_is_not_responding_after_three_minutes_unless_a_tool_runs() {
+    fn a_running_turn_is_unresponsive_after_three_minutes_of_silence() {
         let mut status = idle();
         status.live = Some(running(NOW - 600_000));
         let quiet = NOW - UNRESPONSIVE_AFTER_MS;
@@ -610,7 +605,10 @@ mod tests {
                 name: "Bash".into(),
             };
         }
-        assert_eq!(decided(&status, &Value::Null, Some(quiet)).state, "busy");
+        assert_eq!(
+            decided(&status, &Value::Null, Some(quiet)).state,
+            "unresponsive"
+        );
     }
 
     #[test]
@@ -826,10 +824,10 @@ mod tests {
                 Some(NOW - 3_000 + START_DEFAULT_MS)
             )
         );
-        // A first start is the turn's work: busy.
+        // A cold start has the same estimate.
         live.failed_attempts = 0;
         status.live = Some(live);
-        assert_eq!(decided(&status, &Value::Null, None).state, "busy");
+        assert_eq!(decided(&status, &Value::Null, None).state, "restarting");
         // An agent being opened after the Host started; one made since is not restarting.
         let opening = |created_at_ms: i64| {
             decide(&Facts {

@@ -44,9 +44,13 @@ pub(super) async fn serve(
 
     tokio::select! {
         biased;
-        () = told_to_stop() => {
+        planned_restart = told_to_stop() => {
             let deadline = tokio::time::Instant::now() + DRAIN;
-            hub.close_streams_with(&farewell());
+            if planned_restart {
+                hub.close_streams_with(&farewell());
+            } else {
+                hub.close_streams();
+            }
             let _ = stop.send(());
             match tokio::time::timeout_at(deadline, server).await {
                 Ok(result) => result,
@@ -140,7 +144,7 @@ impl AsyncWrite for Connection {
 }
 
 /// Resolves when the Host is asked to stop. The turns that run are not asked: they go on.
-async fn told_to_stop() {
+async fn told_to_stop() -> bool {
     use tokio::signal::unix::{SignalKind, signal};
     let mut terminate = signal(SignalKind::terminate()).ok();
     let terminated = async {
@@ -152,7 +156,7 @@ async fn told_to_stop() {
         }
     };
     tokio::select! {
-        _ = tokio::signal::ctrl_c() => {}
-        () = terminated => {}
+        _ = tokio::signal::ctrl_c() => false,
+        () = terminated => true,
     }
 }

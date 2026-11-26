@@ -160,9 +160,9 @@ curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" \
 ```
 
 `state` is `ok` (it answers now), `busy` (a turn runs; `queue_ahead` messages
-are read before yours), `unresponsive` (a turn that thinks or writes has shown
+are read before yours), `unresponsive` (a running turn has shown
 no sign of life for 3 minutes; `last_alive_ms`), `restarting` (its process
-starts again), `switching_account` (the Host moves it to another account) or
+is starting or starting again), `switching_account` (the Host moves it to another account) or
 `usage_limit` (no account can take its turn now). `text` is the line the apps
 show, `back_at_ms` when the Host expects it to answer (epoch ms, or `null`).
 Use it to decide, not to refuse: a message to an agent that cannot answer now

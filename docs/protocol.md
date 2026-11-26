@@ -2240,11 +2240,10 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
   - `switching_account`: its turn waits while the Host moves its tool to another account, after a
     usage limit or after a sign-in that ran out; or its last turn was refused for a usage limit
     and another seat takes the next (shown for two minutes).
-  - `restarting`: its process is starting again (an attempt after a failed one, the wait before
-    the next attempt), or the agent is being opened after the Host started.
-  - `unresponsive`: a turn that thinks or writes has shown no sign of life (output, its start)
-    for 180 s. A turn that runs a tool, waits for an approval or a background task, compacts or
-    is retried by its own tool is not counted as silent.
+  - `restarting`: its process is starting or starting again, or the agent is reopening after
+    a Host restart.
+  - `unresponsive`: a running turn has shown no sign of life (output, a tool event, or the
+    process starting) for 180 s.
   - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
   - `ok`: it can answer now.
 - `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
