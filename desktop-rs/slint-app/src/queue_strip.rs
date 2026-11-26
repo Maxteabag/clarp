@@ -106,7 +106,9 @@ pub fn tick(app: &App) {
     let session = {
         let Ok(engine) = app.engine.try_borrow() else { return };
         let session = engine.selected_session().to_owned();
-        let waits = engine.queue_count(&session) > 0 || !engine.turn_queue(&session).is_empty();
+        // The line shows while the count says something waits: that count
+        // is what a stale read would leave wrong.
+        let waits = engine.queue_count(&session) > 0;
         let due = engine.turn_queue_older_than(&session, std::time::Duration::from_secs(clarp_core::queue_line::REREAD_SECS));
         if session.is_empty() || session.starts_with("pair:") || !waits || !due {
             return;
