@@ -291,19 +291,53 @@ start_host() {
         systemctl --user restart "$host_unit"
         return
     fi
-    systemctl --user stop "$host_unit"
-    if systemctl --user restart "$socket_unit"; then
+    # The Host that holds the port lets go of it the moment it is told to stop, and then finishes
+    # what it was answering. The socket takes the port at that moment, not once that Host is gone:
+    # the port is closed only between the two (a few milliseconds), and the next Host starts once
+    # the old one has ended, so one Host at a time writes the data.
+    systemctl --user stop "$host_unit" &
+    local stopping=$! taken=0
+    if port_free "$(sed -n 's/^ListenStream=//p' "$units/$socket_unit" | head -1)" &&
+        systemctl --user restart "$socket_unit"; then
+        taken=1
+    fi
+    wait "$stopping" || true
+    if [ "$taken" = 0 ] && systemctl --user restart "$socket_unit"; then
+        taken=1
+    fi
+    if [ "$taken" = 1 ]; then
         systemctl --user start "$host_unit"
         return
     fi
     echo "install-host: $socket_unit could not take the port: the Host binds it itself, as before" >&2
     journalctl --user -u "$socket_unit" --no-pager -n 4 >&2 || true
-    sed -i -e '/^Requires=clarp-host\.socket$/d' -e '/^StandardInput=socket$/d' \
-        -e 's/^After=network-online\.target clarp-host\.socket$/After=network-online.target/' "$units/$host_unit"
+    sed -i -e "/^Requires=${socket_unit//./\\.}\$/d" -e '/^StandardInput=socket$/d' \
+        -e "s/^After=network-online\.target ${socket_unit//./\\.}\$/After=network-online.target/" "$units/$host_unit"
     systemctl --user disable --quiet "$socket_unit" 2> /dev/null || true
     rm -f "$units/$socket_unit"
     systemctl --user daemon-reload
     systemctl --user restart "$host_unit"
+}
+# Waits until ADDR:PORT can be bound (the Host that held it let go), thirty seconds at most.
+port_free() {
+    python3 - "$1" <<'PY'
+import socket, sys, time
+host, port = sys.argv[1].rsplit(":", 1)
+host = host.strip("[]")
+family = socket.AF_INET6 if ":" in host else socket.AF_INET
+until = time.monotonic() + 30
+while time.monotonic() < until:
+    probe = socket.socket(family, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind((host, int(port)))
+        sys.exit(0)
+    except OSError:
+        time.sleep(0.002)
+    finally:
+        probe.close()
+sys.exit(1)
+PY
 }
 # Waits for the Host to answer, ten seconds at most.
 host_answers() {
