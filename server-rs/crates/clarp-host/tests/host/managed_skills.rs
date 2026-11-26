@@ -701,6 +701,8 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
         "manifest=",
         "choices=",
         "roots=",
+        "before=",
+        "intent=",
         "links=",
         "scan=",
         "write=",
@@ -781,6 +783,27 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
             json!([release(&r1), release(&r2)])
         );
         assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+        // Then it may write the folder but not list it: the links move, and the record still
+        // names both releases, as where that folder's links lead is not known.
+        let parts = || {
+            host.heard
+                .lock()
+                .unwrap()
+                .matches("the skills were reconciled in part in ")
+                .count()
+        };
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o333)).unwrap();
+        wait_for("the links moved in a folder not listed", || {
+            machine.leads("codex", "core1") == Some(r1.join("core1"))
+        });
+        let seen = parts();
+        wait_for("a whole try with the folder not listed", || parts() > seen);
+        assert_eq!(reconciled(&host), 0);
+        assert_eq!(machine.leads("claude", "core1"), Some(r1.join("core1")));
+        assert_eq!(
+            state()["linked_releases"],
+            json!([release(&r1), release(&r2)])
+        );
     }
     std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
     wait_for("the reconciliation tried again", || reconciled(&host) > 0);
@@ -1020,6 +1043,10 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
         "clarp.service=inactive\nclarp-runtime.service=failed\n",
     )
     .unwrap();
+    // The Host's data is where a Host of this place keeps it, for the Hosts started below.
+    std::fs::create_dir_all(place.root.join("data")).unwrap();
+    std::fs::create_dir_all(&share).unwrap();
+    std::os::unix::fs::symlink(place.root.join("data"), share.join("data")).unwrap();
     let install = |commit: &str| -> String {
         let done = run(commit);
         assert!(
@@ -1072,7 +1099,8 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
             .iter()
             .any(|(name, _, runs)| name == "alpha/scripts/run.sh" && *runs)
     );
-    // A newer version gets a place of its own; the one before stays, older ones go.
+    // A newer version gets a place of its own. Where no Host has said yet where the tools'
+    // links lead, none is taken away (issue 935).
     install("bbbbbbbbbbbb2222");
     install("cccccccccccc3333");
     let kept = || -> Vec<String> {
@@ -1083,42 +1111,7 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
         kept.sort();
         kept
     };
-    assert_eq!(kept(), ["bbbbbbbbbbbb", "cccccccccccc"]);
-    // A release a skill's link still leads into, as the Host recorded it, stays too (issue 935):
-    // its reconciliation was not done, or this install was only of files. A path that is no
-    // release of this Host keeps nothing.
-    let record = share.join("data/install.json");
-    let releases = std::fs::canonicalize(share.join("releases")).unwrap();
-    let linked = |names: &[&str]| {
-        let mut paths: Vec<String> = names
-            .iter()
-            .map(|name| releases.join(name).display().to_string())
-            .collect();
-        paths.push(
-            place
-                .root
-                .join("elsewhere/aaaaaaaaaaaa")
-                .display()
-                .to_string(),
-        );
-        let said = json!({ "skills": [], "skills_off": [], "linked_releases": paths });
-        std::fs::write(&record, said.to_string()).unwrap();
-    };
-    linked(&["bbbbbbbbbbbb"]);
-    install("dddddddddddd4444");
-    assert_eq!(kept(), ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"]);
-    // Once the links have moved on, it goes.
-    linked(&["dddddddddddd"]);
-    install("eeeeeeeeeeee5555");
-    assert_eq!(kept(), ["dddddddddddd", "eeeeeeeeeeee"]);
-    // A record of a Host from before names none, and is never written by this tool.
-    std::fs::write(&record, "{\"skills\": [], \"skills_off\": []}\n").unwrap();
-    install("ffffffffffff6666");
-    assert_eq!(kept(), ["eeeeeeeeeeee", "ffffffffffff"]);
-    assert_eq!(
-        std::fs::read_to_string(&record).unwrap(),
-        "{\"skills\": [], \"skills_off\": []}\n"
-    );
+    assert_eq!(kept(), ["aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc"]);
     // Nothing of a tool's skill folder is made or touched, and the other Host's record is read only.
     for folder in [".claude", ".codex", ".gemini"] {
         assert!(!home.join(folder).exists(), "{folder}");
@@ -1126,6 +1119,95 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
     assert_eq!(
         std::fs::read_to_string(&chosen).unwrap(),
         "{\"skills\": [\"clarp-media\"]}"
+    );
+
+    // The links lead into b, as its Host left them. The Host of c moves them and is cut off
+    // before it has settled its record: the record names b and c, written before any link moved.
+    let releases = std::fs::canonicalize(share.join("releases")).unwrap();
+    let at = |version: &str| releases.join(version).join("skills");
+    let claude = home.join(".claude/skills");
+    for id in ["alpha", "beta"] {
+        link(&claude.join(id), &at("bbbbbbbbbbbb").join(id));
+    }
+    let record = share.join("data/install.json");
+    let named = || -> Value {
+        serde_json::from_slice::<Value>(&std::fs::read(&record).unwrap()).unwrap()
+            ["linked_releases"]
+            .clone()
+    };
+    let release_of = |version: &str| releases.join(version).display().to_string();
+    let reads = |version: &str| {
+        for folder in [".claude/skills", ".codex/skills"] {
+            for id in ["alpha", "beta"] {
+                let place = home.join(folder).join(id);
+                assert_eq!(
+                    std::fs::read_link(&place).unwrap(),
+                    at(version).join(id),
+                    "{folder}/{id}"
+                );
+                assert!(std::fs::read_to_string(place.join("SKILL.md")).is_ok());
+            }
+        }
+    };
+    let host_of = |version: &str, held: Option<&Path>| -> Host {
+        let tree = share.join("releases").join(version).join("skills");
+        let args = ["--skills", tree.to_str().unwrap(), "--accounts", "select"];
+        let mut world = vec![("HOME", home.to_str().unwrap()), ("PATH", sealed::PATH)];
+        if let Some(held) = held {
+            world.push(("CLARP_TEST_SKILLS_SAVE_HELD_WHILE", held.to_str().unwrap()));
+        }
+        let without = [
+            "CODEX_HOME",
+            "CLARP_CLAUDE_SKILLS",
+            "CLARP_CODEX_SKILLS",
+            "CLARP_AGY_SKILLS",
+        ];
+        place.start_without("fixture", &args, &world, &without)
+    };
+    let held = place.root.join("save-held");
+    std::fs::write(&held, "").unwrap();
+    let host = host_of("cccccccccccc", Some(&held));
+    wait_for("the links moved into c", || {
+        ["alpha", "beta"].iter().all(|id| {
+            std::fs::read_link(home.join(".codex/skills").join(id))
+                .is_ok_and(|to| to == at("cccccccccccc").join(id))
+        })
+    });
+    host.kill();
+    std::fs::remove_file(&held).unwrap();
+    reads("cccccccccccc");
+    let both = json!([release_of("bbbbbbbbbbbb"), release_of("cccccccccccc")]);
+    assert_eq!(named(), both);
+    // Two installs of files only follow: c is neither the one before nor steady by then, and
+    // stays, as b does, while the record names them.
+    install("dddddddddddd4444");
+    install("eeeeeeeeeeee5555");
+    assert_eq!(
+        kept(),
+        [
+            "bbbbbbbbbbbb",
+            "cccccccccccc",
+            "dddddddddddd",
+            "eeeeeeeeeeee"
+        ]
+    );
+    reads("cccccccccccc");
+    assert_eq!(named(), both, "this tool never writes the record");
+    // The Host of e settles its links and its record: then b and c go.
+    let host = host_of("eeeeeeeeeeee", None);
+    wait_for("the skills reconciled", || reconciled(&host) > 0);
+    host.kill();
+    reads("eeeeeeeeeeee");
+    assert_eq!(named(), json!([release_of("eeeeeeeeeeee")]));
+    install("ffffffffffff6666");
+    assert_eq!(kept(), ["eeeeeeeeeeee", "ffffffffffff"]);
+    // A record of a Host from before names none: every release stays.
+    std::fs::write(&record, "{\"skills\": [], \"skills_off\": []}\n").unwrap();
+    install("gggggggggggg7777");
+    assert_eq!(kept(), ["eeeeeeeeeeee", "ffffffffffff", "gggggggggggg"]);
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        "{\"skills\": [], \"skills_off\": []}\n"
     );
 }
 
@@ -1194,7 +1276,9 @@ fn a_machine_shaped_reconciliation_says_what_each_step_took() {
     wait_for("the skills reconciled", || reconciled(&host) > 0);
     let line = said_line(&host, "clarp-host: skills reconciled in ");
     assert!(
-        line.contains(": 86 links put in place, 0 taken away; the links lead into 1 releases; steps ms: shelf="),
+        line.contains(
+            ": 86 links put in place, 0 taken away; the links lead into 1 releases; steps ms: lock="
+        ),
         "{line}"
     );
     eprintln!("skills-shaped: {line}");
