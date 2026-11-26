@@ -923,13 +923,103 @@ impl Writer for ClaudeWriter {
             .join("projects")
             .join(project)
             .join(format!("{session}.jsonl"));
-        write_new(&file, &lines(&rows))?;
-        Ok(Written {
+        let body = lines(&rows);
+        write_new(&file, &body)?;
+        let written = Written {
             session,
             carried: spoken(said).count(),
             files: vec![file],
             dirs: Vec::new(),
             rows: Vec::new(),
+        };
+        // The session as it lies on disk is what Claude resumes: one that is not whole what was
+        // prepared, or that Claude would refuse, is taken back before the agent is moved to it.
+        let fault = match std::fs::read(&written.files[0]) {
+            Err(why) => Some(format!("it could not be read back: {}", why.kind())),
+            Ok(read) if read != body => Some(format!(
+                "{} bytes were read back of the {} written",
+                read.len(),
+                body.len()
+            )),
+            Ok(_) => Self::fault(&String::from_utf8_lossy(&body)),
+        };
+        if let Some(fault) = fault {
+            written.undo();
+            return Err(Failed::Register(format!(
+                "the Claude session written was taken back: {fault}"
+            )));
+        }
+        Ok(written)
+    }
+}
+
+impl ClaudeWriter {
+    /// What in a session this Host wrote Claude would refuse when it resumes it, by line and
+    /// never by what was said: an answer's calls must be followed at once by one result for
+    /// each, in their order; a call id is used once; a failed result says something (26 Nov
+    /// 2026, issue 938: Claude refused a session carried from Codex whose failed command had
+    /// no output). Read only of what was just written, never of a session Claude made.
+    fn fault(body: &str) -> Option<String> {
+        let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // The calls of the answer before, waiting for their results, and its line.
+        let mut open: Option<(usize, Vec<String>)> = None;
+        for (at, text) in body.lines().enumerate() {
+            let line = at + 1;
+            let Ok(row) = serde_json::from_str::<Value>(text) else {
+                return Some(format!("line {line} is not JSON"));
+            };
+            let Some(role) = row["message"]["role"].as_str() else {
+                continue;
+            };
+            let blocks: &[Value] = row["message"]["content"]
+                .as_array()
+                .map_or(&[], Vec::as_slice);
+            let of = |kind: &str, key: &str| -> Vec<String> {
+                blocks
+                    .iter()
+                    .filter(|block| block["type"] == kind)
+                    .map(|block| block[key].as_str().unwrap_or_default().to_string())
+                    .collect()
+            };
+            let answered = of("tool_result", "tool_use_id");
+            match open.take() {
+                Some((called, calls)) if role != "user" || answered != calls => {
+                    return Some(format!(
+                        "line {line} does not answer the {} calls of line {called} in their order",
+                        calls.len()
+                    ));
+                }
+                None if !answered.is_empty() => {
+                    return Some(format!("line {line} has results of no call"));
+                }
+                _ => {}
+            }
+            let silent = blocks.iter().any(|block| {
+                block["type"] == "tool_result"
+                    && block["is_error"] == true
+                    && result_text(&block["content"]).trim().is_empty()
+            });
+            if silent {
+                return Some(format!(
+                    "line {line} has a failed tool result that is empty"
+                ));
+            }
+            if role == "assistant" {
+                let calls = of("tool_use", "id");
+                for call in &calls {
+                    if call.is_empty() || !used.insert(call.clone()) {
+                        return Some(format!(
+                            "line {line} has a call id that is empty or used before"
+                        ));
+                    }
+                }
+                if !calls.is_empty() {
+                    open = Some((line, calls));
+                }
+            }
+        }
+        open.map(|(called, calls)| {
+            format!("the {} calls of line {called} have no results", calls.len())
         })
     }
 }
@@ -1661,6 +1751,47 @@ mod tests {
         assert_eq!(success["tool_use_id"], calls[3]["id"]);
         assert_eq!(success["is_error"], false);
         assert_eq!(success["content"], "");
+    }
+
+    #[test]
+    fn a_written_claude_session_claude_would_refuse_is_found_by_its_line() {
+        let mut said = said_with_tools();
+        let mut cut_off = used("toolu_cut_off", None);
+        cut_off.failed = true;
+        said[1]
+            .tools
+            .extend([cut_off, used("toolu_empty_success", Some(""))]);
+        let rows = ClaudeWriter::rows(&said, &place(Path::new("/x")), "s").unwrap();
+        let body = |rows: &[Value]| String::from_utf8(lines(rows)).unwrap();
+        assert_eq!(ClaudeWriter::fault(&body(&rows)), None);
+
+        // Rows 3 and 4 are the calls and their results.
+        let mut silent = rows.clone();
+        silent[4]["message"]["content"][0]["is_error"] = json!(true);
+        silent[4]["message"]["content"][0]["content"] = json!(" ");
+        let mut swapped = rows.clone();
+        swapped[4]["message"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .swap(0, 1);
+        let mut twice = rows.clone();
+        twice[3]["message"]["content"][2]["id"] = rows[3]["message"]["content"][1]["id"].clone();
+        let mut unanswered = rows.clone();
+        unanswered.remove(4);
+        for (rows, fault) in [
+            (silent, "line 5 has a failed tool result that is empty"),
+            (
+                swapped,
+                "line 5 does not answer the 3 calls of line 4 in their order",
+            ),
+            (twice, "line 4 has a call id that is empty or used before"),
+            (
+                unanswered,
+                "line 5 does not answer the 3 calls of line 4 in their order",
+            ),
+        ] {
+            assert_eq!(ClaudeWriter::fault(&body(&rows)).as_deref(), Some(fault));
+        }
     }
 
     #[test]

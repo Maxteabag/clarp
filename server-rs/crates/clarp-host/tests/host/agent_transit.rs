@@ -15,6 +15,8 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 
 root = pathlib.Path(__file__).resolve().parent
+with (root / "claude-argv").open("a") as f:
+    f.write(json.dumps(sys.argv[1:]) + "\n")
 incoming = json.loads(sys.stdin.readline())
 prompt = incoming["message"]["content"][0]["text"]
 session = "00000000-0000-4000-8000-000000000001"
@@ -83,7 +85,9 @@ send("result", subtype="success", is_error=False, result=answer)
 
 /// A stand-in for Codex that identifies answers and reads for a Transit summary.
 const CODEX: &str = r#"#!/usr/bin/env python3
-import json, sys
+import json, pathlib, sys, time
+
+root = pathlib.Path(__file__).resolve().parent
 
 args = sys.argv[1:]
 if args == ["--version"]:
@@ -105,9 +109,27 @@ else:
     text = "Codex heard: " + prompt.strip().splitlines()[-1]
 def say(**fields):
     print(json.dumps(fields), flush=True)
+def command(item, code):
+    # A command that printed nothing, as `false` or `true` do.
+    say(type="item.started", item={"id": item, "type": "command_execution", "command": "check",
+                                   "status": "in_progress"})
+    say(type="item.completed", item={"id": item, "type": "command_execution", "command": "check",
+                                     "aggregated_output": "", "exit_code": code,
+                                     "status": "failed" if code else "completed"})
 say(type="thread.started", thread_id=thread)
 say(type="turn.started")
-say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": text})
+if "Run the checks." in prompt:
+    command("item_0", 1)
+    command("item_1", 0)
+if "Run the twin checks." in prompt:
+    # Two items whose ids differ only in a sign a call id cannot hold.
+    command("item.0", 0)
+    command("item_0", 0)
+if (root / "codex-hold").exists():
+    (root / "codex-held").touch()
+    while (root / "codex-hold").exists():
+        time.sleep(0.05)
+say(type="item.completed", item={"id": "item_9", "type": "agent_message", "text": text})
 say(type="turn.completed", usage={"input_tokens": 5, "output_tokens": 2})
 "#;
 
@@ -179,6 +201,24 @@ impl Setting {
             }
         }
         found
+    }
+
+    /// The sessions written into Claude's projects.
+    fn claude_sessions(&self) -> Vec<std::path::PathBuf> {
+        let projects = self.home.join(".claude").join("projects");
+        std::fs::read_dir(projects)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .flat_map(|project| {
+                std::fs::read_dir(project.path())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+            })
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .collect()
     }
 }
 
@@ -791,4 +831,154 @@ fn a_failed_transit_returns_waiting_messages_to_the_source_backend() {
             .iter()
             .any(|(_, text)| text == "Heard: Still there?")
     });
+}
+
+/// A Codex agent whose commands failed or succeeded without printing anything.
+fn codex_agent_that_ran(host: &Host, name: &str, asked: &str) -> String {
+    let made = host.post("/agents", json!({"name": name, "backend": "codex"}));
+    let session = made["session"].as_str().unwrap().to_string();
+    host.send(&session, asked, &format!("{name}-1"));
+    let heard = format!("Codex heard: {asked}");
+    wait_for("the answer", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "assistant" && *text == heard)
+    });
+    wait_for("the agent to be done", || {
+        row(host, &session)["busy"] == false
+    });
+    session
+}
+
+#[test]
+fn a_codex_command_that_failed_silently_moves_to_claude_with_words_claude_takes() {
+    let setting = Setting::new("agent-transit-silent-failure");
+    let host = setting.start();
+    let session = codex_agent_that_ran(&host, "Silent", "Run the checks.");
+    let done = transit(
+        &host,
+        json!({"session": session, "backend": "claude", "model": "",
+               "request_id": "silent-1"}),
+    );
+    assert_eq!(done["phase"], "done", "{done}");
+
+    let written = setting.claude_sessions();
+    assert_eq!(written.len(), 1, "{written:?}");
+    let rows: Vec<Value> = std::fs::read_to_string(&written[0])
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let at = rows
+        .iter()
+        .position(|row| {
+            row["message"]["content"]
+                .as_array()
+                .is_some_and(|blocks| blocks.iter().any(|block| block["type"] == "tool_use"))
+        })
+        .expect("the commands are carried as calls");
+    let calls = rows[at]["message"]["content"].as_array().unwrap();
+    let results = rows[at + 1]["message"]["content"].as_array().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(results.len(), 2);
+    // The failed command: still a failure, under its call's id, and no longer empty, which
+    // Claude refuses when it resumes the session.
+    assert_eq!(results[0]["tool_use_id"], calls[0]["id"]);
+    assert_eq!(results[0]["is_error"], true);
+    assert!(!results[0]["content"].as_str().unwrap().trim().is_empty());
+    // The command that succeeded without output stays as it was.
+    assert_eq!(results[1]["tool_use_id"], calls[1]["id"]);
+    assert_eq!(results[1]["is_error"], false);
+    assert_eq!(results[1]["content"], "");
+
+    // The agent goes on in that session on Claude.
+    let native = written[0]
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(row(&host, &session)["backend"], "claude");
+    host.send(&session, "After the move.", "silent-2");
+    wait_for("Claude's answer", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "assistant" && text == "Heard: After the move.")
+    });
+    let argv = std::fs::read_to_string(setting.place.root.join("claude-argv")).unwrap();
+    assert!(
+        argv.lines().any(|line| {
+            let args: Vec<String> = serde_json::from_str(line).unwrap();
+            args.windows(2)
+                .any(|pair| pair[0] == "--resume" && pair[1] == native)
+        }),
+        "{argv}"
+    );
+}
+
+#[test]
+fn a_claude_session_claude_would_refuse_is_taken_back_and_the_agent_stays() {
+    let setting = Setting::new("agent-transit-refused-claude");
+    let host = setting.start();
+    let session = codex_agent_that_ran(&host, "Twins", "Run the twin checks.");
+    let before = row(&host, &session);
+    let thread = before["backend_session_id"].clone();
+    assert!(!thread.as_str().unwrap_or("").is_empty(), "{before}");
+
+    // Work runs and waits on Codex while the move is asked.
+    let hold = setting.place.root.join("codex-hold");
+    std::fs::write(&hold, "").unwrap();
+    host.send(&session, "Take your time.", "twins-2");
+    wait_for("the Codex turn to hold", || {
+        setting.place.root.join("codex-held").exists()
+    });
+    queue_for_transit(
+        &host,
+        &session,
+        "twins-3",
+        "Waiting through a refused move.",
+    );
+    let ask = json!({"session": session, "backend": "claude", "model": "",
+                     "request_id": "twins-move"});
+    let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
+    assert_eq!(status, 202, "{began}");
+    std::fs::remove_file(hold).unwrap();
+    let failed = finished_transit(&host, &session, began["transit_id"].as_str().unwrap());
+
+    // Two calls under one id: the written session is refused and taken back.
+    assert_eq!(failed["phase"], "failed", "{failed}");
+    let why = failed["error"].as_str().unwrap();
+    assert!(why.contains("used before"), "{why}");
+    assert!(setting.claude_sessions().is_empty());
+    let after = row(&host, &session);
+    assert_eq!(after["backend"], "codex");
+    assert_eq!(after["conversation_id"], before["conversation_id"]);
+    assert_eq!(after["backend_session_id"], thread);
+    assert!(
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "system"
+                && text.starts_with(
+                    "Couldn't move to Claude: the conversation couldn't be written for Claude. \
+                 Still on Codex"
+                )),
+        "{:?}",
+        host.conversation(&session)
+    );
+    // What waited runs on Codex, and the agent answers there after.
+    wait_for("the queue to run on Codex", || {
+        host.conversation(&session).iter().any(|(role, text)| {
+            role == "assistant" && text == "Codex heard: Waiting through a refused move."
+        })
+    });
+    wait_for("the agent to be done", || {
+        row(&host, &session)["busy"] == false
+    });
+    host.send(&session, "Still there?", "twins-4");
+    wait_for("its answer", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(_, text)| text == "Codex heard: Still there?")
+    });
+    assert_eq!(row(&host, &session)["backend_session_id"], thread);
 }
