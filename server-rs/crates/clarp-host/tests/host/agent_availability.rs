@@ -40,7 +40,7 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
     let host = place.start();
     assert_eq!(
         host.get("/server-info")["contract"]["features"]["agent_availability"],
-        204
+        206
     );
     let heard = host.listen();
     let session = host.new_agent("Avail");

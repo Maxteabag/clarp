@@ -282,10 +282,10 @@ fn rested_since(facts: &Facts<'_>) -> i64 {
 }
 
 /// The moment a row is made at, and the run of the Host it is made in.
-#[derive(Debug, Clone, Copy)]
 pub struct At {
     pub now_ms: i64,
     pub host_started_ms: i64,
+    quota: Arc<crate::quota::Rows>,
 }
 
 impl At {
@@ -293,32 +293,23 @@ impl At {
         Self {
             now_ms: app.clock.now_ms(),
             host_started_ms: app.hub.started_ms(),
+            quota: app.hub.availability_quota.borrow().clone(),
         }
     }
 }
 
-/// An agent's availability as its row has it, given what the row says of its tool's account.
-pub fn of_member(
-    member: &Member,
-    view: &crate::agent::View,
-    quota: &crate::quota::Rows,
-    backend_quota: &Value,
-    at: At,
-) -> Value {
-    of(member, view, quota, backend_quota, at).to_json()
+/// An agent's availability as its row has it.
+pub fn of_member(member: &Member, view: &crate::agent::View, at: &At) -> Value {
+    of(member, view, at).to_json()
 }
 
-fn of(
-    member: &Member,
-    view: &crate::agent::View,
-    quota: &crate::quota::Rows,
-    backend_quota: &Value,
-    at: At,
-) -> Availability {
+fn of(member: &Member, view: &crate::agent::View, at: &At) -> Availability {
+    let quota = &at.quota;
+    let backend_quota = quota.of(view.backend, &member.record.model);
     decide(&Facts {
         status: &view.status,
         broken: view.broken.as_deref(),
-        backend_quota,
+        backend_quota: &backend_quota,
         bound: member.record.bound(),
         spare_seat: quota.spare_seat(view.backend, &member.record.model),
         last_alive_ms: member.agent.last_alive_ms(),
@@ -410,37 +401,40 @@ pub fn event(member: &Member, availability: Value) -> Value {
 /// agent every [`SWEEP_EVERY`], for the turns that fell silent and the accounts that changed.
 /// The accounts are read on a task of their own, so a slow reading never holds back the rest.
 pub fn run(app: &crate::edge::App) {
-    let (read, accounts) = tokio::sync::watch::channel(Arc::new(crate::quota::Rows::unasked()));
     let reader = app.clone();
     tokio::spawn(async move {
         loop {
             let rows = crate::quota::rows(&reader).await;
-            if read.send(Arc::new(rows)).is_err() {
-                break;
-            }
+            reader.hub.availability_quota.send_if_modified(|previous| {
+                if **previous == rows {
+                    return false;
+                }
+                *previous = Arc::new(rows);
+                true
+            });
             tokio::time::sleep(SWEEP_EVERY).await;
         }
     });
+    let mut accounts = app.hub.availability_quota.subscribe();
     let app = app.clone();
     tokio::spawn(async move {
         let mut told: HashMap<String, Availability> = HashMap::new();
         // How every agent stands at the start says nothing new: an app reads it in the snapshot.
-        let quota = accounts.borrow().clone();
-        look(&app, &quota, None, &mut told, false);
+        look(&app, None, &mut told, false);
         let first = tokio::time::Instant::now() + SWEEP_EVERY;
         let mut sweep = tokio::time::interval_at(first, SWEEP_EVERY);
         sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let moved = tokio::select! {
                 _ = sweep.tick() => None,
+                Ok(()) = accounts.changed() => None,
                 () = app.hub.availability_wait() => {
                     // What moved in the same breath is looked at together.
                     tokio::time::sleep(BATCHED_FOR).await;
                     Some(app.hub.take_availability_moved())
                 }
             };
-            let quota = accounts.borrow().clone();
-            look(&app, &quota, moved.as_ref(), &mut told, true);
+            look(&app, moved.as_ref(), &mut told, true);
         }
     });
 }
@@ -449,7 +443,6 @@ pub fn run(app: &crate::edge::App) {
 /// apps of each whose availability changed, where `tell`.
 fn look(
     app: &crate::edge::App,
-    quota: &crate::quota::Rows,
     moved: Option<&HashSet<String>>,
     told: &mut HashMap<String, Availability>,
     tell: bool,
@@ -464,8 +457,7 @@ fn look(
         }
         seen.insert(id.clone());
         let view = member.agent.view();
-        let backend_quota = quota.of(view.backend, &member.record.model);
-        let now = of(member, &view, quota, &backend_quota, at);
+        let now = of(member, &view, &at);
         // An agent first seen able to answer has nothing to tell: its row says so.
         let changed = match told.get(id) {
             Some(before) => before.shown() != now.shown(),

@@ -151,7 +151,7 @@ back to it moves it to `running` again. See `clarp-sub-agents`.
 ## Whether another agent can answer now
 
 On a Rust Host that lists feature `agent_availability` in `GET /server-info`
-(contract 204), every agent's row says whether it can answer now, why not, and
+(contract 206), every agent's row says whether it can answer now, why not, and
 until when:
 
 ```bash

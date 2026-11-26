@@ -209,7 +209,7 @@ type Told = BTreeMap<(String, String), (&'static str, Option<i64>)>;
 
 /// Which accounts are used up, and which are near a limit and not used up, by the tool's
 /// name, with what an agent's row says of its tool then.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Looked {
     pub used_up: Arc<UsedUp>,
     pub near: Arc<UsedUp>,
@@ -1004,6 +1004,7 @@ impl Desk {
 
 /// What the agents' rows say of their tools' accounts (`backend_quota`): used up, and else
 /// near a limit, where no other seat of the tool would take the agent's turn.
+#[derive(PartialEq)]
 pub struct Rows {
     looked: Looked,
     accounts: clarp_kernel::recovery::Accounts,

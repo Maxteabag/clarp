@@ -526,7 +526,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `availability {state, text, since_ms, back_at_ms, queue_ahead, last_alive_ms}`, live as an
     // `agent-roster` event of kind `availability`; and every event stream is sent one
     // `host-updating` before the Host stops (`crate::availability`, issue 918).
-    ("agent_availability", 204),
+    ("agent_availability", 206),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1782,7 +1782,7 @@ pub(crate) fn agent_row(
     owners: &toml::Table,
     quota: &crate::quota::Rows,
     forks: &crate::conversation_forks::Named,
-    at: crate::availability::At,
+    at: &crate::availability::At,
 ) -> Value {
     let view = member.agent.view();
     let focused = directory.focus.as_deref() == Some(member.record.agent_id.as_str());
@@ -1862,9 +1862,7 @@ pub(crate) fn agent_row(
     // turn: advice for whoever is about to write to it.
     row["backend_quota"] = quota.of(view.backend, &member.record.model);
     // Whether it can answer now, and if not why and until when (feature `agent_availability`).
-    let availability =
-        crate::availability::of_member(member, &view, quota, &row["backend_quota"], at);
-    row["availability"] = availability;
+    row["availability"] = crate::availability::of_member(member, &view, at);
     // A change of its backend that runs now (feature `agent_backend_transit`), else null.
     row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);
     // The face it is shown with: the picture it has of its own; else, unless it has a
@@ -1998,7 +1996,7 @@ async fn agent_rows(
         .filter(|member| wanted(member))
         .map(|member| {
             let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks, at,
+                directory, families, member, &app.faces, &owners, &quota, &forks, &at,
             );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
@@ -2015,7 +2013,7 @@ async fn agent_rows(
         let jobs = crate::janitors::jobs(app).await;
         for member in directory.janitors.iter().filter(|member| wanted(member)) {
             let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks, at,
+                directory, families, member, &app.faces, &owners, &quota, &forks, &at,
             );
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(false);
@@ -2653,7 +2651,7 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
                 &app.mouth.owners(),
                 &unasked,
                 &crate::conversation_forks::Named::read(),
-                crate::availability::At::of(app),
+                &crate::availability::At::of(app),
             )
         })
         .unwrap_or_default();

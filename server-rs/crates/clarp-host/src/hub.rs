@@ -115,6 +115,8 @@ pub struct Hub {
     /// way to wake whoever looks (`crate::availability::run`).
     availability_moved: Mutex<HashSet<String>>,
     availability_woken: tokio::sync::Notify,
+    /// The same account observation serves both agent reads and live availability.
+    pub(crate) availability_quota: watch::Sender<Arc<crate::quota::Rows>>,
 }
 
 impl Hub {
@@ -151,6 +153,7 @@ impl Hub {
             started_ms: now_ms,
             availability_moved: Mutex::default(),
             availability_woken: tokio::sync::Notify::new(),
+            availability_quota: watch::Sender::new(Arc::new(crate::quota::Rows::unasked())),
         }
     }
 

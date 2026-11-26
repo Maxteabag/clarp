@@ -563,6 +563,7 @@ async fn archived(
     let page = rules::page(&order, limit, position.as_ref());
     let families = edge::Families::of(&directory);
     let quota = crate::quota::rows(&app).await;
+    let at = crate::availability::At::of(&app);
     let owners = app.mouth.owners();
     let forks = crate::conversation_forks::Named::read();
     // What the snapshot adds to a row of its own, so that the row here is the same one.
@@ -578,14 +579,7 @@ async fn archived(
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
             let mut row = edge::agent_row(
-                &directory,
-                &families,
-                member,
-                &app.faces,
-                &owners,
-                &quota,
-                &forks,
-                crate::availability::At::of(&app),
+                &directory, &families, member, &app.faces, &owners, &quota, &forks, &at,
             );
             let session = &member.record.session;
             row["team_ids"] = json!(teams.get(agent_id).map_or(&[][..], Vec::as_slice));

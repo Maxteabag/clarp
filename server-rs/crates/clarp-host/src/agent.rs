@@ -2686,7 +2686,9 @@ impl Worker {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
-            if !actor.transit_resume_pending() && let Some((turn, since)) = actor.waits_for_an_account() {
+            if !actor.transit_resume_pending()
+                && let Some((turn, since)) = actor.waits_for_an_account()
+            {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
                 let resets = actor.waits_until_reset();
@@ -2855,9 +2857,13 @@ impl Worker {
             let held = tokio::task::spawn_blocking(move || {
                 crate::launcher::takeover_request(
                     &socket,
-                    clarp_shim::Request::Hold { ms: clarp_shim::HOLD_MOST_MS },
-                ).and_then(|reply| reply.held)
-            }).await;
+                    clarp_shim::Request::Hold {
+                        ms: clarp_shim::HOLD_MOST_MS,
+                    },
+                )
+                .and_then(|reply| reply.held)
+            })
+            .await;
             if let Ok(Some(held)) = held {
                 let _ = tx.send(Ask::TransitCheckpointHeld { offer, held });
             }
@@ -2892,7 +2898,9 @@ impl Worker {
         match crate::agent_transit::carry(actor, &self.setup.record, change, now) {
             Ok((Ok(changed), out)) => {
                 self.after(out);
-                if self.pooled.take().is_some() && let Some(pool) = self.setup.pool() {
+                if self.pooled.take().is_some()
+                    && let Some(pool) = self.setup.pool()
+                {
                     pool.disowned(&self.setup.record.agent_id);
                     self.held = None;
                 }
@@ -4323,13 +4331,16 @@ impl Worker {
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
-                let whole = held.left_ms > 0 && held.partial_out == 0
-                    && held.partial_err == 0 && held.partial_reports == 0;
+                let whole = held.left_ms > 0
+                    && held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0;
                 let acceptable = if whole
                     && let Some(native) = crate::takeover::native_transit_progress(
-                        &crate::config::home(), &self.setup.record.cwd, &offer,
-                    )
-                {
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &offer,
+                    ) {
                     actor.expect_transit_checkpoint(&offer, held.spool, &native, now)?
                 } else {
                     false
@@ -5610,12 +5621,6 @@ impl Worker {
             .map(|live| working_with(actor, live, &self.setup.hub));
         use clarp_kernel::teams::runtime::routine;
         let prior = self.view.borrow().clone();
-        // An agent that was being opened can answer now (`availability`).
-        if prior.broken.is_some() {
-            self.setup
-                .hub
-                .availability_moved(&self.setup.record.agent_id);
-        }
         let origin = status
             .live
             .as_ref()
@@ -5697,6 +5702,12 @@ impl Worker {
             speech: self.speech.clone(),
             broken: None,
         }));
+        // An agent that was being opened can answer now (`availability`).
+        if prior.broken.is_some() {
+            self.setup
+                .hub
+                .availability_moved(&self.setup.record.agent_id);
+        }
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
@@ -5775,13 +5786,7 @@ impl Worker {
                 .and_then(|told| told.last.as_ref())
                 .map(|was| was.id);
         let now = self.now_ms();
-        // Whether the agent can answer now may have changed (`availability`, issue 918); and a
-        // process that said its first word measures how long the next start takes.
-        if changed.status || changed.queue || stall_changed {
-            self.setup
-                .hub
-                .availability_moved(&self.setup.record.agent_id);
-        }
+        // A process that said its first word measures how long the next start takes.
         if let (Some(was), Some(live)) = (was_live, status.live.as_ref())
             && was.turn == live.turn
             && was.starting
@@ -6181,6 +6186,9 @@ impl Worker {
         }
         self.told = Some(status);
         self.publish_view();
+        if changed.status || changed.queue || stall_changed {
+            hub.availability_moved(&record.agent_id);
+        }
         if helper_moved {
             hub.publish(wire::roster("helper-state", &record.session), now);
         }

@@ -2216,7 +2216,7 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
   (issue 819), so neither the maker's row nor `parent.fields` carries that helper's words. `GET /agents/{session}`
   of such an agent answers 200 with that row, never 403.
 
-### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 204)
+### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
 Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `availability`
 (issue 918), so an app can show one calm line with the reason and the expected wait:
