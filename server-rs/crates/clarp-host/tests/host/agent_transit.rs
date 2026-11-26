@@ -33,6 +33,8 @@ def send(kind, **fields):
     print(row, flush=True)
 
 if (root / "before-init").exists():
+    # The tool is active but has not bound its input to a session yet.
+    print("waiting for session init", file=sys.stderr, flush=True)
     (root / "source-before-init").touch()
     while (root / "before-init").exists():
         time.sleep(0.05)
@@ -406,7 +408,15 @@ fn transit_with_waiting_send(mode: Option<&str>, deferred: bool) {
         setting.place.root.join("source-held").exists()
     });
     assert_eq!(row(&host, session)["backend"], "claude");
-    assert_eq!(row(&host, session)["queued_turn_count"], 2);
+    let waiting = host.get(&format!("/turn-queue?session={session}"));
+    assert!(
+        waiting["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["id"] == "switch-3" && item["status"] == "queued" }),
+        "the user's send must still be queued on the source ({mode:?}, deferred={deferred}): {waiting}"
+    );
     assert!(!setting.place.root.join("source-received-followup").exists());
     std::fs::remove_file(hold).unwrap();
 
