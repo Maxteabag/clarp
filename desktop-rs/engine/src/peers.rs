@@ -83,15 +83,41 @@ impl Engine {
         Some(self.peers.list.iter_mut().find(|p| p.server_id == server_id).map(|p| (&mut *p.engine, local)))
     }
 
-    /// The peer holding a decision or artifact (by its id).
+    /// The peer holding a decision or artifact (by its id): one of its
+    /// Updates, or an older one its agent's publications listed.
     pub(crate) fn owner_mut(&mut self, id: &str) -> Option<Option<(&mut Engine, &str)>> {
-        let server_id = self.peers.owners.get(id)?.clone();
+        let server_id = self.owner_server(id)?;
         Some(self.peers.list.iter_mut().find(|p| p.server_id == server_id).map(|p| (&mut *p.engine, "")))
     }
 
     pub(crate) fn owner_ref(&self, id: &str) -> Option<Option<(&Engine, &str)>> {
-        let server_id = self.peers.owners.get(id)?;
-        Some(self.peers.list.iter().find(|p| &p.server_id == server_id).map(|p| (&*p.engine, "")))
+        let server_id = self.owner_server(id)?;
+        Some(self.peers.list.iter().find(|p| p.server_id == server_id).map(|p| (&*p.engine, "")))
+    }
+
+    fn owner_server(&self, id: &str) -> Option<String> {
+        if let Some(server_id) = self.peers.owners.get(id) {
+            return Some(server_id.clone());
+        }
+        if self.holds_publication_artifact(id) {
+            return None;
+        }
+        self.peers.list.iter().find(|p| !p.server_id.is_empty() && p.engine.holds_publication_artifact(id)).map(|p| p.server_id.clone())
+    }
+
+    /// A peer's publication artifact by its id, its session qualified as
+    /// the merged rows' are.
+    pub(crate) fn peers_publication_artifact(&self, artifact_id: &str) -> Option<Value> {
+        self.peers.list.iter().filter(|p| !p.server_id.is_empty()).find_map(|peer| {
+            let mut row = peer.engine.held_publication_artifact(artifact_id)?;
+            if let Some(object) = row.as_object_mut()
+                && let Some(session) = object.get("session").and_then(Value::as_str).filter(|s| !s.is_empty())
+            {
+                let qualified = all_hosts::qualify(&peer.server_id, session);
+                object.insert("session".into(), json!(qualified));
+            }
+            Some(row)
+        })
     }
 
     /// The peer whose turn queue is loaded.
@@ -542,7 +568,7 @@ impl Engine {
                         roster_changed = true
                     }
                     Change::Updates => updates_changed = true,
-                    Change::Processes | Change::Avatars | Change::Media | Change::Search | Change::Narrator => out.push(change),
+                    Change::Processes | Change::Avatars | Change::Media | Change::Publications | Change::Search | Change::Narrator => out.push(change),
                     // The primary's alone: its selection, panes, saved Hosts,
                     // audio endpoint, voice, launch, Teams and settings.
                     _ => {}

@@ -329,8 +329,24 @@ impl Engine {
             .get(&session)
             .is_some_and(|assets| assets.iter().any(|a| a.get("asset_id").and_then(Value::as_str) == Some(asset.as_str())));
         let mime = clarp_core::media::mime(content_type);
-        if asset.is_empty() || !still_current || bytes.is_empty() || bytes.len() > clarp_core::media::MAX_INLINE_MEDIA_BYTES || !mime.starts_with("image/") {
+        if !still_current || !mime.starts_with("image/") {
             return;
+        }
+        if self.cache_media_file(&asset, bytes) {
+            self.changes.push(Change::Media);
+        }
+    }
+
+    /// Whether the asset's image is cached already.
+    pub(crate) fn media_cached(&self, asset_id: &str) -> bool {
+        self.profile.media_sources.contains_key(asset_id)
+    }
+
+    /// Writes an image to the media cache and remembers its `file://` URL
+    /// (`media_source`); false, and the error said, when it cannot.
+    pub(crate) fn cache_media_file(&mut self, asset: &str, bytes: &[u8]) -> bool {
+        if asset.is_empty() || bytes.is_empty() || bytes.len() > clarp_core::media::MAX_INLINE_MEDIA_BYTES {
+            return false;
         }
         // Image bytes stay out of strings the UI copies: a data URL would be
         // copied each time a transcript row is rebuilt.
@@ -340,23 +356,23 @@ impl Engine {
         }
         let Some(directory) = self.profile.media_directory.clone() else {
             self.set_error("Unable to cache chat images locally");
-            return;
+            return false;
         };
         if let Err(error) = std::fs::create_dir_all(&directory) {
             eprintln!("Engine: could not create the media cache: {error}");
             self.set_error("Unable to cache chat images locally");
-            return;
+            return false;
         }
-        let path = directory.join(clarp_core::media::media_file_name(&self.base_url, &asset));
+        let path = directory.join(clarp_core::media::media_file_name(&self.base_url, asset));
         if let Err(error) = std::fs::write(&path, bytes) {
             eprintln!("Engine: could not cache {}: {error}", path.display());
             self.set_error("Unable to cache chat image");
-            return;
+            return false;
         }
         let url = url::Url::from_file_path(&path).map(|u| u.to_string()).unwrap_or_default();
-        self.profile.media_sources.insert(asset, url);
+        self.profile.media_sources.insert(asset.to_owned(), url);
         self.profile.media_revision += 1;
-        self.changes.push(Change::Media);
+        true
     }
 
     // ---- replies -------------------------------------------------------------

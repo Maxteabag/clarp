@@ -1,0 +1,289 @@
+import { Palette, Look, ChromeText, Focus } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton, Busy } from "agent_controls.slint";
+import { KeyHint } from "artifacts.slint";
+import { ImageView } from "image_view.slint";
+import { MessageImage } from "transcript.slint";
+
+// One thing an agent published: an image, a recording, a film, a report,
+// data, a decision or another artifact.
+export struct PublicationRow {
+    // Stable across pages: "media:<asset id>" or "artifact:<artifact id>".
+    key: string,
+    // image, video, audio, document, data, decision, other
+    kind: string,
+    // The short kind on its tile when there is no picture.
+    badge: string,
+    title: string,
+    // Kind · when · summary.
+    detail: string,
+    // How opening or playing it went ("Downloading…", "Opened").
+    status: string,
+    thumb: image,
+    has-thumb: bool,
+    // A picture still on its way.
+    thumb-loading: bool,
+}
+
+export struct PublicationFilter {
+    label: string,
+    // The digit that chooses it.
+    key: string,
+    chosen: bool,
+}
+
+export global PublicationsBridge {
+    in property <string> agent;
+    in property <[PublicationRow]> rows;
+    in property <[PublicationFilter]> filters;
+    in-out property <int> selected;
+    // Where the list stands: what shows, and whether older can be read.
+    in property <string> footer;
+    in property <string> error;
+    in property <bool> loading;
+    in property <bool> has-more;
+    in property <bool> reduced-motion;
+    // The image viewer: the index into `images`, -1 while closed.
+    in-out property <int> viewing: -1;
+    in property <[MessageImage]> images;
+    callback close();
+    // Opens an agent's publications (its session as the window knows it;
+    // a paired Host's chat keeps its prefix). Over the profile, closing
+    // goes back to it.
+    callback open(string);
+    callback choose-filter(int);
+    callback activate(int);
+    callback load-older();
+    callback reload();
+    callback move-image(int);
+    callback close-image();
+}
+
+component Chip inherits Rectangle {
+    in property <PublicationFilter> filter;
+    callback clicked();
+    height: 24 * Look.unit;
+    preferred-width: row.preferred-width;
+    border-radius: 12px;
+    background: root.filter.chosen ? Palette.accent.with-alpha(0.18) : area.has-hover ? Palette.hover : transparent;
+    border-width: 1px;
+    border-color: root.filter.chosen ? Palette.accent : Palette.border;
+    accessible-role: button;
+    accessible-label: root.filter.label;
+    accessible-checked: root.filter.chosen;
+    accessible-action-default => { root.clicked(); }
+    row := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 9px;
+        spacing: 5px;
+        Text { text: root.filter.key; color: Palette.accent.with-alpha(0.7); font-family: "JetBrains Mono"; font-size: 10 * Look.unit; vertical-alignment: center; }
+        Text { text: root.filter.label; color: root.filter.chosen ? Palette.text : Palette.chrome-text; font-size: 11 * Look.unit; vertical-alignment: center; }
+    }
+    area := TouchArea { clicked => { root.clicked(); } }
+}
+
+// An agent's publications, newest first: one list for everything it
+// published, a kind at a time if chosen. J/K or the arrows move, Enter
+// opens, 0-7 choose the kind, End reads older, R reloads, Esc closes.
+export component PublicationsPanel inherits Rectangle {
+    property <length> row-h: 58 * Look.unit;
+    property <int> selected: PublicationsBridge.selected;
+    changed selected => { root.reveal(); }
+    // The window's keyboard map hands the panel its keys
+    // (publications_view::key); what it leaves stops here instead of
+    // typing into the composer under it.
+    keys := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => { accept }
+    }
+    changed visible => {
+        if (self.visible) { keys.focus(); }
+    }
+    function reveal() {
+        if (root.selected < 0) { return; }
+        if (root.selected * root.row-h < -list.viewport-y) {
+            list.viewport-y = -(root.selected * root.row-h);
+        } else if ((root.selected + 1) * root.row-h > -list.viewport-y + list.visible-height) {
+            list.viewport-y = -((root.selected + 1) * root.row-h - list.visible-height);
+        }
+    }
+    Modal {
+        width: parent.width;
+        height: parent.height;
+        card-width: 820px;
+        card-height: 760px;
+        dismissed => { PublicationsBridge.close(); }
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: Math.min(820px, root.width - 40px) - 2px;
+            height: Math.min(760px, root.height - 40px) - 2px;
+            border-radius: 3px;
+            background: Palette.raised;
+        }
+        VerticalLayout {
+            HorizontalLayout {
+                height: 52px;
+                padding-left: 16px;
+                padding-right: 10px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text { text: "Publications"; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
+                    Text { text: PublicationsBridge.agent; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
+                }
+                if PublicationsBridge.loading: Busy { reduced-motion: PublicationsBridge.reduced-motion; }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("icons/refresh.svg");
+                    tip: "Reload (R)";
+                    clicked => { PublicationsBridge.reload(); }
+                }
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: @image-url("icons/close.svg");
+                    tip: "Close (Esc)";
+                    clicked => { PublicationsBridge.close(); }
+                }
+            }
+            // The kinds: 0 is everything.
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-bottom: 8px;
+                spacing: 6px;
+                alignment: start;
+                for filter[index] in PublicationsBridge.filters: Chip {
+                    filter: filter;
+                    clicked => { PublicationsBridge.choose-filter(index); }
+                }
+            }
+            Rectangle { height: 1px; background: Palette.border; }
+            if PublicationsBridge.error != "": HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                padding-top: 6px;
+                Text {
+                    text: PublicationsBridge.error;
+                    color: Palette.danger;
+                    font-size: 11 * Look.unit;
+                    wrap: word-wrap;
+                }
+            }
+            list := ScrollView {
+                vertical-stretch: 1;
+                content-width: self.visible-width;
+                content-height: PublicationsBridge.rows.length * root.row-h + footer.height;
+                for row[index] in PublicationsBridge.rows: Rectangle {
+                    y: index * root.row-h;
+                    width: parent.width;
+                    height: root.row-h;
+                    background: index == PublicationsBridge.selected ? Focus.cursor : touch.has-hover ? Palette.hover : transparent;
+                    accessible-role: list-item;
+                    accessible-label: row.title + ", " + row.detail;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: index == PublicationsBridge.selected;
+                    accessible-action-default => { PublicationsBridge.activate(index); }
+                    touch := TouchArea {
+                        clicked => {
+                            PublicationsBridge.selected = index;
+                            PublicationsBridge.activate(index);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 10px;
+                        Rectangle {
+                            width: self.height;
+                            border-radius: 3px;
+                            clip: true;
+                            background: Palette.window;
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            if row.has-thumb: Image {
+                                width: parent.width;
+                                height: parent.height;
+                                source: row.thumb;
+                                image-fit: cover;
+                            }
+                            if !row.has-thumb && !row.thumb-loading: Text {
+                                text: row.badge;
+                                color: Palette.accent;
+                                font-family: "JetBrains Mono";
+                                font-size: 9 * Look.unit;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            if row.thumb-loading: Busy { reduced-motion: PublicationsBridge.reduced-motion; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text { text: row.title; color: Palette.text; font-size: 12 * Look.unit; font-weight: 600; overflow: elide; }
+                            Text { text: row.detail; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
+                        }
+                        if row.status != "": Text {
+                            text: row.status;
+                            color: Palette.muted;
+                            font-size: 11 * Look.unit;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                footer := Rectangle {
+                    y: PublicationsBridge.rows.length * root.row-h;
+                    width: parent.width;
+                    height: 40 * Look.unit;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        Text {
+                            text: PublicationsBridge.footer;
+                            color: Palette.muted;
+                            font-size: 11 * Look.unit;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        if PublicationsBridge.has-more && !PublicationsBridge.loading: KeyHint {
+                            y: (parent.height - self.height) / 2;
+                            key: "End";
+                            label: "Load older";
+                            emphasised: true;
+                            clicked => { PublicationsBridge.load-older(); }
+                        }
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Palette.border; }
+            HorizontalLayout {
+                height: 30px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 6px;
+                alignment: start;
+                KeyHint { y: (parent.height - self.height) / 2; key: "J/K"; label: "Move"; }
+                KeyHint { y: (parent.height - self.height) / 2; key: "Enter"; label: "Open"; clicked => { PublicationsBridge.activate(PublicationsBridge.selected); } }
+                KeyHint { y: (parent.height - self.height) / 2; key: "0-7"; label: "Kind"; }
+                KeyHint { y: (parent.height - self.height) / 2; key: "End"; label: "Older"; clicked => { PublicationsBridge.load-older(); } }
+                KeyHint { y: (parent.height - self.height) / 2; key: "Esc"; label: "Close"; clicked => { PublicationsBridge.close(); } }
+            }
+        }
+    }
+    if PublicationsBridge.viewing >= 0 && PublicationsBridge.viewing < PublicationsBridge.images.length: ImageView {
+        width: parent.width;
+        height: parent.height;
+        images: PublicationsBridge.images;
+        index: PublicationsBridge.viewing;
+        moved(delta) => { PublicationsBridge.move-image(delta); }
+        done => { PublicationsBridge.close-image(); }
+    }
+}

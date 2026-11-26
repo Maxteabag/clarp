@@ -932,7 +932,8 @@ fn pump() {
 }
 
 fn artifact(app: &App, id: &str) -> Option<Value> {
-    let found = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned();
+    // An older one may come from its agent's publications.
+    let found = app.engine.borrow().artifact_by_id(id);
     if found.is_none() {
         eprintln!("clarp-slint: no artifact {id}");
     }
@@ -1114,7 +1115,7 @@ fn goal_history(app: &App, id: &str, plan: &Value) -> Vec<String> {
 /// The report viewer's model for an artifact without a report body:
 /// what its card stands for, in full.
 pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
-    let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned()?;
+    let artifact = app.engine.borrow().artifact_by_id(id)?;
     let card = artifact_item(&artifact);
     // Whether the body came from HTML (already read as Markdown here).
     let mut from_html = false;
@@ -2147,14 +2148,13 @@ fn artifact_quiet(app: &App, id: &str) -> Option<Value> {
 /// every data: picture and font) would be thrown away; on a 1.16 MB report
 /// it held the window for seconds.
 pub fn html_report(app: &App, id: &str) -> Option<clarp_core::json::Object> {
-    let engine = app.engine.borrow();
-    let artifact = engine.update_artifacts().iter().find(|a| text(a, "artifact_id") == id)?;
+    let artifact = app.engine.borrow().artifact_by_id(id)?;
     let content = artifact.get("content").and_then(Value::as_str)?;
-    if text(artifact, "type") != "html_form" || content.trim().is_empty() || !clarp_core::text::looks_like_html_report(content) {
+    if text(&artifact, "type") != "html_form" || content.trim().is_empty() || !clarp_core::text::looks_like_html_report(content) {
         return None;
     }
     let body = crate::updates_view::html_markdown(content);
-    serde_json::json!({"artifact_id": id, "title": text(artifact, "title"), "summary": text(artifact, "summary"), "type": "html_form", "isHtml": true, "converted": true, "body": body})
+    serde_json::json!({"artifact_id": id, "title": text(&artifact, "title"), "summary": text(&artifact, "summary"), "type": "html_form", "isHtml": true, "converted": true, "body": body})
         .as_object()
         .cloned()
 }

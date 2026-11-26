@@ -9,7 +9,7 @@ use crate::Engine;
 impl Engine {
     /// True when a panel owned the reply.
     pub(crate) fn panels_json(&mut self, tag: &str, object: &Object) -> bool {
-        self.artifact_summary_json(tag, object) || self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object)
+        self.artifact_summary_json(tag, object) || self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object) || self.publications_json(tag, object)
     }
 
     /// True when a panel owned the failure; the rest become the engine's error.
@@ -19,6 +19,7 @@ impl Engine {
             return true;
         }
         self.updates_failure(tag, &detail, status) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
+            || self.publications_failure(tag, message, status, &detail)
     }
 
     /// Watches the stream; the engine handles every signal after.
@@ -28,7 +29,7 @@ impl Engine {
 
     /// Byte replies (portraits, media images); anything else is unexpected.
     pub(crate) fn panels_bytes(&mut self, tag: &str, bytes: &[u8], content_type: &str) {
-        if !self.updates_bytes(tag, bytes) && !self.avatar_bytes(tag, bytes, content_type) && !self.profile_bytes(tag, bytes, content_type) {
+        if !self.updates_bytes(tag, bytes) && !self.avatar_bytes(tag, bytes, content_type) && !self.profile_bytes(tag, bytes, content_type) && !self.publications_bytes(tag, bytes, content_type) {
             eprintln!("Engine: unexpected bytes reply {tag}");
         }
     }

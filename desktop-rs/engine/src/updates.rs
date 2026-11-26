@@ -205,7 +205,21 @@ impl Engine {
     /// The report view's model for an artifact; None when it has none.
     pub fn report_for_artifact(&self, artifact_id: &str) -> Option<Object> {
         on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.report_for_artifact(artifact_id));
-        clarp_core::text::report_for_artifact(&self.updates.artifacts, artifact_id, &self.base_url)
+        clarp_core::text::report_for_artifact(&self.updates.artifacts, artifact_id, &self.base_url).or_else(|| {
+            // An older one, opened from its agent's publications.
+            let held = self.held_publication_artifact(artifact_id)?;
+            clarp_core::text::report_for_artifact(std::slice::from_ref(&held), artifact_id, &self.base_url)
+        })
+    }
+
+    /// An artifact by its id: one of the Updates (every listed Host's),
+    /// else one an agent's publications listed.
+    pub fn artifact_by_id(&self, artifact_id: &str) -> Option<Value> {
+        if artifact_id.is_empty() {
+            return None;
+        }
+        let listed = self.update_artifacts().iter().find(|a| a.get("artifact_id").and_then(Value::as_str) == Some(artifact_id));
+        listed.cloned().or_else(|| self.held_publication_artifact(artifact_id))
     }
 
     /// 0..1, or negative when the job reports no progress.

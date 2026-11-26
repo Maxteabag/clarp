@@ -42,6 +42,7 @@ mod stop;
 pub mod search;
 mod panels;
 pub mod profile;
+pub mod publications;
 pub mod roster_freshness;
 mod roster_rows;
 mod teams;
@@ -141,6 +142,9 @@ pub enum Change {
     Voices,
     /// A chat's media list or a cached image changed.
     Media,
+    /// An agent's publications (`publications`), their state or a cached
+    /// image of theirs changed.
+    Publications,
     Orchestrator,
     /// An agent portrait arrived (`avatar_source`).
     Avatars,
@@ -343,6 +347,7 @@ pub struct Engine {
     render_specs: render_spec::RenderSpecs,
     teams: teams::Teams,
     profile: profile::Profile,
+    publications: publications::Publications,
     avatars: avatars::Avatars,
     live: live::Live,
     form_events: FormEventStore,
@@ -493,6 +498,7 @@ impl Engine {
             render_specs: Default::default(),
             teams: Default::default(),
             profile: Default::default(),
+            publications: Default::default(),
             avatars: Default::default(),
             live: Default::default(),
             form_events: form_events::store(config.form_events.clone()),
