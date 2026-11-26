@@ -86,6 +86,9 @@ pub(crate) struct Launch {
     favorite_paths: Vec<Value>,
     assignment_session: String,
     assignment_contacts: Vec<Value>,
+    /// The rows of the Host's `GET /managed-skills`: the skills it keeps
+    /// installed for its agents' tools (empty where it keeps none).
+    skills: Vec<Value>,
     terminal: TerminalLauncher,
 }
 
@@ -113,6 +116,7 @@ impl Launch {
             favorite_paths: Vec::new(),
             assignment_session: String::new(),
             assignment_contacts: Vec::new(),
+            skills: Vec::new(),
             terminal: default_terminal_launcher(),
         }
     }
@@ -151,6 +155,23 @@ impl Engine {
 
     fn load_model_catalog(&mut self) {
         self.api.get("model-catalog", "/agent-model-options", &[]);
+    }
+
+    /// The skills a draft may name as `/skill`: the Host's switched-on
+    /// managed skills, as (id, description), by id.
+    pub fn slash_skills(&self) -> Vec<(String, String)> {
+        let mut skills: Vec<(String, String)> = self
+            .launch
+            .skills
+            .iter()
+            .filter_map(Value::as_object)
+            .filter(|row| row.get("enabled").and_then(Value::as_bool) != Some(false))
+            .map(|row| (json::string(row, "id"), json::string(row, "description")))
+            .filter(|(id, _)| !id.trim().is_empty())
+            .collect();
+        skills.sort();
+        skills.dedup_by(|a, b| a.0 == b.0);
+        skills
     }
 
     /// Installed providers as `{id, label}`; the built-in three without a catalog.
@@ -703,6 +724,7 @@ impl Engine {
         if tag == "server-info" {
             self.apply_host_launch_directory_default(&json::string(object, "default_cwd"));
             self.load_model_catalog();
+            self.api.get("managed-skills", "/managed-skills", &[]);
             return false;
         }
         if self.queue_json(tag, object) {
@@ -739,6 +761,8 @@ impl Engine {
         } else if tag == "favorite-paths" {
             self.launch.favorite_paths = array("paths");
             self.changes.push(Change::Launch);
+        } else if tag == "managed-skills" {
+            self.launch.skills = array("skills");
         } else if let Some(session) = tag.strip_prefix("assignment-options:") {
             if session == self.launch.assignment_session {
                 self.launch.assignment_contacts = array("contacts");
@@ -789,6 +813,10 @@ impl Engine {
         } else if tag == "favorite-paths" {
             self.launch.favorite_paths.clear();
             self.changes.push(Change::Launch);
+        } else if tag == "managed-skills" {
+            // An older Host without the list: no skills to complete.
+            self.launch.skills.clear();
+            return true;
         }
         self.queue_failure(tag, message, status)
     }

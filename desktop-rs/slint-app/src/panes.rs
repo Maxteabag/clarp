@@ -73,6 +73,9 @@ pub struct PaneState {
     pub mention: Option<crate::mention_view::Open>,
     /// A mention closed with Escape stays closed while its `@` is typed on.
     pub mention_dismissed: Option<usize>,
+    /// The helper agents at work the pane last drew (their card at the chat's
+    /// end): a roster change that changes them draws the chat again.
+    pub helpers_seen: String,
     /// One more than where the cursor goes with the next `draft_set`.
     draft_cursor: i32,
     /// What `scroll_amount` counts: px (""), "pages" or a "row" to go to.
@@ -130,6 +133,7 @@ impl PaneState {
             reveal_index: 0,
             mention: None,
             mention_dismissed: None,
+            helpers_seen: String::new(),
             draft_cursor: 0,
             cards: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
@@ -169,6 +173,12 @@ fn live_source(entry: &clarp_core::live_present::Entry) -> Shown {
         explanation_repeat: 0,
     };
     (source, entry.expanded, crate::live_view::signature(entry), entry.key.clone())
+}
+
+/// What a helpers card shows, but its ticking time: drawn again when it changes.
+fn card_signature(card: &clarp_core::helpers_card::Card) -> String {
+    let helpers: Vec<String> = card.helpers.iter().map(|h| format!("{}:{}:{}:{}:{}", h.key, h.name, h.state.word(), h.line, h.lines.len())).collect();
+    format!("helpers|{}|{}", card.started_ms, helpers.join(","))
 }
 
 /// Conversation view (#727): an opened turn's work is one bordered box,
@@ -881,6 +891,15 @@ impl App {
                 if shown.author == "user" {
                     shown.meta = crate::mention_view::sent_to(&mentionable, &pane.session, &row.message.text).into();
                 }
+                // A helper's report opens to the helper's chat too.
+                if !shown.prompt.key.is_empty() {
+                    let engine = self.engine.borrow();
+                    let roster = engine.roster();
+                    let helper = roster
+                        .find(&pane.session)
+                        .and_then(|parent| clarp_core::helpers_card::reporting_helper(&row.message.sender_agent_id, parent, roster.agents()));
+                    shown.prompt.helper = helper.map(|h| h.session.clone()).unwrap_or_default().into();
+                }
                 // A receipt names whose question it was and goes to its card
                 // when the card is in the chat.
                 if !shown.receipt.key.is_empty() {
@@ -966,7 +985,7 @@ impl App {
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
             // An unsent message is drawn again when its status becomes due.
-            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
+            format!("{cards}|{}|{pictures}|{receipt}|{}:{}|{}|{}:{}", explained.join(","), row.prompt.expanded, row.prompt.helper, row.status_due, row.work_key, row.work_open)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
@@ -986,6 +1005,7 @@ impl App {
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
         splice_turn_reasons(&reasons, &mut fresh, &mut rows);
+        pane.helpers_seen = self.splice_helpers(pane, &mut fresh, &mut rows);
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);
         if let Some(projection) = &projection {
             box_work(projection, &history, live.as_ref(), &mut fresh, &mut rows);
@@ -1030,6 +1050,19 @@ impl App {
     }
 
     /// What a transcript's rows depend on among the preferences.
+    /// The pane's helper agents at work differ from the card it drew.
+    fn helpers_changed(&self, pane: &PaneState) -> bool {
+        let engine = self.engine.borrow();
+        let roster = engine.roster();
+        let now = roster
+            .find(&pane.session)
+            .and_then(|parent| clarp_core::helpers_card::from_agents(&format!("helpers:agents:{}", pane.session), parent, roster.agents()))
+            .as_ref()
+            .map(card_signature)
+            .unwrap_or_default();
+        now != pane.helpers_seen
+    }
+
     fn presentation_key(&self, session: &str) -> (i32, bool, bool, bool, (bool, bool, bool)) {
         let engine = self.engine.borrow();
         // The quiet line where agent messages were (#653) is drawn or not.
@@ -1091,6 +1124,58 @@ impl App {
             fresh.insert(at, source);
             rows.insert(at, row);
         }
+    }
+
+    /// A turn's helpers as one card where the rows that started them do not
+    /// show (a running turn's items stand for them): after the turn's last
+    /// row. And the agent's helper agents still at work as one card at the
+    /// chat's end, each opening to its chat. Returns what the latter drew.
+    fn splice_helpers(&self, pane: &PaneState, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) -> String {
+        use clarp_core::helpers_card;
+        let engine = self.engine.borrow();
+        let shown: std::collections::HashSet<&str> = fresh.iter().map(|(row, ..)| row.message.id.as_str()).collect();
+        let mut turns: Vec<(String, Vec<serde_json::Value>, i64)> = Vec::new();
+        if let Some(conversation) = engine.conversation(&pane.session) {
+            for message in conversation.rows().iter().filter(|m| !shown.contains(m.id.as_str())) {
+                let cells: Vec<serde_json::Value> = message.display_cells.iter().filter(|c| crate::cells_view::is_helper(c)).cloned().collect();
+                if cells.is_empty() {
+                    continue;
+                }
+                let started = clarp_core::protocol::parse_iso_date(&message.timestamp).map_or(0, |t| t.timestamp_millis());
+                match turns.iter_mut().find(|(trace, ..)| !trace.is_empty() && *trace == message.trace_id) {
+                    Some(turn) => turn.1.extend(cells),
+                    None => turns.push((message.trace_id.clone(), cells, started)),
+                }
+            }
+        }
+        let mut cards: Vec<(String, helpers_card::Card)> = turns
+            .into_iter()
+            .filter_map(|(trace, cells, started)| {
+                let key = format!("helpers:{}", if trace.is_empty() { "turn" } else { trace.as_str() });
+                helpers_card::from_cells(&key, &cells, started).map(|card| (trace, card))
+            })
+            .collect();
+        let roster = engine.roster();
+        let agents = roster.find(&pane.session).and_then(|parent| helpers_card::from_agents(&format!("helpers:agents:{}", pane.session), parent, roster.agents()));
+        let drawn = agents.as_ref().map(card_signature).unwrap_or_default();
+        cards.extend(agents.map(|card| (String::new(), card)));
+        drop(engine);
+        for (trace, card) in cards {
+            // After the turn's last row or the live rows that stand for it;
+            // unsent messages stay last.
+            let sent = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+            let turn = (!trace.is_empty())
+                .then(|| fresh.iter().rposition(|(row, ..)| row.message.trace_id == trace || (row.source_row == usize::MAX && row.message.id.starts_with("live:"))))
+                .flatten()
+                .map(|i| i + 1);
+            let at = turn.unwrap_or(sent).min(fresh.len());
+            let entry = clarp_core::live_present::Entry { key: card.key.clone(), ..Default::default() };
+            let mut source = live_source(&entry);
+            source.2 = card_signature(&card);
+            fresh.insert(at, source);
+            rows.insert(at, MessageRow { id: card.key.clone().into(), author: "activity".into(), helpers: crate::cells_view::helpers_card(&card), ..MessageRow::default() });
+        }
+        drawn
     }
 
     /// The quiet line where the Host left coordination between agents out
@@ -1327,8 +1412,11 @@ impl App {
             // depend on changed (the theme, voice and the rest do not).
             // The roster brings the Host's chat view (#702).
             let preference = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster)) && pane.presented_with != Some(presentation);
+            // The helper agents at work are a card at the chat's end.
+            let helpers = changes.iter().any(|c| matches!(c, Change::Roster)) && self.helpers_changed(pane);
             let conversation = fresh
                 || preference
+                || helpers
                 || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) | Change::Live(s) if *s == session));
             if conversation {
                 self.messages(pane);

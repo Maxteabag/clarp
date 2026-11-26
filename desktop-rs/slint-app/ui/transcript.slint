@@ -1,6 +1,6 @@
 import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight, RevealText, Motion } from "theme.slint";
 import { ListView } from "std-widgets.slint";
-import { DisplayCell, DisplayCellCard } from "cells.slint";
+import { DisplayCell, DisplayCellCard, HelpersCard, HelpersCardView, HelpersBridge } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
 import { AgentAvatar } from "avatar.slint";
 
@@ -108,6 +108,9 @@ export struct PromptRow {
     initial: string,
     line: string,
     expanded: bool,
+    // A helper's report: the helper agent's session, whose chat its
+    // "Open chat" opens ("" for any other agent's message).
+    helper: string,
 }
 
 export struct MessageRow {
@@ -136,6 +139,10 @@ export struct MessageRow {
     tools: [ToolRow],
     // The Host's display cells, shown with the tool cards.
     cells: [DisplayCell],
+    // The row's helpers as one card, shown whether or not its tools are
+    // (none when `total` is 0): the sub-agents it started, or at the chat's
+    // end the helper agents still at work.
+    helpers: HelpersCard,
     // Artifacts the agent made while writing this reply.
     artifacts: [ArtifactItem],
     // A live item row (author "live", or an assistant message item).
@@ -538,7 +545,8 @@ component PromptLine inherits Rectangle {
     border-width: root.selected ? 1px : 0px;
     border-color: Palette.accent;
     accessible-role: button;
-    accessible-label: root.prompt.sender + " prompted" + (root.prompt.expanded || root.prompt.line == "" ? "" : " · " + root.prompt.line);
+    property <string> verb: root.prompt.helper != "" ? "reported" : "prompted";
+    accessible-label: root.prompt.sender + " " + root.verb + (root.prompt.expanded || root.prompt.line == "" ? "" : " · " + root.prompt.line);
     accessible-action-default => { ArtifactBridge.open(root.prompt.key); }
     Timer {
         interval: 150ms;
@@ -568,7 +576,7 @@ component PromptLine inherits Rectangle {
             vertical-alignment: center;
         }
         Text {
-            text: root.prompt.expanded || root.prompt.line == "" ? "prompted" : "prompted ·";
+            text: root.prompt.expanded || root.prompt.line == "" ? root.verb : root.verb + " ·";
             color: Palette.muted;
             font-size: ChatText.detail;
             vertical-alignment: center;
@@ -582,6 +590,26 @@ component PromptLine inherits Rectangle {
             horizontal-stretch: 1;
             min-width: 0px;
             vertical-alignment: center;
+        }
+        // A helper's report goes on to the helper's own chat.
+        if root.prompt.helper != "": Rectangle {
+            width: chat-text.preferred-width + 10px * ChatText.scale;
+            border-radius: 3px;
+            background: chat-touch.has-hover ? Palette.hover : transparent;
+            accessible-role: button;
+            accessible-id: "helper-chat:" + root.prompt.helper;
+            accessible-label: "Open " + root.prompt.sender + "'s chat";
+            accessible-action-default => { HelpersBridge.open-chat(root.prompt.helper); }
+            chat-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { HelpersBridge.open-chat(root.prompt.helper); }
+            }
+            chat-text := Text {
+                text: "Open chat ›";
+                color: Palette.link;
+                font-size: ChatText.note;
+                vertical-alignment: center;
+            }
         }
         Text {
             text: root.prompt.expanded ? "▾" : "▸";
@@ -1086,6 +1114,16 @@ component TranscriptRow inherits HorizontalLayout {
                 spacing: 1px;
                 for cell in root.message.cells: DisplayCellCard { cell: cell; }
                 for tool in root.message.tools: ToolCard { tool: tool; }
+            }
+            if root.message.helpers.total > 0: HorizontalLayout {
+                preferred-width: Math.min(640px * Look.zoom, content-width);
+                alignment: start;
+                HelpersCardView {
+                    card: root.message.helpers;
+                    now: ArtifactBridge.now;
+                    preferred-width: 640px * Look.zoom;
+                    max-width: 640px * Look.zoom;
+                }
             }
             for artifact in root.message.artifacts: HorizontalLayout {
                 // Measured at the width the card is drawn at.

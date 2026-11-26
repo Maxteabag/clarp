@@ -1,4 +1,4 @@
-use clarp_core::mention::{Active, Candidate, active, complete, rank, target};
+use clarp_core::mention::{Active, Candidate, active, complete, complete_slash, rank, slash, target};
 
 fn candidates() -> Vec<Candidate> {
     vec![
@@ -48,4 +48,23 @@ fn the_target_is_the_first_mention_of_a_known_agent() {
     assert_eq!(target("@Mikey hi", &all), None, "a name must end at a word boundary");
     assert_eq!(target("mail me@Mike", &all), None);
     assert_eq!(target("no mention", &all), None);
+}
+
+#[test]
+fn a_slash_at_the_drafts_start_names_a_skill() {
+    assert_eq!(slash("/", 1), Some(Active { start: 0, end: 1, query: String::new() }));
+    assert_eq!(slash("/clarp-me", 4), Some(Active { start: 0, end: 9, query: "cla".into() }), "the token runs on past the cursor");
+    assert_eq!(slash("/clarp-media publish", 12), Some(Active { start: 0, end: 12, query: "clarp-media".into() }));
+    assert_eq!(slash("/clarp-media publish", 14), None, "past the first word it is the skill's text");
+    assert_eq!(slash("see /tmp", 6), None, "only at the start of the draft");
+    assert_eq!(slash(" /x", 3), None);
+    assert_eq!(slash("/x", 0), None, "the cursor before the slash");
+}
+
+#[test]
+fn completing_a_skill_inserts_it_and_a_space() {
+    let token = slash("/med", 4).unwrap();
+    assert_eq!(complete_slash("/med", &token, "clarp-media"), ("/clarp-media ".to_owned(), 13));
+    let token = slash("/med the file", 2).unwrap();
+    assert_eq!(complete_slash("/med the file", &token, "clarp-media"), ("/clarp-media the file".to_owned(), 13), "the rest kept, one space");
 }

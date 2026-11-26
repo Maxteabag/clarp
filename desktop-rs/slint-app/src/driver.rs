@@ -44,6 +44,8 @@ mod startup_checks;
 mod live_checks;
 #[path = "observe_checks.rs"]
 mod observe_checks;
+#[path = "helpers_checks.rs"]
+mod helpers_checks;
 #[path = "a2a_checks.rs"]
 mod a2a_checks;
 #[path = "row_overlap_checks.rs"]
@@ -631,6 +633,10 @@ pub fn start_check(name: &str, out: String) {
         "a2a" => {
             row_overlap_checks::watch();
             a2a_checks::a2a_check(out)
+        }
+        "helpers" => {
+            row_overlap_checks::watch();
+            helpers_checks::helpers_check(out)
         }
         "row-overlap" => {
             row_overlap_checks::watch();

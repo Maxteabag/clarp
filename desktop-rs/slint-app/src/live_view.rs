@@ -325,6 +325,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         expanded: false,
         tools: ModelRc::new(VecModel::<crate::ToolRow>::default()),
         cells: ModelRc::new(VecModel::<crate::DisplayCell>::default()),
+        helpers: crate::HelpersCard::default(),
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
         live: LiveRow {
             kind: entry.kind.name().into(),

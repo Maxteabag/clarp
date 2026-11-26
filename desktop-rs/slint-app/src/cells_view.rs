@@ -6,7 +6,7 @@ use clarp_engine::Engine;
 use serde_json::Value;
 use slint::{ModelRc, VecModel};
 
-use crate::{CellLine, DisplayCell};
+use crate::{CellLine, DisplayCell, HelperLine, HelpersCard};
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -65,9 +65,48 @@ pub fn display_cell(cell: &Value) -> DisplayCell {
     }
 }
 
-/// The cells a row shows; repeats folded into an earlier row are left out.
+/// The cells a row shows with its tools; repeats folded into an earlier row
+/// are left out, and so are its helpers (their own card, `helpers`).
 pub fn cells(row: &PresentedRow) -> Vec<DisplayCell> {
-    row.display_cells.iter().filter(|c| !repeated(c)).map(display_cell).collect()
+    row.display_cells.iter().filter(|c| !repeated(c) && !is_helper(c)).map(display_cell).collect()
+}
+
+/// A sub-agent cell: a helper inside the agent's own process.
+pub fn is_helper(cell: &Value) -> bool {
+    cell.get("kind").and_then(Value::as_str) == Some("subagents")
+}
+
+/// The row's helpers as one card (none: `total` 0).
+pub fn helpers(row: &PresentedRow) -> HelpersCard {
+    let started = clarp_core::protocol::parse_iso_date(&row.message.timestamp).map_or(0, |t| t.timestamp_millis());
+    clarp_core::helpers_card::from_cells(&row.message.id, &row.display_cells, started).map(|c| helpers_card(&c)).unwrap_or_default()
+}
+
+/// A helpers card as the transcript draws it.
+pub fn helpers_card(card: &clarp_core::helpers_card::Card) -> HelpersCard {
+    let helpers: Vec<HelperLine> = card
+        .helpers
+        .iter()
+        .map(|h| HelperLine {
+            key: h.key.clone().into(),
+            name: h.name.clone().into(),
+            line: h.line.clone().into(),
+            state: h.state.word().into(),
+            chat: h.chat.clone().into(),
+            lines: ModelRc::new(VecModel::from(
+                h.lines.iter().map(|(kind, text)| CellLine { kind: kind.clone().into(), text: text.clone().into() }).collect::<Vec<_>>(),
+            )),
+        })
+        .collect();
+    HelpersCard {
+        key: card.key.clone().into(),
+        running: card.running() as i32,
+        total: card.helpers.len() as i32,
+        failed: card.failed() as i32,
+        timed: card.started_ms > 0,
+        started: crate::artifacts_view::clock_at(card.started_ms),
+        helpers: ModelRc::new(VecModel::from(helpers)),
+    }
 }
 
 /// Tool cards beside display cells: a group shows all of them, otherwise

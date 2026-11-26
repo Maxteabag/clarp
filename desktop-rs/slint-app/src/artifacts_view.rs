@@ -36,6 +36,11 @@ pub fn clock_now() -> i32 {
     (chrono::Utc::now().timestamp() - epoch()) as i32
 }
 
+/// A moment (epoch ms) on the window's clock (`clock_now`'s seconds).
+pub fn clock_at(epoch_ms: i64) -> i32 {
+    (epoch_ms.div_euclid(1000) - epoch()) as i32
+}
+
 /// iOS `CountdownDisplay`: before the target the time remaining, for a
 /// minute after it "Now", then the time since.
 pub fn countdown(target: i64, now: i64) -> (&'static str, String) {

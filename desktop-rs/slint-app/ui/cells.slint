@@ -143,3 +143,150 @@ export component TypingIndicator inherits Rectangle {
         }
     }
 }
+
+// One helper on a helpers card (helpers_card.rs): its name and one folded
+// line, its task while it runs and its result once done. A helper agent
+// opens to its chat (`chat`); one inside the agent's own process to its
+// detail lines.
+export struct HelperLine {
+    key: string,
+    name: string,
+    line: string,
+    // running, done or failed
+    state: string,
+    chat: string,
+    lines: [CellLine],
+}
+
+// A turn's helpers as one card: "2 helpers working · 5 s" while they run,
+// "2 helpers finished" with a line per helper once done. `started` is on
+// the window's clock (ArtifactBridge.now), when `timed`.
+export struct HelpersCard {
+    key: string,
+    running: int,
+    total: int,
+    failed: int,
+    timed: bool,
+    started: int,
+    helpers: [HelperLine],
+}
+
+export global HelpersBridge {
+    // The card's title: running, total, failed, seconds elapsed (-1: unknown).
+    pure callback title(int, int, int, int) -> string;
+    // Opens a helper agent's chat.
+    callback open-chat(string);
+}
+
+component HelperItem inherits Rectangle {
+    in property <HelperLine> helper;
+    property <bool> open;
+    property <bool> has-detail: root.helper.chat != "" || root.helper.lines.length > 0;
+    property <color> tone: root.helper.state == "failed" ? Palette.danger : root.helper.state == "running" ? Palette.link : Palette.success;
+    background: touch.has-hover && root.has-detail ? Palette.hover : transparent;
+    border-radius: 3px;
+    accessible-role: button;
+    accessible-id: "helper:" + root.helper.key;
+    accessible-label: root.helper.name + " " + root.helper.state + (root.helper.line == "" ? "" : " · " + root.helper.line);
+    accessible-action-default => { touch.clicked(); }
+    touch := TouchArea {
+        enabled: root.has-detail;
+        mouse-cursor: root.has-detail ? MouseCursor.pointer : MouseCursor.default;
+        clicked => {
+            if (root.helper.chat != "") {
+                HelpersBridge.open-chat(root.helper.chat);
+            } else {
+                root.open = !root.open;
+            }
+        }
+    }
+    VerticalLayout {
+        padding: 3px * ChatText.scale;
+        spacing: 3px * ChatText.scale;
+        HorizontalLayout {
+            spacing: 7px * ChatText.scale;
+            Text {
+                text: root.helper.state == "failed" ? "✕" : root.helper.state == "running" ? "◆" : "✓";
+                color: root.tone;
+                font-size: ChatText.note;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.helper.name;
+                color: Palette.text;
+                font-size: ChatText.detail;
+                font-weight: 600;
+                overflow: elide;
+                max-width: 220px * ChatText.scale;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.helper.line;
+                color: Palette.muted;
+                font-size: ChatText.detail;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if root.has-detail: Text {
+                text: root.helper.chat != "" ? "Open chat ›" : root.open ? "−" : "+";
+                color: root.helper.chat != "" ? Palette.link : Palette.chrome-text;
+                font-size: root.helper.chat != "" ? ChatText.note : ChatText.label;
+                vertical-alignment: center;
+            }
+        }
+        if root.open: VerticalLayout {
+            padding-left: 18px * ChatText.scale;
+            for line in root.helper.lines: Rectangle {
+                min-width: line-text.min-width + 4px;
+                preferred-width: line-text.preferred-width + 4px;
+                height: line-text.preferred-height + 4px;
+                line-text := Text {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 4px;
+                    height: parent.height - 4px;
+                    text: line.text;
+                    color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
+                    font-family: "JetBrains Mono";
+                    font-size: ChatText.detail;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+export component HelpersCardView inherits Rectangle {
+    in property <HelpersCard> card;
+    // The window's clock, in seconds (ArtifactBridge.now).
+    in property <int> now;
+    property <string> title: HelpersBridge.title(root.card.running, root.card.total, root.card.failed,
+        root.card.timed ? Math.max(0, root.now - root.card.started) : -1);
+    background: Palette.raised;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.card.running > 0 ? Palette.link.with-alpha(0.5) : Palette.rule;
+    accessible-role: list;
+    accessible-id: "helpers:" + root.card.key;
+    accessible-label: root.title;
+    VerticalLayout {
+        padding: 6px * ChatText.scale;
+        spacing: 2px * ChatText.scale;
+        HorizontalLayout {
+            spacing: 7px * ChatText.scale;
+            padding-left: 3px * ChatText.scale;
+            Text {
+                text: root.title;
+                color: root.card.running > 0 ? Palette.link : root.card.failed > 0 ? Palette.danger : Palette.chrome-text;
+                font-size: ChatText.label;
+                font-weight: 600;
+                vertical-alignment: center;
+                accessible-role: text;
+                accessible-id: "helpers-title:" + root.card.key;
+                accessible-label: self.text;
+            }
+        }
+        for helper in root.card.helpers: HelperItem { helper: helper; }
+    }
+}

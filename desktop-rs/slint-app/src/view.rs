@@ -693,7 +693,9 @@ pub(crate) fn message_row(
         None if author == "user" => vec![clarp_engine::blocks::Block::Prose(text.clone())],
         _ => clarp_engine::blocks::blocks(&text),
     };
-    let count = (row.activity_count as usize).max(row.tools.len()).max(row.display_cells.len());
+    // Helpers are a card of their own, not among the activity a toggle shows.
+    let helper_cells = row.display_cells.iter().filter(|c| crate::cells_view::is_helper(c)).count();
+    let count = (row.activity_count as usize).max(row.tools.len()).max(row.display_cells.len() - helper_cells);
     let has_activity = !row.activity && count > 0;
     let inline = always_show_tools || row.activity_inline;
     let label = if !has_activity || inline {
@@ -740,6 +742,7 @@ pub(crate) fn message_row(
             row.tools.iter().filter(|t| crate::cells_view::shows_tool(row, t)).map(tool_row).collect::<Vec<_>>(),
         )),
         cells: ModelRc::new(VecModel::from(crate::cells_view::cells(row))),
+        helpers: crate::cells_view::helpers(row),
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
         live: crate::LiveRow::default(),
         receipt: receipt.unwrap_or_default(),
@@ -749,6 +752,8 @@ pub(crate) fn message_row(
             sender: p.sender.into(),
             line: p.line.into(),
             expanded: prompt_open,
+            // The pane names the helper whose report it is.
+            helper: SharedString::new(),
         }),
         // The pane fills in Show work (Conversation view, #702).
         work_key: SharedString::new(),

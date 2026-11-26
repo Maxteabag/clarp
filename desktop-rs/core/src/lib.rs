@@ -32,6 +32,7 @@ pub mod history_fold;
 pub mod live_present;
 pub mod markdown_style;
 pub mod media;
+pub mod helpers_card;
 pub mod mention;
 pub mod message_search;
 pub mod narrator;

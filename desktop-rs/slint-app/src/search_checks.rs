@@ -22,7 +22,9 @@
 //! through them, Tab completes the name, the route chip says where Enter
 //! sends, the message goes to that agent's chat (`/send` to its session),
 //! which opens with the sent row saying so; Escape closes the list and
-//! leaves the composer typing.
+//! leaves the composer typing. A `/` starting the draft lists the Host's
+//! switched-on skills with their descriptions, typing narrows them, Enter
+//! puts `/skill ` in the draft, and past the skill's name the list stays shut.
 
 use std::time::Duration;
 
@@ -489,7 +491,7 @@ pub fn host_search_check(out: String) {
 
 pub fn mention_check(out: String) {
     use slint::platform::Key;
-    let (out1, out2, out3) = (out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out);
     let mentions = || view().mentions.iter().map(|m| m.name.to_string()).collect::<Vec<_>>();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, elapsed| {
@@ -569,6 +571,46 @@ pub fn mention_check(out: String) {
                 return false;
             }
             check(super::report().composer_focused && app_now().active_draft() == "@", "Escape closes the list and the composer keeps typing");
+            headless::press(Key::Backspace);
+            headless::type_text("/");
+            true
+        })),
+        // A `/` starting the draft lists the Host's switched-on skills.
+        ("skills", Box::new(move |_, _, elapsed| {
+            if view().mentions.row_count() < 2 || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let sigils: Vec<String> = view().mentions.iter().map(|m| m.sigil.to_string()).collect();
+            check(mentions() == ["clarp-media", "clarp-sessions"], &format!("/ lists the switched-on skills by name: {:?}", mentions()));
+            check(sigils.iter().all(|s| s == "/"), "the rows read as slash commands");
+            check(view().mentions.iter().next().is_some_and(|m| m.detail == "Publish files into Clarp chat"), "each skill shows its description");
+            shot(&out4, "mention-04-skills");
+            headless::type_text("ses");
+            true
+        })),
+        ("narrowed", Box::new(|_, _, elapsed| {
+            if mentions() != ["clarp-sessions"] || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(true, "typing narrows the skills");
+            headless::press(Key::Return);
+            true
+        })),
+        ("skill chosen", Box::new(move |_, _, elapsed| {
+            if app_now().active_draft() != "/clarp-sessions " || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(view().mentions.row_count() == 0, "Enter puts /clarp-sessions and a space in the draft and closes the list");
+            check(view().route.is_empty(), "a skill routes nowhere else");
+            headless::type_text("who is Mike");
+            true
+        })),
+        ("skill text", Box::new(move |_, _, elapsed| {
+            if app_now().active_draft() != "/clarp-sessions who is Mike" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(view().mentions.row_count() == 0, "past the skill's name the list stays closed");
+            shot(&out5, "mention-05-skill-draft");
             true
         })),
     ];

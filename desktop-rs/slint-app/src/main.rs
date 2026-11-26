@@ -840,6 +840,15 @@ fn main() {
         bridge.on_accept(|pane, index| with_window(|app, _| mention_view::accept(app, &pane, index)));
         bridge.on_dismiss(|pane| with_window(|app, _| mention_view::dismiss(app, &pane)));
     }
+    {
+        // A turn's helpers card: its title, and a helper agent's chat.
+        let bridge = window.global::<HelpersBridge>();
+        bridge.on_title(|running, total, failed, elapsed| {
+            let count = |n: i32| usize::try_from(n).unwrap_or(0);
+            clarp_core::helpers_card::title(count(running), count(total), count(failed), i64::from(elapsed)).into()
+        });
+        bridge.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
+    }
     window.on_draft_edited(|pane, text| {
         // Typing: the composer growing with it resizes the chat as asked.
         scroll_journal::input(&pane);

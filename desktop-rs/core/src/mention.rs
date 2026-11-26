@@ -1,6 +1,7 @@
 //! `@agent` mentions in the composer: the token being typed, the agents
 //! that match it (fuzzy, best first), the text once one is chosen, and the
-//! agent a message is addressed to. Offsets are bytes, as the editor's
+//! agent a message is addressed to. A `/skill` at the start of a draft is
+//! found and completed the same way. Offsets are bytes, as the editor's
 //! cursor is.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,13 +83,38 @@ pub fn rank(candidates: &[Candidate], query: &str, limit: usize) -> Vec<Candidat
     matched.into_iter().take(limit).map(|(_, c)| c.clone()).collect()
 }
 
+/// The skill the draft starts with while the cursor is in it: a `/` as the
+/// draft's first character, then no whitespace up to the cursor. The agent's
+/// tool reads a message that starts with `/name` as that skill's command.
+pub fn slash(text: &str, cursor: usize) -> Option<Active> {
+    if cursor == 0 || cursor > text.len() || !text.is_char_boundary(cursor) || !text.starts_with('/') {
+        return None;
+    }
+    let before = &text[..cursor];
+    if before.contains(char::is_whitespace) {
+        return None;
+    }
+    let end = cursor + text[cursor..].find(char::is_whitespace).unwrap_or(text.len() - cursor);
+    Some(Active { start: 0, end, query: before[1..].to_owned() })
+}
+
 /// `text` with the mention replaced by `@name` and a space, and where the
 /// cursor goes (after the space).
 pub fn complete(text: &str, mention: &Active, name: &str) -> (String, usize) {
-    let rest = &text[mention.end.min(text.len())..];
+    complete_with(text, mention, '@', name)
+}
+
+/// `text` with the `/` token replaced by `/skill` and a space, and where the
+/// cursor goes (after the space).
+pub fn complete_slash(text: &str, token: &Active, skill: &str) -> (String, usize) {
+    complete_with(text, token, '/', skill)
+}
+
+fn complete_with(text: &str, token: &Active, sigil: char, name: &str) -> (String, usize) {
+    let rest = &text[token.end.min(text.len())..];
     let space = if rest.starts_with(char::is_whitespace) { "" } else { " " };
-    let completed = format!("{}@{name}{space}{rest}", &text[..mention.start]);
-    let cursor = mention.start + 1 + name.len() + 1;
+    let completed = format!("{}{sigil}{name}{space}{rest}", &text[..token.start]);
+    let cursor = token.start + 1 + name.len() + 1;
     (completed, cursor)
 }
 

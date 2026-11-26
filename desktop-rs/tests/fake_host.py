@@ -1876,6 +1876,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
             return self.reply(200, model_options)
+        if url.path == "/managed-skills":
+            # The skills this Host keeps for its agents' tools; a switched-off
+            # one is listed too, and is not offered as a slash command.
+            return self.reply(200, {"skills": [
+                {"id": "clarp-media", "pack": "core", "description": "Publish files into Clarp chat", "enabled": True, "health": "ok"},
+                {"id": "clarp-sessions", "pack": "core", "description": "Resolve Clarp agents and sessions", "enabled": True, "health": "ok"},
+                {"id": "clarp-calendar", "pack": "optional", "description": "Add events to the calendar", "enabled": False, "health": "off"},
+            ]})
         if url.path == "/agent-transit":
             state = transit["states"].get(query.get("transit_id", ""))
             return self.reply(200, state) if state else self.reply(404, {"error": "unknown transit"})
@@ -2333,6 +2341,14 @@ class Handler(BaseHTTPRequestHandler):
                     roster_event(roster_burst_event(i, tag))
                     time.sleep(interval)
             threading.Thread(target=burst, daemon=True).start()
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/add-agent":
+            # Test control: a new agent (a helper with its parent), then its
+            # agent-roster event.
+            with state_lock:
+                agents.append({"latest_state": "idle", "alive": True, "last_activity": 0, "turn_started_at": 0,
+                               "head_revision": 0, "stalled_since": None, "stalled_action": None, **body})
+            broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "created"})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/agent":
             # Test control: change an agent's fields, then announce it.
