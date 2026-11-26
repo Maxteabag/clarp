@@ -29,8 +29,9 @@ esac
 exit 0
 """
 CURL = """#!/bin/sh
-# Stand-in curl: the Host answers, and has opened every agent.
-echo '{"opening": 0}'
+# Stand-in curl: the Host answers, and has opened every agent: as a Host from before issue 935
+# answers /host/start once its start is done.
+echo '{"agents": 0, "opening": 0, "broken": 0}'
 """
 COREDUMPCTL = """#!/bin/sh
 # Stand-in coredumpctl: lists what $STANDIN/cores holds.

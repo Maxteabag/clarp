@@ -66,11 +66,12 @@ the routes below instead, and never hand-edit a release under
 features; `GET /host/start`, with the owner's token only, says how many agents
 the Host has, how many are still opening and how many could not be opened, and
 which run of the Host answers (`instance`) and how far its start has come
-(`stage`: `starting`, `agents`, `started`). A Host answers `/server-info` and
-`/host/start` from the first moment of its start. What it answers about its
-agents (`/agents/snapshot`, `/live`, `/log`, `/send`, `/events`) waits until every
-agent is open, and everything else until `started`: a request is held, never
-refused. An install counts only once the run that answered says `started`.
+(`stage`: `starting`, `agents`, `started`; contract 210, feature
+`host_start_readiness`). A Host answers `/server-info` and `/host/start` from the
+first moment of its start, one agent's `/log`, `/live` and `/send` once that agent
+is open, the roster (`/agents/snapshot`) and `/events` once every agent is open,
+and everything else once `started`: a request is held, never refused. An install
+counts only once the run that answered says `started`.
 
 ## Install a Host on a new machine
 

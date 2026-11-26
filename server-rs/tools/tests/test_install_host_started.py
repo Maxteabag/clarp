@@ -12,7 +12,7 @@ import subprocess
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-INSTALL_HOST = ROOT / "server-rs/tools/install-host"
+INSTALL_HOST = pathlib.Path(os.environ.get("INSTALL_HOST_UNDER_TEST", ROOT / "server-rs/tools/install-host"))
 
 CURL = """#!/bin/sh
 # Stand-in curl: answers the next line of $STANDIN/answers; "-" is no answer (refused).
@@ -58,9 +58,24 @@ def test_a_late_failure_and_another_run_is_no_success(tmp_path):
 
 
 def test_a_host_from_before_says_no_stage_and_its_answer_is_its_start_done(tmp_path):
-    done, _ = run(tmp_path, [None, None, {"opening": 0}])
+    legacy = {"agents": 3, "opening": 0, "broken": 0, "left_out": {}, "not_run": {}}
+    done, _ = run(tmp_path, [None, None, legacy])
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip() == "before-935"
+
+
+def test_an_answer_with_one_of_the_two_fields_is_no_start_done(tmp_path):
+    # A new Host says both; one alone, or a stage nobody knows, is never taken for ready.
+    for reply in ({"instance": "a1b2", "agents": 1, "opening": 0, "broken": 0},
+                  {"stage": "started", "agents": 1, "opening": 0, "broken": 0},
+                  {"instance": "a1b2", "stage": "ready"},
+                  {"instance": "", "stage": "started"},
+                  {"opening": 0}):
+        place = tmp_path / str(abs(hash(json.dumps(reply, sort_keys=True))))
+        place.mkdir()
+        done, _ = run(place, [reply])
+        assert done.returncode == 1, (reply, done.stdout)
+        assert "neither a start of issue 935 or later" in done.stderr, (reply, done.stderr)
 
 
 def test_a_run_that_stops_answering_before_its_start_is_done_fails(tmp_path):

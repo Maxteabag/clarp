@@ -2334,6 +2334,39 @@ read the whole snapshot for it (issue 809). On a Rust Host that lists these feat
   (issue 819), so neither the maker's row nor `parent.fields` carries that helper's words. `GET /agents/{session}`
   of such an agent answers 200 with that row, never 403.
 
+### How far a Host's start has come (feature `host_start_readiness`, Rust Host contract 210)
+
+A release stops one Host and starts the next (issue 935). The next Host answers from the first
+moment of its start, and holds what it cannot answer yet until it can: a request is never refused
+for being early, and none is answered with what the start has not yet recovered.
+
+- `GET /server-info` and `GET /host/start` answer at once.
+- `GET /log`, `GET /live` and `POST /send` for one agent answer once that agent is open (its own
+  thread opens it before it answers anything), whatever other agents are still being opened.
+- `GET /agents/snapshot` and `GET /events` answer once every agent is open: no row stands for an
+  agent that is still being opened.
+- Every other route answers once the whole start is done (the gallery, portraits, janitors and
+  calls recovered).
+
+`GET /host/start` (the owner's token) says, beside its counts, which run of the Host answers and
+how far its start has come; both fields are always there together:
+
+```json
+{"instance": "019a6e2f3b10", "stage": "agents", "agents": 664, "opening": 0, "broken": 0,
+ "left_out": {}, "not_run": {}, "judged_when_read": true}
+```
+
+`stage` is `starting` (the Host answers its liveness), `agents` (every agent is open) or
+`started` (the start is done). `instance` is the run, as `GET /live` names it `epoch`: a new run
+is a new Host. `install-host` holds an install or rollback good only once the run that answered
+first says `started`; another run answering in between is a start that failed. A Host before
+contract 210 answers nothing until its start is done and says neither field: its answer is its
+start done.
+
+Where `clarp-host.socket` holds the Host's port (install-host since issue 935), a restart closes
+no connection: what comes in while one Host stops and the next starts waits in the socket's queue
+and is answered by the next Host.
+
 ### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
 Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `availability`
