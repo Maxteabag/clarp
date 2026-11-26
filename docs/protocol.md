@@ -2233,8 +2233,9 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
 ```
 
 - `state`, one at a time, in this order of precedence:
-  - `usage_limit`: no account can take the agent's turn now. Its turn waits for an account and no
-    other seat would take it; or it is idle and its row's `backend_quota` says `exhausted`; or its
+  - `usage_limit`: no account can take the agent's turn now. The pool may hold a turn before
+    its backend launches. A turn also waits here when it has an account failure and no other
+    seat would take it, or when the agent is idle and its row's `backend_quota` says `exhausted`; or its
     last turn ended failed with kind `usage_limit` (any tool) and no other seat would take the
     next (shown for up to five hours when no reset is known; the next turn tells again).
   - `switching_account`: its turn waits while the Host moves its tool to another account, after a
@@ -2247,7 +2248,8 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
   - `busy`: a turn runs; a new message waits behind `queue_ahead` others.
   - `ok`: it can answer now.
 - `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
-  limit"; `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";
+  limit", or "Waiting for account" when the pool holds a launch without a known cause;
+  `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";
   `restarting` "Restarting"; `unresponsive` "Not responding"; `busy` "Busy · N messages ahead of
   you" ("Busy · 1 message ahead of you", and just "Busy" when `queue_ahead` is 0); `ok` "" (show
   nothing). The app adds the time part: from `back_at_ms` ("· back in ~20 s", "· back at 14:05")

@@ -6,8 +6,8 @@
 //! expected wait. The states, in their order of precedence:
 //!
 //! - `usage_limit`: no account can take the agent's turn now. A turn that waits for an account
-//!   while no other seat would take it (its wait names a reset), or an idle agent whose tool's
-//!   account is used up with no seat to move to (its row's `backend_quota` says `exhausted`).
+//!   while no other seat would take it, a launch held by the account pool, or an idle agent
+//!   whose tool's account is used up with no seat to move to (`backend_quota` is `exhausted`).
 //! - `switching_account`: a turn waits for an account while the Host moves its tool to another
 //!   one: after a usage limit, or after a sign-in that ran out.
 //! - `restarting`: its process is starting or starting again, including a wait before
@@ -136,11 +136,10 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
     };
     if let Some(live) = live {
         let parked = live.parked.as_ref();
-        let account_wait = parked.is_some_and(|parked| parked.wait.is_for_an_account());
-        if account_wait || live.held_for_an_account {
-            let since = parked.map_or(live.moved_at_ms, |parked| parked.since_ms);
-            let sign_in = parked.is_some_and(|parked| parked.kind == failures::AUTH);
-            let resets = parked.and_then(|parked| parked.wait.resets_at_ms());
+        if let Some(parked) = parked.filter(|parked| parked.wait.is_for_an_account()) {
+            let since = parked.since_ms;
+            let sign_in = parked.kind == failures::AUTH;
+            let resets = parked.wait.resets_at_ms();
             // A wait that names a reset is one no other seat would take (the pool's word,
             // `Pooled::shown_reset`); one that names none waits while the Host switches.
             if !sign_in && (used_up.is_some() || resets.is_some()) {
@@ -154,6 +153,19 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
                 since,
                 None,
             );
+        }
+        if live.held_for_an_account {
+            // The pool is holding the launch. The turn has no failed attempt to explain
+            // the hold, and even a missing reset says nothing about a switch.
+            let (text, back) = if used_up.is_some() {
+                (
+                    "Usage limit",
+                    when("resets_at").filter(|at| *at > facts.now_ms),
+                )
+            } else {
+                ("Waiting for account", None)
+            };
+            return at("usage_limit", text.into(), live.moved_at_ms, back);
         }
     } else {
         // Its last turn was refused for a usage limit, whatever its tool: it ended failed with

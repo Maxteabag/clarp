@@ -164,7 +164,8 @@ are read before yours), `unresponsive` (a running turn has shown
 no sign of life for 3 minutes; `last_alive_ms`), `restarting` (its process
 is starting or starting again), `switching_account` (the Host moves it to another account) or
 `usage_limit` (no account can take its turn now). `text` is the line the apps
-show, `back_at_ms` when the Host expects it to answer (epoch ms, or `null`).
+show. A launch held by the pool without a known cause says "Waiting for account".
+`back_at_ms` is when the Host expects it to answer (epoch ms, or `null`).
 Use it to decide, not to refuse: a message to an agent that cannot answer now
 still waits in its queue and runs later. When the work cannot wait for
 `back_at_ms`, ask another agent, or tell the user why through their front desk.
