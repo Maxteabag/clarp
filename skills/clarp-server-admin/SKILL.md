@@ -5,18 +5,58 @@ description: Diagnose, update, roll back, and repair a Clarp installation. Use f
 
 # Clarp Server Administration
 
-Prefer the supported commands:
+The Host is the Rust one: one `clarp-host` binary run as the `clarp-host.service`
+systemd user unit, installed by `server-rs/tools/install-host`. Everything it
+keeps is under `~/.local/share/clarp-host` and `~/.config/clarp-host`.
+
+Agents do not deploy, update or restart the Host themselves: not
+`install-host`, not `install-from-release`, not `systemctl --user restart
+clarp-host`. Push the change and ask whoever gave you the task to have it
+shipped; the owner can still deploy himself. What follows is for reading the
+Host's state, and for the owner or the release owner who installs.
+
+Start with these; they only read:
 
 ```bash
-clarp-admin doctor
-clarp-admin update
-clarp-admin rollback
-clarp-admin skills repair-links
+clarp-admin paths                                     # where this installation keeps what
+cat ~/.local/share/clarp-host/data/DEPLOYED_VERSION   # the release installed now
+systemctl --user status clarp-host.service            # running, since when, restarts
+journalctl --user -u clarp-host.service --since -1h   # what it said
+clarp-admin experience --open                         # what users are running into
 ```
 
-Never hand-edit the active generated release. Use `clarp-admin paths` to find
-the platform-native release, configuration, database, cache, log, service, and
-toolchain paths.
+`clarp-admin doctor`, `backup create|verify|restore`, `update`, `rollback` and
+`skills repair-links` belonged to the retired Python Host. On the Rust Host they
+answer "not available on this Host yet (the Rust Host). Nothing was done." Use
+the routes below instead, and never hand-edit a release under
+`~/.local/share/clarp-host/releases`.
+
+## Where the installation lives
+
+- `~/.local/share/clarp-host/bin`: `clarp-host` and `clarp-shim` of the release
+  installed now.
+- `~/.local/share/clarp-host/data`: the state. `fleet.db` and the other
+  databases beside it, each agent's own log under `agents/`, the apps' client
+  log, `crashes/`, and `DEPLOYED_VERSION`.
+- `~/.local/share/clarp-host/releases/<version>`: each kept release's binaries,
+  unit and skills, with `current` and `steady` beside them (see the rollback
+  below).
+- `~/.local/share/clarp-host/toolchains` and `environments`: the agents'
+  Claude Code and Codex, and the Python that runs the Host's own speech engine,
+  as this Host copied them for itself.
+- `~/.local/share/clarp-host/tools`: the agents' Clarp tools (`clarp-admin`,
+  `clarp-goal`, ...). Each is a pipe to this Host, which answers the tools it
+  has and says of the others that it does not have them yet.
+- `~/.local/share/clarp-host/libexec/install-host`: a copy of the installer,
+  for a machine with no checkout at hand.
+- `~/.config/clarp-host`: `config.toml`, `env` (the owner's token, mode 0600),
+  `tools.toml` (the agents' tools' token), `install.conf` (what the
+  installation was told, so an update needs no options again), `relay.json`
+  and `peers.json`.
+
+`GET /server-info` says the release (`version`), the contract and the
+features; `GET /host/start`, with the owner's token only, says how many agents
+the Host has, how many are still opening and how many could not be opened.
 
 ## Install a Host on a new machine
 
@@ -33,6 +73,22 @@ It installs the newest `host-builds` pre-release (built from main), checks its
 running it again updates in place. It needs `curl`, `python3` and a systemd
 user session, never uses sudo, and refuses root and macOS. Never run it on a
 machine whose Host someone else owns or deploys.
+
+## Update a Host
+
+An update is the same install again, by whoever ships releases (not an agent
+on its own initiative): `install-from-release` once more, or, from a checkout
+whose binaries were built by `server-rs/tools/build release`,
+`server-rs/tools/install-host --start`. What the installation was told before
+is kept in `install.conf`, so no option needs repeating; what is named now
+replaces it, and `default` forgets it (`--push-relay default`).
+`install-host --files-only` writes the files and asks systemd nothing, to look
+at what would be installed. The full list of options is in the comment at the
+top of `server-rs/tools/install-host`.
+
+`--start` restarts a running Host. Turns that are running go on, each in a
+systemd scope of its own. An update keeps the agents' Claude Code and Codex versions; to move
+them to another version, name it (`--claude PATH`, `--codex PATH`).
 
 ## A Rust Host that crash-loops right after an install: roll back
 
@@ -113,9 +169,11 @@ with up to 16 KB of detail. The experience watcher opens one finding per device
 front desk, again at most hourly while new flashes come, and clears it after 24
 hours without one (see the watcher configuration). An iOS or Android device's
 flashes count only from a released build number (four digits or more): an iOS
-debug or simulator build (`1`) or a test build opens nothing. The Android app
-sends its version code from every build type today, so its debug and emulator
-builds still count. The log below still lists every flash:
+debug or simulator build (`1`) or a test build opens nothing. From Android build
+1154 (app commit 7d90af77) on, the Android app marks a build that is not a release
+(`<code>-debug`, `<code>-emulator`), so only its release builds count; an older
+Android build's debug and emulator builds still count. The log below still lists
+every flash:
 
 ```bash
 clarp-admin client-log --event scroll_flash --since 1d
@@ -149,180 +207,39 @@ the agents' tools: a turn's `CLARP_TOOL_TOKEN`, or outside a turn
 `auth_token` from `config.toml` and calls the Host from no app and no turn is named in the
 Host's log (`clarp-host: admin token without a turn:`), so it can be moved to that file.
 
-## Which code may meet which database
+## The Host's databases and backups
 
-Only the installed Host and runtime services upgrade a database, when they
-start. Every agent turn carries `CLAUDE_PWA_DB` naming the live database, so
-any Host code run from a checkout would otherwise open it: a script, a
-`python -c`, a probe, a test outside the fixtures. Such a process that meets
-a database below its own schema waits ten seconds for a service to upgrade
-it and then refuses with both versions (`DatabaseOlderThanCode`). The wait is
-spent once in a process; a second open is refused at once. The refusing
-reader leaves the database file and its `-wal` untouched; the `-shm` index
-beside them can change, and is created if a `-wal` had none. Logging does not
-open the database at all, and importing Host code creates nothing. A Host or
-runtime that is not one of the installation's own releases gets no grant
-either, and if the database is below its schema it exits 78 at once. To work on a checkout, point `CLAUDE_PWA_DB`, the
-log, config, share and cache variables at a scratch directory first.
+The stores are SQLite in WAL mode. An agent's log and the key-value stores
+carry their schema in `PRAGMA user_version`: a Host creates such a store it
+does not find and refuses one whose
+schema is newer than it reads, naming both ("has schema N, this build reads
+schema M"). There is no downgrade: a rollback past a schema change is a fix
+forward.
 
-The other direction is refused too. `clarp-admin update`, `clarp-admin
-rollback`, `install.sh` and the Host at start-up all refuse code whose schema
-is below the database's, naming both versions. `--allow-older-schema` on
-`update` and `rollback` is the override for a deliberate rollback: older code
-does not know the newer tables and columns, so restore a database backup that
-matches the release if you stay on it. The override is recorded for exactly
-that pair of versions (`schema-rollback.json` in the data directory) and
-allows nothing else.
+Only the installed Host opens its live stores. A turn's environment carries no
+database path of the Host's, and the retired Python Host's variables
+(`CLAUDE_PWA_DB` and its kin) are cleared from it. To try Host code from a
+checkout, give it a scratch `--data` directory, never
+`~/.local/share/clarp-host/data`.
 
-A Host that meets a newer database unasked exits 78 and is not restarted;
-its message names the command that lets it run: `clarp-admin rollback
-<its release> --allow-older-schema` (with the override, the release that is
-already current can be named). After a failed install the release that
-`install.sh` or `clarp-admin` puts back gets that override by itself, since
-the failed release may have upgraded the database before it failed.
-
-A bare `clarp-admin update` says what the channel resolved to and refuses it
-when it is older than what is installed (the stable channel's newest tag can
-be months behind an installed main). `--ref <ref>` installs what you name.
-
-## Rehearse an additive state upgrade
-
-Before deploying a migration, compare the candidate's `_SCHEMA_VERSION` with
-the actual database's `PRAGMA user_version` and required columns. A database
-previously opened by another feature branch can have a higher marker without
-the new feature's columns. Do not lower the marker or assume version order alone
-proves compatibility. Fix and test the candidate migration first.
-
-### Choose the version number against every source, not just main
-
-`_migrate` returns early when `PRAGMA user_version >= _SCHEMA_VERSION`, so a
-number another branch already used means your migration **silently never runs**
-on that host: the deploy succeeds, the tables are missing, and the feature fails
-at runtime. Several agents work this repo in parallel and deploy feature
-branches to the live host, so `origin/main` alone does not tell you what is
-taken. Read all four before picking:
+`clarp-admin backup` is not available on the Rust Host. Never copy a live
+store with `cp`: the file and its `-wal` move apart while the Host writes. For
+a copy of one store, use SQLite's online backup into a private directory of
+your own, and only when the owner asked for it:
 
 ```bash
-git fetch origin
-grep -n '_SCHEMA_VERSION = ' server/lib/db_schema.py                       # your branch
-git show origin/main:server/lib/db_schema.py | grep -n '_SCHEMA_VERSION = ' # merged
-grep -n '_SCHEMA_VERSION = ' ~/.local/share/clarp/current/lib/db_schema.py  # deployed (the Python Host's install)
-sqlite3 ~/.local/share/clarp/state.sqlite 'pragma user_version;'     # live DB (the Python Host's; a Rust Host keeps its own)
+sqlite3 ~/.local/share/clarp-host/data/fleet.db ".backup '/private/dir/fleet.db'"
 ```
 
-When first assigning a migration, choose a number above the versions already
-used by these sources. An already-assigned candidate number can be retained if
-no other source has used it; do not repeatedly increment it merely because the
-candidate itself appears in the comparison. Add a migration guarded by
-`if version < NN:`, and keep every statement `CREATE TABLE IF NOT EXISTS` so
-re-applying is harmless whichever branch lands first. Re-check after every
-rebase: a merge that lands mid-task can take your number. Verify after
-deploying that `pragma user_version` advanced *and* the new tables exist --
-a matching version number alone does not prove the migration ran.
+## Skill links
 
-Use the helper from this skill to migrate a new private backup, never the live
-database. Choose an existing private directory for the output:
-
-```bash
-# clarp-admin paths names the Python Host's state.sqlite
-python3 scripts/rehearse_state_upgrade.py \
-  --source /path/from/clarp-admin-paths/state.sqlite \
-  --server-root /candidate/checkout/server \
-  --output /private/backups/new-rehearsal.sqlite
-```
-
-It uses SQLite online backup, refuses to overwrite output, and checks every
-existing table's original columns and values after migration. Exit zero proves
-an additive upgrade on that snapshot, not a deployment. Intentional data
-transformations need their own validation; this helper reports them as changes.
-
-For a migration that intentionally inserts catalog or seed rows, opt in only
-the expected existing tables with repeatable `--allow-added-rows TABLE` flags:
-
-```bash
-# clarp-admin paths names the Python Host's state.sqlite
-python3 scripts/rehearse_state_upgrade.py \
-  --source /path/from/clarp-admin-paths/state.sqlite \
-  --server-root /candidate/checkout/server \
-  --output /private/backups/new-catalog-rehearsal.sqlite \
-  --allow-added-rows janitor_trigger_definitions
-```
-
-The default remains strict. Each allowed table retains a complete row multiset
-in memory across all original columns, including generated columns, and must
-preserve every original value, type and duplicate count. Only additional rows
-are accepted; changed/deleted rows and removed tables/columns still fail.
-Unknown table names fail before migration. The JSON `allowed_added_rows` field
-reports `before`, `after`, `added` and `missing` counts per allowed table, or a
-schema error if comparison is impossible. It never prints the row contents.
-
-Keep backups private. Release rollback does not automatically undo a database
-migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
-candidate is verified; do not hand-edit generated releases.
-
-For an authorized update that must survive the HTTP connection restarting, run
-`bash scripts/update_with_job.sh SESSION FULL_SHA PRIVATE_STATE_DIR` in an owned
-`systemd-run --user` unit with a private append log and the normal CLI PATH.
-Use `--dry-run` first to inspect its target without starting a job. Keep the
-script in a permanent location outside the generated release being switched.
-Invoke it with `/usr/bin/bash` in the unit too: managed copies may not have an
-executable bit. Resolve symlinks before choosing the helper path; a dotfiles
-skill link can still point into the generated release.
-It heartbeats a process-fenced job and records `installer-exit`; job completion
-means the installer finished, not that phone/runtime verification is complete.
-Once installation starts, the installer owns rollback; cancelling the tracking
-job is not an emergency stop for the installer. Verify the deployed SHA, schema,
-runtime availability, and `clarp-admin doctor` afterwards.
-
-## Host, runtime and plugin activation are separate
-
-The supported installer restarts the HTTP Host and enables the runtime service;
-it does not force-restart an already-running runtime. Current `runtime.py` starts
-`RuntimeReleaseMonitor`, which watches the installed `RUNTIME_RELEASE_ID` once
-`RUNTIME_READY` and `INSTALL_OK` exist. In the default natural mode
-(`[runtime] release_drain = "natural"`, or `CLARP_RELEASE_DRAIN=natural`) a busy
-runtime holds nothing: it waits (`drain.phase` `waiting_idle`, live `blockers`)
-for a moment with nothing to cut short and fences only for the seconds of the
-seal check. With `release_drain = "fenced"` it fences admissions (new work
-queues durably, in-flight turns finish), hands over when nothing is owned, and
-lifts the fence after 15 minutes with a growing backoff; see
-`docs/runtime-restarts.md` "Graceful release drain". Runtimes from before the
-drain hand over only when fully idle; runtimes from before natural mode always
-fence. Verify the mechanism in the candidate
-and deployed source.
-
-HTTP endpoints and schema migrations activate with the Host restart. Runner
-code becomes active after the natural idle handoff; installer success alone
-is not proof of that transition. Read the runtime status `release_id`,
-`draining` and `drain` fields and compare with the installed release. In
-`GET /status` (contract 62 on), `runtime.draining` is true from the admission
-fence on and `runtime.sealed` is the moment before the handoff; `available:
-false` with a `reason` means the runtime did not answer (unknown, not idle).
-
-The standard Claude runner launches one CLI process per turn. Its plugin path
-resolves through `share/plugin -> current/plugin` on each launch, so the next
-naturally admitted turn can load the new plugin even while the runtime process
-still uses the predecessor's compatible runner code. Hook subprocesses resolve
-the library colocated with their plugin, and managed helper wrappers resolve
-`current` rather than retaining an inherited old code root. Do not claim that
-an already-running Claude turn hot-reloaded its plugin; verify an actual
-provenance receipt on subsequent natural work. Directory-plugin caching and
-manual persistent CLI sessions need their own verification.
-
-Never force a runtime or fleet restart to make a rollout look complete. A manual
-restart interrupts in-flight turns and requires explicit authorization. Preserve
-an existing recovery pause, active conversations, account selection, and rollback.
-
-Runtime startup performs no generic assistant continuity checks. The agent
-performing an authorized planned restart owns targeted resumption: capture the
-exact unfinished work/native-thread inventory first, checkpoint its own handoff,
-then recheck each target after activation. Prompt only genuinely stranded work
-directly from the verified owner, preserving the original task and limits. Do
-not prompt busy agents, valid queued continuations, legitimate waits, completed
-work or idle conversations. Verify an actual native response/tool call afterward.
-See the Host's `docs/runtime-restarts.md`. Unexpected crashes retain visible
-interruption markers; explicitly enrolled goals and user/peer queued work keep
-their independent ownership and recovery rules.
+The Host links the agents' skills when it keeps the machine's tools
+(`install-host --accounts select`): each release ships its skills under
+`releases/<version>`, and at its start the Host moves every link a release
+before it left. `clarp-admin skills repair-links` is not available on the Rust
+Host; a link that reads as outdated is put right at the Host's next start. With
+`--accounts follow` or `none` the Host links no skills: whoever keeps the
+machine's tools does.
 
 ## Codex chat turns on a lane (Rust Host)
 
@@ -349,7 +266,7 @@ turn, and exec continues the same Codex thread. A lane is
 effort Codex keeps, and `idle_ms`. A lane turn's Clarp tools take their turn's
 identity from `CLARP_PROVIDER_TURN_FILE` (`<run>/<agent>-turn.token`), which the
 lane rewrites at each turn. The apps do not yet advertise Codex steering
-(`supports_steer`); the Python Host steers Codex in its own way.
+(`supports_steer`).
 
 ## Claude chat turns on a kept process (Rust Host)
 
@@ -480,45 +397,31 @@ has not read when the turn ends, or a Stop ends it, run as a turn of their own, 
 begins them by itself as the turn ends (then the turn stays open, and they are answered in it);
 a turn on its own server takes none.
 
-## Docker Container Administration
+## Reaching the Host from a phone
 
-When diagnosing or managing Clarp inside a Docker container:
-
-- Run diagnostics inside the container:
-  ```bash
-  docker compose -p clarp exec clarp clarp-admin doctor
-  ```
-
-- Authenticating AI providers inside headless containers:
-  * For terminal/interactive use, pass `-it` to keep stdin open for OAuth codes:
-    ```bash
-    docker compose -p clarp exec -it clarp claude auth login --claudeai
-    docker compose -p clarp exec -it clarp codex login --device-auth
-    ```
-  * When automating or scripting the login flow via agent/subprocess, use `-T` and keep the standard input stream connected to feed the callback code to the active prompt without terminating the session or expiring challenge parameters.
-  * Ensure the container has working outbound DNS (configured in `compose.yaml`) before initiating OAuth token exchanges.
-
-- Tailscale and phone connectivity:
-  * Prefer the `compose.tailscale.yaml` sidecar mode for isolated Tailnet identity, auto-HTTPS, and zero host firewall conflicts.
-  * Without Tailscale, a Host is reached from anywhere through a relay its owner deploys on Cloudflare: `relay/README.md` in the clarp repository says how to deploy it, write `~/.config/clarp-host/relay.json`, turn it on (`install-host --relay on`) and pair through it (`clarp-admin pair create --relay`); `clarp-host network relay status` shows the connection.
-  * If publishing ports on the host directly (`CLARP_PORT=...`), ensure host firewalls (`ufw` / `DOCKER-USER`) allow Tailscale CGNAT traffic (`100.64.0.0/10` / `tailscale0`) to forward to Docker bridge networks.
+The Host listens on the loopback (`127.0.0.1:7690` by default); whatever the
+phone reaches sits in front of it, as Tailscale does. Without Tailscale, a
+Host is reached from anywhere through a relay its owner deploys on Cloudflare:
+`relay/README.md` in the clarp repository says how to deploy it, write
+`~/.config/clarp-host/relay.json`, turn it on (`install-host --relay on`) and
+pair through it (`clarp-admin pair create --relay`). `clarp-host network relay
+status`, with the owner's token in `CLARP_HOST_TOKEN`, shows the connection.
 
 ## Vendor CLI version blocks a resumed agent
 
 A successful Host restart is not proof that a native agent resumed. Inspect its
 actual transcript for errors such as a model requiring a newer Claude Code CLI.
-Read the runtime process's PATH and resolve the executable using that PATH; a
-user-local version check can differ from the managed one, and an earlier Host
-`bin/claude` entry can shadow a hash-pinned toolchain wrapper. Run only `--version`
-for this check; it does not prove a successful model response.
+The programs a turn runs are the unit's `CLARP_CLAUDE_PROGRAM`,
+`CLARP_CODEX_PROGRAM` and their kin (`systemctl --user cat clarp-host.service`),
+usually a copy under `~/.local/share/clarp-host/toolchains`. Check that
+program, not the one on your own path; a user-local version check can differ.
+Run only `--version` for this check; it does not prove a successful model
+response.
 
-The canonical managed pins and upgrade procedure are in `toolchain/README.md`.
-Build a new hash-addressed toolchain with `scripts/install_agent_toolchain.py`;
-never run `npm ci` in an active prefix to repair one vendor, because it also
-replaces the other vendor's packages. Keep running processes, credentials and
-unrelated CLI versions intact. Coordinate ownership before switching executable
-routing, recheck its current target immediately before mutation, and retain a
-rollback receipt. A newer competing route is a reason to reconcile, not overwrite.
-A runtime restart is not needed merely to make a future child resolve a changed
-executable path, but existing child processes keep their current binary. Verify
-an actual resumed response/tool activity separately, in the exact conversation.
+An update keeps the versions the agents have. Moving them to another Claude
+Code or Codex is an install with `--claude PATH` or `--codex PATH`, by whoever
+ships releases; Claude Code must take `--thinking-display` (2.1.285 and later
+do). Never run `npm ci` or `npm install` inside a toolchain the Host runs from:
+it replaces packages under running turns. Keep running processes, credentials
+and unrelated CLI versions intact, and verify an actual resumed response or
+tool call afterwards, in the exact conversation.

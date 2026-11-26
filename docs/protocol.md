@@ -1615,7 +1615,8 @@ it to wait). Each item also carries `status` (optional; `queued`, `claimed` or `
 and is no longer waiting; it leaves the list once its row is written. A message steered into a
 running turn is never lost: it counts as read only on the tool's own evidence that the turn
 read it (Claude Code's replayed echo of it, or its session file after a restart; agy-acp's
-echo; a Codex or Muse lane's user message for it; on an OpenCode lane the order OpenCode
+echo; a Codex or Muse lane's user message for it; on an OpenCode lane, as an answer starts,
+a message id that sorts at or before the answer's parent, and at the recheck the order OpenCode
 stored it in, before the message its answer names, also through OpenCode's own compaction),
 and otherwise it runs once as a turn of its own; a message that was read shares the fate of
 the turn it was read into. Each item also says who it is from: `origin`, the stored value (an open set:

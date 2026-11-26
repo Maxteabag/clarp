@@ -262,10 +262,11 @@ const SCROLL_FLASH_KINDS: [&str; 4] = [
 /// simulator builds report `1`, and jumps are made on purpose on one while it is worked on; a
 /// test build that names itself (`1112-synthetic`, `1152-debug`) is no released build either. A
 /// device whose only flashes came from such builds has no finding, so a finding it had clears on
-/// the next pass. The Android app reports its version code (the commit count) from every build
-/// type today, debug and emulator builds included, so its flashes count from every build until
-/// it marks a build that is not a release (`<code>-debug`). The desktop and web apps report
-/// versions such as `0.1.0`, not build numbers: their flashes count as they come.
+/// the next pass. From Android build 1154 (app commit 7d90af77) on, the Android app marks a build
+/// that is not a release (`<code>-debug`, `<code>-emulator`), so only its release builds count;
+/// an older Android build reports its bare version code (the commit count) from every build type,
+/// debug and emulator builds included, and its flashes count from every build. The desktop and
+/// web apps report versions such as `0.1.0`, not build numbers: their flashes count as they come.
 pub(super) fn counted(client: &str, build: &str) -> bool {
     !matches!(client, "ios" | "android")
         || (build.len() >= 4 && build.bytes().all(|sign| sign.is_ascii_digit()))

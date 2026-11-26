@@ -82,11 +82,13 @@ count only from a released build number, all digits and at least four of them
 (TestFlight and App Store builds, Android release builds): the iOS app's debug
 or simulator build reports `1`, where jumps are made on purpose, and a test build
 that names itself (`1152-debug`) is no build number either. Such a device opens
-nothing, and a finding it had clears on the next pass. The Android app reports
-its version code from every build type today, debug and emulator builds
-included, so its flashes count from every build until it marks a build that is
-not a release (`<code>-debug`). The desktop and web apps report versions, not build
-numbers, and their flashes count as before (`checks::counted`). Its owner is `owners.<kind>`, else
+nothing, and a finding it had clears on the next pass. From Android build 1154
+(app commit 7d90af77) on, the Android app marks a build that is not a release
+(`<code>-debug`, `<code>-emulator`), so only its release builds count; an
+older Android build reports its bare version code from every build type, debug
+and emulator builds included, and its flashes count from every build. The
+desktop and web apps report versions, not build numbers, and their flashes count
+as before (`checks::counted`). Its owner is `owners.<kind>`, else
 `owners.scroll_flash`, else that platform's app-crash owner
 (`app_crash_<platform>`, else `app_crash`), and the front desk as for every
 finding.
