@@ -1543,7 +1543,13 @@ sent_at, kind}` (the last three from Host contract 115): `sent_at` is ISO,
 `kind` is `waiting` (a send that met a busy agent) or `later` (its sender asked
 it to wait). Each item also carries `status` (optional; `queued`, `claimed` or `started`): a
 `started` item is already being read, by a steer into the running turn or by its own turn,
-and is no longer waiting; it leaves the list once its row is written. Each item also says who it is from: `origin`, the stored value (an open set:
+and is no longer waiting; it leaves the list once its row is written. A message steered into a
+running turn is never lost: it counts as read only on the tool's own evidence that the turn
+read it (Claude Code's replayed echo of it, or its session file after a restart; agy-acp's
+echo; a Codex or Muse lane's user message for it; on an OpenCode lane the order OpenCode
+stored it in, before the message its answer names, also through OpenCode's own compaction),
+and otherwise it runs once as a turn of its own; a message that was read shares the fate of
+the turn it was read into. Each item also says who it is from: `origin`, the stored value (an open set:
 `user`, `oracle`, `agent`, `automation` for a goal wake or a schedule, `janitor`,
 `heartbeat`, ...), and `sender`, `{agent_id, name}` when an agent sent it (`name` is `null`
 once that agent is gone), else `null`. A user's send from another device is
