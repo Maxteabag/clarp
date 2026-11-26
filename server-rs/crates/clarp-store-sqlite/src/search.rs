@@ -335,26 +335,58 @@ pub struct SearchReader {
 }
 
 impl SearchReader {
-    /// Opens the index at `path` to read; `None` while its writer has not made it yet.
+    /// Opens the index at `path` to read; `None` while its writer has not made it yet (no file,
+    /// or one SQLite cannot open yet).
     pub fn open(path: &Path) -> Result<Option<Self>, SearchError> {
         if !path.exists() {
             return Ok(None);
         }
         let flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let db = Connection::open_with_flags(path, flags)?;
+        let db = match Connection::open_with_flags(path, flags) {
+            Ok(db) => db,
+            Err(error) if error.sqlite_error_code() == Some(ErrorCode::CannotOpen) => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error.into()),
+        };
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         db.pragma_update(None, "query_only", true)?;
         Ok(Some(Self { db }))
     }
 
-    /// The rows of these agents that have every word asked, newest first.
+    /// The rows of these agents that have every word asked, newest first. An index whose
+    /// writer has not made its tables yet (just after the Host started, or after it was thrown
+    /// away) has nothing yet, and everything to come: it answers no hits and `partial`, never
+    /// an error (26 Nov 2026: a search in that moment answered "no such table: words").
     pub fn search(&self, asked: Asked<'_>) -> Result<Found, SearchError> {
         let query = fts_query(asked.words)
             .ok_or_else(|| SearchError::Asked("nothing to search for in q".to_string()))?;
         let before = asked.before.map(cursor).transpose()?;
+        match self.found(&query, before, asked) {
+            Err(SearchError::Storage(why)) if why.contains("no such table") => Ok(not_yet()),
+            found => found,
+        }
+    }
+
+    fn found(
+        &self,
+        query: &str,
+        before: Option<i64>,
+        asked: Asked<'_>,
+    ) -> Result<Found, SearchError> {
         let limit = asked.limit.clamp(1, MOST);
         let agents = json_list(asked.agents);
         let tx = self.db.unchecked_transaction()?;
+        // In the same snapshot as what follows: the tables are there, or nothing is yet.
+        let tables: i64 = tx.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' \
+             AND name IN ('hit', 'words', 'agent')",
+            [],
+            |row| row.get(0),
+        )?;
+        if tables < 3 {
+            return Ok(not_yet());
+        }
         let mut hits = Vec::new();
         {
             let mut statement = tx.prepare(
@@ -409,6 +441,14 @@ impl SearchReader {
             next,
             partial: behind > 0,
         })
+    }
+}
+
+/// What a search answers before the index has its tables: nothing yet, all of it to come.
+fn not_yet() -> Found {
+    Found {
+        partial: true,
+        ..Found::default()
     }
 }
 
@@ -904,6 +944,37 @@ mod tests {
             .unwrap();
         assert!(reader.db.execute("DELETE FROM agent", []).is_err());
         drop(index);
+    }
+
+    #[test]
+    fn a_search_before_the_tables_are_made_answers_partial_and_no_error() {
+        let (_index, scratch) = index();
+        let allowed = agents(&["a1"]);
+        let asked = Asked {
+            words: "kites",
+            agents: &allowed,
+            limit: 5,
+            before: None,
+        };
+        // A file with nothing in it yet, as the writer's open has just made it.
+        let empty = scratch.0.join("empty.db");
+        std::fs::write(&empty, b"").unwrap();
+        let reader = SearchReader::open(&empty).unwrap().unwrap();
+        assert_eq!(reader.search(asked).unwrap(), not_yet());
+        // A database with some tables but not the index's.
+        let other = scratch.0.join("other.db");
+        Connection::open(&other)
+            .unwrap()
+            .execute_batch("CREATE TABLE hit (id INTEGER PRIMARY KEY)")
+            .unwrap();
+        let reader = SearchReader::open(&other).unwrap().unwrap();
+        assert_eq!(reader.search(asked).unwrap(), not_yet());
+        // What is asked wrongly is still refused in words.
+        let wrong = Asked {
+            words: "  ",
+            ..asked
+        };
+        assert!(matches!(reader.search(wrong), Err(SearchError::Asked(_))));
     }
 
     #[test]
