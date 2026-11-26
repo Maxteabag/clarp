@@ -40,6 +40,7 @@ impl Actor {
         if !self.recorder.transit_held()
             || agent.expected_transit_checkpoint().is_some()
             || agent.selected_takeover().is_some()
+            || !agent.joins().is_empty()
             || !agent.gathered(live.turn).is_empty()
             || live.steering.input_skipped
             || self.fork_runs()
@@ -136,7 +137,8 @@ impl Actor {
             return Ok(None);
         };
         let agent = self.recorder.agent();
-        if !agent.can_take_over(live.turn, into, live.attempt)
+        if self.transit_holds_queue()
+            || !agent.can_take_over(live.turn, into, live.attempt)
             || agent.selected_takeover().is_some()
             || live.opening
             || live.steering.input_skipped

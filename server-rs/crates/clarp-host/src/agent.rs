@@ -3466,6 +3466,7 @@ impl Worker {
         // lane, and only while the owner's setting runs chat turns there: with it off, a goal
         // turn is not steered, as before (review of 23 Nov 2026). The actor reads from the
         // turn's spool whether it can, and decides by the message's text.
+        let transit_holds_queue = self.actor.as_ref().is_some_and(Actor::transit_holds_queue);
         let mut can_offer_steering = match self.setup.backend.steers() {
             clarp_backend::Steers::Stdin => true,
             clarp_backend::Steers::Words => self.chat_lane(),
@@ -3484,7 +3485,7 @@ impl Worker {
                 let desk_relay = *admission == Admission::Later
                     && marks.user_word
                     && marks.coordination.is_some();
-                direct_user || desk_relay
+                !transit_holds_queue && (direct_user || desk_relay)
             }
             // The owner asks for a waiting message of theirs to be read in (issue 867).
             Ask::Steer { .. } => true,
@@ -3521,6 +3522,7 @@ impl Worker {
         } = &mut ask
             && *admission == Admission::Queue
             && marks.coordination.is_none()
+            && !transit_holds_queue
             && let Some(actor) = self.actor.as_ref()
             && let Some(goes) = actor.owner_goes_first(&message.origin)?
             && !(can_offer_steering && actor.can_steer(message))
@@ -3681,6 +3683,7 @@ impl Worker {
                         && message.origin.is_user_send()
                         && marks.coordination.is_none();
                     let forked = if sent.queued
+                        && !transit_holds_queue
                         && direct_user
                         && crate::conversation_forks::may_fork(
                             &self.setup.record.backend,

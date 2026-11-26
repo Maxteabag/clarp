@@ -5,6 +5,7 @@ use super::*;
 const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json
 import pathlib
+import select
 import sys
 import time
 
@@ -29,10 +30,21 @@ send("assistant", message={"id": "msg-look", "role": "assistant", "content": [
     {"type": "tool_use", "id": call, "name": "Read", "input": {"file_path": "/work/word.txt"}}]})
 send("user", message={"role": "user", "content": [
     {"type": "tool_result", "tool_use_id": call, "content": "The word in the file is ember."}]})
+def record_followup(timeout):
+    if select.select([sys.stdin], [], [], timeout)[0]:
+        line = sys.stdin.readline()
+        if line:
+            (root / "source-received-followup").write_text(line)
+
 if (root / "hold").exists():
     (root / "source-held").touch()
     while (root / "hold").exists():
-        time.sleep(0.05)
+        if (root / "record-steering").exists():
+            record_followup(0.05)
+        else:
+            time.sleep(0.05)
+    if (root / "record-steering").exists():
+        record_followup(0.2)
 answer = "Heard: " + prompt.split("\n")[0]
 send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
                            "content": [{"type": "text", "text": answer}]})
@@ -322,12 +334,15 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
                      "request_id": "switch-with-queue"});
     let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
     assert_eq!(status, 202, "{began}");
-    queue_for_transit(&host, session, "switch-3", "Second pending message.");
+    std::fs::write(setting.place.root.join("record-steering"), "").unwrap();
+    let send = host.send(session, "Second pending message.", "switch-3");
+    assert_eq!(send["queued"], true, "{send}");
     assert_eq!(row(&host, session)["backend"], "claude");
     std::fs::remove_file(hold).unwrap();
 
     let done = finished_transit(&host, session, began["transit_id"].as_str().unwrap());
     assert_eq!(done["phase"], "done", "{done}");
+    assert!(!setting.place.root.join("source-received-followup").exists());
     wait_for("the Codex queue to drain", || {
         let row = row(&host, session);
         row["backend"] == "codex" && row["busy"] == false && row["queued_turn_count"] == 0

@@ -4470,6 +4470,10 @@ impl Actor {
         self.asked(Command::RunWaiting, now_ms).map(|(_, out)| out)
     }
 
+    pub fn transit_holds_queue(&self) -> bool {
+        self.recorder.transit_held()
+    }
+
     pub fn transit_resume_pending(&self) -> bool {
         self.recorder.agent().transit_resume().is_some()
     }
