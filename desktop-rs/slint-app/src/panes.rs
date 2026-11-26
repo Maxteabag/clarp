@@ -749,7 +749,11 @@ impl App {
         view.chip_reason = chip.reason.into();
         view.chip_acting = chip.acting;
         view.waiting = ModelRc::new(VecModel::from(waiting));
-        view.waiting_refused = clarp_core::queue_line::refusal_line(&engine.turn_queue_refusal(session)).into();
+        view.waiting_refused = if chip.count > 0 {
+            clarp_core::queue_line::refusal_line(&engine.turn_queue_refusal(session)).into()
+        } else {
+            Default::default()
+        };
         let (meter, warn) = crate::queue_strip::meter(engine, session);
         view.meter = meter.into();
         view.meter_warn = warn;

@@ -73,12 +73,8 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
         .collect()
 }
 
-/// The waiting line (#920, the same in every app): shown while a turn runs
-/// and some of the user's own messages wait. Its count, its action ("steer"
-/// or "stop"; "" when the line is not shown), the message Steer now reads in
-/// (the newest of the user's own `kind: waiting` messages the turn can
-/// take; the Host reads the older ones in first), its word, the dim reason
-/// before Stop and send, and whether the action runs now.
+/// The queue line and its current action, for both the busy #920 chip and
+/// the existing queue controls.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Chip {
     pub kind: &'static str,
@@ -89,12 +85,50 @@ pub struct Chip {
     pub acting: bool,
 }
 
+fn uses_busy_chip(engine: &Engine, session: &str) -> bool {
+    engine.send_while_working_offered_for(session) && engine.roster().find(session).is_some_and(|agent| agent.busy)
+}
+
+/// The drop-1 line, also used to release a deliberately held message
+/// while the chat is idle.
+fn legacy_chip(engine: &Engine, session: &str) -> Chip {
+    use clarp_core::queue_line as words;
+
+    let waiting = waiting(engine, session);
+    if waiting.is_empty() {
+        return Chip::default();
+    }
+    let mut chip = Chip {
+        count: engine.queue_count(session).max(waiting.len() as i32),
+        acting: engine.turn_queue_acting(session),
+        ..Chip::default()
+    };
+    let choice = if let Some(item) = waiting.iter().rev().find(|item| !item.reading && item.steer) {
+        Some((item, "steer", words::STEER_NOW))
+    } else {
+        waiting.iter().find(|item| !item.reading).map(|item| {
+            if item.take_over { (item, "take-over", words::STOP_AND_SEND) } else { (item, "send", words::SEND_NOW) }
+        })
+    };
+    if let Some((item, kind, label)) = choice {
+        chip.kind = kind;
+        chip.label = label;
+        chip.target = item.id.to_string();
+    }
+    chip
+}
+
 pub fn chip(engine: &Engine, session: &str) -> Chip {
     use clarp_core::{queue_line as words, send_while_working as sww};
-    let reason = engine.send_while_working_reason(session);
-    if !engine.roster().find(session).is_some_and(|a| a.busy) {
-        return Chip { reason, ..Chip::default() };
+
+    if !uses_busy_chip(engine, session) {
+        let mut chip = legacy_chip(engine, session);
+        if engine.send_while_working_offered_for(session) {
+            chip.reason = engine.send_while_working_reason(session);
+        }
+        return chip;
     }
+    let reason = engine.send_while_working_reason(session);
     let items = engine.turn_queue(session);
     let own: Vec<&Value> = items.iter().filter(|item| words::waiting_owner_id(item).is_some()).collect();
     if own.is_empty() {
@@ -185,7 +219,7 @@ pub fn follow(app: &App) {
 }
 
 /// Does the line's action for the open chat's waiting messages (by key:
-/// Ctrl+Shift+Enter): Steer now or Stop and send. False when there is no action.
+/// Ctrl+Shift+Enter). False when there is no queue action.
 pub fn send_first(app: &App) -> bool {
     let (session, chip) = {
         let engine = app.engine.borrow();
@@ -196,7 +230,7 @@ pub fn send_first(app: &App) -> bool {
     act(app, &session, chip.kind, &chip.target)
 }
 
-/// The line's action for `session`: Steer now (`target`) or Stop and send.
+/// Runs the action shown by the queue line for this chat.
 pub fn act(app: &App, session: &str, kind: &str, target: &str) -> bool {
     if session.is_empty() || kind.is_empty() {
         return false;
@@ -206,11 +240,26 @@ pub fn act(app: &App, session: &str, kind: &str, target: &str) -> bool {
     if current.kind != kind || current.target != target {
         return false;
     }
-    match kind {
-        "steer" => engine.act_on_queue_chip(session, Some(target)),
-        "stop" => engine.act_on_queue_chip(session, None),
-        _ => false,
+    if current.acting {
+        return true;
     }
+    if uses_busy_chip(&engine, session) {
+        return match kind {
+            "steer" => engine.act_on_queue_chip(session, Some(target)),
+            "stop" => engine.act_on_queue_chip(session, None),
+            _ => false,
+        };
+    }
+    if engine.turn_queue_session() != session {
+        return false;
+    }
+    match kind {
+        "steer" => engine.steer_queued_turn(target),
+        "take-over" => engine.take_over_queued_turn(target),
+        "send" => engine.send_queued_turn(target),
+        _ => return false,
+    }
+    true
 }
 
 /// Tokens as the meter says them: 950, 21K, 1.2M, 1M.

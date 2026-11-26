@@ -547,20 +547,16 @@ component ChipAction inherits Rectangle {
 // reads the older ones in first; where the turn cannot take them the pill
 // is "Stop and send", with a dim line before it saying why.
 // Ctrl+Shift+Enter does the same; Manage lists and edits them. While the
-// action runs the pill spins and takes no second press. Shown only while a
-// turn runs and the user's own messages wait, and Show queue is on; what
-// could not be done says so under it.
+// action runs the pill spins and takes no second press. The idle line and
+// older Hosts still offer their queue controls. Show queue hides the line.
 export component QueueStrip inherits Rectangle {
     in property <[WaitingTurn]> items;
-    // The user's own waiting messages.
     in property <int> count;
     in property <bool> busy;
     in property <bool> paused;
     in property <string> refused;
     in property <string> pane-id;
-    // The line's action ("steer", "stop"; "" for none), the message Steer
-    // now reads in, and its word; why the turn cannot be steered (before
-    // Stop and send); whether the action runs now.
+    // The action, its target and label, and any reason from the Host.
     in property <string> chip-kind;
     in property <string> chip-target;
     in property <string> chip-label;
@@ -628,10 +624,13 @@ export component QueueStrip inherits Rectangle {
                     }
                     if root.chip-kind != "": ChipAction {
                         y: 1px;
-                        icon: root.acting ? @image-url("icons/refresh.svg") : root.chip-kind == "steer" ? @image-url("icons/steer.svg") : @image-url("icons/stop.svg");
+                        icon: root.acting ? @image-url("icons/refresh.svg")
+                            : root.chip-kind == "steer" ? @image-url("icons/steer.svg")
+                            : root.chip-kind == "send" ? @image-url("icons/send.svg")
+                            : @image-url("icons/stop.svg");
                         spinning: root.acting;
                         text: root.chip-label;
-                        tip: root.reason != "" ? root.reason : "Read into this turn";
+                        tip: root.reason != "" ? root.reason : root.chip-kind == "steer" ? "Read into this turn" : root.chip-label;
                         accessible-id: "steer-chip-action:" + root.pane-id;
                         clicked => {
                             if (!root.acting) { root.act(root.chip-kind, root.chip-target); }
@@ -650,6 +649,12 @@ export component QueueStrip inherits Rectangle {
                 accessible-role: text;
                 accessible-id: "steer-chip-note:" + root.pane-id;
                 accessible-label: root.reason;
+            }
+            if root.count > 0 && root.paused && !root.busy: Text {
+                text: "queue paused";
+                color: Palette.muted;
+                font-size: 11 * Look.unit;
+                vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
             if root.count > 0: Rectangle {

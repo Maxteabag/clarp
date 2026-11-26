@@ -274,6 +274,7 @@ pub fn buttons_check(out: String) {
                 {"queue_id": "q2", "text": "second", "steerable": false},
             ]})).is_ok(), "neither message can steer on this turn");
             check(control("/__control/queue-steer", &json!({"on": true})).is_ok(), "the Host has the take-over endpoint");
+            check(control("/__control/send-while-working", &json!({"on": true})).is_ok(), "the Host offers the new chip");
             app_now().engine.borrow_mut().reconnect();
             true
         })),
@@ -406,7 +407,73 @@ pub fn buttons_check(out: String) {
                 return elapsed >= Duration::from_secs(3);
             }
             check(crate::queue_strip::shown(&app.engine.borrow()), "the setting is on again");
+            check(control("/__control/agent", &json!({"session": "rachel", "set": {
+                "busy": false, "latest_state": "idle", "queue_paused": true,
+            }})).is_ok(), "Rachel is idle with a held queue");
             true
+        })),
+        ("held queue with the new Host feature", Box::new(|app, _, elapsed| {
+            let action = format!("steer-chip-action:{}", app.active_id());
+            if label(&action) != "Send now" || !view().queue_paused {
+                check(elapsed < Duration::from_secs(5), "the held line offers Send now on the feature Host");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(app.engine.borrow().send_while_working_offered_for("rachel"), "the Host advertises send_while_busy");
+            check(press(&action), "Send now is pressed for the held item");
+            true
+        })),
+        ("held item released", Box::new(|app, _, elapsed| {
+            if requests_posted("/turn-queue/q3/send") != 1 {
+                check(elapsed < Duration::from_secs(5), "the feature Host sends the first held message");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(control("/__control/send-while-working", &json!({"on": false})).is_ok(), "the Host now offers only the older queue feature");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("held queue on the older Host", Box::new(|app, _, elapsed| {
+            let action = format!("steer-chip-action:{}", app.active_id());
+            let legacy = {
+                let engine = app.engine.borrow();
+                engine.turn_queue_steer("rachel") && !engine.send_while_working_offered_for("rachel")
+            };
+            if !legacy || label(&action) != "Send now" || view().chip_target != "q4" || !view().queue_paused {
+                check(elapsed < Duration::from_secs(8), "queue_steer alone keeps Send now on the held queue");
+                return elapsed >= Duration::from_secs(8);
+            }
+            check(press(&action), "the older Host's Send now is pressed");
+            true
+        })),
+        ("older Host sends the held item", Box::new(|_, _, elapsed| {
+            if requests_posted("/turn-queue/q4/send") != 1 {
+                check(elapsed < Duration::from_secs(5), "the older Host sends the first held message");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(control("/__control/agent", &json!({"session": "rachel", "set": {
+                "busy": true, "latest_state": "thinking", "queue_paused": false,
+            }})).is_ok(), "Rachel starts working again");
+            check(control("/__control/turn-queue", &json!({"session": "rachel", "items": [
+                {"queue_id": "legacy-oldest", "text": "older"},
+                {"queue_id": "legacy-newest", "text": "newer"},
+            ]})).is_ok(), "two messages wait on the older Host");
+            true
+        })),
+        ("older Host offers Steer now", Box::new(|app, _, elapsed| {
+            let action = format!("steer-chip-action:{}", app.active_id());
+            if label(&action) != "Steer now" || view().chip_target != "legacy-newest" {
+                check(elapsed < Duration::from_secs(5), "queue_steer alone keeps Steer now for the newest item");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(press(&action), "Steer now is pressed on the older Host");
+            true
+        })),
+        ("older Host steers the newest item", Box::new(|_, _, elapsed| {
+            let steered = requests_posted("/turn-queue/legacy-newest/steer") == 1;
+            if steered || elapsed >= Duration::from_secs(5) {
+                check(steered, "the older Host receives the steer for the newest message");
+                return true;
+            }
+            false
         })),
     ];
     run_stages(stages);
