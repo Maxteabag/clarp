@@ -5,7 +5,7 @@
 
 use nix::sys::resource::{Resource, getrlimit, setrlimit};
 
-/// Cap automatic raises at the installed unit's limit. Child processes inherit the
+/// Cap automatic raises at the installer's fallback limit. Child processes inherit the
 /// soft limit, so a high hard limit can hurt programs that scan descriptor numbers.
 const CEILING: u64 = 65_536;
 
