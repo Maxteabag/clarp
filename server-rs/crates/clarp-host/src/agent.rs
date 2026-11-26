@@ -6029,8 +6029,17 @@ impl Worker {
                 record.parent_agent_id.is_some()
                     && actor.live_sender_agent_id(live.turn) == record.parent_agent_id.as_deref()
             });
-        let helper_moved =
-            shown(was_live.is_some()) != shown(status.live.is_some()) && !for_its_parent;
+        // A helper that does not read `running` by its own state works for its makers while a
+        // turn of its runs (issue 936): the turn's start and end move the rows above it though
+        // its own state reads the same, and they are told the same way.
+        let works_above = was_live.is_some() != status.live.is_some()
+            && record.is_helper()
+            && record.parent_agent_id.is_some()
+            && shown(was_live.is_some()) != Some("running")
+            && shown(status.live.is_some()) != Some("running");
+        let helper_moved = (shown(was_live.is_some()) != shown(status.live.is_some())
+            && !for_its_parent)
+            || works_above;
 
         let began_from_the_queue = status
             .live

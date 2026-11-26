@@ -643,7 +643,7 @@ pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
         "backend": record.backend,
         "role": record.role(),
         "parent_agent_id": record.parent_agent_id,
-        "helper_state": member.shown_helper_state(),
+        "helper_state": crate::fleet::AboveWork::of(&directory).helper_state(member),
         "helper_completed_at": record.helper_completed_at_ms,
         "archived_at": record.archived_at_ms,
         "archived_by": record.archived_by,
