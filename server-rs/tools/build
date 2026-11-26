@@ -32,7 +32,8 @@
 # Peter, 26 Nov 2026: no queue and no arbitrary limits. This script copies this checkout's server-rs/
 # to the build machine and runs cargo there at once, at ordinary priority, in that checkout's copy
 # with a target directory per checkout, so a second run is incremental. Only a job of the same
-# checkout waits, for the copy (build-queue.py's own_copy). A checkout's first build
+# checkout waits, for the copy (build-queue.py's own_copy), which it holds from publishing its
+# uploaded sources until what this script fetches is set aside. A checkout's first build
 # starts from a reflink clone of the target of the latest checkout whose last build succeeded with
 # the Host's library built (build-queue.py's seed_target): the clone shares that target's data on
 # disk (du counts it in full for each; df does not), and cargo builds only the workspace's crates
@@ -66,10 +67,19 @@ floor="${CLARP_BUILD_MIN_FREE_BYTES:-25769803776}" # 24 GiB
 EXTRA_ENV="${CLARP_BUILD_ENV:-}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"           # .../server-rs
 name="$(basename "$(dirname "$here")")"                            # the worktree's name keys the remote copy
-remote="/var/tmp/clarp-build/$name"
-# Two checkouts of one name share that copy (a working tree and the clean checkout a landing is
-# built from). One of them at a time copies its sources and builds: the other waits here, so
-# that nothing is built from the sources of both.
+# The build machine's copies of this version are in .v2, out of the older tools' reach (build-queue.py's ROOT); the
+# copy a checkout built before 26 Nov 2026 stays at legacy until it is dropped.
+root=/var/tmp/clarp-build/.v2
+remote="$root/$name"
+legacy="/var/tmp/clarp-build/$name"
+# Each invocation uploads to a stage of its own beside the copy (build-queue.py's new_stage), which its job on the
+# build machine holds for as long as it lives and publishes into the copy only while it holds the copy. So no other
+# machine's upload, fetch or drop, and no later invocation here after this one's client was lost while its job ran
+# on, meets the sources a job compiles or what it sets aside.
+machine="$(hostname | tr -c 'A-Za-z0-9-\n' -)"
+if [ -r /etc/machine-id ]; then machine+="-$(head -c 8 /etc/machine-id)"; fi
+# Two checkouts of one name on this machine share that copy (a working tree and the clean checkout a
+# landing is built from). One of them at a time uploads its sources and builds: the other waits here.
 if [ "${1:-}" = lease ]; then
     shift
     exec python3 "$here/tools/build-queue.py" --drive "$name" "$@"
@@ -98,15 +108,17 @@ fi
 if [ "$cmd" = drop ]; then
     # A landed branch's copy is only disk there. This checkout's locks are held (above), and so is its
     # copy's lock there, which a job of this checkout started elsewhere holds while it runs and another
-    # checkout's build takes before it frees room in it or clones from it. The shared eviction lock keeps
-    # the older tools' housekeeping, which takes no copy lock, out meanwhile.
+    # checkout's build takes before it frees room in it or clones from it. This machine's stages go too,
+    # but for one a job still holds; another machine's stay, with whatever it is uploading or fetching. The copy
+    # the older tools made under this name goes as they dropped it, under their eviction lock.
     # The name reaches a remote shell: only a plain checkout name is removed, never a lock or a marker.
     if ! [[ "$name" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || [[ "$name" == lock || "$name" == holder || "$name" == *-lock || "$name" == first-* || "$name" == wait-* ]]; then
         echo "refusing to drop a copy under this checkout name: $name" >&2
         exit 2
     fi
-    copy_lock="/var/tmp/clarp-build/.copy-locks/$name.lock"
-    exec ssh "${ssh_opts[@]}" "$HOST" "mkdir -p /var/tmp/clarp-build/.copy-locks && { flock -n $copy_lock true || echo 'waiting for the job of this checkout running there' >&2; } && flock $copy_lock flock -s /var/tmp/clarp-build/eviction-lock rm -rf -- $remote && echo 'dropped $remote' && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf 'build disk: %s free\\n'"
+    copy_lock="$root/.copy-locks/$name.lock"
+    stages="for d in $root/.stage/$name@$machine.????????; do [ ! -d \"\$d\" ] || flock -n \"\$d/.lock\" rm -rf -- \"\$d\" || true; done"
+    exec ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $root/.copy-locks && { flock -n $copy_lock true || echo 'waiting for the job of this checkout running there' >&2; } && flock $copy_lock rm -rf -- $remote && { $stages; } && echo 'dropped $remote' && { [ ! -e $legacy ] || { flock /var/tmp/clarp-build/eviction-lock rm -rf -- $legacy && echo 'dropped $legacy'; }; } && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf 'build disk: %s free\\n'"
 fi
 
 if ! [[ "$floor" =~ ^(0|[1-9][0-9]*)$ ]] || ! [ "$floor" -ge 0 ] 2>/dev/null; then
@@ -155,18 +167,20 @@ case "$cmd" in
 esac
 
 if [ "$cmd" = fmt ]; then
-    # fmt formats a copy of its own, not this checkout's shared copy: another job of the same
-    # checkout may upload its tree there while fmt runs, and fmt would then format,
-    # and bring home, a tree it was not given. Only what cargo fmt reads goes up: the manifests,
-    # the lockfile, a rustfmt.toml and the crates' Rust sources.
-    ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote"
-    copy=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.fmt-XXXXXXXX")
-    if [[ "$copy" != "$remote"/.fmt-???????? ]]; then
+    # fmt formats a copy of its own in a stage of its own, not this checkout's shared copy: another job of
+    # the same checkout may publish its tree there while fmt runs, and fmt would then format, and bring home,
+    # a tree it was not given. Only what cargo fmt reads goes up: the manifests, the lockfile, a rustfmt.toml
+    # and the crates' Rust sources.
+    stage=$(ssh "${ssh_opts[@]}" "$HOST" "python3 - stage --bare $name $machine" < "$here/tools/build-queue.py")
+    if [[ "$stage" != "$root/.stage/$name@$machine".???????? ]]; then
         echo "could not make a private copy for fmt on $HOST" >&2
         exit 2
     fi
+    copy="$stage/fmt"
+    ssh "${ssh_opts[@]}" "$HOST" "mkdir $(printf '%q' "$copy")"
     work=$(mktemp -d /var/tmp/clarp-fmt-XXXXXXXX)
-    trap 'rm -rf -- "$work"; ssh "${ssh_opts[@]}" "$HOST" "rm -rf -- $copy" || true' EXIT
+    # A fmt job that outlives this client keeps its stage; a later invocation removes it once it has ended.
+    trap 'rm -rf -- "$work"; ssh "${ssh_opts[@]}" "$HOST" "flock -n $(printf "%q" "$stage/.lock") rm -rf -- $(printf "%q" "$stage")" || true' EXIT
     rsync -rlp --prune-empty-dirs --exclude target/ --include '*/' --include '*.rs' --include Cargo.toml \
         --include rustfmt.toml --include .rustfmt.toml --exclude '*' \
         -e "ssh ${ssh_opts[*]}" "$here/crates/" "$HOST:$copy/crates/"
@@ -180,10 +194,10 @@ if [ "$cmd" = fmt ]; then
     hashes="find crates -name '*.rs' -type f -print0 | xargs -0 -r sha256sum -z"
     who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
     # fmt builds nothing, so it runs without the build disk's floor, which belongs to a checkout's target.
-    printf -v job '%q ' python3 build-queue.py "$who" bash -c "$hashes > .fmt-sent && CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd && $hashes > .fmt-done"
-    ssh "${ssh_opts[@]}" "$HOST" "cd $copy && exec env $job" || exit $?
-    ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-sent" > "$work/sent"
-    ssh "${ssh_opts[@]}" "$HOST" "cat $copy/.fmt-done" > "$work/done"
+    printf -v job '%q ' python3 build-queue.py --fmt "$name" "$stage" "$who" bash -c "$hashes > .fmt-sent && CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd && $hashes > .fmt-done"
+    ssh "${ssh_opts[@]}" "$HOST" "cd $(printf '%q' "$copy") && exec env $job" || exit $?
+    ssh "${ssh_opts[@]}" "$HOST" "cat $(printf '%q' "$copy")/.fmt-sent" > "$work/sent"
+    ssh "${ssh_opts[@]}" "$HOST" "cat $(printf '%q' "$copy")/.fmt-done" > "$work/done"
     declare -A sent=()
     while IFS= read -r -d '' line; do sent["${line:66}"]="${line:0:64}"; done < "$work/sent"
     changed=()
@@ -221,7 +235,15 @@ if [ "$cmd" = fmt ]; then
     exit 0
 fi
 
-ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
+# Everything goes to this invocation's stage; the job puts it in the copy (build-queue.py's publish), by the same rules.
+stage=$(ssh "${ssh_opts[@]}" "$HOST" "python3 - stage $name $machine" < "$here/tools/build-queue.py")
+if [[ "$stage" != "$root/.stage/$name@$machine".???????? ]]; then
+    echo "could not make a stage for the upload on $HOST" >&2
+    exit 2
+fi
+src="$stage/src"
+printf -v src_q '%q' "$src"
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $src_q/server-rs"
 # What goes up is what differs in content, and it arrives with the time of its arrival, not with
 # the time it has here. cargo decides what to compile by comparing a source's time with the time
 # of its last build: a file copied with an older time than that build (another checkout of the
@@ -229,35 +251,37 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
 # is no longer there. Seen on 15 Nov 2026: a release was refused for a module the build did not
 # know, after the landing checkout and the working tree had taken turns in one copy.
 up=(rsync -rlpD --checksum)
-"${up[@]}" --delete --exclude target/ --exclude conformance/out/ --exclude dist/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$remote/server-rs/"
+"${up[@]}" --delete --exclude target/ --exclude conformance/out/ --exclude dist/ -e "ssh ${ssh_opts[*]}" "$here/" "$HOST:$src/server-rs/"
 # The contract's schemas and fixtures sit beside server-rs in the repository; tests read them.
-"${up[@]}" --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$remote/contract/"
+"${up[@]}" --delete -e "ssh ${ssh_opts[*]}" "$here/../contract/" "$HOST:$src/contract/"
 # So does the program an agent starts helpers with; a test runs it against the Rust Host.
-ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/scripts"
-"${up[@]}" --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $src_q/skills/clarp-sub-agents $src_q/scripts"
+"${up[@]}" --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$src/skills/clarp-sub-agents/"
 # And the program an agent publishes a file with; a test publishes with it.
-"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
+"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$src/scripts/"
 # The background-task test runs the repository's goal launcher.
-ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-background-jobs/scripts"
-"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$remote/skills/clarp-background-jobs/scripts/"
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $src_q/skills/clarp-background-jobs/scripts"
+"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$src/skills/clarp-background-jobs/scripts/"
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
-# The job gives up its copy before rsync fetches the binaries. Keep links for the
-# transfer so a later build can evict this target without interrupting the fetch.
+# The job gives up its copy before rsync fetches what it set aside in its stage's out/, which only it writes. A
+# release's binaries are copies of their own (reflinks where the disk has them), so a later build in the copy, from
+# any machine, never changes what is fetched.
+out="$stage/out"
 if [ "$cmd" = release ]; then
-    export_dir=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.release-XXXXXXXX")
-    trap 'ssh "${ssh_opts[@]}" "$HOST" "rm -f -- $export_dir/clarp-host $export_dir/clarp-shim && rmdir -- $export_dir"' EXIT
-    cargo_cmd+=" && ln target/release/clarp-host target/release/clarp-shim $export_dir/"
+    printf -v out_q '%q' "$out"
+    trap 'ssh "${ssh_opts[@]}" "$HOST" "rm -f -- $out_q/clarp-host $out_q/clarp-shim"' EXIT
+    cargo_cmd+=" && cp --reflink=auto target/release/clarp-host target/release/clarp-shim $out_q/"
 fi
 set +e
-printf -v job '%q ' python3 tools/build-queue.py "$job_mode" "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd"
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec env $job_env $job"
+printf -v job '%q ' python3 tools/build-queue.py "$job_mode" "$floor" "$name" "$stage" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV $cargo_cmd"
+ssh "${ssh_opts[@]}" "$HOST" "cd $src_q/server-rs && exec env $job_env $job"
 code=$?
 set -e
 if [ "$cmd" = release ] && [ $code -eq 0 ]; then
     mkdir -p "$here/dist"
-    rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$export_dir/clarp-host" "$HOST:$export_dir/clarp-shim" "$here/dist/"
+    rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$out/clarp-host" "$HOST:$out/clarp-shim" "$here/dist/"
     (cd "$here/dist" && sha256sum clarp-host clarp-shim > SHA256SUMS && git -C "$here" rev-parse HEAD > COMMIT)
 fi
 # The lockfile is made by the first build; bring it home so it is committed.
-rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/Cargo.lock" "$here/Cargo.lock" 2>/dev/null || true
+rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$out/Cargo.lock" "$here/Cargo.lock" 2>/dev/null || true
 exit $code
