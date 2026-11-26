@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const clog = vi.fn();
 const noteSseEvent = vi.fn();
 const setConn = vi.fn();
+const onRecordToggle = vi.fn();
+const stopAgent = vi.fn();
 const app = { authRejected: false, session: 'mike' };
 
 vi.mock('../../web/src/lib/net.js', () => ({
@@ -69,6 +71,8 @@ beforeEach(() => {
   clog.mockClear();
   noteSseEvent.mockClear();
   setConn.mockClear();
+  onRecordToggle.mockClear();
+  stopAgent.mockClear();
   vi.stubGlobal('EventSource', FakeEventSource);
   vi.stubGlobal('setTimeout', fn => { timeouts.push(fn); return timeouts.length; });
   vi.stubGlobal('clearTimeout', () => {});
@@ -119,5 +123,50 @@ describe('SSE reconnect ownership', () => {
 
     expect(timeouts).toHaveLength(0);
     expect(setConn).toHaveBeenLastCalledWith('unauthorized', expect.anything());
+  });
+
+  it('records a durable client diagnostic when the stream fails', async () => {
+    const store = await loadStore();
+    store.connectSSE();
+
+    FakeEventSource.instances[0].onerror();
+
+    expect(clog).toHaveBeenCalledWith(
+      'sseReconnect', expect.stringMatching(/attempt|delay|error/),
+    );
+  });
+
+  it('ignores a remote action addressed to a different browser instance', async () => {
+    const store = await loadStore();
+    store.setSseHooks({ onRecordToggle, stopAgent });
+    store.connectSSE();
+
+    FakeEventSource.instances[0].onmessage({
+      data: JSON.stringify({
+        type: 'remote-action', action: 'record-toggle',
+        instance: 'some-other-browser',
+      }),
+    });
+
+    expect(onRecordToggle).not.toHaveBeenCalled();
+  });
+
+  it('does not execute one broadcast toggle in every open client', async () => {
+    const firstStore = await loadStore();
+    firstStore.setSseHooks({ onRecordToggle, stopAgent });
+    firstStore.connectSSE();
+    const first = FakeEventSource.instances[0];
+    const secondStore = await loadStore();
+    secondStore.setSseHooks({ onRecordToggle, stopAgent });
+    secondStore.connectSSE();
+    const second = FakeEventSource.instances[1];
+    const event = {
+      data: JSON.stringify({ type: 'remote-action', action: 'record-toggle' }),
+    };
+
+    first.onmessage(event);
+    second.onmessage(event);
+
+    expect(onRecordToggle).toHaveBeenCalledTimes(1);
   });
 });

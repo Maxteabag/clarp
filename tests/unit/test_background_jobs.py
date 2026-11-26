@@ -323,6 +323,25 @@ def test_dead_adopted_worker_is_reconciled_as_vanished():
     assert vanished["outcome_state"] == "unknown"
 
 
+def test_boot_can_reconcile_a_dead_worker_without_waiting_ten_minutes():
+    _agent()
+    job = background_jobs.upsert(
+        session="nadia-test", job_id="restart-killed", kind="whatsapp",
+        title="WhatsApp watcher", worker_pid=4242,
+        worker_start_token="old-boot:worker")
+
+    reconcile_after_restart = getattr(
+        background_jobs, "reconcile_after_restart", None)
+    assert callable(reconcile_after_restart)
+    changed = reconcile_after_restart(
+        process_probe=lambda _pid, _token: False)
+
+    assert changed == [job["job_id"]]
+    current = background_jobs.get(job["job_id"], reconcile=False)
+    assert current["status"] == "failed"
+    assert "restart" in current["terminal_reason"]
+
+
 def test_stale_reconciler_cannot_overwrite_concurrent_heartbeat():
     _agent()
     job = background_jobs.upsert(

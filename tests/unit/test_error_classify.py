@@ -54,6 +54,28 @@ def test_runner_exit_errors_are_user_visible():
         assert ec.classify_error(msg) == ec.RUNNER_EXIT, msg
 
 
+def test_all_registered_runner_exit_strings_are_user_visible():
+    for msg in [
+        "grok exited rc=2",
+        "opencode exited rc=2",
+        "codex app-server exited",
+    ]:
+        assert ec.classify_error(msg) == ec.RUNNER_EXIT, msg
+
+
+def test_codex_app_server_interruption_is_not_a_clean_unknown():
+    assert ec.classify_error("codex turn interrupted") == ec.INTERRUPTED
+
+
+def test_backend_auth_failures_are_classified_for_user_action():
+    for msg in [
+        "Invalid API key; please run /login",
+        "OAuth token has expired",
+        "auth failed: HTTP 401",
+    ]:
+        assert ec.classify_error(msg) != ec.UNKNOWN, msg
+
+
 def test_interruptions_win_over_connection_noise():
     # A SIGTERM'd turn often also prints a broken-pipe message as it dies;
     # it must classify as INTERRUPTED, never auto-retried.

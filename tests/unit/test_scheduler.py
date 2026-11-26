@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import time
 import pytest
 from datetime import datetime, timezone
 
@@ -147,6 +148,36 @@ def test_schedule_runner_execution(tmp_path: pathlib.Path):
     # Second immediate tick should find 0 due because schedule advanced
     count2 = runner.tick()
     assert count2 == 0
+
+
+def test_schedule_runner_checks_due_work_immediately_after_boot(tmp_path: pathlib.Path):
+    from lib.agent_store import save_agents, load_agents
+    save_agents({"worker": {
+        "name": "Worker", "voice_id": "V2", "cwd": str(tmp_path),
+        "backend": "claude",
+    }})
+    agent = load_agents()["worker"]
+    item = scheduler.create_schedule(
+        session=agent["session"], name="Due at boot",
+        cron_expression="* * * * *", prompt="run now")
+    with db.conn() as c:
+        c.execute(
+            "UPDATE agent_schedules SET next_run_at=? WHERE schedule_id=?",
+            (db.now_ms() - 1_000, item["schedule_id"]))
+    dispatched = []
+    runner = scheduler.AgentScheduleRunner(
+        dispatch_turn=lambda _session, text: dispatched.append(text),
+        check_interval_sec=30.0)
+
+    runner.start()
+    try:
+        deadline = time.monotonic() + 0.5
+        while not dispatched and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        runner.stop()
+
+    assert dispatched == ["run now"]
 
 def test_snapshot_includes_schedules(tmp_path: pathlib.Path):
     from lib.agent_store import save_agents, load_agents

@@ -1127,3 +1127,31 @@ def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
     assert len(backends.spawned) == 1  # not retried
     # Legacy behaviour: idle flip, not the interrupted badge.
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.IDLE
+
+
+def test_unknown_backend_error_remains_visible_instead_of_looking_clean(tmp_path):
+    service, backends, agent_id = _make_service(
+        tmp_path, retry_scheduler=_run_now)
+    service.dispatch(text="hi", requested_session="mike", trace_id="t",
+                     client_msg_id="unknown-error", synthesize_audio=False)
+    _, call = backends.spawned[0]
+
+    call["on_error"]("ENOENT: backend executable vanished")
+
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert state["detail"]["reason"] == "unknown"
+
+
+def test_live_turn_failure_leaves_a_durable_transcript_marker(tmp_path):
+    from lib import message_store
+
+    service, backends, agent_id = _make_service(
+        tmp_path, retry_scheduler=_run_now)
+    service.dispatch(text="hi", requested_session="mike", trace_id="t",
+                     client_msg_id="failed-live", synthesize_audio=False)
+    _, call = backends.spawned[0]
+
+    call["on_error"]("Usage limit reached")
+
+    assert message_store.has_interruption_marker("u-failed-live")

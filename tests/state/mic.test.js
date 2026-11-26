@@ -30,10 +30,12 @@ vi.mock('../../web/src/stores/send.svelte.js', () => ({
 }));
 
 const recorders = [];
+let recorderThrows = false;
 
 class FakeMediaRecorder {
   static isTypeSupported() { return true; }
   constructor(stream, opts = {}) {
+    if (recorderThrows) throw new DOMException('device busy', 'NotSupportedError');
     this.stream = stream;
     this.mimeType = opts.mimeType || 'audio/webm';
     this.state = 'inactive';
@@ -102,6 +104,7 @@ let clock;
 
 beforeEach(() => {
   recorders.length = 0;
+  recorderThrows = false;
   flash.mockClear();
   clog.mockClear();
   sendText.mockClear();
@@ -202,5 +205,28 @@ describe('tap-to-record', () => {
     expect(clog).toHaveBeenCalledWith(
       'transcribeFail', expect.stringMatching(/503.*temporarily unavailable/),
     );
+  });
+
+  it('does not show a live mic after MediaRecorder construction fails', async () => {
+    recorderThrows = true;
+    const m = await loadStore();
+
+    await m.micTap();
+
+    expect(clog).toHaveBeenCalledWith(
+      'recorderFail', expect.stringMatching(/device busy/),
+    );
+    expect(m.mic.recording).toBe(false);
+    expect(m.mic.capturing).toBe(false);
+  });
+
+  it('does not leave the listening indicator live after pipeline teardown', async () => {
+    const m = await loadStore();
+    await m.startAlwaysOn();
+    expect(m.mic.recording).toBe(true);
+
+    m.teardownMic();
+
+    expect(m.mic.recording).toBe(false);
   });
 });

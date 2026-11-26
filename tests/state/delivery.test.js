@@ -87,12 +87,13 @@ describe('the silent losses become visible', () => {
     expect(staleSends(log, { now: 10 ** 9 })).toHaveLength(0);
   });
 
-  it('keeps a failure failed when the transcript later catches up', () => {
-    // A retry writes a new entry; the failed one stays failed as a record.
+  it('lets durable transcript evidence correct a timeout guess', () => {
+    // A timer is only a suspicion. If the exact message id later appears,
+    // the transcript is authoritative and the UI must stop claiming loss.
     let log = send(createDeliveryLog(), 'a');
     log = markState(log, 'a', DeliveryState.FAILED, 'timed out');
     log = confirmFromTurns(log, [{ id: 'u-a' }]);
-    expect(log.entries[0].state).toBe(DeliveryState.FAILED);
+    expect(log.entries[0].state).toBe(DeliveryState.CONFIRMED);
   });
 
   it('records why it failed', () => {
