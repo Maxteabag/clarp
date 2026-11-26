@@ -69,8 +69,8 @@ which run of the Host answers (`instance`) and how far its start has come
 (`stage`: `starting`, `agents`, `started`; contract 210, feature
 `host_start_readiness`). A Host answers `/server-info` and `/host/start` from the
 first moment of its start, one agent's `/log`, `/live` and `/send` once that agent
-is open, the roster (`/agents/snapshot`) and `/events` once every agent is open,
-and everything else once `started`: a request is held, never refused. An install
+is open (a send in a call once `started`), the roster (`/agents/snapshot`) once
+every agent is open, and `/events` and everything else once `started`: a request is held, never refused. An install
 counts only once the run that answered says `started`.
 
 ## Install a Host on a new machine

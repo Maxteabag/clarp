@@ -547,8 +547,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `GET /host/start` says which run of the Host answers (`instance`) and how far its start has
     // come (`stage`: `starting`, `agents`, `started`). The Host answers `/server-info`,
     // `/host/start` and a named agent's `/log`, `/live` and `/send` from the first moment of its
-    // start (the last three once that agent is open), the roster and `/events` once every agent is
-    // open, everything else once `started`: a request is held, never refused. An installer holds
+    // start (the last three once that agent is open; a send in a call once `started`), the roster
+    // once every agent is open, `/events` and everything else once `started`: a request is held,
+    // never refused. An installer holds
     // an install good once the run that answered says `started` (issue 935).
     ("host_start_readiness", 210),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
@@ -3407,6 +3408,12 @@ async fn sent_from(
         .chars()
         .take(64)
         .collect();
+    // `/send` passes the start's door once its own agent is open (`crate::start`). One that
+    // belongs to a call asks the calls themselves, which a start recovers last: it waits until
+    // they are recovered, and never sees a call half put back (issue 935).
+    if !call_id.is_empty() || request.call_opening.is_some() {
+        app.start.reached(crate::start::Stage::Started).await;
+    }
     if let Some(opening) = request.call_opening.take()
         && !python::strip(&request.text).is_empty()
     {
