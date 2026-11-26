@@ -193,6 +193,10 @@ impl Engine {
             }
             self.queue.items = json::array(object, "items");
             self.queue.paused = json::boolean(object, "paused");
+            // The Host's queue is the truth: a count the agent list kept from
+            // an older revision follows it (a stale strip never lingers).
+            let revision = json::integer(object, "queue_revision").max(json::integer(object, "revision"));
+            self.roster.apply_queue_truth(session, self.queue.items.len() as i32, self.queue.paused, revision);
             // Nothing left waiting: nothing left refused.
             if self.queue.items.is_empty() && self.queue.refused_session == session {
                 self.queue.refused.clear();
