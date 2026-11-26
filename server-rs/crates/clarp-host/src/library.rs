@@ -542,6 +542,13 @@ impl Fleet {
             .map(|(member, _)| member)
     }
 
+    fn spec(&self, artifact_id: &str) -> Option<&Artifact> {
+        self.0
+            .iter()
+            .find_map(|(_, view)| view.books.artifacts.any(artifact_id))
+            .filter(|artifact| artifact.kind == spec::KIND)
+    }
+
     /// The agent that asked the request with this id.
     fn asker(&self, decision_id: &str) -> Option<&Arc<Member>> {
         let asked = |view: &View| view.books.artifacts.of_decision(decision_id).is_some();
@@ -623,14 +630,28 @@ pub(crate) async fn shown(
     representation: &str,
     capable: render_spec::Access,
 ) -> Value {
-    // A render spec's row is the same in every representation: plain, or with what was
-    // left out for a client that can see the spec.
-    if row["type"] == spec::KIND
-        && let Some(artifact) = spec_of(app, row["artifact_id"].as_str().unwrap_or(""))
-        && capable.allows(&artifact)
-    {
-        spec::marked(&mut row, &artifact);
+    mark_specs(app, std::slice::from_mut(&mut row), capable);
+    with_page(app, row, representation).await
+}
+
+/// All spec rows of one response use the same fleet view. Release it before page I/O.
+fn mark_specs(app: &App, rows: &mut [Value], capable: render_spec::Access) {
+    if capable == render_spec::Access::default() {
+        return;
     }
+    let mut fleet = None;
+    for row in rows.iter_mut().filter(|row| row["type"] == spec::KIND) {
+        let fleet = fleet.get_or_insert_with(|| Fleet::of(app));
+        let id = row["artifact_id"].as_str().unwrap_or("");
+        if let Some(artifact) = fleet.spec(id)
+            && capable.allows(artifact)
+        {
+            spec::marked(row, artifact);
+        }
+    }
+}
+
+async fn with_page(app: &App, mut row: Value, representation: &str) -> Value {
     let page = reports::named_page(&mut row);
     let mut row = represented(row, representation);
     match page {
@@ -650,26 +671,21 @@ pub(crate) async fn shown(
 /// Rows as they are answered, in their order.
 async fn all_shown(
     app: &App,
-    rows: Vec<Value>,
+    mut rows: Vec<Value>,
     representation: &str,
     capable: render_spec::Access,
 ) -> Vec<Value> {
+    mark_specs(app, &mut rows, capable);
     let mut answered = Vec::with_capacity(rows.len());
     for row in rows {
-        answered.push(shown(app, row, representation, capable).await);
+        answered.push(with_page(app, row, representation).await);
     }
     answered
 }
 
 /// A render spec as its agent keeps it, also one that was thrown away.
 fn spec_of(app: &App, artifact_id: &str) -> Option<Artifact> {
-    let fleet = Fleet::of(app);
-    let member = fleet.holder(artifact_id, true)?;
-    let view = member.agent.view();
-    let found = view.books.artifacts.any(artifact_id);
-    found
-        .filter(|artifact| artifact.kind == spec::KIND)
-        .cloned()
+    Fleet::of(app).spec(artifact_id).cloned()
 }
 
 /// The artifact as a representation asks for it: as it is, without the payload its fields
