@@ -670,6 +670,45 @@ impl Actor {
         Ok((steered, out))
     }
 
+    /// The turn that runs, where one does.
+    pub fn live_turn(&self) -> Option<TurnId> {
+        self.recorder.agent().live().map(|live| live.id())
+    }
+
+    /// Whether the live turn may be cut for a message of the owner's that takes it over
+    /// ([`clarp_kernel::agent::Agent::live_cuttable`]).
+    pub fn live_cuttable(&self) -> bool {
+        self.recorder.agent().live_cuttable()
+    }
+
+    /// Whether the live turn was last found to take a message of the owner's now
+    /// ([`Actor::tell_steerable`]).
+    pub fn steerable(&self) -> bool {
+        self.steerable
+    }
+
+    /// Whether the live turn's tool takes no more steered words in this turn, whatever is
+    /// asked (feature `send_while_busy`): its input ended (a Claude Code or agy-acp turn that
+    /// gave its result), it skipped the turn's own message, or the lane's turn is over. A turn
+    /// whose process is not known yet, or a lane that has not said it takes words yet, may
+    /// still take them: that is "not yet", not this. The tool's compaction is neither: a send
+    /// waits for it, as it cannot be cut.
+    pub fn input_ended(&self) -> bool {
+        let Some(live) = self.live.as_ref() else {
+            return false;
+        };
+        if live.origin.name() == COMPACTION {
+            return false;
+        }
+        match self.backend.steers() {
+            Steers::No => true,
+            Steers::Stdin => !live.steering.stream.can_join() || live.steering.input_skipped,
+            Steers::Words => {
+                live.steering.lane_end.is_some() || !live.steering.stream.can_join()
+            }
+        }
+    }
+
     /// Whether the Host must say if it offers this tool's turns steered words for
     /// [`Actor::tell_steerable`]: only a lane's tool depends on the owner's setting, and only
     /// while its turn could take them.

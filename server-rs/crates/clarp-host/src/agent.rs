@@ -177,6 +177,10 @@ mod claude_lane;
 mod muse_lane;
 mod native_goal;
 mod opencode_lane;
+mod while_busy;
+
+use clarp_kernel::while_busy::{Done as BusyDone, Reason, WhileBusy};
+pub use while_busy::{Busy, Plan};
 
 enum Ask {
     /// What the launch of a Claude lane's turn asks of the agent's thread.
@@ -249,6 +253,8 @@ enum Ask {
         admission: Admission,
         /// Whether it is another agent's, and whether its caller named its trace.
         marks: clarp_actor::Marks,
+        /// What the owner's send does while the agent works (feature `send_while_busy`).
+        while_busy: Busy,
         answer: Answer<Result<Sent, clarp_actor::TraceTaken>>,
     },
     /// A note the agent leaves for its user from its running turn: what became of it, and the
@@ -967,11 +973,26 @@ impl AgentHandle {
         reservation: Option<Value>,
         marks: clarp_actor::Marks,
     ) -> Result<Result<Sent, clarp_actor::TraceTaken>, Unavailable> {
+        self.send_while_busy(message, admission, reservation, marks, Busy::Unasked)
+            .await
+    }
+
+    /// Sends as [`AgentHandle::send_marked`] does, with what the owner's send does while the
+    /// agent works (feature `send_while_busy`): what was done is on the answer's `while_busy`.
+    pub async fn send_while_busy(
+        &self,
+        message: Message,
+        admission: Admission,
+        reservation: Option<Value>,
+        marks: clarp_actor::Marks,
+        while_busy: Busy,
+    ) -> Result<Result<Sent, clarp_actor::TraceTaken>, Unavailable> {
         self.ask(|answer| Ask::Send {
             reservation,
             message,
             admission,
             marks,
+            while_busy,
             answer,
         })
         .await
@@ -1701,6 +1722,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         native: native_goal::Native::default(),
         claude_bypass: None,
         codex_bypass: None,
+        exec_turn: None,
+        steer_pending: Vec::new(),
         muse: muse_lane::State::default(),
         opencode: opencode_lane::OpenCode::default(),
         setup,
@@ -1780,6 +1803,12 @@ struct Worker {
     claude_bypass: Option<(TurnId, u32)>,
     /// The Codex chat attempt that found no lane place free: it runs in a process of its own.
     codex_bypass: Option<(TurnId, u32)>,
+    /// The last turn of a tool that steers on a lane which was launched in a process of its
+    /// own instead (an exec turn, a turn on its own server): it takes no steered words.
+    exec_turn: Option<TurnId>,
+    /// The owner's messages that wait to be read into the running turn once it can take them
+    /// ([`Worker::steer_when_can`]).
+    steer_pending: Vec<TurnId>,
     /// The attempt the Muse lane gave back: it runs on exec.
     muse: muse_lane::State,
     /// The agent's OpenCode lane, for an agent of OpenCode or DeepSeek (issue 763).
@@ -2226,6 +2255,7 @@ impl Worker {
                         }
                     }
                     self.tell_shown();
+                    self.steer_when_can();
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -2254,6 +2284,7 @@ impl Worker {
                 self.actor = None;
             }
             self.tell_shown();
+            self.steer_when_can();
         }
     }
 
@@ -3267,6 +3298,34 @@ impl Worker {
             }
             other => other,
         };
+        let mut ask = ask;
+        // What the owner's send does while the agent works is read against the turn as its
+        // spool says it is now (feature `send_while_busy`). A take-over is said direct from
+        // here on, so that what holds the turn for the tool's own takeover lets it go first.
+        if let Ask::Send {
+            message,
+            admission,
+            reservation: None,
+            marks,
+            while_busy,
+            ..
+        } = &mut ask
+            && let Busy::Asked(asked) = *while_busy
+        {
+            loop {
+                let (read, more) = self.spool_step()?;
+                self.after(read);
+                self.tell_shown();
+                if !more {
+                    break;
+                }
+            }
+            let plan = self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
+            if matches!(plan, Plan::Direct(_)) {
+                *admission = Admission::Direct;
+            }
+            *while_busy = Busy::Planned(plan);
+        }
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
         // takeover, its pool.
         let fork_stop = matches!(
@@ -3505,7 +3564,13 @@ impl Worker {
             // The owner asks for a waiting message of theirs to be read in (issue 867).
             Ask::Steer { .. } => true,
             _ => false,
-        };
+        } && !matches!(
+            &ask,
+            Ask::Send {
+                while_busy: Busy::Planned(Plan::Wait(_)),
+                ..
+            }
+        );
         if can_offer_steering {
             // Read any input fence that reached the spool before this send, even if its
             // wakeup is still behind the send in the mailbox: to its end, each window shown
@@ -3533,11 +3598,14 @@ impl Worker {
             admission,
             reservation: None,
             marks,
+            while_busy,
             ..
         } = &mut ask
             && *admission == Admission::Queue
             && marks.coordination.is_none()
             && !transit_holds_queue
+            // The owner asked for it to wait for the running turn (feature `send_while_busy`).
+            && !matches!(while_busy, Busy::Planned(Plan::Wait(_)))
             && let Some(actor) = self.actor.as_ref()
             && let Some(goes) = actor.owner_goes_first(&message.origin)?
             && !(can_offer_steering && actor.can_steer(message))
@@ -3553,6 +3621,25 @@ impl Worker {
             *admission = Admission::Direct;
             made_way = goes.note.map(|note| (note, goes.coordination));
             can_offer_steering = false;
+            if *while_busy == Busy::Planned(Plan::Steer) {
+                *while_busy = Busy::Planned(Plan::Direct(BusyDone::fell_back(
+                    WhileBusy::Steer,
+                    WhileBusy::TakeOver,
+                    Reason::NotSteerable,
+                )));
+            }
+        } else if let Ask::Send {
+            message,
+            reservation: None,
+            while_busy: Busy::Planned(Plan::Direct(_)),
+            ..
+        } = &ask
+            && let Some(actor) = self.actor.as_ref()
+            && let Some(goes) = actor.owner_goes_first(&message.origin)?
+        {
+            // The owner's take-over of a turn that was not a person's leaves the agent the
+            // same note to take its work up again, as `POST /turn-queue/<id>/take-over` does.
+            made_way = goes.note.map(|note| (note, goes.coordination));
         }
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
@@ -3657,6 +3744,7 @@ impl Worker {
                 admission,
                 reservation,
                 marks,
+                while_busy,
                 answer,
             } => {
                 if let Err(why) = actor.require_here() {
@@ -3697,9 +3785,12 @@ impl Worker {
                     let direct_user = admission == Admission::Queue
                         && message.origin.is_user_send()
                         && marks.coordination.is_none();
+                    // One the owner asked to wait for the running turn waits for it.
+                    let waits = matches!(while_busy, Busy::Planned(Plan::Wait(_)));
                     let forked = if sent.queued
                         && !transit_holds_queue
                         && direct_user
+                        && !waits
                         && crate::conversation_forks::may_fork(
                             &self.setup.record.backend,
                             chat_view(&self.setup),
@@ -3730,6 +3821,20 @@ impl Worker {
                         actor.steer_active(turn, uuid, &message.text, now)?
                     } else {
                         None
+                    };
+                    // What the owner's send did while the agent worked (feature
+                    // `send_while_busy`). One the turn could not take yet waits, and is read in
+                    // once the turn can take it.
+                    sent.while_busy = match while_busy {
+                        Busy::Planned(Plan::Steer) if sent.queued || forked => {
+                            if steer.is_none() && !forked && !self.steer_pending.contains(&turn) {
+                                self.steer_pending.push(turn);
+                            }
+                            Some(BusyDone::as_asked(WhileBusy::Steer))
+                        }
+                        Busy::Planned(Plan::Wait(done)) if sent.queued => Some(done),
+                        Busy::Planned(Plan::Direct(done)) => Some(done),
+                        _ => None,
                     };
                     if let Some(action) = steer {
                         out.actions.push(action);
@@ -4878,6 +4983,13 @@ impl Worker {
             other => other,
         };
         let tx = self.tx.clone();
+        // A turn of a tool that steers on a lane, launched in a process of its own: it takes
+        // no steered words (feature `send_while_busy`).
+        if let Action::Launch(order) = &action
+            && self.setup.backend.steers() == clarp_backend::Steers::Words
+        {
+            self.exec_turn = Some(order.turn);
+        }
         let spawned = match action {
             Action::Launch(mut order) => {
                 if self.setup.record.backend == "codex"

@@ -59,6 +59,10 @@ pub struct SendRequest {
     /// Who wrote it, for a message from another agent: its session, its agent id, or an object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<Value>,
+    /// What the owner's send does while the agent works (feature `send_while_busy`): `steer`,
+    /// `after_turn` or `take_over`. Left out: a busy send does what it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub while_busy: Option<String>,
 }
 
 /// `POST /stop`: the agent, and who stops it and why (contract 61), each as it came: an actor or

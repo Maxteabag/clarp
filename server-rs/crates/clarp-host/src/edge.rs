@@ -3598,6 +3598,20 @@ async fn send_as(
     if text.is_empty() {
         return Err(ApiError::plain(StatusCode::BAD_REQUEST, "empty text"));
     }
+    // What the owner's send does while the agent works (feature `send_while_busy`); only the
+    // owner's own send said to the agent acts on it, which the agent's thread decides.
+    let while_busy = match request.while_busy.as_deref().map(python::strip) {
+        None => crate::agent::Busy::Unasked,
+        Some(word) => match clarp_kernel::while_busy::WhileBusy::named(word) {
+            Some(asked) => crate::agent::Busy::Asked(asked),
+            None => {
+                return Err(ApiError::plain(
+                    StatusCode::BAD_REQUEST,
+                    clarp_kernel::while_busy::NOT_A_VALUE,
+                ));
+            }
+        },
+    };
     // The trace it travels under: the one it names, or one of the Host's.
     let trace_id = match request.trace_id.as_deref().map(python::strip) {
         Some(named) if !named.is_empty() => named.to_string(),
@@ -3907,7 +3921,7 @@ async fn send_as(
     };
     let sent = member
         .agent
-        .send_marked(message, admission, proof, marks)
+        .send_while_busy(message, admission, proof, marks, while_busy)
         .await?;
     let sent = match sent {
         Ok(sent) => sent,
@@ -3980,6 +3994,16 @@ async fn send_as(
         }),
         queue_revision: Some(if sent.queued { sent.queue.revision } else { 0 }),
         words_withheld: words_withheld.then_some(true),
+        while_busy: sent.while_busy.map(|done| done.done.name().to_owned()),
+        fallback: sent.while_busy.and_then(|done| {
+            let (from, reason) = done.fallback?;
+            Some(clarp_protocol::responses::WhileBusyFallback {
+                from: from.name().to_owned(),
+                to: done.done.name().to_owned(),
+                reason: reason.name().to_owned(),
+                text: done.text()?.to_owned(),
+            })
+        }),
         ..SendResponse::default()
     })
 }

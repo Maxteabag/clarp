@@ -1016,6 +1016,17 @@ impl Agent {
             && !native_goal
     }
 
+    /// Whether the live turn may be cut for a message of the owner's that takes it over: not a
+    /// Codex native goal's own turn, nor the tool's compaction or summary for a move. No live
+    /// turn is cuttable too: there is nothing to cut.
+    pub fn live_cuttable(&self) -> bool {
+        !self.live.as_ref().is_some_and(|live| {
+            matches!(live.origin(), Origin::NativeGoal)
+                || matches!(live.origin(), Origin::Trigger { name }
+                    if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY)
+        })
+    }
+
     /// The Stop request's journaled time, while the turn's process is still being retired.
     pub fn stopping_since_ms(&self) -> Option<i64> {
         self.stopping_since_ms
@@ -1382,11 +1393,7 @@ impl Agent {
                 if !queued.origin.is_user_send() {
                     return Err(Refusal::NotTheOwners(turn));
                 }
-                if agent.live.as_ref().is_some_and(|live| {
-                    matches!(live.origin(), Origin::NativeGoal)
-                        || matches!(live.origin(), Origin::Trigger { name }
-                            if name == COMPACTION || name == crate::turn::TRANSIT_SUMMARY)
-                }) {
+                if agent.live.is_some() && !agent.live_cuttable() {
                     return Err(Refusal::Uncuttable);
                 }
                 if agent.live.is_none() {

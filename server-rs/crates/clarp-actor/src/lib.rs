@@ -424,6 +424,9 @@ pub struct Sent {
     pub duplicate: bool,
     /// Where the queue stands with this message taken.
     pub queue: QueueState,
+    /// What the Host did with a send of the owner's that came while a turn ran and said what
+    /// it does then (feature `send_while_busy`); the Host fills it in.
+    pub while_busy: Option<clarp_kernel::while_busy::Done>,
 }
 
 /// A message of the owner's goes ahead of the agent's live turn
@@ -4035,6 +4038,7 @@ impl Actor {
                 queued: false,
                 duplicate: true,
                 queue: self.queue_state(),
+                while_busy: None,
             };
             return Ok((sent, out));
         }
@@ -4067,6 +4071,7 @@ impl Actor {
             queued: !started,
             duplicate: false,
             queue: self.queue_state(),
+            while_busy: None,
         };
         Ok((sent, out))
     }

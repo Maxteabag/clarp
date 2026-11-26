@@ -26,6 +26,24 @@ pub struct SendResponse {
     /// went to an agent that may not read it: it was given that a message came, not its words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub words_withheld: Option<bool>,
+    /// What the Host did with a send of the owner's that named `while_busy` and came while a
+    /// turn ran (feature `send_while_busy`): `steer`, `after_turn` or `take_over`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub while_busy: Option<String>,
+    /// Where that is not what the send asked for: what it asked for, what was done, why, and
+    /// the short line the app shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<WhileBusyFallback>,
+}
+
+/// A send of the owner's that could not do what its `while_busy` asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WhileBusyFallback {
+    pub from: String,
+    pub to: String,
+    /// `not_steerable`, `not_words` or `not_cuttable`.
+    pub reason: String,
+    pub text: String,
 }
 
 /// The answer to `POST /stop`.

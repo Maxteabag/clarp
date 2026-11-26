@@ -115,6 +115,7 @@ pub mod voice_pool;
 pub mod voice_profile;
 pub mod voice_timeline;
 pub mod voices;
+pub mod while_busy;
 
 pub use clarp_tool_args::native_session_name;
 pub mod diagnostics;
