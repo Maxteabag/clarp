@@ -63,6 +63,8 @@ pub enum Request {
         fence: u64,
         replaced_by: u64,
     },
+    /// End the held provider attempt at this fence so the same turn can continue elsewhere.
+    CheckpointForTransit { fence: u64 },
     /// Let a held tool go on. A tool that is not held is left as it is.
     Release,
     /// Give the running turn more of the user's words, under the id that tells when it read

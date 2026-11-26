@@ -214,10 +214,10 @@ enum ToSpool {
     Follow(UnixStream),
     /// Say how far the spool goes, once everything sent before this is written.
     End(Sender<std::io::Result<u64>>),
-    /// Append the durable takeover marker only while the spool still ends at the held fence.
-    MarkTakeover {
+    /// Append the durable marker only while the spool still ends at the held fence.
+    MarkHeld {
         fence: u64,
-        replaced_by: u64,
+        event: ShimEvent,
         done: Sender<std::io::Result<bool>>,
     },
 }
@@ -282,17 +282,13 @@ fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
                 };
                 let _ = answer.send(end);
             }
-            ToSpool::MarkTakeover {
-                fence,
-                replaced_by,
-                done,
-            } => {
+            ToSpool::MarkHeld { fence, event, done } => {
                 let mark = if complete {
                     writer.append_at_and_sync(
                         fence,
                         &Record {
                             t: now_ms(),
-                            entry: Entry::Shim(ShimEvent::Takeover { fence, replaced_by }),
+                            entry: Entry::Shim(event),
                         },
                     )
                 } else {
@@ -717,7 +713,12 @@ impl Control {
     ) -> Reply {
         match request {
             Request::Hold { ms } => self.hold(ms, own),
-            Request::ConsumeHold { fence, replaced_by } => self.consume_hold(fence, replaced_by),
+            Request::ConsumeHold { fence, replaced_by } => {
+                self.consume_hold(fence, ShimEvent::Takeover { fence, replaced_by })
+            }
+            Request::CheckpointForTransit { fence } => {
+                self.consume_hold(fence, ShimEvent::TransitCheckpoint { fence })
+            }
             Request::Release => Reply {
                 let_go: Some(self.let_go("let go by request")),
                 ..Reply::ok(Some(self.pid))
@@ -918,13 +919,19 @@ impl Control {
     }
 
     /// With the locks that own expiry and release held, commit the marker before killing.
-    fn consume_hold(&self, fence: u64, replaced_by: u64) -> Reply {
+    fn consume_hold(&self, fence: u64, event: ShimEvent) -> Reply {
+        let failed_replacement = matches!(&event, ShimEvent::Takeover { replaced_by: 0, .. });
+        let held_end = if matches!(&event, ShimEvent::TransitCheckpoint { .. }) {
+            "checkpointed for Transit"
+        } else {
+            "taken over while held"
+        };
         let not_held = || Reply {
             killed: Some(false),
             ..Reply::ok(Some(self.pid))
         };
         let mut stage = lock(&self.stage);
-        if !stage.ready() || self.leader_exited.load(Ordering::SeqCst) || replaced_by == 0 {
+        if !stage.ready() || self.leader_exited.load(Ordering::SeqCst) || failed_replacement {
             return not_held();
         }
         let mut hold = lock(&self.hold);
@@ -943,26 +950,22 @@ impl Control {
         let (done, wait) = mpsc::channel();
         if self
             .to_spool
-            .send(ToSpool::MarkTakeover {
-                fence,
-                replaced_by,
-                done,
-            })
+            .send(ToSpool::MarkHeld { fence, event, done })
             .is_err()
         {
-            return Reply::failed("the takeover marker could not be written");
+            return Reply::failed("the held attempt marker could not be written");
         }
         match wait.recv() {
             Ok(Ok(true)) => {}
             Ok(Ok(false)) => return not_held(),
-            _ => return Reply::failed("the takeover marker could not be written"),
+            _ => return Reply::failed("the held attempt marker could not be written"),
         }
 
         // The expired timer cannot resume the group after this request has committed.
         let signal = killpg(self.group(), Signal::SIGKILL);
         if let Err(error) = signal {
             log(&format!(
-                "clarp-shim: cannot end a held tool for takeover: {error}"
+                "clarp-shim: cannot end a held tool: {error}"
             ));
             return Reply::failed("the held tool could not be ended");
         }
@@ -972,7 +975,7 @@ impl Control {
         *stage = StopStage::Asked;
         self.hold_changed.notify_all();
         self.changed.notify_all();
-        log(&hold_line(Some(&timing), "taken over while held"));
+        log(&hold_line(Some(&timing), held_end));
         Reply {
             killed: Some(true),
             ..Reply::ok(Some(self.pid))
