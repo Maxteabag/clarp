@@ -27,6 +27,7 @@ use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 
 /// How many signs of the conversation are read at most to carry it: more than the largest
 /// budget of any target ([`budget`]), so that what is left out is known.
@@ -288,6 +289,10 @@ impl Said {
 /// cut, with a line that says how much ([`cut`]).
 pub const RESULT_MOST: usize = 8 * 1024;
 
+/// How long a carried call id is at most, in signs: Codex's provider refuses a longer one,
+/// and with it every turn of the conversation.
+pub const CALL_ID_MOST: usize = 64;
+
 /// One use of a tool by the agent, with what it gave back, as the Host recorded it (or, for
 /// a result the Host kept only the start of, as the source tool's own transcript has it).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,7 +346,10 @@ impl Used {
         }
     }
 
-    /// A call id the target tools take: letters, digits, `_` and `-`, never empty.
+    /// A call id the target tools take: letters, digits, `_` and `-`, never empty, at most
+    /// [`CALL_ID_MOST`] signs. A longer id (one carried from OpenCode, or a Host row id) becomes
+    /// `call_` and the start of the SHA-256 of the whole id, the same on every run, so a call
+    /// and its output, both written from this, still pair.
     pub fn call_id(&self, at: usize) -> String {
         let id: String = self
             .id
@@ -356,6 +364,10 @@ impl Used {
             .collect();
         if id.is_empty() {
             format!("call_carried_{at}")
+        } else if id.len() > CALL_ID_MOST {
+            let digest = Sha256::digest(self.id.as_bytes());
+            let hex: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+            format!("call_{hex}")
         } else {
             id
         }
@@ -1650,6 +1662,64 @@ mod tests {
         assert_eq!(arguments["command"], "cat notes.txt");
         assert_eq!(items[3]["call_id"], "toolu_01");
         assert_eq!(items[3]["output"], "line one\nline two");
+    }
+
+    #[test]
+    fn a_call_id_too_long_for_the_target_is_made_short_and_stays_paired() {
+        let long = format!(
+            "c-clarp-admin-{}-exec-{}",
+            "0123456789abcdef", "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5"
+        );
+        assert!(long.len() > 70);
+        let carried = used(&long, Some("done")).call_id(1);
+        assert!(carried.len() <= CALL_ID_MOST, "{carried}");
+        assert!(carried.starts_with("call_"));
+        // The same on every call, and not the same for another long id.
+        assert_eq!(carried, used(&long, None).call_id(9));
+        assert_eq!(
+            carried,
+            "call_".to_string() + &format!("{:x}", Sha256::digest(long.as_bytes()))[..32]
+        );
+        assert_ne!(carried, used(&format!("{long}x"), None).call_id(1));
+        // An id that fits stays as it is.
+        let fits = "a".repeat(CALL_ID_MOST);
+        assert_eq!(used(&fits, None).call_id(1), fits);
+
+        let mut said = said();
+        said[1].tools = vec![used(&long, Some("line one"))];
+        let rows = CodexWriter::rows(&said, &place(Path::new("/x")), "t");
+        let ids: Vec<&Value> = rows
+            .iter()
+            .filter(|row| row["payload"]["call_id"].is_string())
+            .map(|row| &row["payload"]["call_id"])
+            .collect();
+        assert_eq!(ids.len(), 2, "a call and its output");
+        assert_eq!(ids[0], ids[1]);
+        assert_eq!(ids[0], carried.as_str());
+
+        let rows = ClaudeWriter::rows(&said, &place(Path::new("/x")), "s").unwrap();
+        let call = rows.iter().find_map(|row| {
+            row["message"]["content"]
+                .as_array()?
+                .iter()
+                .find(|b| b["type"] == "tool_use")
+                .cloned()
+        });
+        let result = rows.iter().find_map(|row| {
+            row["message"]["content"]
+                .as_array()?
+                .iter()
+                .find(|b| b["type"] == "tool_result")
+                .cloned()
+        });
+        assert_eq!(call.unwrap()["id"], carried.as_str());
+        assert_eq!(result.unwrap()["tool_use_id"], carried.as_str());
+
+        let export = OpenCodeWriter::export(&said, &place(Path::new("/x")), "ses_x").unwrap();
+        assert_eq!(
+            export["messages"][1]["parts"][1]["callID"],
+            carried.as_str()
+        );
     }
 
     #[test]
