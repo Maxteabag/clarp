@@ -38,10 +38,18 @@ if (root / "quiet-hold").exists():
     while (root / "quiet-hold").exists():
         time.sleep(0.05)
 call = "toolu_" + str(time.time_ns())
-send("assistant", message={"id": "msg-look", "role": "assistant", "content": [
-    {"type": "tool_use", "id": call, "name": "Read", "input": {"file_path": "/work/word.txt"}}]})
+answer = "Heard: " + prompt.split("\n")[0]
+blocks = [{"type": "tool_use", "id": call, "name": "Read", "input": {"file_path": "/work/word.txt"}}]
+if native is not None:
+    blocks.insert(0, {"type": "text", "text": answer})
+send("assistant", message={"id": "msg-look", "role": "assistant", "content": blocks})
 send("user", message={"role": "user", "content": [
     {"type": "tool_result", "tool_use_id": call, "content": "The word in the file is ember."}]})
+if native is not None:
+    # A matching result closes the assistant's text and tool call in the Host journal.
+    (root / "recorded-ready").touch()
+    while (root / "recorded-hold").exists():
+        time.sleep(0.05)
 def record_followup(timeout):
     if select.select([sys.stdin], [], [], timeout)[0]:
         line = sys.stdin.readline()
@@ -57,13 +65,9 @@ if (root / "hold").exists():
             time.sleep(0.05)
     if (root / "record-steering").exists():
         record_followup(0.2)
-answer = "Heard: " + prompt.split("\n")[0]
-send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
-                           "content": [{"type": "text", "text": answer}]})
-if (root / "recorded-hold").exists():
-    (root / "recorded-ready").touch()
-    while (root / "recorded-hold").exists():
-        time.sleep(0.05)
+if native is None:
+    send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
+                               "content": [{"type": "text", "text": answer}]})
 if "Continue the parked work." in prompt:
     send("rate_limit_event", rate_limit_info={"status": "rejected", "rateLimitType": "five_hour"})
     send("result", subtype="success", is_error=True, result="out for now")
