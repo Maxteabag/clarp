@@ -76,7 +76,18 @@ fn change(dir: &Path, add: IFlags, clear: IFlags) -> Result<Marked, Errno> {
     if has.contains(add) && !has.intersects(clear) {
         return Ok(Marked::Already);
     }
-    match rustix::fs::ioctl_setflags(&folder, (has - clear) | add) {
+    // What is taken off is taken off first, by itself: btrfs refuses no-copy-on-write in the
+    // same change that takes no-compression off (seen on Linux 6.8, 26 Nov 2026), and takes it
+    // a moment later. Where the flag is then refused, the caller puts back what it must.
+    let kept = has - clear;
+    if kept != has {
+        match rustix::fs::ioctl_setflags(&folder, kept) {
+            Ok(()) => {}
+            Err(why) if not_here(why) => return Ok(Marked::Unsupported),
+            Err(why) => return Err(why),
+        }
+    }
+    match rustix::fs::ioctl_setflags(&folder, kept | add) {
         Ok(()) => {}
         Err(why) if not_here(why) => return Ok(Marked::Unsupported),
         Err(why) => return Err(why),
