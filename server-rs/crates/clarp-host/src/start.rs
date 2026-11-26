@@ -5,12 +5,12 @@
 //! (`GET /server-info`, `GET /host/start`), so the apps and the installer know it is there.
 //! What is asked of one named agent (`/log`, `/live`, `/send`) is asked of that agent's own
 //! thread, which opens the agent before it answers anything: such a request waits for that agent
-//! alone, however many others are still being opened. The roster and the event stream speak of
-//! every agent, and wait until every agent is open: an agent that is still being opened has no
-//! row of its own yet (no running turn, revision zero), and a row like that must never stand in
-//! for one whose turn runs. Everything else waits until the whole start is done, its recovery of
-//! the gallery, the portraits and the calls included, so that no route serves what is not yet
-//! recovered. A request that waits is held, not refused.
+//! alone, however many others are still being opened. The roster speaks of every agent, and
+//! waits until every agent is open: an agent that is still being opened has no row of its own
+//! yet (no running turn, revision zero), and a row like that must never stand in for one whose
+//! turn runs. Everything else, the event stream with its calls' rings included, waits until the
+//! whole start is done, its recovery of the gallery, the portraits and the calls included, so that
+//! no route serves what is not yet recovered. A request that waits is held, not refused.
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -90,9 +90,13 @@ impl Readiness {
 pub fn needs(path: &str) -> Stage {
     match path {
         "/server-info" | "/host/start" => Stage::Starting,
-        // Answered by the named agent's own thread, once that agent is open.
+        // Answered by the named agent's own thread, once that agent is open. A send that
+        // belongs to a call waits in its handler until the calls are recovered (`sent_from`).
         "/live" | "/log" | "/send" => Stage::Starting,
-        "/agents/snapshot" | "/events" => Stage::Agents,
+        "/agents/snapshot" => Stage::Agents,
+        // The stream shows a call's rings to whom the calls say: it waits until they are
+        // recovered, which the start does last.
+        "/events" => Stage::Started,
         _ => Stage::Started,
     }
 }
@@ -117,10 +121,10 @@ mod tests {
         for path in ["/server-info", "/host/start", "/live", "/log", "/send"] {
             assert_eq!(needs(path), Stage::Starting, "{path}");
         }
-        for path in ["/agents/snapshot", "/events"] {
+        for path in ["/agents/snapshot"] {
             assert_eq!(needs(path), Stage::Agents, "{path}");
         }
-        for path in ["/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
+        for path in ["/events", "/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
             assert_eq!(needs(path), Stage::Started, "{path}");
         }
     }

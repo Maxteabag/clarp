@@ -2342,9 +2342,13 @@ for being early, and none is answered with what the start has not yet recovered.
 
 - `GET /server-info` and `GET /host/start` answer at once.
 - `GET /log`, `GET /live` and `POST /send` for one agent answer once that agent is open (its own
-  thread opens it before it answers anything), whatever other agents are still being opened.
-- `GET /agents/snapshot` and `GET /events` answer once every agent is open: no row stands for an
-  agent that is still being opened.
+  thread opens it before it answers anything), whatever other agents are still being opened. A
+  send that belongs to a call (`call_id`, `call_opening`) answers once the start is done: the
+  calls are recovered last.
+- `GET /agents/snapshot` answers once every agent is open: no row stands for an agent that is
+  still being opened.
+- `GET /events` answers once the start is done: the stream shows a call's rings to whom the
+  recovered calls say.
 - Every other route answers once the whole start is done (the gallery, portraits, janitors and
   calls recovered).
 
