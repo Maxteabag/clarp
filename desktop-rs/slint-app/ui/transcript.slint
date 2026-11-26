@@ -707,8 +707,8 @@ export component Block inherits VerticalLayout {
         property <int> page: Math.max(1, self.last - self.from + 1);
         // A sideways wheel's travel not yet a column's step.
         property <length> nudge;
-        function go(to: int) { self.first = Math.max(1, Math.min(to, self.end)); self.nudge = 0px; }
-        function next-page() { self.go(self.last < self.count - 1 ? self.last + 1 : 1); }
+        function go(to: int) { table-box.first = Math.max(1, Math.min(to, table-box.end)); table-box.nudge = 0px; }
+        function next-page() { table-box.go(table-box.last < table-box.count - 1 ? table-box.last + 1 : 1); }
         // The chat sets its width; it asks for its natural one.
         min-width: 0px;
         preferred-width: self.natural;
