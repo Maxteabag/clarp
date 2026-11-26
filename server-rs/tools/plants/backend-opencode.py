@@ -246,5 +246,13 @@ PLANTS.append((LANE_SHIM, 'lane_host', "OpenCode's compaction summary reads the 
                '            && !compaction(info)\n', '\n'))
 PLANTS.append((HISTORY, 'history', "a past session's own compaction is a row",
                '        if opencode::compaction(data) {', '        if false {'))
+# The recheck's proof reaches through OpenCode's compaction (issue 878).
+PLANTS.append((LANE_SHIM, 'lane_host', "an answer after OpenCode's compaction proves nothing at the recheck",
+               '            .is_some_and(|summary| compaction(&summary["info"]))', '            .is_some_and(|_| false)'))
+PLANTS.append((LANE_SHIM, 'lane_host', "every steer posted counts as stored before OpenCode's go-on message",
+               '                self.go_on.insert(id.to_owned(), self.stored.clone());',
+               '                self.go_on.insert(id.to_owned(), steered.iter().map(|(steer, _)| steer.clone()).collect());'))
+PLANTS.append((LANE_SHIM, 'lane_shim', "the recheck through a compaction asks no store order",
+               '        .is_some_and(|before| before.contains(message))', '        .is_some_and(|_| true)'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

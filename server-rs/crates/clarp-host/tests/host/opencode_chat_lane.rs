@@ -14,7 +14,11 @@ use super::*;
 /// such words (messages given to a turn together) is answered word by word; `die-<x>` ends the
 /// server under the turn; `compact-<x>`, once the file `release-<x>` exists, compacts the context
 /// as OpenCode does by itself (its summary held until `summarized-<x>` exists) and then answers
-/// `said-compact-<x>`, with any steers stored meanwhile (`+<word>`). The first prompt any server is given writes OpenCode's own files into
+/// `said-compact-<x>`, with any steers stored meanwhile (`+<word>`); `compactq-<x>` is the same,
+/// but its answer's start is never told, and with the file `pause-<x>` it waits after its message
+/// to go on until `answer-<x>` exists; a steer `after-<x>` or `tardy-<x>` is never answered there,
+/// and OpenCode stores `tardy-<x>` only after its message to go on, though its post answered at
+/// once. Every user message is told as it is stored, as OpenCode tells it. The first prompt any server is given writes OpenCode's own files into
 /// the global configuration folder, as OpenCode does on its first start. A prompt's user message is named in OpenCode's ascending form. A prompt
 /// that names its `messageID` is a steer: it is stored, and the steers stored since the last
 /// answer are read together at the turn's next step, as OpenCode reads them: one answer, whose
@@ -29,8 +33,9 @@ use super::*;
 /// skew's: the session goes idle, asks a permission whose answer takes 6.5 s, and starts a run for
 /// it, which stores its answer only after that; `flaky-<x>` is `lost-<x>` whose session fails the
 /// second read of its messages after it (the first recheck's), `broken-<x>` is `skew-<x>` whose
-/// session fails the second and third. The session lists its stored messages in the order it stored
-/// them. It tells the sessions that run (`/session/status`) and a session's answers, each with the
+/// session fails the second and third; `wrap-<x>` comes as the run ends, and a run of its own
+/// compacts the context and answers OpenCode's own message to go on, all of it stored and none of
+/// its events told. The session lists its stored messages in the order it stored them. It tells the sessions that run (`/session/status`) and a session's answers, each with the
 /// message it answers. While the file `slow-delete` exists a delete takes two seconds. What it
 /// was asked is noted in files beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
@@ -50,7 +55,7 @@ note("starts", str(pid))
 PASSWORD = os.environ["OPENCODE_SERVER_PASSWORD"]
 sessions_file = root / "sessions"
 listeners = []
-lock = threading.Lock()
+lock = threading.RLock()
 aborted = threading.Event()
 count = [0]
 # The steers stored and not read yet: their message and their word.
@@ -127,16 +132,24 @@ def waited(name):
             return False
     return True
 
+def stored_user(sid, mid):
+    """OpenCode stores a user message and tells it, in that order (`updateMessage`)."""
+    history.append({"id": mid, "role": "user"})
+    emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "user"}}})
+
+# Steers OpenCode stores only after a later message, though their post answered at once.
+tardy = []
+
 def compacted(sid, word):
     """As OpenCode compacts its context by itself before it answers: its own user message with
     a compaction part, its summary for itself from the compaction agent, its own message that
     tells it to go on, and the answer to that, which takes in what was stored meanwhile."""
-    x = word[len("compact-"):]
+    x = word.split("-", 1)[1]
     (root / ("holding-" + x)).write_text("")
     if not waited("release-" + x):
         return idle(sid)
     compaction = ascending()
-    history.append({"id": compaction, "role": "user"})
+    stored_user(sid, compaction)
     emit(part(sid, compaction, id=compaction + "c", type="compaction", auto=True))
     count[0] += 1
     mid = f"msg_{pid}_{count[0]}"
@@ -153,17 +166,28 @@ def compacted(sid, word):
     emit(part(sid, mid, id=mid + "f", type="step-finish", reason="stop", cost=0, tokens={"input": 1, "output": 1}))
     note("compacted", word)
     go_on = ascending()
-    history.append({"id": go_on, "role": "user"})
+    stored_user(sid, go_on)
+    # A steer whose post answered before this, stored only now.
     with lock:
-        ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-"))]
+        late_stored, tardy[:] = list(tardy), []
+    for mid in late_stored:
+        stored_user(sid, mid)
+    if (root / ("pause-" + x)).exists():
+        (root / ("wenton-" + x)).write_text("")
+        if not waited("answer-" + x):
+            return idle(sid)
+    # The answer takes in what was stored before its read; a steer stored after it ("after-",
+    # "tardy-") is never answered here.
+    with lock:
+        ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-", "wrap-", "after-", "tardy-"))]
         for s in ready:
             stored.remove(s)
-    step(sid, "+".join([word] + [w for _, w in ready]), go_on)
+    step(sid, "+".join([word] + [w for _, w in ready]), go_on, quiet=word.startswith("compactq-"))
     idle(sid)
 
 def run(sid, words, user):
     emit(status(sid, "busy"))
-    if words[0].startswith("compact-"):
+    if words[0].startswith(("compact-", "compactq-")):
         return compacted(sid, words[0])
     # Messages the Host gives a turn together are answered one after another.
     for word in words:
@@ -173,7 +197,7 @@ def run(sid, words, user):
     # user message since its last answer: one answer, whose parent is the last of them.
     while True:
         with lock:
-            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-"))]
+            ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-", "wrap-"))]
             if not ready:
                 break
             for s in ready:
@@ -181,6 +205,29 @@ def run(sid, words, user):
         quiet = any(word.startswith(("lost-", "flaky-")) for _, word in ready)
         if not step(sid, *together(ready), quiet=quiet):
             return idle(sid)
+    with lock:
+        wrap = [s for s in stored if s[1].startswith("wrap-")]
+        for s in wrap:
+            stored.remove(s)
+    if wrap:
+        # Words that came as the run ended, which a run of their own took in: it compacted the
+        # context first and then answered OpenCode's own message to go on, as OpenCode does. The
+        # session holds all of it; none of its events reaches the lane (they were lost), and its
+        # run's idle went out with the session idle.
+        compaction, go_on = ascending(), ascending()
+        summary = {"id": f"msg_{pid}_summary", "sessionID": sid, "role": "assistant",
+                   "parentID": compaction, "mode": "compaction", "agent": "compaction", "summary": True}
+        history.extend([{"id": compaction, "role": "user"}, summary, {"id": go_on, "role": "user"},
+                        {"id": f"msg_{pid}_wrapped", "role": "assistant", "parentID": go_on}])
+        note("answered", "+".join(word for _, word in wrap))
+        idle(sid)
+        # Of that run only its messages' own stored events reach the lane: its busy and its
+        # answer's start were lost.
+        for mid in (compaction, go_on):
+            emit({"type": "message.updated", "properties": {"info": {"id": mid, "sessionID": sid, "role": "user"}}})
+            if mid == compaction:
+                emit({"type": "message.updated", "properties": {"info": summary}})
+        return
     with lock:
         slow = [s for s in stored if s[1].startswith("slow-")]
         for s in slow:
@@ -300,7 +347,7 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken|compact)-[a-z0-9]+", text)))
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken|compact|compactq|wrap|after|tardy)-[a-z0-9]+", text)))
             word = words[0]
             if "messageID" in body:
                 note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
@@ -315,7 +362,10 @@ class H(BaseHTTPRequestHandler):
                         ahead = "msg_ffffffffffff" + "".join(random.choice(string.ascii_letters) for _ in range(14))
                         history.append({"id": ahead, "role": "user"})
                         history.append({"id": f"msg_{pid}_ahead", "role": "assistant", "parentID": ahead})
-                    history.append({"id": body["messageID"], "role": "user"})
+                    if word.startswith("tardy-"):
+                        tardy.append(body["messageID"])
+                    else:
+                        stored_user(sid, body["messageID"])
                     stored.append((body["messageID"], word))
                 self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
                 return
@@ -337,7 +387,7 @@ class H(BaseHTTPRequestHandler):
             running[0] = True
             user = ascending()
             with lock:
-                history.append({"id": user, "role": "user"})
+                stored_user(sid, user)
             threading.Thread(target=run, args=(sid, words, user), daemon=True).start()
             self.send_response(204); self.send_header("Content-Length", "0"); self.end_headers()
             return
@@ -354,9 +404,8 @@ class H(BaseHTTPRequestHandler):
         if running[0]:
             return self._json(409, {"name": "SessionBusyError"})
         with lock:
-            found = [s for s in stored if s[0] == parts[4]]
-            for s in found:
-                stored.remove(s)
+            found = [s for s in stored if s[0] == parts[4]] or [m for m in history if m["id"] == parts[4]]
+            stored[:] = [s for s in stored if s[0] != parts[4]]
             history[:] = [m for m in history if m["id"] != parts[4]]
         if not found:
             return self._json(404, {"name": "NotFoundError"})
@@ -1742,4 +1791,162 @@ fn a_steer_before_a_compaction_a_stop_cut_short_runs_once_on_its_own() {
     let own = prompted(&world);
     assert_eq!(own.iter().filter(|w| *w == "ask-t").count(), 1, "{own:?}");
     assert_eq!(answers(&host, "kai", "said-ask-t"), 1);
+}
+
+/// Issue 878. A steer that reaches OpenCode as its run ends starts a run of its own, which
+/// compacts the context and then answers OpenCode's own message to go on; none of that run's
+/// events reaches the lane. Message order holds the turn open for the recheck, and there the
+/// answer after the compaction proves the steer read, though its parent is OpenCode's message,
+/// not the steer: it is read once, nothing is deleted, and it is never run again.
+#[test]
+fn a_recheck_reads_a_steer_the_answer_after_a_compaction_took_in() {
+    let world = world("opencode-recheck-compaction", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "wrap", "opencode");
+    asked(&host, "wrap", "ask-first");
+    lane_ready(&socket);
+
+    host.send("wrap", "hold-a", "a");
+    wait_for("the held turn", || {
+        world.place.root.join("holding-a").exists()
+    });
+    host.send("wrap", "wrap-b", "b");
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("release-a"), "").unwrap();
+    wait_for("the steer read at the recheck", || {
+        read_at(&host, "wrap", "u-b") == "steer"
+    });
+    wait_for("the turn to end", || host.state("wrap") == "done");
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    asked(&host, "wrap", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "hold-a", "ask-after"]);
+    assert_eq!(
+        world
+            .lines("answered")
+            .iter()
+            .filter(|w| *w == "wrap-b")
+            .count(),
+        1
+    );
+}
+
+/// Issue 878. A steer posted while OpenCode writes its compaction's summary, whose answer after
+/// the compaction (to OpenCode's own message to go on) was never told to the lane: the lane saw
+/// the steer stored before that message, so the recheck reads it. Nothing is deleted, and it is
+/// never run again.
+#[test]
+fn a_steer_stored_during_the_summary_is_read_through_the_compaction() {
+    let world = world("opencode-878-during", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    std::fs::write(world.place.root.join("release-d"), "").unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    asked(&host, "kai", "ask-first");
+    lane_ready(&socket);
+
+    host.send("kai", "compactq-d", "d");
+    wait_for("the summary", || {
+        world.place.root.join("summarizing-d").exists()
+    });
+    host.send("kai", "ask-s", "s");
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("summarized-d"), "").unwrap();
+    wait_for("the steer read at the recheck", || {
+        read_at(&host, "kai", "u-s") == "steer"
+    });
+    wait_for("the turn to end", || host.state("kai") == "done");
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    asked(&host, "kai", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "compactq-d", "ask-after"]);
+    assert_eq!(
+        world
+            .lines("answered")
+            .iter()
+            .filter(|w| *w == "compactq-d+ask-s")
+            .count(),
+        1
+    );
+}
+
+/// Issue 878. A steer posted after OpenCode's message to go on was seen, which its answer did not
+/// take in: it is not read through the compaction, and runs once as a turn of its own.
+#[test]
+fn a_steer_posted_after_the_go_on_message_runs_once() {
+    let world = world("opencode-878-after", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    for name in ["release-f", "summarized-f", "pause-f"] {
+        std::fs::write(world.place.root.join(name), "").unwrap();
+    }
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    asked(&host, "kai", "ask-first");
+    lane_ready(&socket);
+
+    host.send("kai", "compactq-f", "f");
+    wait_for("the message to go on", || {
+        world.place.root.join("wenton-f").exists()
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    host.send("kai", "after-s", "s");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let steered = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("answer-f"), "").unwrap();
+    wait_for("the steer taken back", || {
+        world.lines("deleted") == [steered.as_str()]
+    });
+    wait_for("the steer answered on its own", || {
+        answers(&host, "kai", "said-after-s") == 1
+    });
+    wait_for("the last turn to end", || host.state("kai") == "done");
+    assert_ne!(read_at(&host, "kai", "u-s"), "steer");
+    let own = prompted(&world);
+    assert_eq!(own.iter().filter(|w| *w == "after-s").count(), 1, "{own:?}");
+    assert_eq!(answers(&host, "kai", "said-after-s"), 1);
+}
+
+/// Issue 878, the edge. A steer whose post answered while OpenCode wrote its summary, but which
+/// OpenCode stored only after its message to go on, and never answered: the lane saw it stored
+/// after that message, so it is not read through the compaction; it runs once as a turn of its
+/// own and is never lost.
+#[test]
+fn a_steer_stored_only_after_the_go_on_message_runs_once() {
+    let world = world("opencode-878-tardy", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    std::fs::write(world.place.root.join("release-g"), "").unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    asked(&host, "kai", "ask-first");
+    lane_ready(&socket);
+
+    host.send("kai", "compactq-g", "g");
+    wait_for("the summary", || {
+        world.place.root.join("summarizing-g").exists()
+    });
+    host.send("kai", "tardy-s", "s");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let steered = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("summarized-g"), "").unwrap();
+    wait_for("the steer taken back", || {
+        world.lines("deleted") == [steered.as_str()]
+    });
+    wait_for("the steer answered on its own", || {
+        answers(&host, "kai", "said-tardy-s") == 1
+    });
+    wait_for("the last turn to end", || host.state("kai") == "done");
+    assert_ne!(read_at(&host, "kai", "u-s"), "steer");
+    let own = prompted(&world);
+    assert_eq!(own.iter().filter(|w| *w == "tardy-s").count(), 1, "{own:?}");
 }

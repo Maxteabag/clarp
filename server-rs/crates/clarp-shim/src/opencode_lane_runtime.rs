@@ -11,6 +11,7 @@
 //! unread when the turn ends, by its idle or a Stop, are taken out of the session again: the
 //! Host runs them as a turn of their own.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -289,6 +290,44 @@ struct Turn {
     /// The steered words posted to the session, in the order they were posted: the message the
     /// lane named them, then the id the Host steered them under.
     steered: Vec<(String, String)>,
+    /// Which messages OpenCode stored before which, in its own store order ([`StoreOrder`]).
+    order: StoreOrder,
+}
+
+/// What the lane saw of the order OpenCode stored the turn's messages in, by the order of the
+/// events it told them with, never by an id or a clock (issue 878). OpenCode tells each message
+/// as it stores it (`session/session.ts` 629-633, `updateMessage` then its `message.updated`),
+/// and the lane reads one stream of them, so the order of those events is its store order. A
+/// steer's own post says nothing of when it was stored: `prompt_async` answers before the message
+/// is stored (`server/routes/instance/httpapi/handlers/session.ts` 311-329, the prompt forked;
+/// `session/prompt.ts` 635, `createUserMessage`, stores it later).
+#[derive(Default, Clone)]
+struct StoreOrder {
+    /// The turn's own steers OpenCode has told as stored.
+    stored: BTreeSet<String>,
+    /// The last assistant message OpenCode told was its compaction's summary ([`compaction`]).
+    after_summary: bool,
+    /// OpenCode's own messages to go on after a compaction (`session/compaction.ts`: the user
+    /// message it stores after its summary), each with the turn's steers it had told as stored
+    /// before it.
+    go_on: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl StoreOrder {
+    /// A `message.updated` of the turn's session.
+    fn told(&mut self, info: &Value, steered: &[(String, String)]) {
+        match (info["role"].as_str(), info["id"].as_str()) {
+            (Some("assistant"), _) => self.after_summary = compaction(info),
+            (Some("user"), Some(id)) if steered.iter().any(|(steer, _)| steer == id) => {
+                self.stored.insert(id.to_owned());
+            }
+            (Some("user"), Some(id)) if self.after_summary => {
+                self.go_on.insert(id.to_owned(), self.stored.clone());
+                self.after_summary = false;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Whether an answer to the user message `parent` took the steered message `message` in.
@@ -304,21 +343,56 @@ fn taken_in(message: &str, parent: &str) -> bool {
 /// an answer whose parent is `message` or one of the turn's own steers `posted` after it, in the
 /// order the lane posted them. OpenCode answers the last message it took in, and takes in every
 /// message stored before it (issue 862), so such an answer is certain, whatever the ids or the
-/// clock say. An answer to a message not of this turn proves nothing.
-fn proven(list: &Value, posted: &[(String, String)], message: &str) -> bool {
+/// clock say. An answer to a message not of this turn proves nothing, but for one: OpenCode's
+/// own message that tells it to go on after it compacted its context, for the steers the lane saw
+/// it store before that ([`after_compaction`]).
+fn proven(list: &Value, posted: &[(String, String)], order: &StoreOrder, message: &str) -> bool {
     let Some(own) = posted.iter().position(|(steered, _)| steered == message) else {
         return false;
     };
-    let answered: Vec<&str> = list
-        .as_array()
-        .into_iter()
-        .flatten()
+    let stored = list.as_array().map_or(&[][..], Vec::as_slice);
+    let answered: Vec<&str> = stored
+        .iter()
         .filter(|stored| stored["info"]["role"] == "assistant" && !compaction(&stored["info"]))
         .filter_map(|stored| stored["info"]["parentID"].as_str())
         .collect();
     posted[own..]
         .iter()
         .any(|(steered, _)| answered.contains(&steered.as_str()))
+        || answered
+            .iter()
+            .any(|parent| after_compaction(stored, order, parent, message))
+}
+
+/// Whether `parent` is OpenCode's own message that tells it to go on after it compacted its
+/// context, and `message` a steer of the turn's own OpenCode stored before it: then the answer to
+/// it took `message` in (issue 878). OpenCode's answer after a compaction names that message as
+/// its parent, not the steers it read, and it answers from all that was stored since its
+/// compaction (`session/message-v2.ts`, `filterCompacted`): a steer stored while it wrote its
+/// summary too. "Stored before" is the lane's own event order ([`StoreOrder`]), never an id. The
+/// stored list must agree that `parent` is that message: a user message whose last assistant
+/// message before it is a compaction's summary. A steer the lane did not see stored before it
+/// is not proven by it, and runs once as a turn of its own: a repeat is rare, a lost word worse.
+fn after_compaction(stored: &[Value], order: &StoreOrder, parent: &str, message: &str) -> bool {
+    if !order
+        .go_on
+        .get(parent)
+        .is_some_and(|before| before.contains(message))
+    {
+        return false;
+    }
+    let Some(go_on) = stored
+        .iter()
+        .position(|kept| kept["info"]["id"].as_str() == Some(parent))
+    else {
+        return false;
+    };
+    stored[go_on]["info"]["role"] == "user"
+        && stored[..go_on]
+            .iter()
+            .rev()
+            .find(|kept| kept["info"]["role"] == "assistant")
+            .is_some_and(|summary| compaction(&summary["info"]))
 }
 
 /// What the idle that ends a turn found of its unread steered words.
@@ -691,6 +765,7 @@ impl Lane {
             follow: Follow::new(&self.thread),
             stopping: false,
             steered: Vec::new(),
+            order: StoreOrder::default(),
         });
         // A turn the lane lost (its Stop's grace ran out on the Host's side) may still run.
         if self.session_busy {
@@ -854,11 +929,14 @@ impl Lane {
     /// their own, and the turn ends as its idle would have. A list that cannot be read holds the
     /// turn for one more recheck (`failed` says this is it); after that it ends without it.
     fn look_again(&mut self, failed: bool) {
-        let Some((stopping, unread, posted)) = self
-            .turn
-            .as_ref()
-            .map(|turn| (turn.stopping, turn.unread(), turn.steered.clone()))
-        else {
+        let Some((stopping, unread, posted, order)) = self.turn.as_ref().map(|turn| {
+            (
+                turn.stopping,
+                turn.unread(),
+                turn.steered.clone(),
+                turn.order.clone(),
+            )
+        }) else {
             return;
         };
         match self.stored() {
@@ -866,7 +944,7 @@ impl Lane {
                 let now = super::now_ms();
                 let read = unread
                     .iter()
-                    .filter(|(message, _)| proven(&list, &posted, message))
+                    .filter(|(message, _)| proven(&list, &posted, &order, message))
                     .try_for_each(|(_, id)| match self.turn.as_mut() {
                         Some(turn) => turn.spool.steer_read(id, now),
                         None => Ok(()),
@@ -907,6 +985,11 @@ impl Lane {
         let Some(turn) = self.turn.as_mut() else {
             return;
         };
+        if event["type"] == "message.updated"
+            && props["info"]["sessionID"].as_str() == Some(&self.thread)
+        {
+            turn.order.told(&props["info"], &turn.steered);
+        }
         // Steered words are read when an answer that took them in starts: its parent, the last
         // message it took in, is theirs or stored after theirs. Each is written in the order they
         // were posted, and durable, before anything of that answer.
@@ -1027,7 +1110,7 @@ impl Lane {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{MessageIds, any_taken_in, proven, taken_in};
+    use super::{MessageIds, StoreOrder, any_taken_in, proven, taken_in};
     use serde_json::json;
 
     #[test]
@@ -1058,24 +1141,51 @@ mod tests {
             .map(|m| ((*m).to_owned(), format!("u-{m}")))
             .collect();
         // Answered itself, or with a steer the lane posted after it (issue 862).
-        assert!(proven(&json!([answer("b")]), &posted, "b"));
+        assert!(proven(
+            &json!([answer("b")]),
+            &posted,
+            &StoreOrder::default(),
+            "b"
+        ));
         assert!(proven(
             &json!([asked("b"), asked("c"), answer("c")]),
             &posted,
+            &StoreOrder::default(),
             "b"
         ));
         // An answer to a steer posted before it, to a message not of this turn (whatever its id
         // or place says: a clock that stepped back), or none: no proof (issue 864).
-        assert!(!proven(&json!([answer("b")]), &posted, "c"));
+        assert!(!proven(
+            &json!([answer("b")]),
+            &posted,
+            &StoreOrder::default(),
+            "c"
+        ));
         let ahead = "msg_ffffffffffffA";
         assert!(!proven(
             &json!([asked(ahead), answer(ahead), asked("d")]),
             &posted,
+            &StoreOrder::default(),
             "d"
         ));
-        assert!(!proven(&json!([asked("d")]), &posted, "d"));
-        assert!(!proven(&json!({"not": "a list"}), &posted, "b"));
-        assert!(!proven(&json!([answer("x")]), &posted, "x"));
+        assert!(!proven(
+            &json!([asked("d")]),
+            &posted,
+            &StoreOrder::default(),
+            "d"
+        ));
+        assert!(!proven(
+            &json!({"not": "a list"}),
+            &posted,
+            &StoreOrder::default(),
+            "b"
+        ));
+        assert!(!proven(
+            &json!([answer("x")]),
+            &posted,
+            &StoreOrder::default(),
+            "x"
+        ));
         // A clock that stepped back between two posts: the later steer's id sorts before the
         // earlier one's. Post order decides, and the earlier is still proven by it.
         let mut ids = MessageIds::default();
@@ -1089,9 +1199,15 @@ mod tests {
         assert!(proven(
             &json!([asked(&earlier), asked(&later), answer(&later)]),
             &skewed,
+            &StoreOrder::default(),
             &earlier
         ));
-        assert!(!proven(&json!([answer(&earlier)]), &skewed, &later));
+        assert!(!proven(
+            &json!([answer(&earlier)]),
+            &skewed,
+            &StoreOrder::default(),
+            &later
+        ));
         // An older answer whose parent is the turn's prompt, stored before the steer but with an
         // id that sorts after it (a clock step): message order says the steer was taken in, but
         // the answer's parent is no steer of this turn, so nothing proves it.
@@ -1099,7 +1215,79 @@ mod tests {
         let steer = ids.next(1_795_619_200_500).unwrap();
         assert!(taken_in(&steer, &prompt), "order alone says taken in");
         let list = json!([asked(&prompt), answer(&prompt), asked(&steer)]);
-        assert!(!proven(&list, &[(steer.clone(), "u-s".to_owned())], &steer));
+        assert!(!proven(
+            &list,
+            &[(steer.clone(), "u-s".to_owned())],
+            &StoreOrder::default(),
+            &steer,
+        ));
+    }
+
+    #[test]
+    fn an_answer_after_opencodes_compaction_proves_the_steers_it_stored_before_its_go_on() {
+        let asked = |id: &str| json!({"info": {"role": "user", "id": id}});
+        let answer = |parent: &str| json!({"info": {"role": "assistant", "parentID": parent}});
+        let summary = |parent: &str| {
+            json!({"info": {"role": "assistant", "parentID": parent, "mode": "compaction",
+                   "agent": "compaction", "summary": true}})
+        };
+        let posted: Vec<(String, String)> = ["b", "c", "e", "t"]
+            .iter()
+            .map(|m| ((*m).to_owned(), format!("u-{m}")))
+            .collect();
+        // What OpenCode told as stored, in its order (issue 878): b before its compaction, c
+        // while it summarized, then its go-on message; t, posted earlier, stored only after it
+        // (its post answers before it is stored), and e after it.
+        let mut order = StoreOrder::default();
+        for info in [
+            json!({"role": "user", "id": "b"}),
+            json!({"role": "user", "id": "compaction"}),
+            summary("compaction")["info"].clone(),
+            json!({"role": "user", "id": "c"}),
+            json!({"role": "user", "id": "go-on"}),
+            json!({"role": "user", "id": "t"}),
+            json!({"role": "user", "id": "e"}),
+        ] {
+            order.told(&info, &posted);
+        }
+        let list = json!([
+            asked("b"),
+            asked("compaction"),
+            summary("compaction"),
+            asked("c"),
+            asked("go-on"),
+            asked("t"),
+            answer("go-on"),
+            asked("e"),
+        ]);
+        assert!(proven(&list, &posted, &order, "b"));
+        assert!(
+            proven(&list, &posted, &order, "c"),
+            "stored while it summarized"
+        );
+        assert!(
+            !proven(&list, &posted, &order, "t"),
+            "posted before, stored after"
+        );
+        assert!(!proven(&list, &posted, &order, "e"));
+        // Not seen stored at all (no mark): runs once.
+        assert!(!proven(&list, &posted, &StoreOrder::default(), "b"));
+        // The stored list must agree: no compaction's summary right before the go-on message, or
+        // only the summary itself, proves nothing.
+        let list = json!([asked("b"), asked("go-on"), answer("go-on")]);
+        assert!(!proven(&list, &posted, &order, "b"));
+        let list = json!([asked("b"), asked("compaction"), summary("compaction")]);
+        assert!(!proven(&list, &posted, &order, "b"));
+        // An ordinary message of OpenCode's after an ordinary answer is no go-on message.
+        let mut plain = StoreOrder::default();
+        for info in [
+            json!({"role": "user", "id": "b"}),
+            json!({"role": "assistant", "id": "x"}),
+            json!({"role": "user", "id": "other"}),
+        ] {
+            plain.told(&info, &posted);
+        }
+        assert!(plain.go_on.is_empty());
     }
 
     #[test]
