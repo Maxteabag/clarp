@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use serde_json::json;
 
-use super::{Stage, app_now, check, check_window_size_free, control, posts, report, run_stages, sends, shot};
+use super::{Stage, app_now, check, check_window_size_free, control, posts, report, run_stages, sends, shot, view};
 use crate::headless;
 
 fn element(id: &str) -> Option<i_slint_backend_testing::ElementHandle> {
