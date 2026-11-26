@@ -72,6 +72,8 @@ pub(crate) struct Live {
     /// round counts a chat's `/live` as read only once none is outstanding,
     /// so an answer to a request from before the round cannot end it.
     pub outstanding: std::collections::HashMap<String, u32>,
+    /// The stream following the panes (`events_chat_previews`, #905).
+    pub viewport: crate::viewport::Viewport,
 }
 
 impl Engine {
@@ -201,6 +203,7 @@ impl Engine {
             self.live.enabled = enabled;
             self.live.views.clear();
         }
+        self.viewport_server_info(info);
         if enabled && self.live.explanation_setting {
             self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
         }
@@ -230,8 +233,11 @@ impl Engine {
             return;
         }
         let fresh = !self.live.views.contains_key(session);
+        // Following the panes, a chat gets its item ops only once it is
+        // streamed in full: its snapshot is read there (viewport.rs).
+        let streamed = !self.viewport_streaming() || self.viewport_full(session);
         let view = self.live.views.entry(session.to_owned()).or_default();
-        if fresh || (view.lseq().is_none() && !view.awaiting_snapshot()) {
+        if streamed && (fresh || (view.lseq().is_none() && !view.awaiting_snapshot())) {
             self.request_live(session);
         }
         if opened_now {
@@ -259,7 +265,7 @@ impl Engine {
 
     /// The chats always watched live: the selected one and every one shown
     /// in a pane, on this engine's Host.
-    fn kept_watched(&self) -> std::collections::HashSet<String> {
+    pub(crate) fn kept_watched(&self) -> std::collections::HashSet<String> {
         let mut kept = self.shown_here();
         if !self.selected.is_empty() {
             kept.insert(self.selected.clone());
@@ -306,7 +312,7 @@ impl Engine {
         }
     }
 
-    fn request_live(&mut self, session: &str) {
+    pub(crate) fn request_live(&mut self, session: &str) {
         if let Some(view) = self.live.views.get_mut(session) {
             view.expect_snapshot();
         }
@@ -373,6 +379,12 @@ impl Engine {
     /// Opens the stream with the sessions it should carry items for; a
     /// running stream reopens (resuming by event id) only when they changed.
     pub(crate) fn sync_live_subscription(&mut self, reopen: bool) {
+        if self.viewport_streaming() {
+            // The sets change on the open stream (viewport.rs); only the
+            // query a reconnect opens with follows here.
+            self.viewport_query();
+            return;
+        }
         let wanted = self.live.enabled.then(|| self.live_sessions());
         let gzip = self.live.events_gzip;
         if wanted == self.live.subscribed && gzip == self.live.gzip_asked {
@@ -400,7 +412,14 @@ impl Engine {
             return;
         }
         // A view still waiting for its first snapshot needs no second one.
-        let sessions: Vec<String> = self.live.views.iter().filter(|(_, v)| v.lseq().is_some()).map(|(s, _)| s.clone()).collect();
+        // Following the panes, only the chats streamed in full get item ops.
+        let sessions: Vec<String> = self
+            .live
+            .views
+            .iter()
+            .filter(|(s, v)| v.lseq().is_some() && (!self.viewport_streaming() || self.viewport_full(s)))
+            .map(|(s, _)| s.clone())
+            .collect();
         for session in sessions {
             self.request_live(&session);
         }
@@ -429,7 +448,11 @@ impl Engine {
         let session = json::string(event, "session");
         // Item ops (and lseq) count only from a stream that lists the chat:
         // a summary copy (status and turn ops) must not advance it (§4).
-        let listed = self.live.subscribed.as_deref().is_some_and(|s| s.split(',').any(|n| n == session));
+        let listed = if self.viewport_streaming() {
+            self.viewport_full(&session)
+        } else {
+            self.live.subscribed.as_deref().is_some_and(|s| s.split(',').any(|n| n == session))
+        };
         if !listed {
             return;
         }
@@ -454,6 +477,9 @@ impl Engine {
     pub(crate) fn live_json(&mut self, tag: &str, object: &Object) -> bool {
         if tag == "tool-explanations-settings" {
             self.live_explanations(Some(object));
+            return true;
+        }
+        if self.viewport_json(tag) {
             return true;
         }
         let Some(session) = tag.strip_prefix("live:") else { return false };
@@ -491,6 +517,10 @@ impl Engine {
             self.live.explanations = None;
             self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
             self.set_error(&format!("Could not change tool explanations: {detail}"));
+            return true;
+        }
+        if self.viewport_failure(tag) {
+            eprintln!("Engine: {tag} failed: {detail}; the event stream opens again with the panes' chats");
             return true;
         }
         let Some(session) = tag.strip_prefix("live:") else { return false };

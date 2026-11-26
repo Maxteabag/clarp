@@ -233,6 +233,16 @@ spoken_when_asked = False
 live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
+# The stream following the panes (events_live_change + events_chat_previews,
+# #892/#905): off until /__control/viewport turns it on. A stream opened with
+# live_change=1 names itself first ({type: stream, stream_id}); POST
+# /events/{id}/live changes its followed and shown chats and sends
+# live-changed on it. Such a stream gets item ops and transcript-updated only
+# for the chats both followed and shown; `refuse` answers the POST 404.
+viewport = {"on": False, "refuse": False}
+viewport_streams = {}  # stream_id -> inbox
+viewport_full = {}     # id(inbox) -> the chats it streams in full
+stream_counter = 0
 tool_explanation_settings = {"enabled": True, "detail_level": 2}
 # Coordination between agents (feature hidden_coordination, Host contract
 # 120): off until a check turns it on; the Host's value, and each chat's own.
@@ -1077,6 +1087,9 @@ def broadcast(event):
         event_id += 1
         payload = f"id: {event_id}\ndata: {json.dumps(event)}\n\n".encode()
         for subscriber in list(subscribers):
+            full = viewport_full.get(id(subscriber))
+            if full is not None and event.get("type") == "transcript-updated" and event.get("session") not in full:
+                continue  # a background chat: its preview tells the list
             subscriber.put(payload)
 
 
@@ -1694,6 +1707,8 @@ class Handler(BaseHTTPRequestHandler):
             # As the real Host and contract/schemas/server-info.json have it:
             # feature flags under capabilities.features.
             features = ["live_items", "tool_explanation_setting"] if live_features else []
+            if viewport["on"]:
+                features += ["events_live_change", "events_chat_previews"]
             features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
@@ -2041,13 +2056,26 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/events":
             inbox = queue.Queue()
             # `live=` (blank) asks for status ops only; no parameter, none.
-            live = parse_qs(url.query, keep_blank_values=True).get("live", [None])[0]
+            params = parse_qs(url.query, keep_blank_values=True)
+            live = params.get("live", [None])[0]
+            visible = params.get("visible", [None])[0]
+            stream_id = None
             # Subscribed before the 200 goes out: a client counts itself
             # connected once it has the headers, and an event broadcast then
             # must already reach this inbox (it is not kept for later).
             with state_lock:
+                global stream_counter
                 subscribers.append(inbox)
                 live_filters[id(inbox)] = None if live is None else {n for n in live.split(",") if n}
+                if viewport["on"] and params.get("live_change", [""])[0] == "1":
+                    stream_counter += 1
+                    stream_id = f"stream-{stream_counter}"
+                    viewport_streams[stream_id] = inbox
+                    if params.get("chat_previews", [""])[0] == "1" and visible is not None:
+                        shown = {n for n in visible.split(",") if n}
+                        live_filters[id(inbox)] = (live_filters[id(inbox)] or set()) & shown
+                        viewport_full[id(inbox)] = set(live_filters[id(inbox)])
+                    inbox.put(f"data: {json.dumps({'type': 'stream', 'stream_id': stream_id})}\n\n".encode())
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -2071,6 +2099,9 @@ class Handler(BaseHTTPRequestHandler):
                 with state_lock:
                     subscribers.remove(inbox)
                     live_filters.pop(id(inbox), None)
+                    viewport_full.pop(id(inbox), None)
+                    if stream_id is not None:
+                        viewport_streams.pop(stream_id, None)
             return
         return self.reply(404, {"error": "not found"})
 
@@ -2145,6 +2176,41 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(500, {"error": "upload refused"})
             return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
         body = json.loads(raw or b"{}")
+        if url.path.startswith("/events/") and url.path.endswith("/live"):
+            # POST /events/{stream_id}/live: both whole sets; the change takes
+            # effect at the live-changed event sent on that stream.
+            if self.in_outage():
+                return
+            stream_id = unquote(url.path[len("/events/"):-len("/live")])
+            record({"method": "POST", "path": "/events/{id}/live", "stream_id": stream_id, "body": body})
+            with state_lock:
+                inbox = viewport_streams.get(stream_id)
+                if inbox is None or viewport["refuse"]:
+                    return self.reply(404, {"error": "no such stream"})
+                followed, shown = list(body.get("live", [])), list(body.get("visible", []))
+                full = set(followed) & set(shown)
+                live_filters[id(inbox)] = full
+                viewport_full[id(inbox)] = set(full)
+                inbox.put(f"data: {json.dumps({'type': 'live-changed', 'live': followed, 'visible': shown})}\n\n".encode())
+            return self.reply(200, {"live": followed, "visible": shown})
+        if url.path == "/__control/viewport":
+            # Test control: the two stream features (read from /server-info on
+            # connecting), and whether POST /events/{id}/live is refused.
+            viewport["on"] = bool(body.get("on", True))
+            viewport["refuse"] = bool(body.get("refuse", False))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/preview":
+            # Test control: a background chat's coalesced preview, unnumbered,
+            # to every stream; the row takes the same fields.
+            session, fields = body["session"], body.get("fields", {})
+            with state_lock:
+                agent = next((a for a in agents if a["session"] == session), {})
+                agent.update(fields)
+                payload = {"type": "agent-roster", "kind": "preview", "session": session,
+                           "agent_id": agent.get("agent_id", ""), "fields": fields}
+                for subscriber in list(subscribers):
+                    subscriber.put(f"data: {json.dumps(payload)}\n\n".encode())
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/render-spec-clients":
             # Test control: the Host's per-client render_spec minimums.
             global render_spec_min, render_spec_v2_min

@@ -105,6 +105,13 @@ impl Engine {
 
     /// An `agent-roster` event.
     pub(crate) fn roster_event(&mut self, event: &Object) {
+        if json::string(event, "kind") == "preview" {
+            // The chat list's row only (viewport.rs): never history, and a
+            // snapshot on its way keeps what is newer by revision and time.
+            self.preview_event(event);
+            return;
+        }
+        self.viewport_resync(event);
         let step = step(event, self.roster_rows.fields, self.roster_rows.row);
         if step != Step::Snapshot && self.snapshot_in_flight {
             // The list on its way may have been made before this change.
@@ -143,7 +150,7 @@ impl Engine {
     }
 
     /// Reads one row, or the whole list where the Host answers no row.
-    fn read_row(&mut self, session: &str) {
+    pub(crate) fn read_row(&mut self, session: &str) {
         if !self.roster_rows.row {
             self.request_snapshot();
             return;
