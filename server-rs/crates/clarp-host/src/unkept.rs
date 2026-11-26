@@ -515,6 +515,7 @@ pub(crate) mod at_the_port {
                 label_checker: Arc::default(),
                 quota_keeper: Arc::default(),
                 cold_starts: crate::cold_starts::shared(),
+                start: std::sync::Arc::default(),
                 audio: Arc::default(),
                 limits: Arc::default(),
                 pools: Vec::new(),

@@ -9,6 +9,14 @@ The Host is the Rust one: one `clarp-host` binary run as the `clarp-host.service
 systemd user unit, installed by `server-rs/tools/install-host`. Everything it
 keeps is under `~/.local/share/clarp-host` and `~/.config/clarp-host`.
 
+Where an install of issue 935 or later runs it, `clarp-host.socket` holds the
+Host's port and hands it to the service: while the Host restarts, a request waits
+in the socket's queue for the next Host instead of being refused. The socket also
+starts the service when a request comes and the Host is not running, so a Host
+stopped by hand stays stopped only with its socket stopped too
+(`systemctl --user stop clarp-host.socket clarp-host.service`). A rollback to a
+release from before the socket takes the socket away.
+
 Agents do not deploy, update or restart the Host themselves: not
 `install-host`, not `install-from-release`, not `systemctl --user restart
 clarp-host`. Push the change and ask whoever gave you the task to have it
@@ -56,7 +64,13 @@ the routes below instead, and never hand-edit a release under
 
 `GET /server-info` says the release (`version`), the contract and the
 features; `GET /host/start`, with the owner's token only, says how many agents
-the Host has, how many are still opening and how many could not be opened.
+the Host has, how many are still opening and how many could not be opened, and
+which run of the Host answers (`instance`) and how far its start has come
+(`stage`: `starting`, `agents`, `started`). A Host answers `/server-info` and
+`/host/start` from the first moment of its start. What it answers about its
+agents (`/agents/snapshot`, `/live`, `/log`, `/send`, `/events`) waits until every
+agent is open, and everything else until `started`: a request is held, never
+refused. An install counts only once the run that answered says `started`.
 
 ## Install a Host on a new machine
 

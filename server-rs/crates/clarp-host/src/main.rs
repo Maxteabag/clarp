@@ -206,12 +206,13 @@ impl Steps {
     }
 }
 
-/// How many of the agents the door waits for are still being opened.
+/// How many agents, janitors among them, are still being opened.
 fn still_opening(app: &App) -> usize {
-    app.fleet
-        .directory()
+    let directory = app.fleet.directory();
+    directory
         .members
         .iter()
+        .chain(directory.janitors.iter())
         .filter(|member| {
             member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING)
         })
@@ -494,6 +495,7 @@ async fn serve(config: Config) -> Result<(), String> {
         keeper: Arc::default(),
         quota_keeper: Arc::default(),
         cold_starts,
+        start: Arc::new(clarp_host::start::Readiness::starting()),
         label_checker: Arc::default(),
         audio: Arc::default(),
         limits,
@@ -544,8 +546,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // The Host answers from here on (issue 935). A release stops one Host and starts the next,
     // and the apps waited the whole start of the next one, 45 seconds on the owner's machine,
     // for anything at all. Everything the start does after this goes on beside the answers, in
-    // the order it always had: an agent that is still being opened says so on its row
-    // (`availability` restarting) and answers what is asked of it once it is open.
+    // the order it always had. What a request needs of the start, it waits for at the door
+    // (`clarp_host::start`): liveness is answered at once, the agents' rows once every agent is
+    // open, everything else once the start is done; a request is held there, never refused.
     // The edge is told who connected: the administrator's token opens the Host only from here.
     let router = edge::router(app.clone());
     // And where the Host is reached through a relay, what a phone asks there is asked of
@@ -559,6 +562,16 @@ async fn serve(config: Config) -> Result<(), String> {
     let mut server = tokio::spawn(shutdown::serve(listener, router, app.clone(), restart_ms));
     steps.mark("answering");
     let finishing = async {
+        // The tests make a start fail after the Host has begun to answer (issue 935): once the
+        // file named exists.
+        #[cfg(debug_assertions)]
+        if let Some(when) = std::env::var_os("CLARP_TEST_START_FAILS_WHEN") {
+            let when = std::path::PathBuf::from(when);
+            while !when.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            return Err("a step of the start failed (CLARP_TEST_START_FAILS_WHEN)".to_string());
+        }
         // Where this Host keeps the machine's tools, the chosen skills are linked to its release;
         // anywhere else this writes nothing. A turn that starts before they are finds the release
         // before's skills, which install-host keeps until the links have moved.
@@ -577,8 +590,8 @@ async fn serve(config: Config) -> Result<(), String> {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         steps.mark("door");
-        // How many agents were still being opened when the door let requests in, and when the last
-        // of them was (issue 935): one line, from beside the start, which goes on meanwhile.
+        // How many agents were still being opened when the start's wait for them ended, and when
+        // the last of them was (issue 935): one line, from beside the start, which goes on.
         {
             let app = app.clone();
             let began = steps.began;
@@ -588,10 +601,12 @@ async fn serve(config: Config) -> Result<(), String> {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
                 eprintln!(
-                    "clarp-host: {at_door} agents were still being opened at the door; the last was \
+                    "clarp-host: {at_door} agents were still being opened after the start's wait; the last was \
                      opened {} ms after the start began",
                     began.elapsed().as_millis()
                 );
+                // Every agent's row is its own from now on: what asks about them is answered.
+                app.start.reach(clarp_host::start::Stage::Agents);
             });
         }
         app.mouth.start_voice_names().await;
@@ -729,6 +744,10 @@ async fn serve(config: Config) -> Result<(), String> {
                 pool.tool()
             );
         }
+        // The start is done once every agent is open too: what waits for that is answered now.
+        app.start.reached(clarp_host::start::Stage::Agents).await;
+        app.start.reach(clarp_host::start::Stage::Started);
+        steps.mark("ready");
         // Said last of its start, after every line the start has always said.
         eprintln!("{}", steps.line());
         Ok::<(), String>(())

@@ -339,13 +339,42 @@ while time.monotonic() < until:
 sys.exit(1)
 PY
 }
-# Waits for the Host to answer, ten seconds at most.
-host_answers() {
-    for _ in $(seq 1 50); do
-        curl -fsS -m 2 -H "Authorization: Bearer $2" "http://$1/server-info" > /dev/null 2>&1 && return 0
+# Waits until the run of the Host that answers first says its whole start is done (issue 935). A
+# Host answers that it is there before its start is done, so an answer alone is no success: the
+# run that answered must reach `started` itself. Another run answering (that one failed late in
+# its start and was started again), no answer for 30 s after one came, no answer within three
+# minutes or a start not done within ten is a failure. A Host from before issue 935 answers only
+# once its start is done, and says no stage: its answer is its start done. Prints the run.
+host_started() {
+    local began=$SECONDS first="" heard="" said instance stage
+    while [ $((SECONDS - began)) -lt 600 ]; do
+        if said="$(curl -fsS -m 5 -H "Authorization: Bearer $2" "http://$1/host/start" 2> /dev/null)"; then
+            heard=$SECONDS
+            read -r instance stage < <(printf '%s' "$said" | python3 -c '
+import json, sys
+said = json.load(sys.stdin)
+print(said.get("instance", "before-935"), said.get("stage", "started"))' 2> /dev/null || echo "unreadable unreadable")
+            if [ -z "$first" ]; then
+                first="$instance"
+            elif [ "$instance" != "$first" ]; then
+                echo "install-host: another run answers: $first did not finish its start, $instance was started" >&2
+                return 1
+            fi
+            if [ "$stage" = started ]; then
+                echo "$instance"
+                return 0
+            fi
+        elif [ -z "$heard" ] && [ $((SECONDS - began)) -gt 180 ]; then
+            echo "install-host: the Host does not answer" >&2
+            return 1
+        elif [ -n "$heard" ] && [ $((SECONDS - heard)) -gt 30 ]; then
+            echo "install-host: the run $first stopped answering before its start was done ($stage)" >&2
+            return 1
+        fi
         sleep 0.2
     done
-    curl -fsS -m 2 -H "Authorization: Bearer $2" "http://$1/server-info" > /dev/null 2>&1
+    echo "install-host: the start of run ${first:-none} was not done within ten minutes (${stage:-no answer})" >&2
+    return 1
 }
 # Puts the last release that ran steady back in place, binaries and unit, and starts it.
 rollback() {
@@ -387,8 +416,8 @@ rollback() {
     start_host "$socket_written"
     listen="$(sed -n 's/^ExecStart=.* --listen \([^ ]*\) .*/\1/p' "$units/$host_unit" | head -1)"
     token="$(sed -n 's/^CLARP_HOST_TOKEN=//p' "$config/env" 2>/dev/null || true)"
-    if ! host_answers "$listen" "$token"; then
-        echo "install-host: rolled back from $left to $steady and started it, and the Host does not answer on $listen" >&2
+    if ! host_started "$listen" "$token" > /dev/null; then
+        echo "install-host: rolled back from $left to $steady and started it, and the Host did not finish its start on $listen" >&2
         journalctl --user -u "$host_unit" --no-pager -n 8 >&2 || true
         exit 1
     fi
@@ -1362,8 +1391,8 @@ echo "the agents' own tools: $tools names in $share/tools"
 systemctl --user daemon-reload
 if [ "$start" = 1 ]; then
     start_host "$socket_written"
-    if host_answers "$listen" "$token"; then
-        echo "running: the Host answers on $listen"
+    if run="$(host_started "$listen" "$token")"; then
+        echo "running: the Host answers on $listen, its start done (run $run)"
         # From now on it is the release whose run the next install or --judge judges.
         [ "$version" = unknown ] || write_current "$version"
         # How its start went: asked until no agent is still being opened (a minute at most). What
@@ -1392,7 +1421,7 @@ print(" ".join(parts))' 2>/dev/null || echo "its start could not be read")
             exit 3
         fi
     else
-        echo "install-host: the unit was started and the Host does not answer on $listen" >&2
+        echo "install-host: the unit was started and the Host did not finish its start on $listen" >&2
         journalctl --user -u clarp-host.service --no-pager -n 8 >&2 || true
         exit 1
     fi
