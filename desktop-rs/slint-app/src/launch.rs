@@ -101,6 +101,7 @@ fn focus_hyprland_window() {
     let _ = std::process::Command::new("sh")
         .arg("-c")
         .arg(format!(
+            // ui-text: allow (a shell script run in the background, never drawn)
             "ws=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty'); \
              addr=$(hyprctl clients -j 2>/dev/null | jq -r 'map(select(.pid == {pid})) | first | .address // empty'); \
              if [ -n \"$addr\" ] && [ -n \"$ws\" ]; then \

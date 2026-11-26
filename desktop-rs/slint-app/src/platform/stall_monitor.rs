@@ -267,6 +267,7 @@ fn module_offset(address: usize) -> String {
 fn write_capture(log: &Path, reason: &str, measure: &str, frames: &[usize]) {
     rotate(log);
     let header = format!(
+        // ui-text: allow (the stall log's header line, read by developers, never drawn)
         "== {reason} at {} pid={} {measure} build={} exe={}\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
         std::process::id(),
