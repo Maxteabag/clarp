@@ -576,6 +576,10 @@ pub struct Queued {
     pub user_word: bool,
     /// A held unsent continuation resumes on a fresh attempt, keeping its existing row.
     pub attempt: u32,
+    /// How many turns took this message into their prompt and gave it back, one after the
+    /// other, without their tool having done anything for it (`Agent::give_back`). Rebuilt
+    /// from the agent's log like the rest of its state, so a restart keeps it.
+    pub given_back: u32,
 }
 
 /// A turn whose tool process is being started: for the first time, or again.
@@ -734,6 +738,7 @@ impl Queued {
                 accepted_at_ms: at_ms,
                 user_word,
                 attempt: 1,
+                given_back: 0,
             },
             event,
         )

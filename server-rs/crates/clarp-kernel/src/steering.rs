@@ -57,6 +57,8 @@ pub struct Gathered {
     /// What it had as it waited: it waits so again if the turn gives it back.
     pub origin: crate::turn::Origin,
     pub accepted_at_ms: i64,
+    /// How often it was given back before this turn took it ([`crate::turn::Queued::given_back`]).
+    pub given_back: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2782,4 +2782,198 @@ mod tests {
             "an empty batch writes nothing and succeeds"
         );
     }
+
+    fn start_with_waiting_messages(recorder: &mut Recorder, into: u64, t: &mut i64) -> Vec<u64> {
+        let mut next = |recorder: &mut Recorder, command: Command| {
+            *t += 10;
+            recorder.handle(command, *t).unwrap();
+        };
+        let taken = recorder.agent().waiting_together();
+        for turn in &taken {
+            let join = crate::steering::Join {
+                into: TurnId(into),
+                uuid: format!("together-{}", turn.0),
+                recovery: None,
+                together: true,
+            };
+            next(recorder, Command::Join { turn: *turn, join });
+            next(recorder, Command::JoinRead { turn: *turn });
+        }
+        next(recorder, Command::TurnStarted { turn: TurnId(into) });
+        for turn in &taken {
+            next(recorder, Command::JoinSettled { turn: *turn });
+        }
+        taken.iter().map(|turn| turn.0).collect()
+    }
+
+    fn lost_with_nothing_done(recorder: &mut Recorder, into: u64, t: &mut i64) -> Vec<u64> {
+        let taken = start_with_waiting_messages(recorder, into, t);
+        *t += 10;
+        recorder
+            .handle(
+                Command::TurnEnded {
+                    turn: TurnId(into),
+                    outcome: RunOutcome::Interrupted {
+                        reason: "the tool ended and nothing said how".into(),
+                    },
+                },
+                *t,
+            )
+            .unwrap();
+        taken
+    }
+
+    fn start_give_back_history(recorder: &mut Recorder, t: i64) {
+        recorder.accept(b"first".to_vec(), Origin::User, t).unwrap();
+        recorder
+            .handle(Command::TurnStarted { turn: TurnId(1) }, t)
+            .unwrap();
+        for words in ["two", "three", "four", "five"] {
+            recorder
+                .accept(words.as_bytes().to_vec(), Origin::User, t)
+                .unwrap();
+        }
+        recorder
+            .handle(
+                Command::TurnEnded {
+                    turn: TurnId(1),
+                    outcome: RunOutcome::Completed,
+                },
+                t,
+            )
+            .unwrap();
+    }
+
+    /// Issue 927: how often a message was given back is the log's, so a Host started again
+    /// counts on from where it was and ends the message with the third turn that did nothing.
+    #[test]
+    fn the_give_backs_of_a_message_are_counted_across_a_reopen() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let mut t = 10;
+        start_give_back_history(&mut recorder, t);
+        let counts = |recorder: &Recorder| -> Vec<(u64, u32)> {
+            recorder
+                .agent()
+                .waiting()
+                .map(|queued| (queued.id.0, queued.given_back))
+                .collect()
+        };
+        assert_eq!(
+            lost_with_nothing_done(&mut recorder, 2, &mut t),
+            vec![3, 4, 5]
+        );
+        drop(recorder);
+        let mut reopened = open(&engine);
+        assert_eq!(counts(&reopened), vec![(4, 1), (5, 1)]);
+        assert_eq!(lost_with_nothing_done(&mut reopened, 3, &mut t), vec![4, 5]);
+        drop(reopened);
+        let mut reopened = open(&engine);
+        assert_eq!(counts(&reopened), vec![(5, 2)]);
+        assert_eq!(
+            start_with_waiting_messages(&mut reopened, 4, &mut t),
+            vec![5]
+        );
+        reopened
+            .accept(b"sixth".to_vec(), Origin::User, t + 1)
+            .unwrap();
+        let after = reopened.last_seq();
+        reopened
+            .handle(
+                Command::TurnEnded {
+                    turn: TurnId(4),
+                    outcome: RunOutcome::Interrupted {
+                        reason: "the tool ended and nothing said how".into(),
+                    },
+                },
+                t + 2,
+            )
+            .unwrap();
+        assert!(counts(&reopened).is_empty());
+        assert!(matches!(
+            reopened.agent().live(),
+            Some(Turn::Starting(turn)) if turn.id == TurnId(6)
+        ));
+        assert_eq!(reopened.agent().last().unwrap().id, TurnId(4));
+        assert!(!reopened.agent().deliveries().holds(5));
+        // The ordinary queued settlement is replayable by a Host that never kept counts.
+        let written = reopened
+            .log()
+            .read_after(after, Kinds::only(kind::AGENT_EVENT), 10)
+            .unwrap();
+        let events: Vec<AgentEvent> = written
+            .iter()
+            .map(|item| serde_json::from_slice(&item.body).unwrap())
+            .collect();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                AgentEvent::Turn {
+                    turn: TurnId(4),
+                    change: TurnEvent::Settled { outcome: crate::turn::Outcome::Interrupted { .. }, .. },
+                },
+                AgentEvent::Turn {
+                    turn: TurnId(5),
+                    change: TurnEvent::Settled { outcome: crate::turn::Outcome::Withdrawn { .. }, .. },
+                },
+                AgentEvent::Turn {
+                    turn: TurnId(6),
+                    change: TurnEvent::Started { .. },
+                },
+            ]
+        ));
+        let before = reopened.agent().clone();
+        drop(reopened);
+        assert_eq!(open(&engine).agent(), &before);
+    }
+
+    #[test]
+    fn a_legacy_give_back_journal_replays_a_third_return_and_next_start() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let mut t = 10;
+        start_give_back_history(&mut recorder, t);
+        assert_eq!(
+            lost_with_nothing_done(&mut recorder, 2, &mut t),
+            vec![3, 4, 5]
+        );
+        assert_eq!(lost_with_nothing_done(&mut recorder, 3, &mut t), vec![4, 5]);
+        assert_eq!(
+            start_with_waiting_messages(&mut recorder, 4, &mut t),
+            vec![5]
+        );
+        assert_eq!(recorder.agent().gathered(TurnId(4))[0].given_back, 2);
+        drop(recorder);
+
+        // The first two settlements need no cap decision and use the old wire shape.
+        // Finish the history with what the old Host wrote after the third interruption.
+        let mut log = engine
+            .open(Path::new("/agents/a"), standard_set("zstd").unwrap())
+            .unwrap();
+        let at = t + 10;
+        let ended = serde_json::json!({
+            "agent": "turn", "turn": 4,
+            "change": {
+                "event": "settled", "at_ms": at,
+                "outcome": {"outcome": "interrupted", "reason": "the process is gone"}
+            }
+        });
+        let started = serde_json::json!({
+            "agent": "turn", "turn": 5,
+            "change": { "event": "started", "at_ms": at }
+        });
+        log.append(
+            &[ended, started].map(|event| {
+                NewItem::new(kind::AGENT_EVENT, at, serde_json::to_vec(&event).unwrap())
+            }),
+        )
+        .unwrap();
+        drop(log);
+
+        let reopened = open(&engine);
+        assert!(matches!(
+            reopened.agent().live(),
+            Some(Turn::Starting(turn)) if turn.id == TurnId(5)
+        ));
+    }
 }

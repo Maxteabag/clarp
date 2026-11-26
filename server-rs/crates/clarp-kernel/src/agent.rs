@@ -35,6 +35,11 @@ pub const DRAINED: &str = "nothing waits";
 /// The actor recorded on the mailbox hold in an agent import.
 pub const IMPORT: &str = "move";
 
+/// How many turns in a row may take a message of the user's into their prompt and end without
+/// their tool having done anything for it ([`gives_back`]): the last of them ends it rather than
+/// give it back once more.
+pub const TAKEN_FOR_NOTHING: u32 = 3;
+
 /// Who stopped a turn that a direct message replaced.
 pub fn preempted_by(turn: TurnId) -> String {
     format!("message of turn {}", turn.0)
@@ -750,6 +755,7 @@ impl Agent {
                     admission: Admission::Queue,
                     user_word: false,
                     attempt: starting.attempt.saturating_add(1),
+                    given_back: 0,
                 })
             }
             Turn::Parked(parked) if parked.id == turn && !parked.ran => Some(Queued {
@@ -760,6 +766,7 @@ impl Agent {
                 admission: Admission::Queue,
                 user_word: false,
                 attempt: parked.attempts.saturating_add(1),
+                given_back: 0,
             }),
             _ => None,
         }
@@ -1161,6 +1168,7 @@ impl Agent {
                     accepted_at_ms: one.accepted_at_ms,
                     user_word: true,
                     attempt: 1,
+                    given_back: one.given_back.saturating_add(1),
                 },
             );
         }
@@ -1874,6 +1882,7 @@ impl Agent {
                             message_seq: join.message_seq,
                             origin: waiting.origin.clone(),
                             accepted_at_ms: waiting.accepted_at_ms,
+                            given_back: waiting.given_back,
                         });
                 }
                 self.mailbox.remove(position);
@@ -2416,9 +2425,37 @@ struct Work {
 
 impl Work {
     fn record(&mut self, event: AgentEvent) {
-        // `decide` only records events it has just shown to be legal; if one is not, the state
-        // machine itself is wrong, and dropping the event is the one way not to make it worse.
-        if self.agent.apply(&event).is_ok() {
+        // Settle the carrier first, which returns its gathered messages on every reader.
+        // Then remove exhausted messages with the existing queued settlement before deciding
+        // what starts next. All these events are written in one journal append.
+        let exhausted: Vec<_> = match &event {
+            AgentEvent::Turn {
+                turn,
+                change: TurnEvent::Settled { outcome, at_ms },
+            } if self.agent.live_id() == Some(*turn)
+                && !self.agent.live_worked
+                && gives_back(outcome) =>
+            {
+                self.agent
+                    .gathered(*turn)
+                    .iter()
+                    .filter(|one| one.given_back >= TAKEN_FOR_NOTHING - 1)
+                    .map(|one| AgentEvent::Turn {
+                        turn: one.turn,
+                        change: TurnEvent::Settled {
+                            outcome: Outcome::Withdrawn { by: "host".into() },
+                            at_ms: *at_ms,
+                        },
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        // Decided events are legal in sequence. If one fails, do not apply its dependents.
+        for event in std::iter::once(event).chain(exhausted) {
+            if self.agent.apply(&event).is_err() {
+                break;
+            }
             self.decision.events.push(event);
         }
     }
@@ -5243,5 +5280,135 @@ mod tests {
             .unwrap();
         assert!(worked.waiting().is_empty(), "nothing given back");
         assert!(gathered(&worked, 2).is_empty());
+    }
+
+    /// How often each waiting message was given back, in queue order.
+    fn given_back(a: &Driven) -> Vec<(u64, u32)> {
+        a.agent
+            .waiting()
+            .map(|queued| (queued.id.0, queued.given_back))
+            .collect()
+    }
+
+    /// The live turn takes what waits behind it, its process starts, and is gone before its
+    /// tool did anything: its joins settled as the actor settles them.
+    fn lost_with_nothing_done(a: &mut Driven, turn: u64) -> Vec<u64> {
+        let taken = take_together(a, turn);
+        a.send(Command::TurnStarted { turn: TurnId(turn) }).unwrap();
+        for one in &taken {
+            a.send(Command::JoinSettled { turn: TurnId(*one) }).unwrap();
+        }
+        a.send(Command::TurnEnded {
+            turn: TurnId(turn),
+            outcome: RunOutcome::Interrupted {
+                reason: "the turn's process is gone and did not say how it went".into(),
+            },
+        })
+        .unwrap();
+        taken
+    }
+
+    /// Turn 1 runs and four of the user's messages (turns 2 to 5) wait behind it; it ends, and
+    /// turn 2 is being started.
+    fn four_waiting() -> Driven {
+        let mut a = Driven::new();
+        a.user(10);
+        a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+        for seq in [11, 12, 13, 14] {
+            a.user(seq);
+        }
+        a.finish(1);
+        assert_eq!(a.live(), Some(2));
+        a
+    }
+
+    #[test]
+    fn a_message_taken_into_three_turns_in_a_row_that_did_nothing_ends_with_the_third() {
+        let mut a = four_waiting();
+        assert_eq!(lost_with_nothing_done(&mut a, 2), vec![3, 4, 5]);
+        // Given back fewer times than the limit: back in the queue, first, in order.
+        assert_eq!(a.live(), Some(3));
+        assert_eq!(given_back(&a), vec![(4, 1), (5, 1)]);
+        assert_eq!(lost_with_nothing_done(&mut a, 3), vec![4, 5]);
+        assert_eq!(a.live(), Some(4));
+        assert_eq!(given_back(&a), vec![(5, 2)]);
+        assert_eq!(take_together(&mut a, 4), vec![5]);
+        assert_eq!(a.agent.gathered(TurnId(4))[0].given_back, 2);
+        // The count is the log's: the state a restart rebuilds holds it.
+        let restarted = Agent::replay(&a.history).unwrap();
+        assert_eq!(restarted.gathered(TurnId(4)), a.agent.gathered(TurnId(4)));
+        a.send(Command::TurnStarted { turn: TurnId(4) }).unwrap();
+        a.send(Command::JoinSettled { turn: TurnId(5) }).unwrap();
+        a.send(Command::TurnEnded {
+            turn: TurnId(4),
+            outcome: RunOutcome::Interrupted {
+                reason: "the turn's process is gone and did not say how it went".into(),
+            },
+        })
+        .unwrap();
+        // The third turn that took it for nothing: it ends with that turn, not given back.
+        assert!(a.waiting().is_empty(), "message 5 is over");
+        assert_eq!(a.live(), None);
+        assert!(gathered(&a, 4).is_empty());
+        assert!(!a.agent.deliveries().holds(5));
+        a.user(15);
+        assert_eq!(a.live(), Some(6), "the agent takes new work as ever");
+    }
+
+    #[test]
+    fn a_message_given_back_twice_ends_with_a_turn_that_worked_or_the_users_stop() {
+        for how in ["worked", "stopped"] {
+            let mut a = four_waiting();
+            lost_with_nothing_done(&mut a, 2);
+            lost_with_nothing_done(&mut a, 3);
+            assert_eq!(given_back(&a), vec![(5, 2)]);
+            assert_eq!(take_together(&mut a, 4), vec![5]);
+            a.send(Command::TurnStarted { turn: TurnId(4) }).unwrap();
+            if how == "worked" {
+                a.send(Command::TurnMoved {
+                    turn: TurnId(4),
+                    activity: Activity::Responding,
+                })
+                .unwrap();
+                a.send(Command::Stop { by: an_agent() }).unwrap();
+            } else {
+                a.send(Command::Stop {
+                    by: Control::by("user"),
+                })
+                .unwrap();
+            }
+            a.send(Command::JoinSettled { turn: TurnId(5) }).unwrap();
+            a.send(Command::TurnEnded {
+                turn: TurnId(4),
+                outcome: RunOutcome::Interrupted {
+                    reason: "the tool was ended by signal 15".into(),
+                },
+            })
+            .unwrap();
+            assert!(a.waiting().is_empty(), "{how}: nothing given back");
+        }
+    }
+
+    #[test]
+    fn a_message_given_back_fewer_times_goes_back_again_ahead_of_newer_work() {
+        let mut a = four_waiting();
+        lost_with_nothing_done(&mut a, 2);
+        a.user(15);
+        assert_eq!(take_together(&mut a, 3), vec![4, 5, 6]);
+        a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
+        a.user(16);
+        for turn in [4, 5, 6] {
+            a.send(Command::JoinSettled { turn: TurnId(turn) }).unwrap();
+        }
+        a.send(Command::TurnEnded {
+            turn: TurnId(3),
+            outcome: RunOutcome::Interrupted {
+                reason: "the turn's process is gone and did not say how it went".into(),
+            },
+        })
+        .unwrap();
+        // Each counted on its own, and all of them ahead of the message sent after.
+        assert_eq!(a.live(), Some(4));
+        assert_eq!(given_back(&a), vec![(5, 2), (6, 1), (7, 0)]);
     }
 }
