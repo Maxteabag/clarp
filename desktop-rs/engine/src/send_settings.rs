@@ -28,6 +28,9 @@ pub const NOTICE: Duration = Duration::from_secs(5);
 pub(crate) struct SendSettings {
     /// `send_while_busy` was in the last `/server-info`.
     feature: bool,
+    /// The setting was asked for on this connection: once at connect, as
+    /// `/server-info` may answer more than once.
+    asked: bool,
     /// The Host's setting (Steer now until it says otherwise).
     while_busy: WhileBusy,
     /// Why the last change did not go through, as the Host said it.
@@ -122,7 +125,8 @@ impl Engine {
             self.send_settings = SendSettings { feature: has, ..Default::default() };
             self.changes.push(Change::HostStatus);
         }
-        if has {
+        if has && !self.send_settings.asked {
+            self.send_settings.asked = true;
             self.api.get(READ, "/send-settings", &[]);
         }
     }
@@ -178,6 +182,8 @@ impl Engine {
             true
         } else if tag == READ {
             eprintln!("Engine: GET /send-settings failed ({status}): {message}");
+            // The next `/server-info` asks again.
+            self.send_settings.asked = false;
             true
         } else {
             false

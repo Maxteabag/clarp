@@ -66,7 +66,8 @@ fn the_hosts_fallback_shows_in_the_chip_and_the_chip_counts_what_waits() {
     host.control("/__control/agent", json!({"session": "rachel", "set": {"busy": true, "latest_state": "thinking", "queued_turn_count": 2}}));
     d.until("the agent works", |e| e.roster().find("rachel").is_some_and(|a| a.busy));
     d.engine.load_turn_queue("rachel");
-    d.until("the chip", |e| e.send_chip("rachel").is_some_and(|c| c.action.is_some()));
+    // Read while the agent works, the waiting message is steerable.
+    d.until("the chip", |e| e.send_chip("rachel").is_some_and(|c| c.action == Some(ChipAction::Steer("q1".into()))));
     let chip = d.engine.send_chip("rachel").unwrap();
     assert_eq!(chip.count, 2);
     assert_eq!(chip.action, Some(ChipAction::Steer("q1".into())));
