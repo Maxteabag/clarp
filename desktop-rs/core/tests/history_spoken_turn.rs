@@ -73,11 +73,10 @@ fn at(seconds: i64) -> String {
     chrono::DateTime::from_timestamp_millis(1791100000000 + seconds * 1000).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
 }
 
-/// A turn without tool calls shows its answer only, in history as live does
-/// (CL-081): no "Worked for" row, and the unspoken commentary does not
-/// reappear when history takes the turn over from live (#653).
+/// A turn without tool calls has no "Worked for" row in history, as live
+/// (CL-081): what it wrote shows in place.
 #[test]
-fn a_turn_without_tools_shows_its_answer_only_in_history_as_live_does() {
+fn a_turn_without_tools_has_no_work_row_in_history_as_live() {
     let rows: Vec<Message> = [
         json!({"id": "u-n", "role": "user", "text": "Is it fine?", "timestamp": at(0), "trace_id": "tr-n"}),
         json!({"id": "a-note", "role": "assistant", "phase": "commentary", "text": "Let me check.", "timestamp": at(1), "trace_id": "tr-n"}),
@@ -89,8 +88,7 @@ fn a_turn_without_tools_shows_its_answer_only_in_history_as_live_does() {
         let folded = present(&rows, None, &options(expanded));
         let read: Vec<String> = folded.folds.iter().flat_map(read).collect();
         assert!(read.iter().all(|r| !r.starts_with("Worked for")), "{read:?}");
-        assert!(!read.iter().any(|r| r == "row a-note"), "{read:?}");
-        assert!(folded.hidden_rows.contains("a-note"));
+        assert!(!folded.hidden_rows.contains("a-note"), "the commentary shows");
     }
 }
 

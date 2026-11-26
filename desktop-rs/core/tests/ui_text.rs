@@ -132,13 +132,6 @@ fn allowed(lines: &[&str], line: usize) -> Option<bool> {
 /// rubric refuses, each kept as it is until its fix is approved one by one
 /// (issue #888). File, the literal as written, the catalogue entry.
 const WAITING: &[(&str, &str, &str)] = &[
-    ("core/src/narrator.rs", "Off \u{2014} no background requests", "CL-077"),
-    ("core/src/prefs.rs", "{} \u{2014} {} (:set {}; aliases: {})", "CL-077"),
-    ("core/src/prefs.rs", "{} \u{2014} {}", "CL-077"),
-    ("core/src/prefs.rs", "Font size \u{2014} Size of message text in the chat (:set fontsize)", "CL-077"),
-    ("engine/src/lifecycle.rs", "{} \u{2014} {}", "CL-077"),
-    ("slint-app/ui/app.slint", " \u{2014} Clarp", "CL-077"),
-    ("slint-app/ui/preview.slint", "Pinned to an older build \u{2014} automatic updates paused", "CL-077"),
 ];
 
 #[test]

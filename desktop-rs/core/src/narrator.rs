@@ -195,7 +195,7 @@ impl Narrator {
 
     pub fn status(&self) -> String {
         if !self.enabled {
-            return "Off — no background requests".into();
+            return "Off: no background requests".into();
         }
         if !self.error.is_empty() {
             return self.error.clone();

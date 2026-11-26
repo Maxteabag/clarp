@@ -683,7 +683,7 @@ impl Engine {
             .local_agent_directory(session)
             .or_else(clarp_core::dirs::home)
             .map_or_else(|| "/".to_owned(), |path| path.to_string_lossy().into_owned());
-        let title = format!("{} — {}", display_name(&agent), agent.backend);
+        let title = format!("{} · {}", display_name(&agent), agent.backend);
         let command = clarp_core::links::agent_terminal_command(&bridge, session, &self.base_url);
         let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
         let (launcher, launch_arguments) = clarp_core::links::terminal_command(xdg, &title, &directory, &command);

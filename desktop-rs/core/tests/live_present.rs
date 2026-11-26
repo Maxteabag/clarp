@@ -826,10 +826,10 @@ fn a_turn_of_thinking_and_its_answer_shows_the_answer_only() {
     }
 }
 
-/// A tool-less turn's unspoken commentary goes with the answer-only rule;
-/// spoken commentary (the user heard it) and Always visible keep their place.
+/// A tool-less turn, stopped or not, keeps what it wrote in place and loses
+/// its thought and work rows (CL-071, CL-081).
 #[test]
-fn a_tool_less_turn_keeps_only_commentary_the_user_heard_or_asked_to_see() {
+fn a_tool_less_turn_keeps_what_it_wrote_and_no_work_or_thought_row() {
     let s = SPOKEN_STARTED;
     let item = |id: &str, ordinal: i64, phase: &str, text: &str| json!({"id": id, "kind": "message", "rev": 1, "conv": "c-q", "turn_id": "tr-q",
         "status": "completed", "ordinal": ordinal, "started_at_ms": s + ordinal * 100, "ended_at_ms": s + ordinal * 100 + 50, "phase": phase, "text": text});
@@ -848,10 +848,7 @@ fn a_tool_less_turn_keeps_only_commentary_the_user_heard_or_asked_to_see() {
     let p = present(&view, &[], &options(&[], 0));
     let texts: Vec<&str> = p.entries.iter().map(|e| e.text.as_str()).collect();
     assert!(p.entries.iter().all(|e| !matches!(e.kind, Kind::Fold | Kind::Reasoning)), "no work row, no thought row, stopped or not: {:?}", titles(&p));
-    assert_eq!(texts, ["On it.", "TOKYO"], "the heard commentary and the answer");
-    let always = present(&view, &[], &Options { show_commentary: true, ..options(&[], 0) });
-    let texts: Vec<&str> = always.entries.iter().map(|e| e.text.as_str()).collect();
-    assert_eq!(texts, ["Let me check.", "On it.", "TOKYO"], "Always visible keeps the commentary");
+    assert_eq!(texts, ["Let me check.", "On it.", "TOKYO"], "what it wrote, in order");
 }
 
 /// A thought under half a second would read "Thought for 0s": it shows

@@ -617,16 +617,12 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
     // turn folds the same way when the reader groups it: `Working · N tools`, the
     // calls so far. Always visible keeps commentary in its place.
     let spoken = |entry: &Entry| entry.kind == Kind::Message && entry.spoken && entry.phase == "commentary";
-    // A settled turn that used no tool shows its answer only (CL-081): no
-    // "Worked for" row, and its thinking and unspoken commentary go with the
-    // row they would have folded under. Spoken commentary (the user heard it)
-    // and Always visible commentary keep their places.
+    // A settled turn that used no tool shows what it said and nothing about
+    // its work (CL-081): no "Worked for" row, and its thinking goes with the
+    // row it would have folded under. What it wrote stays: with no row there
+    // would be nothing to open it from.
     if settled && !entries.iter().any(|e| matches!(e.kind, Kind::Tool | Kind::Explore)) {
-        entries.retain(|e| match e.kind {
-            Kind::Reasoning => false,
-            Kind::Message => e.phase != "commentary" || spoken(e) || options.show_commentary,
-            _ => true,
-        });
+        entries.retain(|e| e.kind != Kind::Reasoning);
         return entries;
     }
     if settled || options.fold_running {
