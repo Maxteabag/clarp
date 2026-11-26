@@ -221,6 +221,16 @@ component Row inherits Rectangle {
                     children: root.chat.running-helpers;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
+                // Compact has no preview line: a snoozed row's "z" sits here.
+                if root.compact && root.chat.snoozed != "": Text {
+                    text: "z";
+                    color: Palette.faint;
+                    font-size: 11 * Look.unit;
+                    vertical-alignment: center;
+                    accessible-role: text;
+                    accessible-id: "row-snoozed";
+                    accessible-label: "Snoozed until " + root.chat.snoozed;
+                }
                 // Compact: a glyph and a count per kind, after the name, which
                 // elides to make room.
                 if root.compact && root.chat.running-helpers > 0: CompactWork {
