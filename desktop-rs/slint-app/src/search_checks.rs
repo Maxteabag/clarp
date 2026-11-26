@@ -588,7 +588,7 @@ pub fn mention_check(out: String) {
             headless::type_text("ses");
             true
         })),
-        ("narrowed", Box::new(|_, _, elapsed| {
+        ("narrowed", Box::new(move |_, _, elapsed| {
             if mentions() != ["clarp-sessions"] || elapsed < Duration::from_millis(200) {
                 return false;
             }
