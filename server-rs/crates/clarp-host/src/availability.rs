@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use clarp_actor::Status;
 use clarp_kernel::failures;
-use clarp_kernel::turn::{Activity, Wait};
+use clarp_kernel::turn::{Activity, Outcome, Wait};
 use serde_json::{Value, json};
 
 use crate::fleet::Member;
@@ -46,6 +46,12 @@ use crate::fleet::Member;
 pub const UNRESPONSIVE_AFTER_MS: i64 = 180_000;
 /// How often the Host looks at every agent for what time alone changes.
 pub const SWEEP_EVERY: Duration = Duration::from_secs(15);
+/// How long a turn refused for a usage limit shows the switch to another seat, which takes the
+/// next turn: by then the Host has moved the tool.
+const SWITCH_SHOWN_MS: i64 = 120_000;
+/// How long a turn refused for a usage limit with no reset known shows the limit: a usage window
+/// is five hours at most, and the next turn tells again.
+const REFUSAL_SHOWN_MS: i64 = 5 * 3_600_000;
 /// How long the moves of agents are gathered before they are looked at.
 const BATCHED_FOR: Duration = Duration::from_millis(100);
 /// How long a tool's process takes to start, until the Host has measured a few of its own.
@@ -98,6 +104,9 @@ pub struct Facts<'a> {
     pub backend_quota: &'a Value,
     /// The agent runs on a provider of its own, never on the machine's accounts.
     pub bound: bool,
+    /// Another seat of its tool has room and this Host moves the tool to it (the Hotseat's
+    /// failover, `quota::Rows::spare_seat`).
+    pub spare_seat: bool,
     /// The running turn's last sign of life: its tool's last output, else its start.
     pub last_alive_ms: Option<i64>,
     /// How long its tool takes to start ([`start_estimate`]).
@@ -114,14 +123,7 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
     let queue_ahead = status.queue_depth;
     let live = status.live.as_ref();
     let at = |state: &'static str, text: String, since_ms: i64, back_at_ms: Option<i64>| {
-        Availability {
-            state,
-            text,
-            since_ms,
-            back_at_ms,
-            queue_ahead,
-            last_alive_ms: None,
-        }
+        at_state(state, text, since_ms, back_at_ms, queue_ahead)
     };
     // The account in use is used up and no other seat would take the turn.
     let used_up = Some(facts.backend_quota)
@@ -153,9 +155,39 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
                 None,
             );
         }
-    } else if used_up.is_some() {
-        let since = when("observed_at").unwrap_or_else(|| rested_since(facts));
-        return at("usage_limit", "Usage limit".into(), since, when("resets_at"));
+    } else {
+        // Its last turn was refused for a usage limit, whatever its tool: it ended failed with
+        // that kind, as a tool the Host keeps no pool of ends it.
+        let refused_at = status.last.as_ref().and_then(|last| match &last.outcome {
+            Outcome::Failed { reason, kind } => {
+                let kind = if kind.is_empty() {
+                    failures::classify_error(reason)
+                } else {
+                    kind
+                };
+                (kind == failures::USAGE_LIMIT).then_some(last.ended_at_ms)
+            }
+            _ => None,
+        });
+        let back = when("resets_at").filter(|at| *at > facts.now_ms);
+        let age = |at: i64| facts.now_ms.saturating_sub(at);
+        match refused_at {
+            // Another seat takes the next turn: the Host is moving the tool to it.
+            Some(refused) if facts.spare_seat && !facts.bound => {
+                if age(refused) < SWITCH_SHOWN_MS {
+                    let text = "Switching account (usage limit)".to_string();
+                    return at("switching_account", text, refused, None);
+                }
+            }
+            Some(refused) if used_up.is_some() || age(refused) < REFUSAL_SHOWN_MS => {
+                return at("usage_limit", "Usage limit".into(), refused, back);
+            }
+            _ if used_up.is_some() => {
+                let since = when("observed_at").unwrap_or_else(|| rested_since(facts));
+                return at("usage_limit", "Usage limit".into(), since, back);
+            }
+            _ => {}
+        }
     }
     if facts.broken.is_some() {
         return at("restarting", "Restarting".into(), facts.host_started_ms, None);
@@ -202,6 +234,23 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
     shown
 }
 
+fn at_state(
+    state: &'static str,
+    text: String,
+    since_ms: i64,
+    back_at_ms: Option<i64>,
+    queue_ahead: usize,
+) -> Availability {
+    Availability {
+        state,
+        text,
+        since_ms,
+        back_at_ms,
+        queue_ahead,
+        last_alive_ms: None,
+    }
+}
+
 /// Since when an agent with no turn has rested: its last turn's end, else its making.
 fn rested_since(facts: &Facts<'_>) -> i64 {
     facts
@@ -231,18 +280,26 @@ impl At {
 pub fn of_member(
     member: &Member,
     view: &crate::agent::View,
+    quota: &crate::quota::Rows,
     backend_quota: &Value,
     at: At,
 ) -> Value {
-    of(member, view, backend_quota, at).to_json()
+    of(member, view, quota, backend_quota, at).to_json()
 }
 
-fn of(member: &Member, view: &crate::agent::View, backend_quota: &Value, at: At) -> Availability {
+fn of(
+    member: &Member,
+    view: &crate::agent::View,
+    quota: &crate::quota::Rows,
+    backend_quota: &Value,
+    at: At,
+) -> Availability {
     decide(&Facts {
         status: &view.status,
         broken: view.broken.as_deref(),
         backend_quota,
         bound: member.record.bound(),
+        spare_seat: quota.spare_seat(view.backend, &member.record.model),
         last_alive_ms: member.agent.last_alive_ms(),
         start_ms: start_estimate(view.backend),
         created_at_ms: member.record.created_at_ms,
@@ -363,7 +420,7 @@ pub fn run(app: &crate::edge::App) {
                 }
                 let view = member.agent.view();
                 let backend_quota = quota.of(view.backend, &member.record.model);
-                let now = of(member, &view, &backend_quota, at);
+                let now = of(member, &view, &quota, &backend_quota, at);
                 if moved.is_none() {
                     seen.insert(id.clone());
                 }
@@ -473,6 +530,7 @@ mod tests {
             broken: None,
             backend_quota: quota,
             bound: false,
+            spare_seat: false,
             last_alive_ms: alive,
             start_ms: START_DEFAULT_MS,
             created_at_ms: 5,
@@ -572,6 +630,81 @@ mod tests {
         }
     }
 
+    fn refused(kind: &str, reason: &str, ended_at_ms: i64) -> Status {
+        let mut status = idle();
+        status.last = Some(clarp_kernel::turn::Settled {
+            id: TurnId(1),
+            message_seq: 1,
+            origin: Origin::User,
+            outcome: Outcome::Failed {
+                reason: reason.into(),
+                kind: kind.into(),
+            },
+            accepted_at_ms: ended_at_ms - 5_000,
+            started_at_ms: Some(ended_at_ms - 4_000),
+            ended_at_ms,
+            tool_count: 0,
+            attempts: 1,
+            account_waits: 0,
+            never_ran: false,
+        });
+        status
+    }
+
+    #[test]
+    fn a_turn_that_ended_on_a_usage_limit_shows_the_limit_whatever_its_tool() {
+        // A tool the Host keeps no pool of ends the turn failed with the kind.
+        let status = refused(failures::USAGE_LIMIT, "Usage limit reached", NOW - 60_000);
+        let limit = decided(&status, &Value::Null, None);
+        assert_eq!(
+            (limit.state, limit.text.as_str(), limit.since_ms, limit.back_at_ms),
+            ("usage_limit", "Usage limit", NOW - 60_000, None)
+        );
+        // With the reset where the Host's reading of the tool's account has one.
+        let used_up = json!({"state": "exhausted", "resets_at": "2030-03-17T19:00:00Z"});
+        let limit = decided(&status, &used_up, None);
+        assert_eq!(
+            (limit.state, limit.since_ms, limit.back_at_ms),
+            ("usage_limit", NOW - 60_000, clarp_kernel::quota::from_text("2030-03-17T19:00:00Z"))
+        );
+        // A log from before the kind was kept is read by its words.
+        let words = "You've hit your usage limit. Try again later.";
+        let older = refused("", words, NOW - 60_000);
+        let expected = if failures::classify_error(words) == failures::USAGE_LIMIT {
+            "usage_limit"
+        } else {
+            "ok"
+        };
+        assert_eq!(decided(&older, &Value::Null, None).state, expected);
+        // Another failure says nothing of the account.
+        let other = refused("stalled", "the tool stalled", NOW - 60_000);
+        assert_eq!(decided(&other, &Value::Null, None).state, "ok");
+        // Long after, with no reset known, the next turn tells again.
+        let old = refused(failures::USAGE_LIMIT, "Usage limit reached", NOW - REFUSAL_SHOWN_MS);
+        assert_eq!(decided(&old, &Value::Null, None).state, "ok");
+        // Where another seat has room, the Host moves the tool to it: a switch, for a while.
+        let switch = |ended_at_ms: i64| {
+            decide(&Facts {
+                status: &refused(failures::USAGE_LIMIT, "Usage limit reached", ended_at_ms),
+                broken: None,
+                backend_quota: &Value::Null,
+                bound: false,
+                spare_seat: true,
+                last_alive_ms: None,
+                start_ms: START_DEFAULT_MS,
+                created_at_ms: 5,
+                host_started_ms: 7,
+                now_ms: NOW,
+            })
+        };
+        let switching = switch(NOW - 10_000);
+        assert_eq!(
+            (switching.state, switching.text.as_str()),
+            ("switching_account", "Switching account (usage limit)")
+        );
+        assert_eq!(switch(NOW - SWITCH_SHOWN_MS).state, "ok");
+    }
+
     #[test]
     fn an_idle_agent_whose_account_is_used_up_with_no_seat_left_cannot_answer() {
         let used_up = json!({
@@ -593,6 +726,7 @@ mod tests {
             broken: None,
             backend_quota: &used_up,
             bound: true,
+            spare_seat: false,
             last_alive_ms: None,
             start_ms: START_DEFAULT_MS,
             created_at_ms: 5,
@@ -637,6 +771,7 @@ mod tests {
             broken: Some(crate::agent::OPENING),
             backend_quota: &Value::Null,
             bound: false,
+            spare_seat: false,
             last_alive_ms: None,
             start_ms: START_DEFAULT_MS,
             created_at_ms: 5,

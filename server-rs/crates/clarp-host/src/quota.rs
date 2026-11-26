@@ -1037,6 +1037,12 @@ impl Rows {
         }
     }
 
+    /// Whether another seat of its tool has room and this Host moves the tool to it, for an
+    /// agent on `model` (`availability`: a turn refused for a usage limit is then a switch).
+    pub fn spare_seat(&self, tool: &str, model: &str) -> bool {
+        self.failover(tool, model) == clarp_kernel::quota_near::Failover::Spare
+    }
+
     /// Whether another seat would take a turn of an agent on `model` from its tool.
     fn failover(&self, tool: &str, model: &str) -> clarp_kernel::quota_near::Failover {
         let selector = self.selectors.contains(tool);
