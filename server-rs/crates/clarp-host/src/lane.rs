@@ -455,19 +455,6 @@ pub(crate) fn mark_owners_view(run: &Path, agent_id: &str) {
     touch(&run.join(format!("{agent_id}-owner-view.mark")));
 }
 
-/// A turn of this agent ended: whether the owner sent it. While the last turn that ended was his,
-/// the agent's lanes stay his however long ago it was, so a helper's lane never takes the place
-/// of his front desk's (issue 908). A turn another agent sent makes them the agents' own again;
-/// one the Host started by itself (a compaction, a schedule, a goal's wake) changes nothing.
-pub(crate) fn mark_last_turn(run: &Path, agent_id: &str, origin: &clarp_kernel::turn::Origin) {
-    let path = run.join(format!("{agent_id}-owner-last.mark"));
-    if origin.is_user_send() {
-        touch(&path);
-    } else if matches!(origin, clarp_kernel::turn::Origin::Agent { .. }) {
-        let _ = std::fs::remove_file(path);
-    }
-}
-
 fn touch(path: &Path) {
     let _ = OpenOptions::new()
         .create(true)
@@ -476,18 +463,16 @@ fn touch(path: &Path) {
         .and_then(|file| file.set_modified(std::time::SystemTime::now()));
 }
 
-/// Whether this agent's lanes are the owner's: a turn of his within half an hour, the last turn
-/// of it that ended his ([`mark_last_turn`]), or a chat of it open on one of his devices. Every
-/// other lane is the agents' own (helpers, janitors, one agent asking another).
+/// Whether this agent's lanes are the owner's: a turn of his within half an hour, or a chat of
+/// it open on one of his devices. Every other lane is the agents' own (helpers, janitors,
+/// one agent asking another).
 fn owners(run: &Path, agent_id: &str) -> bool {
     let fresh = |name: &str, within: Duration| {
         std::fs::metadata(run.join(format!("{agent_id}-{name}.mark")))
             .and_then(|meta| meta.modified())
             .is_ok_and(|at| at.elapsed().is_ok_and(|age| age <= within))
     };
-    fresh("owner-turn", OWNERS_TURN)
-        || fresh("owner-view", OWNERS_VIEW)
-        || run.join(format!("{agent_id}-owner-last.mark")).exists()
+    fresh("owner-turn", OWNERS_TURN) || fresh("owner-view", OWNERS_VIEW)
 }
 
 /// A turn of its own process holds its conversation's lock (under `locks`, named by `thread`)
@@ -717,7 +702,7 @@ impl Endpoint {
         } else {
             // Said, so a turn that ran cold for want of a place is known in the Host's log.
             eprintln!(
-                "clarp-host: no place for the {} lane of {}: no idle lane may leave for it; its turn runs in a process of its own",
+                "clarp-host: no place for the {} lane of {}: no idle lane that may leave for it made room; its turn runs in a process of its own",
                 self.tool.name(),
                 self.agent().unwrap_or("an agent"),
             );
@@ -1017,12 +1002,13 @@ impl Endpoint {
     /// old tool to end. A lane that refuses (a turn claimed it since it was looked at) says so
     /// at once. One that takes the ask removes its socket first, as every lane leaving does, and
     /// answers at once (Codex, Muse, OpenCode) or once its tool has gone (Claude Code, up to its
-    /// own 2 s limit): either is enough, and nothing is waited for beyond [`REFUSAL_LOOK`]
-    /// (issue 908). Whether it took the ask, or had gone already.
+    /// own 2 s limit); nothing is waited for beyond [`REFUSAL_LOOK`] (issue 908). Whether it
+    /// left for this ask: it said it goes, or its socket went after it was asked. One that
+    /// refused, said nothing with its socket still there, or had gone before the ask (another
+    /// start's place, or its own idle time) did not.
     fn asked_to_leave(&self) -> bool {
-        let stream = match self.connect(&Lifecycle::Retire, LEAVING_LOOK) {
-            Ok(stream) => stream,
-            Err(error) => return gone(&error),
+        let Ok(stream) = self.connect(&Lifecycle::Retire, LEAVING_LOOK) else {
+            return false;
         };
         let until = Instant::now() + REFUSAL_LOOK;
         let mut input = BufReader::new(stream);
@@ -1031,15 +1017,13 @@ impl Endpoint {
             match input.read_line(&mut said) {
                 Ok(0) => return !self.socket.exists(),
                 Ok(_) => return replied::<Status>(&mut said.as_bytes(), self.tool).is_ok(),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
-                {
+                Err(error) if unanswered(&error) => {
                     // On its way out: its socket is gone, and its answer may wait for its exit.
-                    if !self.socket.exists() || Instant::now() >= until {
+                    if !self.socket.exists() {
                         return true;
+                    }
+                    if Instant::now() >= until {
+                        return false;
                     }
                 }
                 Err(_) => return !self.socket.exists(),
@@ -1272,24 +1256,24 @@ pub(crate) fn once_more<T>(
 /// talking with leave first, longest idle first, then idle lanes of his, longest idle first. A
 /// lane for an agent of his may send any idle lane away; a lane of the agents' own may send
 /// away only idle lanes of the agents' own, so it never takes a lane the owner's next turn is
-/// about to use. Where both want a place at once, his start chooses first ([`gate`]).
+/// about to use. A start of his is counted at the [`gate`] before it looks at the lanes: a start
+/// of the agents' own that chooses while his is still looking leaves room for his, so where one
+/// place can be made it is his. Nobody waits for another's start.
 ///
 /// What may leave is reckoned first. A lane that is not `needed` sends nothing away unless what
 /// may leave makes room for it, within the limits or in the place of idle lanes: a start that
 /// will not happen ends no lane. A `needed` lane starts whatever the answer, so it sends away
-/// what it may, toward the limits. Answers whether the new lane has its place: `false` when no
-/// idle lane may leave for it (every lane that is left runs work).
+/// what it may, toward the limits. Only a lane that left counts as a place: one that refused,
+/// said nothing, or had gone before it was asked does not, and a plan within the limits is
+/// checked against the limits again once they were asked, never taken as paid. Answers whether
+/// the new lane has its place: `false` when no place could be made.
 fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
     let for_owner = own.agent().is_some_and(|agent| owners(run, agent));
     let gate = gate::of(run);
-    // His start says so before it looks at the lanes; another waits for his to have chosen.
-    let first = if for_owner {
-        Some(gate.owner_first())
-    } else {
-        gate.after_owners(TURN_LEAVE_WAIT);
-        None
-    };
     let new = own.tool.typical_bytes();
+    // His start is counted at the gate before it looks at the lanes: a start of the agents' own
+    // that chooses meanwhile leaves room for it. Nobody waits for it.
+    let first = for_owner.then(|| gate.owner_first(new));
     let (mut live, mut held, growing, idle) = idle_in_order(run, &own.socket, for_owner);
     // What lanes started moments ago will still take is not free, whatever the machine says now.
     let room = Room {
@@ -1302,49 +1286,93 @@ fn make_room(run: &Path, own: &Endpoint, room: Room, needed: bool) -> bool {
     live += 1;
     held = held.saturating_add(new);
     let start = held;
-    let fits = |live: usize, held: u64| room.fits(live, held, new, start - held);
-    let chosen = gate.choose(|leaving| {
+    // The limits with the new lane counted, and the owner's starts still choosing beside it.
+    let fits = |live: usize, held: u64, ahead: gate::Ahead| {
+        room.fits(
+            live + ahead.count,
+            held.saturating_add(ahead.bytes),
+            new.saturating_add(ahead.bytes),
+            start - held,
+        )
+    };
+    let planned = gate.choose(first, |seen| {
+        let ahead = seen.ahead;
+        // A lane another start chose, or that has gone since it was looked at, is no place.
         let idle: Vec<Leaving> = idle
             .into_iter()
-            .filter(|(_, _, _, lane)| !leaving.contains(&lane.socket))
+            .filter(|(_, _, _, lane)| seen.free(&lane.socket))
             .collect();
-        let Some(chosen) = to_leave(&idle, live, held, new, &fits, needed) else {
+        let wanted = new.saturating_add(ahead.bytes);
+        let within = |live: usize, held: u64| fits(live, held, ahead);
+        let Some(plan) = to_leave(&idle, live, held, wanted, &within, needed) else {
             return (None, Vec::new());
         };
-        let chosen: Vec<Leaving> = idle.into_iter().take(chosen).collect();
+        let chosen: Vec<Leaving> = idle.into_iter().take(plan.leaving()).collect();
         let sockets = chosen.iter().map(|lane| lane.3.socket.clone()).collect();
-        (Some(chosen), sockets)
+        (Some((plan, ahead, chosen)), sockets)
     });
-    drop(first);
-    let Some(chosen) = chosen else {
+    let Some((plan, ahead, chosen)) = planned else {
         return false;
     };
+    // Only a lane that left counts as a place: one that said it goes, or whose socket went
+    // after it was asked. One that refused (a turn claimed it), said nothing, or had gone
+    // before the ask, counts as it was.
     let (mut left, mut paid) = (0usize, 0u64);
+    let mut asked = Vec::with_capacity(chosen.len());
     for (_, _, memory, lane) in &chosen {
-        if lane.asked_to_leave() {
+        let went = lane.asked_to_leave();
+        if went {
             live -= 1;
             held = held.saturating_sub(*memory);
             left += 1;
             paid = paid.saturating_add(pays(lane, *memory));
         }
+        asked.push((lane.socket.as_path(), went));
     }
-    gate.asked(chosen.iter().map(|lane| lane.3.socket.as_path()));
-    let within = fits(live, held);
-    if !within && !needed && left > 0 {
-        eprintln!(
-            "clarp-host: over the lanes' limits, {left} idle lane(s) left to make room for the {} lane of {}",
-            own.tool.name(),
-            own.agent().unwrap_or("an agent"),
-        );
+    gate.asked(asked);
+    match plan {
+        // Within the limits only: those that left are checked as they are, and a plan that
+        // needed more of them to leave never turns into one that pays.
+        Plan::Fits(_) | Plan::Toward(_) => fits(live, held, ahead),
+        Plan::Paid(_) => {
+            let placed = left > 0 && paid >= new.saturating_add(ahead.bytes);
+            if placed {
+                eprintln!(
+                    "clarp-host: over the lanes' limits, {left} idle lane(s) left to make room for the {} lane of {}",
+                    own.tool.name(),
+                    own.agent().unwrap_or("an agent"),
+                );
+            }
+            placed
+        }
     }
-    within || (left > 0 && paid >= new)
+}
+
+/// How idle lanes make room for a new one ([`to_leave`]): how many of them, in order, leave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plan {
+    /// The fewest after which every limit holds.
+    Fits(usize),
+    /// No count of them brings the lanes within the limits: the fewest that pay for the new lane
+    /// ([`pays`]), whose place it takes.
+    Paid(usize),
+    /// A `needed` lane where no count fits: every one, toward the limits.
+    Toward(usize),
+}
+
+impl Plan {
+    fn leaving(self) -> usize {
+        match self {
+            Self::Fits(count) | Self::Paid(count) | Self::Toward(count) => count,
+        }
+    }
 }
 
 /// How many of `idle`, in order, leave for a new lane of `new` bytes, with `live` lanes holding
-/// `held` bytes, the new one counted: the fewest after which the limits hold (`fits`), or, where
-/// none do, after which what left pays for the new lane ([`pays`]). `None`: neither, and the lane
-/// does not start. A `needed` lane, which starts anyway, takes no place: as many leave as bring
-/// the lanes toward the limits, every idle one where the limits cannot be reached.
+/// `held` bytes, the new one counted. Every count is tried for the limits (`fits`) first, and
+/// the fewest that fits is taken: fewer leave for nothing. Only where none fits, not even all of
+/// them, does the new lane take the place of the fewest that pay for it, and a `needed` lane
+/// (which starts anyway) sends them all away instead. `None`: the lane does not start.
 fn to_leave(
     idle: &[Leaving],
     live: usize,
@@ -1352,18 +1380,28 @@ fn to_leave(
     new: u64,
     fits: &impl Fn(usize, u64) -> bool,
     needed: bool,
-) -> Option<usize> {
-    let (mut would_live, mut would_hold, mut paid) = (live, held, 0u64);
+) -> Option<Plan> {
+    let (mut would_live, mut would_hold) = (live, held);
+    let (mut paid, mut pays_at) = (0u64, None);
     for (count, (_, _, memory, lane)) in idle.iter().enumerate() {
-        if fits(would_live, would_hold) || (!needed && count > 0 && paid >= new) {
-            return Some(count);
+        if fits(would_live, would_hold) {
+            return Some(Plan::Fits(count));
         }
         would_live -= 1;
         would_hold = would_hold.saturating_sub(*memory);
         paid = paid.saturating_add(pays(lane, *memory));
+        if pays_at.is_none() && paid >= new {
+            pays_at = Some(count + 1);
+        }
     }
     let all = idle.len();
-    (fits(would_live, would_hold) || needed || (all > 0 && paid >= new)).then_some(all)
+    if fits(would_live, would_hold) {
+        Some(Plan::Fits(all))
+    } else if needed {
+        Some(Plan::Toward(all))
+    } else {
+        pays_at.map(Plan::Paid)
+    }
 }
 
 /// What an idle lane that leaves pays toward a new one: what it weighed, and never less than a

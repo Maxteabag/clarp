@@ -162,7 +162,9 @@ fn a_lane_is_named_by_its_agent_and_tool_in_the_run_folder() {
 
 /// A lane process as the Host sees it: it answers `inspect` with `status`, holds its owner lock
 /// until it is retired, and refuses `retire` while it holds a claim. Every op it was asked is
-/// kept, in order.
+/// kept, in order. With `"refuses": true` in `status` it says it is idle and refuses `retire`
+/// all the same (a turn claimed it after it was looked at); with `"quiet": true` it takes
+/// `retire` and never answers it, its socket staying where it is.
 struct FakeLane {
     endpoint: Endpoint,
     asked: Arc<Mutex<Vec<String>>>,
@@ -186,6 +188,7 @@ impl FakeLane {
         let socket = endpoint.socket().to_owned();
         std::thread::spawn(move || {
             let mut owner = Some(owner);
+            let mut unanswered = Vec::new();
             for stream in listener.incoming() {
                 let mut stream = stream.unwrap();
                 let mut line = String::new();
@@ -193,7 +196,11 @@ impl FakeLane {
                 let request: Value = serde_json::from_str(&line).unwrap();
                 let op = request["op"].as_str().unwrap().to_owned();
                 seen.lock().unwrap().push(op.clone());
-                let busy = !status["claim"].is_null();
+                if op == "retire" && status["quiet"] == json!(true) {
+                    unanswered.push(stream);
+                    continue;
+                }
+                let busy = !status["claim"].is_null() || status["refuses"] == json!(true);
                 let reply = match op.as_str() {
                     "retire" if busy => {
                         json!({"ok": false, "error": "the Codex lane still owns live work"})
@@ -928,12 +935,13 @@ fn over_the_limits_a_chat_lane_takes_the_place_of_the_longest_idle_one_alone() {
 
 #[test]
 fn a_lane_takes_the_place_of_as_many_idle_ones_as_pay_for_it() {
-    // Over the count of one, a busy lane and two idle Codex lanes that weighed 110 MiB: a new
-    // OpenCode lane counts at 590, and each idle Codex lane pays at least the 270 a new Codex lane
-    // counts at. Both leave for it (540 would not pay); a Codex lane would take one's place.
+    // Over the count of one, a busy lane and idle Codex lanes that weighed 110 MiB: no count of
+    // them leaving brings the lanes within it. Each idle Codex lane pays at least the 270 a new
+    // Codex lane counts at, so a Codex lane takes the place of one, and an OpenCode lane, which
+    // counts at 590, of three (two pay 540, short of it).
     let run = run_dir("pays");
     let busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
-    let idle: Vec<FakeLane> = (0..3u64)
+    let mut idle: Vec<FakeLane> = (0..3u64)
         .map(|at| {
             let mut said = status("t", "d", 100_000 - at, false);
             said["memory_bytes"] = json!(110 * MIB);
@@ -951,35 +959,55 @@ fn a_lane_takes_the_place_of_as_many_idle_ones_as_pay_for_it() {
         [0],
         "a start that will not happen ends no lane"
     );
-    assert_eq!(busy.asked(), ["inspect", "inspect"]);
+    // A third idle lane: the three pay for it, and all three leave.
+    let mut said = status("t", "d", 50_000, false);
+    said["memory_bytes"] = json!(110 * MIB);
+    idle.push(FakeLane::start(&run, "i3", said));
+    assert!(make_room(&run, &opencode, counted(1), false));
+    assert_eq!(retired(&idle), [0, 1, 2, 3]);
+    assert!(busy.asked().iter().all(|op| op == "inspect"));
     std::fs::remove_dir_all(&run).unwrap();
 }
 
-/// Eight lanes in a run folder: `busy` running turns, the rest idle (the lower the index, the
-/// longer idle), each of an agent named by its place; `his` names which agents are the owner's.
-fn eight(run: &Path, busy: usize, his: &[usize]) -> Vec<FakeLane> {
-    (0..8usize)
-        .map(|n| {
-            if his.contains(&n) {
-                mark_owners_view(run, &format!("a{n}"));
-            }
-            let idle_ms = if n < busy {
-                0
-            } else {
-                100_000 - u64::try_from(n).unwrap()
-            };
-            FakeLane::start(run, &format!("a{n}"), status("t", "d", idle_ms, n < busy))
-        })
-        .collect()
+#[test]
+fn where_the_limits_can_be_met_as_many_leave_as_meet_them_and_a_refusal_starts_nothing() {
+    // Two busy lanes and three idle ones, for a count of four: with the new lane six, so two
+    // idle lanes must leave. bd4a41ad2 stopped at one, because one idle Codex lane already pays
+    // for a new one, and started a fifth lane over the count of four (issue 908).
+    let run = run_dir("fits-two");
+    let (idle, _busy) = idle_and_busy(&run, 3);
+    let own = Endpoint::of(Tool::Codex, &run, "new");
+    assert!(make_room(&run, &own, counted(4), false));
+    assert_eq!(
+        retired(&idle),
+        [0, 1],
+        "two leave, the fewest that meet the count"
+    );
+    std::fs::remove_dir_all(&run).unwrap();
+
+    // The second of the two refuses (a turn claimed it after it was looked at). One left, which
+    // pays for a Codex lane; bd4a41ad2 counted that as the new lane's place and started it over
+    // the count. Within the limits only: the lane does not start.
+    let run = run_dir("fits-refused");
+    let mut said = status("t", "d", 100_000, false);
+    said["memory_bytes"] = json!(110 * MIB);
+    let first = FakeLane::start(&run, "i0", said.clone());
+    said["idle_ms"] = json!(90_000);
+    said["refuses"] = json!(true);
+    let claimed = FakeLane::start(&run, "i1", said);
+    let busy: Vec<FakeLane> = (0..2u64)
+        .map(|at| FakeLane::start(&run, &format!("w{at}"), status("t", "d", 0, true)))
+        .collect();
+    assert!(!make_room(&run, &own_of(&run), counted(3), false));
+    assert_eq!(first.asked().last().unwrap(), "retire");
+    assert_eq!(claimed.asked().last().unwrap(), "retire");
+    assert!(claimed.endpoint.socket().exists(), "the claimed lane stays");
+    assert!(busy.iter().all(|lane| lane.asked() == ["inspect"]));
+    std::fs::remove_dir_all(&run).unwrap();
 }
 
-fn retired(lanes: &[FakeLane]) -> Vec<usize> {
-    lanes
-        .iter()
-        .enumerate()
-        .filter(|(_, lane)| lane.asked().contains(&"retire".to_owned()))
-        .map(|(n, _)| n)
-        .collect()
+fn own_of(run: &Path) -> Endpoint {
+    Endpoint::of(Tool::Codex, run, "new")
 }
 
 #[test]
@@ -1250,79 +1278,86 @@ fn a_lane_another_start_has_chosen_to_leave_is_not_asked_again() {
     let run = run_dir("chosen-once");
     let (idle, _busy) = idle_and_busy(&run, 2);
     let gate = super::gate::of(&run);
-    gate.choose(|_| ((), vec![idle[0].endpoint.socket().to_owned()]));
+    gate.choose(None, |_| ((), vec![idle[0].endpoint.socket().to_owned()]));
     let own = Endpoint::of(Tool::Codex, &run, "new");
     assert!(make_room(&run, &own, counted(1), false));
     assert_eq!(retired(&idle), [1]);
-    gate.asked([idle[0].endpoint.socket()]);
+    gate.asked([(idle[0].endpoint.socket(), false)]);
     std::fs::remove_dir_all(&run).unwrap();
 }
 
 #[test]
-fn a_helpers_lane_never_takes_the_place_of_an_agent_whose_last_turn_was_the_owners() {
-    // Seven busy lanes and one idle lane of an agent whose last turn the owner sent, long ago:
-    // no owner's turn within half an hour, no chat of it open. A helper's lane does not take its
-    // place (issue 908); the owner's may.
-    use clarp_kernel::turn::Origin;
-    let run = run_dir("owners-last");
-    let lanes = eight(&run, 7, &[]);
-    super::mark_last_turn(&run, "a7", &Origin::User);
-    let room = Settings::of(None).room_with(None);
-    let helper = Endpoint::of(Tool::Codex, &run, "helper");
-    let place = helper
-        .place(&run, Some("t"), "d", |_| false, room, false)
-        .unwrap();
-    assert_eq!(place, Place::Full);
-    assert!(retired(&lanes).is_empty());
-    // A compaction or a schedule on it changes nothing; a turn another agent sent makes it the
-    // agents' own again, and the helper's lane then takes its place.
-    super::mark_last_turn(&run, "a7", &Origin::Trigger { name: "automation".into() });
-    let place = helper
-        .place(&run, Some("t"), "d", |_| false, room, false)
-        .unwrap();
-    assert_eq!(place, Place::Full);
-    super::mark_last_turn(&run, "a7", &Origin::Agent { agent_id: "x".into() });
-    let place = helper
-        .place(&run, Some("t"), "d", |_| false, room, false)
-        .unwrap();
-    assert_eq!(place, Place::Free);
-    assert_eq!(retired(&lanes), [7]);
-    std::fs::remove_dir_all(&run).unwrap();
-}
-
-#[test]
-fn the_owners_start_chooses_before_a_helpers_waiting_for_the_same_place() {
-    // Seven busy lanes and one idle helper lane, at the count of eight: one place can be made. A
-    // start of the owner's is choosing when a helper's start comes; the helper's waits for it,
-    // and the owner's takes the place (issue 908).
-    let run = run_dir("owner-before-helper");
-    let lanes = eight(&run, 7, &[]);
-    mark_owners_turn(&run, "his");
+fn a_lane_that_left_for_one_start_is_no_place_for_another() {
+    // Over a count of one, another start chose the lane idle longest and asked it, and it said
+    // it goes; its tool is still on its way out, so it still answers as idle. bd4a41ad2
+    // unmarked it once asked, so a start whose look came before it left chose it again, and
+    // two lanes started in its one place. It stays marked until its socket is gone: this start
+    // takes the place of the next one.
+    let run = run_dir("left-once");
+    let mut said = status("t", "d", 100_000, false);
+    said["hangs"] = json!(true);
+    let leaving = FakeLane::start(&run, "i0", said);
+    let next = FakeLane::start(&run, "i1", status("t", "d", 90_000, false));
+    let _busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
     let gate = super::gate::of(&run);
-    let choosing = gate.owner_first();
-    let room = Settings::of(None).room_with(None);
-    let helper = {
-        let run = run.clone();
-        std::thread::spawn(move || {
-            let helper = Endpoint::of(Tool::Codex, &run, "helper");
-            helper.place(&run, Some("t"), "d", |_| false, room, false)
-        })
-    };
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    assert!(
-        !helper.is_finished(),
-        "the helper's start waits for the owner's"
-    );
-    let his = Endpoint::of(Tool::Codex, &run, "his");
-    let place = his
-        .place(&run, Some("t"), "d", |_| false, room, false)
+    let socket = leaving.endpoint.socket().to_owned();
+    gate.choose(None, |_| ((), vec![socket.clone()]));
+    leaving
+        .endpoint
+        .ask::<Status>(&clarp_shim::lane::Lifecycle::Retire)
         .unwrap();
-    assert_eq!(place, Place::Free);
-    // His lane starts in the place made, and runs his turn.
-    let _his = FakeLane::start(&run, "his", status("t", "d", 0, true));
-    drop(choosing);
-    assert_eq!(helper.join().unwrap().unwrap(), Place::Full);
-    assert_eq!(retired(&lanes), [7], "one lane left, for the owner's");
+    gate.asked([(socket.as_path(), true)]);
+    assert!(make_room(&run, &own_of(&run), counted(1), false));
+    assert_eq!(next.asked().last().unwrap(), "retire");
+    let asked = leaving.asked().iter().filter(|op| *op == "retire").count();
+    assert_eq!(asked, 1, "asked to leave once, by the start it left for");
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_lane_that_says_nothing_when_asked_to_leave_is_no_place() {
+    // Over a count of one, a busy lane and an idle one that takes the ask to leave and never
+    // answers, its socket still there. bd4a41ad2 counted it as gone after 500 ms, and the new
+    // lane started beside it. It did not leave: the lane does not start.
+    let run = run_dir("quiet");
+    let mut said = status("t", "d", 100_000, false);
+    said["quiet"] = json!(true);
+    let quiet = FakeLane::start(&run, "i0", said);
+    let _busy = FakeLane::start(&run, "w", status("t", "d", 0, true));
+    assert!(!make_room(&run, &own_of(&run), counted(1), false));
+    assert_eq!(quiet.asked().last().unwrap(), "retire");
+    assert!(quiet.endpoint.socket().exists());
+    std::fs::remove_dir_all(&run).unwrap();
+}
+
+#[test]
+fn a_helpers_start_leaves_the_one_place_to_an_owners_start_still_choosing_and_waits_for_none() {
+    // Seven busy lanes and one idle lane of the agents' own. A start of the owner's is counted at
+    // the gate and still looking at the lanes when a helper's start chooses. bd4a41ad2 had the
+    // helper's start wait for it up to 3 s and then choose as if his were not there, so with one
+    // place it took the idle lane's, and his turn ran cold. The helper's start now leaves room
+    // for his at once: where two places can be made it starts, where one can it does not.
+    let run = run_dir("owner-ahead");
+    let lanes = eight(&run, 7, &[]);
+    let gate = super::gate::of(&run);
+    let his_start = gate.owner_first(CODEX_LANE);
+    let helper = Endpoint::of(Tool::Codex, &run, "helper");
+    assert!(
+        make_room(&run, &helper, counted(10), false),
+        "room for both"
+    );
+    assert!(retired(&lanes).is_empty());
+    assert!(
+        !make_room(&run, &helper, counted(8), false),
+        "one place: his"
+    );
+    assert!(retired(&lanes).is_empty());
+    // His start chooses, and takes the place.
+    drop(his_start);
+    mark_owners_turn(&run, "his");
+    let his = Endpoint::of(Tool::Codex, &run, "his");
+    assert!(make_room(&run, &his, counted(8), false));
+    assert_eq!(retired(&lanes), [7]);
     std::fs::remove_dir_all(&run).unwrap();
 }
 

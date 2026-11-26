@@ -126,7 +126,8 @@ as before.
   - A lane that has not said a weight, or said 0 (its `/proc` could not be read), counts at its
     tool's typical size (Codex 270 MiB), never at 0. So does the lane about to start.
 - **Room is made before a lane starts.** The idle lanes leave, longest idle first, until both
-  limits hold with the new one included. A lane that runs a turn, or whose work may continue
+  limits hold with the new one included: every count of them is tried, and the fewest that
+  meet every limit leave. A lane that runs a turn, or whose work may continue
   (an active goal), or that a turn has claimed, is never chosen, refuses to leave if asked, and
   counts.
 - **Over the limits, a wanted lane takes the place of idle ones** (issue 908). The lanes can be
@@ -134,15 +135,26 @@ as before.
   memory below the reserve; fixed, the owner lowered the count or the budget below what is held.
   No idle lane leaving may then bring them within the limits, and refusing every lane while idle
   ones sit there is the worst answer: a refused turn starts its tool in a process of its own, as
-  big as a lane and started cold. So a lane still starts, in the place of the fewest idle lanes,
-  in the order below, that pay for it: each counts at what it weighed, and never less than a new
-  lane of its own tool counts at, so one idle Claude lane makes room for one Claude lane, and two
-  idle Codex lanes for one OpenCode lane. What is held does not grow for it. The Host's log says
-  how many left (`over the lanes' limits, N idle lane(s) left to make room`).
-- **A lane leaving is chosen once** (issue 908). Which idle lanes leave is chosen under one gate
-  per Host (`lane/gate.rs`): a lane chosen by a start is marked until it has been asked,
-  so no other start counts it as its place or asks it again. The asks themselves are made outside
-  the gate, so nobody waits there on another lane's exit.
+  big as a lane and started cold. Only where no count of idle lanes leaving meets the limits does
+  a lane still start, in the place of the fewest idle lanes, in the order below, that pay for it:
+  each counts at what it weighed, and never less than a new lane of its own tool counts at
+  (Codex 270 MiB, Claude Code and Muse 300, OpenCode 590). So one idle Claude lane makes room for
+  one Claude lane, and three idle Codex lanes for one OpenCode lane (two pay 540, short of 590).
+  The lane that starts may grow beyond what a small idle lane weighed, so what is held can grow
+  by that difference. The Host's log says how many left (`over the lanes' limits, N idle lane(s)
+  left to make room`).
+- **Only a lane that left counts as a place** (issue 908). An idle lane asked to leave counts
+  once it said it goes, or its socket went after it was asked. One that refuses (a turn claimed
+  it after it was looked at), says nothing for half a second with its socket still there, or had
+  gone before it was asked counts as it was. Where the limits could be met, they are checked again
+  once the lanes were asked: if one of those that had to leave did not, the lane does not start,
+  even when those that left would have paid for it.
+- **A lane leaving is chosen once, and counted once** (issue 908). Which idle lanes leave is
+  chosen under one gate per run folder (`lane/gate.rs`), held only while a start chooses. A lane
+  a start chose is marked, so no other start chooses it; one that did not leave is unmarked once
+  asked, and one that left stays marked until its socket is gone, so a start whose look at the
+  lanes came before it left does not count it again. The asks are made outside the gate, and
+  nobody waits there.
 - **With every place busy, an optional lane does not start** (issue 786). Where no idle lane
   may leave for it, or those that may would not pay for it, a chat turn's lane is not started: a
   Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread
@@ -154,10 +166,6 @@ as before.
   agent had a turn the owner sent (the Oracle's included) that started or ended in the last 30
   minutes, or a chat of it is open on one of his devices: one of his apps, by a paired device's
   token or the Host's own, watches it live (`/events?live=`); an agent's tool token never counts.
-  It stays his, too, while the last of its turns that ended was one he sent, however long ago
-  (`<agent>-owner-last.mark`, issue 908): a turn another agent sent makes it the agents' own
-  again, and a compaction, schedule or goal's wake changes nothing. So a helper's lane never
-  takes the place of his front desk's.
   Any local tool that presents the Host's token counts as well, though none watches live today.
   A chat counts as long as an app names it: the web app names the chats on screen and the few
   opened last; the desktop still names every chat opened since it started, until it caps them
@@ -171,10 +179,12 @@ as before.
   only idle lanes of the agents' own, so it never ends a lane the owner's next turn is about to
   take; where that is not enough it does not start, and its agent runs per turn. A native goal's
   lane is never refused, and counts. No turn waits for a lane.
-- **The owner's start chooses first** (issue 908). A start for one of his agents says so at the
-  gate before it looks at the lanes; a start of the agents' own waits there, 3 s at most
-  (`TURN_LEAVE_WAIT`), until no start of his is still choosing. Where an owner's turn and a
-  helper's want the last place at once, his takes it, and the helper's runs per turn.
+- **A start of the owner's is counted before it chooses** (issue 908). A start for one of his
+  agents is counted at the gate, with what its lane counts at, before it looks at the lanes. A
+  start of the agents' own that chooses while his is still looking leaves room for his as if his
+  lane were already there: where one place can be made, the helper's runs per turn and his takes
+  it; where two can, both start. Neither waits for the other. A start of the agents' own that
+  chose before his reached the gate keeps what it chose.
 - **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
   that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
   at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on
