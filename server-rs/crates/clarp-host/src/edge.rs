@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 199;
+pub const HOST_CONTRACT: u64 = 200;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -509,6 +509,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // row larger than `row_max` comes as a placeholder (`placeholder`: kind, bytes, preview,
     // `fetch`); `GET /log?session=&message_id=` answers that row whole (issue 881).
     ("log_budget", 199),
+    // The word after an `/events` replay (`agent-roster` with `replay`) says the Host's run
+    // (`epoch`), the event it resumed after, how many it gave and whether some could not be
+    // given (`truncated`); `GET /agents/snapshot` carries `attention`, what waits for the owner
+    // of the agents it shows, as `GET /attention?decision_format=2` answers it (issue 882).
+    ("resume_state", 200),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -2155,6 +2160,25 @@ async fn snapshot(
         // then shows the tool's own command on the row.
         "tool_explanations": apps::explanations_told(&app),
     });
+    // What waits for the owner, as `GET /attention?decision_format=2` answers it, of the
+    // agents this reader is shown: an app needs no second call at start (feature
+    // `resume_state`, issue 882).
+    let shown: HashSet<&str> = agents
+        .iter()
+        .filter_map(|agent| agent["agent_id"].as_str())
+        .collect();
+    let mut attention = library::inbox(&app, true, false);
+    for list in ["items", "janitor_items"] {
+        if let Some(items) = attention[list].as_array_mut() {
+            items.retain(|item| {
+                item["agent_id"]
+                    .as_str()
+                    .is_some_and(|id| shown.contains(id))
+            });
+        }
+    }
+    attention["count"] = json!(attention["items"].as_array().map_or(0, Vec::len));
+    body["attention"] = attention;
     if without_archived {
         let all = directory.members.iter().chain(&directory.janitors);
         let archived = all.filter(|member| put_away(member));
@@ -5173,7 +5197,7 @@ async fn events(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse().ok())
         .or(query.last_event_id);
-    let (missed, live) = app.hub.subscribe(after);
+    let (missed, live, replay) = app.hub.resume(after);
     let slim = Slim::of(&query);
     // The turns the connection asked to be shown as they run. What they show is never kept:
     // nothing of it is among what was missed.
@@ -5209,7 +5233,11 @@ async fn events(
             first.push_back(numbered(published));
         }
     }
-    first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
+    // With what the replay was: a client that missed events the Host could not give knows it
+    // (feature `resume_state`).
+    let mut look = json!({ "type": "agent-roster", "replay": replay.to_json() });
+    look["replay"]["count"] = json!(first.len());
+    first.push_back(unnumbered(&look));
     let clock = app.clock.clone();
     let stream = stream::unfold(
         (first, live, watched, slim),

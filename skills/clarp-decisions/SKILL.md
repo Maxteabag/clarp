@@ -24,6 +24,10 @@ clarp-agent-artifacts attention
 # Optional: --session SESSION or --include-archived
 ```
 
+On a Rust Host with feature `resume_state` (contract 200), `GET /agents/snapshot`
+also carries the same pending items under `attention`, so a script that already
+reads the snapshot needs no second call.
+
 Look at the pending requests before adding one so you understand the competing
 work. Describe the facts about your own request; never assign an arbitrary list
 position, alter another agent's request, or inflate urgency to jump the queue.

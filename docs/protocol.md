@@ -421,6 +421,14 @@ Rules:
 - There is no `/sessions` in this layer. The list of chats is
   `agents[].session` filtered by `archived_at == null`.
 
+#### What waits for the owner (feature `resume_state`, Rust Host contract 200)
+
+The snapshot carries `attention`: what `GET /attention?decision_format=2` answers (`items`,
+`count`, `decision_format`, `janitor_items`), kept to the agents the snapshot shows its reader.
+An app draws its decision cards and badge from it at start, without a second call, and follows
+`attention-updated` and `artifact-updated` as before. `count` counts `items`. A Host without the
+feature sends no `attention`: call `GET /attention` there.
+
 #### Archived agents: `GET /agents/archived`
 
 The agents `include_archived=0` leaves out, a page at a time, for an archive
@@ -1298,7 +1306,18 @@ Connection rules:
   so a reconnect loses nothing. Without it the server replays the last few
   minutes.
 - After the replay the server always sends `{"type": "agent-roster"}`. Treat
-  it as "call `/agents/snapshot` now".
+  it as "call `/agents/snapshot` now". With feature `resume_state` (Rust Host
+  contract 200) it carries `replay`: `{"epoch", "after", "count", "truncated"}`.
+  `epoch` names the Host's run (it changes when the Host restarts; it is the
+  `epoch` of the `live` events), `after` the event id the replay began after (the
+  `Last-Event-ID` sent, or null), `count` the events replayed. `truncated: true`
+  means some events after `after` could not be given: the id is another run's
+  (the Host restarted) or older than the few minutes the Host keeps. Then events
+  were missed: drop what was derived from events alone (live activity rows,
+  cached deltas) and read the snapshot and the open chats' `/log` anew.
+  `truncated: false` means every event after `after` was given (rings this
+  client may not be told of left out). Without `Last-Event-ID` there is no
+  resume: `after` is null and `truncated` false.
 - The server sends a `heartbeat` event (`event: heartbeat`) every few seconds when nothing else happens. If nothing arrives
   for 25 s, reconnect with exponential backoff (250 ms to 5 s).
 - The server closes the stream when a client falls too far behind. Reconnect;

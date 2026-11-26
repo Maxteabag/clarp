@@ -21,7 +21,7 @@ fn shortcuts_broadcast_once_to_live_listeners_and_never_replay_a_button_press() 
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|e| e == &json!({"type":"agent-roster"}))
+                .any(|e| e["type"] == "agent-roster" && e.get("kind").is_none())
         })
     };
     ready(&heard);
