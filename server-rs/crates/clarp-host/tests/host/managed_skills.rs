@@ -624,7 +624,7 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
     wait_for("the start done while the skills are held", || {
         started(&host)
     });
-    let events = host.listen();
+    let events = host.listen_at(&format!("/events?token={}", host.token));
     wait_for("the event stream", || {
         events
             .lock()
