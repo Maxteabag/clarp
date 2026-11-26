@@ -488,12 +488,15 @@ fn a_reconnect_with_previews_is_replayed_nothing_a_preview_stands_for() {
     let open = host.new_agent("Open");
     let listed = host.new_agent("Listed");
     let first = host.listen();
-    wait_for("the stream to open", || {
+    // Watches every chat whole, live ops too: whether the listed chat changed at all.
+    let watcher = listen_timed(&host, "/events?live=*");
+    wait_for("the streams to open", || {
         first
             .lock()
             .unwrap()
             .iter()
             .any(|event| event["type"] == "agent-roster")
+            && opened(&watcher)
     });
     let cursor = first
         .lock()
@@ -509,7 +512,22 @@ fn a_reconnect_with_previews_is_replayed_nothing_a_preview_stands_for() {
             .iter()
             .all(|agent| host.state(agent) == "done")
     });
+    // When the watcher last heard anything of the listed chat.
+    let last_heard = || {
+        watcher
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, event)| event["session"] == listed)
+            .map(|(at, _)| *at)
+            .max()
+    };
     for compact in ["", "&compact=1"] {
+        // The listed chat at rest: nothing of it heard for two seconds.
+        wait_for("the listed chat to be quiet", || {
+            last_heard().is_none_or(|at| at.elapsed() >= Duration::from_secs(2))
+        });
+        let quiet_since = last_heard();
         let resumed = listen_timed(
             &host,
             &format!(
@@ -546,10 +564,19 @@ fn a_reconnect_with_previews_is_replayed_nothing_a_preview_stands_for() {
             .count();
         assert_eq!(receipts, 1, "{compact}: the receipt is replayed once");
         // A replayed receipt makes no preview: the snapshot read after the replay says the chat.
+        // The watcher shows the chat did not change meanwhile, so a preview could only come from
+        // the replay.
         std::thread::sleep(Duration::from_millis(1_000));
+        assert_eq!(
+            last_heard(),
+            quiet_since,
+            "{compact}: the listed chat changed during the check: {:#?}",
+            events(&watcher, 0)
+        );
         assert!(
             previews_of(&resumed, 0, &listed).is_empty(),
-            "{compact}: no preview of what was replayed"
+            "{compact}: no preview of what was replayed: {:#?}",
+            events(&resumed, 0)
         );
         let numbers: Vec<u64> = replay
             .iter()
