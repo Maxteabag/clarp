@@ -1586,7 +1586,9 @@ into the turn can do neither. Every refusal is `{"error": words, "code": code}`.
   next, at once, in the same conversation, so the model sees what the cut turn did. The queue
   is not held (a plain Stop holds it); what else waits goes on after it, and a cut turn's
   messages it had not begun to answer wait behind it. A Stop sent after the take-over holds
-  the message with the rest. Where the cut turn was not a person's (another agent's, a
+  the message with the rest. A take-over asked after a Stop, while the stopped turn is still
+  ending, is the user's own request for that message: it runs when that turn is over, past the
+  Stop's hold, as a Send now does, and what else waits stays as the Stop left it. Where the cut turn was not a person's (another agent's, a
   schedule's), the agent is left the same note to take that work up again. `202 {"ok": true,
   "session", "taken_over": true}`; `409` code `no_turn_running` when no turn runs (send the
   message instead); `409` code `turn_not_cuttable` while the turn is a Codex native goal's own
