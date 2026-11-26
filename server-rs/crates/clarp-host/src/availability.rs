@@ -16,9 +16,10 @@
 //!   [`UNRESPONSIVE_AFTER_MS`].
 //! - `busy`: a message of the owner's said now could neither be read into the running turn nor
 //!   take its place, and waits for it ([`Why`]); `queue_ahead` others run before it.
-//! - `ok`: it can answer now. That includes a turn at work that the owner's word steers into,
-//!   that makes way for it, or that he may take over: ordinary work is the chat's preview and
-//!   activity to show, not a reason the agent cannot answer (Peter via Hazel, 26 Nov 2026).
+//! - `ok`: it can answer now. That includes a turn at work that the owner's send, as his apps
+//!   make it with the `while_busy` setting, is read into or takes the place of
+//!   (`Worker::owner_waits`): ordinary work is the chat's preview and activity to show, not a
+//!   reason the agent cannot answer (Peter via Hazel, 26 Nov 2026).
 //!
 //! `queue_ahead` counts what runs before a message of the owner's said now
 //! (`Agent::ahead_of_owner`): his own earlier words, a front desk's relay of them, a card he
@@ -142,7 +143,7 @@ impl Why {
 /// Whether a message of the owner's said now would wait, and how many run before it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OwnerWaits {
-    /// What it waits for; `None` where it is read in, goes first, or may take over now.
+    /// What it waits for; `None` where it is read in or takes the turn's place now.
     pub why: Option<Why>,
     /// The waiting messages that run before it (`Agent::ahead_of_owner`).
     pub ahead: usize,
@@ -311,8 +312,8 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         shown.last_alive_ms = Some(alive);
         return shown;
     }
-    // A turn at work that the owner's word steers into, makes way for, or that he may take
-    // over keeps nobody waiting: its preview and activity say what it does.
+    // A turn at work that the owner's send is read into or takes the place of keeps nobody
+    // waiting: its preview and activity say what it does.
     let Some(why) = facts.owner_waits.why else {
         return at_state("ok", String::new(), live.started_at_ms, None, 0);
     };
@@ -675,7 +676,7 @@ mod tests {
         assert_eq!((ok.state, ok.text.as_str(), ok.since_ms), ("ok", "", 5));
         assert_eq!(ok.to_json()["back_at_ms"], Value::Null);
         // A healthy turn at work, with other agents' messages queued behind it: the owner's
-        // word steers in, goes first or may take over. Nothing replaces the preview.
+        // send is read in or takes the turn's place. Nothing replaces the preview.
         let mut status = idle();
         status.live = Some(running(NOW - 1_000));
         status.queue_depth = 25;

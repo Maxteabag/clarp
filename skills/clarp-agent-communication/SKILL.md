@@ -173,7 +173,8 @@ curl -s -H "Authorization: Bearer $CLARP_AUTH_TOKEN" \
   "$CLARP_SERVER_URL/agents/ada-1a2b" | jq .availability
 ```
 
-`state` says whether the agent can answer its user now: `ok` (it can, also
+From contract 213 (feature `agent_availability_owner_wait`), `state` says
+whether the agent can answer its user now: `ok` (it can, also
 while a turn runs that the user's message steers into or takes over), `busy`
 (the user's message would wait for a turn that cannot take it, such as a
 compaction; `queue_ahead` messages run before the user's), `unresponsive` (a
@@ -182,7 +183,8 @@ running turn has shown no sign of life for 3 minutes; `last_alive_ms`),
 `switching_account` (the Host moves it to another account) or `usage_limit`
 (no account can take its turn now). Your own message waits behind a running
 turn whatever `state` says: whether a turn runs is the row's `busy`, and what
-waits is `queued_turn_count`. `text` is the line the apps
+waits is `queued_turn_count`. On a Host with contract 206 to 212, `busy`
+means any running turn and `queue_ahead` is `queued_turn_count`. `text` is the line the apps
 show. A launch held by the pool without a known cause says "Waiting for account".
 `back_at_ms` is when the Host expects it to answer (epoch ms, or `null`).
 Use it to decide, not to refuse: a message to an agent that cannot answer now

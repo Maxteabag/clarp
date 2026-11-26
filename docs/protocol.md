@@ -2474,7 +2474,11 @@ follows a planned restart or a crash, may give out some of those numbers again.
 ### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
 Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `availability`
-(issue 918), so an app can show one calm line with the reason and the expected wait:
+(issue 918), so an app can show one calm line with the reason and the expected wait. What
+follows is the meaning from Rust Host contract 213 (feature `agent_availability_owner_wait`):
+the line says only what keeps the user waiting. On a Host with `agent_availability` but not
+`agent_availability_owner_wait`, `busy` ("Busy · N messages ahead of you", or "Busy") is any
+running turn, `queue_ahead` is `queued_turn_count`, and a turn's first start is `restarting`.
 
 ```json
 "availability": {
@@ -2500,13 +2504,17 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
     agent is reopening after a Host restart. A turn's first start is ordinary work: `ok`.
   - `unresponsive`: a running turn has shown no sign of life (output, a tool event, or the
     process starting) for 180 s.
-  - `busy`: a message the user sends now can neither be read into the running turn nor take its
-    place, and waits for it: the tool's compaction, its summary for a move to another backend,
-    or a Codex native goal's own turn, where that turn does not take the user's words now; or a
-    move to another backend holds the queue.
-  - `ok`: it can answer now. That includes a turn at work that the user's message steers into,
-    that makes way for it, or that the user may take over (issue 839, `send_while_busy`):
-    ordinary work, whoever it is for, is shown by the chat's preview and activity, not here.
+  - `busy`: a message the user sends now, as the apps send it (words, with the Host's
+    `while_busy` setting, feature `send_while_busy`), can neither be read into the running turn
+    nor take its place, and waits for it (`turn_not_cuttable`): the tool's compaction, its
+    summary for a move to another backend, or a Codex native goal's own turn, where that turn
+    does not take the user's words now; or a move to another backend holds the queue.
+  - `ok`: it can answer now. That includes a turn at work, whoever it is for, that such a
+    message is read into or takes the place of (issue 839, `send_while_busy`; a turn whose tool
+    takes no words is stopped for it under `steer` and `take_over`): ordinary work, shown by
+    the chat's preview and activity, not here. Under `after_turn` the message waits for the
+    turn because the user chose that order: still `ok`. A send without `while_busy` keeps its
+    older admission, which `availability` does not describe.
 - `text`: the Host's line without the time part, the same in every app: `usage_limit` "Usage
   limit", or "Waiting for account" when the pool holds a launch without a known cause;
   `switching_account` "Switching account (usage limit)" or "Switching account (sign-in)";

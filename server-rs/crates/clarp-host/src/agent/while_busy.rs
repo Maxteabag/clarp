@@ -46,20 +46,32 @@ impl Worker {
         admission: Admission,
         coordination: bool,
     ) -> Plan {
+        let owners =
+            admission == Admission::Queue && message.origin.is_user_send() && !coordination;
+        if !owners {
+            return Plan::AsAlways;
+        }
+        let text = message.text.trim();
+        // A send the tool would not take as words (a file it names, a `/` command) waits for
+        // its own turn, as it always has.
+        let words = !text.starts_with('/') && clarp_backend::agy_acp::attached(text).is_empty();
+        self.plan_for(asked, words)
+    }
+
+    /// What an owner's own send said to the agent now does while a turn runs, by what it asks
+    /// and whether it is words the tool could take: [`Worker::plan_while_busy`] for a send, and
+    /// [`Worker::owner_waits`] for the row that says whether such a send waits.
+    fn plan_for(&self, asked: WhileBusy, words: bool) -> Plan {
         let Some(actor) = self.actor.as_ref() else {
             return Plan::AsAlways;
         };
-        let owners =
-            admission == Admission::Queue && message.origin.is_user_send() && !coordination;
-        if !owners || actor.transit_holds_queue() || actor.live_turn().is_none() {
+        if actor.transit_holds_queue() || actor.live_turn().is_none() {
             return Plan::AsAlways;
         }
         let cuttable = actor.live_cuttable();
-        // A turn that cannot take words now and cannot be stopped either (the tool's
-        // compaction, a native goal's own turn) is waited for, and the answer says so
-        // (`turn_not_cuttable`).
-        // A turn that cannot be cut (the tool's compaction, a native goal's own turn) is waited
-        // for, whatever was asked: as a take-over of it is refused.
+        // A turn that cannot be cut (the tool's compaction, a native goal's own turn) and cannot
+        // take words now is waited for, whatever was asked: as a take-over of it is refused, and
+        // the answer says so (`turn_not_cuttable`).
         let take_over = |done: Done| {
             if cuttable {
                 Plan::Direct(done)
@@ -74,17 +86,13 @@ impl Worker {
         match asked {
             WhileBusy::TakeOver => take_over(Done::as_asked(WhileBusy::TakeOver)),
             WhileBusy::AfterTurn => Plan::Wait(Done::as_asked(WhileBusy::AfterTurn)),
+            WhileBusy::Steer if !words => Plan::Wait(Done::fell_back(
+                asked,
+                WhileBusy::AfterTurn,
+                Reason::NotWords,
+            )),
             WhileBusy::Steer => {
-                let text = message.text.trim();
-                // A send the tool would not take as words (a file it names, a `/` command)
-                // waits for its own turn, as it always has.
-                if text.starts_with('/') || !clarp_backend::agy_acp::attached(text).is_empty() {
-                    Plan::Wait(Done::fell_back(
-                        asked,
-                        WhileBusy::AfterTurn,
-                        Reason::NotWords,
-                    ))
-                } else if self.never_takes_words() || (!cuttable && !actor.steerable()) {
+                if self.never_takes_words() || (!cuttable && !actor.steerable()) {
                     take_over(Done::fell_back(
                         asked,
                         WhileBusy::TakeOver,
@@ -97,13 +105,17 @@ impl Worker {
         }
     }
 
-    /// What keeps a message of the owner's said now from being read into the running turn or
-    /// taking its place, and how many waiting messages run before it (issue 918, the agent's
-    /// `availability`): the same terms as [`Worker::plan_while_busy`] and the send's own
-    /// admission read. A turn the owner's word steers into, makes way for, or that he may take
-    /// over keeps nobody waiting. One that can neither take his words now nor be cut (the
-    /// tool's compaction, a summary for a move, a native goal's own turn) does, and so does a
-    /// backend move that holds the queue.
+    /// What keeps a message of the owner's said now waiting, and how many waiting messages run
+    /// before it (issue 918, the agent's `availability`). The message is the one his apps send:
+    /// words, with the Host's `while_busy` setting (feature `send_while_busy`), read by the same
+    /// [`Worker::plan_for`] that admits it. It waits where a backend move holds the queue, or
+    /// where the running turn can neither take it now nor be cut (`turn_not_cuttable`: the
+    /// tool's compaction, a summary for a move, a native goal's own turn). It does not wait
+    /// where it is read into the turn, or the turn makes way for it (a turn that takes no words,
+    /// his own included, is stopped for it under `steer` and `take_over`). Under `after_turn` it
+    /// waits for the turn because he chose that order: ordinary work, which the chat's preview
+    /// shows, not a reason the agent cannot answer. A send without `while_busy` (an app before
+    /// feature `send_while_busy`) keeps its older admission, which this does not describe.
     pub(super) fn owner_waits(&self) -> crate::availability::OwnerWaits {
         use crate::availability::{OwnerWaits, Why};
         let Some(actor) = self.actor.as_ref() else {
@@ -111,13 +123,18 @@ impl Worker {
         };
         let why = if actor.transit_holds_queue() {
             Some(Why::Moving)
-        } else if actor.live_turn().is_some()
-            && !actor.live_cuttable()
-            && (self.never_takes_words() || !actor.steerable())
-        {
-            actor.live_origin().and_then(Why::uncut)
         } else {
-            None
+            let directory = self.setup.hub.queue_directory();
+            let setting = directory
+                .as_deref()
+                .and_then(|directory| directory.setting(clarp_kernel::while_busy::KEY));
+            match self.plan_for(WhileBusy::stored(setting), true) {
+                Plan::Wait(Done {
+                    fallback: Some((_, Reason::NotCuttable)),
+                    ..
+                }) => actor.live_origin().and_then(Why::uncut),
+                Plan::AsAlways | Plan::Steer | Plan::Direct(_) | Plan::Wait(_) => None,
+            }
         };
         OwnerWaits {
             why,

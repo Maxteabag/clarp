@@ -42,6 +42,10 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
         host.get("/server-info")["contract"]["features"]["agent_availability"],
         206
     );
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["agent_availability_owner_wait"],
+        213
+    );
     let heard = host.listen();
     let session = host.new_agent("Avail");
     // A new agent is never shown as restarting while it is being opened.
@@ -66,11 +70,11 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
         .unwrap();
     assert_eq!(shown(&row["availability"]), shown(&idle), "{row}");
 
-    // Ordinary healthy work keeps nobody waiting: the owner's word steers in or may take over,
-    // and the preview says what it does. Nothing replaces it, also with a message queued.
+    // Ordinary healthy work keeps nobody waiting. The stand-in's own turn takes no words, so
+    // the owner's send as his apps make it (`while_busy` from the Host's setting, `steer` by
+    // default) stops it and runs now: nothing replaces the preview.
     host.send(&session, "sleep 60", "long");
     wait_for("the turn to run", || host.state(&session) == "thinking");
-    host.send(&session, "after it", "second");
     let counted = || {
         heard
             .lock()
@@ -80,13 +84,29 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
             .count()
     };
     std::thread::sleep(Duration::from_secs(1));
+    let ordinary = json!(["ok", "", null, 0]);
     let working = availability_of(&host, &session);
-    assert_eq!(
-        shown(&working),
-        json!(["ok", "", null, 0]),
-        "ordinary work: {working}"
-    );
+    assert_eq!(shown(&working), ordinary, "ordinary work: {working}");
+    // Under `after_turn` his send waits for the turn because he chose that order: still
+    // ordinary work, not a reason the agent cannot answer.
+    host.post("/send-settings", json!({ "while_busy": "after_turn" }));
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(shown(&availability_of(&host, &session)), ordinary);
+    host.post("/send-settings", json!({ "while_busy": "steer" }));
     assert_eq!(counted(), 0, "nothing is told of ordinary work");
+    // What the row said is what his send does: it takes the turn's place at once.
+    let steer = host.post(
+        "/send",
+        json!({ "session": session, "text": "now", "client_msg_id": "now",
+                "while_busy": "steer" }),
+    );
+    assert_eq!(steer["while_busy"], "take_over", "{steer}");
+    wait_for("his send to run", || {
+        host.conversation(&session)
+            .iter()
+            .any(|(role, text)| role == "user" && text == "now")
+    });
+    assert_eq!(shown(&availability_of(&host, &session)), ordinary);
     host.post("/stop", json!({ "session": session }));
 }
 
