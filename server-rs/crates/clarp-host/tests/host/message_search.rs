@@ -137,9 +137,7 @@ fn a_search_while_history_is_read_says_partial_and_then_finds_it() {
     wait_for("Ada's answer", || host.state(&ada) == "done");
     host.kill();
     // The index is thrown away: the next Host builds it again from the agents' logs.
-    for name in ["search.db", "search.db-wal", "search.db-shm"] {
-        let _ = std::fs::remove_file(place.root.join("data").join(name));
-    }
+    without_index(&place);
     let host = place.start();
     let early = search(&host, "q=kites");
     assert_eq!(early["partial"], true, "{early}");
@@ -297,11 +295,42 @@ fn row_of(host: &Host, session: &str) -> Value {
         .unwrap_or_else(|| panic!("{session} is not in the snapshot"))
 }
 
+/// Where the index lives: a folder of its own in the data folder (issue 848).
+fn index_file(place: &Place) -> PathBuf {
+    place.root.join("data").join("search").join("search.db")
+}
+
 /// Throws the index away while the Host is down: the next Host reads every agent anew.
 fn without_index(place: &Place) {
-    for name in ["search.db", "search.db-wal", "search.db-shm"] {
-        let _ = std::fs::remove_file(place.root.join("data").join(name));
+    for side in ["", "-wal", "-shm"] {
+        let mut name = index_file(place).into_os_string();
+        name.push(side);
+        let _ = std::fs::remove_file(PathBuf::from(name));
     }
+}
+
+#[test]
+fn an_index_left_beside_the_fleets_file_is_removed_and_read_anew_in_its_own_folder() {
+    let place = Place::new("message-search-moved");
+    let host = place.start();
+    let ada = host.new_agent("Ada");
+    host.send(&ada, "Lanterns over Tromsø", "m-1");
+    wait_for("Ada's answer", || host.state(&ada) == "done");
+    found(&host, "q=lanterns", 2);
+    host.kill();
+    // As a Host before issue 848 left it: the index beside the fleet's file, none in the folder.
+    let data = place.root.join("data");
+    for side in ["", "-wal", "-shm"] {
+        let mut from = index_file(&place).into_os_string();
+        from.push(side);
+        let _ = std::fs::rename(PathBuf::from(from), data.join(format!("search.db{side}")));
+    }
+    assert!(data.join("search.db").is_file());
+    let host = place.start();
+    wait_for("the old index removed", || !data.join("search.db").exists());
+    assert!(index_file(&place).is_file());
+    let hits = found(&host, "q=lanterns", 2);
+    assert!(hits.iter().all(|hit| hit["session"] == ada.as_str()), "{hits:?}");
 }
 
 #[test]
