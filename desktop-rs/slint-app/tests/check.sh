@@ -30,11 +30,14 @@ cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
 # The video is long enough for a five-second seek without hitting EOF.
 # A separate audio clip gives us time to observe playback and pause it.
-if [ "$name" = playback ]; then
-    ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 \
-        -t 12 -c:v libx264 -profile:v high -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart "$scratch/clip.mp4" || exit 1
+if [[ "$name" == playback || "$name" == playback-audio ]]; then
     ffmpeg -loglevel error -y -f lavfi -i sine=frequency=660:sample_rate=48000 -t 6 "$scratch/audio.mp3" || exit 1
-    export CLARP_TEST_VIDEO="$scratch/clip.mp4" CLARP_TEST_AUDIO="$scratch/audio.mp3" CLARP_TEST_VIDEO_SOUND_FILE="$out/playback-sound.wav"
+    export CLARP_TEST_AUDIO="$scratch/audio.mp3"
+    if [ "$name" = playback ]; then
+        ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25 -f lavfi -i sine=frequency=440:sample_rate=48000 \
+            -t 12 -c:v libx264 -profile:v high -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart "$scratch/clip.mp4" || exit 1
+        export CLARP_TEST_VIDEO="$scratch/clip.mp4" CLARP_TEST_VIDEO_SOUND_FILE="$out/playback-sound.wav"
+    fi
 fi
 # The terminal launcher an agent terminal needs (and a CLI); never run,
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
