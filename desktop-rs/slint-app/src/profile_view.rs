@@ -323,7 +323,7 @@ pub fn give_back(app: &App, window: &AppWindow) -> bool {
 /// to the profile (`resume`).
 pub fn open_publications(window: &AppWindow, filter: i32) {
     let publications = window.global::<crate::PublicationsBridge>();
-    publications.invoke_open_for_profile();
+    publications.invoke_open(session().into());
     publications.invoke_choose_filter(filter);
 }
 

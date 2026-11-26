@@ -636,12 +636,12 @@ export component AgentProfile inherits Modal {
                         spacing: 6px;
                         Spot {
                             spot: "publications";
-                            TextButton { text: "All publications"; clicked => { PublicationsBridge.open-for-profile(); PublicationsBridge.choose-filter(0); } }
+                            TextButton { text: "All publications"; clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(0); } }
                             KeyBadge { text: "1"; y: (parent.height - self.height) / 2; }
                         }
                         Spot {
                             spot: "images";
-                            TextButton { text: "Images"; clicked => { PublicationsBridge.open-for-profile(); PublicationsBridge.choose-filter(1); } }
+                            TextButton { text: "Images"; clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(1); } }
                             KeyBadge { text: "2"; y: (parent.height - self.height) / 2; }
                         }
                     }
