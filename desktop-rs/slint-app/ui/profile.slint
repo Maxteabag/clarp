@@ -32,6 +32,8 @@ export struct ProfileInfo {
     heartbeat-empty: string,
     prompts-loading: bool,
     prompts-more: bool,
+    // The Host offers prompt history (one that answers 404 does not).
+    prompts-shown: bool,
     mcp-shown: bool,
     // This chat's own choices (#653): messages between agents (the Host's,
     // on a Host with `hidden_coordination`; 0 Follow Settings, 1 Show, 2
@@ -246,12 +248,6 @@ export component AgentProfile inherits Modal {
             }
         }
         Rectangle { height: 1px; background: Palette.border; }
-        if root.info.error != "": Text {
-            text: root.info.error;
-            color: Palette.danger;
-            font-size: 11 * Look.unit;
-            wrap: word-wrap;
-        }
         // The chat's ⋯ menu opens the profile at its artifacts (#653).
         property <int> artifacts-request: ProfileBridge.artifacts-request;
         changed artifacts-request => { profile-scroll.viewport-y = -artifacts-card.y; }
@@ -266,9 +262,17 @@ export component AgentProfile inherits Modal {
                 padding-top: 3px;
                 padding-bottom: 8px;
                 spacing: 3px;
+                // A request that failed for real, in plain words, once,
+                // inside the panel (a Host that lacks one says nothing).
+                if root.info.error != "": Text {
+                    text: root.info.error;
+                    color: Palette.danger;
+                    font-size: 11 * Look.unit;
+                    wrap: word-wrap;
+                }
+                // One card for this chat: the session is in the subtitle.
                 Card {
                     title: "THIS CHAT";
-                    InfoRow { label: "Session"; value: root.info.session; }
                     InfoRow { label: "Folder"; value: root.info.folder; }
                     HorizontalLayout {
                         spacing: 4px;
@@ -276,6 +280,40 @@ export component AgentProfile inherits Modal {
                         IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
                         IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
                         IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
+                    }
+                    if root.info.chat-view-shown: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.chat-view-choices;
+                            current-index: root.info.chat-view-index;
+                            accessible-label: "Chat view";
+                            selected => { ProfileBridge.set-chat-view(self.current-index); }
+                        }
+                    }
+                    if root.info.agent-messages-shown: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.agent-message-choices;
+                            current-index: root.info.agent-messages-index;
+                            accessible-label: "Messages between agents";
+                            selected => { ProfileBridge.set-agent-messages(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                        ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.tool-activity-choices;
+                            current-index: root.info.tool-activity-index;
+                            enabled: root.info.tool-activity-applies;
+                            accessible-label: "Tool activity";
+                            selected => { ProfileBridge.set-tool-activity(self.current-index); }
+                        }
                     }
                 }
                 if root.info.backend-shown: Card {
@@ -334,7 +372,7 @@ export component AgentProfile inherits Modal {
                         if task.steps != "": Text { text: task.steps; color: Palette.faint; font-size: 11 * Look.unit; }
                     }
                 }
-                Card {
+                if root.info.prompts-shown: Card {
                     title: "PROMPT HISTORY";
                     for prompt in ProfileBridge.prompts: Rectangle {
                         border-radius: 2px;
@@ -395,43 +433,6 @@ export component AgentProfile inherits Modal {
                     ToggleRow { label: "Heartbeat"; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
                     ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
                     ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
-                }
-                Card {
-                    title: "THIS CHAT";
-                    if root.info.chat-view-shown: HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.chat-view-choices;
-                            current-index: root.info.chat-view-index;
-                            accessible-label: "Chat view";
-                            selected => { ProfileBridge.set-chat-view(self.current-index); }
-                        }
-                    }
-                    if root.info.agent-messages-shown: HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.agent-message-choices;
-                            current-index: root.info.agent-messages-index;
-                            accessible-label: "Messages between agents";
-                            selected => { ProfileBridge.set-agent-messages(self.current-index); }
-                        }
-                    }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                        ComboBox {
-                            horizontal-stretch: 1;
-                            model: ProfileBridge.tool-activity-choices;
-                            current-index: root.info.tool-activity-index;
-                            enabled: root.info.tool-activity-applies;
-                            accessible-label: "Tool activity";
-                            selected => { ProfileBridge.set-tool-activity(self.current-index); }
-                        }
-                    }
                 }
                 Card {
                     title: "HEARTBEAT";

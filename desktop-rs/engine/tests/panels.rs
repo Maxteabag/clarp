@@ -436,3 +436,25 @@ fn portraits_are_fetched_once_cropped_square_and_cached() {
     assert_eq!(d.engine.avatar_revision(), 1);
     assert!(d.engine.avatar_source("nobody").is_none());
 }
+
+#[test]
+fn a_host_without_prompt_history_leaves_it_out_and_a_real_failure_is_said_once() {
+    let host = Host::start("profile-missing");
+    let mut d = Driver::live(&host);
+    d.until("roster", |e| e.roster().find("rachel").is_some());
+    // A Host with no /identity/prompt-history answers 404: not offered, no error.
+    host.control("/__control/fail", json!({"path": "/identity/prompt-history", "status": 404}));
+    d.engine.load_agent_profile("rachel");
+    d.until("profile", |e| !e.profile_loading() && !e.profile_prompts_loading());
+    assert!(!d.engine.profile_prompts_offered());
+    assert_eq!(d.engine.profile_error(), "");
+    // The next answer brings it back.
+    d.engine.load_agent_profile("rachel");
+    d.until("prompts", |e| !e.profile_prompts_loading() && !e.profile_prompts().is_empty());
+    assert!(d.engine.profile_prompts_offered());
+    // A plan that fails for real is said in plain words, once.
+    host.control("/__control/fail", json!({"path": "/task-plan", "status": 500}));
+    d.engine.load_agent_profile("rachel");
+    d.until("plan failed", |e| !e.profile_loading());
+    assert_eq!(d.engine.profile_error(), "Could not load the plan: Gateway Timeout (the Host answered 500)");
+}

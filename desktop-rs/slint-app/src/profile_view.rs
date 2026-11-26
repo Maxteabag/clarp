@@ -52,6 +52,14 @@ fn name_of(value: &Value) -> String {
     value.as_str().map_or_else(|| text(value, "name"), str::to_owned)
 }
 
+/// Adds `current` (an id the catalog's `options` lack) at the end, named by
+/// its id, so a picker can show it chosen.
+fn with_current(options: &mut Vec<Value>, current: &str) {
+    if !current.is_empty() && !options.iter().any(|o| text(o, "id") == current) {
+        options.push(serde_json::json!({"id": current, "label": current}));
+    }
+}
+
 // ---- dialog layers -----------------------------------------------------------
 
 /// Shows `name`, keeping the dialog it opens over to return to.
@@ -319,11 +327,16 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let backend = value("backend");
     let name = first(&[value("name")], "Agent");
 
-    // Model and effort, as the catalog lists them.
-    let models = engine.models_for_backend(&backend);
+    // Model and effort, as the catalog lists them. What the agent runs
+    // (its roster row) is always among them: a model or effort the catalog
+    // does not list (one set with /agent-llm, a provider's own) is added,
+    // so the box says "Harness default" only when the agent runs it.
+    let mut models = engine.models_for_backend(&backend);
+    with_current(&mut models, &value("model"));
     let model_ids: Vec<String> = models.iter().map(|m| text(m, "id")).collect();
     let model_index = model_ids.iter().position(|id| *id == value("model")).unwrap_or(0);
-    let efforts = engine.efforts_for_model(&backend, &value("model"));
+    let mut efforts = engine.efforts_for_model(&backend, &value("model"));
+    with_current(&mut efforts, &value("effort"));
     let effort_ids: Vec<String> = efforts.iter().map(|e| text(e, "id")).collect();
     let effort_index = effort_ids.iter().position(|id| *id == value("effort")).unwrap_or(0);
     bridge.set_models(ModelRc::new(VecModel::from(models.iter().map(|m| SharedString::from(first(&[text(m, "label"), text(m, "id")], "")))
@@ -471,6 +484,7 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         heartbeat_empty: if scheduled("enabled") { "No heartbeat history yet" } else { "Heartbeat is off" }.into(),
         prompts_loading: engine.profile_prompts_loading(),
         prompts_more: engine.profile_prompts_have_more(),
+        prompts_shown: engine.profile_prompts_offered(),
         mcp_shown: value("backend") == "claude" && !available.is_empty(),
         agent_messages_shown: engine.chat_hidden_coordination(session),
         agent_messages_index: crate::chat_menu::COORDINATION.iter().position(|(v, _)| *v == engine.chat_coordination_choice(session)).unwrap_or(0) as i32,
