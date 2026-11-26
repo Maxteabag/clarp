@@ -887,10 +887,16 @@ impl ClaudeWriter {
                     .iter()
                     .zip(&ids)
                     .map(|(used, call)| {
+                        let is_error = used.failed || used.output.is_none();
+                        let mut content = used.result();
+                        // Claude rejects an empty failed tool result when it resumes the session.
+                        if is_error && content.trim().is_empty() {
+                            content = "[The tool failed without output.]".to_string();
+                        }
                         json!({
                             "type": "tool_result", "tool_use_id": call,
-                            "content": used.result(),
-                            "is_error": used.failed || used.output.is_none(),
+                            "content": content,
+                            "is_error": is_error,
                         })
                     })
                     .collect();
@@ -1633,6 +1639,28 @@ mod tests {
             "c-codex-item_7"
         );
         assert_eq!(turns[5]["message"]["content"][0]["is_error"], true);
+    }
+
+    #[test]
+    fn claude_gets_nonempty_content_for_a_failed_tool_without_output() {
+        let mut said = said_with_tools();
+        let mut failed = used("toolu_empty_error", Some(""));
+        failed.failed = true;
+        said[1]
+            .tools
+            .extend([failed, used("toolu_empty_success", Some(""))]);
+
+        let rows = ClaudeWriter::rows(&said, &place(Path::new("/x")), "s").unwrap();
+        let calls = &rows[3]["message"]["content"];
+        let results = &rows[4]["message"]["content"];
+        let error = &results[1];
+        assert_eq!(error["tool_use_id"], calls[2]["id"]);
+        assert_eq!(error["is_error"], true);
+        assert!(!error["content"].as_str().unwrap().trim().is_empty());
+        let success = &results[2];
+        assert_eq!(success["tool_use_id"], calls[3]["id"]);
+        assert_eq!(success["is_error"], false);
+        assert_eq!(success["content"], "");
     }
 
     #[test]
