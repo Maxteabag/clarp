@@ -158,7 +158,8 @@ impl Engine {
     }
 
     /// The skills a draft may name as `/skill`: the Host's switched-on
-    /// managed skills, as (id, description), by id.
+    /// managed skills, as (id, description), by id. An agent's own list
+    /// (Host issue #900) replaces this read once the Host names it.
     pub fn slash_skills(&self) -> Vec<(String, String)> {
         let mut skills: Vec<(String, String)> = self
             .launch

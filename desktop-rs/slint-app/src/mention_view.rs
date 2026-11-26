@@ -11,6 +11,9 @@
 //! way; choosing one puts `/skill ` at the start of the draft, which the
 //! agent's tool reads as that skill's command (the Host passes the text on as
 //! it is). A Host that keeps no skills lists none, and `/` stays plain text.
+//! The list is the Host's, not yet each agent's own: the per-agent list
+//! (name and description) is Host issue #900, which names no feature or
+//! endpoint yet; `Engine::slash_skills` is the one place to read it from then.
 
 use clarp_core::mention::{self, Active, Candidate};
 use clarp_engine::Engine;
