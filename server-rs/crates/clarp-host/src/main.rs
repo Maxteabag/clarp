@@ -303,7 +303,9 @@ async fn serve(config: Config) -> Result<(), String> {
         config.data_dir.clone(),
     );
     steps.mark("store");
-    let mut hub = Hub::new(clock.now_ms());
+    // Its events' numbers start above what the last run that stopped may have given out (issue
+    // 935): a client resuming from an earlier run's number is told it missed something.
+    let mut hub = Hub::new(clock.now_ms()).above(clarp_host::hub::event_floor(&config.data_dir));
     hub.capture = Some(capture.clone());
     let hub = Arc::new(hub);
     // The first event of a Host's life says which version it is. A client that connects while
@@ -577,6 +579,13 @@ async fn serve(config: Config) -> Result<(), String> {
         // before's skills, which install-host keeps until the links have moved.
         clarp_host::managed_skills::at_start(&app).await;
         steps.mark("skills");
+        // The janitors a Host has of its own are installed, each once, paused. Before anything
+        // waits for the agents to be open: with these, every agent the start admits is in the
+        // roster, and "every agent is open" means all of them (issue 935).
+        if let Err(why) = clarp_host::janitors::install(&app).await {
+            eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
+        }
+        steps.mark("janitors");
         // What follows needs the agents opened: it waits for them, twenty seconds at most.
         let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
         while tokio::time::Instant::now() < opened_by
@@ -605,7 +614,8 @@ async fn serve(config: Config) -> Result<(), String> {
                      opened {} ms after the start began",
                     began.elapsed().as_millis()
                 );
-                // Every agent's row is its own from now on: what asks about them is answered.
+                // Every agent the start admitted, its own janitors included, is open: every row
+                // is its own from now on, and what asks about them is answered.
                 app.start.reach(clarp_host::start::Stage::Agents);
             });
         }
@@ -622,17 +632,13 @@ async fn serve(config: Config) -> Result<(), String> {
             .map_err(|e| e.0)?;
         clarp_host::media_manage::recover(&app).await;
         steps.mark("media");
-        // The janitors a Host has of its own are installed, each once, paused.
-        if let Err(why) = clarp_host::janitors::install(&app).await {
-            eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
-        }
         // A ring that rang when the Host stopped has its time again, or is missed now: the apps
         // and its agent are told without anybody having to ask first.
         // Repair admissions before speech queued by surviving shims can be voiced.
         // What recovers, later, the call of an agent that does not answer now.
         let recovering = clarp_host::calls::opening::Recovering(app.clone());
         app.mouth.held.recovered_by(Arc::new(recovering));
-        steps.mark("janitors");
+        steps.mark("rings");
         app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
         steps.mark("calls");
         app.mouth.bindings_ready.notify_one();
