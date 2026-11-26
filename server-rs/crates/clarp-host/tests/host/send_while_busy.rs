@@ -95,7 +95,7 @@ fn the_owner_sets_what_send_does_while_the_agent_works_and_every_app_is_told() {
     let host = place.start();
     assert_eq!(
         host.get("/server-info")["contract"]["features"]["send_while_busy"],
-        206
+        208
     );
     assert_eq!(host.get("/send-settings"), json!({"while_busy": "steer"}));
     let events = host.listen();
