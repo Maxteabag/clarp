@@ -14,8 +14,23 @@ use serde_json::Value;
 
 use crate::{App, WaitingTurn};
 
-/// The most waiting messages the strip lists; the rest are "+N more".
-pub const SHOWN: usize = 3;
+/// The most waiting messages the strip lists. With more waiting it folds
+/// to one "N waiting" line (Manage and Send now on it).
+pub const SHOWN: usize = 2;
+
+/// Whether the strip shows at all (Settings "Show the queue", Ctrl+K
+/// "Hide queue"). Off, the composer's count line alone says what waits.
+pub const SETTING: &str = "composer/showQueue";
+
+pub fn shown(engine: &Engine) -> bool {
+    engine.settings().boolean(SETTING, true)
+}
+
+/// Shows or hides the strip in every chat.
+pub fn set_shown(app: &App, on: bool) {
+    app.engine.borrow_mut().settings_mut().set(SETTING, on);
+    app.refresh(&[clarp_engine::Change::Panes]);
+}
 
 thread_local! {
     /// The chat and count the strip last loaded the queue for.

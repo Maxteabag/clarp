@@ -11,7 +11,9 @@
 //! each waiting message with Send now; a Send now the Host refuses says the
 //! Host's answer and the message waits on; Ctrl+Shift+Enter sends the
 //! first. The composer's frame shows the context meter, and warns near the
-//! account's limit.
+//! account's limit. With more than two waiting the strip is one "N waiting"
+//! line with Manage and Send now; Hide queue (Ctrl+K) leaves no strip and
+//! Show queue brings it back.
 //! Needs the fake Host.
 
 use std::cell::Cell;
@@ -92,7 +94,7 @@ thread_local! {
 const LONG_DRAFT: &str = "sent by the button, a draft long enough to wrap the composer onto several lines: token bucket, leaky bucket, sliding window log, sliding window counter, clock skew, race conditions, failure modes, observability and testing, with an example in every section.";
 
 pub fn buttons_check(out: String) {
-    let (out1, out2, out3, out4, out5, out6, out7) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out4, out5, out6, out7, out8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     let box_at_end: Rc<Cell<Option<(f32, f32, f32, f32)>>> = Rc::new(Cell::new(None));
     let (end1, end2, end3) = (box_at_end.clone(), box_at_end.clone(), box_at_end);
     let stages: Vec<Stage> = vec![
@@ -357,6 +359,46 @@ pub fn buttons_check(out: String) {
                 return elapsed >= Duration::from_secs(5);
             }
             check(requests_posted("/turn-queue/q2/send") == 0, "not the plain send");
+            // Three wait now: the strip folds to one line.
+            let items = json!([{"queue_id": "q3", "text": "third"}, {"queue_id": "q4", "text": "fourth"}, {"queue_id": "q5", "text": "fifth"}]);
+            let set = control("/__control/turn-queue", &json!({"session": "rachel", "items": items}))
+                .and_then(|()| control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 3}})));
+            check(set.is_ok(), &format!("three messages wait: {set:?}"));
+            true
+        })),
+        ("folded", Box::new(move |_, window, elapsed| {
+            let folded = format!("queue-folded:{}", app_now().active_id());
+            if !drawn(&folded) || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(5), "with more than two waiting the strip is one 'N waiting' line");
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(label(&folded).starts_with("3 waiting"), &format!("it says how many: {:?}", label(&folded)));
+            check(!drawn("queue-item:q3") && !drawn("queue-item:q4") && !drawn("queue-item:q5"), "no row for each message");
+            check(drawn(&format!("queue-manage:{}", app_now().active_id())), "Manage stays on the line");
+            check(drawn("queue-send:q3"), "and Send now for the first");
+            check_window_size_free(window, "with the strip folded");
+            shot(&out8, "buttons-08-queue-folded");
+            check(crate::queue_strip::shown(&app_now().engine.borrow()), "the queue shows by default");
+            crate::commands::run(&app_now(), window, "toggle-queue");
+            true
+        })),
+        ("hidden", Box::new(|app, window, elapsed| {
+            let strip = format!("queue-strip:{}", app_now().active_id());
+            if crate::queue_strip::shown(&app.engine.borrow()) || drawn(&strip) {
+                check(elapsed < Duration::from_secs(3), "Hide queue leaves no strip at all");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(app.engine.borrow().queue_count("rachel") == 3, "the messages still wait");
+            crate::commands::run(&app_now(), window, "toggle-queue");
+            true
+        })),
+        ("shown again", Box::new(|app, _, elapsed| {
+            let folded = format!("queue-folded:{}", app_now().active_id());
+            if !drawn(&folded) {
+                check(elapsed < Duration::from_secs(3), "Show queue brings the strip back");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(crate::queue_strip::shown(&app.engine.borrow()), "the setting is on again");
             true
         })),
     ];
