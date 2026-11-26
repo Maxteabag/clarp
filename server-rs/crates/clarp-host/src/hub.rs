@@ -160,6 +160,28 @@ impl Hub {
         }
     }
 
+    /// This run's numbers start above `floor`: what an earlier run said it may have given out
+    /// (`event_floor`, issue 935). Numbers that start from the time alone can meet an earlier
+    /// run's within one second of numbers: a client that resumed from such a number would have
+    /// the new run's first events skipped for having numbers at or below its own.
+    #[must_use]
+    pub fn above(mut self, floor: u64) -> Self {
+        let recent = self.recent.get_mut().unwrap_or_else(PoisonError::into_inner);
+        if floor > recent.first_id && recent.events.is_empty() {
+            recent.first_id = floor;
+            recent.next_id = floor;
+        }
+        self
+    }
+
+    /// The number the next event will have.
+    pub fn next_id(&self) -> u64 {
+        self.recent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .next_id
+    }
+
     /// When this run of the Host started.
     pub fn started_ms(&self) -> i64 {
         self.started_ms
@@ -448,6 +470,24 @@ impl Hub {
     }
 }
 
+/// Where a Host that stops says how far its events' numbers may go.
+const EVENT_FLOOR: &str = "event-floor";
+
+/// What a stopping Host writes: its next event's number and a second of numbers more, for what
+/// it still says while its connections drain (issue 935). The next run starts above it.
+pub fn record_event_floor(data_dir: &std::path::Path, next_id: u64) {
+    let floor = next_id.saturating_add(1 << 20);
+    let _ = std::fs::write(data_dir.join(EVENT_FLOOR), floor.to_string());
+}
+
+/// The number this run's events start above: what the last run that stopped wrote, or 0.
+pub fn event_floor(data_dir: &std::path::Path) -> u64 {
+    std::fs::read_to_string(data_dir.join(EVENT_FLOOR))
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -481,6 +521,42 @@ mod tests {
             3,
             "a client that names no event is given what is kept"
         );
+    }
+
+    #[test]
+    fn a_run_started_within_the_last_ones_second_of_numbers_starts_above_it_and_a_resume_is_told() {
+        // The last run gave out B and B+1; the next one starts in the same second of numbers.
+        let old = Hub::new(1_700_000_000_000);
+        let b = old.publish(roster("one"), 1_700_000_000_000);
+        let last = old.publish(roster("two"), 1_700_000_000_001);
+        assert_eq!(last, b + 1);
+        let place = std::env::temp_dir().join(format!("hub-floor-{}", std::process::id()));
+        std::fs::create_dir_all(&place).unwrap();
+        record_event_floor(&place, old.next_id());
+
+        // Without the floor the new run gives out B, B+1, B+2 again, and a client that resumes
+        // from B+1 is told nothing was missed while two new events are skipped.
+        let unfloored = Hub::new(1_700_000_000_500);
+        let reused: Vec<u64> = (0..3)
+            .map(|n| unfloored.publish(roster("new"), 1_700_000_000_500 + n))
+            .collect();
+        assert_eq!(reused, vec![b, b + 1, b + 2]);
+        assert!(!unfloored.resume(Some(last)).truncated);
+
+        // With it, every new number is above every old one, and the resume is told to look again.
+        let next = Hub::new(1_700_000_000_500).above(event_floor(&place));
+        let fresh: Vec<u64> = (0..3)
+            .map(|n| next.publish(roster("new"), 1_700_000_000_500 + n))
+            .collect();
+        assert!(fresh.iter().all(|id| *id > last), "{fresh:?} after {last}");
+        let resumed = next.resume(Some(last));
+        assert!(resumed.truncated);
+        assert_eq!(resumed.missed.len(), 3);
+        // A floor below the time's own numbers changes nothing.
+        let later = Hub::new(1_800_000_000_000);
+        let own = later.next_id();
+        assert_eq!(Hub::new(1_800_000_000_000).above(1).next_id(), own);
+        std::fs::remove_dir_all(&place).unwrap();
     }
 
     #[test]
