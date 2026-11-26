@@ -47,6 +47,7 @@ use std::time::Duration;
 use clarp_actor::Status;
 use clarp_kernel::failures;
 use clarp_kernel::turn::{Outcome, Wait};
+use clarp_kernel::while_busy::WhileBusy;
 use serde_json::{Value, json};
 
 use crate::fleet::Member;
@@ -140,9 +141,37 @@ impl Why {
     }
 }
 
-/// Whether a message of the owner's said now would wait, and how many run before it.
+/// What a message of the owner's said now would wait for under each of his `while_busy`
+/// settings, and how many run before it: read on the agent's thread, where the turn is, and
+/// chosen by the setting where the row is made, so a change of the setting alone changes the row
+/// (`Worker::owner_waits`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OwnerWaits {
+    pub steer: Option<Why>,
+    pub after_turn: Option<Why>,
+    pub take_over: Option<Why>,
+    /// The waiting messages that run before it (`Agent::ahead_of_owner`).
+    pub ahead: usize,
+}
+
+impl OwnerWaits {
+    /// What his message waits for under the setting the Host has now.
+    pub fn under(self, setting: WhileBusy) -> Waits {
+        let why = match setting {
+            WhileBusy::Steer => self.steer,
+            WhileBusy::AfterTurn => self.after_turn,
+            WhileBusy::TakeOver => self.take_over,
+        };
+        Waits {
+            why,
+            ahead: self.ahead,
+        }
+    }
+}
+
+/// Whether a message of the owner's said now would wait, and how many run before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Waits {
     /// What it waits for; `None` where it is read in or takes the turn's place now.
     pub why: Option<Why>,
     /// The waiting messages that run before it (`Agent::ahead_of_owner`).
@@ -152,8 +181,8 @@ pub struct OwnerWaits {
 /// What the decision reads of one agent, all of it held by the Host already.
 pub struct Facts<'a> {
     pub status: &'a Status,
-    /// What keeps a message of the owner's said now waiting, read on the agent's thread.
-    pub owner_waits: OwnerWaits,
+    /// What keeps a message of the owner's said now waiting, under the Host's setting.
+    pub owner_waits: Waits,
     /// Why the agent's thread cannot answer at all now (`agent::View::broken`).
     pub broken: Option<&'a str>,
     /// The row's `backend_quota`: what it says of the tool's account.
@@ -367,14 +396,18 @@ pub struct At {
     pub now_ms: i64,
     pub host_started_ms: i64,
     quota: Arc<crate::quota::Rows>,
+    /// What the owner's Send does while the agent works, as the Host has it now.
+    while_busy: WhileBusy,
 }
 
 impl At {
     pub fn of(app: &crate::edge::App) -> Self {
+        let directory = app.fleet.directory();
         Self {
             now_ms: app.clock.now_ms(),
             host_started_ms: app.hub.started_ms(),
             quota: app.hub.availability_quota.borrow().clone(),
+            while_busy: WhileBusy::stored(directory.setting(clarp_kernel::while_busy::KEY)),
         }
     }
 }
@@ -389,7 +422,7 @@ fn of(member: &Member, view: &crate::agent::View, at: &At) -> Availability {
     let backend_quota = quota.of(view.backend, &member.record.model);
     decide(&Facts {
         status: &view.status,
-        owner_waits: view.owner_waits,
+        owner_waits: view.owner_waits.under(at.while_busy),
         broken: view.broken.as_deref(),
         backend_quota: &backend_quota,
         bound: member.record.bound(),
@@ -645,7 +678,7 @@ mod tests {
     }
 
     fn decided(status: &Status, quota: &Value, alive: Option<i64>) -> Availability {
-        waiting(status, quota, alive, OwnerWaits::default())
+        waiting(status, quota, alive, Waits::default())
     }
 
     /// As [`decided`], with what keeps a message of the owner's waiting.
@@ -653,7 +686,7 @@ mod tests {
         status: &Status,
         quota: &Value,
         alive: Option<i64>,
-        owner_waits: OwnerWaits,
+        owner_waits: Waits,
     ) -> Availability {
         decide(&Facts {
             owner_waits,
@@ -668,6 +701,14 @@ mod tests {
             host_started_ms: 7,
             now_ms: NOW,
         })
+    }
+
+    fn shown_of(availability: &Availability) -> (&'static str, String, usize) {
+        (
+            availability.state,
+            availability.text.clone(),
+            availability.queue_ahead,
+        )
     }
 
     #[test]
@@ -690,7 +731,7 @@ mod tests {
             ),
             ("ok", "", 0, None)
         );
-        let ahead = |ahead| OwnerWaits { why: None, ahead };
+        let ahead = |ahead| Waits { why: None, ahead };
         assert_eq!(
             waiting(&status, &Value::Null, None, ahead(2)).to_json()["queue_ahead"],
             0,
@@ -698,7 +739,7 @@ mod tests {
         );
         // A turn that can neither take his word now nor be cut: what it waits for, and what
         // truly runs before it, not the raw queue.
-        let blocked = |why, ahead| OwnerWaits {
+        let blocked = |why, ahead| Waits {
             why: Some(why),
             ahead,
         };
@@ -734,6 +775,22 @@ mod tests {
         assert_eq!(
             (held.state, held.text.as_str(), held.since_ms),
             ("busy", "Moving to another backend", 5)
+        );
+        // The row takes what the Host's setting says now: under `after_turn` his message waits
+        // for the turn by his own choice, which is no reason the agent cannot answer.
+        let read = OwnerWaits {
+            steer: Some(Why::Compacting),
+            after_turn: None,
+            take_over: Some(Why::Compacting),
+            ahead: 1,
+        };
+        assert_eq!(read.under(WhileBusy::Steer), blocked(Why::Compacting, 1));
+        assert_eq!(read.under(WhileBusy::TakeOver), blocked(Why::Compacting, 1));
+        let chosen = read.under(WhileBusy::AfterTurn);
+        assert_eq!(chosen, ahead(1));
+        assert_eq!(
+            shown_of(&waiting(&status, &Value::Null, None, chosen)),
+            ("ok", String::new(), 0)
         );
         // Only the turns that cannot be cut are named; any other is not guessed at.
         use clarp_kernel::turn::{COMPACTION, TRANSIT_SUMMARY};
@@ -782,7 +839,7 @@ mod tests {
         status.live = Some(live.clone());
         // Seven wait, three of them before the owner's word.
         status.queue_depth = 7;
-        let three_ahead = OwnerWaits {
+        let three_ahead = Waits {
             why: None,
             ahead: 3,
         };
@@ -903,7 +960,7 @@ mod tests {
         // Where another seat has room, the Host moves the tool to it: a switch, for a while.
         let switch = |ended_at_ms: i64| {
             decide(&Facts {
-                owner_waits: OwnerWaits::default(),
+                owner_waits: Waits::default(),
                 status: &refused(failures::USAGE_LIMIT, "Usage limit reached", ended_at_ms),
                 broken: None,
                 backend_quota: &Value::Null,
@@ -941,7 +998,7 @@ mod tests {
         let near = json!({"state": "near", "resets_at": "2030-03-17T19:00:00Z"});
         assert_eq!(decided(&idle(), &near, None).state, "ok");
         let bound = decide(&Facts {
-            owner_waits: OwnerWaits::default(),
+            owner_waits: Waits::default(),
             status: &idle(),
             broken: None,
             backend_quota: &used_up,
@@ -996,7 +1053,7 @@ mod tests {
         // An agent being opened after the Host started; one made since is not restarting.
         let opening = |created_at_ms: i64| {
             decide(&Facts {
-                owner_waits: OwnerWaits::default(),
+                owner_waits: Waits::default(),
                 status: &idle(),
                 broken: Some(crate::agent::OPENING),
                 backend_quota: &Value::Null,

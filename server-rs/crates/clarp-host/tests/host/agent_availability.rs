@@ -172,6 +172,25 @@ fn a_turn_that_cannot_take_the_owners_word_says_why_and_what_runs_before_it() {
         .find(|row| row["session"] == session.as_str())
         .unwrap();
     assert_eq!(shown(&row["availability"]), one, "{row}");
+    // The setting alone moves the row and its event: under `after_turn` his message waits for
+    // the compaction by his own choice (ok), under `steer` again because it cannot be cut. The
+    // compaction runs on and his message waits throughout: admission is untouched.
+    host.post("/send-settings", json!({ "while_busy": "after_turn" }));
+    same_as_the_row(&json!(["ok", "", null, 0]));
+    host.post("/send-settings", json!({ "while_busy": "steer" }));
+    same_as_the_row(&one);
+    let snapshot = host.get("/agents/snapshot");
+    let row = snapshot["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["session"] == session.as_str())
+        .unwrap();
+    assert_eq!(row["compacting"], true, "the compaction was not cut: {row}");
+    assert_eq!(
+        row["queued_turn_count"], 1,
+        "his message still waits: {row}"
+    );
     // Automation left for later waits behind his word: it is in the queue, not ahead of him.
     let later = host.post(
         "/send",

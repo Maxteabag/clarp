@@ -108,7 +108,8 @@ impl Worker {
     /// What keeps a message of the owner's said now waiting, and how many waiting messages run
     /// before it (issue 918, the agent's `availability`). The message is the one his apps send:
     /// words, with the Host's `while_busy` setting (feature `send_while_busy`), read by the same
-    /// [`Worker::plan_for`] that admits it. It waits where a backend move holds the queue, or
+    /// [`Worker::plan_for`] that admits it, under each of the three settings, for the row to
+    /// take the one the Host has when it is made. It waits where a backend move holds the queue, or
     /// where the running turn can neither take it now nor be cut (`turn_not_cuttable`: the
     /// tool's compaction, a summary for a move, a native goal's own turn). It does not wait
     /// where it is read into the turn, or the turn makes way for it (a turn that takes no words,
@@ -122,14 +123,14 @@ impl Worker {
         let Some(actor) = self.actor.as_ref() else {
             return OwnerWaits::default();
         };
-        let why = if actor.transit_holds_queue() {
-            Some(Why::Moving)
-        } else {
-            let directory = self.setup.hub.queue_directory();
-            let setting = directory
-                .as_deref()
-                .and_then(|directory| directory.setting(clarp_kernel::while_busy::KEY));
-            match self.plan_for(WhileBusy::stored(setting), true) {
+        let transit = actor.transit_holds_queue();
+        // Under each setting, as the row is made with the one the Host has then: a change of
+        // the setting alone changes what the row says (`Fleet::set` has it looked at again).
+        let under = |asked| {
+            if transit {
+                return Some(Why::Moving);
+            }
+            match self.plan_for(asked, true) {
                 Plan::Wait(Done {
                     fallback: Some((_, Reason::NotCuttable)),
                     ..
@@ -138,7 +139,9 @@ impl Worker {
             }
         };
         OwnerWaits {
-            why,
+            steer: under(WhileBusy::Steer),
+            after_turn: under(WhileBusy::AfterTurn),
+            take_over: under(WhileBusy::TakeOver),
             ahead: actor.ahead_of_owner(),
         }
     }

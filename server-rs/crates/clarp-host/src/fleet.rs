@@ -3180,6 +3180,11 @@ impl Fleet {
                 serde_json::json!({"type": crate::send_settings::CHANGED, "while_busy": after.name()}),
                 self.now_ms(),
             );
+            // Whether the owner's Send waits for a running turn follows the setting: every
+            // agent's availability is looked at again (`availability::OwnerWaits::under`).
+            for member in &self.members {
+                self.works.hub.availability_moved(&member.record.agent_id);
+            }
         }
         Ok(())
     }

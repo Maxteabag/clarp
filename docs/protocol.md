@@ -2540,7 +2540,7 @@ line says only what keeps the user waiting. On a Host with `agent_availability` 
 `fields: {"availability": {...}}` whenever `state`, `text`, `back_at_ms` or `queue_ahead` changes,
 never for a sign of life alone. Patch the row as for other `fields` (`roster_fields`). The Host
 looks at an agent as soon as its status or queue moves, or whether the running turn takes the
-user's words now changes, and at every agent every 15 s (a turn that
+user's words now changes, at every agent when the `while_busy` setting changes, and at every agent every 15 s (a turn that
 fell silent, an account that changed). Snapshot rows and roster events use the same cached quota observation. A new observation
 wakes the roster watcher.
 
