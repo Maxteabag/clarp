@@ -21,9 +21,11 @@ pub(crate) struct TurnQueue {
     action_sessions: HashMap<String, String>,
     /// The Send now tags in flight.
     sends: std::collections::HashSet<String>,
-    /// Plain `/send`s on a `queue_steer` Host, by tag: refused because a
-    /// turn runs after all (the agent's busy state lagged), they take over.
-    take_over_on_refusal: HashMap<String, String>,
+    /// Send now on a `queue_steer` Host, by the tag of its step in flight:
+    /// a step the Host refuses (409) goes on to the next way of sending it
+    /// now (`Step`), so a turn that cannot be steered is stopped instead,
+    /// and one that ended meanwhile is sent to plainly.
+    chains: HashMap<String, Chain>,
     /// The Host's answer to the last refused Send now (a turn still runs),
     /// and its chat. A reload keeps it: the Host reloads the queue with
     /// `queue-updated` on the same refusal.
@@ -36,6 +38,23 @@ pub(crate) struct TurnQueue {
 
 /// The Host feature that offers Steer now and Take over.
 pub const STEER_FEATURE: &str = "queue_steer";
+
+/// The ways of sending a waiting message now, in the order Send now tries
+/// them after a refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// Read into the running turn (`/steer`).
+    Steer,
+    /// Stop the running turn and run it (`/take-over`).
+    TakeOver,
+    /// Send it (`/send`): passes a held queue, refused while a turn runs.
+    Send,
+}
+
+struct Chain {
+    queue_id: String,
+    tried: Vec<Step>,
+}
 
 impl Engine {
     /// The loaded queue's items when it is `session`'s, else none.
@@ -152,57 +171,82 @@ impl Engine {
     /// Sends a queued turn now instead of after the running one. While the
     /// agent works, on a Host that offers it (`queue_steer`), "now" means now:
     /// the message is read into the running turn (`/steer`), or, where it
-    /// cannot be, the running turn stops and this message runs (`/take-over`).
-    /// `/send` alone only passes a held queue and is refused while a turn
-    /// runs. An idle agent, or a Host without `queue_steer`, sends as before.
+    /// cannot be, the running turn stops and this message runs
+    /// (`/take-over`). `/send`
+    /// alone only passes a held queue and is refused while a turn runs. An
+    /// idle agent, or a Host without `queue_steer`, sends as before. A step
+    /// the Host refuses goes on to the next (`queue_failure`).
     pub fn send_queued_turn(&mut self, queue_id: &str) {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.send_queued_turn(queue_id));
         if queue_id.is_empty() {
             return;
         }
         let busy = self.roster().find(&self.queue.session).is_some_and(|a| a.busy);
-        if self.queue.steer && busy {
-            let item = self.queue.items.iter().find(|item| {
-                item.get("queue_id").or_else(|| item.get("id")).and_then(Value::as_str) == Some(queue_id)
-            });
-            let steerable = item.is_some_and(|item| {
-                item.get("steerable").and_then(Value::as_bool) == Some(true)
-                    && item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting")
-            });
-            if steerable {
-                self.steer_queued_turn(queue_id);
-            } else {
-                self.take_over_queued_turn(queue_id);
-            }
-            return;
-        }
-        let mut body = json!({});
-        self.ask_voice(&mut body);
-        let tag = self.queue_action("POST", &format!("{}/send", Self::queue_item_path(queue_id)), body);
-        if let Some(tag) = tag.filter(|_| self.queue.steer) {
-            self.queue.take_over_on_refusal.insert(tag, queue_id.to_owned());
-        }
+        let first = if !self.queue.steer || !busy {
+            Step::Send
+        } else if self.queued_steerable(queue_id) {
+            Step::Steer
+        } else {
+            Step::TakeOver
+        };
+        self.queue_step(queue_id, first, Vec::new());
     }
 
-    /// Reads a waiting message into the running turn now (`queue_steer`).
+    /// Reads a waiting message into the running turn now (`queue_steer`);
+    /// where the turn cannot take it, it stops and the message runs.
     pub fn steer_queued_turn(&mut self, queue_id: &str) {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.steer_queued_turn(queue_id));
         if !queue_id.is_empty() {
-            let mut body = json!({});
-            self.ask_voice(&mut body);
-            self.queue_action("POST", &format!("{}/steer", Self::queue_item_path(queue_id)), body);
+            self.queue_step(queue_id, Step::Steer, Vec::new());
         }
     }
 
     /// Stops the running turn and runs this waiting message now
-    /// (`queue_steer`).
+    /// (`queue_steer`); with no turn left to stop it is sent.
     pub fn take_over_queued_turn(&mut self, queue_id: &str) {
         on_peer!(self.queue_peer_mut(), |engine, _local| engine.take_over_queued_turn(queue_id));
         if !queue_id.is_empty() {
-            let mut body = json!({});
-            self.ask_voice(&mut body);
-            self.queue_action("POST", &format!("{}/take-over", Self::queue_item_path(queue_id)), body);
+            self.queue_step(queue_id, Step::TakeOver, Vec::new());
         }
+    }
+
+    /// The loaded item may be read into the running turn: the Host says it
+    /// is `steerable`, and it met the busy agent (not `kind: later`).
+    fn queued_steerable(&self, queue_id: &str) -> bool {
+        self.queue
+            .items
+            .iter()
+            .find(|item| item.get("queue_id").or_else(|| item.get("id")).and_then(Value::as_str) == Some(queue_id))
+            .is_some_and(|item| {
+                item.get("steerable").and_then(Value::as_bool) == Some(true)
+                    && item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting")
+            })
+    }
+
+    /// Sends one step of Send now. A plain send says whether to speak the
+    /// answer as the composer's send does (`synthesize_audio`): a Host that
+    /// hears nothing speaks nothing.
+    fn queue_step(&mut self, queue_id: &str, step: Step, mut tried: Vec<Step>) {
+        let (verb, mut body) = match step {
+            Step::Steer => ("steer", json!({})),
+            Step::TakeOver => ("take-over", json!({})),
+            Step::Send => ("send", json!({"synthesize_audio": !self.muted})),
+        };
+        if step != Step::Send {
+            self.ask_voice(&mut body);
+        }
+        let tag = self.queue_action("POST", &format!("{}/{verb}", Self::queue_item_path(queue_id)), body);
+        if let Some(tag) = tag.filter(|_| self.queue.steer) {
+            tried.push(step);
+            self.queue.chains.insert(tag, Chain { queue_id: queue_id.to_owned(), tried });
+        }
+    }
+
+    /// The next way to send a refused message now, or None when every way
+    /// was refused.
+    fn next_step(&self, chain: &Chain) -> Option<Step> {
+        let steer = self.queued_steerable(&chain.queue_id).then_some(Step::Steer);
+        [steer, Some(Step::TakeOver), Some(Step::Send)].into_iter().flatten().find(|step| !chain.tried.contains(step))
     }
 
     /// An event for the whole engine; the loaded queue follows its chat's
@@ -235,8 +279,8 @@ impl Engine {
             self.changes.push(Change::Queue(session.to_owned()));
         } else if tag.starts_with("queue-action:") {
             self.queue.sends.remove(tag);
-            self.queue.take_over_on_refusal.remove(tag);
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
+            self.queue.chains.remove(tag);
             if !session.is_empty() && session == self.queue.session {
                 self.load_turn_queue(&session);
             }
@@ -257,13 +301,23 @@ impl Engine {
             }
             self.queue.loading = false;
         } else if tag.starts_with("queue-action:") {
-            // Send now refused because a turn runs after all: it takes over.
-            if let Some(queue_id) = self.queue.take_over_on_refusal.remove(tag)
-                && status == 409
-            {
+            // Send now refused (a turn runs after all, it cannot be steered,
+            // or it ended meanwhile): the next way of sending it now, until
+            // none is left; then it waits on, and says so calmly.
+            let chain = self.queue.chains.remove(tag);
+            if let Some(chain) = chain.filter(|_| status == 409) {
                 self.queue.sends.remove(tag);
-                self.queue.action_sessions.remove(tag);
-                self.take_over_queued_turn(&queue_id);
+                let session = self.queue.action_sessions.remove(tag).unwrap_or_default();
+                if let Some(next) = self.next_step(&chain).filter(|_| session == self.queue.session) {
+                    self.queue_step(&chain.queue_id, next, chain.tried);
+                } else {
+                    self.queue.refused = clarp_core::queue_line::STILL_WAITING.to_owned();
+                    self.queue.refused_session = session.clone();
+                    self.changes.push(Change::Queue(session.clone()));
+                    if session == self.queue.session {
+                        self.load_turn_queue(&session);
+                    }
+                }
                 return true;
             }
             let session = self.queue.action_sessions.remove(tag).unwrap_or_default();

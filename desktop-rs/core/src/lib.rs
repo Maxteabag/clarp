@@ -42,6 +42,7 @@ pub mod presentation;
 pub mod presence;
 pub mod preview;
 pub mod protocol;
+pub mod queue_line;
 pub mod reading_theme;
 pub mod readability;
 pub mod render_spec;
