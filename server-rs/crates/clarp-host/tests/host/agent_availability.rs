@@ -67,6 +67,9 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
     assert_eq!(shown(&row["availability"]), shown(&idle), "{row}");
 
     host.send(&session, "sleep 60", "long");
+    wait_for("the row to say busy", || {
+        availability_of(&host, &session)["state"] == "busy"
+    });
     wait_for("the agent to be busy", || {
         told(&heard, &session)
             .is_some_and(|event| event["fields"]["availability"]["state"] == "busy")

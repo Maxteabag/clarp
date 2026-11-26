@@ -32,7 +32,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
-use std::sync::{LazyLock, Mutex, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use clarp_actor::Status;
@@ -401,60 +401,78 @@ pub fn event(member: &Member, availability: Value) -> Value {
 /// Tells the apps when an agent's availability changes: one task for the whole Host. It looks at
 /// an agent at once when its status or queue moved (`Hub::availability_moved`), and at every
 /// agent every [`SWEEP_EVERY`], for the turns that fell silent and the accounts that changed.
+/// The accounts are read on a task of their own, so a slow reading never holds back the rest.
 pub fn run(app: &crate::edge::App) {
+    let (read, accounts) = tokio::sync::watch::channel(Arc::new(crate::quota::Rows::unasked()));
+    let reader = app.clone();
+    tokio::spawn(async move {
+        loop {
+            let rows = crate::quota::rows(&reader).await;
+            if read.send(Arc::new(rows)).is_err() {
+                break;
+            }
+            tokio::time::sleep(SWEEP_EVERY).await;
+        }
+    });
     let app = app.clone();
     tokio::spawn(async move {
         let mut told: HashMap<String, Availability> = HashMap::new();
-        let mut sweep = tokio::time::interval(SWEEP_EVERY);
+        // How every agent stands at the start says nothing new: an app reads it in the snapshot.
+        let quota = accounts.borrow().clone();
+        look(&app, &quota, None, &mut told, false);
+        let first = tokio::time::Instant::now() + SWEEP_EVERY;
+        let mut sweep = tokio::time::interval_at(first, SWEEP_EVERY);
         sweep.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // Read at the first sweep, which comes at once, and at every sweep after.
-        let mut quota = crate::quota::Rows::unasked();
-        // The first look only learns how every agent stands: an app read that in the snapshot.
-        let mut first = true;
         loop {
             let moved = tokio::select! {
-                _ = sweep.tick() => {
-                    quota = crate::quota::rows(&app).await;
-                    None
-                }
+                _ = sweep.tick() => None,
                 () = app.hub.availability_wait() => {
                     // What moved in the same breath is looked at together.
                     tokio::time::sleep(BATCHED_FOR).await;
                     Some(app.hub.take_availability_moved())
                 }
             };
-            let directory = app.fleet.directory();
-            let at = At::of(&app);
-            let members = directory.members.iter().chain(&directory.janitors);
-            let mut seen = HashSet::new();
-            for member in members {
-                let id = &member.record.agent_id;
-                if moved.as_ref().is_some_and(|moved| !moved.contains(id)) {
-                    continue;
-                }
-                let view = member.agent.view();
-                let backend_quota = quota.of(view.backend, &member.record.model);
-                let now = of(member, &view, &quota, &backend_quota, at);
-                if moved.is_none() {
-                    seen.insert(id.clone());
-                }
-                // An agent first seen able to answer has nothing to tell: its row says so.
-                let changed = match told.get(id) {
-                    Some(before) => before.shown() != now.shown(),
-                    None => now.state != "ok",
-                };
-                if changed && !first {
-                    app.hub.publish(event(member, now.to_json()), at.now_ms);
-                }
-                told.insert(id.clone(), now);
-            }
-            if moved.is_none() {
-                // An agent the Host no longer has is forgotten.
-                told.retain(|id, _| seen.contains(id));
-                first = false;
-            }
+            let quota = accounts.borrow().clone();
+            look(&app, &quota, moved.as_ref(), &mut told, true);
         }
     });
+}
+
+/// Looks at the agents that `moved` names (every agent where it names none), and tells the
+/// apps of each whose availability changed, where `tell`.
+fn look(
+    app: &crate::edge::App,
+    quota: &crate::quota::Rows,
+    moved: Option<&HashSet<String>>,
+    told: &mut HashMap<String, Availability>,
+    tell: bool,
+) {
+    let directory = app.fleet.directory();
+    let at = At::of(app);
+    let mut seen = HashSet::new();
+    for member in directory.members.iter().chain(&directory.janitors) {
+        let id = &member.record.agent_id;
+        if moved.is_some_and(|moved| !moved.contains(id)) {
+            continue;
+        }
+        seen.insert(id.clone());
+        let view = member.agent.view();
+        let backend_quota = quota.of(view.backend, &member.record.model);
+        let now = of(member, &view, quota, &backend_quota, at);
+        // An agent first seen able to answer has nothing to tell: its row says so.
+        let changed = match told.get(id) {
+            Some(before) => before.shown() != now.shown(),
+            None => now.state != "ok",
+        };
+        if changed && tell {
+            app.hub.publish(event(member, now.to_json()), at.now_ms);
+        }
+        told.insert(id.clone(), now);
+    }
+    if moved.is_none() {
+        // An agent the Host no longer has is forgotten.
+        told.retain(|id, _| seen.contains(id));
+    }
 }
 
 #[cfg(test)]
