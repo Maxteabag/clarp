@@ -181,6 +181,8 @@ mod question_cards;
 mod queue_provenance;
 #[path = "host/queue_steer.rs"]
 mod queue_steer;
+#[path = "host/send_while_busy.rs"]
+mod send_while_busy;
 #[path = "host/queue_together.rs"]
 mod queue_together;
 #[path = "host/quota_near.rs"]
