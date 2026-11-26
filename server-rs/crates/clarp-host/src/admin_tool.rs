@@ -1499,8 +1499,9 @@ async fn portrait(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     }
 }
 
-/// `clarp-admin agent archive --session S [--restore]`: an agent puts itself or one of its own
-/// helpers away (or takes it back), as `POST /agent-archive` does it.
+/// `clarp-admin agent archive --session S [--restore]`: an agent puts any agent away (or takes
+/// it back), as `POST /agent-archive` does it, from its own verified turn, which says who did
+/// it: the agent keeps that as `archived_by` while it is away, and the Host's log names it.
 async fn agent_archive(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     let usage = |why: &str| {
         ToolAnswer::said(
@@ -1522,12 +1523,15 @@ async fn agent_archive(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswe
         Ok(actor) => actor,
         Err(refused) => return refused,
     };
-    let target = match own_or_helper(app, &actor, session, "agent archive") {
-        Ok(target) => target,
-        Err(refused) => return refused,
+    let Some(target) = app.fleet.directory().by_session(session.trim()).cloned() else {
+        return ToolAnswer::said(
+            1,
+            format!("clarp-admin agent archive: no such agent: {session}. Nothing was done."),
+        );
     };
     let archived = !parsed.flags.contains("--restore");
-    match roster::put_away(app, &target.record.session, archived).await {
+    let by = crate::fleet::ArchivedBy::agent(&actor.record.session, &actor.record.agent_id);
+    match roster::put_away(app, &target.record.session, archived, by).await {
         Ok(answer) => shown(&answer),
         Err(refused) => {
             let (status, body) = refused.answered();

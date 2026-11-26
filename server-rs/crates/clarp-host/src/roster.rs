@@ -26,7 +26,7 @@ use clarp_kernel::told;
 use serde_json::{Map, Value, json};
 
 use crate::edge::{self, ApiError, App};
-use crate::fleet::{AgentRecord, Amend, NotAmended};
+use crate::fleet::{AgentRecord, Amend, ArchivedBy, NotAmended};
 
 pub(crate) type Fields = Map<String, Value>;
 
@@ -171,7 +171,8 @@ async fn rename(State(app): State<App>, body: Bytes) -> Answered {
 }
 
 /// `POST /agent-archive` with `{session, archived}`: puts an agent away, or takes it out
-/// again. An agent that is put away keeps everything and can still be written to.
+/// again. An agent that is put away keeps everything and can still be written to. Asked with
+/// the owner's token, so the owner put it away.
 async fn archive(State(app): State<App>, body: Bytes) -> Answered {
     let asked = object(&body)?;
     let session = text(&asked, "session");
@@ -181,14 +182,27 @@ async fn archive(State(app): State<App>, body: Bytes) -> Answered {
     ) else {
         return Err(bad("session and archived required"));
     };
-    Ok(Json(put_away(&app, &session, archived).await?))
+    Ok(Json(
+        put_away(&app, &session, archived, ArchivedBy::owner()).await?,
+    ))
 }
 
 /// An agent is put away (`archived`) or taken back, as `POST /agent-archive` does it: answered
-/// `{ok, session, archived}`. Who may ask is the caller's to have checked.
-pub(crate) async fn put_away(app: &App, session: &str, archived: bool) -> Result<Value, Refusal> {
-    amend(app, session, Amend::Archive(archived)).await?;
-    Ok(json!({ "ok": true, "session": session, "archived": archived }))
+/// `{ok, session, archived, archived_by}`. Who may ask is the caller's to have checked; `by`
+/// is who asked, kept on the agent while it is away and named in the Host's log line of it.
+pub(crate) async fn put_away(
+    app: &App,
+    session: &str,
+    archived: bool,
+    by: ArchivedBy,
+) -> Result<Value, Refusal> {
+    let record = amend(app, session, Amend::ArchiveBy(archived, by)).await?;
+    Ok(json!({
+        "ok": true,
+        "session": session,
+        "archived": archived,
+        "archived_by": record.archived_by,
+    }))
 }
 
 /// `POST /agent-voice-verbosity` with `{session, voice_verbosity}`: how much the agent says
@@ -601,6 +615,7 @@ pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
         "helper_state": member.shown_helper_state(),
         "helper_completed_at": record.helper_completed_at_ms,
         "archived_at": record.archived_at_ms,
+        "archived_by": record.archived_by,
     }))
 }
 

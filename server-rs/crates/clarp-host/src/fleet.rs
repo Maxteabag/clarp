@@ -182,6 +182,10 @@ pub struct AgentRecord {
     /// written to; the apps leave it out of their lists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
+    /// Who put it away, while it is: an agent (by its session and id), the owner, or the Host
+    /// itself. Taken off when it is taken back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_by: Option<ArchivedBy>,
     /// The agent that made this one, by its id, when one did. It stays when that agent
     /// is gone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +257,54 @@ pub struct AgentRecord {
     /// bound again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub readers: Vec<String>,
+}
+
+/// Who put an agent away ([`AgentRecord::archived_by`]), as the apps are told it:
+/// `{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}` or `{"kind": "host"}`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchivedBy {
+    /// `agent`, `owner` or `host`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub agent_id: String,
+}
+
+impl ArchivedBy {
+    /// An agent, from its own verified turn.
+    pub fn agent(session: &str, agent_id: &str) -> Self {
+        Self {
+            kind: "agent".into(),
+            session: session.into(),
+            agent_id: agent_id.into(),
+        }
+    }
+
+    /// The owner, with his own token (`POST /agent-archive`).
+    pub fn owner() -> Self {
+        Self {
+            kind: "owner".into(),
+            ..Self::default()
+        }
+    }
+
+    /// The Host itself (a helper's grace period ended, a janitor's rule).
+    pub fn host() -> Self {
+        Self {
+            kind: "host".into(),
+            ..Self::default()
+        }
+    }
+
+    /// As a line of the Host's log says it.
+    pub fn said(&self) -> String {
+        if self.kind == "agent" {
+            format!("{} ({})", self.session, self.agent_id)
+        } else {
+            self.kind.clone()
+        }
+    }
 }
 
 impl AgentRecord {
@@ -343,8 +395,10 @@ pub enum Amend {
     /// Its name as a person reads it, as [`roster::display_name`] keeps one. Its session
     /// name and its id stay: everything that names the agent goes on naming it.
     Rename(String),
-    /// Put away, or taken out again.
+    /// Put away, or taken out again, by the Host itself.
     Archive(bool),
+    /// Put away, or taken out again, by whom it says.
+    ArchiveBy(bool, ArchivedBy),
     /// Which model its next turn runs with, and how much effort. `None` leaves one as it
     /// is; an empty text is the tool's own choice.
     Tune {
@@ -4081,6 +4135,12 @@ impl Fleet {
         let before = &self.members[at].record;
         let mut record = before.clone();
         let assigned = matches!(change, Amend::Contact(..) | Amend::ContactAuto(_));
+        // Who puts it away or takes it back, as the Host's log names them.
+        let archiver = match &change {
+            Amend::Archive(_) => Some(ArchivedBy::host().said()),
+            Amend::ArchiveBy(_, by) => Some(by.said()),
+            _ => None,
+        };
         let edits_mcp = matches!(change, Amend::McpServers(_));
         match change {
             Amend::Mute(muted) => record.muted = muted,
@@ -4110,7 +4170,14 @@ impl Fleet {
                 record.persona = name;
             }
             // Put away again, an agent is put away now.
-            Amend::Archive(archived) => record.archived_at_ms = archived.then(|| self.now_ms()),
+            Amend::Archive(archived) => {
+                record.archived_at_ms = archived.then(|| self.now_ms());
+                record.archived_by = archived.then(ArchivedBy::host);
+            }
+            Amend::ArchiveBy(archived, by) => {
+                record.archived_at_ms = archived.then(|| self.now_ms());
+                record.archived_by = archived.then_some(by);
+            }
             Amend::Tune { model, effort } => {
                 if let Some(model) = model {
                     record.model = model;
@@ -4234,7 +4301,24 @@ impl Fleet {
                 self.now_ms(),
             );
         }
-        if let Some(kind) = roster_kind {
+        // Each archive and restore is a line in the Host's log: what, which agent, and who.
+        if let Some(archiver) = &archiver {
+            eprintln!(
+                "clarp-host: agent {}: {} ({}) by {archiver}",
+                if record.archived_at_ms.is_some() {
+                    "archived"
+                } else {
+                    "restored"
+                },
+                record.session,
+                record.agent_id,
+            );
+        }
+        if roster_kind == Some("archive-changed") {
+            self.works
+                .hub
+                .publish(wire::roster_archived(&record), self.now_ms());
+        } else if let Some(kind) = roster_kind {
             self.tell_roster(kind, &record.session);
         }
         if put_away {

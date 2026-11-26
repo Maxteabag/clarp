@@ -1410,6 +1410,17 @@ pub fn roster(kind: &str, session: &str) -> Value {
     json!({ "type": "agent-roster", "kind": kind, "session": session })
 }
 
+/// An agent was put away or taken back (`archive-changed`): whether it is away now, and who
+/// put it away while it is (`archived_by`, absent once it is taken back).
+pub fn roster_archived(record: &AgentRecord) -> Value {
+    let mut told = roster("archive-changed", &record.session);
+    told["archived"] = json!(record.archived_at_ms.is_some());
+    if let Some(by) = &record.archived_by {
+        told["archived_by"] = json!(by);
+    }
+    told
+}
+
 /// The helper a job only mirrors, when it does. `clarp-sub-agent --clarp-agent` registers a
 /// job of kind `sub-agent` that names the helper's session: the helper itself is the
 /// sub-agent, and the job that watches it is not a second one. `helper_sessions` are the
@@ -2183,6 +2194,7 @@ pub fn summary(
         // A quiet agent (a janitor) is never unread and never counted among the agents at work.
         "quiet": record.is_quiet(),
         "archived_at": record.archived_at_ms,
+        "archived_by": record.archived_by,
         "created_at": record.created_at_ms,
         "role": record.role(),
         "is_janitor": record.is_janitor,

@@ -1314,6 +1314,30 @@ integration supports the button and swipe events. Flic officially requires a
 Hub for Hold & Twist, so rotation remains a separately negotiated experimental
 input rather than a production-critical command.
 
+#### Who archived an agent (feature `archive_by_anyone`, Rust Host contract 200)
+
+Any agent may put any agent away or take it back: `clarp-admin agent archive --session S
+[--restore]`, run from the agent's own verified turn (or a job its turn started), on
+`/tools/run`. Before this contract an agent could do it only for itself and its own helpers.
+Without a verified turn it is refused (exit 4, "verified turn identity required"), as before;
+an unknown session is refused with exit 1, "no such agent". The owner still uses
+`POST /agent-archive` with his token.
+
+An agent that is away says who put it there, as `archived_by`:
+
+- `{"kind": "agent", "session": "...", "agent_id": "..."}`: an agent, from its own turn.
+- `{"kind": "owner"}`: the owner's `POST /agent-archive`.
+- `{"kind": "host"}`: the Host itself (a helper's grace period ended, a janitor's rule).
+
+It is on the agent's row in `GET /agents/snapshot` and `GET /agents/archived`, in
+`GET /agent-helper-state`, and on the answers to `POST /agent-archive` and
+`clarp-admin agent archive`. It is `null` while the agent is not away, and on an agent put
+away before this contract. The `agent-roster` event of kind `archive-changed` carries
+`archived` (whether the agent is away now) and, while it is, `archived_by`. An agent that moves
+to another Host keeps it. The Host writes one line to its log for each archive and restore:
+`clarp-host: agent archived|restored: <session> (<agent_id>) by <session> (<agent_id>)|owner`.
+An older Host sends no `archived_by`: show nothing about who.
+
 #### A gzipped stream (feature `events_gzip`, Rust Host contract 198)
 
 `GET /events?gzip=1` from a client that sends `Accept-Encoding: gzip` is answered with
@@ -2019,6 +2043,8 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `/agent-voice` — per-agent toggles: `{"session", "<flag>": bool}`.
 - On Rust Hosts with `agent_api_status`, a mute or archive change emits
   `agent-roster` with `kind: "mute-changed"` or `"archive-changed"` and the session.
+  With `archive_by_anyone` (contract 200) `archive-changed` adds `archived` and, while
+  the agent is away, `archived_by`; see below.
   The resulting state and the agent's creation time (`created_at`, epoch milliseconds)
   are available in `GET /agents/snapshot`. A nonexistent explicit working directory in
   `POST /agents` is refused with 400 `cwd_not_found`. Model options report

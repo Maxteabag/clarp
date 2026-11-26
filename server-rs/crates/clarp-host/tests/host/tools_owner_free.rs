@@ -106,7 +106,7 @@ fn an_agents_tools_read_the_fleet_through_bound_privacy_and_change_nothing_else(
 }
 
 #[test]
-fn an_agent_makes_contacts_and_puts_away_its_own_helpers_from_its_own_turn_only() {
+fn an_agent_makes_contacts_and_puts_away_its_own_helpers_from_its_own_turn() {
     let place = Place::new("tools-own-helpers");
     let admin = "tools-helpers-owner";
     let host = place.start_with_token(admin);
@@ -158,12 +158,7 @@ fn an_agent_makes_contacts_and_puts_away_its_own_helpers_from_its_own_turn_only(
     let (code, _, said) = archive(None, &helper, &[]);
     assert_eq!(code, 4, "{said}");
     assert!(said.contains("verified turn identity required"), "{said}");
-    // Another agent is not the lead's to put away.
-    let (code, _, said) = archive(turn, &peer, &[]);
-    assert_eq!(code, 4, "{said}");
-    assert!(said.contains("neither"), "{said}");
-    assert!(listed(&peer));
-    // Its own helper is, and is taken back.
+    // Its own helper is put away, and is taken back.
     let (code, answer, said) = archive(turn, &helper, &[]);
     assert_eq!(code, 0, "{said}");
     assert!(answer.contains("\"archived\": true"), "{answer}");
@@ -222,6 +217,108 @@ fn an_agent_makes_contacts_and_puts_away_its_own_helpers_from_its_own_turn_only(
     let (code, _, said) = portrait(&helper);
     assert_eq!(code, 4, "{said}");
     assert!(said.contains("the Host refused it"), "{said}");
+}
+
+#[test]
+fn any_agent_puts_away_any_agent_and_the_host_keeps_and_logs_who() {
+    let place = Place::new("tools-any-archive");
+    let admin = "tools-any-archive-owner";
+    let host = place.start_with_token(admin);
+    let dir = place.root.clone();
+    let tools = clarp_host::tool_token(admin);
+    let ada = host.new_agent("Ada");
+    let ben = host.new_agent("Ben");
+    for (session, id) in [(&ada, "u-1"), (&ben, "u-2")] {
+        host.send(session, "hello", id);
+    }
+    for session in [&ada, &ben] {
+        wait_for("each first turn", || host.state(session) == "done");
+    }
+    let ada_id = agent_id(&host, &ada);
+    let ben_id = agent_id(&host, &ben);
+    let ada_turn = first_turn_token(&place, &ada_id);
+    let row = |session: &str| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
+    };
+    let archive = |turn: Option<&str>, session: &str, more: &[&str]| {
+        let mut args = vec!["clarp-admin", "agent", "archive", "--session", session];
+        args.extend_from_slice(more);
+        as_tools(&host, &dir, &tools, turn, &args)
+    };
+    let events = host.listen();
+
+    // Without a verified turn nobody can be said to ask: nothing is done, as before.
+    let (code, _, said) = archive(None, &ben, &[]);
+    assert_eq!(code, 4, "{said}");
+    assert!(said.contains("verified turn identity required"), "{said}");
+    assert!(row(&ben)["archived_at"].is_null());
+    // An agent that does not exist is no agent.
+    let (code, _, said) = archive(Some(&ada_turn), "no-such-agent", &[]);
+    assert_eq!(code, 1, "{said}");
+    assert!(said.contains("no such agent"), "{said}");
+
+    // Ada puts Ben away, who is neither she nor her helper; the row and the event say she did.
+    let by = json!({ "kind": "agent", "session": ada, "agent_id": ada_id });
+    let (code, answer, said) = archive(Some(&ada_turn), &ben, &[]);
+    assert_eq!(code, 0, "{said}");
+    let answer: Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(answer["archived"], true, "{answer}");
+    assert_eq!(answer["archived_by"], by, "{answer}");
+    let put_away = row(&ben);
+    assert!(put_away["archived_at"].is_i64(), "{put_away}");
+    assert_eq!(put_away["archived_by"], by, "{put_away}");
+    let told = |archived: bool| {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "agent-roster"
+                    && event["kind"] == "archive-changed"
+                    && event["session"] == ben
+                    && event["archived"] == archived
+            })
+            .cloned()
+    };
+    wait_for("the archive event", || told(true).is_some());
+    assert_eq!(told(true).unwrap()["archived_by"], by);
+
+    // And takes him back: he is no longer away, so no one put him away.
+    let (code, _, said) = archive(Some(&ada_turn), &ben, &["--restore"]);
+    assert_eq!(code, 0, "{said}");
+    let back = row(&ben);
+    assert!(back["archived_at"].is_null(), "{back}");
+    assert!(back["archived_by"].is_null(), "{back}");
+    wait_for("the restore event", || told(false).is_some());
+    assert!(told(false).unwrap().get("archived_by").is_none());
+
+    // The owner's own archive says the owner.
+    assert_eq!(
+        host.post(
+            "/agent-archive",
+            json!({ "session": ben, "archived": true })
+        )["archived_by"],
+        json!({ "kind": "owner" })
+    );
+    assert_eq!(row(&ben)["archived_by"], json!({ "kind": "owner" }));
+
+    // Each one is in the Host's log: what, which agent, and who asked.
+    let heard = || host.heard.lock().unwrap().clone();
+    let owners = format!("clarp-host: agent archived: {ben} ({ben_id}) by owner");
+    wait_for("the lines", || heard().contains(&owners));
+    let heard = heard();
+    for what in ["archived", "restored"] {
+        let line = format!("clarp-host: agent {what}: {ben} ({ben_id}) by {ada} ({ada_id})");
+        assert!(heard.contains(&line), "{line}\n{heard}");
+    }
+    // What was refused was not done, and is not written as done.
+    assert!(!heard.contains("no-such-agent ("), "{heard}");
 }
 
 #[test]

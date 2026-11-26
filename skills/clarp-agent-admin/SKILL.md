@@ -151,6 +151,22 @@ holds its `rows_from` revision or more merges them instead of reading `GET /log`
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
 
+## Archiving and restoring agents
+
+On a Rust Host with `archive_by_anyone` (contract 200), any agent may archive or restore any
+agent from its own turn (or a job its turn started):
+
+```bash
+clarp-admin agent archive --session <session>            # put it away
+clarp-admin agent archive --session <session> --restore  # take it back
+```
+
+An archived agent keeps everything and can still be written to. It carries `archived_by`
+(`{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}` or `{"kind": "host"}`)
+while it is away, so the apps show who archived it, and the Host logs every archive and
+restore. Without a verified turn the command is refused. On an older Host (contract 193 to
+199) it works only for yourself and your own helpers.
+
 ## Organizing agents into teams
 
 For requests to group the current fleet, base assignments on current evidence:

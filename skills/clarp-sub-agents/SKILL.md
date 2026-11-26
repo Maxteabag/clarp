@@ -233,8 +233,11 @@ start, and the command exits 1.
    To put a helper of yours away at once instead of after the grace period, on a Rust
    Host with `tools_owner_free` (contract 193): `clarp-admin agent archive --session
    stream-a-3f9c` (`--restore` takes it back). It works from your own turn or a job it
-   started, for yourself and your own helpers only; another agent is the owner's to put
-   away. The watcher a helper gets is told your Host and the agents' tools token by name
+   started. On a Host with `archive_by_anyone` (contract 200) any agent may archive or
+   restore any agent this way, not only itself and its own helpers; the agent keeps
+   `archived_by` (who put it away) while it is away, the apps can show who did it, and
+   the Host's log has a line for each archive and restore. On an older Host it works for
+   yourself and your own helpers only. The watcher a helper gets is told your Host and the agents' tools token by name
    (`--setenv=NAME`), with your turn's identity, so it never uses the owner's token.
 
    On the Rust Host with `helper_ended_unreported` (contract 155), a helper

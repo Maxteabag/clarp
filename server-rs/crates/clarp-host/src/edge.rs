@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 199;
+pub const HOST_CONTRACT: u64 = 200;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -507,6 +507,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // of the same conversation told) and, to such a connection, the rows above it (`rows`,
     // `rows_latest`) where they are at most 20 and 16 KB and read within 200 ms (issue 879).
     ("events_rows", 199),
+    // Any agent puts any agent away or takes it back (`clarp-admin agent archive [--restore]`,
+    // from its own verified turn), not only itself and its own helpers (the owner, 26 Nov 2026).
+    // An agent that is away says who put it there: `archived_by` on its row, on the answer and
+    // on the `archive-changed` event; each archive and restore is a line in the Host's log.
+    ("archive_by_anyone", 200),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -2865,6 +2870,9 @@ async fn import_agent(
         heartbeat_enabled: matches!(request.agent["heartbeat_enabled"].as_i64(), Some(1))
             || request.agent["heartbeat_enabled"] == true,
         archived_at_ms: request.agent["archived_at"].as_i64(),
+        archived_by: request.agent["archived_at"]
+            .as_i64()
+            .and_then(|_| serde_json::from_value(request.agent["archived_by"].clone()).ok()),
         voice_id: field("voice_id"),
         // A helper stays a helper, as its work stood. The agent that made it is named by
         // its id, whether or not it is on this Host.
