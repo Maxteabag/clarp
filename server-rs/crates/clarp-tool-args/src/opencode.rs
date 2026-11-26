@@ -26,6 +26,17 @@ pub fn model_pair(model: &str) -> Option<Value> {
         .then(|| json!({"providerID": provider, "modelID": model}))
 }
 
+/// Whether an assistant message's `info` is OpenCode's own compaction: the summary of the
+/// conversation it writes for itself when it compacts its context (`session/compaction.ts`:
+/// `mode` and `agent` `compaction`, `summary: true`). It is no answer to anyone: no reply of the
+/// turn, and no reading of a message the turn was given (issue 874).
+pub fn compaction(info: &Value) -> bool {
+    info["role"] == "assistant"
+        && (info["summary"] == true
+            || info["mode"] == "compaction"
+            || info["agent"] == "compaction")
+}
+
 /// A retry OpenCode announces (`session.status` of type `retry`) that no retry gets past: the
 /// provider refused the account itself (a free tier's limit, credits, a plan to buy), so OpenCode
 /// would retry without end. Answers the provider's words. A retry of a passing trouble (a rate

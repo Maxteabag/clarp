@@ -473,3 +473,129 @@ fn a_steps_words_are_written_when_it_finishes_before_the_next_step() {
     );
     assert_eq!(replies(&signals), ["first answer", "second answer"]);
 }
+
+/// Issue 874. OpenCode compacts its context by itself before it answers: its summary for itself
+/// comes as an assistant message of the compaction agent (`summary`, `mode` and `agent`
+/// `compaction`). It is told as a compaction, as other tools' are, with what it cost, and never
+/// as a reply; its model is not the agent's. The answer after it is the turn's one reply.
+#[test]
+fn opencodes_own_compaction_is_told_as_a_compaction_and_never_as_a_reply() {
+    use clarp_kernel::live::Glimpse;
+    use clarp_kernel::turn::Activity;
+    let part = |part: Value| {
+        json!({"type": "message.part.updated", "properties": {"sessionID": "s", "part": part}})
+            .to_string()
+    };
+    let updated =
+        |info: Value| json!({"type": "message.updated", "properties": {"info": info}}).to_string();
+    let summary =
+        "## Objective\nSummarize conversation history to enable a coding agent to continue";
+    let lines = [
+        // OpenCode's own user message of the compaction, with its compaction part.
+        part(json!({"id": "p-c", "messageID": "u-c", "type": "compaction", "auto": true})),
+        updated(
+            json!({"id": "m-sum", "sessionID": "s", "role": "assistant", "parentID": "u-c",
+            "mode": "compaction", "agent": "compaction", "summary": true,
+            "providerID": "opencode", "modelID": "compactor"}),
+        ),
+        part(json!({"id": "s1", "messageID": "m-sum", "type": "step-start"})),
+        part(json!({"id": "t1", "messageID": "m-sum", "type": "text", "text": ""})),
+        json!({"type": "message.part.delta", "properties": {"sessionID": "s",
+            "messageID": "m-sum", "partID": "t1", "field": "text", "delta": summary}})
+        .to_string(),
+        part(
+            json!({"id": "t1", "messageID": "m-sum", "type": "text", "text": summary,
+            "time": {"end": 2}}),
+        ),
+        part(
+            json!({"id": "f1", "messageID": "m-sum", "type": "step-finish", "reason": "stop",
+            "cost": 0.01, "tokens": {"input": 9000, "output": 400}}),
+        ),
+        updated(
+            json!({"id": "m-ans", "sessionID": "s", "role": "assistant", "parentID": "u-go",
+            "providerID": "opencode", "modelID": "big-pickle"}),
+        ),
+        part(json!({"id": "s2", "messageID": "m-ans", "type": "step-start"})),
+        part(json!({"id": "t2", "messageID": "m-ans", "type": "text", "text": "The answer."})),
+        part(
+            json!({"id": "f2", "messageID": "m-ans", "type": "step-finish", "reason": "stop",
+            "cost": 0.02, "tokens": {"input": 100, "output": 10}}),
+        ),
+    ];
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "compacted");
+    let mut signals = Vec::new();
+    for line in lines {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(line),
+            },
+            &mut signals,
+        );
+    }
+    interpreter.on_record(
+        &Record {
+            t: 2,
+            entry: Entry::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        },
+        &mut signals,
+    );
+    let replies: Vec<&str> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Reply(reply) if !reply.text.is_empty() => Some(reply.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies, ["The answer."]);
+    let shown_summary = signals.iter().any(|signal| match signal {
+        Signal::Live(live) => live.text.contains("Summarize"),
+        Signal::Glimpse(Glimpse::Message { text, .. }) => text.contains("Summarize"),
+        _ => false,
+    });
+    assert!(
+        !shown_summary,
+        "the summary is never shown as words of the turn"
+    );
+    let compacting: Vec<bool> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Glimpse(Glimpse::Compacting { prefix, over }) => {
+                assert_eq!(prefix, "oc");
+                Some(*over)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        compacting,
+        [false, true],
+        "told as a compaction, begun and over"
+    );
+    assert!(
+        signals
+            .iter()
+            .any(|signal| matches!(signal, Signal::Moved(Activity::Compacting)))
+    );
+    let models: Vec<&str> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Model(model) => Some(model.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(models, ["opencode/big-pickle"]);
+    let cost = signals.iter().find_map(|signal| match signal {
+        Signal::TurnCost { micros } => Some(*micros),
+        _ => None,
+    });
+    assert_eq!(cost, Some(30_000), "what the compaction cost counts");
+    assert!(
+        signals
+            .iter()
+            .any(|signal| matches!(signal, Signal::Ended(RunOutcome::Completed)))
+    );
+}

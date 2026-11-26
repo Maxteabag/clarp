@@ -1,6 +1,6 @@
 //! Native OpenCode history, shared by the full catalogue and the DeepSeek card.
 use clarp_kernel::{
-    failures, python, told,
+    failures, opencode, python, told,
     tools::{self, cells},
 };
 use rusqlite::{Connection, OpenFlags, params};
@@ -303,6 +303,11 @@ pub fn turns(messages: &[(i64, Value, Vec<Value>)]) -> Vec<Value> {
     let mut pending = Pieces::default();
     let mut owner: Option<usize> = None;
     for (created, data, stored) in messages {
+        // OpenCode's summary for itself as it compacted its context answers no one: no row of
+        // the conversation (issue 874).
+        if opencode::compaction(data) {
+            continue;
+        }
         let role = data["role"]
             .as_str()
             .or(data["type"].as_str())

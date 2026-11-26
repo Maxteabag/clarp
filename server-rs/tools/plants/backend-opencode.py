@@ -239,5 +239,12 @@ PLANTS.append((LANE_HOST, 'lane_host', "OpenCode's own files in the global folde
                '    dependencies.remove(OPENCODE_PLUGIN);\n', ''))
 PLANTS.append((LANE_SHIM, 'lane_host', 'a second idle of a held-open turn decides before its recheck',
                '        if matches!(seen, Ok(true)) && self.recheck.is_some() && !stopping {', '        if false {'))
+# OpenCode's own compaction is no reply and no answer to a steer (issue 874).
+PLANTS.append(('clarp-backend/src/opencode.rs', 'streams', "OpenCode's summary for itself is filed as a reply",
+               '        if self.compactions.contains(msg) {', '        if false {'))
+PLANTS.append((LANE_SHIM, 'lane_host', "OpenCode's compaction summary reads the steers before it",
+               '            && !compaction(info)\n', '\n'))
+PLANTS.append((HISTORY, 'history', "a past session's own compaction is a row",
+               '        if opencode::compaction(data) {', '        if false {'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

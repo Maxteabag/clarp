@@ -25,6 +25,7 @@ use clarp_shim::Reply;
 use clarp_shim::lane::{Claim, LOGIN_CHANGED, thread_lock};
 use clarp_shim::lane_spool::ClaimSpool;
 use clarp_shim::opencode_lane::{Request, Snapshot, spoken};
+use clarp_tool_args::opencode::compaction;
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use serde_json::{Value, json};
@@ -312,7 +313,7 @@ fn proven(list: &Value, posted: &[(String, String)], message: &str) -> bool {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|stored| stored["info"]["role"] == "assistant")
+        .filter(|stored| stored["info"]["role"] == "assistant" && !compaction(&stored["info"]))
         .filter_map(|stored| stored["info"]["parentID"].as_str())
         .collect();
     posted[own..]
@@ -334,6 +335,7 @@ enum Settle {
 fn any_taken_in(list: &Value, messages: &[(String, String)]) -> bool {
     list.as_array().into_iter().flatten().any(|message| {
         message["info"]["role"] == "assistant"
+            && !compaction(&message["info"])
             && message["info"]["parentID"].as_str().is_some_and(|parent| {
                 messages
                     .iter()
@@ -912,6 +914,9 @@ impl Lane {
         if event["type"] == "message.updated"
             && info["sessionID"].as_str() == Some(&self.thread)
             && info["role"] == "assistant"
+            // OpenCode's summary for itself as it compacts its context answers no one (issue
+            // 874): the answer after it reads what it took in.
+            && !compaction(info)
             && let Some(parent) = info["parentID"].as_str()
         {
             let now = super::now_ms();

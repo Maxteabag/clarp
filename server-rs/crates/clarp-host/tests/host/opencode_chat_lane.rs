@@ -12,7 +12,9 @@ use super::*;
 /// session another server made. A word `ask-<x>` is answered `said-ask-<x>` at once; `hold-<x>`
 /// once the file `release-<x>` exists, unless the session is aborted first; a prompt of several
 /// such words (messages given to a turn together) is answered word by word; `die-<x>` ends the
-/// server under the turn. The first prompt any server is given writes OpenCode's own files into
+/// server under the turn; `compact-<x>`, once the file `release-<x>` exists, compacts the context
+/// as OpenCode does by itself (its summary held until `summarized-<x>` exists) and then answers
+/// `said-compact-<x>`, with any steers stored meanwhile (`+<word>`). The first prompt any server is given writes OpenCode's own files into
 /// the global configuration folder, as OpenCode does on its first start. A prompt's user message is named in OpenCode's ascending form. A prompt
 /// that names its `messageID` is a steer: it is stored, and the steers stored since the last
 /// answer are read together at the turn's next step, as OpenCode reads them: one answer, whose
@@ -117,8 +119,52 @@ def together(group):
     """What one answer to stored messages answers, and the last of them, its parent."""
     return "+".join(word for _, word in group), group[-1][0]
 
+def waited(name):
+    """Waits for the file `name` (at most 60 s): False when the session was aborted meanwhile."""
+    end = time.monotonic() + 60
+    while not (root / name).exists() and time.monotonic() < end:
+        if aborted.wait(0.02):
+            return False
+    return True
+
+def compacted(sid, word):
+    """As OpenCode compacts its context by itself before it answers: its own user message with
+    a compaction part, its summary for itself from the compaction agent, its own message that
+    tells it to go on, and the answer to that, which takes in what was stored meanwhile."""
+    x = word[len("compact-"):]
+    (root / ("holding-" + x)).write_text("")
+    if not waited("release-" + x):
+        return idle(sid)
+    compaction = ascending()
+    history.append({"id": compaction, "role": "user"})
+    emit(part(sid, compaction, id=compaction + "c", type="compaction", auto=True))
+    count[0] += 1
+    mid = f"msg_{pid}_{count[0]}"
+    info = {"id": mid, "sessionID": sid, "role": "assistant", "parentID": compaction,
+            "mode": "compaction", "agent": "compaction", "summary": True}
+    history.append(info)
+    emit({"type": "message.updated", "properties": {"info": info}})
+    emit(part(sid, mid, id=mid + "s", type="step-start"))
+    (root / ("summarizing-" + x)).write_text("")
+    if not waited("summarized-" + x):
+        return idle(sid)
+    summary = "\x23\x23 Objective\nSummarize conversation history to enable a coding agent to continue"
+    emit(part(sid, mid, id=mid + "t", type="text", text=summary, time={"end": 1}))
+    emit(part(sid, mid, id=mid + "f", type="step-finish", reason="stop", cost=0, tokens={"input": 1, "output": 1}))
+    note("compacted", word)
+    go_on = ascending()
+    history.append({"id": go_on, "role": "user"})
+    with lock:
+        ready = [s for s in stored if not s[1].startswith(("late-", "race-", "done-", "skew-", "slow-", "broken-"))]
+        for s in ready:
+            stored.remove(s)
+    step(sid, "+".join([word] + [w for _, w in ready]), go_on)
+    idle(sid)
+
 def run(sid, words, user):
     emit(status(sid, "busy"))
+    if words[0].startswith("compact-"):
+        return compacted(sid, words[0])
     # Messages the Host gives a turn together are answered one after another.
     for word in words:
         if not step(sid, word, user):
@@ -254,7 +300,7 @@ class H(BaseHTTPRequestHandler):
         if path.endswith("/prompt_async"):
             sid = path.split("/")[2]
             text = body["parts"][0]["text"]
-            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken)-[a-z0-9]+", text)))
+            words = list(dict.fromkeys(re.findall(r"\b(?:ask|hold|die|late|race|done|skew|lost|slow|flaky|broken|compact)-[a-z0-9]+", text)))
             word = words[0]
             if "messageID" in body:
                 note("steered", f"{pid} {body['messageID']} {word} {'busy' if running[0] else 'idle'}")
@@ -1565,4 +1611,135 @@ fn two_failed_reads_end_the_turn_once_without_the_list() {
     assert_ne!(read_at(&host, "broken", "u-b"), "steer");
     assert_eq!(answers(&host, "broken", "said-hold-a"), 1);
     assert_eq!(answers(&host, "broken", "said-broken-b"), 1);
+}
+
+/// Whether any row of the conversation holds OpenCode's summary for itself.
+fn summary_filed(host: &Host, session: &str) -> bool {
+    host.conversation(session)
+        .iter()
+        .any(|(_, text)| text.contains("Summarize conversation history"))
+}
+
+/// Issue 874. OpenCode compacts its context by itself before it answers, on a turn's own
+/// server and on the lane alike: its summary for itself is no reply and no row of the
+/// conversation; the answer after it is the turn's one reply.
+#[test]
+fn opencodes_own_compaction_files_only_the_answer_after_it() {
+    let world = world("opencode-compaction", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    for x in ["a", "b"] {
+        std::fs::write(world.place.root.join(format!("release-{x}")), "").unwrap();
+        std::fs::write(world.place.root.join(format!("summarized-{x}")), "").unwrap();
+    }
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    // The first turn, on its own server.
+    asked(&host, "kai", "compact-a");
+    lane_ready(&socket);
+    let lane_pid = lane_state(&socket).unwrap()["pid"].to_string();
+    // A turn on the lane.
+    asked(&host, "kai", "compact-b");
+    assert_eq!(world.servers().last().unwrap(), &lane_pid);
+    assert_eq!(world.lines("compacted"), ["compact-a", "compact-b"]);
+    assert!(
+        !summary_filed(&host, "kai"),
+        "{:?}",
+        host.conversation("kai")
+    );
+    let said: Vec<(String, String)> = host.conversation("kai");
+    assert_eq!(
+        said,
+        [
+            ("user".to_owned(), "compact-a".to_owned()),
+            ("assistant".to_owned(), "said-compact-a".to_owned()),
+            ("user".to_owned(), "compact-b".to_owned()),
+            ("assistant".to_owned(), "said-compact-b".to_owned()),
+        ]
+    );
+}
+
+/// Issue 874. A message steered into a lane turn before OpenCode compacts its context is not
+/// read by the compaction's summary, though that summary answers a message stored after it: it
+/// is read when the answer after the compaction starts, answered there once, and nothing is
+/// deleted.
+#[test]
+fn a_steer_before_a_compaction_is_read_by_the_answer_after_it_not_by_the_summary() {
+    let world = world("opencode-compaction-steer", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    asked(&host, "kai", "ask-first");
+    lane_ready(&socket);
+
+    host.send("kai", "compact-d", "d");
+    wait_for("the turn's work", || {
+        world.place.root.join("holding-d").exists()
+    });
+    assert_eq!(host.send("kai", "ask-s", "s")["queued"], true);
+    wait_for("the steer", || steers(&world).len() == 1);
+    std::fs::write(world.place.root.join("release-d"), "").unwrap();
+    wait_for("the compaction's summary", || {
+        world.place.root.join("summarizing-d").exists()
+    });
+    // The summary's start has reached the lane: it read nothing.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_ne!(read_at(&host, "kai", "u-s"), "steer");
+    std::fs::write(world.place.root.join("summarized-d"), "").unwrap();
+    wait_for("the answer after the compaction", || {
+        answers(&host, "kai", "said-compact-d+ask-s") == 1
+    });
+    wait_for("the turn to end", || host.state("kai") == "done");
+    assert_eq!(read_at(&host, "kai", "u-s"), "steer");
+    assert!(
+        world.lines("deleting").is_empty(),
+        "{:?}",
+        world.lines("deleting")
+    );
+    assert!(!summary_filed(&host, "kai"));
+    asked(&host, "kai", "ask-after");
+    assert_eq!(prompted(&world), ["ask-first", "compact-d", "ask-after"]);
+    assert_eq!(answers(&host, "kai", "said-compact-d+ask-s"), 1);
+}
+
+/// Issue 874. A Stop while OpenCode writes its compaction's summary: the steer stored before it
+/// was answered by no one, so it is not read, is taken back, and runs once as a turn of its own.
+#[test]
+fn a_steer_before_a_compaction_a_stop_cut_short_runs_once_on_its_own() {
+    let world = world("opencode-compaction-stop", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "kai", "opencode");
+    asked(&host, "kai", "ask-first");
+    lane_ready(&socket);
+
+    host.send("kai", "compact-e", "e");
+    wait_for("the turn's work", || {
+        world.place.root.join("holding-e").exists()
+    });
+    host.send("kai", "ask-t", "t");
+    wait_for("the steer", || steers(&world).len() == 1);
+    let steered = steers(&world)[0][1].clone();
+    std::fs::write(world.place.root.join("release-e"), "").unwrap();
+    wait_for("the compaction's summary", || {
+        world.place.root.join("summarizing-e").exists()
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    host.post("/stop", json!({"session": "kai"}));
+    wait_for("the steer taken back", || {
+        world.lines("deleted") == [steered.as_str()]
+    });
+    assert_ne!(read_at(&host, "kai", "u-t"), "steer");
+    // A Stop holds what waits until the user's next message; then the steer runs once.
+    asked(&host, "kai", "ask-after");
+    wait_for("the steer answered on its own", || {
+        answers(&host, "kai", "said-ask-t") == 1
+    });
+    wait_for("the last turn to end", || host.state("kai") == "done");
+    assert!(!summary_filed(&host, "kai"));
+    let own = prompted(&world);
+    assert_eq!(own.iter().filter(|w| *w == "ask-t").count(), 1, "{own:?}");
+    assert_eq!(answers(&host, "kai", "said-ask-t"), 1);
 }

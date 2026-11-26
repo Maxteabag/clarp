@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::python;
 
-pub use clarp_tool_args::opencode::{command, model_pair, refused};
+pub use clarp_tool_args::opencode::{command, compaction, model_pair, refused};
 
 pub fn permissions(raw: &str) -> Value {
     let mut rules = serde_json::from_str::<serde_json::Map<String, Value>>(raw).unwrap_or_default();

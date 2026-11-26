@@ -123,6 +123,9 @@ struct Stream {
     /// The replies a step has written so far: its words before each of its calls are one.
     part: u64,
     assistant: BTreeSet<String>,
+    /// OpenCode's own compactions of its context ([`rules::compaction`]): messages whose words
+    /// are its summary for itself, which are told as a compaction and never filed as a reply.
+    compactions: BTreeSet<String>,
     types: BTreeMap<String, String>,
     texts: BTreeMap<String, String>,
     order: Vec<String>,
@@ -434,6 +437,30 @@ impl Stream {
     fn serve(&mut self, p: &Value, t: i64, out: &mut Vec<Signal>) {
         let kind = word(p, "type");
         let msg = word(p, "messageID");
+        // OpenCode compacts its context: told as the compaction it is, as other tools' are,
+        // with what it cost. Its summary is no reply (issue 874).
+        if self.compactions.contains(msg) {
+            match kind {
+                "step-start" => {
+                    self.flush(out);
+                    out.push(Signal::Moved(Activity::Compacting));
+                    out.push(Signal::Glimpse(Glimpse::Compacting {
+                        prefix: "oc".into(),
+                        over: false,
+                    }));
+                }
+                "step-finish" => {
+                    self.usage(p);
+                    out.push(Signal::Glimpse(Glimpse::Compacting {
+                        prefix: "oc".into(),
+                        over: true,
+                    }));
+                    out.push(Signal::Moved(Activity::Thinking));
+                }
+                _ => {}
+            }
+            return;
+        }
         if kind == "step-start" {
             self.assistant.insert(msg.into());
         }
@@ -508,6 +535,13 @@ impl Stream {
             }
             // An answer names the model that gave it: as the agent's model is named, its
             // provider and its id (`opencode/big-pickle`).
+            // OpenCode's compaction is told by its parts ([`Stream::serve`]); its model is the
+            // compaction agent's, not the one that answers.
+            "message.updated" if rules::compaction(&props["info"]) => {
+                if let Some(id) = props["info"]["id"].as_str() {
+                    self.compactions.insert(id.into());
+                }
+            }
             "message.updated" if props["info"]["role"] == "assistant" => {
                 let (provider, id) = (
                     word(&props["info"], "providerID"),
