@@ -82,7 +82,11 @@ fn change(dir: &Path, add: IFlags, clear: IFlags) -> Result<Marked, Errno> {
         Err(why) => return Err(why),
     }
     let kept = rustix::fs::ioctl_getflags(&folder).is_ok_and(|now| now.contains(add));
-    Ok(if kept { Marked::Set } else { Marked::Unsupported })
+    Ok(if kept {
+        Marked::Set
+    } else {
+        Marked::Unsupported
+    })
 }
 
 /// What a filesystem without such flags answers.
