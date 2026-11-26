@@ -578,9 +578,21 @@ pub fn invoked(path: &str) -> Option<String> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
+/// Whether a path is `/events/{stream_id}/live`: the change of what an open stream follows.
+fn is_stream_follow_change(path: &str) -> bool {
+    path.strip_prefix("/events/")
+        .and_then(|rest| rest.strip_suffix("/live"))
+        .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+}
+
 /// Whether a device with limited access is refused before routing.
 pub fn limited_refused(method: &str, path: &str) -> bool {
     if method == "POST" && path == "/paired-devices/revoke" {
+        return false;
+    }
+    // A limited device reads the event stream, so it may change what its own stream follows
+    // (feature `events_live_change`); the route answers only the token that opened the stream.
+    if method == "POST" && is_stream_follow_change(path) {
         return false;
     }
     if method == "GET" {
@@ -669,6 +681,19 @@ pub fn revoke_target<'a>(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_limited_device_may_change_only_what_its_own_stream_follows() {
+        assert!(!limited_refused(
+            "POST",
+            "/events/0123456789abcdef0123456789abcdef/live"
+        ));
+        assert!(limited_refused("POST", "/events//live"));
+        assert!(limited_refused("POST", "/events/a/b/live"));
+        assert!(limited_refused("POST", "/events/abc/other"));
+        assert!(limited_refused("GET", "/events/abc/live"));
+        assert!(!limited_refused("GET", "/events"));
+    }
 
     #[test]
     fn an_address_is_kept_only_when_it_is_safe_to_follow() {

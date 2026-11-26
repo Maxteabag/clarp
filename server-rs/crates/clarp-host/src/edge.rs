@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 208;
+pub const HOST_CONTRACT: u64 = 209;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -540,6 +540,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // take words at all, `steer` stops it instead. The answer says `while_busy` (what was done)
     // and, where that is not what was asked, `fallback` with the chip's line.
     ("send_while_busy", 208),
+    // `GET /events?live_change=1` says its `stream_id` first (a `stream` event), and
+    // `POST /events/{stream_id}/live` from the token that opened it changes the chats it follows;
+    // the stream says `live-changed` where the change takes effect (issue 892).
+    ("events_live_change", 209),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -913,6 +917,7 @@ pub fn router(app: App) -> Router {
         .route("/log", get(log))
         .route("/search", get(crate::search::route))
         .route("/events", get(events))
+        .route("/events/{stream_id}/live", post(change_live))
         .route("/send", post(send))
         .route("/agent-moved", post(crate::agent_moved::set))
         .route("/agent-chat-view", post(crate::chat_view::set))
@@ -4918,6 +4923,58 @@ struct EventsQuery {
     /// `1`: a resume and a lag are caught up compacted, told first, and never cut; no replay
     /// without `Last-Event-ID` (feature `compact_resume`).
     compact: Option<String>,
+    /// `1`: the stream says its id first, and `POST /events/{id}/live` changes what it follows
+    /// (feature `events_live_change`).
+    live_change: Option<String>,
+}
+
+/// Whose stream it is, for a change of what it follows: a device by its id, the Host's own
+/// token and the agents' tools each as one.
+fn stream_owner(principal: &Principal) -> String {
+    match principal {
+        Principal::Device { device_id, .. } => format!("device:{device_id}"),
+        Principal::Administrator => "administrator".to_string(),
+        Principal::Tools => "tools".to_string(),
+    }
+}
+
+/// `POST /events/{stream_id}/live` `{"live": [...]}`: what an open stream of the caller's follows
+/// from its `live-changed` on, named as `live=` names it (feature `events_live_change`). 404 for a
+/// stream that ended or that another token opened.
+async fn change_live(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    Path(stream_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let named = body["live"].as_array().and_then(|names| {
+        names
+            .iter()
+            .map(Value::as_str)
+            .collect::<Option<Vec<&str>>>()
+    });
+    let Some(named) = named else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "live must be a list of sessions or agent ids",
+        ));
+    };
+    let mut live: Vec<String> = crate::live_change::followed(named).into_iter().collect();
+    live.sort();
+    match app
+        .hub
+        .streams
+        .change(&stream_id, &stream_owner(&principal), live)
+    {
+        crate::live_change::Changed::Taken(live) => Ok(Json(json!({
+            "ok": true,
+            "stream_id": stream_id,
+            "live": live,
+        }))),
+        crate::live_change::Changed::Unknown => {
+            Err(ApiError::new(StatusCode::NOT_FOUND, "stream not found"))
+        }
+    }
 }
 
 /// The rows a `transcript-updated` stands for, as `/log` answers a delta from its `rows_from`
@@ -5041,13 +5098,15 @@ async fn events(
     };
     // The turns the connection asked to be shown as they run. What they show is never kept:
     // nothing of it is among what was missed.
-    let wanted: Option<HashSet<String>> = query.live.map(|live| {
-        live.split(',')
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_string)
-            .collect()
-    });
+    let wanted: Option<HashSet<String>> = query
+        .live
+        .map(|live| crate::live_change::followed(live.split(',')));
+    // A stream whose chats may change while it is open: its id is its first word.
+    let changing = matches!(
+        query.live_change.as_deref().map(str::trim),
+        Some("1" | "true" | "yes")
+    )
+    .then(|| app.hub.streams.open(stream_owner(&principal)));
     // A chat watched live by one of the owner's apps is a chat open on his device: its agent's
     // lanes are his while the connection lasts (the owner's rule of 25 Nov 2026). Only a paired
     // device or the Host's own token, which the app on the Host's machine presents, counts;
@@ -5064,7 +5123,7 @@ async fn events(
         };
         (wanted, app.hub.watch(), marks)
     });
-    let (first, live, last) = if compact {
+    let (mut first, live, last) = if compact {
         // A client that asked to be caught up compacted and resumes having missed something is
         // told so first, then given the newest of what it missed (feature `compact_resume`,
         // issue 882). One that missed nothing, or names no event (it reads the snapshot
@@ -5091,13 +5150,34 @@ async fn events(
         first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
         (first, live, 0)
     };
+    if let Some(held) = &changing {
+        first.push_front(unnumbered(
+            &json!({ "type": "stream", "stream_id": held.id }),
+        ));
+    }
     let clock = app.clock.clone();
     // The stream ends the moment the Host is told to stop, not when its process is gone: its
     // apps reconnect to the next Host about five seconds sooner (issue 880).
     let closing = Some(Box::pin(app.hub.closing()));
     let stream = stream::unfold(
-        (first, live, watched, closing, last, HashMap::new()),
-        move |(mut first, mut live, mut watched, mut closing, mut last, mut read_under)| {
+        (
+            first,
+            live,
+            watched,
+            closing,
+            last,
+            HashMap::new(),
+            changing,
+        ),
+        move |(
+            mut first,
+            mut live,
+            mut watched,
+            mut closing,
+            mut last,
+            mut read_under,
+            mut changing,
+        )| {
             let clock = clock.clone();
             let (app, listener) = (app.clone(), listener.clone());
             async move {
@@ -5108,7 +5188,7 @@ async fn events(
                     if let Some(event) = first.pop_front() {
                         return Some((
                             Ok(event),
-                            (first, live, watched, closing, last, read_under),
+                            (first, live, watched, closing, last, read_under, changing),
                         ));
                     }
                     // The Host stopped and its last word was sent: the stream ends.
@@ -5123,11 +5203,19 @@ async fn events(
                             None => std::future::pending().await,
                         }
                     };
+                    // A change of what it follows, for a stream that may be changed.
+                    let changed = async {
+                        match changing.as_mut() {
+                            Some(held) => held.changes.changed().await.is_ok(),
+                            None => std::future::pending().await,
+                        }
+                    };
                     let heard = tokio::time::timeout_at(beat_at, async {
                         tokio::select! {
                             biased;
                             () = stopping => Heard::Closing,
                             published = live.recv() => Heard::Event(published),
+                            open = changed => Heard::Changed(open),
                             shown = shown => Heard::Shown(shown),
                         }
                     })
@@ -5201,6 +5289,32 @@ async fn events(
                             closing = None;
                             SseEvent::default().data(&*app.hub.farewell()?)
                         }
+                        // From here on it follows what it was told, and says so.
+                        Ok(Heard::Changed(true)) => {
+                            let named = changing
+                                .as_mut()
+                                .and_then(|held| held.changes.borrow_and_update().clone())
+                                .unwrap_or_default();
+                            let wanted =
+                                crate::live_change::followed(named.iter().map(String::as_str));
+                            let marks = if owners {
+                                ViewMarks::start(&app, &wanted)
+                            } else {
+                                ViewMarks(None)
+                            };
+                            match watched.as_mut() {
+                                Some((held, _, held_marks)) => {
+                                    *held = wanted;
+                                    *held_marks = marks;
+                                }
+                                None => watched = Some((wanted, app.hub.watch(), marks)),
+                            }
+                            unnumbered(&json!({ "type": "live-changed", "live": named }))
+                        }
+                        Ok(Heard::Changed(false)) => {
+                            changing = None;
+                            continue;
+                        }
                         Err(_) => {
                             let beat = json!({ "type": "heartbeat", "ts": clock.now_ms() });
                             SseEvent::default()
@@ -5208,7 +5322,10 @@ async fn events(
                                 .data(beat.to_string())
                         }
                     };
-                    return Some((Ok(event), (first, live, watched, closing, last, read_under)));
+                    return Some((
+                        Ok(event),
+                        (first, live, watched, closing, last, read_under, changing),
+                    ));
                 }
             }
         },
@@ -5282,6 +5399,8 @@ enum Heard {
     Shown(Result<Arc<crate::hub::Shown>, RecvError>),
     /// The Host is stopping: the stream ends (issue 880).
     Closing,
+    /// What the stream follows was changed (`true`), or can no longer be (`false`).
+    Changed(bool),
 }
 
 #[cfg(test)]
@@ -5346,6 +5465,7 @@ mod tests {
                 rows_automated: None,
                 rows_coordination: None,
                 compact: compact.then(|| "1".to_string()),
+                live_change: None,
             };
             let answer = events(
                 State(app.clone()),

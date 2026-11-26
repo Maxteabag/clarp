@@ -379,7 +379,9 @@ GET /events?live=                   status/turn ops only (the agent list)
 ```
 
 `live` accepts session names or agent ids. Without the parameter a connection
-gets no `live` events at all (old clients). For a conversation outside your
+gets no `live` events at all (old clients). With feature `events_live_change` an open stream's set
+can be changed without reconnecting (`live_change=1`, then `POST /events/{stream_id}/live`); see
+[the protocol](protocol.md#change-what-an-open-stream-follows-feature-events_live_change-rust-host-contract-209). For a conversation outside your
 list the event carries only its `status` and `turn` ops; its `lseq` still counts
 the ops you did not get, so do not track `lseq` (or fetch `/live`) for those: use
 them only to update the agent's status line.

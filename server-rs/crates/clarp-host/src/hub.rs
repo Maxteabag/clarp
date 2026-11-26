@@ -86,6 +86,8 @@ pub struct Hub {
     /// The rows each recent `transcript-updated` stands for, read once for every connection that
     /// asked for them (`rows=1`, feature `events_rows`).
     pub carried: crate::carried::Reads,
+    /// The open streams whose followed chats may be changed (feature `events_live_change`).
+    pub streams: Arc<crate::live_change::Streams>,
     /// The name of this run of the Host for those who watch a turn.
     epoch: String,
     /// How many requests of each agent wait for the user: what the apps' badge counts.
@@ -132,6 +134,7 @@ impl Hub {
         Self {
             capture: None,
             carried: crate::carried::Reads::default(),
+            streams: Arc::default(),
             shown,
             statuses,
             badge,

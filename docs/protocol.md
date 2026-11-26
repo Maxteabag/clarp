@@ -1508,6 +1508,34 @@ A stream opened without `compact=1` is exactly as before: every kept event after
 far behind. The marker is never sent to it: an app that takes the first id-less `agent-roster` as
 the end of the replay would end it at the marker. A Host without the feature ignores `compact=1`
 and behaves the same way.
+#### Change what an open stream follows (feature `events_live_change`, Rust Host contract 209)
+
+`live=` is fixed when a stream opens. A client that opens a chat it does not follow yet need not
+close the stream and open another (a reconnect, a replay, and through the relay a new tunnel):
+
+1. Open the stream with `live_change=1` (beside `live=`, or without it). Its first event, before
+   the replay, is `{"type": "stream", "stream_id": "<32 hex signs>"}`: a random id that belongs to
+   the token the stream was opened with. It has no SSE `id:` and is never replayed. With
+   `compact=1`, it precedes the catch-up marker.
+2. `POST /events/{stream_id}/live` with `{"live": ["rachel", "mike"]}`, with that same token, sets
+   what the stream follows, named as `live=` names it (sessions or agent ids, `"*"` for every one,
+   `[]` for the status lines alone; blanks and repeats are dropped). It answers
+   `{"ok": true, "stream_id", "live": [...]}`. Any other token, and a stream that has ended, get
+   404 `stream not found`; a `live` that is not a list of texts gets 400.
+3. The stream then sends `{"type": "live-changed", "live": [...]}` (no `id:`, never replayed) at
+   the point the change takes effect: every `live` event before it follows the old set, every one
+   after it the new set. Changes made faster than the stream takes them collapse: it takes the
+   newest, with one `live-changed`.
+
+A newly followed chat starts as it does when a stream opens ([live-items.md](live-items.md) §3,
+rule 2): fetch `GET /live?session=` for it and apply its events with `lseq` above the snapshot's,
+keeping those that arrive meanwhile. A chat no longer followed gets its status and turn ops only,
+as every chat a stream does not follow; stop tracking its `lseq`. A reconnect (with
+`Last-Event-ID`) opens a new stream with a new id and the `live=` of its address: send the change
+again if it was made after the stream was opened. A stream opened without `live_change=1` has no
+id and cannot be changed. A Host without the feature ignores `live_change=1`, sends no `stream`
+event and answers the `POST` with 404 too: send it only where `GET /server-info` lists
+`events_live_change`.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,

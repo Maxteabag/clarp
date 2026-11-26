@@ -83,6 +83,8 @@ mod end_at_answer;
 mod enter_at_start;
 #[path = "host/events_gzip.rs"]
 mod events_gzip;
+#[path = "host/events_live_change.rs"]
+mod events_live_change;
 #[path = "host/events_rows.rs"]
 mod events_rows;
 #[path = "host/events_rows_options.rs"]

@@ -157,6 +157,12 @@ With feature `events_rows_options` (contract 207) add `rows_automated=0` and
 `rows_coordination=auto` when you read `/log` that way, so the carried rows
 match your own reads.
 
+On a Host with feature `events_live_change` (contract 209), open the stream
+with `live_change=1` to follow other chats without reconnecting: its first
+event gives `stream_id`, and `POST /events/<stream_id>/live` with
+`{"live": ["<session>"]}` (same token) switches the set; `live-changed` marks
+where it takes effect.
+
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
 

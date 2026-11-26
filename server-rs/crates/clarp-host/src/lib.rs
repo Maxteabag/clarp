@@ -80,6 +80,7 @@ pub mod launcher;
 pub mod library;
 pub mod line;
 pub mod listening;
+pub mod live_change;
 pub mod logins;
 pub mod managed_skills;
 mod mcp;
