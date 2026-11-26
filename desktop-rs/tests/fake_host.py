@@ -224,6 +224,20 @@ spoken_when_asked = False
 live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
+# Rows carried in transcript-updated (feature events_rows, Rust Host contract
+# 199): off until /__control/events-rows turns it on. Then every
+# transcript-updated says its conversation_id, head_revision and rows_from
+# (the head the one before it of the same conversation told), and a stream
+# opened with rows=1 also gets `rows` (what /log answers after rows_from with
+# include_automated=1&include_tool_details=0) and `rows_latest`, when they are
+# at most 20 rows and 16 KB. `withheld` sessions get rows_from alone (a reader
+# that may not read the agent). `offered: false` keeps the feature out of
+# /server-info while the events still say rows_from (a Host from before a
+# client asked). `measure` records the bytes of every /log request and answer
+# (headers included) and of every event written to a stream, as RESPONSE and
+# SSE lines.
+events_rows = {"on": False, "offered": True, "withheld": set(), "measure": False, "told": {}}
+rows_streams = set()  # id(inbox) of the streams opened with rows=1
 tool_explanation_settings = {"enabled": True, "detail_level": 2}
 # Coordination between agents (feature hidden_coordination, Host contract
 # 120): off until a check turns it on; the Host's value, and each chat's own.
@@ -367,9 +381,10 @@ def coordination_rows(session, rows, mode):
     return shown, echo, (count(run) if run else None)
 
 
-def put_rows(session, new_rows):
+def put_rows(session, new_rows, missed=False):
     """Updates rows by id or appends them, each with a new revision, and
-    announces it (what a Host write does)."""
+    announces it (what a Host write does). `missed`: the announcement is
+    lost on its way, as one a client misses (its rows_from still moves)."""
     global revision
     with state_lock:
         rows = turns.setdefault(session, [])
@@ -384,6 +399,9 @@ def put_rows(session, new_rows):
         for agent in agents:
             if agent["session"] == session:
                 agent["head_revision"] = revision
+        if missed:
+            carried_rows({"type": "transcript-updated", "session": session})
+            return
     broadcast({"type": "transcript-updated", "session": session})
 
 
@@ -1062,13 +1080,55 @@ def lane_settings_change(body):
     return 200, lane_settings_answer()
 
 
+def shortened(row):
+    """A row as /log answers it with include_tool_details=0: a header for
+    the first tool and each failed one, one header for the cells, and
+    whether there are details to read."""
+    row = copy.deepcopy(row)
+    tools = [t for t in row.get("tools") or [] if isinstance(t, dict)]
+    cells = [c for c in row.get("display_cells") or [] if isinstance(c, dict)]
+    keep = lambda item, keys: {k: item[k] for k in keys if k in item}
+    row["tools"] = [keep(t, ["id", "name", "summary", "action", "status"]) for i, t in enumerate(tools)
+                    if i == 0 or t.get("status") == "error"]
+    row["display_cells"] = [keep(c, ["id", "kind", "title", "summary", "status"]) for c in cells[:1]]
+    row["tool_details_available"] = bool(tools or cells)
+    row["activity_count"] = len(cells) if cells else len(tools)
+    return row
+
+
+def carried_rows(event):
+    """Under state_lock: fills in a transcript-updated's conversation_id,
+    head_revision and rows_from, and hands back the event as a rows=1 stream
+    gets it (None: the same as every other stream)."""
+    session = event.get("session", "")
+    cid = next((a.get("conversation_id", "") for a in agents if a["session"] == session), "")
+    rows = turns.get(session, [])
+    head = max([t["revision"] for t in rows] or [0])
+    told = events_rows["told"].get(session)
+    events_rows["told"][session] = (cid, head)
+    event.update({"conversation_id": cid, "head_revision": head})
+    if told and told[0] == cid and told[1] > 0:
+        event["rows_from"] = told[1]
+    if "rows_from" not in event or session in events_rows["withheld"]:
+        return None
+    carried = [shortened(t) for t in rows if t["revision"] > event["rows_from"]]
+    if len(carried) > 20 or len(json.dumps(carried)) > 16 * 1024:
+        return None
+    return {**event, "rows": carried, "rows_latest": head}
+
+
 def broadcast(event):
     global event_id
     with state_lock:
         event_id += 1
+        with_rows = None
+        if events_rows["on"] and event.get("type") == "transcript-updated":
+            event = dict(event)
+            with_rows = carried_rows(event)
         payload = f"id: {event_id}\ndata: {json.dumps(event)}\n\n".encode()
+        rows_payload = with_rows and f"id: {event_id}\ndata: {json.dumps(with_rows)}\n\n".encode()
         for subscriber in list(subscribers):
-            subscriber.put(payload)
+            subscriber.put(rows_payload if rows_payload and id(subscriber) in rows_streams else payload)
 
 
 def roster_event(body):
@@ -1649,11 +1709,16 @@ class Handler(BaseHTTPRequestHandler):
     def reply(self, status, body):
         data = json.dumps(body).encode()
         path = urlparse(self.path).path
-        if self.command == "GET" and (path.startswith("/artifacts") or path in ("/attention", "/background-jobs")):
+        measured = self.command == "GET" and path == "/log" and events_rows["measure"]
+        if self.command == "GET" and (path.startswith("/artifacts") or path in ("/attention", "/background-jobs")) and not measured:
             record({"method": "RESPONSE", "path": path, "status": status, "bytes": len(data), "at": time.time()})
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        if measured:
+            asked = len(self.requestline) + 2 + sum(len(k) + len(v) + 4 for k, v in self.headers.items()) + 2
+            answered = sum(len(line) for line in getattr(self, "_headers_buffer", [])) + 2
+            record({"method": "RESPONSE", "path": path, "status": status, "bytes": asked + answered + len(data), "at": time.time()})
         self.end_headers()
         self.wfile.write(data)
 
@@ -1686,6 +1751,8 @@ class Handler(BaseHTTPRequestHandler):
             # feature flags under capabilities.features.
             features = ["live_items", "tool_explanation_setting"] if live_features else []
             features.append("html_form_events")
+            if events_rows["on"] and events_rows["offered"]:
+                features.append("events_rows")
             if turn_summaries:
                 features.append("log_turn_summary")
             if turn_reasons:
@@ -2029,9 +2096,12 @@ class Handler(BaseHTTPRequestHandler):
             # Subscribed before the 200 goes out: a client counts itself
             # connected once it has the headers, and an event broadcast then
             # must already reach this inbox (it is not kept for later).
+            rows_asked = parse_qs(url.query).get("rows", [""])[0] == "1"
             with state_lock:
                 subscribers.append(inbox)
                 live_filters[id(inbox)] = None if live is None else {n for n in live.split(",") if n}
+                if rows_asked:
+                    rows_streams.add(id(inbox))
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -2049,12 +2119,15 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     self.wfile.write(chunk)
                     self.wfile.flush()
+                    if events_rows["measure"] and chunk.startswith(b"id: "):
+                        record({"method": "SSE", "path": "/events", "bytes": len(chunk), "at": time.time()})
             except (BrokenPipeError, ConnectionResetError):
                 pass
             finally:
                 with state_lock:
                     subscribers.remove(inbox)
                     live_filters.pop(id(inbox), None)
+                    rows_streams.discard(id(inbox))
             return
         return self.reply(404, {"error": "not found"})
 
@@ -2305,7 +2378,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/upsert":
             # Test control: update turns by id (a streaming reply growing) or
             # append them, each with a new revision, and announce it.
-            put_rows(body["session"], body["turns"])
+            put_rows(body["session"], body["turns"], missed=bool(body.get("missed")))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/publish-pending":
             with state_lock:
@@ -2360,6 +2433,21 @@ class Handler(BaseHTTPRequestHandler):
             # reads it from /server-info when it connects).
             global stall_feature
             stall_feature = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/head":
+            # Test control: the newest revision of a session's rows.
+            with state_lock:
+                rows = turns.get(body.get("session", ""), [])
+                return self.reply(200, {"head": max([t["revision"] for t in rows] or [0])})
+        if url.path == "/__control/events-rows":
+            # Test control: the events_rows feature (read from /server-info
+            # when the client connects), the sessions withheld from it, and
+            # whether bytes are recorded.
+            with state_lock:
+                events_rows["on"] = bool(body.get("on", True))
+                events_rows["withheld"] = set(body.get("withheld", []))
+                events_rows["measure"] = bool(body.get("measure", False))
+                events_rows["offered"] = bool(body.get("offered", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/live":
             # Test control: the live_items feature on or off (the client

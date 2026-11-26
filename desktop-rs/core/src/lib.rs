@@ -19,6 +19,7 @@ pub mod diagnostics;
 pub mod directory;
 pub mod dirs;
 pub mod endpoint;
+pub mod events_rows;
 pub mod form_events;
 pub mod hosts;
 pub mod jobs;

@@ -1450,6 +1450,30 @@ impl Engine {
         self.api.get(&format!("log-delta:{session}"), "/log", &query);
     }
 
+    /// A `transcript-updated` that carries its rows (`events_rows`) is
+    /// applied as the `/log` delta it stands for, with no read, where that
+    /// is exactly what the read would answer (clarp_core::events_rows) and
+    /// nothing else reads this chat now: no read in flight or queued, no
+    /// copy catching up or order to check, and no coordination policy the
+    /// read would carry. False: read `/log` as before.
+    fn apply_carried_rows(&mut self, session: &str, event: &Object) -> bool {
+        if !event.contains_key("rows")
+            || self.log_in_flight.contains(session)
+            || self.pending_log_mode.contains_key(session)
+            || self.catching_up.contains(session)
+            || self.order_check.contains(session)
+            || !self.coordination_query(session, true).is_empty()
+        {
+            return false;
+        }
+        let Some(conversation) = self.conversations.get(session) else { return false };
+        let Some(delta) = clarp_core::events_rows::as_delta(event, conversation.conversation_id(), conversation.latest_revision()) else {
+            return false;
+        };
+        self.apply_log(session, &delta, LoadKind::Delta);
+        true
+    }
+
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
         self.log_in_flight.remove(session);
         self.ensure_conversation(session);
@@ -1862,7 +1886,7 @@ impl Engine {
                 }
             }
             "transcript-updated" => {
-                if self.conversations.contains_key(&session) {
+                if self.conversations.contains_key(&session) && !self.apply_carried_rows(&session, event) {
                     self.request_delta(&session);
                 }
                 self.refresh_pair_conversations_for(&session);
