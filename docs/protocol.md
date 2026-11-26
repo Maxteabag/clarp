@@ -122,7 +122,8 @@ text or script answer of 1 KB or more gzipped, with `Content-Encoding: gzip`; ev
 carries `Vary: Accept-Encoding`, gzipped or not. The decoded body is byte for byte the plain one.
 The Python Host has always done so; the Rust Host does since issue 805, where a snapshot of about
 310 agents went from about 1.25 MB to a fraction of it. Never gzipped: event streams (`/events`
-and every other answer sent as it is made), WebSocket upgrades, a request with `Range` and a
+and every other answer sent as it is made; `/events` only when asked with `gzip=1`, feature
+`events_gzip` below), WebSocket upgrades, a request with `Range` and a
 partial answer, media and files that are no text, answers without a body (`HEAD`, 204, 304) and
 answers above 64 MiB. URLSession and OkHttp ask for gzip and decode it themselves; a client that
 sets `Accept-Encoding` by hand must decode what it asked for. Through the connection relay the
@@ -1308,6 +1309,43 @@ Valid `controller_event` values are `down`, `up`, `single-click`,
 integration supports the button and swipe events. Flic officially requires a
 Hub for Hold & Twist, so rotation remains a separately negotiated experimental
 input rather than a production-critical command.
+
+#### A gzipped stream (feature `events_gzip`, Rust Host contract 198)
+
+`GET /events?gzip=1` from a client that sends `Accept-Encoding: gzip` is answered with
+`Content-Encoding: gzip`: the whole stream is one gzip stream, flushed (a sync flush) after every
+event and heartbeat, so each event can be decoded the moment its bytes arrive and nothing waits for
+the next one. The events, their order, their `id:` lines and the replay are those of the plain
+stream; only the bytes on the wire differ. What the events repeat (their keys, the agents' names
+and ids, a reply's words in its `upsert` and again in its `done`) is sent once and referred back to
+within the 32 KB window. Measured with the apps' way of listening (`server-rs/tools/build
+wire-read`, issue 879), the stream of one short answer went from 19.2 KB to 3.6 KB (the same 49
+events).
+
+Without `gzip=1` the stream is never packed, whatever `Accept-Encoding` says: an older app's HTTP
+stack asks for gzip by itself and is sent the plain stream it has always read. Send `gzip=1` only
+where the stack decodes gzip as the body arrives: URLSession (`bytes(for:)`), OkHttp with its own
+`Accept-Encoding` (not set by hand) and reqwest with its `gzip` feature all do, through the relay
+and directly, with no event later than on a plain connection beside it (issue 879). A client that
+sets `Accept-Encoding` by hand decodes the stream itself.
+
+Through the connection relay the stream is gzipped only where the relay says it hands a packed
+answer to the phone untouched (`passthrough_encoding` on each request it passes; the relay in
+`relay/` says so from contract 198): it then passes each part on as the Host flushes it. Through a
+relay that does not say so, the Host is asked for no encoding and the stream comes plain. A Host
+without the feature ignores `gzip=1` too. So read `Content-Encoding` rather than assuming.
+
+What it costs the Host: each gzipped connection keeps its own compressor, about 264 KB of memory
+for as long as it is open (the window and the compressor's tables), and the CPU to pack each
+event. Ten phones with the stream open hold about 2 MB.
+
+No event carries a credential (a device or administrator token, a key, a pairing code or secret,
+a signed address): checked for issue 879 across every event the Host publishes. The listen-first
+opening's token is in the answer to `POST /calls/ring/answer` and in requests, never in an event,
+and the signed addresses of agents' pictures go only into push payloads. So no secret shares a
+compression window with words an agent read, which would let a watcher of the encrypted lengths
+guess it. An event that ever carries one must stay out of the gzipped stream (or the field out of
+the event), and its review must say so.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,

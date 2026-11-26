@@ -1,6 +1,7 @@
 import { env, exports } from 'cloudflare:workers';
 import { describe, it, expect, afterEach } from 'vitest';
-import { HostRelay, MAX_STREAMS } from '../src/index';
+import { HostRelay } from '../src/index';
+import { MAX_STREAMS } from '../src/limits';
 
 const encoder = new TextEncoder();
 function frame(kind: number, id: number, payload = new Uint8Array()) {
@@ -121,6 +122,29 @@ describe('HTTP frame lifecycle', () => {
     await object.webSocketMessage(host, frame(0x13, 1));
     expect(response.headers.get('content-encoding')).toBe('gzip');
     expect(new Uint8Array(await body)).toEqual(bytes);
+  });
+  it('tells the Host it passes a packed answer through, so the Host may pack it', async () => {
+    const { object, sent } = relay();
+    object.fetch(new Request('https://relay.test/events?gzip=1', { headers: { 'accept-encoding': 'gzip' } }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const head = JSON.parse(new TextDecoder().decode(sent.map(unpack).find(f => f.kind === 1)!.payload));
+    expect(head.passthrough_encoding).toBe(true);
+    expect(head.headers['accept-encoding']).toBe('gzip');
+  });
+  it('streams a gzipped event stream piece by piece, each readable before the next comes', async () => {
+    const { object, host } = relay();
+    const pending = object.fetch(new Request('https://relay.test/events?gzip=1'));
+    await object.webSocketMessage(host, json(0x11, 1, { status: 200, headers: { 'content-encoding': 'gzip', 'content-type': 'text/event-stream' } }));
+    const response = await pending;
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    const reader = response.body!.getReader();
+    for (const piece of [new Uint8Array([31, 139, 8, 0]), new Uint8Array([1, 2, 3]), new Uint8Array([4, 5])]) {
+      await object.webSocketMessage(host, frame(0x12, 1, piece));
+      const { value } = await reader.read();
+      expect(new Uint8Array(value!)).toEqual(piece);
+    }
+    await object.webSocketMessage(host, frame(0x13, 1));
+    expect((await reader.read()).done).toBe(true);
   });
   it('aborts upstream when the reader cancels an SSE stream', async () => {
     const { object, host, sent } = relay();

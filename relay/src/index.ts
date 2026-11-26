@@ -15,6 +15,7 @@
  * connectors that send it there, but an address is written into request logs, so a
  * header is the way to send it.
  */
+import { MAX_STREAMS } from "./limits";
 export interface Env {
   HOST_RELAY: DurableObjectNamespace;
   RELAY_SECRET: string;
@@ -28,9 +29,6 @@ const K = {
 } as const;
 
 const CHUNK = 256 * 1024; // stay well under the 1 MiB Durable Object message limit
-// Streams (requests and tunneled WebSockets) one Host may have open at once. Anyone who knows
-// a host id can open streams before the Host checks them; past this the relay answers 429.
-export const MAX_STREAMS = 256;
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection", "host", "content-length"]);
 
 function frame(kind: number, id: number, payload?: Uint8Array): Uint8Array {
@@ -178,7 +176,10 @@ export class HostRelay implements DurableObject {
     // The phone closing the response (SSE reconnect, app backgrounded) errors the writable side.
     writer.closed.catch(() => { if (this.pending.delete(id)) { try { host.send(frame(K.ABORT, id)); } catch {} } });
 
-    host.send(json(K.REQ, id, { method: request.method, path, headers }));
+    // The relay hands a packed answer to the phone byte for byte (below), so the Host may pack it
+    // for a phone that takes gzip: a JSON answer, and an event stream that asks with gzip=1. The
+    // edge compresses JSON by itself, but never an event stream.
+    host.send(json(K.REQ, id, { method: request.method, path, headers, passthrough_encoding: true }));
     // Stream the request body in bounded chunks, then mark its end.
     if (request.body) {
       const reader = request.body.getReader();

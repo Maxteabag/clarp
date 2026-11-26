@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 197;
+pub const HOST_CONTRACT: u64 = 198;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -499,6 +499,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // has one take over a running turn: the turn ends as stopped for a newer message and that
     // message runs next; the queue is not held (issue 867).
     ("queue_steer", 197),
+    // `GET /events?gzip=1` with `Accept-Encoding: gzip` sends the stream gzipped, one gzip stream
+    // flushed at each event, so each event is read the moment it comes and what the events
+    // repeat is sent once (issue 879). Without `gzip=1` the stream goes plain, as before.
+    ("events_gzip", 198),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

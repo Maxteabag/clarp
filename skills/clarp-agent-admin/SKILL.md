@@ -140,6 +140,10 @@ helper, `parent` (its maker's counts and state), so a watcher of `/events`
 needs no read for it; and `transcript-updated` carries the conversation's
 `head_revision` and `conversation_id`, so a reader that already holds that
 revision skips `GET /log`.
+On a Host with feature `events_gzip` (contract 198), a watcher of `/events`
+whose HTTP client decodes gzip as it streams can add `gzip=1` to get the same
+events in a fraction of the bytes; without the feature, or without decoding
+gzip, leave it out.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.
