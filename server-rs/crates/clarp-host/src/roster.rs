@@ -578,7 +578,13 @@ async fn archived(
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
             let mut row = edge::agent_row(
-                &directory, &families, member, &app.faces, &owners, &quota, &forks,
+                &directory,
+                &families,
+                member,
+                &app.faces,
+                &owners,
+                &quota,
+                &forks,
                 crate::availability::At::of(&app),
             );
             let session = &member.record.session;

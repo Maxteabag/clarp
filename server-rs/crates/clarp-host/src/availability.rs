@@ -190,7 +190,12 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         }
     }
     if facts.broken.is_some() {
-        return at("restarting", "Restarting".into(), facts.host_started_ms, None);
+        return at(
+            "restarting",
+            "Restarting".into(),
+            facts.host_started_ms,
+            None,
+        );
     }
     let Some(live) = live else {
         return at("ok", String::new(), rested_since(facts), None);
@@ -204,14 +209,19 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
     }
     if live.starting && (live.failed_attempts > 0 || live.handoff_retry.is_some()) {
         let back = live.moved_at_ms.saturating_add(facts.start_ms);
-        return at("restarting", "Restarting".into(), live.moved_at_ms, Some(back));
+        return at(
+            "restarting",
+            "Restarting".into(),
+            live.moved_at_ms,
+            Some(back),
+        );
     }
     let alive = facts.last_alive_ms.filter(|_| !live.starting);
     // Only a turn that thinks or writes can fall silent: a tool that runs is work however
     // quiet (its row says what runs), and so is a wait for an approval or a background task, a
     // compaction, and the tool's own retries at a provider that would not answer.
-    let silent_work = live.tools.is_empty()
-        && matches!(live.activity, Activity::Thinking | Activity::Responding);
+    let silent_work =
+        live.tools.is_empty() && matches!(live.activity, Activity::Thinking | Activity::Responding);
     if let Some(alive) = alive.filter(|_| silent_work && !live.stopping)
         && facts.now_ms.saturating_sub(alive) >= UNRESPONSIVE_AFTER_MS
     {
@@ -566,7 +576,10 @@ mod tests {
         status.live = Some(running(NOW - 600_000));
         let quiet = NOW - UNRESPONSIVE_AFTER_MS;
         let shown = decided(&status, &Value::Null, Some(quiet));
-        assert_eq!((shown.state, shown.text.as_str()), ("unresponsive", "Not responding"));
+        assert_eq!(
+            (shown.state, shown.text.as_str()),
+            ("unresponsive", "Not responding")
+        );
         assert_eq!((shown.last_alive_ms, shown.since_ms), (Some(quiet), NOW));
         let just = decided(&status, &Value::Null, Some(quiet + 1));
         assert_eq!(just.state, "busy");
@@ -592,7 +605,12 @@ mod tests {
         status.queue_depth = 3;
         let limit = decided(&status, &Value::Null, None);
         assert_eq!(
-            (limit.state, limit.text.as_str(), limit.since_ms, limit.back_at_ms),
+            (
+                limit.state,
+                limit.text.as_str(),
+                limit.since_ms,
+                limit.back_at_ms
+            ),
             ("usage_limit", "Usage limit", NOW - 30_000, Some(reset))
         );
         assert_eq!(limit.queue_ahead, 3);
@@ -605,7 +623,11 @@ mod tests {
         status.live = Some(live.clone());
         let switching = decided(&status, &Value::Null, None);
         assert_eq!(
-            (switching.state, switching.text.as_str(), switching.back_at_ms),
+            (
+                switching.state,
+                switching.text.as_str(),
+                switching.back_at_ms
+            ),
             ("switching_account", "Switching account (usage limit)", None)
         );
         // ...unless the row says the account is used up with no seat to move to.
@@ -657,7 +679,12 @@ mod tests {
         let status = refused(failures::USAGE_LIMIT, "Usage limit reached", NOW - 60_000);
         let limit = decided(&status, &Value::Null, None);
         assert_eq!(
-            (limit.state, limit.text.as_str(), limit.since_ms, limit.back_at_ms),
+            (
+                limit.state,
+                limit.text.as_str(),
+                limit.since_ms,
+                limit.back_at_ms
+            ),
             ("usage_limit", "Usage limit", NOW - 60_000, None)
         );
         // With the reset where the Host's reading of the tool's account has one.
@@ -665,7 +692,11 @@ mod tests {
         let limit = decided(&status, &used_up, None);
         assert_eq!(
             (limit.state, limit.since_ms, limit.back_at_ms),
-            ("usage_limit", NOW - 60_000, clarp_kernel::quota::from_text("2030-03-17T19:00:00Z"))
+            (
+                "usage_limit",
+                NOW - 60_000,
+                clarp_kernel::quota::from_text("2030-03-17T19:00:00Z")
+            )
         );
         // A log from before the kind was kept is read by its words.
         let words = "You've hit your usage limit. Try again later.";
@@ -680,7 +711,11 @@ mod tests {
         let other = refused("stalled", "the tool stalled", NOW - 60_000);
         assert_eq!(decided(&other, &Value::Null, None).state, "ok");
         // Long after, with no reset known, the next turn tells again.
-        let old = refused(failures::USAGE_LIMIT, "Usage limit reached", NOW - REFUSAL_SHOWN_MS);
+        let old = refused(
+            failures::USAGE_LIMIT,
+            "Usage limit reached",
+            NOW - REFUSAL_SHOWN_MS,
+        );
         assert_eq!(decided(&old, &Value::Null, None).state, "ok");
         // Where another seat has room, the Host moves the tool to it: a switch, for a while.
         let switch = |ended_at_ms: i64| {
@@ -749,7 +784,11 @@ mod tests {
         let waiting = decided(&status, &Value::Null, None);
         assert_eq!(
             (waiting.state, waiting.text.as_str(), waiting.back_at_ms),
-            ("restarting", "Restarting", Some(NOW + 5_000 + START_DEFAULT_MS))
+            (
+                "restarting",
+                "Restarting",
+                Some(NOW + 5_000 + START_DEFAULT_MS)
+            )
         );
         live.parked = None;
         live.starting = true;
@@ -759,7 +798,11 @@ mod tests {
         let starting = decided(&status, &Value::Null, None);
         assert_eq!(
             (starting.state, starting.since_ms, starting.back_at_ms),
-            ("restarting", NOW - 3_000, Some(NOW - 3_000 + START_DEFAULT_MS))
+            (
+                "restarting",
+                NOW - 3_000,
+                Some(NOW - 3_000 + START_DEFAULT_MS)
+            )
         );
         // A first start is the turn's work: busy.
         live.failed_attempts = 0;

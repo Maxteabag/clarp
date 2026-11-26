@@ -62,7 +62,8 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
 
     host.send(&session, "sleep 60", "long");
     wait_for("the agent to be busy", || {
-        told(&heard, &session).is_some_and(|event| event["fields"]["availability"]["state"] == "busy")
+        told(&heard, &session)
+            .is_some_and(|event| event["fields"]["availability"]["state"] == "busy")
     });
     let event = told(&heard, &session).unwrap();
     assert_eq!(event["agent_id"], row["agent_id"], "{event}");
@@ -85,8 +86,15 @@ fn an_agent_at_work_says_how_many_messages_wait_and_the_event_carries_its_row() 
         json!(["busy", "Busy · 1 message ahead of you", null, 1]),
         "{event}"
     );
-    assert_eq!(shown(&event["fields"]["availability"]), shown(&now), "{now}");
-    assert_eq!(now["queue_ahead"], host.get(&format!("/agents/{session}"))["queued_turn_count"]);
+    assert_eq!(
+        shown(&event["fields"]["availability"]),
+        shown(&now),
+        "{now}"
+    );
+    assert_eq!(
+        now["queue_ahead"],
+        host.get(&format!("/agents/{session}"))["queued_turn_count"]
+    );
     assert!(now["last_alive_ms"].as_i64().is_some(), "{now}");
     // Nothing more is told while nothing an app shows changes.
     let count = || {
@@ -110,14 +118,22 @@ fn an_event_stream_is_told_the_host_is_updating_before_it_stops() {
     let mut host = place.start();
     let heard = host.listen();
     wait_for("the stream to begin", || {
-        heard.lock().unwrap().iter().any(|event| event["type"] == "agent-roster")
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster")
     });
     let before = host.get("/server-info");
     assert!(before["contract"].is_object());
     let pid = Pid::from_raw(i32::try_from(host.process.id()).unwrap());
     kill(pid, Signal::SIGTERM).unwrap();
     wait_for("the Host's last word", || {
-        heard.lock().unwrap().iter().any(|event| event["type"] == "host-updating")
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "host-updating")
     });
     let events = heard.lock().unwrap().clone();
     let last = events.last().unwrap();
@@ -125,7 +141,11 @@ fn an_event_stream_is_told_the_host_is_updating_before_it_stops() {
     assert_eq!(last["text"], "Host updating", "{last}");
     let since = last["since_ms"].as_i64().unwrap();
     // No restart measured yet: the default.
-    assert_eq!(last["back_at_ms"].as_i64().unwrap(), since + 45_000, "{last}");
+    assert_eq!(
+        last["back_at_ms"].as_i64().unwrap(),
+        since + 45_000,
+        "{last}"
+    );
     assert!(last.get("event_id").is_none(), "{last}");
     wait_within("the Host to exit", Duration::from_secs(7), || {
         host.process.try_wait().unwrap().is_some()

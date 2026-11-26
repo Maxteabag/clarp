@@ -1862,7 +1862,8 @@ pub(crate) fn agent_row(
     // turn: advice for whoever is about to write to it.
     row["backend_quota"] = quota.of(view.backend, &member.record.model);
     // Whether it can answer now, and if not why and until when (feature `agent_availability`).
-    let availability = crate::availability::of_member(member, &view, quota, &row["backend_quota"], at);
+    let availability =
+        crate::availability::of_member(member, &view, quota, &row["backend_quota"], at);
     row["availability"] = availability;
     // A change of its backend that runs now (feature `agent_backend_transit`), else null.
     row["transit"] = crate::agent_transit::running_of(&member.record.agent_id);

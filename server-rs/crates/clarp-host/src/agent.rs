@@ -9,8 +9,8 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -5612,7 +5612,9 @@ impl Worker {
         let prior = self.view.borrow().clone();
         // An agent that was being opened can answer now (`availability`).
         if prior.broken.is_some() {
-            self.setup.hub.availability_moved(&self.setup.record.agent_id);
+            self.setup
+                .hub
+                .availability_moved(&self.setup.record.agent_id);
         }
         let origin = status
             .live
@@ -5776,7 +5778,9 @@ impl Worker {
         // Whether the agent can answer now may have changed (`availability`, issue 918); and a
         // process that said its first word measures how long the next start takes.
         if changed.status || changed.queue || stall_changed {
-            self.setup.hub.availability_moved(&self.setup.record.agent_id);
+            self.setup
+                .hub
+                .availability_moved(&self.setup.record.agent_id);
         }
         if let (Some(was), Some(live)) = (was_live, status.live.as_ref())
             && was.turn == live.turn
@@ -6221,7 +6225,9 @@ impl Worker {
         view.broken = Some(why.to_string());
         view.stalled_since = None;
         self.view.send_replace(Arc::new(view));
-        self.setup.hub.availability_moved(&self.setup.record.agent_id);
+        self.setup
+            .hub
+            .availability_moved(&self.setup.record.agent_id);
     }
 }
 
