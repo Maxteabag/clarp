@@ -1688,7 +1688,7 @@ fn a_lane_let_start_counts_until_it_listens_and_gives_its_place_back_when_its_la
     // A count of one and no lane yet. His start is given the place; its lane has not bound its
     // socket yet. e1a523fa saw no lane there, and let a helper's lane start beside it: two
     // lanes over a count of one.
-    let run = run_dir("starting");
+    let run = run_dir("let-start");
     mark_owners_turn(&run, "his");
     let his = Endpoint::of(Tool::Codex, &run, "his");
     let helper = Endpoint::of(Tool::Codex, &run, "helper");

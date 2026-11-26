@@ -695,7 +695,12 @@ fn over_the_limits_with_every_lane_busy_a_turn_runs_on_its_own() {
     );
     assert_eq!(crowd.cold(), cold + 1);
     assert!(there(&one) && there(&two), "no busy lane was touched");
-    assert!(noted(&crowd.place, "exits").is_empty(), "no lane left");
+    // The turn's own process ends with its turn, and its stand-in notes that exit as a lane's
+    // would: bd4a41ad2 counted it as a lane that left, and failed every run. Its exit is the
+    // only one.
+    let exits = || noted(&crowd.place, "exits").lines().count();
+    wait_for("the turn's own process to end", || exits() >= 1);
+    assert_eq!(exits(), 1, "no lane left");
     crowd.release("one");
     crowd.release("two");
 }
