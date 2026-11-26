@@ -329,13 +329,13 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
     wait_for("source tool work before Transit", || {
         setting.place.root.join("source-held").exists()
     });
-    queue_for_transit(&host, session, "switch-2", "First pending message.");
+    queue_for_transit(&host, session, "switch-2", "Waiting automation message.");
     let ask = json!({"session": session, "backend": "codex", "model": "gpt-5.5",
                      "request_id": "switch-with-queue"});
     let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
     assert_eq!(status, 202, "{began}");
     std::fs::write(setting.place.root.join("record-steering"), "").unwrap();
-    let send = host.send(session, "Second pending message.", "switch-3");
+    let send = host.send(session, "Waiting user message.", "switch-3");
     assert_eq!(send["queued"], true, "{send}");
     assert_eq!(row(&host, session)["backend"], "claude");
     std::fs::remove_file(hold).unwrap();
@@ -356,8 +356,9 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
         answers,
         [
             "Heard: Finish this on Claude.",
-            "Codex heard: First pending message.",
-            "Codex heard: Second pending message.",
+            // An ordinary user send keeps its priority over queued automation across Transit.
+            "Codex heard: Waiting user message.",
+            "Codex heard: Waiting automation message.",
         ]
     );
 }
