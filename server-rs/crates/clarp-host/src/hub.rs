@@ -173,7 +173,25 @@ impl Hub {
 
     fn reserving_in_blocks(mut self, path: std::path::PathBuf, block: u64) -> Self {
         let reserved = Arc::new(Reserved::new(path, block));
-        let floor = reserved.read();
+        let floor = match reserved.read() {
+            Ok(floor) => floor,
+            Err(why) => {
+                // The floor is unknown: the file is kept, nothing is reserved over it, and the
+                // numbers of this run go unreserved, from the time.
+                use std::sync::atomic::Ordering;
+                reserved.unknown.store(true, Ordering::Release);
+                reserved.lapsed.store(true, Ordering::Release);
+                reserved.refused.store(true, Ordering::Relaxed);
+                eprintln!(
+                    "clarp-host: the reservation of event numbers at {} cannot be read ({why}): it is \
+                     kept as it is, and this run numbers its events unreserved: a client that \
+                     resumes across its next restart may be told it missed nothing",
+                    reserved.path.display()
+                );
+                self.reserved = Some(reserved);
+                return self;
+            }
+        };
         let recent = self.recent.get_mut().unwrap_or_else(PoisonError::into_inner);
         if floor > recent.first_id && recent.events.is_empty() {
             recent.first_id = floor;
@@ -511,6 +529,9 @@ pub struct Reserved {
     tried: Mutex<Option<std::time::Instant>>,
     /// How many times a reservation was written or tried: what a test of the lapse counts.
     attempts: std::sync::atomic::AtomicU64,
+    /// The file is there and cannot be read: the floor is unknown, and the file is kept as it
+    /// is: nothing is written over it, for the end it holds may be above anything this run knows.
+    unknown: std::sync::atomic::AtomicBool,
 }
 
 /// How often a lapsed reservation is tried again, in the background.
@@ -528,15 +549,23 @@ impl Reserved {
             lapsed: std::sync::atomic::AtomicBool::new(false),
             tried: Mutex::new(None),
             attempts: std::sync::atomic::AtomicU64::new(0),
+            unknown: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
-    /// The end of the last reservation any run made, or 0 where there is none.
-    fn read(&self) -> u64 {
-        std::fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| text.trim().parse().ok())
-            .unwrap_or(0)
+    /// The end of the last reservation any run made: 0 where no file is there, and an error where
+    /// one is and cannot be read as a whole reservation (its digits and the newline after them, so
+    /// that a file cut short is never taken for a lower end).
+    fn read(&self) -> Result<u64, String> {
+        let text = match std::fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(why) if why.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(why) => return Err(why.to_string()),
+        };
+        text.strip_suffix('\n')
+            .filter(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|digits| digits.parse().ok())
+            .ok_or_else(|| "it holds no whole reservation".to_string())
     }
 
     /// Makes `end` the reservation on disk, if it is not already: written beside, flushed,
@@ -548,10 +577,15 @@ impl Reserved {
         if self.end.load(Ordering::Acquire) >= end {
             return Ok(());
         }
+        if self.unknown.load(Ordering::Acquire) {
+            return Err(std::io::Error::other(
+                "the reservation on disk could not be read, and is kept as it is",
+            ));
+        }
         self.attempts.fetch_add(1, Ordering::Relaxed);
         let beside = self.path.with_extension("new");
         let mut file = std::fs::File::create(&beside)?;
-        file.write_all(end.to_string().as_bytes())?;
+        file.write_all(format!("{end}\n").as_bytes())?;
         file.sync_all()?;
         std::fs::rename(&beside, &self.path)?;
         if let Some(folder) = self.path.parent() {
@@ -700,6 +734,27 @@ mod tests {
         // Every number given out was below the reservation on disk when it was given out.
         let on_disk: u64 = std::fs::read_to_string(&file).unwrap().trim().parse().unwrap();
         assert!(on_disk > c_first);
+        // A reservation file that is there and cannot be read is kept as it is: never written over
+        // with a lower end, the run lapsed from its start, its numbers unreserved.
+        for (name, kept) in [("malformed", "18829279\nnot a number\n"), ("cut", "18829")] {
+            let path = place.join(name);
+            std::fs::write(&path, kept).unwrap();
+            let unknown = Hub::new(now).reserving_in_blocks(path.clone(), 8);
+            for n in 0..20 {
+                unknown.publish(roster("unknown"), now + n);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), kept, "{name}");
+            let reserved = unknown.reserved.as_ref().unwrap();
+            assert!(reserved.lapsed.load(std::sync::atomic::Ordering::Acquire), "{name}");
+            assert_eq!(reserved.attempts.load(std::sync::atomic::Ordering::Relaxed), 0, "{name}");
+        }
+        let folder = place.join("a-folder");
+        std::fs::create_dir_all(&folder).unwrap();
+        let unreadable = Hub::new(now).reserving_in_blocks(folder.clone(), 8);
+        unreadable.publish(roster("unknown"), now);
+        assert!(folder.is_dir());
+        assert!(unreadable.reserved.as_ref().unwrap().unknown.load(std::sync::atomic::Ordering::Acquire));
         // A reservation that cannot be written lapses: the hub goes on giving out numbers, and no
         // publish touches the disk; it is tried again in the background, at most every 30 s.
         let unwritable = Hub::new(now).reserving_in_blocks(place.join("no/such/folder/file"), 8);
