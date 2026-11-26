@@ -610,9 +610,7 @@ fn the_hosts_own_queue_answer_wins_over_a_count_kept_from_a_newer_revision() {
 /// #918: a Host offering `agent_availability` puts `availability` on the
 /// snapshot row and patches it live (`agent-roster` kind `availability`);
 /// `ok` clears it, `agent-state` does not touch it, and an older Host shows
-/// nothing new. Busy shows only while the running turn answers other
-/// agents (Peter, 26 Nov 2026): the user's own turn has the working
-/// indicator; every other state shows whatever turn runs.
+/// nothing new.
 #[test]
 fn why_an_agent_cannot_answer_follows_the_host() {
     use clarp_core::availability::{Clock, FEATURE, State, line};
@@ -623,32 +621,15 @@ fn why_an_agent_cannot_answer_follows_the_host() {
     h.snapshot(json!([roster_row("sam", "sam-id", 10, json!({"availability": restarting.clone()}))]));
     let shown = h.row("sam").availability.clone().expect("a snapshot carries it");
     assert_eq!(shown.state, State::Restarting);
-    assert_eq!(line(&shown, clock).as_deref(), Some("Restarting · ~20 s"));
+    assert_eq!(line(&shown, clock).as_deref(), Some("Restarting · back in ~20 s"));
     assert_eq!(h.roster.availability("sam"), Some(&shown));
 
-    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "thinking", "ts": 13, "audience": "agents", "sender_name": "Bella"}))));
+    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "thinking", "ts": 13}))));
     assert!(h.row("sam").availability.is_some(), "a state event leaves it");
     h.with(|r| {
         r.patch_row("sam", &obj(json!({"availability": {"state": "busy", "queue_ahead": 25}})));
     });
-    let busy = Some("Answering other agents · 25 ahead of you");
-    assert_eq!(h.row("sam").availability.as_ref().and_then(|a| line(a, clock)).as_deref(), busy, "a roster patch sets it");
-    assert_eq!(h.roster.availability("sam").and_then(|a| line(a, clock)).as_deref(), busy, "the header reads the same");
-    // The user's own turn: busy is the working indicator's, not a line.
-    h.with(|r| r.apply_state_event(&obj(json!({"session": "sam", "kind": "tool", "ts": 14, "audience": "user"}))));
-    assert_eq!((h.row("sam").availability.clone(), h.roster.availability("sam")), (None, None), "busy on the user's own turn shows nothing");
-    assert!(h.row("sam").busy, "the agent still works");
-    // A state that keeps the user waiting shows over the user's turn.
-    h.with(|r| {
-        r.patch_row("sam", &obj(json!({"availability": {"state": "unresponsive", "last_alive_ms": 10_000 - 4 * 60_000}})));
-    });
-    assert_eq!(h.roster.availability("sam").and_then(|a| line(a, clock)).as_deref(), Some("No sign of life for 4 min"));
-    // Idle again: no turn names an audience, a busy left over says nothing.
-    h.with(|r| {
-        r.patch_row("sam", &obj(json!({"availability": {"state": "busy", "queue_ahead": 1}})));
-        r.apply_state_event(&obj(json!({"session": "sam", "kind": "idle", "ts": 15})));
-    });
-    assert_eq!(h.roster.availability("sam"), None, "busy with no running turn named");
+    assert_eq!(h.row("sam").availability.as_ref().and_then(|a| line(a, clock)).as_deref(), Some("Busy · 25 messages ahead of you"), "a roster patch sets it");
     h.with(|r| {
         r.patch_row("sam", &obj(json!({"availability": {"state": "ok", "queue_ahead": 0}})));
     });

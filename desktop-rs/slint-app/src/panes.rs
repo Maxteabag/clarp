@@ -772,11 +772,15 @@ impl App {
         clarp_core::stall::indicator(since, chrono::Utc::now().timestamp_millis(), agent.queued_turn_count > 0)
     }
 
-    /// Why the open chat's agent cannot answer now (#918), the header's
-    /// line, counted on its Host's clock; "" while it can.
+    /// Why the open chat's agent cannot answer the user now (#918), the
+    /// header's short line, counted on its Host's clock; "" while it can,
+    /// and while it works on the user's own turn (`header_line`). The chat
+    /// list keeps its own line (`view::row_activity`).
     fn availability_line(engine: &Engine, session: &str) -> String {
         let clock = clarp_core::availability::Clock::now(engine.host_clock_offset_ms(session));
-        engine.roster().availability(session).and_then(|a| clarp_core::availability::line(a, clock)).unwrap_or_default()
+        let roster = engine.roster();
+        let audience = roster.find(session).map(|a| a.working_audience.as_str()).unwrap_or_default();
+        roster.availability(session).and_then(|a| clarp_core::availability::header_line(a, audience, clock)).unwrap_or_default()
     }
 
     /// Once a second with the turn clock: a stalled chat's minutes move on,
