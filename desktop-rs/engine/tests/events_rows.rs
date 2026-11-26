@@ -192,10 +192,12 @@ fn thread_cpu() -> Duration {
     Duration::from_nanos(stat.split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0))
 }
 
-fn bytes(host: &Host, since: f64) -> (u64, u64) {
+/// (/log, events) bytes since `since`: as sent plain (`bytes`) or packed as
+/// the Rust Host packs them for the desktop (`gz`).
+fn bytes(host: &Host, since: f64, field: &str) -> (u64, u64) {
     let log = host.log();
     let sum = |method: &str| -> u64 {
-        log.iter().filter(|l| l["method"] == method && l["at"].as_f64().unwrap_or(0.0) >= since).map(|l| l["bytes"].as_u64().unwrap_or(0)).sum()
+        log.iter().filter(|l| l["method"] == method && l["at"].as_f64().unwrap_or(0.0) >= since).map(|l| l[field].as_u64().unwrap_or(0)).sum()
     };
     (sum("RESPONSE"), sum("SSE"))
 }
@@ -206,8 +208,9 @@ fn now() -> f64 {
 
 struct Measured {
     reads: f64,
-    log_bytes: f64,
-    event_bytes: f64,
+    plain_bytes: f64,
+    gzip_log: f64,
+    gzip_events: f64,
     write_to_drawn_ms: f64,
     cpu_us: f64,
 }
@@ -230,12 +233,14 @@ fn measure_case(name: &str, rows: bool, withheld: &[&str], steps: &dyn Fn(usize)
         }
     }
     side.driver.settle(Duration::from_millis(500));
-    let (log_bytes, event_bytes) = bytes(&side.host, since);
+    let (log_bytes, event_bytes) = bytes(&side.host, since, "bytes");
+    let (gzip_log, gzip_events) = bytes(&side.host, since, "gz");
     let per = answers as f64;
     Measured {
         reads: (log_reads(&side.host) - reads) as f64 / per,
-        log_bytes: log_bytes as f64 / per,
-        event_bytes: event_bytes as f64 / per,
+        plain_bytes: (log_bytes + event_bytes) as f64 / per,
+        gzip_log: gzip_log as f64 / per,
+        gzip_events: gzip_events as f64 / per,
         write_to_drawn_ms: latency.as_secs_f64() * 1000.0 / f64::from(writes.max(1)),
         cpu_us: cpu.as_secs_f64() * 1e6 / per,
     }
@@ -273,20 +278,33 @@ fn measure() {
     ];
     const ANSWERS: usize = 10;
     let mut table = String::from(
-        "| case | /log reads per answer | /log bytes | event bytes | total bytes | write to drawn (ms) | pump thread CPU (us) |\n|---|---|---|---|---|---|---|\n",
+        "| case | /log reads per answer | gzip /log bytes | gzip event bytes | gzip total bytes | plain total bytes | write to drawn (ms) | pump thread CPU (us) |\n|---|---|---|---|---|---|---|---|\n",
     );
+    // Each side three times, alternating; the median of each figure.
+    const ROUNDS: usize = 3;
+    let median = |mut values: Vec<f64>| {
+        values.sort_by(f64::total_cmp);
+        values[values.len() / 2]
+    };
     for (name, withheld, steps) in cases {
-        let before = measure_case(&name.replace(' ', "-"), false, withheld, steps, ANSWERS);
-        let after = measure_case(&name.replace(' ', "-"), true, withheld, steps, ANSWERS);
-        let pair = |a: f64, b: f64, digits: usize| format!("{a:.digits$} → {b:.digits$}");
+        let (mut before, mut after) = (Vec::new(), Vec::new());
+        for round in 0..ROUNDS {
+            before.push(measure_case(&format!("{}-{round}", name.replace(' ', "-")), false, withheld, steps, ANSWERS));
+            after.push(measure_case(&format!("{}-{round}", name.replace(' ', "-")), true, withheld, steps, ANSWERS));
+        }
+        let pair = |figure: fn(&Measured) -> f64, digits: usize| {
+            let (a, b) = (median(before.iter().map(figure).collect()), median(after.iter().map(figure).collect()));
+            format!("{a:.digits$} → {b:.digits$}")
+        };
         table += &format!(
-            "| {name} | {} | {} | {} | {} | {} | {} |\n",
-            pair(before.reads, after.reads, 1),
-            pair(before.log_bytes, after.log_bytes, 0),
-            pair(before.event_bytes, after.event_bytes, 0),
-            pair(before.log_bytes + before.event_bytes, after.log_bytes + after.event_bytes, 0),
-            pair(before.write_to_drawn_ms, after.write_to_drawn_ms, 2),
-            pair(before.cpu_us, after.cpu_us, 0),
+            "| {name} | {} | {} | {} | {} | {} | {} | {} |\n",
+            pair(|m| m.reads, 1),
+            pair(|m| m.gzip_log, 0),
+            pair(|m| m.gzip_events, 0),
+            pair(|m| m.gzip_log + m.gzip_events, 0),
+            pair(|m| m.plain_bytes, 0),
+            pair(|m| m.write_to_drawn_ms, 2),
+            pair(|m| m.cpu_us, 0),
         );
     }
     println!("\n{table}");

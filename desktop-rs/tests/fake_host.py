@@ -14,6 +14,7 @@ ones, as served from /static/avatars).
 """
 import argparse
 import copy
+import gzip
 import hashlib
 import json
 import pathlib
@@ -22,6 +23,7 @@ import random
 import re
 import sys
 import threading
+import zlib
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -1718,7 +1720,11 @@ class Handler(BaseHTTPRequestHandler):
         if measured:
             asked = len(self.requestline) + 2 + sum(len(k) + len(v) + 4 for k, v in self.headers.items()) + 2
             answered = sum(len(line) for line in getattr(self, "_headers_buffer", [])) + 2
-            record({"method": "RESPONSE", "path": path, "status": status, "bytes": asked + answered + len(data), "at": time.time()})
+            # As the Rust Host packs it for a client that accepts gzip: an
+            # answer of 1 KB and more at level 5, with its Content-Encoding.
+            packed = len(gzip.compress(data, 5)) + len("Content-Encoding: gzip\r\n") if len(data) >= 1024 else len(data)
+            record({"method": "RESPONSE", "path": path, "status": status, "bytes": asked + answered + len(data),
+                    "gz": asked + answered + packed, "at": time.time()})
         self.end_headers()
         self.wfile.write(data)
 
@@ -2109,6 +2115,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
+                # The stream as gzip=1 packs it: one window, flushed event by event.
+                packer = zlib.compressobj(5, zlib.DEFLATED, 31)
                 while True:
                     try:
                         chunk = inbox.get(timeout=5)
@@ -2119,8 +2127,10 @@ class Handler(BaseHTTPRequestHandler):
                         return
                     self.wfile.write(chunk)
                     self.wfile.flush()
-                    if events_rows["measure"] and chunk.startswith(b"id: "):
-                        record({"method": "SSE", "path": "/events", "bytes": len(chunk), "at": time.time()})
+                    if events_rows["measure"]:
+                        packed = len(packer.compress(chunk)) + len(packer.flush(zlib.Z_SYNC_FLUSH))
+                        if chunk.startswith(b"id: "):
+                            record({"method": "SSE", "path": "/events", "bytes": len(chunk), "gz": packed, "at": time.time()})
             except (BrokenPipeError, ConnectionResetError):
                 pass
             finally:
