@@ -20,6 +20,7 @@ export struct ProfileInfo {
     dreaming: bool,
     push-alerts: bool,
     context-fraction: float,
+    // Empty while the Host does not say how much is used: no row then.
     context-used: string,
     compacting: bool,
     queue-text: string,
@@ -28,8 +29,8 @@ export struct ProfileInfo {
     plan-loading: bool,
     plan-title: string,
     plan-progress: string,
-    heartbeat-state: string,
-    heartbeat-empty: string,
+    // "Dormant" for a dormant heartbeat, else empty: the switch says on or off.
+    heartbeat-note: string,
     prompts-loading: bool,
     prompts-more: bool,
     // The Host offers prompt history (one that answers 404 does not).
@@ -436,19 +437,15 @@ export component AgentProfile inherits Modal {
                 }
                 Card {
                     title: "AUTONOMY & NOTIFICATIONS";
-                    ToggleRow { label: "Heartbeat"; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
-                    ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
-                    ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
-                }
-                Card {
-                    title: "HEARTBEAT";
-                    InfoRow { label: "State"; value: root.info.heartbeat-state; }
+                    ToggleRow { label: "Heartbeat"; note: root.info.heartbeat-note; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
+                    // The heartbeat's recent checks, under its switch.
                     for line in ProfileBridge.heartbeat-history: HorizontalLayout {
                         spacing: 8px;
                         Rectangle { width: 6px; height: 6px; y: (parent.height - self.height) / 2; border-radius: 2px; background: Palette.chrome-text; }
                         Text { text: line; color: Palette.text; font-size: 11 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                     }
-                    if ProfileBridge.heartbeat-history.length == 0: Text { text: root.info.heartbeat-empty; color: Palette.muted; font-size: 11 * Look.unit; }
+                    ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
+                    ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
                 }
                 if ProfileBridge.teams.length > 0: Card {
                     title: "TEAMS";
@@ -480,7 +477,7 @@ export component AgentProfile inherits Modal {
                             background: Palette.muted;
                         }
                     }
-                    InfoRow { label: "Used"; value: root.info.context-used; }
+                    if root.info.context-used != "": InfoRow { label: "Used"; value: root.info.context-used; }
                     HorizontalLayout {
                         alignment: start;
                         TextButton {

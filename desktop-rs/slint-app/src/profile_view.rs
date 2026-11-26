@@ -471,7 +471,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         },
         context_used: match tokens {
             Some(tokens) => format!("{tokens} / {} tokens", if window_size > 0 { window_size.to_string() } else { "unknown".into() }),
-            None => "Unknown".to_owned(),
+            // Unknown usage says nothing: the row is left out.
+            None => String::new(),
         }
         .into(),
         compacting: state == "compacting",
@@ -480,8 +481,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         plan_loading: engine.profile_loading(),
         plan_title: text(&plan_value, "title").into(),
         plan_progress: format!("{}/{}", number("completed_count"), number("total_count")).into(),
-        heartbeat_state: if scheduled("dormant") { "Dormant" } else if scheduled("enabled") { "Active" } else { "Off" }.into(),
-        heartbeat_empty: if scheduled("enabled") { "No heartbeat history yet" } else { "Heartbeat is off" }.into(),
+        // The Heartbeat switch says on or off; only a dormant one adds a word.
+        heartbeat_note: if scheduled("dormant") { "Dormant" } else { "" }.into(),
         prompts_loading: engine.profile_prompts_loading(),
         prompts_more: engine.profile_prompts_have_more(),
         prompts_shown: engine.profile_prompts_offered(),
@@ -589,7 +590,8 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
             .unwrap_or_else(|| id.to_owned())
     };
     let blocked = engine.transit_blocked(session);
-    let mut row = BackendRow { shown: true, value: transit::value(&backend_label(backend), &model_label(backend, model)), ..BackendRow::default() };
+    // The row names the tool alone: the Model line below says the model.
+    let mut row = BackendRow { shown: true, value: backend_label(backend), ..BackendRow::default() };
     match &flow.step {
         Step::Moving { backend: target, phase, .. } => {
             row.moving = true;

@@ -90,6 +90,7 @@ pub(super) fn profile_check(out: String) {
             }
             check(info.name == "Rachel" && info.session == "rachel" && info.backend == "claude", &format!("the profile is Rachel's: {} {}", info.name, info.backend));
             check(info.folder.as_str() == folder3 && info.context_used == "50000 / 200000 tokens", &format!("with its folder and context: {} {}", info.folder, info.context_used));
+            check(texts(|t| t == "Used").len() == 1, "a known context shows its Used row");
             check(info.plan_title == "Ship it" && bridge.get_plan().row_count() == 1, "and the current plan");
             check(bridge.get_prompts().row_count() == 20 && info.prompts_more, "the first 20 prompts, with more to load");
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();
@@ -547,7 +548,7 @@ fn backend_now(window: &crate::AppWindow) -> (crate::ProfileInfo, String, Vec<cr
 
 /// `--check backend-row --out DIR` (feature agent_backend_transit, issue
 /// 720): a Host without the feature shows no Backend row; with it the row
-/// says "Claude · Opus", is held while messages wait, and opens the picker:
+/// names the tool ("Claude", the Model line says the model), is held while messages wait, and opens the picker:
 /// the Host's backends for this agent (unavailable ones dimmed with their
 /// reason), the chosen one's models (the default marked), then Move. The
 /// move's phases land on the moved row, the Host's one line is in the chat
@@ -601,8 +602,17 @@ pub(super) fn backend_row_check(out: String) {
             if window.get_overlay() != "profile" || !info.backend_shown || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(info.backend_value == "Claude · Opus" && info.backend_enabled && info.backend_detail.is_empty() && step.is_empty(),
-                &format!("the Backend row shows the agent's backend and model: {:?} {}", info.backend_value, info.backend_enabled));
+            check(info.backend_value == "Claude" && info.backend_enabled && info.backend_detail.is_empty() && step.is_empty(),
+                &format!("the Backend row names the tool alone: {:?} {}", info.backend_value, info.backend_enabled));
+            // Issue 887: the model, the heartbeat and the context each say
+            // what they know once.
+            let bridge = window.global::<ProfileBridge>();
+            let shown_model = bridge.get_models().row_data(info.model_index as usize).map(|m| m.to_string()).unwrap_or_default();
+            check(shown_model == "Opus" && texts(|t| t.contains(" · Opus")).is_empty(), &format!("the model is said once, on the Model line: {shown_model:?}"));
+            let heartbeat = texts(|t| t.to_lowercase().contains("heartbeat"));
+            check(heartbeat == ["Heartbeat"] && texts(|t| t == "State").is_empty(), &format!("the heartbeat is said once, by its switch: {heartbeat:?}"));
+            check(info.context_used.is_empty() && texts(|t| t == "Used" || t == "Unknown").is_empty() && texts(|t| t == "Compact context").len() == 1,
+                &format!("unknown context usage shows no Used row, only Compact: {:?}", info.context_used));
             shot(&out1, "backend-01-row");
             check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 1}})).is_ok(), "a message waits for Rachel");
             true
@@ -716,7 +726,7 @@ pub(super) fn backend_row_check(out: String) {
             let body = posts("/agent-transit").last().map(|p| p["body"].clone()).unwrap_or(Value::Null);
             check(body["session"] == "rachel" && body["backend"] == "codex" && body["model"] == "gpt-5.5" && body["request_id"].as_str().is_some_and(|r| !r.is_empty()) && body.get("effort").is_none(),
                 &format!("Move starts it with a request id: {body}"));
-            check(step.is_empty() && info.backend_value == "Codex · GPT-5.5" && info.backend_detail.is_empty(), &format!("the row lands on the moved agent: {:?} {:?}", info.backend_value, info.backend_detail));
+            check(step.is_empty() && info.backend_value == "Codex" && info.backend_detail.is_empty(), &format!("the row lands on the moved agent: {:?} {:?}", info.backend_value, info.backend_detail));
             let header = window.get_panes().iter().find(|p| p.session == "rachel").map(|p| p.moving.to_string()).unwrap_or_default();
             check(header.is_empty(), &format!("and the header's moving line clears: {header:?}"));
             let rows: Vec<&str> = engine.conversation("rachel").map(|c| c.rows().iter().map(|r| r.text.as_str()).collect()).unwrap_or_default();
@@ -747,7 +757,7 @@ pub(super) fn backend_row_check(out: String) {
             if !info.backend_failed || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(step.is_empty() && info.backend_detail == "Messages are waiting for this agent. Try again once they have gone." && info.backend_value == "Codex · GPT-5.5",
+            check(step.is_empty() && info.backend_detail == "Messages are waiting for this agent. Try again once they have gone." && info.backend_value == "Codex",
                 &format!("a refused start says why in plain words, nothing changed: {:?}", info.backend_detail));
             shot(&out6, "backend-06-refused");
             let fail = json!({"fail": "the conversation couldn't be imported into Claude"});
@@ -774,7 +784,7 @@ pub(super) fn backend_row_check(out: String) {
             if !info.backend_failed || !line {
                 return false;
             }
-            check(info.backend_detail == "the conversation couldn't be imported into Claude" && info.backend_value == "Codex · GPT-5.5",
+            check(info.backend_detail == "the conversation couldn't be imported into Claude" && info.backend_value == "Codex",
                 &format!("a failed move says why and the agent stays: {:?} {:?}", info.backend_detail, info.backend_value));
             headless::press(Key::Escape);
             true
