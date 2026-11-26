@@ -285,8 +285,14 @@ start, and the command exits 1.
    helper in a new worktree.
 
    A queued prompt is not proof the work started; check the helper's own new
-   activity. `clarp-sub-agent stop NAME` stops only the watcher in this
-   mode; the helper agent stays until you mark it done or delete it.
+   activity. `clarp-sub-agent stop NAME [--reason R]` stops a Clarp helper
+   through the Host, as your Stop with the reason: its running turn ends and
+   its queue is held until `clarp-admin resume --session HELPER --from
+   YOUR_SESSION`. Its watcher is stopped only after the Host says the queue is
+   held. It refuses, and stops nothing, when `NAME.session` is empty, names no
+   live helper, or names one that is not yours, or when the Host's answer does
+   not say the queue is held. The helper agent stays until you mark it done or
+   delete it.
 
 ## When the user does not see the turn
 

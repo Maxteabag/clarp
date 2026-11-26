@@ -5,7 +5,7 @@
     clarp-sub-agent fork NAME --task T|--task-file F [--count N] [--worktree REPO:BRANCH] [--cwd D]
                          [--backend B] [--model M] [--effort E] [--title T]
     clarp-sub-agent status [NAME]
-    clarp-sub-agent stop NAME
+    clarp-sub-agent stop NAME [--reason R]
 
 Default mode: each sub-agent runs as its own systemd user unit
 (clarp-sub-agent-NAME), outside the parent session's cgroup, as a raw
@@ -497,7 +497,9 @@ def main(argv: list[str]) -> int:
     f.add_argument("--model"); f.add_argument("--title")
     f.add_argument("--effort", help="reasoning effort for every child (not on agy)")
     st = sub.add_parser("status"); st.add_argument("name", nargs="?")
-    sp = sub.add_parser("stop"); sp.add_argument("name")
+    sp = sub.add_parser("stop", help="stop a sub-agent: a helper's running turn and its unit")
+    sp.add_argument("name")
+    sp.add_argument("--reason", help="why, recorded with a helper's Stop")
     a = p.parse_args(argv)
     if a.cmd == "start":
         return start(a)
@@ -505,8 +507,59 @@ def main(argv: list[str]) -> int:
         return fork(a)
     if a.cmd == "status":
         return status(a)
-    return subprocess.run(["systemctl", "--user", "stop", f"clarp-sub-agent-{a.name}"]).returncode
+    return stop(a)
 
+
+def _stop_refused(helper: str, why: str) -> int:
+    print(f"clarp-sub-agent: the helper {helper or '(none)'} was not stopped: {why}; "
+          "its watcher is left running", file=sys.stderr)
+    return 1
+
+
+def stop(a: argparse.Namespace) -> int:
+    """Stop a sub-agent. A worker is stopped by its unit. A Clarp helper (``NAME.session``) is
+    stopped through the Host first, as the caller's Stop with its reason, and its watcher only
+    once the Host said the Stop held the helper's queue; otherwise nothing more is done."""
+    unit = f"clarp-sub-agent-{a.name}"
+    saved = DIR / f"{a.name}.session"
+    if not saved.exists():
+        return subprocess.run(["systemctl", "--user", "stop", unit]).returncode
+    helper = saved.read_text().strip()
+    if not helper:
+        return _stop_refused("", f"{saved} names no helper")
+    parent = _parent()
+    if not parent:
+        # Without the caller's session the Stop would be recorded as the user's.
+        return _stop_refused(helper, "CLARP_SESSION (your own session) is not set")
+    try:
+        row = _admin("agent", "helper-state", helper)
+        mine = _admin("agent", "helper-state", parent)
+    except AdminError as exc:
+        return _stop_refused(helper, str(exc))
+    if row.get("role") != "helper" or row.get("archived_at"):
+        return _stop_refused(helper, f"{saved} names no live helper (a stale name)")
+    if not mine.get("agent_id") or row.get("parent_agent_id") != mine.get("agent_id"):
+        return _stop_refused(helper, f"it is not a helper of {parent}")
+    try:
+        answer = _admin("stop", "--session", helper, "--reason",
+                        a.reason or f"stopped by its parent (clarp-sub-agent stop {a.name})",
+                        "--from", parent)
+    except AdminError as exc:
+        return _stop_refused(helper, str(exc))
+    if answer.get("ok") is not True or answer.get("queue_paused") is not True:
+        return _stop_refused(helper, f"the Host's answer does not say its queue is held: "
+                                     f"{json.dumps(answer, sort_keys=True)[:300]}")
+    ended = "its turn was stopped" if answer.get("terminated") else "no turn of it was running"
+    by = answer.get("stop_actor") or "?"
+    if not answer.get("stop_actor_verified"):
+        by += " (unverified)"
+    print(f"stopped helper {helper} as {by}: {ended}; its queue is held until "
+          f"clarp-admin resume --session {helper} --from {parent}")
+    out = subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, text=True)
+    if out.returncode != 0 and "not loaded" not in out.stderr:
+        print(out.stderr.strip(), file=sys.stderr)
+        return out.returncode
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
