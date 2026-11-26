@@ -173,10 +173,22 @@ fn set_connected(state: &Mutex<State>, sink: &Sink, run: u64, connected: bool) -
     emit(state, sink, run, |s| (std::mem::replace(&mut s.connected, connected) != connected).then_some(SseSignal::Connected(connected)))
 }
 
+/// A `stream` event (feature `events_live_change`) names the stream that
+/// was opened with `opened`: the event carries that query as
+/// `opened_query`, so the app knows which followed and visible chats the
+/// Host applies from it on, even when a newer query was set meanwhile.
+fn stamped(mut event: Object, opened: &[(String, String)]) -> Object {
+    if event.get("type").and_then(serde_json::Value::as_str) == Some("stream") {
+        let query: Object = opened.iter().map(|(k, v)| (k.clone(), serde_json::Value::from(v.clone()))).collect();
+        event.insert("opened_query".into(), serde_json::Value::Object(query));
+    }
+    event
+}
+
 async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: SseTiming, sink: Sink, run: u64) {
     let mut attempt = 0u32;
     loop {
-        let request = {
+        let (request, opened) = {
             let guard = state.lock().expect("sse state");
             if guard.run != run {
                 return;
@@ -194,7 +206,7 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
                 && let Ok(value) = HeaderValue::from_str(last) {
                     headers.insert("Last-Event-ID", value);
                 }
-            http.get(url).headers(headers)
+            (http.get(url).headers(headers), guard.query.clone())
         };
         let failure = match tokio::time::timeout(timing.watchdog, request.send()).await {
             Err(_) => Some(SseSignal::Error("Event stream timed out".to_owned())),
@@ -220,7 +232,7 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
                         Ok(Ok(None)) => break Some(SseSignal::Error("Event stream closed".to_owned())),
                         Ok(Ok(Some(bytes))) => {
                             for message in parser.feed(&bytes) {
-                                let alive = emit(&state, &sink, run, |s| Some(SseSignal::Event(s.cursor.accept(message))));
+                                let alive = emit(&state, &sink, run, |s| Some(SseSignal::Event(stamped(s.cursor.accept_named(message), &opened))));
                                 if !alive {
                                     return;
                                 }

@@ -113,6 +113,17 @@ impl SseCursor {
         self.last_event_id = id.to_owned();
     }
 
+    /// As [`accept`](Self::accept), and an event whose data names no
+    /// `type` takes its SSE `event:` name as one.
+    pub fn accept_named(&mut self, message: SseMessage) -> Object {
+        let name = message.event.clone();
+        let mut event = self.accept(message);
+        if !name.is_empty() && !event.contains_key("type") {
+            event.insert("type".into(), Value::from(name));
+        }
+        event
+    }
+
     /// Record a delivered message and return the event the app sees: the
     /// data object plus `event_id` (numeric when the id is an integer).
     pub fn accept(&mut self, message: SseMessage) -> Object {

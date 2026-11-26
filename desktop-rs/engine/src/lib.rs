@@ -47,6 +47,7 @@ mod roster_rows;
 mod teams;
 pub mod transit;
 mod updates;
+mod viewport;
 mod artifact_summary;
 mod render_spec;
 pub use render_spec::{FormState, FormView};
@@ -555,6 +556,8 @@ impl Engine {
             let outcomes = self.take_chat_view_outcomes();
             self.settle_chat_views(outcomes);
         }
+        // What the panes show, told to the Host once per pump (#905).
+        self.sync_viewport();
         self.pump_peers();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();
@@ -1068,6 +1071,9 @@ impl Engine {
             return;
         }
         self.snapshot_in_flight = true;
+        // Sent now, it covers every change marked before it (one marked
+        // while an earlier request failed in an outage included).
+        self.snapshot_dirty = false;
         self.snapshot_last = Some(Instant::now());
         self.snapshot_generation += 1;
         self.freshness.started();
@@ -1156,6 +1162,11 @@ impl Engine {
             }
         }
         // Caches behind the Host's head, or on a dead conversation, catch up.
+        // Following the panes, a new stream's `stream` event does this for
+        // the chats it streams in full, and hidden ones wait for their pane.
+        if self.viewport_streaming() {
+            return;
+        }
         let stale: Vec<(String, bool)> = self
             .conversations
             .iter()
@@ -1450,7 +1461,13 @@ impl Engine {
     fn request_tail(&mut self, session: &str, replace: bool) {
         let session = if session.is_empty() { self.selected.clone() } else { session.to_owned() };
         on_peer!(self.peer_mut(&session), |engine, local| engine.request_tail(local, replace));
-        if session.is_empty() || !self.begin_log_request(&session, if replace { "replace" } else { "tail" }) {
+        // A chat no pane shows reads its history once it is shown (#905).
+        let read = if replace { viewport::Read::Replace } else { viewport::Read::Tail };
+        if session.is_empty() || !self.history_now(&session, read) {
+            return;
+        }
+        let replace = replace || self.take_deferred(&session) == Some(viewport::Read::Replace);
+        if !self.begin_log_request(&session, if replace { "replace" } else { "tail" }) {
             return;
         }
         self.ensure_conversation(&session);
@@ -1465,7 +1482,16 @@ impl Engine {
     fn request_delta(&mut self, session: &str) {
         let session = if session.is_empty() { self.selected.clone() } else { session.to_owned() };
         on_peer!(self.peer_mut(&session), |engine, local| engine.request_delta(local));
-        if session.is_empty() || !self.begin_log_request(&session, "delta") {
+        if session.is_empty() || !self.history_now(&session, viewport::Read::Delta) {
+            return;
+        }
+        // A tail asked while the chat was hidden goes ahead instead.
+        match self.take_deferred(&session) {
+            Some(viewport::Read::Replace) => return self.request_tail(&session, true),
+            Some(viewport::Read::Tail) => return self.request_tail(&session, false),
+            _ => {}
+        }
+        if !self.begin_log_request(&session, "delta") {
             return;
         }
         self.ensure_conversation(&session);
@@ -1510,6 +1536,7 @@ impl Engine {
             self.catching_up.remove(session);
         }
         self.continue_pending_log_request(session);
+        self.viewport_log_settled(session);
         self.catch_up_log(session, answered);
     }
 
@@ -1808,6 +1835,7 @@ impl Engine {
                 c.set_loading(false);
                 c.set_error(&detail);
             });
+            self.viewport_log_settled(&session);
             // The Host answered (with a refusal): a catch-up round has
             // nothing more to read for this chat.
             let answered = self.outage.log_sent.remove(&session);
@@ -1845,11 +1873,13 @@ impl Engine {
                     // are for the grace (`outage.rs`); the next snapshot
                     // ends a host-updating line.
                     self.live_stream_dropped();
+                    self.viewport_dropped();
                     self.mutate_roster(Roster::stream_dropped);
                     self.outage_stream_dropped();
                 } else {
                     // A deliberate stop: the caller already set the state.
                     self.live_stream_dropped();
+                    self.viewport_dropped();
                     self.mutate_roster(Roster::mark_transport_unavailable);
                     let sessions: Vec<String> = self.conversations.keys().cloned().collect();
                     for session in sessions {
@@ -1928,6 +1958,8 @@ impl Engine {
                 self.refresh_pair_conversations_for(&session);
             }
             "live" => self.live_event(event),
+            "stream" => self.viewport_stream(event),
+            "live-changed" => self.viewport_changed(event),
             "lane-settings-updated" => self.lanes_event(),
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));

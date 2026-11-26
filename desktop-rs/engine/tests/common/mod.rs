@@ -19,12 +19,18 @@ pub struct Host {
 
 impl Host {
     pub fn start(name: &str) -> Self {
+        Self::start_with(name, &[])
+    }
+
+    /// A fake Host started with extra arguments (`--peer`: the second Host).
+    pub fn start_with(name: &str, extra: &[&str]) -> Self {
         let dir = std::env::temp_dir().join(format!("clarp-engine-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (port, log) = (dir.join("port"), dir.join("host.log"));
         let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fake_host.py");
         let child = Command::new("/usr/bin/python3")
             .args([script, "--port-file", port.to_str().unwrap(), "--log", log.to_str().unwrap()])
+            .args(extra)
             .spawn()
             .expect("fake host starts");
         let deadline = Instant::now() + Duration::from_secs(10);
