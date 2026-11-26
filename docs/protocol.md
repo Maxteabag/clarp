@@ -2378,8 +2378,9 @@ run reserves its numbers on disk before it gives any out, above every number an 
 have given out, whether that run stopped, failed to record its stop or crashed. A stream resumed
 with an earlier run's number is then always told it missed something (`agent-roster` with
 `resync`, `truncated` on `compact=1`) and reads the snapshot again. Where the disk refuses the
-reservation, the Host says so once in its journal and goes on numbering its events unreserved; after
-a crash of that run, the next run may give out some of those numbers again.
+reservation, or the file that holds it is there and cannot be read (it is then kept as it is), the
+Host says so once in its journal and numbers its events unreserved: the run after it, whether it
+follows a planned restart or a crash, may give out some of those numbers again.
 
 ### Whether an agent can answer now (feature `agent_availability`, Rust Host contract 206)
 
