@@ -48,6 +48,9 @@ export global AgentDialogs {
     // The queue strip's Steer now and take-over Send now (`queue_steer`).
     callback queue-steer(string);
     callback queue-take-over(string);
+    // The waiting line's action (#920): its chat, "steer" or "stop", and the
+    // message Steer now reads in.
+    callback waiting-act(string, string, string);
     callback queue-delete(string);
     callback cancel();
 }

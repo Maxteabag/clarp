@@ -99,6 +99,22 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Send while working (#920): the connected Host's setting, the same
+        // in every app; listed only while that Host offers it. The words are
+        // the apps' own; the footer is its description.
+        Setting::choice(
+            e("send-while-working", clarp_core::send_while_working::TITLE, "chats", clarp_core::send_while_working::FOOTER, &["steer", "steer now", "after the turn", "stop and send", "while working", "busy", "interrupt"]),
+            "CHATS",
+            |_| clarp_core::send_while_working::Mode::ALL.iter().map(|m| Choice::new(m.wire(), m.label()).about(m.about())).collect(),
+            |app| app.engine.borrow().send_while_working().wire().to_owned(),
+            |app, _, value| {
+                if let Some(mode) = clarp_core::send_while_working::Mode::from_wire(value) {
+                    app.engine.borrow_mut().set_send_while_working(mode);
+                }
+            },
+        )
+        .default(clarp_core::send_while_working::Mode::Steer.wire())
+        .when(|app| app.engine.borrow().send_while_working_offered()),
         // Conversation view for every chat (#702), this device's switch:
         // a chat's own choice in its menu still wins. Listed while a Host
         // this desktop reads offers the views.

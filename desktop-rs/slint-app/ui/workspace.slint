@@ -134,6 +134,11 @@ export struct PaneView {
     chip-kind: string,
     chip-target: string,
     chip-label: string,
+    // The user's own waiting messages (#920), the dim reason before Stop and
+    // send, and whether the line's action runs now.
+    chip-count: int,
+    chip-reason: string,
+    chip-acting: bool,
     // The composer frame's meter: the context the agent's conversation
     // holds ("21K / 1M · 2%"), and its account's limit when near or used
     // up; "" when unknown. `meter-warn` draws it in the warning colour.
@@ -779,9 +784,9 @@ export component Pane inherits Rectangle {
             }
         }
         // The messages waiting behind the turn: one line, "1 waiting · Steer now".
-        if root.pane.waiting.length > 0 && !root.pane.pair: QueueStrip {
+        if (root.pane.chip-count > 0 || root.pane.waiting-refused != "") && !root.pane.pair: QueueStrip {
             items: root.pane.waiting;
-            count: Math.max(root.pane.queued, root.pane.waiting.length);
+            count: root.pane.chip-count;
             busy: root.pane.busy;
             paused: root.pane.queue-paused;
             refused: root.pane.waiting-refused;
@@ -789,9 +794,9 @@ export component Pane inherits Rectangle {
             chip-kind: root.pane.chip-kind;
             chip-target: root.pane.chip-target;
             chip-label: root.pane.chip-label;
-            send-now(id) => { AgentDialogs.queue-send(id); }
-            steer-now(id) => { AgentDialogs.queue-steer(id); }
-            take-over(id) => { AgentDialogs.queue-take-over(id); }
+            reason: root.pane.chip-reason;
+            acting: root.pane.chip-acting;
+            act(kind, target) => { AgentDialogs.waiting-act(root.pane.session, kind, target); }
             manage => { AgentDialogs.queue-open(root.pane.session); }
         }
         // Pair rooms are the Host's read-only projection: no composer.

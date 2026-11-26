@@ -48,6 +48,21 @@ export global ComposerKeys {
     in property <string> send-now: "Ctrl+Shift+Enter";
 }
 
+// Send's menu during a turn (#920, on a Host with Send while working): the
+// two choices other than the Host's setting, for one message. Rust fills
+// the choices for the open chat's Host; the menu sets `once`, which the
+// send it makes carries and Rust clears.
+export struct SendOption {
+    value: string,
+    label: string,
+    about: string,
+}
+
+export global SendChoice {
+    in property <[SendOption]> options;
+    in-out property <string> once;
+}
+
 export component TipButton inherits Rectangle {
     in property <image> icon;
     in property <string> label;
@@ -60,6 +75,8 @@ export component TipButton inherits Rectangle {
     in property <string> caption;
     out property <length> captioned-width: root.caption == "" ? 32px : 6px + 14px + 4px + word.preferred-width + 7px;
     callback clicked();
+    // A right-click (Send's menu during a turn).
+    callback context();
     width: 32px;
     height: 32px;
     border-radius: 3px;
@@ -90,6 +107,9 @@ export component TipButton inherits Rectangle {
         enabled: root.enabled;
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) { root.context(); }
+        }
     }
     if touch.has-hover && root.tip != "": Rectangle {
         width: tip-text.preferred-width + 12px;
@@ -176,6 +196,10 @@ export component Composer inherits FocusScope {
             root.submit(event.modifiers.control);
             return accept;
         }
+        // Send's menu during a turn: the menu key or Shift+F10.
+        if (event.text == Key.Menu || (event.text == Key.F10 && event.modifiers.shift)) {
+            if (root.open-send-choices()) { return accept; }
+        }
         if (event.text == Key.End && event.modifiers.control) {
             root.jump-to-latest();
             return accept;
@@ -243,6 +267,66 @@ export component Composer inherits FocusScope {
     function submit(queue: bool) {
         if (root.sendable) {
             root.send(root.draft, queue);
+        }
+    }
+    // Opens Send's menu while the agent works and the Host offers the
+    // choices; false when there is nothing to offer.
+    function open-send-choices() -> bool {
+        if (!root.busy || !root.sendable || SendChoice.options.length == 0) { return false; }
+        root.choice = 0;
+        send-choices.show();
+        return true;
+    }
+    function send-as(value: string) {
+        send-choices.close();
+        SendChoice.once = value;
+        root.submit(value == "after_turn");
+        SendChoice.once = "";
+    }
+    property <int> choice;
+    send-choices := PopupWindow {
+        x: root.width - 300px;
+        y: -self.height - 4px;
+        width: 300px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Palette.window;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: Palette.border;
+            accessible-role: list;
+            accessible-label: "Send this message";
+            choice-keys := FocusScope {
+                init => { self.focus(); }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) { send-choices.close(); editor.focus(); return accept; }
+                    if (event.text == Key.DownArrow || event.text == Key.Tab) { root.choice = Math.min(root.choice + 1, SendChoice.options.length - 1); return accept; }
+                    if (event.text == Key.UpArrow || event.text == Key.Backtab) { root.choice = Math.max(root.choice - 1, 0); return accept; }
+                    if (event.text == Key.Return || event.text == " ") { root.send-as(SendChoice.options[root.choice].value); return accept; }
+                    reject
+                }
+                VerticalLayout {
+                    padding: 3px;
+                    for option[index] in SendChoice.options: Rectangle {
+                        height: 40px;
+                        border-radius: 2px;
+                        background: index == root.choice ? Palette.hover : option-touch.has-hover ? Palette.hover : transparent;
+                        accessible-role: button;
+                        accessible-id: "send-choice:" + option.value;
+                        accessible-label: option.label;
+                        accessible-description: option.about;
+                        accessible-action-default => { root.send-as(option.value); }
+                        VerticalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            alignment: center;
+                            Text { text: option.label; color: Palette.text; font-size: 12 * Look.unit; }
+                            Text { text: option.about; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
+                        }
+                        option-touch := TouchArea { mouse-cursor: pointer; clicked => { root.send-as(option.value); } }
+                    }
+                }
+            }
         }
     }
     // The [i] Insert frame is the box: the editor sits on the pane itself,
@@ -404,10 +488,11 @@ export component Composer inherits FocusScope {
                 height: Palette.body-size * 1.6;
                 icon: @image-url("icons/send.svg");
                 label: "Send";
-                tip: "Send · " + ComposerKeys.send;
+                tip: "Send · " + ComposerKeys.send + (root.busy && SendChoice.options.length > 0 ? " · right-click for other ways" : "");
                 tint: Palette.accent;
                 accessible-id: "composer-send";
                 clicked => { root.submit(false); }
+                context => { root.open-send-choices(); }
             }
         }
         }
@@ -420,6 +505,8 @@ component ChipAction inherits Rectangle {
     in property <image> icon;
     in property <string> text;
     in property <string> tip;
+    // The action runs: the icon turns, as a small spinner.
+    in property <bool> spinning;
     callback clicked();
     width: action-row.preferred-width;
     height: 20px;
@@ -429,6 +516,7 @@ component ChipAction inherits Rectangle {
     accessible-label: root.text;
     accessible-description: root.tip;
     accessible-action-default => { root.clicked(); }
+    opacity: root.spinning ? 0.7 : 1;
     action-row := HorizontalLayout {
         padding-left: 8px;
         padding-right: 10px;
@@ -439,6 +527,7 @@ component ChipAction inherits Rectangle {
             height: 12px;
             y: (parent.height - self.height) / 2;
             colorize: Palette.accent-text;
+            rotation-angle: root.spinning ? mod(animation-tick(), 1s) / 1s * 360deg : 0deg;
         }
         Text {
             text: root.text;
@@ -452,27 +541,32 @@ component ChipAction inherits Rectangle {
 }
 
 // The messages waiting behind the running turn, above the composer, as one
-// line: "1 waiting · Steer now". Its action reads them into the running
-// turn, or stops it for them where it cannot take them, or after a Stop
-// sends them (Ctrl+Shift+Enter does the same); Manage lists and edits them.
-// What could not be sent says so under it; the message waits on. Shown
-// while messages wait and Show queue is on, folded composer or not.
+// line (#920, the same in every app): a capsule with a clock, "N waiting"
+// (the user's own waiting messages), a dot and a filled pill. "Steer now"
+// reads them into the running turn, the newest first asked so the Host
+// reads the older ones in first; where the turn cannot take them the pill
+// is "Stop and send", the plain Stop, with a dim line before it saying why.
+// Ctrl+Shift+Enter does the same; Manage lists and edits them. While the
+// action runs the pill spins and takes no second press. Shown only while a
+// turn runs and the user's own messages wait, and Show queue is on; what
+// could not be done says so under it.
 export component QueueStrip inherits Rectangle {
     in property <[WaitingTurn]> items;
-    // The Host's count of waiting messages.
+    // The user's own waiting messages.
     in property <int> count;
     in property <bool> busy;
     in property <bool> paused;
     in property <string> refused;
     in property <string> pane-id;
-    // The line's action ("steer", "take-over", "send"; "" for none), the
-    // message it acts on, and its word.
+    // The line's action ("steer", "stop"; "" for none), the message Steer
+    // now reads in, and its word; why the turn cannot be steered (before
+    // Stop and send); whether the action runs now.
     in property <string> chip-kind;
     in property <string> chip-target;
     in property <string> chip-label;
-    callback send-now(string);
-    callback steer-now(string);
-    callback take-over(string);
+    in property <string> reason;
+    in property <bool> acting;
+    callback act(string, string);
     callback manage();
     background: Palette.window;
     accessible-role: list;
@@ -495,7 +589,8 @@ export component QueueStrip inherits Rectangle {
                 border-color: Palette.border;
                 accessible-role: groupbox;
                 accessible-id: "steer-chip:" + root.pane-id;
-                accessible-label: (root.count == 1 ? "1 waiting" : root.count + " waiting") + (root.chip-label != "" ? " · " + root.chip-label : "");
+                accessible-label: root.count == 1 ? "1 message waiting" : root.count + " messages waiting";
+                accessible-description: root.chip-label + (root.reason != "" ? " · " + root.reason : "");
                 chip-row := HorizontalLayout {
                     padding-left: 8px;
                     padding-right: 2px;
@@ -512,32 +607,37 @@ export component QueueStrip inherits Rectangle {
                         color: Palette.muted;
                         font-size: 11 * Look.unit;
                         vertical-alignment: center;
+                        accessible-role: none;
                     }
                     if root.chip-kind != "": Text {
                         text: "·";
                         color: Palette.faint;
                         font-size: 11 * Look.unit;
                         vertical-alignment: center;
+                        accessible-role: none;
+                    }
+                    // Why the turn cannot be steered: one dim line, cut short.
+                    if root.chip-kind == "stop" && root.reason != "": Text {
+                        text: root.reason;
+                        color: Palette.faint;
+                        font-size: 11 * Look.unit;
+                        overflow: elide;
+                        max-width: 260px;
+                        vertical-alignment: center;
+                        accessible-role: none;
                     }
                     if root.chip-kind != "": ChipAction {
                         y: 1px;
-                        icon: root.chip-kind == "steer" ? @image-url("icons/steer.svg") : root.chip-kind == "take-over" ? @image-url("icons/stop.svg") : @image-url("icons/send.svg");
+                        icon: root.acting ? @image-url("icons/refresh.svg") : root.chip-kind == "steer" ? @image-url("icons/steer.svg") : @image-url("icons/stop.svg");
+                        spinning: root.acting;
                         text: root.chip-label;
-                        tip: root.chip-kind == "steer" ? "Read into this turn" : root.chip-kind == "take-over" ? "Stop this turn and send" : "Send now";
+                        tip: root.chip-kind == "steer" ? "Read into this turn" : root.reason;
                         accessible-id: "steer-chip-action:" + root.pane-id;
                         clicked => {
-                            if (root.chip-kind == "steer") { root.steer-now(root.chip-target); }
-                            else if (root.chip-kind == "take-over") { root.take-over(root.chip-target); }
-                            else { root.send-now(root.chip-target); }
+                            if (!root.acting) { root.act(root.chip-kind, root.chip-target); }
                         }
                     }
                 }
-            }
-            if root.count > 0 && root.paused && !root.busy: Text {
-                text: "queue paused";
-                color: Palette.muted;
-                font-size: 11 * Look.unit;
-                vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
             if root.count > 0: Rectangle {

@@ -73,30 +73,69 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
         .collect()
 }
 
-/// The line's action for the waiting messages: its kind ("steer",
-/// "take-over", "send"; "" when nothing can be sent now), the message it
-/// acts on, and its word.
+/// The waiting line (#920, the same in every app): shown while a turn runs
+/// and some of the user's own messages wait. Its count, its action ("steer"
+/// or "stop"; "" when the line is not shown), the message Steer now reads in
+/// (the newest of the user's own `kind: waiting` messages the turn can
+/// take; the Host reads the older ones in first), its word, the dim reason
+/// before Stop and send, and whether the action runs now.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Chip {
     pub kind: &'static str,
     pub target: String,
     pub label: &'static str,
+    pub count: i32,
+    pub reason: String,
+    pub acting: bool,
 }
 
-/// Steer now reads the newest steerable message in (the Host reads the
-/// older ones in first); where none can be steered, Stop and send runs the
-/// first; after a Stop, Send now sends it.
-pub fn chip(waiting: &[WaitingTurn]) -> Chip {
-    use clarp_core::queue_line as words;
-    let open = || waiting.iter().filter(|w| !w.reading);
-    if let Some(item) = waiting.iter().rev().find(|w| !w.reading && w.steer) {
-        return Chip { kind: "steer", target: item.id.to_string(), label: words::STEER_NOW };
+/// The user's own waiting message (origin user or oracle, or none said),
+/// not yet being read into the turn.
+fn own_waiting(item: &Value) -> bool {
+    let owners = item.get("origin").and_then(Value::as_str).is_none_or(|o| o == "user" || o == "oracle");
+    owners && item.get("status").and_then(Value::as_str) != Some("started") && !item_id(item).is_empty()
+}
+
+pub fn chip(engine: &Engine, session: &str) -> Chip {
+    use clarp_core::{queue_line as words, send_while_working as sww};
+    if !engine.roster().find(session).is_some_and(|a| a.busy) {
+        return Chip::default();
     }
-    match open().next() {
-        Some(item) if item.take_over => Chip { kind: "take-over", target: item.id.to_string(), label: words::STOP_AND_SEND },
-        Some(item) => Chip { kind: "send", target: item.id.to_string(), label: words::SEND_NOW },
-        None => Chip::default(),
+    let items = engine.turn_queue(session);
+    let own: Vec<&Value> = items.iter().filter(|item| own_waiting(item)).collect();
+    if own.is_empty() {
+        return Chip::default();
     }
+    let acting = engine.turn_queue_acting(session) || engine.stopping_for_waiting(session);
+    let count = own.len() as i32;
+    let steerable = |item: &&&Value| {
+        item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting") && item.get("steerable").and_then(Value::as_bool) == Some(true)
+    };
+    if engine.turn_queue_steer(session)
+        && let Some(item) = own.iter().rev().find(steerable)
+    {
+        return Chip { kind: "steer", target: item_id(item), label: words::STEER_NOW, count, reason: String::new(), acting };
+    }
+    let reason = sww::reason_line(&engine.send_while_working_reason(session));
+    Chip { kind: "stop", target: String::new(), label: words::STOP_AND_SEND, count, reason, acting }
+}
+
+/// Sends a one-off choice's words for `session`'s Host into Send's menu:
+/// the two choices other than its setting, while it offers the setting.
+pub fn fill_send_choices(engine: &Engine, session: &str, window: &crate::AppWindow) {
+    use clarp_core::send_while_working::Mode;
+    use slint::ComponentHandle;
+    let options: Vec<crate::SendOption> = if !session.is_empty() && engine.send_while_working_offered_for(session) {
+        engine
+            .send_while_working_for(session)
+            .others()
+            .iter()
+            .map(|m: &Mode| crate::SendOption { value: m.wire().into(), label: m.label().into(), about: m.about().into() })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    window.global::<crate::SendChoice>().set_options(slint::ModelRc::new(slint::VecModel::from(options)));
 }
 
 /// Once a second with the turn clock: the open chat's queue is read again
@@ -150,22 +189,30 @@ pub fn follow(app: &App) {
 }
 
 /// Does the line's action for the open chat's waiting messages (by key:
-/// Ctrl+Shift+Enter). False when nothing waits that it could send.
+/// Ctrl+Shift+Enter): Steer now, or the plain Stop. False when the line
+/// offers nothing, or its action already runs.
 pub fn send_first(app: &App) -> bool {
     let (session, chip) = {
         let engine = app.engine.borrow();
         let session = engine.selected_session().to_owned();
-        let chip = chip(&waiting(&engine, &session));
+        let chip = chip(&engine, &session);
         (session, chip)
     };
-    if session.is_empty() || chip.kind.is_empty() {
+    act(app, &session, &chip.kind.to_owned(), &chip.target)
+}
+
+/// The line's action for `session`: Steer now (`target`) or Stop and send.
+pub fn act(app: &App, session: &str, kind: &str, target: &str) -> bool {
+    if session.is_empty() || kind.is_empty() {
         return false;
     }
     let mut engine = app.engine.borrow_mut();
-    match chip.kind {
-        "steer" => engine.steer_queued_turn(&chip.target),
-        "take-over" => engine.take_over_queued_turn(&chip.target),
-        _ => engine.send_queued_turn(&chip.target),
+    if chip(&engine, session).acting {
+        return true;
+    }
+    match kind {
+        "steer" => engine.steer_from_line(target),
+        _ => engine.stop_for_waiting(session),
     }
     true
 }

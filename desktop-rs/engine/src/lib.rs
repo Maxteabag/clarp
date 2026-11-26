@@ -36,6 +36,7 @@ mod host_status;
 pub mod lifecycle;
 mod live;
 mod queue;
+mod send_while_working;
 mod stop;
 pub mod search;
 mod panels;
@@ -322,6 +323,7 @@ pub struct Engine {
     // lifecycle
     launch: lifecycle::Launch,
     queue: queue::TurnQueue,
+    send_while_working: send_while_working::SendWhileWorking,
 
     // panels
     updates: updates::Updates,
@@ -471,6 +473,7 @@ impl Engine {
             // lifecycle
             launch,
             queue: queue::TurnQueue::default(),
+            send_while_working: send_while_working::SendWhileWorking::default(),
             // panels
             updates: Default::default(),
             artifact_summary: Default::default(),
@@ -1104,6 +1107,7 @@ impl Engine {
         }
         self.mutate_roster(|r| r.apply_snapshot(object));
         self.changes.push(Change::Roster);
+        self.send_while_working_snapshot(object);
         self.archived.apply_snapshot(object);
         if !self.archived.take_ops().is_empty() {
             self.changes.push(Change::Archive);
@@ -1532,6 +1536,7 @@ impl Engine {
         if !trace.is_empty() {
             body["trace_id"] = json!(trace);
         }
+        self.send_while_working_once(&mut body);
         if !transcription.is_empty() {
             body["transcription_id"] = json!(transcription);
         }
@@ -1596,6 +1601,7 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        self.send_while_working_stop_answer(tag);
         if self.form_events_json(tag, object) {
             return;
         }
@@ -1634,7 +1640,7 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
-        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) || self.roster_rows_json(tag, object) {
+        if self.live_json(tag, object) || self.lanes_json(tag, object) || self.coordination_json(tag, object) || self.transit_json(tag, object) || self.chat_view_json(tag) || self.roster_rows_json(tag, object) || self.send_while_working_json(tag, object) {
             return;
         }
         if tag == "server-info" {
@@ -1663,6 +1669,7 @@ impl Engine {
             self.stop_server_info(object);
             self.search_server_info(object);
             self.queue_server_info(object);
+            self.send_while_working_server_info(object);
             self.artifact_summary_server_info(object);
             self.live_rewatch();
             self.sse.start();
@@ -1684,6 +1691,7 @@ impl Engine {
             // The 2xx is what makes this send delivered (CLIENT-SEND-500), in
             // the chat that sent it, even after its timer marked it failed.
             if let Some(session) = self.send_answered(client_id) {
+                self.send_while_working_send_answer(&session, object);
                 self.with_conversation(&session, |c| c.confirm_delivery(client_id));
                 self.request_delta(&session);
             }
@@ -1695,7 +1703,8 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
+        self.send_while_working_stop_answer(tag);
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
@@ -1824,6 +1833,7 @@ impl Engine {
         let kind = json::string(event, "type");
         let session = json::string(event, "session");
         self.lifecycle_event(&kind, &session);
+        self.send_while_working_event(&kind, &session, event);
         match kind.as_str() {
             "audio" => {
                 // A clip for the chat means its voice works again: a later

@@ -314,6 +314,10 @@ pub fn wire(window: &AppWindow) {
         app.engine.borrow_mut().take_over_queued_turn(&id);
         pump_now(app);
     }));
+    globals.on_waiting_act(|session, kind, target| with_window(|app, _| {
+        crate::queue_strip::act(app, &session, &kind, &target);
+        pump_now(app);
+    }));
     globals.on_queue_delete(|id| with_window(|app, _| {
         app.engine.borrow_mut().delete_queued_turn(&id);
         pump_now(app);

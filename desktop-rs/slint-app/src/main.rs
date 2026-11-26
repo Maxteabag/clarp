@@ -414,6 +414,9 @@ impl App {
             look::apply(self, &window);
         }
         let selected = engine.selected_session().to_owned();
+        if changes.iter().any(|c| matches!(c, Change::Preferences | Change::Selection | Change::ServerInfo)) {
+            queue_strip::fill_send_choices(&engine, &selected, &window);
+        }
         if changes.contains(&Change::Selection) && !selected.is_empty() {
             let mut recent = self.recent.borrow_mut();
             recent.retain(|s| *s != selected);
@@ -834,6 +837,11 @@ fn main() {
         // then opens with it.
         let route = mention_view::route(&mention_view::candidates(&app.engine.borrow()), &session, &text);
         let target = route.as_ref().map_or(session.as_str(), |c| c.session.as_str()).to_owned();
+        // Send's menu during a turn: this message's own choice (#920).
+        let once = window().map(|w| w.global::<SendChoice>().get_once().to_string()).unwrap_or_default();
+        if let Some(mode) = clarp_core::send_while_working::Mode::from_wire(&once) {
+            app.engine.borrow_mut().send_next_as(&target, mode);
+        }
         let sent = app.engine.borrow_mut().send_composer_to(&session, &target, &text, queue);
         let mut row = SharedString::new();
         if sent {

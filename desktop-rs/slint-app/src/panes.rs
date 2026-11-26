@@ -739,10 +739,13 @@ impl App {
         // Hidden by the reader's setting (Show the queue off): no line at all.
         let listed = (view.queued > 0 || engine.queue_count(session) > 0) && crate::queue_strip::shown(engine);
         let waiting = if listed { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
-        let chip = crate::queue_strip::chip(&waiting);
+        let chip = if listed { crate::queue_strip::chip(engine, session) } else { Default::default() };
         view.chip_kind = chip.kind.into();
         view.chip_target = chip.target.into();
         view.chip_label = chip.label.into();
+        view.chip_count = chip.count;
+        view.chip_reason = chip.reason.into();
+        view.chip_acting = chip.acting;
         view.waiting = ModelRc::new(VecModel::from(waiting));
         view.waiting_refused = clarp_core::queue_line::refusal_line(&engine.turn_queue_refusal(session)).into();
         let (meter, warn) = crate::queue_strip::meter(engine, session);
