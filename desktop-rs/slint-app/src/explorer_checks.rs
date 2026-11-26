@@ -16,12 +16,17 @@ use slint::platform::Key;
 use super::{Rect, Stage, check, explorer_row, labelled, rect, report, run_stages, shot, within};
 use crate::headless;
 
-/// The explorer's list, as drawn.
+/// The explorer's list, as drawn. The triage chips above it are a list
+/// too (`explorer-scopes`), a one-line strip the rows never scroll in.
 fn explorer_list() -> Option<Rect> {
     use i_slint_backend_testing::{AccessibleRole, ElementQuery};
     let window = crate::window()?;
     ElementQuery::from_root(&window)
-        .match_predicate(|e| e.accessible_role() == Some(AccessibleRole::List) && e.size().width > 0.0)
+        .match_predicate(|e| {
+            e.accessible_role() == Some(AccessibleRole::List)
+                && e.size().width > 0.0
+                && e.accessible_id().is_none_or(|id| id != "explorer-scopes")
+        })
         .find_all()
         .into_iter()
         .map(|e| rect(&e))
