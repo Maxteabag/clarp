@@ -1661,6 +1661,10 @@ impl Engine {
             self.force_snapshot();
             self.live_server_info(object);
             self.mutate_roster(|r| r.set_stall_feature(clarp_core::stall::offered_by(object)));
+            let availability = clarp_core::availability::offered_by(object);
+            self.mutate_roster(|r| r.set_availability_feature(availability));
+            self.archived.set_availability_feature(availability);
+            self.archived.take_ops();
             self.coordination_server_info(object);
             self.lanes_server_info(object);
             self.transit_server_info(object);

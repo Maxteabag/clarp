@@ -167,6 +167,9 @@ pub struct Roster {
     /// The Host said it restarts (`host-updating`); cleared by the next
     /// snapshot, which only a Host that is up answers.
     host_updating: Option<crate::availability::HostUpdating>,
+    /// The Host lists `agent_availability`: rows' `availability` and its
+    /// `host-updating` are read. Off, an older Host shows nothing new.
+    availability_feature: bool,
     /// The Host's clock minus this machine's (ms), stamped on every row.
     clock_offset_ms: i64,
     ops: Vec<Op>,
@@ -326,6 +329,9 @@ impl Roster {
         }
         agent.host_clock_offset_ms = self.clock_offset_ms;
         agent.host_updating = self.host_updating.clone();
+        if !self.availability_feature {
+            agent.availability = None;
+        }
         self.transport_available = true;
         if let Some(row) = self.index_of_session(&agent.session) {
             agent.unread = self.agents[row].unread;
@@ -350,6 +356,9 @@ impl Roster {
             self.turn_clock |= object.contains_key("turn_started_at");
             let mut agent = Agent::from_json(object);
             agent.host_clock_offset_ms = self.clock_offset_ms;
+            if !self.availability_feature {
+                agent.availability = None;
+            }
             if !self.stall_feature {
                 agent.stalled_since = None;
                 agent.stalled_action = None;
@@ -459,6 +468,9 @@ impl Roster {
         let mut agent = self.agents[row].clone();
         agent.patch(fields);
         agent.host_clock_offset_ms = self.clock_offset_ms;
+        if !self.availability_feature {
+            agent.availability = None;
+        }
         if !self.stall_feature {
             agent.stalled_since = None;
             agent.stalled_action = None;
@@ -473,6 +485,9 @@ impl Roster {
         let Some(row) = self.index_of_session(&agent.session).filter(|_| !agent.session.is_empty()) else { return RowChange::NotHeld };
         agent.host_clock_offset_ms = self.clock_offset_ms;
         agent.host_updating = self.host_updating.clone();
+        if !self.availability_feature {
+            agent.availability = None;
+        }
         self.turn_clock |= object.contains_key("turn_started_at");
         if !self.stall_feature {
             agent.stalled_since = None;
@@ -497,6 +512,9 @@ impl Roster {
     /// The Host's `host-updating` event: every row shows "Host updating"
     /// until the next snapshot.
     pub fn set_host_updating(&mut self, updating: crate::availability::HostUpdating) {
+        if !self.availability_feature {
+            return;
+        }
         let updating = Some(updating);
         if self.host_updating == updating {
             return;
@@ -568,6 +586,25 @@ impl Roster {
 
     /// `/server-info` answered: whether the Host offers `stalled_turn`. A
     /// Host without it shows no stall (its next snapshot fills one in).
+    /// `/server-info` answered: whether the Host offers
+    /// `agent_availability`. Without it no row says why its agent cannot
+    /// answer, and a Host restart is not announced.
+    pub fn set_availability_feature(&mut self, on: bool) {
+        self.availability_feature = on;
+        if on {
+            return;
+        }
+        self.host_updating = None;
+        for row in 0..self.agents.len() {
+            let agent = &mut self.agents[row];
+            if agent.availability.is_some() || agent.host_updating.is_some() {
+                agent.availability = None;
+                agent.host_updating = None;
+                self.notify_row(row, &ALL_ROLES);
+            }
+        }
+    }
+
     pub fn set_stall_feature(&mut self, on: bool) {
         self.stall_feature = on;
         if on {

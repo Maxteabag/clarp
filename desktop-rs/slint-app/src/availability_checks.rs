@@ -3,7 +3,9 @@
 //! of kind `availability`), the chat-list row's preview and the open chat's
 //! header line say why: the Host's `text`, with the time part counted here
 //! ("Restarting · back in ~20 s", "Busy · 25 messages ahead of you"). A `host-updating` event puts "Host updating" on every
-//! agent until the snapshot is read again; `ok` takes the line away.
+//! agent until the snapshot is read again; `ok` takes the line away. A Host
+//! without the `agent_availability` feature shows nothing new, whatever its
+//! rows carry.
 
 use std::time::Duration;
 
@@ -11,6 +13,25 @@ use serde_json::json;
 use slint::Model;
 
 use super::{Stage, check, control, run_stages, shot, view};
+
+/// Reconnects with the `agent_availability` feature on or off.
+fn host_feature(on: bool) -> Stage {
+    let mut asked = false;
+    (if on { "feature on" } else { "feature off" }, Box::new(move |app, _, elapsed| {
+        if !std::mem::replace(&mut asked, true) {
+            let set = control("/__control/availability-feature", &json!({"on": on}));
+            check(set.is_ok(), &format!("the Host's agent_availability feature is {}: {set:?}", if on { "on" } else { "off" }));
+            app.engine.borrow_mut().reconnect();
+            return false;
+        }
+        elapsed > Duration::from_millis(1500) && !app.engine.borrow().connecting()
+    }))
+}
+
+fn restarting() -> serde_json::Value {
+    json!({"session": "rachel", "set": {"availability": {"state": "restarting", "text": "Restarting",
+        "since_ms": now(), "back_at_ms": now() + 19_000, "queue_ahead": 0, "last_alive_ms": null}}})
+}
 
 fn now() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -39,11 +60,26 @@ fn shows(name: &'static str, expected: &'static str, out: String, shot_name: &'s
 pub fn availability_check(out: String) {
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, _| app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty()))),
-        shows("older host", "", out.clone(), "availability-01-none"),
-        // ---- the snapshot's row
+        // ---- an older Host: its rows' availability is not read
+        host_feature(false),
+        ("older host restarting", Box::new(|_, _, _| {
+            let set = control("/__control/agent", &restarting());
+            check(set.is_ok(), &format!("an older Host's row says Rachel restarts: {set:?}"));
+            true
+        })),
+        ("older host shows nothing", Box::new(move |app, window, elapsed| {
+            let read = app.engine.borrow().roster().find("rachel").is_some();
+            if !read || elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(row_line(window, "rachel").is_empty() && view().availability.is_empty(),
+                &format!("without the feature nothing new shows: {:?} / {:?}", row_line(window, "rachel"), view().availability));
+            true
+        })),
+        // ---- a current Host: the snapshot's row
+        host_feature(true),
         ("restarting", Box::new(|_, _, _| {
-            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"availability": {"state": "restarting",
-                "text": "Restarting", "since_ms": now(), "back_at_ms": now() + 19_000, "queue_ahead": 0, "last_alive_ms": null}}}));
+            let set = control("/__control/agent", &restarting());
             check(set.is_ok(), &format!("Rachel restarts: {set:?}"));
             true
         })),

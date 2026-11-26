@@ -39,8 +39,10 @@ fn row(session: &str, extra: Value) -> Value {
     row
 }
 
+/// A roster of a Host that offers `agent_availability`.
 fn roster(rows: Value) -> Roster {
     let mut roster = Roster::new();
+    roster.set_availability_feature(true);
     roster.apply_snapshot(&obj(json!({"agents": rows})));
     roster.take_ops();
     roster
@@ -70,6 +72,27 @@ fn a_row_reads_its_availability_and_an_older_row_none() {
     assert_eq!(r.find("rachel").unwrap().availability.as_ref().map(|a| a.state.as_str()), Some("restarting"));
     assert_eq!(r.find("old").unwrap().availability, None);
     assert_eq!(r.availability_line(r.find("old").unwrap(), NOW, &Utc), "", "nothing new from an older Host");
+}
+
+#[test]
+fn a_host_without_the_feature_shows_nothing_new() {
+    let rows = json!([row("rachel", json!({"availability": busy(25)}))]);
+    let mut r = Roster::new();
+    r.apply_snapshot(&obj(json!({"agents": rows.clone()})));
+    assert_eq!(r.find("rachel").unwrap().availability, None, "a row's availability is not read");
+    r.patch_row("rachel", &obj(json!({"availability": busy(3)})));
+    assert_eq!(r.find("rachel").unwrap().availability, None, "nor an event's");
+    r.set_host_updating(updating("Host updating", Some(NOW + 40_000)));
+    assert_eq!(r.availability_line(r.find("rachel").unwrap(), NOW, &Utc), "", "nor a restart");
+
+    // The feature taken away clears what was shown.
+    let mut r = roster(rows);
+    r.set_host_updating(updating("Host updating", None));
+    r.set_availability_feature(false);
+    let agent = r.find("rachel").unwrap();
+    assert_eq!((agent.availability.is_none(), agent.host_updating.is_none()), (true, true));
+    assert!(clarp_core::availability::offered_by(&obj(json!({"capabilities": {"features": ["agent_availability"]}}))));
+    assert!(!clarp_core::availability::offered_by(&obj(json!({"capabilities": {"features": []}}))));
 }
 
 #[test]

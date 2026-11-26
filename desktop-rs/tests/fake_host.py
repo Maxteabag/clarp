@@ -203,6 +203,8 @@ ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit", 
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
+# Rows say whether their agent can answer now (agent_availability, #918).
+availability_feature = True
 # Conversation and Session views (feature chat_view, #702) and conversation
 # forks (conversation_fork): off until /__control/chat-view turns them on.
 # `refuse`: POST /agent-chat-view answers 403 agents_may_not.
@@ -1701,6 +1703,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("agent_backend_transit")
             if audience_returns:
                 features.append("turn_audience_returns")
+            if availability_feature:
+                features.append("agent_availability")
             if stall_feature:
                 features.append("stalled_turn")
             if message_search["on"]:
@@ -2355,6 +2359,12 @@ class Handler(BaseHTTPRequestHandler):
                 turns["pair:a1:a2"].append({"id": f"p{pair_revision}", "role": "assistant", "text": body.get("text", "more"),
                                             "revision": pair_revision, "timestamp": "2026-09-29T09:31:00Z"})
             broadcast({"type": "transcript-updated", "session": "rachel"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/availability-feature":
+            # Test control: the agent_availability feature on or off (read
+            # from /server-info at the next connection).
+            global availability_feature
+            availability_feature = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/stall-feature":
             # Test control: the stalled_turn feature on or off (the client

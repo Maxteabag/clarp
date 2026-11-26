@@ -21,6 +21,14 @@ use crate::json::Object;
 pub const FEATURE: &str = "agent_availability";
 /// The `agent-roster` kind whose `fields` carry `availability`.
 pub const ROSTER_KIND: &str = "availability";
+/// Whether a `/server-info` answer offers the feature.
+pub fn offered_by(info: &Object) -> bool {
+    info.get("capabilities")
+        .and_then(|c| c.get("features"))
+        .and_then(Value::as_array)
+        .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)))
+}
+
 /// The Host's event before a planned restart.
 pub const HOST_UPDATING: &str = "host-updating";
 
