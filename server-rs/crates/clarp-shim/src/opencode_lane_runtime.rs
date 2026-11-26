@@ -18,6 +18,8 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
@@ -160,6 +162,98 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     result
 }
 
+/// How long a server that ended before it said where it listens is given before it is started
+/// once more.
+const START_AGAIN_AFTER: Duration = Duration::from_millis(500);
+/// How long a server whose output closed before it said where it listens is given to have ended:
+/// one that ended is started once more, one still there after saying nothing for the whole wait
+/// is not.
+const ENDED_LOOK: Duration = Duration::from_millis(250);
+/// The most of what a server writes to its error output that is kept, from its end.
+const SAID_KEPT: usize = 4096;
+
+/// A server that ended, or did not say, before it said where it listens; with the last line it
+/// wrote to its error output, if any, and whether it had ended by itself.
+#[derive(Debug)]
+struct Unheard {
+    said: String,
+    ended: bool,
+}
+
+impl std::fmt::Display for Unheard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.said.is_empty() {
+            write!(f, "OpenCode did not say where it listens")
+        } else {
+            write!(f, "OpenCode did not say where it listens: {}", self.said)
+        }
+    }
+}
+
+impl std::error::Error for Unheard {}
+
+/// A server's error output, read to its end on a thread of its own so the server never blocks on
+/// it, the last of it kept.
+struct Said(Receiver<Vec<u8>>);
+
+impl Said {
+    fn read(mut from: impl Read + Send + 'static) -> Self {
+        let (send, kept) = mpsc::sync_channel(1);
+        let _ = std::thread::Builder::new()
+            .name("opencode-lane-said".into())
+            .spawn(move || {
+                let mut tail = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while let Ok(n) = from.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    tail.extend_from_slice(&chunk[..n]);
+                    if tail.len() > SAID_KEPT {
+                        tail.drain(..tail.len() - SAID_KEPT);
+                    }
+                }
+                let _ = send.send(tail);
+            });
+        Self(kept)
+    }
+
+    /// The last line it wrote with words in it, without terminal colours, once it has ended
+    /// (waited for a second at most). Empty where there was none.
+    fn last(self) -> String {
+        let tail = self
+            .0
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or_default();
+        last_line(&String::from_utf8_lossy(&tail))
+    }
+}
+
+/// The last line of `text` with words in it, its terminal escapes left out and cut to 300
+/// characters.
+fn last_line(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // An escape sequence: up to and with its final letter.
+            for c in chars.by_ref() {
+                if c.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
+        .lines()
+        .map(str::trim)
+        .rfind(|line| line.chars().any(char::is_alphanumeric))
+        .map(|line| line.chars().take(300).collect())
+        .unwrap_or_default()
+}
+
 /// The kept server: its process group, its client, and what it said it is.
 struct Serve {
     pid: u32,
@@ -174,7 +268,30 @@ impl Serve {
     /// Starts the server in a group of its own, through the shim's `tool-child`, so a lane that
     /// is killed takes its server with it. Warms the agent's directory, opens the event stream,
     /// and refuses a server whose session API Clarp does not read.
+    ///
+    /// A server that ends before it says where it listens is started once more, a moment later:
+    /// two servers opening OpenCode's database at the same moment (the lane's beside its agent's
+    /// first turn, which starts a server of its own) can find it locked, and one of them ends
+    /// at once (issue 908). What it said on its way out is in the error. One that said nothing
+    /// for the whole wait, and was still there, is not started again.
     fn start(program: &str, directory: String, send: SyncSender<Input>) -> io::Result<Self> {
+        let ended = |error: &io::Error| {
+            error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<Unheard>())
+                .is_some_and(|unheard| unheard.ended)
+        };
+        match Self::start_once(program, directory.clone(), send.clone()) {
+            Err(error) if ended(&error) => {
+                eprintln!("clarp-shim: OpenCode lane: {error}; started once more");
+                std::thread::sleep(START_AGAIN_AFTER);
+                Self::start_once(program, directory, send)
+            }
+            started => started,
+        }
+    }
+
+    fn start_once(program: &str, directory: String, send: SyncSender<Input>) -> io::Result<Self> {
         let mut random = [0u8; 24];
         File::open("/dev/urandom")?.read_exact(&mut random)?;
         let password = STANDARD.encode(random);
@@ -184,19 +301,27 @@ impl Serve {
             .env("OPENCODE_SERVER_PASSWORD", &password)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .process_group(0)
             .spawn()?;
         let stdout = child.stdout.take();
+        let said = child.stderr.take().map(Said::read);
         let pid = child.id();
         let (reaped, gone) = mpsc::channel();
         let told = send.clone();
+        // The lane hears of a server's end only once that server said where it listens: one that
+        // ended before is this start's to answer for, and its end must not reach the lane that a
+        // server started once more serves (issue 908).
+        let heard = Arc::new(AtomicBool::new(false));
+        let listened = heard.clone();
         std::thread::Builder::new()
             .name("opencode-lane-serve".into())
             .spawn(move || {
                 let _ = child.wait();
                 let _ = reaped.send(());
-                let _ = told.send(Input::ServeGone);
+                if listened.load(Ordering::Acquire) {
+                    let _ = told.send(Input::ServeGone);
+                }
             })?;
         let mut serve = Self {
             pid,
@@ -206,9 +331,12 @@ impl Serve {
             ended: false,
         };
         let Some(port) = stdout.and_then(port) else {
+            let ended = serve.gone.recv_timeout(ENDED_LOOK).is_ok();
             serve.end();
-            return Err(io::Error::other("OpenCode did not say where it listens"));
+            let said = said.map(Said::last).unwrap_or_default();
+            return Err(io::Error::other(Unheard { said, ended }));
         };
+        heard.store(true, Ordering::Release);
         serve.client = Client::new(port, &password, directory);
         let ready = (|| {
             let health = serve.client.get("/global/health", 30)?;
@@ -1110,8 +1238,27 @@ impl Lane {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{MessageIds, StoreOrder, any_taken_in, proven, taken_in};
+    use super::{MessageIds, StoreOrder, Unheard, any_taken_in, last_line, proven, taken_in};
     use serde_json::json;
+
+    #[test]
+    fn a_server_that_ended_unheard_says_the_last_line_it_wrote() {
+        // What OpenCode 1.18 wrote when another server held its database (issue 908).
+        let said = "\u{1b}[91m\u{1b}[1mError: \u{1b}[0mUnexpected error\n\ndatabase is locked\n";
+        assert_eq!(last_line(said), "database is locked");
+        assert_eq!(last_line(""), "");
+        assert_eq!(last_line("\n  \n"), "");
+        let unheard = |said: String| Unheard { said, ended: true };
+        assert_eq!(
+            unheard(last_line(said)).to_string(),
+            "OpenCode did not say where it listens: database is locked"
+        );
+        assert_eq!(
+            unheard(String::new()).to_string(),
+            "OpenCode did not say where it listens"
+        );
+        assert_eq!(last_line(&"x".repeat(400)).len(), 300);
+    }
 
     #[test]
     fn an_answer_takes_in_every_message_up_to_its_parent() {

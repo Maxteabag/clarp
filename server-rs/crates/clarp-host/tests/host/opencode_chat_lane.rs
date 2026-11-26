@@ -39,8 +39,9 @@ use super::*;
 /// message it answers. While the file `slow-delete` exists a delete takes two seconds. A word
 /// `refused-<x>` is refused as a provider refuses an account out of free usage: a retry OpenCode
 /// announces, until the session is aborted. While the file `locked-turn-once` exists, the first
-/// server a turn of its own starts ends before it listens, its database locked. What it was asked
-/// is noted in files beside it.
+/// server a turn of its own starts ends before it listens, its database locked, and while
+/// `locked-once` exists the first server a lane starts does. What it was asked is noted in files
+/// beside it.
 const SERVE: &str = r#"#!/usr/bin/env python3
 import base64, json, os, queue, random, re, string, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,15 +56,20 @@ if "--version" in sys.argv:
 assert sys.argv[1:] == ["serve", "--hostname", "127.0.0.1", "--port", "0"], sys.argv
 # While the file locked-turn-once exists, the first server a turn of its own starts (its driver is
 # `opencode-turn`) ends at once, as OpenCode does when another server holds its database, and the
-# file goes.
+# file goes. The file locked-once does the same for the first server a lane starts
+# (`opencode-lane`).
 turn_locked = root / "locked-turn-once"
-if turn_locked.exists():
+lane_locked = root / "locked-once"
+if turn_locked.exists() or lane_locked.exists():
     try:
         parent = Path(f"/proc/{os.getppid()}/cmdline").read_bytes().split(b"\0")
     except OSError:
         parent = []
-    if b"opencode-turn" in parent:
-        turn_locked.unlink()
+    locked = (turn_locked if turn_locked.exists() and b"opencode-turn" in parent
+              else lane_locked if lane_locked.exists() and b"opencode-lane" in parent
+              else None)
+    if locked is not None:
+        locked.unlink()
         note("locked", str(os.getpid()))
         sys.stderr.write("\x1b[91mError: \x1b[0mUnexpected error\n\ndatabase is locked\n")
         sys.exit(1)
@@ -820,6 +826,32 @@ fn a_server_that_dies_under_a_lane_turn_fails_that_turn_once_and_the_next_runs()
         1
     );
     lane_ready(&socket);
+}
+
+/// Issue 908. Two OpenCode servers that open its database at the same moment (the lane's, started
+/// beside the agent's first turn, and that turn's own) can find it locked, and one ends before it
+/// says where it listens. The lane's is started once more, and the turns after run on the lane.
+#[test]
+fn a_lane_whose_server_ends_before_it_listens_is_started_once_more() {
+    let world = world("opencode-start-again", "");
+    let _lanes = Lanes(world.place.root.clone());
+    std::fs::create_dir_all(world.place.root.join("work")).unwrap();
+    std::fs::write(world.place.root.join("locked-once"), "").unwrap();
+    let host = world.host();
+    let socket = world.agent(&host, "again", "opencode");
+    asked(&host, "again", "ask-one");
+    lane_ready(&socket);
+    assert!(
+        !world.place.root.join("locked-once").exists(),
+        "the lane's first server ended before it listened"
+    );
+    let lane_pid = lane_state(&socket).unwrap()["pid"].to_string();
+    asked(&host, "again", "ask-two");
+    assert_eq!(
+        world.servers().last().unwrap(),
+        &lane_pid,
+        "the turn after ran on the lane"
+    );
 }
 
 #[test]
