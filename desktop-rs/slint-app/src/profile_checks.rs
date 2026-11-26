@@ -257,7 +257,12 @@ pub(super) fn profile_check(out: String) {
                 &format!("the model box shows the model the agent runs, not the harness default: {models:?} {}", info.model_index),
             );
             check(texts(|t| t == "THIS CHAT").len() == 1, &format!("one THIS CHAT section: {:?}", texts(|t| t == "THIS CHAT")));
-            check(texts(|t| t == "Session").is_empty() && texts(|t| t == "claude  ·  rachel").len() == 1, "the session shows once, in the subtitle");
+            // Rachel's session is "rachel": it only repeats her name, and the
+            // backend is under BACKEND, so the header says neither (VQ-18).
+            check(
+                texts(|t| t == "Session").is_empty() && texts(|t| t == "rachel" || t.contains("·  rachel")).is_empty(),
+                &format!("no session row, and no subtitle repeating the name: {:?}", texts(|t| t.contains("rachel"))),
+            );
             shot(&out4, "profile-04-no-prompt-history");
             let broken = json!({"path": "/task-plan", "status": 500});
             check(control("/__control/fail", &broken).is_ok(), "the Host's plan fails next");
