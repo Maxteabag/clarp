@@ -367,6 +367,26 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     };
     // Rows that carry a message: they show, at its place.
     let giving: HashSet<&str> = items.iter().filter(|i| text(i, "kind") == "message").filter_map(|i| owner_of(i)).collect();
+    // The entry of the message chosen to stand for its row, as its item
+    // says, except that a row the Host has made its turn's answer (`final`
+    // and the turn's anchor, `session_rows`) is the answer: an item that
+    // still says `commentary` (its promotion not yet here) does not fold it
+    // away. Which item stands for the row is still the items' own choice
+    // (the first live final, else the first). Only ever towards the answer,
+    // and only for the anchor: a row `/log` merely calls final (text said
+    // along the way, #827) or one that says commentary keeps the item's phase.
+    let decided: HashSet<&str> = rows
+        .iter()
+        .filter(|m| giving.contains(m.id.as_str()) && m.phase == "final" && m.session_rows.is_some())
+        .map(|m| m.id.as_str())
+        .collect();
+    let message_entry = |item: &Object| {
+        let mut entry = item_entry(item, options);
+        if owner_of(item).is_some_and(|row| decided.contains(row)) {
+            entry.phase = "final".to_owned();
+        }
+        entry
+    };
     let mut placed: HashSet<&str> = HashSet::new();
     let mut rows_of: HashMap<&str, Entry> = HashMap::new();
     let mut shown = Vec::new();
@@ -392,10 +412,10 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
                 .filter(|other| text(other, "kind") == "message" && owner_of(*other) == Some(row))
                 .collect();
             let stands_for = carried.iter().copied()
-                .find(|other| item_entry(*other, options).phase != "commentary")
+                .find(|other| item_entry(other, options).phase != "commentary")
                 .or_else(|| carried.first().copied());
             if stands_for.is_some_and(|chosen| text(chosen, "id") == text(item, "id")) && placed.insert(row) {
-                let mut entry = item_entry(item, options);
+                let mut entry = message_entry(item);
                 entry.row = row.to_owned();
                 entry.spoken = entry.spoken || carried.iter().any(|other| item_entry(*other, options).spoken);
                 rows_of.insert(text(item, "id"), entry);
