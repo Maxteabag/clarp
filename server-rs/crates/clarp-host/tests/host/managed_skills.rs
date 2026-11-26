@@ -647,9 +647,19 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
         Some(machine.older.join("core1"))
     );
     assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
-    // Every link is sampled while the links move, until this is cleared.
+    // Every link is sampled while the links move, until this is cleared: when the sampling is
+    // done, or when an assertion below fails. Then the hold is let go too, so that the scope
+    // waits neither on the probe nor on the change.
     let moving = std::sync::atomic::AtomicBool::new(true);
+    struct Ends<'a>(&'a std::sync::atomic::AtomicBool, &'a Path);
+    impl Drop for Ends<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, std::sync::atomic::Ordering::Relaxed);
+            let _ = std::fs::remove_file(self.1);
+        }
+    }
     std::thread::scope(|scope| {
+        let _ends = Ends(&moving, &hold);
         // A change asked for meanwhile waits for the reconciliation, and is made after it.
         let change = scope.spawn(|| {
             host.ask(
