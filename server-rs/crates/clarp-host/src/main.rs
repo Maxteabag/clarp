@@ -540,175 +540,12 @@ async fn serve(config: Config) -> Result<(), String> {
             std::time::Duration::from_millis(config.logins_checked_every_ms),
         );
     }
-    // Where this Host keeps the machine's tools, the chosen skills are linked to its release
-    // before it answers; anywhere else this writes nothing.
     steps.mark("app");
-    clarp_host::managed_skills::at_start(&app).await;
-    steps.mark("skills");
-    // The Host answers when it knows its agents: what they are doing, what runs for them. A
-    // request that comes earlier waits at the door for that moment, it is not given half a view.
-    let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
-    while tokio::time::Instant::now() < opened_by
-        && app
-            .fleet
-            .directory()
-            .members
-            .iter()
-            .any(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
-    {
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
-    steps.mark("door");
-    // How many agents were still being opened when the door let requests in, and when the last
-    // of them was (issue 935): one line, from beside the start, which goes on meanwhile.
-    {
-        let app = app.clone();
-        let began = steps.began;
-        tokio::spawn(async move {
-            let at_door = still_opening(&app);
-            while still_opening(&app) > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            }
-            eprintln!(
-                "clarp-host: {at_door} agents were still being opened at the door; the last was \
-                 opened {} ms after the start began",
-                began.elapsed().as_millis()
-            );
-        });
-    }
-    app.mouth.start_voice_names().await;
-    steps.mark("voice_names");
-    clarp_host::profile::migrate_at_start(&app).await;
-    steps.mark("voice_shapes");
-    clarp_host::media_manage::import_history(&app)
-        .await
-        .map_err(|e| e.words().to_owned())?;
-    steps.mark("gallery");
-    clarp_host::portrait_generation::recover(&app)
-        .await
-        .map_err(|e| e.0)?;
-    clarp_host::media_manage::recover(&app).await;
-    steps.mark("media");
-    // The janitors a Host has of its own are installed, each once, paused.
-    if let Err(why) = clarp_host::janitors::install(&app).await {
-        eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
-    }
-    // A ring that rang when the Host stopped has its time again, or is missed now: the apps
-    // and its agent are told without anybody having to ask first.
-    // Repair admissions before speech queued by surviving shims can be voiced.
-    // What recovers, later, the call of an agent that does not answer now.
-    let recovering = clarp_host::calls::opening::Recovering(app.clone());
-    app.mouth.held.recovered_by(Arc::new(recovering));
-    steps.mark("janitors");
-    app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
-    steps.mark("calls");
-    app.mouth.bindings_ready.notify_one();
-    clarp_host::calls::resume(&app);
-    let staging = app.clone();
-    tokio::spawn(async move {
-        let hour = std::time::Duration::from_secs(3600);
-        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + hour, hour);
-        loop {
-            tick.tick().await;
-            if staging
-                .ears
-                .sweep_model_staging(&staging.fleet)
-                .await
-                .is_err()
-            {
-                eprintln!("clarp-host: could not sweep orphaned transcription staging");
-            }
-        }
-    });
-    let pruning = app.clone();
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
-        loop {
-            tick.tick().await;
-            if let Err(why) = pruning.calls.prune_openings(&pruning).await {
-                eprintln!("clarp-host: opening retention: {}", why.0);
-            }
-        }
-    });
-    // And the chips of the phones are kept current from now on.
-    tokio::spawn(clarp_host::calls::opening_launch::run(
-        app.clone(),
-        opening_requests,
-    ));
-    clarp_host::chip::run(&app, is_limited);
-    tokio::spawn(clarp_host::android_chip::run(app.clone()));
-    // A contact's picture that was being made when the Host stopped ends failed, as a try:
-    // nothing is asked of a provider at a start.
-    {
-        let app = app.clone();
-        tokio::spawn(async move { clarp_host::pictures::interrupted(&app).await });
-    }
-    // Idle lanes leave while memory is short.
-    clarp_host::watch_lane_pressure(&app);
-    // And what is due of the schedules is sent.
-    clarp_host::schedules::run(&app);
-    clarp_host::experience_watch::run(&app);
-    // And the conversations are kept searchable, their history read in the background.
-    clarp_host::search::run(&app);
-    // And a handoff of the Oracle's that a phone does not get on with is not waited for.
-    clarp_host::oracle::run(&app);
-    // And an idle agent that asked for it is given a heartbeat when one is due.
-    clarp_host::heartbeat::run(&app);
-    clarp_host::teams::runtime::run(&app);
-    clarp_host::goal_listener::run(&app);
-    // And a janitor's scheduled task is run when its schedule says.
-    clarp_host::janitors::run(&app);
-    clarp_host::seats::start_switcher(&app);
-    // And whether an account is used up or near a limit is looked at again as it may change.
-    clarp_host::quota::watch(&app);
-    // And what waits to be explained of the use of tools is asked of its janitor's model.
-    clarp_host::explain::run(&app);
-    // And the open goals are kept current beside their owners, where a keeper is on.
-    clarp_host::keeper::run(&app);
-    // And an idle agent's own label that outlived its time is taken back.
-    clarp_host::labels::run(&app);
-    steps.mark("serving");
-    eprintln!("clarp-host listens on {address}");
-    // What could not be read of what it keeps, in one line: the door shows the same counts.
-    // Said after where it listens, which is the Host's first line.
-    eprintln!("{}", app.fleet.left_out().line());
-    if held_by_unit {
-        eprintln!(
-            "clarp-host: its port is held by its socket unit: what comes in while it restarts waits for it"
-        );
-    }
-    if app.config.peers.is_none() {
-        eprintln!("clarp-host: started without --peers: this Host has no peers");
-    }
-    if app.config.config_dir.is_none() {
-        eprintln!(
-            "clarp-host: started without --config: every owner's setting is its default, and \
-             no account reset command runs"
-        );
-    }
-    if let Some(why) = app.turns.unkept() {
-        app.fleet.unkept(clarp_host::turn_identity::KIND, why);
-    } else if !app.turns.has_key() {
-        eprintln!(
-            "clarp-host: the key of the turns' tokens cannot be read: no turn is given one, and a \
-             token presented is answered that it cannot be said whose it is"
-        );
-    }
-    eprintln!(
-        "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
-        clarp_host::VERSION,
-        config.data_dir.display(),
-        config.engine,
-        config.codec,
-        config.blobs,
-        config.launcher
-    );
-    for pool in &pools {
-        eprintln!(
-            "clarp-host: the {} accounts: the owner's selector is run by this Host",
-            pool.tool()
-        );
-    }
+    // The Host answers from here on (issue 935). A release stops one Host and starts the next,
+    // and the apps waited the whole start of the next one, 45 seconds on the owner's machine,
+    // for anything at all. Everything the start does after this goes on beside the answers, in
+    // the order it always had: an agent that is still being opened says so on its row
+    // (`availability` restarting) and answers what is asked of it once it is open.
     // The edge is told who connected: the administrator's token opens the Host only from here.
     let router = edge::router(app.clone());
     // And where the Host is reached through a relay, what a phone asks there is asked of
@@ -719,10 +556,195 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::availability::run(&app);
     clarp_host::availability::host_started(&app.config.data_dir, app.clock.now_ms());
     let restart_ms = clarp_host::availability::restart_estimate(&app.config.data_dir);
-    // Said last of its start, after every line the start has always said.
-    eprintln!("{}", steps.line());
-    shutdown::serve(listener, router, &app, restart_ms)
+    let mut server = tokio::spawn(shutdown::serve(listener, router, app.clone(), restart_ms));
+    steps.mark("answering");
+    let finishing = async {
+        // Where this Host keeps the machine's tools, the chosen skills are linked to its release;
+        // anywhere else this writes nothing. A turn that starts before they are finds the release
+        // before's skills, which install-host keeps until the links have moved.
+        clarp_host::managed_skills::at_start(&app).await;
+        steps.mark("skills");
+        // What follows needs the agents opened: it waits for them, twenty seconds at most.
+        let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+        while tokio::time::Instant::now() < opened_by
+            && app
+                .fleet
+                .directory()
+                .members
+                .iter()
+                .any(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        steps.mark("door");
+        // How many agents were still being opened when the door let requests in, and when the last
+        // of them was (issue 935): one line, from beside the start, which goes on meanwhile.
+        {
+            let app = app.clone();
+            let began = steps.began;
+            tokio::spawn(async move {
+                let at_door = still_opening(&app);
+                while still_opening(&app) > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                eprintln!(
+                    "clarp-host: {at_door} agents were still being opened at the door; the last was \
+                     opened {} ms after the start began",
+                    began.elapsed().as_millis()
+                );
+            });
+        }
+        app.mouth.start_voice_names().await;
+        steps.mark("voice_names");
+        clarp_host::profile::migrate_at_start(&app).await;
+        steps.mark("voice_shapes");
+        clarp_host::media_manage::import_history(&app)
+            .await
+            .map_err(|e| e.words().to_owned())?;
+        steps.mark("gallery");
+        clarp_host::portrait_generation::recover(&app)
+            .await
+            .map_err(|e| e.0)?;
+        clarp_host::media_manage::recover(&app).await;
+        steps.mark("media");
+        // The janitors a Host has of its own are installed, each once, paused.
+        if let Err(why) = clarp_host::janitors::install(&app).await {
+            eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
+        }
+        // A ring that rang when the Host stopped has its time again, or is missed now: the apps
+        // and its agent are told without anybody having to ask first.
+        // Repair admissions before speech queued by surviving shims can be voiced.
+        // What recovers, later, the call of an agent that does not answer now.
+        let recovering = clarp_host::calls::opening::Recovering(app.clone());
+        app.mouth.held.recovered_by(Arc::new(recovering));
+        steps.mark("janitors");
+        app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
+        steps.mark("calls");
+        app.mouth.bindings_ready.notify_one();
+        clarp_host::calls::resume(&app);
+        let staging = app.clone();
+        tokio::spawn(async move {
+            let hour = std::time::Duration::from_secs(3600);
+            let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + hour, hour);
+            loop {
+                tick.tick().await;
+                if staging
+                    .ears
+                    .sweep_model_staging(&staging.fleet)
+                    .await
+                    .is_err()
+                {
+                    eprintln!("clarp-host: could not sweep orphaned transcription staging");
+                }
+            }
+        });
+        let pruning = app.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                if let Err(why) = pruning.calls.prune_openings(&pruning).await {
+                    eprintln!("clarp-host: opening retention: {}", why.0);
+                }
+            }
+        });
+        // And the chips of the phones are kept current from now on.
+        tokio::spawn(clarp_host::calls::opening_launch::run(
+            app.clone(),
+            opening_requests,
+        ));
+        clarp_host::chip::run(&app, is_limited);
+        tokio::spawn(clarp_host::android_chip::run(app.clone()));
+        // A contact's picture that was being made when the Host stopped ends failed, as a try:
+        // nothing is asked of a provider at a start.
+        {
+            let app = app.clone();
+            tokio::spawn(async move { clarp_host::pictures::interrupted(&app).await });
+        }
+        // Idle lanes leave while memory is short.
+        clarp_host::watch_lane_pressure(&app);
+        // And what is due of the schedules is sent.
+        clarp_host::schedules::run(&app);
+        clarp_host::experience_watch::run(&app);
+        // And the conversations are kept searchable, their history read in the background.
+        clarp_host::search::run(&app);
+        // And a handoff of the Oracle's that a phone does not get on with is not waited for.
+        clarp_host::oracle::run(&app);
+        // And an idle agent that asked for it is given a heartbeat when one is due.
+        clarp_host::heartbeat::run(&app);
+        clarp_host::teams::runtime::run(&app);
+        clarp_host::goal_listener::run(&app);
+        // And a janitor's scheduled task is run when its schedule says.
+        clarp_host::janitors::run(&app);
+        clarp_host::seats::start_switcher(&app);
+        // And whether an account is used up or near a limit is looked at again as it may change.
+        clarp_host::quota::watch(&app);
+        // And what waits to be explained of the use of tools is asked of its janitor's model.
+        clarp_host::explain::run(&app);
+        // And the open goals are kept current beside their owners, where a keeper is on.
+        clarp_host::keeper::run(&app);
+        // And an idle agent's own label that outlived its time is taken back.
+        clarp_host::labels::run(&app);
+        steps.mark("started");
+        // Said once the start has finished. The Host has answered since `answering`; whoever
+        // waits for this line (the tests, an installer) finds the whole start done.
+        eprintln!("clarp-host listens on {address}");
+        // What could not be read of what it keeps, in one line: the door shows the same counts.
+        // Said after where it listens, which is the Host's first line.
+        eprintln!("{}", app.fleet.left_out().line());
+        if held_by_unit {
+            eprintln!(
+                "clarp-host: its port is held by its socket unit: what comes in while it restarts waits for it"
+            );
+        }
+        if app.config.peers.is_none() {
+            eprintln!("clarp-host: started without --peers: this Host has no peers");
+        }
+        if app.config.config_dir.is_none() {
+            eprintln!(
+                "clarp-host: started without --config: every owner's setting is its default, and \
+                 no account reset command runs"
+            );
+        }
+        if let Some(why) = app.turns.unkept() {
+            app.fleet.unkept(clarp_host::turn_identity::KIND, why);
+        } else if !app.turns.has_key() {
+            eprintln!(
+                "clarp-host: the key of the turns' tokens cannot be read: no turn is given one, and a \
+                 token presented is answered that it cannot be said whose it is"
+            );
+        }
+        eprintln!(
+            "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
+            clarp_host::VERSION,
+            config.data_dir.display(),
+            config.engine,
+            config.codec,
+            config.blobs,
+            config.launcher
+        );
+        for pool in &pools {
+            eprintln!(
+                "clarp-host: the {} accounts: the owner's selector is run by this Host",
+                pool.tool()
+            );
+        }
+        // Said last of its start, after every line the start has always said.
+        eprintln!("{}", steps.line());
+        Ok::<(), String>(())
+    };
+    // A start that fails ends the Host, as before; a Host told to stop while it starts stops.
+    tokio::select! {
+        finished = finishing => finished?,
+        served = &mut server => {
+            return served
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string());
+        }
+    }
+    server
         .await
+        .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())
 }
 

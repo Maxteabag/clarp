@@ -56,7 +56,8 @@ pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Ta
     view
 }
 
-/// Rewrite only voice shapes the speaker resolves identically, before the Host serves requests.
+/// Rewrite only voice shapes the speaker resolves identically, at the start. The Host answers
+/// meanwhile (issue 935): a shape read before it is rewritten sounds the same as after.
 pub async fn migrate_at_start(app: &crate::edge::App) {
     let directory = app.fleet.directory();
     let owners = app.mouth.owners_from(&directory);
