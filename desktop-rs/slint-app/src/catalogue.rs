@@ -533,7 +533,7 @@ pub const ENTRIES: &[Entry] = &[
     e("send-queued", "Send waiting message now", "agent", "Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.", &["send now", "steer", "queue", "waiting", "interrupt", "now"]),
     e("list-all", "Agents: all chats", "view", "Shows every chat in the explorer.", &["sidebar list", "scope", "everything", "back", "all agents"]),
     e("list-unread", "Agents: unread only", "view", "Shows only chats with unread messages in the explorer.", &["sidebar list", "filter", "new", "unread", "scope"]),
-    e("list-working", "Agents: working", "view", "Shows only the chats whose agent is working now in the explorer.", &["sidebar list", "filter", "busy", "running", "active", "triage", "scope"]),
+    e("list-working", "Agents: working", "view", "Shows only the chats whose agent is working now in the explorer.", &["sidebar list", "filter", "busy", "at work", "triage", "scope"]),
     e("list-needs-you", "Agents: needs you", "view", "Shows only the chats waiting for you: unread, asking a question or holding a decision. Snoozed chats stay out.", &["sidebar list", "filter", "attention", "waiting", "inbox", "triage", "scope"]),
     e("list-done", "Agents: done", "view", "Shows only the chats that are idle and read in the explorer.", &["sidebar list", "filter", "finished", "settled", "idle", "triage", "scope"]),
     e("list-snoozed", "Agents: snoozed", "view", "Shows the chats you snoozed, with when each comes back.", &["sidebar list", "filter", "later", "put off", "triage", "scope"]),

@@ -676,7 +676,7 @@ export component Block inherits VerticalLayout {
     // click on "→ N columns" (to its end and back), and a fade on the
     // edge says more is there. A plain wheel still scrolls the chat.
     if root.block.kind == "table": table-box := Rectangle {
-        property <length> char: root.body-size * 0.55;
+        property <length> char: root.body-size * 0.62;
         property <length> pad: 12px;
         property <int> count: root.block.columns.length;
         property <length> natural: root.block.table-chars * self.char + self.count * self.pad + 2px;

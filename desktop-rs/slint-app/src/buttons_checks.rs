@@ -19,6 +19,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
+use slint::Model;
 
 use super::{Stage, app_now, check, check_window_size_free, control, posts, report, run_stages, sends, shot, view};
 use crate::headless;
@@ -288,8 +289,13 @@ pub fn buttons_check(out: String) {
             let pane = app_now().active_id();
             let refused = format!("queue-refused:{pane}");
             if !drawn(&refused) || elapsed < Duration::from_millis(500) {
-                check(elapsed < Duration::from_secs(5), "a refused Send now says the Host's answer under the strip");
-                return elapsed >= Duration::from_secs(5);
+                if elapsed >= Duration::from_secs(5) {
+                    let engine = app_now().engine.borrow().turn_queue_refusal("rachel");
+                    check(false, &format!("a refused Send now says the Host's answer under the strip (pane {:?}, engine {engine:?}, waiting {})", view().waiting_refused, view().waiting.row_count()));
+                    shot(&out5, "buttons-05-send-refused");
+                    return true;
+                }
+                return false;
             }
             check(label(&refused) == "agent is still working", &format!("in the Host's words: {:?}", label(&refused)));
             check(drawn("queue-send:q1"), "and the message waits on, still listed after the queue reloaded");
