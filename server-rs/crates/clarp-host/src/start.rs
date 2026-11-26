@@ -3,11 +3,14 @@
 //!
 //! A release stops one Host and starts the next. The next one answers its liveness at once
 //! (`GET /server-info`, `GET /host/start`), so the apps and the installer know it is there.
-//! What it answers about its agents waits until every agent is open: an agent that is still
-//! being opened has no row of its own yet (no running turn, revision zero), and a row like that
-//! must never stand in for one whose turn runs. Everything else waits until the whole start is
-//! done, its recovery of the gallery, the portraits and the calls included, so that no route
-//! serves what is not yet recovered. A request that waits is held, not refused.
+//! What is asked of one named agent (`/log`, `/live`, `/send`) is asked of that agent's own
+//! thread, which opens the agent before it answers anything: such a request waits for that agent
+//! alone, however many others are still being opened. The roster and the event stream speak of
+//! every agent, and wait until every agent is open: an agent that is still being opened has no
+//! row of its own yet (no running turn, revision zero), and a row like that must never stand in
+//! for one whose turn runs. Everything else waits until the whole start is done, its recovery of
+//! the gallery, the portraits and the calls included, so that no route serves what is not yet
+//! recovered. A request that waits is held, not refused.
 
 use axum::extract::{Request, State};
 use axum::middleware::Next;
@@ -87,7 +90,9 @@ impl Readiness {
 pub fn needs(path: &str) -> Stage {
     match path {
         "/server-info" | "/host/start" => Stage::Starting,
-        "/agents/snapshot" | "/live" | "/log" | "/send" | "/events" => Stage::Agents,
+        // Answered by the named agent's own thread, once that agent is open.
+        "/live" | "/log" | "/send" => Stage::Starting,
+        "/agents/snapshot" | "/events" => Stage::Agents,
         _ => Stage::Started,
     }
 }
@@ -108,10 +113,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn liveness_is_answered_at_once_rows_once_the_agents_are_open_and_the_rest_once_started() {
-        assert_eq!(needs("/server-info"), Stage::Starting);
-        assert_eq!(needs("/host/start"), Stage::Starting);
-        for path in ["/agents/snapshot", "/live", "/log", "/send", "/events"] {
+    fn liveness_and_a_named_chat_at_once_the_roster_once_every_agent_is_open_the_rest_started() {
+        for path in ["/server-info", "/host/start", "/live", "/log", "/send"] {
+            assert_eq!(needs(path), Stage::Starting, "{path}");
+        }
+        for path in ["/agents/snapshot", "/events"] {
             assert_eq!(needs(path), Stage::Agents, "{path}");
         }
         for path in ["/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {

@@ -343,8 +343,9 @@ PY
 # Host answers that it is there before its start is done, so an answer alone is no success: the
 # run that answered must reach `started` itself. Another run answering (that one failed late in
 # its start and was started again), no answer for 30 s after one came, no answer within three
-# minutes or a start not done within ten is a failure. A Host from before issue 935 answers only
-# once its start is done, and says no stage: its answer is its start done. Prints the run.
+# minutes or a start not done within ten is a failure. A Host of issue 935 or later says both its
+# run and its stage, or its answer is a failure; one from before says neither and answers only once
+# its start is done: its valid answer (its counts) is its start done. Prints the run.
 host_started() {
     local began=$SECONDS first="" heard="" said instance stage
     while [ $((SECONDS - began)) -lt 600 ]; do
@@ -352,17 +353,39 @@ host_started() {
             heard=$SECONDS
             read -r instance stage < <(printf '%s' "$said" | python3 -c '
 import json, sys
-said = json.load(sys.stdin)
-print(said.get("instance", "before-935"), said.get("stage", "started"))' 2> /dev/null || echo "unreadable unreadable")
-            if [ -z "$first" ]; then
-                first="$instance"
-            elif [ "$instance" != "$first" ]; then
-                echo "install-host: another run answers: $first did not finish its start, $instance was started" >&2
+try:
+    said = json.load(sys.stdin)
+except ValueError:
+    print("unreadable unreadable")
+    raise SystemExit
+if not isinstance(said, dict):
+    print("invalid invalid")
+elif "instance" not in said and "stage" not in said:
+    # A Host from before issue 935 answers only once its start is done: a valid answer of its
+    # kind (its three counts) is its start done.
+    old = all(isinstance(said.get(key), int) and not isinstance(said.get(key), bool)
+              for key in ("agents", "opening", "broken"))
+    print("before-935 started" if old else "invalid invalid")
+else:
+    # A Host of issue 935 or later says both, or its answer is not one to trust.
+    run, stage = said.get("instance"), said.get("stage")
+    fine = isinstance(run, str) and run.isalnum() and stage in ("starting", "agents", "started")
+    print(f"{run} {stage}" if fine else "invalid invalid")' 2> /dev/null || echo "unreadable unreadable")
+            if [ "$instance" = invalid ]; then
+                echo "install-host: the Host answered /host/start with what is neither a start of issue 935 or later (instance and stage) nor one from before: $said" >&2
                 return 1
             fi
-            if [ "$stage" = started ]; then
-                echo "$instance"
-                return 0
+            if [ "$instance" != unreadable ]; then
+                if [ -z "$first" ]; then
+                    first="$instance"
+                elif [ "$instance" != "$first" ]; then
+                    echo "install-host: another run answers: $first did not finish its start, $instance was started" >&2
+                    return 1
+                fi
+                if [ "$stage" = started ]; then
+                    echo "$instance"
+                    return 0
+                fi
             fi
         elif [ -z "$heard" ] && [ $((SECONDS - began)) -gt 180 ]; then
             echo "install-host: the Host does not answer" >&2

@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 209;
+pub const HOST_CONTRACT: u64 = 210;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -544,6 +544,13 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `POST /events/{stream_id}/live` from the token that opened it changes the chats it follows;
     // the stream says `live-changed` where the change takes effect (issue 892).
     ("events_live_change", 209),
+    // `GET /host/start` says which run of the Host answers (`instance`) and how far its start has
+    // come (`stage`: `starting`, `agents`, `started`). The Host answers `/server-info`,
+    // `/host/start` and a named agent's `/log`, `/live` and `/send` from the first moment of its
+    // start (the last three once that agent is open), the roster and `/events` once every agent is
+    // open, everything else once `started`: a request is held, never refused. An installer holds
+    // an install good once the run that answered says `started` (issue 935).
+    ("host_start_readiness", 210),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
