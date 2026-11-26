@@ -2515,13 +2515,6 @@ class Handler(BaseHTTPRequestHandler):
             send_while_working["on"] = bool(body.get("on", True))
             send_while_working["fallback"] = body.get("fallback")
             return self.reply(200, {"ok": True})
-        if url.path == "/send-settings" and send_while_working["on"]:
-            value = body.get("while_busy")
-            if value not in ("steer", "after_turn", "take_over"):
-                return self.reply(400, {"error": "while_busy must be steer, after_turn or take_over"})
-            send_while_working["value"] = value
-            broadcast({"type": "send-settings-updated", "while_busy": value})
-            return self.reply(200, {"while_busy": value})
         if url.path == "/__control/message-search":
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
@@ -2850,6 +2843,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "pairing code expired"})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        if url.path == "/send-settings" and send_while_working["on"]:
+            value = body.get("while_busy")
+            if value not in ("steer", "after_turn", "take_over"):
+                return self.reply(400, {"error": "while_busy must be steer, after_turn or take_over"})
+            send_while_working["value"] = value
+            broadcast({"type": "send-settings-updated", "while_busy": value})
+            return self.reply(200, {"while_busy": value})
         if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
             failure = failures.get(url.path)
             if failure and failure[1] > 0:
