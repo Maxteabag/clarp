@@ -187,6 +187,11 @@ export struct WorkspaceTab {
 
 // PaneLeaf.qml + ConversationPane.qml.
 export component Pane inherits Rectangle {
+    // The header's quiet line: what is set, joined by dots, none trailing.
+    property <string> header-info: root.join-info(root.join-info(root.join-info(root.join-info(root.pane.host, root.pane.moved), root.pane.moving), root.pane.status), root.pane.busy ? "working" : "");
+    pure function join-info(a: string, b: string) -> string {
+        return a == "" ? b : b == "" ? a : a + "  ·  " + b;
+    }
     // A pane may shrink to whatever the window gives it (min-width 0): its
     // chat and composer wrap or clip inside instead of widening the layout.
     min-width: 0px;
@@ -515,20 +520,15 @@ export component Pane inherits Rectangle {
             journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
           }
           // In the composer letters type: Ctrl+H is the way back to the chat.
-          // The agent's name, folder and runtime sit on the right of the
-          // frame's border (there is no separate header).
+          // The agent's name sits on the right of the frame's border (there is
+          // no separate header), with only what matters while reading: its
+          // Host where there are several, a move, its status, working. The
+          // folder, model and effort are one click away in its profile (the
+          // owner's rubric: no detail every reader has to read past).
           PaneFrame {
             info-name: root.pane.session == "" ? "No agent selected" : root.pane.name;
             info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
-                : (root.pane.host != "" ? root.pane.host + "  ·  " : "")
-                + (root.pane.moved != "" ? root.pane.moved + "  ·  " : "")
-                + (root.pane.moving != "" ? root.pane.moving + "  ·  " : "")
-                + (root.pane.workspace-label != "" ? root.pane.workspace-label + "  ·  " : "")
-                + (root.pane.status != "" ? root.pane.status + "  ·  " : "")
-                + (root.pane.model != "" ? root.pane.model : "model not reported")
-                + "  ·  " + (root.pane.effort != "" ? "effort " + root.pane.effort
-                    : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
-                + (root.pane.busy ? "  ·  working" : "");
+                : root.header-info;
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
             // In vim mode the title says the mode, as Vim's last line does.
             key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
