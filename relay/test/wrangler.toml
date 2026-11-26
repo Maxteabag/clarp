@@ -1,0 +1,15 @@
+name = "clarp-relay-tests"
+main = "../src/index.ts"
+compatibility_date = "2026-09-01"
+workers_dev = false
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "HOST_RELAY"
+class_name = "HostRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["HostRelay"]
+
+# RELAY_SECRET is set with `wrangler secret put RELAY_SECRET`; per-host keys are HMAC(secret, host_id).

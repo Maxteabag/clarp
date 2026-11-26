@@ -500,6 +500,7 @@ When diagnosing or managing Clarp inside a Docker container:
 
 - Tailscale and phone connectivity:
   * Prefer the `compose.tailscale.yaml` sidecar mode for isolated Tailnet identity, auto-HTTPS, and zero host firewall conflicts.
+  * Without Tailscale, a Host is reached from anywhere through a relay its owner deploys on Cloudflare: `relay/README.md` in the clarp repository says how to deploy it, write `~/.config/clarp-host/relay.json`, turn it on (`install-host --relay on`) and pair through it (`clarp-admin pair create --relay`); `clarp-host network relay status` shows the connection.
   * If publishing ports on the host directly (`CLARP_PORT=...`), ensure host firewalls (`ufw` / `DOCKER-USER`) allow Tailscale CGNAT traffic (`100.64.0.0/10` / `tailscale0`) to forward to Docker bridge networks.
 
 ## Vendor CLI version blocks a resumed agent
