@@ -30,8 +30,33 @@ pub struct Published {
 }
 
 struct Recent {
+    /// The first number this run of the Host gave out: a number below it is an earlier run's.
+    first_id: u64,
     next_id: u64,
     events: VecDeque<Arc<Published>>,
+}
+
+/// What a client that resumes was given (feature `resume_state`, issue 882): which run of the
+/// Host answered it, after which event, how many it was given, and whether some it missed
+/// could not be given (`truncated`): the Host had forgotten them, or the number it named was
+/// another run's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replay {
+    pub epoch: String,
+    pub after: Option<u64>,
+    pub count: usize,
+    pub truncated: bool,
+}
+
+impl Replay {
+    pub fn to_json(&self) -> Value {
+        json!({
+            "epoch": self.epoch,
+            "after": self.after,
+            "count": self.count,
+            "truncated": self.truncated,
+        })
+    }
 }
 
 /// What an agent's turn shows right now, as it is sent to those who asked to be shown
@@ -47,19 +72,59 @@ pub struct Shown {
     /// `None` when it has nothing of that: a connection that does not follow the agent is
     /// sent nothing then.
     pub summary: Option<String>,
+    /// The whole event without the words of the reply and the thinking, for a connection that
+    /// asked for none (`text=0`, feature `events_slim`, issue 879). `None` when nothing is
+    /// left of it: then such a connection is sent nothing.
+    pub textless: Option<String>,
+    /// The conversation and the number of the event, for a connection that numbers what it was
+    /// sent of it (`lseq_prev`).
+    pub conv: String,
+    pub lseq: u64,
 }
 
 impl Shown {
     /// What a connection is sent of it. `wanted` are the sessions and agents it follows,
-    /// with `*` for every one.
-    pub fn for_one(&self, wanted: &HashSet<String>) -> Option<&str> {
+    /// with `*` for every one; `text` whether it is sent the words of a reply as they come.
+    pub fn for_one(&self, wanted: &HashSet<String>, text: bool) -> Option<&str> {
         let named = |name: &String| !name.is_empty() && wanted.contains(name);
         if wanted.contains("*") || named(&self.session) || named(&self.agent_id) {
-            Some(&self.whole)
+            if text {
+                Some(&self.whole)
+            } else {
+                self.textless.as_deref()
+            }
         } else {
             self.summary.as_deref()
         }
     }
+}
+
+/// The kinds of live item whose `text` is the words of the reply or of the thinking.
+const WORDS: [&str; 2] = ["message", "reasoning"];
+
+/// The ops of a live event without the words of a reply or of thinking: no text appended,
+/// and no `text` in what an op sets of a message or reasoning item. The rest of every op
+/// stays as it was (issue 879).
+pub fn without_text(ops: &[Value]) -> Vec<Value> {
+    ops.iter()
+        .filter(|op| !(op["op"] == "append" && op["field"] == "text"))
+        .filter_map(|op| {
+            let worded = op["kind"]
+                .as_str()
+                .is_some_and(|kind| WORDS.contains(&kind));
+            if !worded || !op["item"].is_object() {
+                return Some(op.clone());
+            }
+            let mut op = op.clone();
+            if let Some(item) = op["item"].as_object_mut() {
+                item.remove("text");
+            }
+            // An upsert that set nothing but the words sets nothing: it is left out.
+            let empty =
+                op["op"] == "upsert" && op["item"].as_object().is_some_and(|item| item.is_empty());
+            (!empty).then_some(op)
+        })
+        .collect()
 }
 
 pub struct Hub {
@@ -105,6 +170,7 @@ impl Hub {
             // hex signs, as the Python Host's name of a run has.
             epoch: format!("{now_ms:012x}"),
             recent: Mutex::new(Recent {
+                first_id: (seconds << 20).max(1),
                 next_id: (seconds << 20).max(1),
                 events: VecDeque::new(),
             }),
@@ -274,6 +340,16 @@ impl Hub {
             .filter(|op| matches!(op["op"].as_str(), Some("status" | "turn")))
             .cloned()
             .collect();
+        let wordless = without_text(event["ops"].as_array().map_or(&[], Vec::as_slice));
+        let textless = if event["ops"].as_array().is_some_and(|ops| *ops == wordless) {
+            Some(whole.clone())
+        } else {
+            (!wordless.is_empty()).then(|| {
+                let mut copy = event.clone();
+                copy["ops"] = Value::Array(wordless);
+                copy.to_string()
+            })
+        };
         let summary = (!of_all.is_empty()).then(|| {
             event["ops"] = Value::Array(of_all);
             event.to_string()
@@ -282,8 +358,11 @@ impl Hub {
         let _ = self.shown.send(Arc::new(Shown {
             session: text("session"),
             agent_id: text("agent_id"),
+            conv: text("conv"),
+            lseq: event["lseq"].as_u64().unwrap_or(0),
             whole,
             summary,
+            textless,
         }));
     }
 
@@ -298,14 +377,43 @@ impl Hub {
         &self,
         after: Option<u64>,
     ) -> (Vec<Arc<Published>>, broadcast::Receiver<Arc<Published>>) {
+        let (missed, live, _) = self.resume(after);
+        (missed, live)
+    }
+
+    /// As [`Hub::subscribe`], and what the replay was: whether every event after `after` was
+    /// still kept, judged under the same lock that takes them.
+    pub fn resume(
+        &self,
+        after: Option<u64>,
+    ) -> (
+        Vec<Arc<Published>>,
+        broadcast::Receiver<Arc<Published>>,
+        Replay,
+    ) {
         let recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
-        let missed = recent
+        let missed: Vec<Arc<Published>> = recent
             .events
             .iter()
             .filter(|event| after.is_none_or(|after| event.id > after))
             .cloned()
             .collect();
-        (missed, self.live.subscribe())
+        let oldest = recent
+            .events
+            .front()
+            .map_or(recent.next_id, |event| event.id);
+        // A number this run never gave out (an earlier run's, or one it has not reached), or
+        // one older than what is kept: what came after it is not all here.
+        let truncated = after.is_some_and(|after| {
+            after < recent.first_id || after >= recent.next_id || oldest > after + 1
+        });
+        let replay = Replay {
+            epoch: self.epoch.clone(),
+            after,
+            count: missed.len(),
+            truncated,
+        };
+        (missed, self.live.subscribe(), replay)
     }
 }
 
@@ -361,18 +469,18 @@ mod tests {
         let first = watching.try_recv().unwrap();
         let wanted = |names: &[&str]| names.iter().map(|name| (*name).to_string()).collect();
         let whole: Value =
-            serde_json::from_str(first.for_one(&wanted(&["claire"])).unwrap()).unwrap();
+            serde_json::from_str(first.for_one(&wanted(&["claire"]), true).unwrap()).unwrap();
         assert_eq!(whole["ops"].as_array().unwrap().len(), 3);
         assert_eq!(
             whole["server_now_ms"], 7,
             "the clock is read when it is sent"
         );
         assert_eq!(
-            first.for_one(&wanted(&["a1"])),
-            first.for_one(&wanted(&["*"]))
+            first.for_one(&wanted(&["a1"]), true),
+            first.for_one(&wanted(&["*"]), true)
         );
         let short: Value =
-            serde_json::from_str(first.for_one(&wanted(&["mike"])).unwrap()).unwrap();
+            serde_json::from_str(first.for_one(&wanted(&["mike"]), true).unwrap()).unwrap();
         let ops: Vec<&str> = short["ops"]
             .as_array()
             .unwrap()
@@ -382,14 +490,124 @@ mod tests {
         assert_eq!(ops, ["status", "turn"]);
         assert_eq!(short["lseq"], 4, "under the same number");
         assert_eq!(
-            first.for_one(&wanted(&[])),
-            first.for_one(&wanted(&["mike"]))
+            first.for_one(&wanted(&[]), true),
+            first.for_one(&wanted(&["mike"]), true)
         );
         // An event with nothing for a list of agents is for those who follow the agent alone.
         let second = watching.try_recv().unwrap();
-        assert!(second.for_one(&wanted(&["claire"])).is_some());
-        assert_eq!(second.for_one(&wanted(&["mike"])), None);
+        assert!(second.for_one(&wanted(&["claire"]), true).is_some());
+        assert_eq!(second.for_one(&wanted(&["mike"]), true), None);
         assert!(watching.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_connection_that_takes_no_text_is_sent_every_op_but_the_words() {
+        let hub = Hub::new(1_700_000_000_000);
+        let mut watching = hub.watch();
+        let wanted: HashSet<String> = ["claire".to_string()].into();
+        let event = |ops: Value| json!({"type": "live", "agent_id": "a1", "session": "claire", "conv": "c1", "lseq": 9, "ops": ops});
+        hub.show(
+            event(json!([
+                {"op": "upsert", "conv": "c1", "id": "cl:m1", "kind": "message", "rev": 1,
+                 "item": {"text": "Hel", "phase": "commentary", "ordinal": 3}},
+                {"op": "upsert", "conv": "c1", "id": "cl:r1", "kind": "reasoning", "rev": 2,
+                 "item": {"text": "more thought"}},
+                {"op": "append", "conv": "c1", "id": "cl:m1", "kind": "message", "rev": 2,
+                 "field": "text", "chunk": "lo"},
+                {"op": "append", "conv": "c1", "id": "cx:t1", "kind": "tool", "rev": 4,
+                 "field": "tool.output", "lines": ["ok"], "total_lines": 1},
+                {"op": "done", "conv": "c1", "id": "cl:m1", "kind": "message", "rev": 3,
+                 "status": "completed", "item": {"text": "Hello"}},
+                {"op": "status", "conv": "c1", "activity": {"state": "responding"}},
+            ])),
+            5,
+            None,
+        );
+        hub.show(
+            event(json!([{"op": "append", "conv": "c1", "id": "cl:m1", "kind": "message", "rev": 4, "field": "text", "chunk": "!"}])),
+            6,
+            None,
+        );
+        let first = watching.try_recv().unwrap();
+        assert_eq!((first.conv.as_str(), first.lseq), ("c1", 9));
+        let slim: Value = serde_json::from_str(first.for_one(&wanted, false).unwrap()).unwrap();
+        let ops = slim["ops"].as_array().unwrap();
+        let named: Vec<(&str, &str)> = ops
+            .iter()
+            .map(|op| (op["op"].as_str().unwrap(), op["id"].as_str().unwrap_or("")))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("upsert", "cl:m1"),
+                ("append", "cx:t1"),
+                ("done", "cl:m1"),
+                ("status", "")
+            ],
+            "the text appends and an upsert of the words alone are left out"
+        );
+        assert_eq!(ops[0]["item"], json!({"phase": "commentary", "ordinal": 3}));
+        assert!(ops[2]["item"].as_object().unwrap().is_empty());
+        assert!(!slim.to_string().contains("Hel"));
+        assert_eq!(
+            first.for_one(&wanted, true).unwrap(),
+            first.whole,
+            "a connection that takes text is sent it whole"
+        );
+        // An event of nothing but the words is not sent at all to who takes none.
+        let second = watching.try_recv().unwrap();
+        assert_eq!(second.for_one(&wanted, false), None);
+        assert!(second.for_one(&wanted, true).is_some());
+        // One whose ops all stay, less their words, is sent without them.
+        hub.show(
+            event(
+                json!([{"op": "upsert", "conv": "c1", "id": "cl:r2", "kind": "reasoning", "rev": 1,
+                          "item": {"text": "", "status": "running", "title": null}}]),
+            ),
+            7,
+            None,
+        );
+        let third = watching.try_recv().unwrap();
+        let slim: Value = serde_json::from_str(third.for_one(&wanted, false).unwrap()).unwrap();
+        assert_eq!(
+            slim["ops"][0]["item"],
+            json!({"status": "running", "title": null})
+        );
+    }
+
+    #[test]
+    fn a_resume_says_whether_its_replay_was_whole() {
+        let hub = Hub::new(1_700_000_000_000);
+        let first = hub.publish(roster("one"), 1_700_000_000_000);
+        let second = hub.publish(roster("two"), 1_700_000_000_001);
+        let (missed, _, whole) = hub.resume(Some(first));
+        assert_eq!(missed.len(), 1);
+        assert_eq!(
+            whole,
+            Replay {
+                epoch: hub.epoch().to_string(),
+                after: Some(first),
+                count: 1,
+                truncated: false
+            }
+        );
+        assert!(!hub.resume(Some(second)).2.truncated, "nothing missed");
+        assert!(
+            hub.resume(Some(first - 1)).2.truncated,
+            "a number before the run's first"
+        );
+        assert!(!hub.resume(None).2.truncated, "no resume");
+        // A number of an earlier run, or one this run never gave.
+        assert!(hub.resume(Some(first - 2)).2.truncated);
+        assert!(hub.resume(Some(second + 1)).2.truncated);
+        // Forgotten: the run has gone on past what it keeps.
+        hub.publish(roster("much later"), 1_700_000_000_000 + KEEP_MS + 5);
+        let (missed, _, cut) = hub.resume(Some(first));
+        assert_eq!((missed.len(), cut.truncated), (1, true));
+        assert_eq!(
+            cut.to_json(),
+            json!({"epoch": hub.epoch(), "after": first, "count": 1, "truncated": true})
+        );
     }
 
     #[test]

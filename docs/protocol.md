@@ -1263,7 +1263,7 @@ Event types and payloads:
 
 | `type` | Fields | Client action |
 |---|---|---|
-| `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
+| `transcript-updated` | `agent_id`, `session`, `backend_session_id`; `head_revision` and `conversation_id` (feature `roster_fields`: as the agent's snapshot row has them); `rows_from`, and to a `rows=1` connection `rows` and `rows_latest` (feature `events_slim`, below) | The conversation changed. Fetch a delta for that session; with feature `roster_fields`, not when the cache already holds `head_revision` of that `conversation_id`; with `rows`, not when the cache holds `rows_from` or more (merge `rows`). The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile, coordination-changed, agent-moved, chat_view, agent-transit (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`), `coordination_visibility` (with `coordination-changed`: the new effective value, for that `session` or, without one, the Host's; a Rust Host follows a change of the Host's value with one event for each chat without a choice of its own that does not follow it, a helper's own chat, carrying that chat's value, so apply the events in order), `chat_view` (with `chat_view`: that `session`'s new chat view, feature `chat_view`), `agent_id`, `fields` and `parent` (feature `roster_fields`: the changed fields of the agent's snapshot row, and with `helper-state` its maker's) | Refetch the snapshot; with feature `roster_fields`, patch the rows with `fields` and `parent` instead, and with feature `agent_row` read the one row where the kind allows it (see [the roster's events](#one-agents-change-in-its-roster-event-and-one-agents-row-features-roster_fields-and-agent_row-rust-host-contracts-182-and-183)). `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
@@ -1308,6 +1308,50 @@ Valid `controller_event` values are `down`, `up`, `single-click`,
 integration supports the button and swipe events. Flic officially requires a
 Hub for Hold & Twist, so rotation remains a separately negotiated experimental
 input rather than a production-critical command.
+
+#### A client that streams no text (feature `events_slim`, Rust Host contract 198)
+
+An app that shows a reply once it is written, not as it is written, need not be sent the words as
+they come, nor read `/log` after each `transcript-updated`. Measured on a disposable Host (issue
+879, `server-rs/tools/build wire-read`): a short answer cost such a client about 27 KB, most of it
+the reply's words as live ops it threw away, the other live ops uncompressed and nine `/log` deltas;
+with the three options below, 3.4 KB and no `/log` call. Three options of
+`GET /events` say what it wants instead; each is opt-in, and a connection that names none is sent
+exactly what it was before:
+
+- `text=0`: the `live` events (with `live=`, [live-items.md](live-items.md)) leave out the words
+  of a reply and of thinking: no `append` op of field `text`, and no `text` in what an `upsert` or
+  `done` op of a `message` or `reasoning` item sets (its `phase`, `row_id`, `title`, status and
+  times still come). An `upsert` that set nothing but the words, and an event that held nothing but
+  the words, are not sent. So the `lseq` of the events such a connection gets may skip: each
+  carries `lseq_prev`, the `lseq` of the event of that conversation the same connection was sent
+  before it (absent on the first). Check order against it instead of `lseq - 1`: `lseq_prev` equal
+  to the held `lseq` is no gap. The `rev` of a `message` or `reasoning` item skips as well; do not
+  check it (rule 3 of live-items.md §3 holds for every other kind). `GET /live?session=&text=0`
+  answers the turn the same way, for gap recovery on such a connection.
+- `rows=1`: a `transcript-updated` carries the rows it stands for, where they are few and small.
+  The Host's events of one conversation follow one another: an event carries `rows_from`, the
+  `head_revision` the previous `transcript-updated` of the same conversation told (absent on the
+  first after the Host starts, and when the conversation changed). To a `rows=1` connection the
+  event adds `rows`, what `GET /log?session=&after_revision=<rows_from>&include_automated=1&include_tool_details=0`
+  answers in `turns` at the moment it is sent, and `rows_latest`, that answer's `latest_revision`.
+  It adds them only when the answer holds all of it (no `has_more`, at most 20 rows, no
+  `replace_required`, the same `conversation_id`) and the rows are at most 16 KB as JSON; otherwise
+  the event goes as before. A client that holds this `conversation_id` at a revision of
+  `rows_from` or higher merges `rows` by `id` and `revision` (the rules of `/log`) and then holds
+  `rows_latest`; one that holds less, or reads `/log` with other options (`view`, `coordination`,
+  `include_automated=0`), reads `/log` as before. Rows are carried on live events only, not on the
+  replay after a reconnect: after a reconnect read `/log` as before. A row of an agent whose words
+  the reader may not read is blanked in the event as in `/log` (bound privacy).
+- `gzip=1` with `Accept-Encoding: gzip`: the stream is sent gzipped (`Content-Encoding: gzip`),
+  one gzip stream flushed at each event, so every event can be decoded the moment it arrives and
+  the keys and names the events repeat are sent once. Without `gzip=1` a stream is never packed,
+  whatever `Accept-Encoding` says (an older app's HTTP stack may ask for gzip and not decode a
+  stream as it comes). A client whose stack decodes gzip by itself (URLSession, OkHttp) reads the
+  events as before; one that sets `Accept-Encoding` by hand decodes it.
+
+A Host without the feature ignores the options: a client sends them only where `GET /server-info`
+lists `events_slim`.
 
 Agent states (`kind` / `latest_state`): `thinking`, `tool`, `compacting` are
 **busy**; `idle`, `done`, `stopped`, `interrupted`, `waiting`, `background`,

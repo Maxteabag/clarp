@@ -140,6 +140,11 @@ helper, `parent` (its maker's counts and state), so a watcher of `/events`
 needs no read for it; and `transcript-updated` carries the conversation's
 `head_revision` and `conversation_id`, so a reader that already holds that
 revision skips `GET /log`.
+On a Host with feature `events_slim` (contract 198), a watcher that does not
+show replies as they are written listens with `/events?text=0&rows=1` (and
+`gzip=1` where its HTTP client decodes gzip): no reply words in `live` events,
+and a `transcript-updated` that carries `rows` and `rows_latest` needs no
+`GET /log` when you hold its `rows_from` revision or more.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.

@@ -379,7 +379,9 @@ GET /events?live=                   status/turn ops only (the agent list)
 ```
 
 `live` accepts session names or agent ids. Without the parameter a connection
-gets no `live` events at all (old clients). For a conversation outside your
+gets no `live` events at all (old clients). With `text=0` (feature `events_slim`)
+the events leave out the words of replies and thinking and carry `lseq_prev`; see
+[the protocol](protocol.md#a-client-that-streams-no-text-feature-events_slim-rust-host-contract-198). For a conversation outside your
 list the event carries only its `status` and `turn` ops; its `lseq` still counts
 the ops you did not get, so do not track `lseq` (or fetch `/live`) for those: use
 them only to update the agent's status line.

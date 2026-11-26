@@ -46,7 +46,11 @@ pub fn asked(method: &Method, headers: &HeaderMap) -> bool {
 
 pub async fn layer(request: Request, next: Next) -> Response {
     let asked = asked(request.method(), request.headers());
+    let streamed = asked && stream_asked(request.uri().query());
     let response = next.run(request).await;
+    if streamed && event_stream(response.status(), response.headers()) {
+        return packed_stream(response);
+    }
     if !packable(response.status(), response.headers(), response.body()) {
         return response;
     }
@@ -78,6 +82,74 @@ pub async fn layer(request: Request, next: Next) -> Response {
         }
         _ => Response::from_parts(parts, Body::from(plain)),
     }
+}
+
+/// Whether a request for a stream of events asks for it gzipped as well (`gzip=1`, feature
+/// `events_slim`, issue 879). An app that does not ask is sent the stream plain, whatever its
+/// HTTP stack says it takes: an older app reads it as it always has.
+fn stream_asked(query: Option<&str>) -> bool {
+    url::form_urlencoded::parse(query.unwrap_or("").as_bytes())
+        .any(|(key, value)| key == "gzip" && matches!(value.trim(), "1" | "true" | "yes"))
+}
+
+/// Whether an answer is a stream of events that is sent as it is made.
+fn event_stream(status: StatusCode, headers: &HeaderMap) -> bool {
+    status == StatusCode::OK
+        && !headers.contains_key(header::CONTENT_ENCODING)
+        && headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|kind| {
+                kind.trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("text/event-stream")
+            })
+}
+
+/// A stream of events gzipped as one gzip stream, each part flushed as it comes, so that an
+/// event is never held back for the next: the client decodes each event when it arrives, and
+/// what the events repeat (their keys, the agents' names) is sent once.
+fn packed_stream(response: Response) -> Response {
+    let (mut parts, body) = response.into_parts();
+    parts.headers.remove(header::CONTENT_LENGTH);
+    parts
+        .headers
+        .insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    parts
+        .headers
+        .append(header::VARY, HeaderValue::from_static("Accept-Encoding"));
+    let encoder = GzEncoder::new(Vec::new(), Compression::new(LEVEL));
+    let parts_of = futures_util::stream::unfold(
+        (body.into_data_stream(), Some(encoder)),
+        |(mut inner, encoder)| async move {
+            use futures_util::StreamExt;
+            let mut encoder = encoder?;
+            loop {
+                match inner.next().await {
+                    Some(Ok(part)) => {
+                        let packed = encoder.write_all(&part).and_then(|()| encoder.flush());
+                        if packed.is_err() {
+                            return None;
+                        }
+                        let out = std::mem::take(encoder.get_mut());
+                        if out.is_empty() {
+                            continue;
+                        }
+                        let out = axum::body::Bytes::from(out);
+                        return Some((Ok::<_, axum::Error>(out), (inner, Some(encoder))));
+                    }
+                    Some(Err(why)) => return Some((Err(why), (inner, None))),
+                    // The stream ended: the gzip trailer, and nothing after it.
+                    None => {
+                        let rest = encoder.finish().ok()?;
+                        let rest = axum::body::Bytes::from(rest);
+                        return Some((Ok(rest), (inner, None)));
+                    }
+                }
+            }
+        },
+    );
+    Response::from_parts(parts, Body::from_stream(parts_of))
 }
 
 /// Whether an answer is one the Host packs for a client that takes gzip.
@@ -242,6 +314,60 @@ mod tests {
         assert_eq!(encoding(&response), None);
         assert!(response.headers().get(header::VARY).is_none());
         assert!(body.starts_with(b"data: 0 "));
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_asks_is_gzipped_event_by_event() {
+        // Without gzip in the header, the word alone packs nothing.
+        let (response, body) = fetch("/events?gzip=1", None).await;
+        assert_eq!(encoding(&response), None);
+        assert!(body.starts_with(b"data: 0 "));
+
+        let (response, packed) = fetch("/events?live=a&gzip=1", Some("gzip")).await;
+        assert_eq!(encoding(&response), Some("gzip"));
+        assert_eq!(
+            response.headers().get(header::VARY).unwrap(),
+            "Accept-Encoding"
+        );
+        let mut decoded = Vec::new();
+        GzDecoder::new(&packed[..])
+            .read_to_end(&mut decoded)
+            .unwrap();
+        let plain: String = (0..50)
+            .map(|n| format!("data: {n} {}\n\n", "x".repeat(80)))
+            .collect();
+        assert_eq!(decoded, plain.into_bytes());
+        assert!(
+            packed.len() * 3 < decoded.len(),
+            "{} of {}",
+            packed.len(),
+            decoded.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn each_event_of_a_packed_stream_can_be_read_when_it_comes() {
+        let request = Request::builder()
+            .uri("/events?gzip=1")
+            .header(header::ACCEPT_ENCODING, "gzip")
+            .body(Body::empty())
+            .unwrap();
+        let response = router().oneshot(request).await.unwrap();
+        let mut parts = response.into_body().into_data_stream();
+        let mut decoder = flate2::write::GzDecoder::new(Vec::new());
+        use futures_util::StreamExt;
+        use std::io::Write;
+        for n in 0..3 {
+            let part = parts.next().await.unwrap().unwrap();
+            decoder.write_all(&part).unwrap();
+            decoder.flush().unwrap();
+            let read = String::from_utf8(std::mem::take(decoder.get_mut())).unwrap();
+            assert_eq!(
+                read,
+                format!("data: {n} {}\n\n", "x".repeat(80)),
+                "event {n} whole on its own"
+            );
+        }
     }
 
     #[tokio::test]

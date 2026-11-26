@@ -237,6 +237,8 @@ mod voice_names;
 mod voice_pool;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
+#[path = "host/events_slim.rs"]
+mod events_slim;
 
 // What every process a test starts is given of the environment: nothing of the machine's.
 #[path = "host/sealed.rs"]
