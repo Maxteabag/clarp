@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Own the remote build slot until the command and its remaining children are gone."""
+"""Run one job of a checkout in its copy on the build machine, and own the copy until the command and its remaining
+children are gone. Jobs of different checkouts run side by side; one checkout's jobs take turns in its copy."""
 from collections import Counter
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import ctypes
 import datetime
 import fcntl
@@ -9,8 +10,6 @@ import json
 import os
 from pathlib import Path
 import re
-import select
-import shlex
 import shutil
 import signal
 import stat
@@ -19,10 +18,11 @@ import sys
 import time
 from urllib.parse import quote
 
-QUEUE = Path('/var/tmp/clarp-build')
-LOCK = QUEUE / 'lock'
-HOLDER = QUEUE / 'holder'
-RETRY_SECONDS = 0.2
+ROOT = Path('/var/tmp/clarp-build')
+COPY_LOCKS = ROOT / '.copy-locks'
+LEGACY_SLOT = ROOT / 'lock'
+LEGACY_HOLDER = ROOT / 'holder'
+LEGACY_EVICTION = ROOT / 'eviction-lock'
 CHILDREN = Path(f'/proc/self/task/{os.getpid()}/children')
 
 
@@ -35,7 +35,7 @@ def executable(pid):
 
 
 def place_in(path):
-    if path.is_relative_to(QUEUE):
+    if path.is_relative_to(ROOT):
         return None
     # Host tests usually run in "work" below a named fixture. Pytest
     # inserts a per-user parent above its fixtures; never print that parent.
@@ -97,7 +97,7 @@ def clean_children():
     print(f'leftovers={sum(counts.values())}', *summary, flush=True)
 
 
-def recorded_holder(identity):
+def recorded_holder(identity, path):
     # Some filesystems report a different device number in /proc/locks
     # than in stat. Ask the recorded owner's actual descriptor instead.
     fields = identity.split(':')
@@ -106,7 +106,7 @@ def recorded_holder(identity):
     pid, start, fd = fields
     proc = Path('/proc') / pid
     try:
-        if process_start(pid) != start or not (proc / 'fd' / fd).samefile(LOCK):
+        if process_start(pid) != start or not (proc / 'fd' / fd).samefile(path):
             return False
         for line in (proc / 'fdinfo' / fd).read_text().splitlines():
             words = line.split()
@@ -126,193 +126,145 @@ def process_start(pid):
         return None
 
 
-def waiting_landings():
-    waiting = {}
-    for marker in sorted(QUEUE.glob('first-*-*')):
-        _, pid, start = marker.name.split('-', 2)
-        try:
-            if process_start(pid) != start:
-                marker.unlink(missing_ok=True)
-            else:
-                waiting[f'{pid}-{start}'] = marker.read_text().strip()
-        except FileNotFoundError:
-            continue
-    return waiting
-
-
-def publish_marker(marker, description):
-    # Until the complete description is ready, waiters still see the old one.
-    temporary = marker.with_name('.' + marker.name)
-    try:
-        temporary.write_text(description + '\n')
-        temporary.replace(marker)
-    finally:
-        temporary.unlink(missing_ok=True)
+def open_lock(path):
+    # Not inherited (PEP 446): a build's leftover child never keeps a copy held.
+    return os.open(path, os.O_RDONLY | os.O_CREAT | os.O_NOFOLLOW, 0o644)
 
 
 @contextmanager
-def marker_for(description):
-    pid = os.getpid()
-    marker = QUEUE / f'first-{pid}-{process_start(pid)}'
+def held(path, mode=fcntl.LOCK_EX, wait=True):
+    """Lock `path` (flock) for the block and yield True, or, with wait=False, yield False at once when another has it."""
+    fd = open_lock(path)
     try:
-        publish_marker(marker, description)
-        yield marker
-    finally:
-        marker.unlink(missing_ok=True)
-
-
-def try_lock(lock):
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except BlockingIOError:
-        return False
-
-
-def admitted(landing, lease):
-    markers = waiting_landings()
-    if lease:
-        if not markers.get(lease, '').startswith('lease '):
-            raise SystemExit('The landing lease has ended.')
-        return True
-    if landing:
-        return not any(text.startswith('lease ') for text in markers.values())
-    return not markers
-
-
-# An ordinary waiter's place in line: wait-<arrival, ns since the epoch>-<pid>-<process start>,
-# holding its description. Waiters take the slot in order of arrival; a landing (CLARP_BUILD_FIRST)
-# and a lease's builds keep going before all of them, and take no place in line.
-IN_LINE = re.compile(r'wait-([0-9]+)-([0-9]+)-([0-9]+)')
-
-
-def waiting_in_line():
-    """The ordinary waiters still alive, first come first: (arrival ns, marker name, description).
-    A waiter whose process has ended gives up its place: its marker is removed here."""
-    line = []
-    for name in os.listdir(QUEUE):
-        match = IN_LINE.fullmatch(name)
-        if not match:
-            continue
-        arrival, pid, start = match.groups()
         try:
-            if not stat.S_ISREG(os.lstat(QUEUE / name).st_mode):
-                continue
-            if process_start(pid) != start:
-                (QUEUE / name).unlink(missing_ok=True)
-                continue
-            description = (QUEUE / name).read_text().strip()
-        except FileNotFoundError:
-            continue
-        line.append((int(arrival), name, description))
-    return sorted(line)
+            fcntl.flock(fd, mode if wait else mode | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(fd)
+
+
+def lock_of(name):
+    """The lock of one checkout's copy, kept beside the copies so that a drop of the copy never removes it."""
+    COPY_LOCKS.mkdir(exist_ok=True)
+    return COPY_LOCKS / f'{name}.lock'
+
+
+def holder_of(name):
+    return COPY_LOCKS / f'{name}.holder'
+
+
+def holding(name):
+    """(started ns, description) of the job that holds this copy now, or None."""
+    try:
+        identity, started, description = holder_of(name).read_text().strip().split(' ', 2)
+    except (FileNotFoundError, ValueError):
+        return None
+    if not started.isdecimal() or not recorded_holder(identity, COPY_LOCKS / f'{name}.lock'):
+        return None
+    return int(started), description
 
 
 @contextmanager
-def place_in_line(description):
-    pid = os.getpid()
-    marker = QUEUE / f'wait-{time.time_ns()}-{pid}-{process_start(pid)}'
+def own_copy(name, description):
+    """Hold this checkout's copy for one job: its sources, its target and its stamps. Another job of the same
+    checkout waits here; jobs of other checkouts do not (Peter, 26 Nov 2026: no queue)."""
+    fd = open_lock(lock_of(name))
     try:
-        publish_marker(marker, description)
-        yield marker
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            other = holding(name)
+            print(f"Build copy: waiting for this checkout's running job to finish ({other[1] if other else 'starting'}).",
+                  flush=True)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        temporary = COPY_LOCKS / f'.{name}.holder.{os.getpid()}'
+        temporary.write_text(f'{os.getpid()}:{process_start(os.getpid())}:{fd} {time.time_ns()} {description}\n')
+        temporary.replace(holder_of(name))
+        try:
+            yield
+        finally:
+            # Still held here, so no later job's record is removed.
+            holder_of(name).unlink(missing_ok=True)
     finally:
-        marker.unlink(missing_ok=True)
+        os.close(fd)
 
 
-def my_turn(landing, lease, place):
-    """Whether this waiter may try for the slot now: admitted, and first in line if it has a place."""
-    if not admitted(landing, lease):
-        return False
-    if place is None:
-        return True
-    line = waiting_in_line()
-    return bool(line) and line[0][1] == place.name
+# Checkouts whose tools predate 26 Nov 2026 still build with the machine-wide slot (LEGACY_SLOT, held for as
+# long as such a build runs, by a process that takes no copy lock), and free room or seed a target under the
+# eviction lock (LEGACY_EVICTION, exclusive). Their files are left as they are; these two fences keep a build of
+# either version from touching a target the other is using. Both go once no checkout has the old tools.
+
+@contextmanager
+def no_old_build_running():
+    """Yield True while no build of the older tools can run, so another copy's target can be shown to be idle by its
+    copy lock alone. Shared and without waiting: builds of this version never hold each other off here, and one that
+    cannot have it skips its optional housekeeping rather than wait."""
+    with held(LEGACY_SLOT, fcntl.LOCK_SH, wait=False) as free:
+        yield free
 
 
-def acquire_slot(lock, landing, lease, place=None):
-    while True:
-        if my_turn(landing, lease, place) and try_lock(lock):
-            if admitted(landing, lease):
-                return
-            fcntl.flock(lock, fcntl.LOCK_UN)
-        time.sleep(RETRY_SECONDS)
+@contextmanager
+def kept_from_older_housekeeping():
+    """Keep the older tools' eviction, seeding and drop, which take no copy lock, away from this build's target.
+    Shared: builds of this version never hold each other off; it waits only while older tools are freeing room."""
+    fd = open_lock(LEGACY_EVICTION)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Build copy: waiting for a build of older tools to finish freeing build disk.', flush=True)
+            fcntl.flock(fd, fcntl.LOCK_SH)
+        yield
+    finally:
+        os.close(fd)
 
 
-def take_slot(lock, landing, description):
-    lease = os.getenv('CLARP_BUILD_LEASE')
-    if landing and not lease:
-        with marker_for(description):
-            acquire_slot(lock, landing, None)
-    elif lease:
-        acquire_slot(lock, landing, lease)
-    else:
-        with place_in_line(description) as place:
-            acquire_slot(lock, landing, lease, place)
-
-
-def reserve(description):
-    # The local wrapper alone owns the writing end of SSH stdin. EOF also
-    # cancels a driver that dies while waiting behind another reservation.
-    with marker_for(description) as marker, (QUEUE / 'lease-lock').open('a') as serial:
-        while not try_lock(serial):
-            if select.select([sys.stdin], [], [], RETRY_SECONDS)[0]:
-                return
-        with (QUEUE / 'eviction-lock').open('a') as guard:
-            fcntl.flock(guard, fcntl.LOCK_EX)
-            publish_marker(marker, 'lease ' + description)
-        print(marker.name.removeprefix('first-'), flush=True)
-        sys.stdin.buffer.read()
-
-
-def drive(host, checkout, who, command):
+def drive(checkout, command):
+    """A local landing driver's lease: this checkout's lock on this machine, held while the driver runs, so its
+    build commands go before any other job of this checkout started here. It reserves nothing on the build machine."""
     if not command or os.getenv('CLARP_BUILD_LEASE'):
         raise SystemExit('usage: build lease COMMAND [ARG ...] (one lease per driver)')
-    # Hold the checkout lock before registering remotely. Otherwise an ordinary
-    # caller could own the checkout while its remote build waits for our lease.
     with open(f'/var/tmp/clarp-build-{checkout}.lock', 'a') as local:
         fcntl.flock(local, fcntl.LOCK_EX)
-        remote = shlex.join(['python3', '-c', Path(__file__).read_text(), '--reserve', who])
-        with subprocess.Popen(['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
-                               host, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                              text=True) as keeper:
-            try:
-                identity = keeper.stdout.readline().strip()
-                pid, separator, start = identity.partition('-')
-                if not separator or not pid.isdecimal() or not start.isdecimal():
-                    raise SystemExit('Could not acquire the landing lease.')
-                env = dict(os.environ, CLARP_BUILD_LEASE=identity, CLARP_BUILD_LEASE_CHECKOUT=checkout)
-                result = subprocess.run(command, env=env).returncode
-                return result if result >= 0 else 128 - result
-            finally:
-                keeper.stdin.close()
+        pid = os.getpid()
+        env = dict(os.environ, CLARP_BUILD_LEASE=f'{pid}-{process_start(pid)}', CLARP_BUILD_LEASE_CHECKOUT=checkout)
+        result = subprocess.run(command, env=env).returncode
+        return result if result >= 0 else 128 - result
 
 
-def status(lock):
-    markers = waiting_landings()
-    for identity, waiting in markers.items():
-        if waiting.startswith('lease '):
-            pid = identity.partition('-')[0]
-            print(f'landing lease: {waiting[6:]} (keeper PID {pid}; ending this process releases the reservation)')
-        else:
-            print(f'landing waiting: {waiting}')
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        try:
-            identity, _, description = HOLDER.read_text().strip().partition(' ')
-        except FileNotFoundError:
-            identity, description = '', ''
-        if description and recorded_holder(identity):
-            print(f'building: {description}')
-        else:
-            users = subprocess.run(['fuser', str(LOCK)], capture_output=True, text=True)
-            names = [executable(pid) for pid in users.stdout.split() if pid.isdecimal() and int(pid) != os.getpid()]
-            print('queue: held without a current holder record; file users:', *names)
-    else:
-        print('queue: reserved' if any(m.startswith('lease ') for m in markers.values()) else 'queue: free')
+def status():
+    """The builds running now, by checkout, without taking any lock."""
     now = time.time_ns()
-    for place, (arrival, _, description) in enumerate(waiting_in_line(), 1):
-        print(f'waiting {place}: {description} (waited {waited(now - arrival)})')
+    running = []
+    try:
+        names = sorted(entry.removesuffix('.holder') for entry in os.listdir(COPY_LOCKS) if entry.endswith('.holder')
+                       and not entry.startswith('.'))
+    except FileNotFoundError:
+        names = []
+    for name in names:
+        job = holding(name)
+        if job:
+            running.append((job[0], job[1]))
+    for started, description in sorted(running):
+        print(f'building: {description} (for {waited(now - started)})')
+    try:
+        identity, _, description = LEGACY_HOLDER.read_text().strip().partition(' ')
+    except FileNotFoundError:
+        identity, description = '', ''
+    old = bool(description) and recorded_holder(identity, LEGACY_SLOT)
+    if old:
+        print(f'building with older tools: {description}')
+    if not running and not old:
+        print('builds: none running')
+    waiting = 0
+    for marker in ROOT.glob('wait-*-*-*'):
+        _, _, pid, start = marker.name.split('-', 3)
+        waiting += process_start(pid) == start
+    if waiting:
+        print(f'waiting in the older tools\' line: {waiting} (they take turns among themselves)')
 
 
 def waited(ns):
@@ -405,6 +357,18 @@ def trim_test_executables(deps):
     return removed
 
 
+def evictable(root, name):
+    """(last build's time, target's stat) of another checkout's copy whose target may be removed, else None."""
+    try:
+        with directory(name, root) as copy, directory('server-rs', copy) as workspace:
+            with directory('target', workspace) as target:
+                identity = os.fstat(target)
+            age = last_build(name, copy, workspace)
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return None
+    return None if age is None else (age, identity)
+
+
 def make_room(root, current, floor):
     # Free space is the filesystem's own count (statvfs, as df reports it), never a sum of du:
     # a target cloned from another (seed_target) shares most of its data with it, and du counts
@@ -422,39 +386,37 @@ def make_room(root, current, floor):
             pass
         if tests:
             free = free_after_removal(floor)
+    busy = 'none'
     if free < floor:
-        # Serialize this scan with publication of a new lease. A keeper may
-        # release its lease during cleanup; retaining its copy is safe.
-        with (QUEUE / 'eviction-lock').open('a') as guard:
-            fcntl.flock(guard, fcntl.LOCK_EX)
-            leases = [description.rsplit(' since ', 1)[0] for description in waiting_landings().values()
-                      if description.startswith('lease ')]
-            candidates = []
-            for name in os.listdir(root):
-                if name == current or any(lease.endswith(' ' + name) for lease in leases):
-                    continue
-                try:
-                    with directory(name, root) as copy, directory('server-rs', copy) as workspace:
-                        with directory('target', workspace) as target:
-                            identity = os.fstat(target)
-                        age = last_build(name, copy, workspace)
-                        if age is not None:
-                            candidates.append((age, name, identity))
-                except (FileNotFoundError, NotADirectoryError, PermissionError):
-                    continue
-            for _, name, identity in sorted(candidates):
-                try:
-                    with directory(name, root) as copy, directory('server-rs', copy) as workspace:
-                        with directory('target', workspace) as target:
-                            if not os.path.samestat(os.fstat(target), identity):
-                                continue
-                        shutil.rmtree('target', dir_fd=workspace)
-                except (FileNotFoundError, NotADirectoryError):
-                    continue
-                removed.append(quote(name, safe=''))
-                free = free_after_removal(floor)
-                if free >= floor:
-                    break
+        with no_old_build_running() as fenced:
+            if not fenced:
+                busy = 'all (a build of older tools is running)'
+            else:
+                candidates = []
+                for name in os.listdir(root):
+                    if name != current and (built := evictable(root, name)) is not None:
+                        candidates.append((*built, name))
+                kept = []
+                for age, identity, name in sorted(candidates, key=lambda c: (c[0], c[2])):
+                    # A copy whose own job or drop has it is in use: it is left, never waited for. Under its lock the
+                    # target must still be the one found, and not built since, to be removed.
+                    with held(lock_of(name), wait=False) as idle:
+                        if not idle:
+                            kept.append(quote(name, safe=''))
+                            continue
+                        now = evictable(root, name)
+                        if now is None or now[0] != age or not os.path.samestat(now[1], identity):
+                            continue
+                        try:
+                            with directory(name, root) as copy, directory('server-rs', copy) as workspace:
+                                shutil.rmtree('target', dir_fd=workspace)
+                        except (FileNotFoundError, NotADirectoryError):
+                            continue
+                    removed.append(quote(name, safe=''))
+                    free = free_after_removal(floor)
+                    if free >= floor:
+                        break
+                busy = ','.join(kept) or 'none'
     if free < floor:
         try:
             with directory('target') as target, directory('debug', target) as debug:
@@ -467,7 +429,7 @@ def make_room(root, current, floor):
     verdict = ('ready' if free >= floor else
                f'Build stopped before cargo because less than {floor} bytes are free; {floor - free} more bytes needed')
     print(f"Build disk: for {quote(current, safe='')}, superseded tests={tests}, "
-          f"removed targets={','.join(removed) or 'none'}, incremental removed={incremental}, "
+          f"removed targets={','.join(removed) or 'none'}, targets in use kept={busy}, incremental removed={incremental}, "
           f"free={free} bytes, {verdict}.", file=sys.stdout if free >= floor else sys.stderr, flush=True)
     return free >= floor
 
@@ -523,8 +485,7 @@ def seed_target(root, current, workspace):
     every checkout, so checkouts building in turn would rebuild each other's crates every time.
     Where the filesystem cannot clone, nothing is copied and the build starts cold: one file is
     cloned first to find out, and the target is cloned only with --reflink=always, never copied.
-    The caller holds the slot, so no build writes to the source while it is cloned; the eviction
-    lock keeps a drop from removing it meanwhile.
+    The caller holds its own copy; the source is held shared while it is cloned (see below).
     Returns the source checkout's name, or None.
     """
     try:
@@ -532,64 +493,91 @@ def seed_target(root, current, workspace):
         return None
     except FileNotFoundError:
         pass
-    with (QUEUE / 'eviction-lock').open('a') as guard:
-        fcntl.flock(guard, fcntl.LOCK_EX)
-        sources = []
-        for name in os.listdir(root):
-            if name == current:
-                continue
-            try:
-                with directory(name, root) as copy, directory('server-rs', copy) as other:
-                    with directory('target', other) as target:
-                        built = host_library_built(target)
-                    good = last_good_build(copy)
-                    if good is not None and last_build(name, copy, other) is not None:
-                        sources.append((built, good, name))
-            except (FileNotFoundError, NotADirectoryError, PermissionError):
-                continue
-        if not sources:
+    sources = [found for name in os.listdir(root) if name != current and (found := seed_source(root, name))]
+    if not sources:
+        return None
+    with no_old_build_running() as fenced:
+        if not fenced:
+            print('Build target: a build of older tools is running, so no other target can be shown idle; building cold.',
+                  flush=True)
             return None
-        name = max(sources)[2]
-        try:
-            shutil.rmtree(SEED, dir_fd=workspace)
-        except FileNotFoundError:
-            pass
-        try:
-            with directory(name, root) as copy, directory('server-rs', copy) as other:
-                # A file of this checkout's own, cloned beside it, tells whether the filesystem
-                # clones at all; the checkouts and their targets are on that one filesystem.
-                fd = os.open(SEED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=workspace)
-                with os.fdopen(fd, 'w') as probe:
-                    probe.write('clone probe\n')
+        in_use = []
+        for found in sorted(sources, reverse=True):
+            name = found[2]
+            # Shared: two new checkouts may clone one target at once. Its own job and a drop take it alone, so none
+            # of them writes or removes it while it is cloned, and a copy that one of them has is left, never waited
+            # for. Under the lock the source must still be as it was found: a build since may have failed.
+            with held(lock_of(name), fcntl.LOCK_SH, wait=False) as idle:
+                if not idle:
+                    in_use.append(quote(name, safe=''))
+                    continue
+                if seed_source(root, name) != found:
+                    continue
+                cloned = clone_target(root, name, workspace)
+                if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
+                    os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
+                    newer_than_the_clone(ROOT / current)
+                    return name
+            try:
+                shutil.rmtree(SEED, dir_fd=workspace)
+            except FileNotFoundError:
+                pass
+            if cloned is None:  # the source went meanwhile
+                continue
+            detail = cloned.stderr.strip().splitlines()[-1:]
+            print(f"Build target: could not clone {quote(name, safe='')}'s target ({' '.join(detail)}); building cold.", flush=True)
+            return None
+        if in_use:
+            print(f"Build target: the good targets are in use ({','.join(in_use)}); building cold.", flush=True)
+        return None
+
+
+def seed_source(root, name):
+    """(Host's library built, last good build's time, name) of a copy whose target may seed another, else None."""
+    try:
+        with directory(name, root) as copy, directory('server-rs', copy) as other:
+            with directory('target', other) as target:
+                built = host_library_built(target)
+            good = last_good_build(copy)
+            if good is not None and last_build(name, copy, other) is not None:
+                return built, good, name
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        pass
+    return None
+
+
+def clone_target(root, name, workspace):
+    """Clone `name`'s target to SEED in this workspace. The cp's result, or None when the source is gone."""
+    try:
+        shutil.rmtree(SEED, dir_fd=workspace)
+    except FileNotFoundError:
+        pass
+    try:
+        with directory(name, root) as copy, directory('server-rs', copy) as other:
+            # A file of this checkout's own, cloned beside it, tells whether the filesystem
+            # clones at all; the checkouts and their targets are on that one filesystem.
+            fd = os.open(SEED, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600, dir_fd=workspace)
+            with os.fdopen(fd, 'w') as probe:
+                probe.write('clone probe\n')
+            cloned = subprocess.run(
+                ['cp', '--reflink=always', f'/proc/self/fd/{workspace}/{SEED}', f'/proc/self/fd/{workspace}/{SEED}.clone'],
+                pass_fds=(workspace,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            for probe in (SEED, f'{SEED}.clone'):
+                try:
+                    os.unlink(probe, dir_fd=workspace)
+                except FileNotFoundError:
+                    pass
+            if cloned.returncode == 0:
                 cloned = subprocess.run(
-                    ['cp', '--reflink=always', f'/proc/self/fd/{workspace}/{SEED}', f'/proc/self/fd/{workspace}/{SEED}.clone'],
-                    pass_fds=(workspace,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-                for probe in (SEED, f'{SEED}.clone'):
-                    try:
-                        os.unlink(probe, dir_fd=workspace)
-                    except FileNotFoundError:
-                        pass
-                if cloned.returncode == 0:
-                    cloned = subprocess.run(
-                        ['cp', '-a', '--reflink=always', f'/proc/self/fd/{other}/target', f'/proc/self/fd/{workspace}/{SEED}'],
-                        pass_fds=(other, workspace), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-        except (FileNotFoundError, NotADirectoryError):
-            cloned = None
-        if cloned is not None and cloned.returncode == 0 and stat.S_ISDIR(os.stat(SEED, dir_fd=workspace, follow_symlinks=False).st_mode):
-            os.rename(SEED, 'target', src_dir_fd=workspace, dst_dir_fd=workspace)
-            newer_than_the_clone(QUEUE / current)
-            return name
-        try:
-            shutil.rmtree(SEED, dir_fd=workspace)
-        except FileNotFoundError:
-            pass
-        detail = cloned.stderr.strip().splitlines()[-1:] if cloned is not None else ['source removed']
-        print(f"Build target: could not clone {quote(name, safe='')}'s target ({' '.join(detail)}); building cold.", flush=True)
+                    ['cp', '-a', '--reflink=always', f'/proc/self/fd/{other}/target', f'/proc/self/fd/{workspace}/{SEED}'],
+                    pass_fds=(other, workspace), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            return cloned
+    except (FileNotFoundError, NotADirectoryError):
         return None
 
 
 def prepare_debug(workspace, profile):
-    """Keep one dev/test profile generation in this target. The caller holds the slot."""
+    """Keep one dev/test profile generation in this target. The caller holds its copy."""
     mark = '.clarp-debug-profile'
     try:
         os.mkdir('target', dir_fd=workspace)
@@ -634,12 +622,18 @@ def build_space(floor, debug=False, outcome=None):
         yield True
         return
     cwd = Path.cwd()
-    if cwd.name != 'server-rs' or cwd.parent.parent != QUEUE:
+    if cwd.name != 'server-rs' or cwd.parent.parent != ROOT:
         raise SystemExit('Build workspace is outside the managed build directory.')
-    with directory(QUEUE) as root, directory(cwd.parent.name, root) as copy:
+    with directory(ROOT) as root, directory(cwd.parent.name, root) as copy:
         with directory('server-rs', copy) as workspace:
             if not os.path.samestat(os.fstat(workspace), os.stat('.')):
-                raise SystemExit('Build workspace changed during admission.')
+                raise SystemExit('Build workspace changed while its copy was being taken.')
+            # From here the target changes: it seeds no other checkout until this build has ended with 0, also
+            # when this build is killed before its stamp is written.
+            try:
+                os.unlink(GOOD, dir_fd=copy)
+            except FileNotFoundError:
+                pass
             started = time.monotonic()
             source = seed_target(root, cwd.parent.name, workspace)
             if source:
@@ -666,7 +660,15 @@ def build_space(floor, debug=False, outcome=None):
             os.replace(temp, STAMP, src_dir_fd=copy, dst_dir_fd=copy)
 
 
-def run(lock, who, command, floor=None, debug=False):
+def copy_name():
+    """The checkout whose copy this job runs in: its workspace (server-rs) or fmt's private copy in it."""
+    cwd = Path.cwd()
+    if cwd.parent.parent != ROOT or cwd.parent.name.startswith('.'):
+        raise SystemExit('Build job is outside the managed build directory.')
+    return cwd.parent.name
+
+
+def run(who, command, floor=None, debug=False):
     # PR_SET_CHILD_SUBREAPER adopts orphaned descendants, including children
     # which start their own process group or session.
     libc = ctypes.CDLL(None, use_errno=True)
@@ -674,43 +676,35 @@ def run(lock, who, command, floor=None, debug=False):
         raise OSError(ctypes.get_errno(), 'cannot supervise build children')
     for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, cancelled)
-    landing = os.environ.get('CLARP_BUILD_FIRST') == '1' or bool(os.getenv('CLARP_BUILD_LEASE'))
+    name = copy_name()
     since = datetime.datetime.now().strftime('%H:%M:%S')
-    take_slot(lock, landing, f'{who} since {since}')
-    try:
-        prefix = 'landing ' if landing else ''
-        since = datetime.datetime.now().strftime('%H:%M:%S')
-        identity = f'{os.getpid()}:{process_start(os.getpid())}:{lock}'
-        HOLDER.write_text(f'{identity} {prefix}{who} since {since}\n')
-        outcome = {}
-        with build_space(floor, debug, outcome) as ready:
-            if not ready:
-                return 1
-            child = subprocess.Popen(command)
-            result = child.wait()
-            outcome['code'] = result
-        return result if result >= 0 else 128 - result
-    finally:
-        for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-            signal.signal(sig, signal.SIG_IGN)
+    with own_copy(name, f'{who} since {since}'), (kept_from_older_housekeeping() if floor is not None else nullcontext()):
+        # The copy stays held until every child is gone: a leftover still writing the target keeps it.
         try:
-            clean_children()
+            outcome = {}
+            with build_space(floor, debug, outcome) as ready:
+                if not ready:
+                    return 1
+                child = subprocess.Popen(command)
+                result = child.wait()
+                outcome['code'] = result
+            return result if result >= 0 else 128 - result
         finally:
-            HOLDER.write_text('')
+            for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+                signal.signal(sig, signal.SIG_IGN)
+            clean_children()
+
+
+def main(argv):
+    if argv[0] == '--drive':
+        return drive(argv[1], argv[2:])
+    if argv[0] == 'status':
+        return status()
+    ROOT.mkdir(exist_ok=True)
+    if argv[0] in ('--build', '--build-debug'):
+        return run(argv[2], argv[3:], int(argv[1]), argv[0] == '--build-debug')
+    return run(argv[0], argv[1:])
 
 
 if __name__ == '__main__':
-    if sys.argv[1] == '--drive':
-        sys.exit(drive(*sys.argv[2:5], sys.argv[5:]))
-    QUEUE.mkdir(exist_ok=True)
-    if sys.argv[1] == '--reserve':
-        reserve(sys.argv[2] + ' since ' + datetime.datetime.now().strftime('%H:%M:%S'))
-        sys.exit(0)
-    # Python opens the lock close-on-exec; Popen also closes other descriptors.
-    with LOCK.open('a') as slot:
-        if sys.argv[1] == 'status':
-            status(slot.fileno())
-        elif sys.argv[1] in ('--build', '--build-debug'):
-            sys.exit(run(slot.fileno(), sys.argv[3], sys.argv[4:], int(sys.argv[2]), sys.argv[1] == '--build-debug'))
-        else:
-            sys.exit(run(slot.fileno(), sys.argv[1], sys.argv[2:]))
+    sys.exit(main(sys.argv[1:]))
