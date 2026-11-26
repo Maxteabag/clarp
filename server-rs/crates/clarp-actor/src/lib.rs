@@ -4447,8 +4447,7 @@ impl Actor {
             return self.run_waiting(now_ms);
         }
         let mut out = Outputs::default();
-        if held
-            && let Some(Turn::Parked(waiting)) = self.recorder.agent().live()
+        if let Some(Turn::Parked(waiting)) = self.recorder.agent().live()
             && waiting.wait.is_for_an_account()
             && !waiting.ran
         {
@@ -4473,7 +4472,7 @@ impl Actor {
         let agent = self.recorder.agent();
         let live = agent.live().is_some();
         let waiting = agent.waiting().count();
-        (live || waiting > 0 && !agent.transit_held()).then_some((live, waiting))
+        (live || waiting > 0 && !self.recorder.transit_held()).then_some((live, waiting))
     }
 
     /// The tools the agent's log last changed it from and to, since it was last started again.

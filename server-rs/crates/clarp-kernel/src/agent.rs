@@ -459,7 +459,6 @@ pub struct Agent {
     paused: bool,
     /// The destination of a move starts no turn until the handoff resumes it.
     import_held: bool,
-    transit_held: bool,
     /// First turn number after the most recent explicit user Stop.
     user_stop_floor: Option<u64>,
     moved: Option<crate::agent_moves::Mark>,
@@ -574,7 +573,6 @@ impl Default for Agent {
             note: None,
             paused: false,
             import_held: false,
-            transit_held: false,
             user_stop_floor: None,
             moved: None,
             settled: 0,
@@ -694,15 +692,6 @@ impl Agent {
 
     pub fn waiting(&self) -> impl Iterator<Item = &Queued> {
         self.mailbox.iter()
-    }
-
-    pub fn transit_held(&self) -> bool {
-        self.transit_held
-    }
-
-    /// Transit jobs belong to the running Host, so their dispatch fence is not replayed.
-    pub(crate) fn hold_for_transit(&mut self, held: bool) {
-        self.transit_held = held;
     }
 
     pub fn import_held(&self) -> bool {
@@ -1130,11 +1119,22 @@ impl Agent {
 
     /// Says what a command does, without doing it.
     pub fn decide(&self, command: Command, now_ms: i64) -> Result<Decision, Refusal> {
+        self.decide_with_transit_hold(command, now_ms, false)
+    }
+
+    /// A transient Host cutover can fence dispatch without changing the replayable state.
+    pub(crate) fn decide_with_transit_hold(
+        &self,
+        command: Command,
+        now_ms: i64,
+        transit_held: bool,
+    ) -> Result<Decision, Refusal> {
         // Work on a copy and move it only through `apply`, so that what is decided here is, by
         // construction, what a replay of the events will rebuild.
         let mut work = Work {
             agent: self.clone(),
             decision: Decision::default(),
+            transit_held,
         };
         let start_waiting = matches!(&command, Command::StopAndStartWaiting { .. });
         match command {
@@ -1438,7 +1438,7 @@ impl Agent {
                 work.record(AgentEvent::StartedAgain { at_ms: now_ms });
             }
             Command::HoldUnsentForTransit { turn } => {
-                if !work.agent.transit_held
+                if !work.transit_held
                     || !matches!(&work.agent.live, Some(Turn::Parked(waiting))
                         if waiting.id == turn && !waiting.ran && waiting.wait.is_for_an_account())
                 {
@@ -1460,7 +1460,7 @@ impl Agent {
                 if work.agent.live.is_some() {
                     return Err(Refusal::AtWork);
                 }
-                if !work.agent.transit_held && !work.agent.mailbox.is_empty() {
+                if !work.transit_held && !work.agent.mailbox.is_empty() {
                     return Err(Refusal::Waiting);
                 }
                 work.record(AgentEvent::ChangedTool {
@@ -2286,6 +2286,7 @@ fn change_at(change: &TurnEvent) -> Option<i64> {
 struct Work {
     agent: Agent,
     decision: Decision,
+    transit_held: bool,
 }
 
 impl Work {
@@ -2365,7 +2366,7 @@ impl Work {
     fn start_next_with(&mut self, now_ms: i64, takeover: Option<crate::takeover::Start>) {
         // Keep the replay's ordering check compatible with historical turns that started under
         // an import pause. New decisions must never start one before the handoff.
-        if self.agent.live.is_some() || self.agent.import_held || self.agent.transit_held {
+        if self.agent.live.is_some() || self.agent.import_held || self.transit_held {
             return;
         }
         // The message that took over the turn that just ended runs next: sent by hand once
@@ -2485,8 +2486,18 @@ mod tests {
         }
 
         fn send(&mut self, command: Command) -> Result<Vec<Effect>, Refusal> {
+            self.send_with_transit_hold(command, false)
+        }
+
+        fn send_with_transit_hold(
+            &mut self,
+            command: Command,
+            transit_held: bool,
+        ) -> Result<Vec<Effect>, Refusal> {
             self.now_ms += 10;
-            let decision = self.agent.decide(command, self.now_ms)?;
+            let decision = self
+                .agent
+                .decide_with_transit_hold(command, self.now_ms, transit_held)?;
             for event in &decision.events {
                 self.agent.apply(event).expect("a decided event applies");
             }
@@ -4216,22 +4227,60 @@ mod tests {
         a.background(11);
         assert_eq!(a.live(), None, "a held mailbox starts nothing");
         assert_eq!(a.waiting(), vec![2]);
-        a.agent.hold_for_transit(true);
-        a.send(Command::ChangeTool {
-            from: "claude".to_string(),
-            backend: "codex".to_string(),
-            selection: None,
-            backend_session: Some("thread-1".to_string()),
-            opening: None,
-        })
+        a.send_with_transit_hold(
+            Command::ChangeTool {
+                from: "claude".to_string(),
+                backend: "codex".to_string(),
+                selection: None,
+                backend_session: Some("thread-1".to_string()),
+                opening: None,
+            },
+            true,
+        )
         .unwrap();
-        a.agent.hold_for_transit(false);
         a.send(Command::RunWaiting).unwrap();
         assert_eq!(a.agent.changed(), Some(("claude", "codex")));
         assert_eq!(a.live(), None);
         assert_eq!(a.waiting(), vec![2]);
         a.send(Command::Resume { by: "user".into() }).unwrap();
         assert_eq!(a.live(), Some(2));
+    }
+
+    #[test]
+    fn agent_transit_returns_only_an_unstarted_account_wait_to_the_front() {
+        for provider_started in [false, true] {
+            let mut a = Driven::new();
+            a.user(10);
+            a.user(11);
+            a.send(Command::TurnParked {
+                turn: TurnId(1),
+                wait: crate::turn::Wait::account(90_000),
+                kind: if provider_started {
+                    crate::failures::USAGE_LIMIT
+                } else {
+                    crate::failures::NOT_STARTED
+                }
+                .to_string(),
+                reason: "waiting for an account".to_string(),
+            })
+            .unwrap();
+
+            let hold = Command::HoldUnsentForTransit { turn: TurnId(1) };
+            let held = a.send_with_transit_hold(hold, true);
+            if provider_started {
+                assert_eq!(held, Err(Refusal::UnsentNotProven(TurnId(1))));
+                assert_eq!(a.live(), Some(1));
+                assert_eq!(a.waiting(), vec![2]);
+            } else {
+                assert!(held.unwrap().is_empty());
+                assert_eq!(a.live(), None);
+                assert_eq!(a.waiting(), vec![1, 2]);
+                assert_eq!(
+                    a.send(Command::RunWaiting).unwrap(),
+                    vec![Effect::StartTurn { turn: TurnId(1), message_seq: 10 }]
+                );
+            }
+        }
     }
 
     #[test]

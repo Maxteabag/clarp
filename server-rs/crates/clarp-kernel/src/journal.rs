@@ -262,6 +262,8 @@ pub struct Recorder {
     experience: crate::experience::History,
     turn_sessions: turn_sessions::TurnSessions,
     agent: Agent,
+    // In-process queue fence, deliberately separate from the agent’s journaled state.
+    transit_held: bool,
     /// Legacy waiting turns that already have a conversation row.
     shown_waiting: HashSet<TurnId>,
     /// Form answer deliveries among the queued turns, recovered from their stored prompts.
@@ -475,6 +477,7 @@ impl Recorder {
             experience,
             turn_sessions,
             agent,
+            transit_held: false,
             shown_waiting,
             waiting_answers,
             cursor,
@@ -606,7 +609,11 @@ impl Recorder {
     }
 
     pub fn hold_for_transit(&mut self, held: bool) {
-        self.agent.hold_for_transit(held);
+        self.transit_held = held;
+    }
+
+    pub fn transit_held(&self) -> bool {
+        self.transit_held
     }
 
     /// The public queue contains messages whose conversation row does not exist yet.
@@ -904,7 +911,9 @@ impl Batch<'_> {
     /// A command the agent refuses adds nothing: the refusal is returned and the batch stands.
     pub fn command(&mut self, command: Command, now_ms: i64) -> Result<(), Refusal> {
         let team_prompt = self.team_prompt_key(&command);
-        let decision = self.work.decide(command, now_ms)?;
+        let decision = self
+            .work
+            .decide_with_transit_hold(command, now_ms, self.recorder.transit_held)?;
         if let Some(key) = &team_prompt {
             self.team_prompt_read(key, now_ms);
         }
