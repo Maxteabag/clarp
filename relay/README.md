@@ -83,8 +83,12 @@ Check the connection, then pair an app through it:
 
 ```bash
 clarp-host network relay status
-clarp-admin pair create --relay --name "My phone"
+CLARP_HOST_TOKEN="$(sed -n 's/^CLARP_HOST_TOKEN=//p' ~/.config/clarp-host/env)" \
+  clarp-admin pair create --relay --name "My phone"
 ```
+
+Pairing answers only the Host's owner, so it is run with the Host's administrator token,
+which the installer keeps in `~/.config/clarp-host/env`.
 
 `pair create --relay` prints a one-use QR code and `clarp://` link that carries the
 relay address `https://<relay>/h/<host id>`. Scan it with the app.
@@ -113,7 +117,8 @@ last, so never give two Hosts the same `relay.json`.
   `Authorization: Bearer` header, which is not in the URL. It still accepts the key as a
   `?key=` query parameter for connectors that send it there, and the Clarp Host
   currently does, so the key appears in your Worker's request logs. Anyone with access
-  to those logs can read it.
+  to those logs can read it. Moving the Host to the header is
+  [issue #876](https://github.com/Maxteabag/clarp/issues/876).
 - **Strangers.** Anyone who knows a host id can send requests to it. The relay forwards
   them to the Host, which refuses them without a device token and answers 429 after
   repeated failures from one address. While the Host is offline the relay answers 503
