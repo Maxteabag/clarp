@@ -542,3 +542,170 @@ fn a_turn_that_meets_a_lane_on_its_way_out_waits_for_it_and_starts_the_lane() {
     assert_eq!(switched.cold(), cold, "no turn started without a lane");
     drop(retire);
 }
+
+/// Claude agents on one Host, each with its lane, under limits a test changes as it goes (issue
+/// 908). Its fields are dropped in order: the Host stops, and then its lanes are asked to leave.
+struct Crowd {
+    host: Host,
+    _lanes: Lanes,
+    place: Place,
+    config: std::path::PathBuf,
+}
+
+impl Crowd {
+    fn new(name: &str, more: &[&str]) -> Self {
+        let place = Place::new(name);
+        let lanes = Lanes(place.root.clone());
+        let claude = place.root.join("claude");
+        program(&claude, CLAUDE);
+        let config = place.root.join("config");
+        std::fs::create_dir_all(config.join("clarp-host")).unwrap();
+        let home = place.root.join("home");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        let crowd = Self {
+            config: config.join("clarp-host/config.toml"),
+            host: place.start_in(
+                "",
+                more,
+                &[
+                    ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+                    ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+                    ("HOME", home.to_str().unwrap()),
+                ],
+            ),
+            place,
+            _lanes: lanes,
+        };
+        crowd.most(8);
+        crowd
+    }
+
+    /// The count of lanes, fixed, as the owner sets it.
+    fn most(&self, most: usize) {
+        std::fs::write(
+            &self.config,
+            format!(
+                "claude_chat_lane = true\ncodex_lane_idle_minutes = 15\nlane_limits = \"fixed\"\n\
+                 codex_lane_most = {most}\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    /// A new agent whose first turn, `ask-<session>`, started its lane; the lane's socket.
+    fn agent(&self, session: &str) -> std::path::PathBuf {
+        let made = self.host.post(
+            "/agents",
+            json!({"name": session, "session": session, "backend": "claude"}),
+        );
+        assert_eq!(made["session"], session, "{made}");
+        asked(&self.host, session, &format!("ask-{session}"));
+        let id = self.host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap()["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let socket = self.place.root.join("run").join(format!("{id}-cll.sock"));
+        assert!(
+            lane_said(&socket, "inspect").is_some(),
+            "{session} has a lane"
+        );
+        socket
+    }
+
+    /// A turn of the agent's that runs until the test releases it.
+    fn hold(&self, session: &str) {
+        let word = format!("hold-{session}");
+        self.host.send(session, &word, &word);
+        let holding = self.place.root.join(format!("holding-{session}"));
+        wait_for("the turn to be held", || holding.exists());
+    }
+
+    fn release(&self, session: &str) {
+        std::fs::write(self.place.root.join(format!("release-{session}")), "").unwrap();
+        let answer = format!("said-hold-{session}");
+        wait_for(&answer, || answers(&self.host, session, &answer) == 1);
+    }
+
+    fn cold(&self) -> u64 {
+        self.host.get("/lane-settings")["cold_starts_last_hour"]["tools"]["claude"]
+            .as_u64()
+            .unwrap_or(0)
+    }
+
+    fn launches(&self) -> Vec<String> {
+        noted(&self.place, "launches")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+fn there(socket: &std::path::Path) -> bool {
+    lane_said(socket, "inspect").is_some()
+}
+
+/// Issue 908. Over the lanes' limits (here a count the owner lowered below what is held), a turn
+/// with no lane there once ran in a process of its own while idle lanes sat there. Its lane now
+/// starts in the place of the one idle longest: no cold start, no process of its own, and the
+/// busy lane runs on.
+#[test]
+fn over_the_limits_a_turns_lane_takes_the_place_of_the_idle_one() {
+    let crowd = Crowd::new("claude-lane-over", &[]);
+    let busy = crowd.agent("busy");
+    let older = crowd.agent("older");
+    let newer = crowd.agent("newer");
+    crowd.hold("busy");
+    // One lane is all the owner allows now; three are held.
+    crowd.most(1);
+    let cold = crowd.cold();
+    let made = crowd.host.post(
+        "/agents",
+        json!({"name": "late", "session": "late", "backend": "claude"}),
+    );
+    assert_eq!(made["session"], "late", "{made}");
+    asked(&crowd.host, "late", "ask-late");
+    assert_eq!(
+        crowd.launches().last().unwrap(),
+        "--session-id turn=absent",
+        "the turn's Claude Code started as its lane"
+    );
+    assert_eq!(crowd.cold(), cold, "no turn started without a lane");
+    assert!(!there(&older), "the lane idle longest left for it");
+    assert!(there(&newer), "and only that one");
+    assert!(there(&busy), "the busy lane runs on");
+    crowd.release("busy");
+}
+
+/// Issue 908. Over the limits with only busy lanes, no lane leaves and the turn runs in a process
+/// of its own, as before.
+#[test]
+fn over_the_limits_with_every_lane_busy_a_turn_runs_on_its_own() {
+    let crowd = Crowd::new("claude-lane-over-busy", &[]);
+    let one = crowd.agent("one");
+    let two = crowd.agent("two");
+    crowd.hold("one");
+    crowd.hold("two");
+    crowd.most(1);
+    let cold = crowd.cold();
+    let made = crowd.host.post(
+        "/agents",
+        json!({"name": "late", "session": "late", "backend": "claude"}),
+    );
+    assert_eq!(made["session"], "late", "{made}");
+    asked(&crowd.host, "late", "ask-late");
+    assert_eq!(
+        crowd.launches().last().unwrap(),
+        "--session-id turn=set",
+        "the turn ran in a process of its own"
+    );
+    assert_eq!(crowd.cold(), cold + 1);
+    assert!(there(&one) && there(&two), "no busy lane was touched");
+    assert!(noted(&crowd.place, "exits").is_empty(), "no lane left");
+    crowd.release("one");
+    crowd.release("two");
+}

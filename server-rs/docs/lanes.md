@@ -127,19 +127,37 @@ as before.
     tool's typical size (Codex 270 MiB), never at 0. So does the lane about to start.
 - **Room is made before a lane starts.** The idle lanes leave, longest idle first, until both
   limits hold with the new one included. A lane that runs a turn, or whose work may continue
-  (an active goal), refuses to leave and counts.
+  (an active goal), or that a turn has claimed, is never chosen, refuses to leave if asked, and
+  counts.
+- **Over the limits, a wanted lane takes the place of idle ones** (issue 908). The lanes can be
+  over their limits with nothing wrong in them: in auto, other programs took the machine's
+  memory below the reserve; fixed, the owner lowered the count or the budget below what is held.
+  No idle lane leaving may then bring them within the limits, and refusing every lane while idle
+  ones sit there is the worst answer: a refused turn starts its tool in a process of its own, as
+  big as a lane and started cold. So a lane still starts, in the place of the fewest idle lanes,
+  in the order below, that pay for it: each counts at what it weighed, and never less than a new
+  lane of its own tool counts at, so one idle Claude lane makes room for one Claude lane, and two
+  idle Codex lanes for one OpenCode lane. What is held does not grow for it. The Host's log says
+  how many left (`over the lanes' limits, N idle lane(s) left to make room`).
+- **A lane leaving is chosen once** (issue 908). Which idle lanes leave is chosen under one gate
+  per Host (`lane/gate.rs`): a lane chosen by a start is marked until it has been asked,
+  so no other start counts it as its place or asks it again. The asks themselves are made outside
+  the gate, so nobody waits there on another lane's exit.
 - **With every place busy, an optional lane does not start** (issue 786). Where no idle lane
-  is left to leave and the limits still do not hold, a chat turn's lane is not started: a
+  may leave for it, or those that may would not pay for it, a chat turn's lane is not started: a
   Claude agent's next turns run per turn, and a Codex chat turn goes back to the agent's thread
-  and runs in a process of its own. Nothing is asked to leave for a lane that will not start:
-  which idle lanes would leave is reckoned first, and none leaves unless that is enough. A
-  native goal's lane is needed: it sends away what idle lanes it may, starts past the limits
-  and counts, so the next optional lane is not started either, and that agent's turns run per
-  turn, until a place is free.
+  and runs in a process of its own. The Host's log says so (`no place for the <tool> lane of
+  <agent>`). Nothing is asked to leave for a lane that will not start: which idle lanes would
+  leave is reckoned first, and none leaves unless that makes room. A native goal's lane is
+  needed: it sends away what idle lanes it may, starts past the limits and counts.
 - **The owner's agents come first** (his rule of 25 Nov 2026). A lane is the owner's when its
   agent had a turn the owner sent (the Oracle's included) that started or ended in the last 30
   minutes, or a chat of it is open on one of his devices: one of his apps, by a paired device's
   token or the Host's own, watches it live (`/events?live=`); an agent's tool token never counts.
+  It stays his, too, while the last of its turns that ended was one he sent, however long ago
+  (`<agent>-owner-last.mark`, issue 908): a turn another agent sent makes it the agents' own
+  again, and a compaction, schedule or goal's wake changes nothing. So a helper's lane never
+  takes the place of his front desk's.
   Any local tool that presents the Host's token counts as well, though none watches live today.
   A chat counts as long as an app names it: the web app names the chats on screen and the few
   opened last; the desktop still names every chat opened since it started, until it caps them
@@ -150,8 +168,13 @@ as before.
   room is decided without asking any agent's thread. When room is needed, idle lanes of the agents' own leave first, longest idle
   first, then idle lanes of the owner's, longest idle first; a busy lane never leaves. A lane for
   an agent of the owner's may send any idle lane away. A lane of the agents' own may send away
-  only idle lanes of the agents' own; where that is not enough it does not start, and its agent
-  runs per turn. A native goal's lane is never refused, and counts. No turn waits for a lane.
+  only idle lanes of the agents' own, so it never ends a lane the owner's next turn is about to
+  take; where that is not enough it does not start, and its agent runs per turn. A native goal's
+  lane is never refused, and counts. No turn waits for a lane.
+- **The owner's start chooses first** (issue 908). A start for one of his agents says so at the
+  gate before it looks at the lanes; a start of the agents' own waits there, 3 s at most
+  (`TURN_LEAVE_WAIT`), until no start of his is still choosing. Where an owner's turn and a
+  helper's want the last place at once, his takes it, and the helper's runs per turn.
 - **What holds with Codex alone.** The count allows eight lanes. The budget allows eight lanes
   that have not weighed themselves yet (270 MiB each). Lanes that have weighed themselves count
   at what they measured: an idle Codex app-server measured 130, 139 and 142 MiB of PSS on
