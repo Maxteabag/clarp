@@ -11,6 +11,9 @@ export struct ChatRow {
     initial: string,
     stamp: string,
     preview: string,
+    // Why the agent cannot answer now ("Restarting · back in ~20 s"), else
+    // "": it stands in for the preview while shown.
+    availability: string,
     activity: string,
     depth: int,
     queued: int,
@@ -269,12 +272,22 @@ component Row inherits Rectangle {
             }
             if !root.compact: HorizontalLayout {
                 spacing: 6px;
-                Text {
+                if root.chat.availability == "": Text {
                     text: root.chat.preview;
                     color: Palette.muted;
                     font-size: 12 * Look.unit;
                     overflow: elide;
                     horizontal-stretch: 1;
+                }
+                if root.chat.availability != "": Text {
+                    text: root.chat.availability;
+                    color: Palette.muted;
+                    font-size: 12 * Look.unit;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    accessible-role: text;
+                    accessible-id: "row-availability";
+                    accessible-label: root.chat.availability;
                 }
                 if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12 * Look.unit; }
                 // Snoozed: out of Needs you until then.

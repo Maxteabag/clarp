@@ -96,6 +96,8 @@ export struct PaneView {
     moved: string,
     // "Moving to Codex… Starting" while the agent changes backend (#723).
     moving: string,
+    // Why the agent cannot answer now ("Usage limit · back at 14:05"), else "".
+    availability: string,
     default-effort: string,
     busy: bool,
     // "Working…" under the transcript (Show when ready, agent working).
@@ -201,7 +203,9 @@ export struct WorkspaceTab {
 // PaneLeaf.qml + ConversationPane.qml.
 export component Pane inherits Rectangle {
     // The header's quiet line: what is set, joined by dots, none trailing.
-    property <string> header-info: root.join-info(root.join-info(root.join-info(root.join-info(root.pane.host, root.pane.moved), root.pane.moving), root.pane.status), root.pane.busy ? "working" : "");
+    // Why the agent cannot answer now stands in for its status and "working".
+    property <string> header-info: root.join-info(root.join-info(root.join-info(root.pane.host, root.pane.moved), root.pane.moving),
+        root.pane.availability != "" ? root.pane.availability : root.join-info(root.pane.status, root.pane.busy ? "working" : ""));
     pure function join-info(a: string, b: string) -> string {
         return a == "" ? b : b == "" ? a : a + "  ·  " + b;
     }

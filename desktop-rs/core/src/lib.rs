@@ -7,6 +7,7 @@ pub mod all_hosts;
 pub mod artifact_summary;
 pub mod attachments;
 pub mod audio;
+pub mod availability;
 pub mod audio_journal;
 pub mod avatar_motion;
 pub mod catalog;

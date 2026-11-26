@@ -113,6 +113,15 @@ pub struct Agent {
     /// phase, backend, model}, feature `agent_backend_transit`); None
     /// otherwise.
     pub transit: Option<Object>,
+    /// Whether it can answer now (`availability`, feature
+    /// `agent_availability`); None from an older Host, or once it can.
+    pub availability: Option<crate::availability::Availability>,
+    /// Its Host said it restarts (`host-updating`) and has not been read
+    /// since; set by the roster, never read from a row.
+    pub host_updating: Option<crate::availability::HostUpdating>,
+    /// The Host's clock minus this machine's (ms) when the row was last
+    /// set: the availability line counts with it. Set by the roster.
+    pub host_clock_offset_ms: i64,
 }
 
 impl Default for Agent {
@@ -177,6 +186,9 @@ impl Default for Agent {
             moved_to_host: String::new(),
             host: String::new(),
             transit: None,
+            availability: None,
+            host_updating: None,
+            host_clock_offset_ms: 0,
         }
     }
 }
@@ -272,6 +284,9 @@ impl Agent {
                 .to_owned(),
             host: String::new(),
             transit: object.get("transit").and_then(Value::as_object).cloned(),
+            availability: crate::availability::Availability::from_json(object.get("availability")),
+            host_updating: None,
+            host_clock_offset_ms: 0,
         }
     }
 
@@ -343,6 +358,7 @@ impl Agent {
                     self.moved_to_host = new.moved_to_host.clone();
                 }
                 "transit" => self.transit = new.transit.clone(),
+                "availability" => self.availability = new.availability.clone(),
                 _ => {}
             }
         }

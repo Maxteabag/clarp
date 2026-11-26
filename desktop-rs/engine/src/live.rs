@@ -382,6 +382,7 @@ impl Engine {
         let effects = view.apply_event(event);
         if view.generation() != before {
             view.observe_clock(server_now, now_ms());
+            self.observe_host_clock(server_now);
             self.live.heard.insert(session.clone());
             self.changes.push(Change::Live(session.clone()));
         }
@@ -403,12 +404,14 @@ impl Engine {
                 self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
             }
             let Some(view) = self.live.views.get_mut(session) else { return true };
-            view.observe_clock(object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0), now_ms());
+            let server_now = object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0);
+            view.observe_clock(server_now, now_ms());
             // An idle, empty snapshot is what a silent Host answers too.
             let state = view.activity().get("state").and_then(Value::as_str).unwrap_or("idle");
             if !view.items().is_empty() || !matches!(state, "idle" | "") {
                 self.live.heard.insert(session.to_owned());
             }
+            self.observe_host_clock(server_now);
             self.changes.push(Change::Live(session.to_owned()));
         }
         true

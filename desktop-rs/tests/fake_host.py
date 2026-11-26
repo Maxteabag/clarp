@@ -199,7 +199,7 @@ queue_steer = {"on": False}
 # 183): off until /__control/roster-rows turns them on.
 roster_rows = {"fields": False, "row": False}
 # The kinds whose events carry `fields`, and those an app reads one row for.
-ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit")
+ROSTER_CARRIED = ("helper-state", "mute-changed", "chat_view", "agent-transit", "availability")
 # A stalled turn (feature stalled_turn, Host contract 149): on, as a current
 # Host has it; /__control/stall-feature turns it off for an older Host.
 stall_feature = True
@@ -1085,7 +1085,8 @@ def roster_event(body):
             rows[session].update(body.get("set", {}))
         if parent.get("session") in rows:
             rows[parent["session"]].update(parent.get("set", {}))
-        if roster_rows["fields"] and kind in ROSTER_CARRIED and session in rows and body.get("set"):
+        # An availability event always carries its fields (agent_availability).
+        if (roster_rows["fields"] or kind == "availability") and kind in ROSTER_CARRIED and session in rows and body.get("set"):
             row = rows[session]
             event["agent_id"] = row["agent_id"]
             event["fields"] = {key: copy.deepcopy(row.get(key)) for key in body["set"]}

@@ -90,6 +90,9 @@ mod stop_checks;
 // ---- a stalled turn: the working indicator says so and offers Stop (#249)
 #[path = "stall_checks.rs"]
 mod stall_checks;
+// ---- an agent that cannot answer now says why (#918, #924)
+#[path = "availability_checks.rs"]
+mod availability_checks;
 // ---- the agent list kept, marked stale and retried when the snapshot fails
 #[path = "roster_checks.rs"]
 mod roster_checks;
@@ -622,6 +625,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "stalled-turn" => stall_checks::stalled_turn_check(out),
+        "availability" => availability_checks::availability_check(out),
         "kept-processes" => lanes_checks::kept_processes_check(out),
         "all-hosts" => all_hosts_checks::all_hosts_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),

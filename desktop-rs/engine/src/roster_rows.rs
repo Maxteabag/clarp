@@ -27,7 +27,8 @@ pub(crate) const FIELDS_FEATURE: &str = "roster_fields";
 pub(crate) const ROW_FEATURE: &str = "agent_row";
 
 /// The kinds whose events carry `fields` on a Host with `roster_fields`.
-const CARRIED: [&str; 4] = ["helper-state", "mute-changed", "chat_view", "agent-transit"];
+/// `availability` (feature `agent_availability`) always carries them.
+const CARRIED: [&str; 5] = ["helper-state", "mute-changed", "chat_view", "agent-transit", "availability"];
 /// The kinds whose change stays in the agent's own row: with `agent_row`,
 /// that row is read. `coordination-changed` is one only with a `session`
 /// (without, the Host's own value changed), and `agent-transit` only
@@ -67,7 +68,7 @@ pub(crate) fn step(event: &Object, fields: bool, row: bool) -> Step {
     if kind.is_empty() || session.is_empty() {
         return Step::Snapshot;
     }
-    if fields && CARRIED.contains(&kind.as_str()) {
+    if (fields || kind == clarp_core::availability::ROSTER_KIND) && CARRIED.contains(&kind.as_str()) {
         if let Some(changed) = event.get("fields").and_then(Value::as_object) {
             let parent = event.get("parent").and_then(Value::as_object).and_then(|parent| {
                 let maker = json::string(parent, "session");

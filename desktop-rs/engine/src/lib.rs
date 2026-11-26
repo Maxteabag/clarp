@@ -840,7 +840,8 @@ impl Engine {
             return;
         }
         let Some(cache) = self.transcript_cache.clone() else { return };
-        let snapshot = cache.load_roster(&self.cache_key);
+        let mut snapshot = cache.load_roster(&self.cache_key);
+        clarp_core::availability::strip_cached(&mut snapshot);
         if !snapshot.is_empty() && self.roster.agents().is_empty() {
             self.mutate_roster(|r| r.apply_snapshot(&snapshot));
             self.changes.push(Change::Roster);
@@ -1082,6 +1083,16 @@ impl Engine {
         self.snapshot_retry = 0;
         self.snapshot_dirty = false;
         self.request_snapshot();
+    }
+
+    /// A time the Host sent as its "now" (epoch ms): the offset the
+    /// availability line counts with.
+    pub(crate) fn observe_host_clock(&mut self, host_now_ms: i64) {
+        if host_now_ms > 0 {
+            let offset = host_now_ms - crate::live::now_ms();
+            self.roster.set_clock_offset(offset);
+            self.archived.set_clock_offset(offset);
+        }
     }
 
     fn mutate_roster<R>(&mut self, change: impl FnOnce(&mut Roster) -> R) -> R {
@@ -1850,6 +1861,15 @@ impl Engine {
                 }
             }
             "agent-transit" => self.transit_event(event),
+            clarp_core::availability::HOST_UPDATING => {
+                // Sent just before a planned restart, so its `since_ms` is
+                // the Host's now.
+                let updating = clarp_core::availability::HostUpdating::from_event(event);
+                if updating.since_ms > 0 {
+                    self.observe_host_clock(updating.since_ms);
+                }
+                self.mutate_roster(|r| r.set_host_updating(updating));
+            }
             "agent-roster" => {
                 self.chat_view_roster(event);
                 self.roster_event(event);

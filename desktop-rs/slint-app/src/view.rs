@@ -268,10 +268,21 @@ pub(crate) fn start_turn_clock() {
         if let Some(app) = crate::app() {
             app.tick_turn_stamps();
             app.tick_stall_notices();
+            app.tick_availability();
             crate::triage::tick(&app);
         }
     });
     TURN_CLOCK.with(|t| *t.borrow_mut() = Some(timer));
+}
+
+/// Why `session`'s agent cannot answer now, as the chat list and the chat's
+/// header say it, or empty (`clarp_core::availability`).
+pub(crate) fn availability_line(engine: &clarp_engine::Engine, session: &str) -> String {
+    let roster = engine.roster();
+    roster
+        .find(session)
+        .map(|agent| roster.availability_line(agent, chrono::Utc::now().timestamp_millis(), &chrono::Local))
+        .unwrap_or_default()
 }
 
 pub(crate) fn initial(name: &str) -> SharedString {

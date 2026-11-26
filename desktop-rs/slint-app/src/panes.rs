@@ -669,6 +669,7 @@ impl App {
         view.host = engine.host_badge(session).into();
         view.moved = agent.map(clarp_core::all_hosts::moved_line).unwrap_or_default().into();
         view.moving = crate::profile_view::moving_line(engine, session).into();
+        view.availability = crate::view::availability_line(engine, session).into();
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
@@ -773,6 +774,30 @@ impl App {
             pane.view.stall = stall.into();
             if let Some(mut row) = self.panes.row_data(index).filter(|row| row.id == pane.view.id) {
                 row.stall = pane.view.stall.clone();
+                self.panes.set_row_data(index, row);
+            }
+        }
+    }
+
+    /// With the chat list's: an open chat's availability line counts on,
+    /// and only a pane whose words changed is rewritten.
+    pub fn tick_pane_availability(&self) {
+        let Ok(engine) = self.engine.try_borrow() else { return };
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        for index in 0..panes.len() {
+            let pane = &mut panes[index];
+            let shown = !pane.view.availability.is_empty();
+            let has = engine.roster().find(&pane.session).is_some_and(|a| a.availability.is_some() || a.host_updating.is_some());
+            if !shown && !has {
+                continue;
+            }
+            let line = crate::view::availability_line(&engine, &pane.session);
+            if pane.view.availability == line.as_str() {
+                continue;
+            }
+            pane.view.availability = line.into();
+            if let Some(mut row) = self.panes.row_data(index).filter(|row| row.id == pane.view.id) {
+                row.availability = pane.view.availability.clone();
                 self.panes.set_row_data(index, row);
             }
         }

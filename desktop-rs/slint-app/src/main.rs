@@ -297,6 +297,7 @@ impl App {
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
                 chat.host = engine.host_badge(&row.session).into();
+                chat.availability = view::availability_line(engine, &row.session).into();
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
                 (chat.running_helpers, chat.running_processes) = view::running_work(&chat, working_under.get(&row.session).copied().unwrap_or(0));
                 chat.queue = queue.iter().position(|s| *s == row.session).map_or(0, |i| i as i32 + 1);
@@ -336,6 +337,28 @@ impl App {
                 self.chats.set_row_data(index, chat);
             }
         }
+    }
+
+    /// Once a second: the availability lines count down ("back in ~20 s").
+    /// Only rows whose agent has one, or had one, are read; a row is
+    /// rewritten only when its words changed.
+    pub fn tick_availability(&self) {
+        let Ok(engine) = self.engine.try_borrow() else { return };
+        let roster = engine.roster();
+        for index in 0..self.chats.row_count() {
+            let Some(mut chat) = self.chats.row_data(index) else { continue };
+            let Some(agent) = roster.find(chat.session.as_str()) else { continue };
+            if chat.availability.is_empty() && agent.availability.is_none() && agent.host_updating.is_none() {
+                continue;
+            }
+            let line = view::availability_line(&engine, chat.session.as_str());
+            if chat.availability != line.as_str() {
+                chat.availability = line.into();
+                self.chats.set_row_data(index, chat);
+            }
+        }
+        drop(engine);
+        self.tick_pane_availability();
     }
 
     /// Folds (`Some(false)`), unfolds (`Some(true)`) or toggles (`None`) the

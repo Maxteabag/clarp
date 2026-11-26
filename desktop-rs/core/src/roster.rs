@@ -164,6 +164,11 @@ pub struct Roster {
     /// The Host lists the `stalled_turn` feature (contract 149): its stall
     /// fields are read. Off, an older Host shows nothing new.
     stall_feature: bool,
+    /// The Host said it restarts (`host-updating`); cleared by the next
+    /// snapshot, which only a Host that is up answers.
+    host_updating: Option<crate::availability::HostUpdating>,
+    /// The Host's clock minus this machine's (ms), stamped on every row.
+    clock_offset_ms: i64,
     ops: Vec<Op>,
 }
 
@@ -319,6 +324,8 @@ impl Roster {
         if agent.session.is_empty() || agent.agent_id.is_empty() || self.archived_only {
             return false;
         }
+        agent.host_clock_offset_ms = self.clock_offset_ms;
+        agent.host_updating = self.host_updating.clone();
         self.transport_available = true;
         if let Some(row) = self.index_of_session(&agent.session) {
             agent.unread = self.agents[row].unread;
@@ -334,12 +341,15 @@ impl Roster {
 
     pub fn apply_snapshot(&mut self, snapshot: &Object) {
         self.transport_available = true;
+        // A Host that answers is up: every row is read without the update.
+        self.host_updating = None;
         let mut next: Vec<Agent> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for value in json::array(snapshot, "agents") {
             let Some(object) = value.as_object() else { continue };
             self.turn_clock |= object.contains_key("turn_started_at");
             let mut agent = Agent::from_json(object);
+            agent.host_clock_offset_ms = self.clock_offset_ms;
             if !self.stall_feature {
                 agent.stalled_since = None;
                 agent.stalled_action = None;
@@ -448,6 +458,7 @@ impl Roster {
         let Some(row) = self.index_of_session(session) else { return RowChange::NotHeld };
         let mut agent = self.agents[row].clone();
         agent.patch(fields);
+        agent.host_clock_offset_ms = self.clock_offset_ms;
         if !self.stall_feature {
             agent.stalled_since = None;
             agent.stalled_action = None;
@@ -460,6 +471,8 @@ impl Roster {
     pub fn replace_row(&mut self, object: &Object) -> RowChange {
         let mut agent = Agent::from_json(object);
         let Some(row) = self.index_of_session(&agent.session).filter(|_| !agent.session.is_empty()) else { return RowChange::NotHeld };
+        agent.host_clock_offset_ms = self.clock_offset_ms;
+        agent.host_updating = self.host_updating.clone();
         self.turn_clock |= object.contains_key("turn_started_at");
         if !self.stall_feature {
             agent.stalled_since = None;
@@ -479,6 +492,47 @@ impl Roster {
             self.recount_helpers();
         }
         RowChange::Applied
+    }
+
+    /// The Host's `host-updating` event: every row shows "Host updating"
+    /// until the next snapshot.
+    pub fn set_host_updating(&mut self, updating: crate::availability::HostUpdating) {
+        let updating = Some(updating);
+        if self.host_updating == updating {
+            return;
+        }
+        self.host_updating = updating.clone();
+        for agent in &mut self.agents {
+            agent.host_updating = updating.clone();
+        }
+        self.notify_all(&ALL_ROLES);
+    }
+
+    /// The Host's clock minus this machine's (ms), from a time the Host
+    /// sent with "now" in it. Stamped on every row; nothing is redrawn,
+    /// the next tick counts with it.
+    pub fn set_clock_offset(&mut self, offset_ms: i64) {
+        self.clock_offset_ms = offset_ms;
+        for agent in &mut self.agents {
+            agent.host_clock_offset_ms = offset_ms;
+        }
+    }
+
+    /// The agent's availability line at `local_now_ms` (this machine's
+    /// clock) in `zone`, or empty. A row this desktop cannot reach says
+    /// only that its Host updates.
+    pub fn availability_line<Tz: chrono::TimeZone>(&self, agent: &Agent, local_now_ms: i64, zone: &Tz) -> String
+    where
+        Tz::Offset: std::fmt::Display,
+    {
+        let reachable = self.transport_available && agent.latest_state != "offline";
+        crate::availability::line(
+            agent.availability.as_ref().filter(|_| reachable),
+            agent.host_updating.as_ref(),
+            agent.host_clock_offset_ms,
+            local_now_ms,
+            zone,
+        )
     }
 
     pub fn apply_state_event(&mut self, event: &Object) {

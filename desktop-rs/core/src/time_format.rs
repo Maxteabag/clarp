@@ -89,6 +89,15 @@ where
     }
 }
 
+/// Short clock time ("14:05" or "2:05 PM") of an epoch-milliseconds
+/// instant in `zone`, or empty.
+pub fn clock_at<Tz: TimeZone>(epoch_millis: i64, zone: &Tz) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    zone.timestamp_millis_opt(epoch_millis).single().map(|m| short_time(&m)).unwrap_or_default()
+}
+
 /// Short clock time for an ISO-8601 message timestamp, or empty.
 pub fn clock_time<Tz: TimeZone>(timestamp: &str, zone: &Tz) -> String
 where
