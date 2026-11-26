@@ -25,6 +25,63 @@ WORKER_TERM_TIMEOUT_SEC = 2.0
 WORKER_KILL_TIMEOUT_SEC = 2.0
 
 
+# How a detached worker was placed relative to the server's own service unit.
+DETACH_TRANSIENT_UNIT = "transient_unit"
+DETACH_NEW_SESSION = "new_session"
+
+
+def spawn_detached_worker(
+    command: list[str], *, unit: str,
+    environment: dict[str, str] | None = None,
+    launcher: Callable[..., tuple[bool, str]] | None = None,
+    popen: Callable[..., Any] = subprocess.Popen,
+) -> tuple[bool, str, str]:
+    """Launch a worker that must outlive a restart of the Clarp service.
+
+    `systemd/clarp.service` sets no `KillMode`, so it gets systemd's default,
+    `control-group`: `systemctl --user restart clarp` SIGTERMs *every* process
+    in the unit's cgroup. `start_new_session=True` buys a new session and
+    process group but the same cgroup, so on Linux it does not escape that
+    sweep -- on macOS it does, because launchd's default
+    `AbandonProcessGroup=false` kills only the process group.
+
+    Preference order, therefore:
+
+    1. a transient systemd user unit (`service_manager.launch_detached`), which
+       puts the worker in a sibling cgroup under `user@.service` and out of
+       reach of the restart sweep. This is what the server update already does
+       (server/lib/server_update.py:249).
+    2. `start_new_session=True`, for macOS, containers, and any Linux host
+       without a usable user D-Bus session. `launch_detached` returns failure
+       rather than falling back in that last case, so the fallback lives here.
+
+    Returns `(ok, mechanism, error)`; `mechanism` is one of
+    `DETACH_TRANSIENT_UNIT`, `DETACH_NEW_SESSION` or `""`.
+    """
+    if not command:
+        raise ValueError("detached worker needs a command")
+    if launcher is None:
+        from . import service_manager
+        launcher = service_manager.launch_detached
+    error = ""
+    try:
+        ok, error = launcher(list(command), unit=unit, environment=environment)
+    except Exception as exc:  # noqa: BLE001 -- any launcher failure must fall back
+        ok, error = False, f"{type(exc).__name__}: {exc}"
+    if ok:
+        return True, DETACH_TRANSIENT_UNIT, ""
+    try:
+        popen(
+            list(command), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+            env={**os.environ, **(environment or {})},
+        )
+    except (OSError, ValueError) as exc:
+        return False, "", f"{error}; new-session fallback failed: {exc}".strip("; ")
+    return True, DETACH_NEW_SESSION, error
+
+
 def job_handle(job: dict) -> str:
     return f"bg1:{int(job.get('generation') or 1)}:{job['job_id']}"
 

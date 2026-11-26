@@ -17,6 +17,14 @@ Environment="CLAUDE_PWA_CONFIG=@@CONFIG_FILE_ENV@@"
 Environment="CLAUDE_PWA_DB=@@DATABASE_ENV@@"
 Environment="CLAUDE_PWA_LOG_DIR=@@LOG_ENV@@"
 UMask=0077
+# KillMode is deliberately left at systemd's default, `control-group`: a
+# restart must take every backend CLI, TTS worker and turn child down with the
+# server, because none of them can finish a turn once the server that owns
+# their callbacks is gone (see server/lib/interrupted_turns.py, issue #11).
+# The consequence is that `start_new_session=True` does NOT protect a worker:
+# a new session is not a new cgroup. Work that is meant to outlive a restart
+# must be launched into its own transient unit -- see
+# `service_manager.launch_detached` and `background_jobs.spawn_detached_worker`.
 ExecStart=@@PYTHON@@ @@SERVER@@
 Restart=on-failure
 RestartSec=2

@@ -751,12 +751,69 @@ def build_parser() -> argparse.ArgumentParser:
     himalaya.add_argument("--himalaya-bin", default="himalaya")
     himalaya.set_defaults(func=run_himalaya)
 
+    for sub_parser in (whatsapp, himalaya):
+        sub_parser.add_argument(
+            "--detach", action="store_true",
+            help=("relaunch this watcher into its own transient service unit "
+                  "so a Clarp server restart cannot take it down, then exit"))
+
     return parser
+
+
+def _load_background_jobs():
+    """Import the deployed `lib.background_jobs`, the way agent_bg.py does."""
+    root = os.environ.get(
+        "CLARP_CODE_ROOT",
+        os.environ.get("CLARP_SHARE_DIR", str(Path.home() / ".local/share/clarp")))
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from lib import background_jobs  # noqa: PLC0415
+    return background_jobs
+
+
+def detach_self(argv: list[str]) -> int:
+    """Relaunch this process detached from the server's control group.
+
+    A watcher started from an agent's shell inherits the Clarp service cgroup,
+    and `systemctl --user restart clarp` kills the whole cgroup by default, so
+    the watcher dies with the server it was registered against. Relaunching
+    through `background_jobs.spawn_detached_worker` puts it in its own
+    transient unit (a new session as a fallback).
+    """
+    command = [sys.executable, os.path.abspath(__file__)] + [
+        arg for arg in argv if arg != "--detach"]
+    unit = "clarp-message-watch-" + hashlib.sha256(
+        "\0".join(command).encode()).hexdigest()[:12]
+    try:
+        background_jobs = _load_background_jobs()
+    except Exception as exc:  # noqa: BLE001 -- worker must still start
+        print(f"warning: detach helper unavailable ({exc}); "
+              "starting a new session instead", file=sys.stderr)
+        subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        print("new_session")
+        return 0
+    ok, mechanism, error = background_jobs.spawn_detached_worker(
+        command, unit=unit)
+    if not ok:
+        print(f"error: could not launch the detached watcher: {error}",
+              file=sys.stderr)
+        return 1
+    if mechanism != background_jobs.DETACH_TRANSIENT_UNIT:
+        # Never silent: on Linux this fallback means the watcher is still
+        # inside the server's cgroup and will not survive a restart.
+        print(f"warning: no transient unit ({error or 'unavailable'}); "
+              f"detached with {mechanism}", file=sys.stderr)
+    print(mechanism)
+    return 0
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if getattr(args, "detach", False):
+        return detach_self(sys.argv[1:])
     return args.func(args)
 
 

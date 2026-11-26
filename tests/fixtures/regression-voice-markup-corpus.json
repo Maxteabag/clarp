@@ -1,0 +1,186 @@
+{
+  "_comment": [
+    "Contract corpus for the display-side voice-markup cleaner.",
+    "`expected` is what server/lib/voice_markup.py clean_for_display(text) returns.",
+    "Every implementation that mirrors it (static/lib/voice-markup.js stripVoiceMarkup,",
+    "and the out-of-repo Swift MarkdownParser) must produce the same string.",
+    "`agree` cases pass in both languages today.",
+    "`diverge` cases are pinned as expected failures on the JS side; `pwa_today`",
+    "records what the PWA actually produces so the drift is visible in review."
+  ],
+  "agree": [
+    {
+      "name": "plain",
+      "input": "Just a sentence.",
+      "expected": "Just a sentence."
+    },
+    {
+      "name": "speak_wrapper",
+      "input": "<speak>hello there</speak>",
+      "expected": "hello there"
+    },
+    {
+      "name": "speak_attributes",
+      "input": "<speak version=\"1.0\" xml:lang=\"en-GB\">hi</speak>",
+      "expected": "hi"
+    },
+    {
+      "name": "speak_unclosed",
+      "input": "<speak>hello",
+      "expected": "hello"
+    },
+    {
+      "name": "speak_uppercase",
+      "input": "<SPEAK>hello</SPEAK>",
+      "expected": "hello"
+    },
+    {
+      "name": "vox_leading",
+      "input": "<vox>Hmm</vox>, okay then.",
+      "expected": "Okay then."
+    },
+    {
+      "name": "vox_inline",
+      "input": "I, <vox>um</vox>, think so.",
+      "expected": "I think so."
+    },
+    {
+      "name": "vox_attributes",
+      "input": "<vox kind=\"filler\">um</vox> ok",
+      "expected": "Ok"
+    },
+    {
+      "name": "vox_multiline",
+      "input": "<vox>um\nuh</vox> ready",
+      "expected": "Ready"
+    },
+    {
+      "name": "vox_em_dash",
+      "input": "Right — <vox>you know</vox> — done.",
+      "expected": "Right done."
+    },
+    {
+      "name": "vox_nested",
+      "input": "<speak><vox>um <vox>uh</vox></vox> ready</speak>",
+      "expected": "</vox> ready"
+    },
+    {
+      "name": "vox_unclosed",
+      "input": "I said <vox>um and then stopped",
+      "expected": "I said <vox>um and then stopped"
+    },
+    {
+      "name": "break_self_closing",
+      "input": "wait <break time=\"350ms\"/> for it",
+      "expected": "wait for it"
+    },
+    {
+      "name": "break_no_slash",
+      "input": "wait <break time=\"300ms\"> for it",
+      "expected": "wait for it"
+    },
+    {
+      "name": "break_stray_close",
+      "input": "wait </break> for it",
+      "expected": "wait for it"
+    },
+    {
+      "name": "break_before_comma",
+      "input": "Sure <break time=\"1s\"/>, we can.",
+      "expected": "Sure, we can."
+    },
+    {
+      "name": "break_gt_inside_attribute",
+      "input": "<break time=\"3>0\"/> x",
+      "expected": "0\"/> x"
+    },
+    {
+      "name": "speed_pair",
+      "input": "<speed ratio=\"0.85\">slow</speed> done",
+      "expected": "slow done"
+    },
+    {
+      "name": "speed_stray_close",
+      "input": "ready </speed> now",
+      "expected": "ready now"
+    },
+    {
+      "name": "emotion_pair",
+      "input": "<emotion name=\"calm\">calm words</emotion> done",
+      "expected": "calm words done"
+    },
+    {
+      "name": "volume_self_closing",
+      "input": "<volume level=\"loud\"/>loud",
+      "expected": "loud"
+    },
+    {
+      "name": "mixed_full_reply",
+      "input": "<speak><vox>Hmm</vox>, repo is clean — <break time=\"300ms\"/> nothing hanging. <vox>You know</vox>, the board is empty.</speak>",
+      "expected": "Repo is clean — nothing hanging. The board is empty."
+    },
+    {
+      "name": "newlines_preserved",
+      "input": "line one\n\nline two",
+      "expected": "line one\n\nline two"
+    },
+    {
+      "name": "collapsing_spaces",
+      "input": "a  b   c",
+      "expected": "a b c"
+    },
+    {
+      "name": "space_before_punctuation",
+      "input": "word , next",
+      "expected": "word, next"
+    },
+    {
+      "name": "literal_less_than",
+      "input": "2 < 3 is true",
+      "expected": "2 < 3 is true"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "expected": ""
+    }
+  ],
+  "diverge": [
+    {
+      "name": "team_block",
+      "input": "Alright. <team>Sprint is green, moving on.</team> Anything else?",
+      "expected": "Alright. Anything else?",
+      "pwa_today": "Alright. <team>Sprint is green, moving on.</team> Anything else?"
+    },
+    {
+      "name": "team_block_only",
+      "input": "<speak><team>internal</team></speak>",
+      "expected": "",
+      "pwa_today": "<team>internal</team>"
+    },
+    {
+      "name": "team_uppercase",
+      "input": "before <TEAM>secret</TEAM> after",
+      "expected": "before after",
+      "pwa_today": "before <TEAM>secret</TEAM> after"
+    },
+    {
+      "name": "team_attributes",
+      "input": "x <team id=\"t1\">secret</team> y",
+      "expected": "x y",
+      "pwa_today": "x <team id=\"t1\">secret</team> y"
+    },
+    {
+      "name": "hidden_oai_mem_citation",
+      "input": "Visible.<oai-mem-citation>secret</oai-mem-citation> Done.",
+      "expected": "Visible. Done.",
+      "pwa_today": "Visible.<oai-mem-citation>secret</oai-mem-citation> Done."
+    },
+    {
+      "name": "hidden_environment_context",
+      "input": "Reply.<environment_context>cwd=/tmp</environment_context>",
+      "expected": "Reply.",
+      "pwa_today": "Reply.<environment_context>cwd=/tmp</environment_context>"
+    }
+  ]
+}
