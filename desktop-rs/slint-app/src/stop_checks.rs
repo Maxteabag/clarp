@@ -91,6 +91,12 @@ pub fn stop_receipt_check(out: String) {
             }
             let added = control("/__control/add-agent", &json!({"session": "theo-97e5", "persona": "Theo"}));
             check(added.is_ok(), &format!("Theo joins the roster: {added:?}"));
+            // The Host tells a Stop in its own sentence where it has one
+            // (`stop_receipt_text`); an answer without one keeps the
+            // desktop's line.
+            let text = control("/__control/stop-text", &json!({"on": true}));
+            check(text.is_ok(), &format!("the Host lists stop_receipt_text: {text:?}"));
+            app.engine.borrow_mut().reconnect();
             true
         })),
         ("theo", Box::new(|app, _, _| app.engine.borrow().roster().find("theo-97e5").is_some())),
@@ -160,6 +166,12 @@ pub fn stop_receipt_check(out: String) {
             shot(&out_refused, "stop-06-runtime-refused");
             true
         })),
+        // ---- the Host's bare "Stopped.": the transcript's Stop line says
+        // it, once; the composer adds nothing and keeps its height.
+        working("bare sentence working", json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
+            "queue_paused": false, "goals_paused": 0, "text": "Stopped."})),
+        stop_by_command("bare sentence stop"),
+        says("bare sentence", 6, "", out.clone(), "stop-08-stopped-once"),
         // ---- the paused queue, as the composer and the explorer say it
         ("queue paused", Box::new(|_, _, _| {
             let set = control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 2, "queue_paused": true}}));

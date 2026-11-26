@@ -256,7 +256,9 @@ fn state(name: &str) -> Vec<Binding> {
             b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, true),
             b("send", &["Return"], "Send", false, Send, true),
             b("newline", &["Shift+Return"], "New line", false, Always, true),
-            b("queue", &["Ctrl+Return"], "Queue", true, Busy, true),
+            // While the agent works Enter hands the message over now (read
+            // into the running turn); this one keeps it until the turn ends.
+            b("queue", &["Ctrl+Return"], "Send after this turn", true, Busy, true),
             b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
             b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
             // The composer has no buttons: its actions are keys, shown here.

@@ -285,7 +285,9 @@ fn one_line(text: &str) -> String {
 }
 
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
-    let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
+    // A chat with no message yet says so in words; its folder is no
+    // subtitle (a Host's internal path read as noise in the list).
+    let preview = if row.last_message.trim().is_empty() { "No messages yet".to_owned() } else { one_line(&row.last_message) };
     let activity = if row.stalled_since.is_some() {
         clarp_core::stall::ROW_STATUS.to_owned()
     } else if row.busy && !row.status_text.is_empty() {
@@ -918,6 +920,8 @@ mod tests {
         let chat = super::chat_row(&row, 0, "");
         assert_eq!(chat.activity.as_str(), "helper: python3 - <<'EOF' p = 'core/tests/x.rs' assert_eq!(a, b)");
         assert_eq!(chat.preview.as_str(), "First line second line");
+        let quiet = clarp_core::roster::AgentRow { working_directory: "/state/ws".into(), ..Default::default() };
+        assert_eq!(super::chat_row(&quiet, 0, "").preview.as_str(), "No messages yet", "a chat with no message never shows its folder");
     }
 
     /// The compact explorer's marks count what the full row's badges count:

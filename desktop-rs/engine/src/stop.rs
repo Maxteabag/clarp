@@ -35,7 +35,7 @@ impl Engine {
         let Some((receipt, _)) = self.stops.receipts.get(session) else { return String::new() };
         let name = |s: &str| self.roster.find(s).map(|a| display_name(a).to_owned());
         match receipt.said(&name, self.queue_waiting(session)) {
-            Said::Line(line) => line,
+            Said::Line(line) => clarp_core::stop_receipt::composer_line(&line).to_owned(),
             Said::Error(_) => String::new(),
         }
     }

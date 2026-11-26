@@ -184,3 +184,21 @@ impl StopReceipt {
         Said::Line(chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default())
     }
 }
+
+/// The line the chat's composer shows for a Stop: a bare "Stopped." says
+/// only what the transcript's own Stop line already says, so it shows once,
+/// there, and the composer keeps its height.
+pub fn composer_line(line: &str) -> &str {
+    if line.trim().trim_end_matches('.').eq_ignore_ascii_case("stopped") { "" } else { line }
+}
+
+#[cfg(test)]
+mod composer_tests {
+    #[test]
+    fn a_bare_stopped_is_left_to_the_transcript() {
+        assert_eq!(super::composer_line("Stopped."), "");
+        assert_eq!(super::composer_line("Stopped"), "");
+        assert_eq!(super::composer_line("Stopped. 1 message waits; send one to go on."), "Stopped. 1 message waits; send one to go on.");
+        assert_eq!(super::composer_line("Stopped by Theo"), "Stopped by Theo");
+    }
+}

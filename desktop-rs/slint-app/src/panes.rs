@@ -819,6 +819,7 @@ impl App {
         // A native form's card reads its spec when it is drawn.
         crate::form_view::want(self, &session_artifacts);
         let agent_name = self.engine.borrow().roster().find(&pane.session).map(|a| clarp_core::protocol::display_name(a).to_owned()).unwrap_or_default();
+        let agent_busy = self.engine.borrow().roster().find(&pane.session).is_some_and(|a| a.busy);
         let mentionable = crate::mention_view::candidates(&self.engine.borrow());
         let cursor = self.artifact_cursor.borrow().clone();
         // Image blocks show the keyboard's place from the bridge.
@@ -880,6 +881,14 @@ impl App {
                 // A message addressed to this chat's agent by an @-mention.
                 if shown.author == "user" {
                     shown.meta = crate::mention_view::sent_to(&mentionable, &pane.session, &row.message.text).into();
+                }
+                // A message sent while the agent works says what became of
+                // it: read into the running turn, or waiting for it to end.
+                if shown.author == "user" && shown.meta.is_empty() && !shown.pending && !shown.failed {
+                    let state = sent_while_working(&row.message, live.as_ref(), agent_busy, &agent_name);
+                    if !state.is_empty() {
+                        shown.meta = state.into();
+                    }
                 }
                 // A receipt names whose question it was and goes to its card
                 // when the card is in the chat.
@@ -1371,5 +1380,42 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// What became of a message the reader sent while the agent worked: "Read
+/// while Mira worked" once the Host read it into a running turn (the live
+/// turn's `read_rows`, or the row's own `read_into`), "Waits for Mira to
+/// finish" while the turn it came after still runs, else "".
+pub(crate) fn sent_while_working(message: &clarp_core::protocol::Message, live: Option<&clarp_core::live_present::Presented>, busy: bool, agent: &str) -> String {
+    let agent = if agent.is_empty() { "the agent" } else { agent };
+    let read = !message.read_into.is_empty() || live.is_some_and(|l| l.read_rows.iter().any(|id| *id == message.id));
+    if read {
+        return format!("Read while {agent} worked");
+    }
+    let Some(live) = live.filter(|_| busy) else { return String::new() };
+    let after_start = live.started_at_ms.zip(clarp_core::time_format::epoch_ms(&message.timestamp)).is_some_and(|(began, sent)| sent > began);
+    if after_start && message.trace_id != live.turn_id {
+        return format!("Waits for {agent} to finish");
+    }
+    String::new()
+}
+
+#[cfg(test)]
+mod sent_while_working_tests {
+    use clarp_core::live_present::Presented;
+    use clarp_core::protocol::Message;
+
+    #[test]
+    fn a_message_sent_while_the_agent_works_says_read_or_waiting() {
+        let live = Presented { turn_id: "t1".into(), started_at_ms: Some(1_795_000_000_000), read_rows: vec!["read".into()], ..Presented::default() };
+        let later = "2026-11-26T10:00:00Z".to_owned();
+        let message = |id: &str, trace: &str| Message { id: id.into(), role: "user".into(), trace_id: trace.into(), timestamp: later.clone(), ..Message::default() };
+        assert_eq!(super::sent_while_working(&message("read", ""), Some(&live), true, "Mira"), "Read while Mira worked");
+        assert_eq!(super::sent_while_working(&message("next", ""), Some(&live), true, "Mira"), "Waits for Mira to finish");
+        assert_eq!(super::sent_while_working(&message("own", "t1"), Some(&live), true, "Mira"), "", "the turn's own prompt says nothing");
+        assert_eq!(super::sent_while_working(&message("next", ""), Some(&live), false, "Mira"), "", "nothing waits once the agent is idle");
+        let read_into = Message { read_into: "t1".into(), ..message("old", "") };
+        assert_eq!(super::sent_while_working(&read_into, None, false, "Mira"), "Read while Mira worked", "history keeps it");
     }
 }

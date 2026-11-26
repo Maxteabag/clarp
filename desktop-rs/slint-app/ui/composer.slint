@@ -404,7 +404,9 @@ export component Composer inherits FocusScope {
                 height: Palette.body-size * 1.6;
                 icon: @image-url("icons/send.svg");
                 label: "Send";
-                tip: "Send · " + ComposerKeys.send;
+                // While the agent works, Enter hands the message over now;
+                // the shortcut bar names the key that waits for the turn.
+                tip: root.busy ? "Send now · " + ComposerKeys.send + " (" + (root.agent-name != "" ? root.agent-name : "the agent") + " reads it while working)" : "Send · " + ComposerKeys.send;
                 tint: Palette.accent;
                 accessible-id: "composer-send";
                 clicked => { root.submit(false); }
