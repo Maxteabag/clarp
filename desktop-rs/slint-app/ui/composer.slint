@@ -414,28 +414,66 @@ export component Composer inherits FocusScope {
     }
 }
 
-// The messages waiting behind the running turn, above the composer: each
-// with Send now (`POST /turn-queue/<id>/send`), which hands it to the agent
-// now instead of after the turn; Ctrl+Shift+Enter sends the first. A Send
-// now the Host refuses (a turn still runs) says the Host's answer here; the
-// message waits on. Shown while it has items, folded composer or not.
-// More than two waiting fold it to one "N waiting" line with Manage and
-// the first one's Send now; the line opens the queue dialog.
+// The waiting line's action: a filled pill with an icon and its word
+// ("Steer now").
+component ChipAction inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <string> tip;
+    callback clicked();
+    width: action-row.preferred-width;
+    height: 20px;
+    border-radius: 10px;
+    background: touch.has-hover ? Palette.accent.brighter(10%) : Palette.accent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-description: root.tip;
+    accessible-action-default => { root.clicked(); }
+    action-row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 5px;
+        Image {
+            source: root.icon;
+            width: 12px;
+            height: 12px;
+            y: (parent.height - self.height) / 2;
+            colorize: Palette.accent-text;
+        }
+        Text {
+            text: root.text;
+            color: Palette.accent-text;
+            font-size: 11 * Look.unit;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The messages waiting behind the running turn, above the composer, as one
+// line: "1 waiting · Steer now". Its action reads them into the running
+// turn, or stops it for them where it cannot take them, or after a Stop
+// sends them (Ctrl+Shift+Enter does the same); Manage lists and edits them.
+// What could not be sent says so under it; the message waits on. Shown
+// while messages wait and Show queue is on, folded composer or not.
 export component QueueStrip inherits Rectangle {
     in property <[WaitingTurn]> items;
-    // The Host's count: more than the strip lists shows as "+N more".
+    // The Host's count of waiting messages.
     in property <int> count;
     in property <bool> busy;
     in property <bool> paused;
     in property <string> refused;
     in property <string> pane-id;
+    // The line's action ("steer", "take-over", "send"; "" for none), the
+    // message it acts on, and its word.
+    in property <string> chip-kind;
+    in property <string> chip-target;
+    in property <string> chip-label;
     callback send-now(string);
     callback steer-now(string);
     callback take-over(string);
     callback manage();
-    property <bool> folded: root.count > 2;
-    // The folded line's Send now: the first message not already being read.
-    property <WaitingTurn> next: !root.items[0].reading ? root.items[0] : root.items[1];
     background: Palette.window;
     accessible-role: list;
     accessible-id: "queue-strip:" + root.pane-id;
@@ -447,56 +485,69 @@ export component QueueStrip inherits Rectangle {
         padding-bottom: 3px;
         spacing: 2px;
         HorizontalLayout {
-            height: root.folded ? 24px : 18px;
+            height: 24px;
             spacing: 8px;
-            // Folded, the line itself opens the queue dialog.
-            Rectangle {
-                horizontal-stretch: 1;
-                min-width: 0px;
-                summary := Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.folded ? root.count + " waiting" + (root.paused && !root.busy ? "  ·  queue paused" : "")
-                        : (root.count == 1 ? "1 message waiting" : root.count + " messages waiting")
-                        + (root.paused && !root.busy ? "  ·  queue paused: Send now runs one"
-                            : root.busy ? "  ·  Send now hands it to the agent during this turn" : "");
-                    color: Palette.muted;
-                    font-size: 11 * Look.unit;
-                    overflow: elide;
-                    vertical-alignment: center;
-                }
-                if root.folded: Rectangle {
-                    accessible-role: button;
-                    accessible-id: "queue-folded:" + root.pane-id;
-                    accessible-label: summary.text;
-                    accessible-action-default => { root.manage(); }
-                    summary-touch := TouchArea { mouse-cursor: pointer; clicked => { root.manage(); } }
+            if root.count > 0: Rectangle {
+                width: chip-row.preferred-width;
+                border-radius: 12px;
+                background: Palette.raised;
+                border-width: 1px;
+                border-color: Palette.border;
+                accessible-role: groupbox;
+                accessible-id: "steer-chip:" + root.pane-id;
+                accessible-label: (root.count == 1 ? "1 waiting" : root.count + " waiting") + (root.chip-label != "" ? " · " + root.chip-label : "");
+                chip-row := HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 2px;
+                    spacing: 5px;
+                    Image {
+                        source: @image-url("icons/clock.svg");
+                        width: 12px;
+                        height: 12px;
+                        y: (parent.height - self.height) / 2;
+                        colorize: Palette.muted;
+                    }
+                    Text {
+                        text: root.count + " waiting";
+                        color: Palette.muted;
+                        font-size: 11 * Look.unit;
+                        vertical-alignment: center;
+                    }
+                    if root.chip-kind != "": Text {
+                        text: "·";
+                        color: Palette.faint;
+                        font-size: 11 * Look.unit;
+                        vertical-alignment: center;
+                    }
+                    if root.chip-kind != "": ChipAction {
+                        y: 1px;
+                        icon: root.chip-kind == "steer" ? @image-url("icons/steer.svg") : root.chip-kind == "take-over" ? @image-url("icons/stop.svg") : @image-url("icons/send.svg");
+                        text: root.chip-label;
+                        tip: root.chip-kind == "steer" ? "Read into this turn" : root.chip-kind == "take-over" ? "Stop this turn and send" : "Send now";
+                        accessible-id: "steer-chip-action:" + root.pane-id;
+                        clicked => {
+                            if (root.chip-kind == "steer") { root.steer-now(root.chip-target); }
+                            else if (root.chip-kind == "take-over") { root.take-over(root.chip-target); }
+                            else { root.send-now(root.chip-target); }
+                        }
+                    }
                 }
             }
-            if root.folded && root.next.id != "": TipButton {
-                width: self.captioned-width;
-                height: 22px;
-                icon: @image-url("icons/send.svg");
-                caption: "Send now";
-                label: "Send now: " + root.next.text;
-                tip: root.next.steer ? "Read into this turn" : root.next.take-over ? "Stop this turn and run it now"
-                    : ComposerKeys.send-now != "" ? "Send now · " + ComposerKeys.send-now : "Send now";
-                tint: Palette.accent;
-                accessible-id: "queue-send:" + root.next.id;
-                clicked => {
-                    if (root.next.steer) { root.steer-now(root.next.id); }
-                    else if (root.next.take-over) { root.take-over(root.next.id); }
-                    else { root.send-now(root.next.id); }
-                }
+            if root.count > 0 && root.paused && !root.busy: Text {
+                text: "queue paused";
+                color: Palette.muted;
+                font-size: 11 * Look.unit;
+                vertical-alignment: center;
             }
-            Rectangle {
+            Rectangle { horizontal-stretch: 1; }
+            if root.count > 0: Rectangle {
                 width: manage-text.preferred-width;
                 accessible-role: button;
                 accessible-id: "queue-manage:" + root.pane-id;
                 accessible-label: "Manage waiting messages";
                 accessible-action-default => { root.manage(); }
                 manage-text := Text {
-                    text: !root.folded && root.count > root.items.length ? "+" + (root.count - root.items.length) + " more · Manage" : "Manage";
+                    text: "Manage";
                     color: manage-touch.has-hover ? Palette.accent : Palette.link;
                     font-size: 11 * Look.unit;
                     vertical-alignment: center;
@@ -504,71 +555,8 @@ export component QueueStrip inherits Rectangle {
                 manage-touch := TouchArea { mouse-cursor: pointer; clicked => { root.manage(); } }
             }
         }
-        if !root.folded: VerticalLayout {
-            spacing: 2px;
-            for item[index] in root.items: Rectangle {
-                height: 26px;
-                border-radius: 3px;
-                background: Palette.raised;
-                accessible-role: list-item;
-                accessible-id: "queue-item:" + item.id;
-                accessible-label: item.text;
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 2px;
-                    spacing: 8px;
-                    Text {
-                        text: "⏵";
-                        color: Palette.faint;
-                        font-size: 11 * Look.unit;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: item.text;
-                        color: Palette.text;
-                        font-size: 12 * Look.unit;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                        min-width: 0px;
-                        vertical-alignment: center;
-                    }
-                    if item.reading: Text {
-                        text: "being read";
-                        color: Palette.muted;
-                        font-size: 11 * Look.unit;
-                        vertical-alignment: center;
-                    }
-                    // Steer now: read into the running turn, first choice.
-                    if !item.reading && item.steer: TipButton {
-                        y: 2px;
-                        width: self.captioned-width;
-                        height: 22px;
-                        icon: @image-url("icons/send.svg");
-                        caption: "Steer now";
-                        label: "Steer now: " + item.text;
-                        tip: index == 0 && ComposerKeys.send-now != "" ? "Read into this turn · " + ComposerKeys.send-now : "Read into this turn";
-                        tint: Palette.accent;
-                        accessible-id: "queue-steer:" + item.id;
-                        clicked => { root.steer-now(item.id); }
-                    }
-                    if !item.reading: TipButton {
-                        y: 2px;
-                        width: self.captioned-width;
-                        height: 22px;
-                        icon: @image-url("icons/send.svg");
-                        caption: "Send now";
-                        label: "Send now: " + item.text;
-                        tip: item.take-over ? "Stop this turn and run it now"
-                            : index == 0 && ComposerKeys.send-now != "" ? "Send now · " + ComposerKeys.send-now : "Send now";
-                        tint: item.steer ? Palette.muted : Palette.accent;
-                        accessible-id: "queue-send:" + item.id;
-                        clicked => { if (item.take-over) { root.take-over(item.id); } else { root.send-now(item.id); } }
-                    }
-                }
-            }
-        }
         if root.refused != "": Text {
-            text: "Not sent now: " + root.refused;
+            text: root.refused;
             color: Palette.warning;
             font-size: 11 * Look.unit;
             wrap: word-wrap;

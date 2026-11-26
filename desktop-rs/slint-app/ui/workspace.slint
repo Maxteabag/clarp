@@ -129,6 +129,11 @@ export struct PaneView {
     // refused Send now.
     waiting: [WaitingTurn],
     waiting-refused: string,
+    // The waiting line's action ("steer", "take-over", "send" or ""), the
+    // message it acts on and its word.
+    chip-kind: string,
+    chip-target: string,
+    chip-label: string,
     // The composer frame's meter: the context the agent's conversation
     // holds ("21K / 1M · 2%"), and its account's limit when near or used
     // up; "" when unknown. `meter-warn` draws it in the warning colour.
@@ -773,7 +778,7 @@ export component Pane inherits Rectangle {
                 clicked => { root.stop(); }
             }
         }
-        // The messages waiting behind the turn, each with Send now.
+        // The messages waiting behind the turn: one line, "1 waiting · Steer now".
         if root.pane.waiting.length > 0 && !root.pane.pair: QueueStrip {
             items: root.pane.waiting;
             count: Math.max(root.pane.queued, root.pane.waiting.length);
@@ -781,6 +786,9 @@ export component Pane inherits Rectangle {
             paused: root.pane.queue-paused;
             refused: root.pane.waiting-refused;
             pane-id: root.pane.id;
+            chip-kind: root.pane.chip-kind;
+            chip-target: root.pane.chip-target;
+            chip-label: root.pane.chip-label;
             send-now(id) => { AgentDialogs.queue-send(id); }
             steer-now(id) => { AgentDialogs.queue-steer(id); }
             take-over(id) => { AgentDialogs.queue-take-over(id); }

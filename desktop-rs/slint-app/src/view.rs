@@ -274,6 +274,7 @@ pub(crate) fn start_turn_clock() {
             if ticks.get() == 0 {
                 app.tick_availability();
             }
+            crate::queue_strip::tick(&app);
             crate::triage::tick(&app);
         }
     });
