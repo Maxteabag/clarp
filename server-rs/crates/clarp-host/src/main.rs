@@ -303,9 +303,10 @@ async fn serve(config: Config) -> Result<(), String> {
         config.data_dir.clone(),
     );
     steps.mark("store");
-    // Its events' numbers start above what the last run that stopped may have given out (issue
-    // 935): a client resuming from an earlier run's number is told it missed something.
-    let mut hub = Hub::new(clock.now_ms()).above(clarp_host::hub::event_floor(&config.data_dir));
+    // Its events' numbers are reserved on disk before any is given out, above every number an
+    // earlier run may have given out however it ended (issue 935): a client resuming from an
+    // earlier run's number is told it missed something.
+    let mut hub = Hub::new(clock.now_ms()).reserving(config.data_dir.join("event-numbers"));
     hub.capture = Some(capture.clone());
     let hub = Arc::new(hub);
     // The first event of a Host's life says which version it is. A client that connects while

@@ -119,6 +119,8 @@ pub struct Hub {
     availability_woken: tokio::sync::Notify,
     /// The same account observation serves both agent reads and live availability.
     pub(crate) availability_quota: watch::Sender<Arc<crate::quota::Rows>>,
+    /// The numbers its events may have, reserved on disk (`Reserved`); none for a hub of a test.
+    reserved: Option<Arc<Reserved>>,
 }
 
 impl Hub {
@@ -157,29 +159,32 @@ impl Hub {
             availability_moved: Mutex::default(),
             availability_woken: tokio::sync::Notify::new(),
             availability_quota: watch::Sender::new(Arc::new(crate::quota::Rows::unasked())),
+            reserved: None,
         }
     }
 
-    /// This run's numbers start above `floor`: what an earlier run said it may have given out
-    /// (`event_floor`, issue 935). Numbers that start from the time alone can meet an earlier
-    /// run's within one second of numbers: a client that resumed from such a number would have
-    /// the new run's first events skipped for having numbers at or below its own.
+    /// This run's events take their numbers from a reservation kept in the file at `path`:
+    /// from at or above the end of the last one any run made, and none before its own first block
+    /// is on disk (`Reserved`, issue 935).
     #[must_use]
-    pub fn above(mut self, floor: u64) -> Self {
+    pub fn reserving(self, path: std::path::PathBuf) -> Self {
+        self.reserving_in_blocks(path, BLOCK)
+    }
+
+    fn reserving_in_blocks(mut self, path: std::path::PathBuf, block: u64) -> Self {
+        let reserved = Arc::new(Reserved::new(path, block));
+        let floor = reserved.read();
         let recent = self.recent.get_mut().unwrap_or_else(PoisonError::into_inner);
         if floor > recent.first_id && recent.events.is_empty() {
             recent.first_id = floor;
             recent.next_id = floor;
         }
+        let first = recent.next_id;
+        if let Err(why) = reserved.reserve(first.saturating_add(block)) {
+            reserved.refused(&why);
+        }
+        self.reserved = Some(reserved);
         self
-    }
-
-    /// The number the next event will have.
-    pub fn next_id(&self) -> u64 {
-        self.recent
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .next_id
     }
 
     /// When this run of the Host started.
@@ -326,6 +331,9 @@ impl Hub {
         }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;
+        if let Some(reserved) = &self.reserved {
+            reserved.cover(id);
+        }
         recent.next_id += 1;
         if let Some(fields) = event.as_object_mut() {
             fields.insert("event_id".to_string(), json!(id));
@@ -470,22 +478,107 @@ impl Hub {
     }
 }
 
-/// Where a Host that stops says how far its events' numbers may go.
-const EVENT_FLOOR: &str = "event-floor";
+/// How many event numbers a run reserves on disk at a time.
+const BLOCK: u64 = 1 << 20;
 
-/// What a stopping Host writes: its next event's number and a second of numbers more, for what
-/// it still says while its connections drain (issue 935). The next run starts above it.
-pub fn record_event_floor(data_dir: &std::path::Path, next_id: u64) {
-    let floor = next_id.saturating_add(1 << 20);
-    let _ = std::fs::write(data_dir.join(EVENT_FLOOR), floor.to_string());
+/// The numbers this Host's events may have, reserved on disk before any of them is given out
+/// (issue 935). The file says the end of the last reservation; a run starts at or above it, and
+/// gives out no number at or above its own reservation's end before that end is on disk. So no
+/// run gives out a number an earlier run may have given out, whether that run stopped, failed to
+/// write at its stop, or crashed: a client resuming from an earlier run's number is always told
+/// that it missed something. The next block is reserved in the background when half of this one is
+/// used; a publish waits for the disk only where a block runs out before that is done.
+pub struct Reserved {
+    path: std::path::PathBuf,
+    block: u64,
+    /// The end of what is on disk: no number at or above it has been given out.
+    end: std::sync::atomic::AtomicU64,
+    /// One write at a time.
+    writing: Mutex<()>,
+    /// A reservation ahead is being written.
+    ahead: std::sync::atomic::AtomicBool,
+    /// The disk refused a reservation: said once.
+    refused: std::sync::atomic::AtomicBool,
 }
 
-/// The number this run's events start above: what the last run that stopped wrote, or 0.
-pub fn event_floor(data_dir: &std::path::Path) -> u64 {
-    std::fs::read_to_string(data_dir.join(EVENT_FLOOR))
-        .ok()
-        .and_then(|text| text.trim().parse().ok())
-        .unwrap_or(0)
+impl Reserved {
+    fn new(path: std::path::PathBuf, block: u64) -> Self {
+        Self {
+            path,
+            block,
+            end: std::sync::atomic::AtomicU64::new(0),
+            writing: Mutex::new(()),
+            ahead: std::sync::atomic::AtomicBool::new(false),
+            refused: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// The end of the last reservation any run made, or 0 where there is none.
+    fn read(&self) -> u64 {
+        std::fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    /// Makes `end` the reservation on disk, if it is not already: written beside, flushed,
+    /// renamed over, and the folder flushed, so that a crash leaves the old end or the new one.
+    fn reserve(&self, end: u64) -> std::io::Result<()> {
+        use std::io::Write as _;
+        use std::sync::atomic::Ordering;
+        let _one = self.writing.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.end.load(Ordering::Acquire) >= end {
+            return Ok(());
+        }
+        let beside = self.path.with_extension("new");
+        let mut file = std::fs::File::create(&beside)?;
+        file.write_all(end.to_string().as_bytes())?;
+        file.sync_all()?;
+        std::fs::rename(&beside, &self.path)?;
+        if let Some(folder) = self.path.parent() {
+            std::fs::File::open(folder)?.sync_all()?;
+        }
+        self.end.store(end, Ordering::Release);
+        Ok(())
+    }
+
+    fn refused(&self, why: &std::io::Error) {
+        if !self.refused.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "clarp-host: the numbers of its events could not be reserved on disk ({why}): a \
+                 client that resumes across a crash of this run may be told it missed nothing"
+            );
+        }
+    }
+
+    /// The number `id` is about to be given out: it is covered by what is on disk, and the next
+    /// block is on its way once half of this one is used.
+    fn cover(self: &Arc<Self>, id: u64) {
+        use std::sync::atomic::Ordering;
+        let end = self.end.load(Ordering::Acquire);
+        if id >= end {
+            // Run out before the reservation ahead was on disk: this number waits for it.
+            if let Err(why) = self.reserve(id.saturating_add(self.block)) {
+                self.refused(&why);
+            }
+            return;
+        }
+        if id.saturating_add(self.block / 2) >= end && !self.ahead.swap(true, Ordering::AcqRel) {
+            let reserved = self.clone();
+            let next = end.saturating_add(self.block);
+            let spawned = std::thread::Builder::new()
+                .name("event-reserve".into())
+                .spawn(move || {
+                    if let Err(why) = reserved.reserve(next) {
+                        reserved.refused(&why);
+                    }
+                    reserved.ahead.store(false, Ordering::Release);
+                });
+            if spawned.is_err() {
+                self.ahead.store(false, Ordering::Release);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -524,38 +617,47 @@ mod tests {
     }
 
     #[test]
-    fn a_run_started_within_the_last_ones_second_of_numbers_starts_above_it_and_a_resume_is_told() {
-        // The last run gave out B and B+1; the next one starts in the same second of numbers.
-        let old = Hub::new(1_700_000_000_000);
-        let b = old.publish(roster("one"), 1_700_000_000_000);
-        let last = old.publish(roster("two"), 1_700_000_000_001);
-        assert_eq!(last, b + 1);
-        let place = std::env::temp_dir().join(format!("hub-floor-{}", std::process::id()));
+    fn no_run_gives_out_a_number_an_earlier_run_may_have_given_out_however_that_run_ended() {
+        let place = std::env::temp_dir().join(format!("hub-reserved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&place);
         std::fs::create_dir_all(&place).unwrap();
-        record_event_floor(&place, old.next_id());
+        let file = place.join("event-numbers");
+        let now = 1_700_000_000_000;
+        let run = |at: i64| Hub::new(at).reserving_in_blocks(file.clone(), 8);
 
-        // Without the floor the new run gives out B, B+1, B+2 again, and a client that resumes
-        // from B+1 is told nothing was missed while two new events are skipped.
-        let unfloored = Hub::new(1_700_000_000_500);
-        let reused: Vec<u64> = (0..3)
-            .map(|n| unfloored.publish(roster("new"), 1_700_000_000_500 + n))
-            .collect();
+        // Without a reservation two runs in one second of numbers give out the same numbers, and a
+        // client resuming from the old run's last is told nothing was missed.
+        let old = Hub::new(now);
+        let b = old.publish(roster("one"), now);
+        let last = old.publish(roster("two"), now + 1);
+        let unreserved = Hub::new(now + 500);
+        let reused: Vec<u64> = (0..3).map(|n| unreserved.publish(roster("new"), now + 500 + n)).collect();
         assert_eq!(reused, vec![b, b + 1, b + 2]);
-        assert!(!unfloored.resume(Some(last)).truncated);
+        assert!(!unreserved.resume(Some(last)).truncated);
 
-        // With it, every new number is above every old one, and the resume is told to look again.
-        let next = Hub::new(1_700_000_000_500).above(event_floor(&place));
-        let fresh: Vec<u64> = (0..3)
-            .map(|n| next.publish(roster("new"), 1_700_000_000_500 + n))
-            .collect();
-        assert!(fresh.iter().all(|id| *id > last), "{fresh:?} after {last}");
-        let resumed = next.resume(Some(last));
+        // A runs past two blocks (one reserved ahead while it ran), then crashes: nothing is written
+        // at its end. B starts in the same second, gives out numbers, and crashes too. C as well.
+        let a = run(now);
+        let a_ids: Vec<u64> = (0..20).map(|n| a.publish(roster("a"), now + n)).collect();
+        drop(a);
+        let b_run = run(now + 300);
+        let b_ids: Vec<u64> = (0..5).map(|n| b_run.publish(roster("b"), now + 300 + n)).collect();
+        assert!(b_ids[0] > *a_ids.last().unwrap(), "{b_ids:?} after {a_ids:?}");
+        drop(b_run);
+        let c = run(now + 600);
+        let c_first = c.publish(roster("c"), now + 600);
+        assert!(c_first > *b_ids.last().unwrap(), "{c_first} after {b_ids:?}");
+        // A client resuming from B's last number is told it missed something, and given C's.
+        let resumed = c.resume(Some(*b_ids.last().unwrap()));
         assert!(resumed.truncated);
-        assert_eq!(resumed.missed.len(), 3);
-        // A floor below the time's own numbers changes nothing.
-        let later = Hub::new(1_800_000_000_000);
-        let own = later.next_id();
-        assert_eq!(Hub::new(1_800_000_000_000).above(1).next_id(), own);
+        assert_eq!(resumed.missed.len(), 1);
+
+        // Every number given out was below the reservation on disk when it was given out.
+        let on_disk: u64 = std::fs::read_to_string(&file).unwrap().trim().parse().unwrap();
+        assert!(on_disk > c_first);
+        // A reservation that cannot be written leaves the hub giving out numbers, as before.
+        let unwritable = Hub::new(now).reserving_in_blocks(place.join("no/such/folder/file"), 8);
+        assert!(unwritable.publish(roster("still"), now) > 0);
         std::fs::remove_dir_all(&place).unwrap();
     }
 

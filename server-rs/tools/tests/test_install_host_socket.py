@@ -1,5 +1,6 @@
 """install-host restarts only the Host where its socket unit holds the port on the address its unit
-says now, as start_host last started it; anything else starts the socket again (issue 935).
+says now, in the run of the socket (InvocationID) start_host last started; anything else starts the
+socket again (issue 935).
 
 A unit written with --files-only is on disk and not in effect: the next install must not take it
 for the port the socket holds. start_host and port_free are run here alone, taken from the script,
@@ -14,11 +15,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 INSTALL_HOST = pathlib.Path(os.environ.get("INSTALL_HOST_UNDER_TEST", ROOT / "server-rs/tools/install-host"))
 
 SYSTEMCTL = """#!/bin/sh
-# Stand-in systemctl: records each call; a unit is active while $STANDIN/active-<unit> exists.
+# Stand-in systemctl: records each call; a unit is active while $STANDIN/active-<unit> exists; the
+# socket's run is $STANDIN/invocation, a new one at every start of the socket (none: empty).
 echo "$*" >> "$STANDIN/calls"
 case "$*" in
     *"is-active --quiet "*) for unit; do :; done; [ -e "$STANDIN/active-$unit" ] ;;
-    *"restart clarp-host.socket"*|*"start clarp-host.socket"*) touch "$STANDIN/active-clarp-host.socket" ;;
+    *"show clarp-host.socket -p InvocationID --value"*) cat "$STANDIN/invocation" 2>/dev/null || true ;;
+    *"restart clarp-host.socket"*|*"start clarp-host.socket"*)
+        touch "$STANDIN/active-clarp-host.socket"
+        [ -e "$STANDIN/no-invocation" ] || echo "run$(date +%s%N)" > "$STANDIN/invocation" ;;
     *) exit 0 ;;
 esac
 """
@@ -30,7 +35,7 @@ def free_address():
         return f"127.0.0.1:{probe.getsockname()[1]}"
 
 
-def machine(tmp_path, listen, recorded, active):
+def machine(tmp_path, listen, recorded, active, run="run1"):
     standin, units, releases = tmp_path / "standin", tmp_path / "units", tmp_path / "releases"
     for d in (standin, units, releases):
         d.mkdir()
@@ -44,6 +49,10 @@ def machine(tmp_path, listen, recorded, active):
         (releases / "socket-listening").write_text(recorded + "\n")
     if active:
         (standin / "active-clarp-host.socket").touch()
+    if run:
+        (standin / "invocation").write_text(run + "\n")
+    else:
+        (standin / "no-invocation").touch()
     return standin, units, releases
 
 
@@ -60,7 +69,7 @@ def start_host(tmp_path, standin, units, releases, arg):
 
 def test_the_socket_in_effect_on_the_address_written_restarts_only_the_host(tmp_path):
     listen = free_address()
-    standin, units, releases = machine(tmp_path, listen, recorded=listen, active=True)
+    standin, units, releases = machine(tmp_path, listen, recorded=f"{listen} run1", active=True)
     done, calls = start_host(tmp_path, standin, units, releases, 0)
     assert done.returncode == 0, done.stderr
     assert "--user restart clarp-host.service" in calls, calls
@@ -70,12 +79,33 @@ def test_the_socket_in_effect_on_the_address_written_restarts_only_the_host(tmp_
 def test_a_listen_written_with_files_only_starts_the_socket_again(tmp_path):
     # The socket still holds the address it was last started on; the unit on disk says another.
     old, new = free_address(), free_address()
-    standin, units, releases = machine(tmp_path, new, recorded=old, active=True)
+    standin, units, releases = machine(tmp_path, new, recorded=f"{old} run1", active=True)
     done, calls = start_host(tmp_path, standin, units, releases, 0)
     assert done.returncode == 0, done.stderr
     assert "--user restart clarp-host.socket" in calls, calls
     assert "--user start clarp-host.service" in calls, calls
-    assert (releases / "socket-listening").read_text().strip() == new
+    recorded = (releases / "socket-listening").read_text().split()
+    assert recorded[0] == new and recorded[1] != "run1", recorded
+
+
+def test_a_matching_address_from_an_earlier_run_of_the_socket_starts_it_again(tmp_path):
+    # Recorded: address A in run1. Someone started the socket again since (run2, perhaps on B),
+    # then A was staged again: the address matches, the run does not.
+    listen = free_address()
+    standin, units, releases = machine(tmp_path, listen, recorded=f"{listen} run1", active=True, run="run2")
+    done, calls = start_host(tmp_path, standin, units, releases, 0)
+    assert done.returncode == 0, done.stderr
+    assert "--user restart clarp-host.socket" in calls, calls
+    assert "--user restart clarp-host.service" not in calls, calls
+
+
+def test_a_socket_whose_run_cannot_be_told_is_never_trusted_and_not_recorded(tmp_path):
+    listen = free_address()
+    standin, units, releases = machine(tmp_path, listen, recorded=f"{listen} run1", active=True, run=None)
+    done, calls = start_host(tmp_path, standin, units, releases, 0)
+    assert done.returncode == 0, done.stderr
+    assert "--user restart clarp-host.socket" in calls, calls
+    assert not (releases / "socket-listening").exists()
 
 
 def test_a_socket_never_started_by_start_host_is_started_again(tmp_path):
@@ -84,4 +114,4 @@ def test_a_socket_never_started_by_start_host_is_started_again(tmp_path):
     done, calls = start_host(tmp_path, standin, units, releases, 0)
     assert done.returncode == 0, done.stderr
     assert "--user restart clarp-host.socket" in calls, calls
-    assert (releases / "socket-listening").read_text().strip() == listen
+    assert (releases / "socket-listening").read_text().split()[0] == listen
