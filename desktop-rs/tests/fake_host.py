@@ -2481,6 +2481,13 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/queue-steer":
             queue_steer["on"] = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/turn-queue":
+            # Test control: a chat's waiting messages, as GET /turn-queue lists them.
+            with state_lock:
+                session = body.get("session", "")
+                turn_queue[session] = [dict(i) for i in body.get("items", [])]
+            broadcast({"type": "queue-updated", "session": session, "queue_depth": len(turn_queue[session])})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/message-search":
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).

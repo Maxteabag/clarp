@@ -83,6 +83,8 @@ fn command(action: &str, key: &str) -> Item {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Toggles {
     pub preview_versions: bool,
+    /// The queue strip shows: its command says Hide queue, else Show queue.
+    pub queue_shown: bool,
 }
 
 /// The commands; the settings come from the settings page (`settings`).
@@ -113,6 +115,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("ui-smaller", "Ctrl+Alt+PageDown"),
         ("ui-reset", "Ctrl+Alt+0"),
         ("send-queued", "Ctrl+Shift+Enter"),
+        ("toggle-queue", ""),
         ("list-all", ""),
         ("list-unread", ""),
         ("list-working", ""),
@@ -157,6 +160,9 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
     .map(|(action, key)| command(action, key))
     .collect();
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
+    if let Some(queue) = rows.iter_mut().find(|c| c.target == "toggle-queue") {
+        queue.label = if toggles.queue_shown { "Hide queue" } else { "Show queue" }.into();
+    }
     rows
 }
 
@@ -384,7 +390,7 @@ mod tests {
         assert_eq!(split.len(), 1);
         assert_eq!(split[0].target, "split-right");
         assert!(rows.iter().all(|c| c.target != "preview-versions"), "only where previews can install");
-        assert!(commands(Toggles { preview_versions: true }).iter().any(|c| c.target == "preview-versions"));
+        assert!(commands(Toggles { preview_versions: true, ..Toggles::default() }).iter().any(|c| c.target == "preview-versions"));
     }
 
     #[test]
@@ -407,8 +413,15 @@ mod tests {
     }
 
     #[test]
+    fn the_queue_command_says_what_it_will_do() {
+        let label = |queue_shown| commands(Toggles { queue_shown, ..Toggles::default() }).into_iter().find(|c| c.target == "toggle-queue").map(|c| c.label);
+        assert_eq!(label(true).as_deref(), Some("Hide queue"));
+        assert_eq!(label(false).as_deref(), Some("Show queue"));
+    }
+
+    #[test]
     fn every_command_is_described_with_aliases() {
-        for item in commands(Toggles { preview_versions: true }) {
+        for item in commands(Toggles { preview_versions: true, ..Toggles::default() }) {
             let entry = crate::catalogue::find(&item.target);
             assert!(entry.is_some_and(|e| !e.description.is_empty() && e.aliases.len() >= 2), "{} ({}) needs a catalogue entry", item.label, item.target);
             assert_eq!(item.description, entry.map(|e| e.description).unwrap_or_default());

@@ -735,7 +735,9 @@ impl App {
         view.stop_notice = engine.stop_notice(session).into();
         // The queue strip: the loaded queue's waiting messages, while the
         // Host still counts some (a stale list never outlives its count).
-        let waiting = if view.queued > 0 || engine.queue_count(session) > 0 { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
+        // Hidden by the reader's setting, no strip at all.
+        let listed = crate::queue_strip::shown(engine) && (view.queued > 0 || engine.queue_count(session) > 0);
+        let waiting = if listed { crate::queue_strip::waiting(engine, session) } else { Vec::new() };
         view.waiting = ModelRc::new(VecModel::from(waiting));
         view.waiting_refused = engine.turn_queue_refusal(session).into();
         let (meter, warn) = crate::queue_strip::meter(engine, session);

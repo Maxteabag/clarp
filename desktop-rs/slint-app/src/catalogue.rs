@@ -530,6 +530,7 @@ pub const ENTRIES: &[Entry] = &[
     e("ui-larger", "Larger interface", "view", "Draws the whole window one step larger, the chats included.", &["scale up", "bigger window", "increase", "window size", "dpi"]),
     e("ui-smaller", "Smaller interface", "view", "Draws the whole window one step smaller, the chats included.", &["scale down", "smaller window", "shrink window", "window size", "dpi"]),
     e("ui-reset", "Reset interface size", "view", "Returns the whole window to its usual scale.", &["default size", "actual size", "scale", "window size"]),
+    e("toggle-queue", "Hide queue", "view", "Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue).", &["queue strip", "waiting messages", "messages waiting", "show queue"]),
     e("send-queued", "Send waiting message now", "agent", "Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.", &["send now", "steer", "queue", "waiting", "interrupt", "now"]),
     e("list-all", "Agents: all chats", "view", "Shows every chat in the explorer.", &["sidebar list", "scope", "everything", "back", "all agents"]),
     e("list-unread", "Agents: unread only", "view", "Shows only chats with unread messages in the explorer.", &["sidebar list", "filter", "new", "unread", "scope"]),

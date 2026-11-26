@@ -151,6 +151,22 @@ fn chats() -> Vec<Setting> {
             crate::profile_view::LIVE_STATUS_LINE,
             false,
         ),
+        Setting::toggle(
+            keyed(
+                e(
+                    "show-queue",
+                    "Show the queue",
+                    "chats",
+                    "Lists the messages waiting behind the running turn above the composer, folded to one line when more than two wait. Off, only the composer's count says how many wait.",
+                    &["queue", "queue strip", "waiting messages", "messages waiting", "send now", "hide queue", "show queue", "toggle"],
+                ),
+                &["toggle-queue"],
+            ),
+            "CHATS",
+            |app| crate::queue_strip::shown(&app.engine.borrow()),
+            |app, _, on| crate::queue_strip::set_shown(app, on),
+        )
+        .default("on"),
         Setting::stored_toggle(
             e(
                 "send-animation",

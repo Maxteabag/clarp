@@ -751,6 +751,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             crate::preview_view::open(app, window);
         }
         "update-preview" => return crate::preview_view::update_or_open(app, window),
+        "toggle-queue" => {
+            let on = crate::queue_strip::shown(&app.engine.borrow());
+            crate::queue_strip::set_shown(app, !on);
+        }
         "toggle-explanations" => {
             if !app.engine.borrow().tool_explanation_setting() {
                 return false;
@@ -853,8 +857,8 @@ fn focus_sidebar(app: &App, window: &AppWindow) {
 
 // ---- the quick switcher ------------------------------------------------------
 
-fn toggles() -> switcher::Toggles {
-    switcher::Toggles { preview_versions: crate::preview_view::enabled() }
+fn toggles(app: &App) -> switcher::Toggles {
+    switcher::Toggles { preview_versions: crate::preview_view::enabled(), queue_shown: crate::queue_strip::shown(&app.engine.borrow()) }
 }
 
 /// Ctrl+Shift+X, its command and its setting: the Host's tool explanations
@@ -946,7 +950,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     if !app.switcher.borrow().open {
         return;
     }
-    let toggles = toggles();
+    let toggles = toggles(app);
     let (query, contacts_only, picker) = {
         let state = app.switcher.borrow();
         (state.query.clone(), state.contacts_only, state.picker.clone())

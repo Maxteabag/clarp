@@ -119,6 +119,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("list-archive", &[], "Archived agents", false, Always, false),
             b("agent-profile", &[], "Agent profile", false, Agent, false),
             b("manage-queue", &[], "Message queue", false, Agent, false),
+            b("toggle-queue", &[], "Show/hide queue", false, Always, false),
             b("dismiss-error", &[], "Dismiss conversation error", false, Always, false),
             b("dismiss-layout-warning", &[], "Dismiss layout warning", false, Always, false),
             b("tool-narration", &[], "Plain-English tools", false, Always, false),
