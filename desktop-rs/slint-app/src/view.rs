@@ -268,6 +268,7 @@ pub(crate) fn start_turn_clock() {
         if let Some(app) = crate::app() {
             app.tick_turn_stamps();
             app.tick_stall_notices();
+            crate::queue_strip::tick(&app);
             crate::triage::tick(&app);
         }
     });

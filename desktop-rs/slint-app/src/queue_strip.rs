@@ -1,10 +1,15 @@
-//! The open chat's waiting messages above its composer (the queue strip),
-//! each with Send now, and the composer frame's context and quota meter.
+//! The open chat's waiting messages above its composer as one line
+//! ("1 waiting · Steer now", `clarp_core::queue_line`), and the composer
+//! frame's context and quota meter.
 //!
-//! The strip lists the open chat's queue (`GET /turn-queue`): whenever the
-//! chat has waiting messages this loads it, and the engine follows it on
-//! `queue-updated`. Send now is `POST /turn-queue/<id>/send`; a refusal
-//! (a turn still runs, 409) shows the Host's answer under the strip.
+//! The line reads the open chat's queue (`GET /turn-queue`): whenever the
+//! chat has waiting messages this loads it, the engine follows it on
+//! `queue-updated`, and it is read again every 30 seconds while something
+//! waits; the Host's answer wins over a count an event left behind. Its
+//! action reads the messages into the running turn, or stops the turn for
+//! them, on a Host with `queue_steer` (the engine tries the next way when
+//! the Host refuses one), else `POST /turn-queue/<id>/send`; what could not
+//! be sent says why under it. Settings and Ctrl+K hide it (Show queue).
 
 use std::cell::RefCell;
 
@@ -14,11 +19,7 @@ use serde_json::Value;
 
 use crate::{App, WaitingTurn};
 
-/// The most waiting messages the strip lists. With more waiting it folds
-/// to one "N waiting" line (Manage and Send now on it).
-pub const SHOWN: usize = 2;
-
-/// Whether the strip shows at all (Settings "Show the queue", Ctrl+K
+/// Whether the waiting line shows at all (Settings "Show the queue", Ctrl+K
 /// "Hide queue"). Off, the composer's count line alone says what waits.
 pub const SETTING: &str = "composer/showQueue";
 
@@ -53,7 +54,6 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
         .turn_queue(session)
         .iter()
         .filter(|item| !item_id(item).is_empty())
-        .take(SHOWN)
         .map(|item| {
             let text = item.as_object().map(|o| json::string(o, "text")).unwrap_or_default();
             // Only a message that met the busy agent may steer; one its
@@ -71,6 +71,51 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
             }
         })
         .collect()
+}
+
+/// The line's action for the waiting messages: its kind ("steer",
+/// "take-over", "send"; "" when nothing can be sent now), the message it
+/// acts on, and its word.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Chip {
+    pub kind: &'static str,
+    pub target: String,
+    pub label: &'static str,
+}
+
+/// Steer now reads the newest steerable message in (the Host reads the
+/// older ones in first); where none can be steered, Stop and send runs the
+/// first; after a Stop, Send now sends it.
+pub fn chip(waiting: &[WaitingTurn]) -> Chip {
+    use clarp_core::queue_line as words;
+    let open = || waiting.iter().filter(|w| !w.reading);
+    if let Some(item) = open().filter(|w| w.steer).last() {
+        return Chip { kind: "steer", target: item.id.to_string(), label: words::STEER_NOW };
+    }
+    match open().next() {
+        Some(item) if item.take_over => Chip { kind: "take-over", target: item.id.to_string(), label: words::STOP_AND_SEND },
+        Some(item) => Chip { kind: "send", target: item.id.to_string(), label: words::SEND_NOW },
+        None => Chip::default(),
+    }
+}
+
+/// Once a second with the turn clock: the open chat's queue is read again
+/// from the Host every 30 seconds while anything of it waits, so an entry
+/// already sent or cleared never lingers.
+pub fn tick(app: &App) {
+    let session = {
+        let Ok(engine) = app.engine.try_borrow() else { return };
+        let session = engine.selected_session().to_owned();
+        let waits = engine.queue_count(&session) > 0 || !engine.turn_queue(&session).is_empty();
+        let due = engine.turn_queue_older_than(&session, std::time::Duration::from_secs(clarp_core::queue_line::REREAD_SECS));
+        if session.is_empty() || session.starts_with("pair:") || !waits || !due {
+            return;
+        }
+        session
+    };
+    if let Ok(mut engine) = app.engine.try_borrow_mut() {
+        engine.load_turn_queue(&session);
+    }
 }
 
 /// The first message of `session`'s that Send now can still hand over.
@@ -114,24 +159,23 @@ pub fn follow(app: &App) {
     }
 }
 
-/// Sends the open chat's first waiting message now (the strip's first
-/// Send now, by key). False when nothing waits that it could send.
+/// Does the line's action for the open chat's waiting messages (by key:
+/// Ctrl+Shift+Enter). False when nothing waits that it could send.
 pub fn send_first(app: &App) -> bool {
-    let (session, first) = {
+    let (session, chip) = {
         let engine = app.engine.borrow();
         let session = engine.selected_session().to_owned();
-        let first = first(&engine, &session);
-        (session, first)
+        let chip = chip(&waiting(&engine, &session));
+        (session, chip)
     };
-    let Some(item) = first.filter(|_| !session.is_empty()) else { return false };
-    // The strip's first choice for it: Steer now where offered, else Send now.
+    if session.is_empty() || chip.kind.is_empty() {
+        return false;
+    }
     let mut engine = app.engine.borrow_mut();
-    if item.steer {
-        engine.steer_queued_turn(&item.id);
-    } else if item.take_over {
-        engine.take_over_queued_turn(&item.id);
-    } else {
-        engine.send_queued_turn(&item.id);
+    match chip.kind {
+        "steer" => engine.steer_queued_turn(&chip.target),
+        "take-over" => engine.take_over_queued_turn(&chip.target),
+        _ => engine.send_queued_turn(&chip.target),
     }
     true
 }

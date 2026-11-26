@@ -2,11 +2,7 @@
 //! running turn: "1 waiting · Steer now". Its action reads them into the
 //! running turn, or stops the turn for them where it cannot take them, or,
 //! after a Stop, sends them. Every word the desktop shows for it lives here
-//! (the iOS and Android apps use the same words), and the local switch that
-//! hides it.
-
-/// This device hides the line (Settings and Ctrl+K: Show queue).
-pub const SHOWN_KEY: &str = "conversation/queueShown";
+//! (the iOS and Android apps use the same words).
 
 /// How often the open chat's queue is read again from the Host while
 /// something waits, so an entry the Host no longer has never lingers.

@@ -157,7 +157,7 @@ fn chats() -> Vec<Setting> {
                     "show-queue",
                     "Show the queue",
                     "chats",
-                    "Lists the messages waiting behind the running turn above the composer, folded to one line when more than two wait. Off, only the composer's count says how many wait.",
+                    "Shows one line above the composer that says how many messages wait behind the running turn, with Steer now. Off, only the composer's count says how many wait.",
                     &["queue", "queue strip", "waiting messages", "messages waiting", "send now", "hide queue", "show queue", "toggle"],
                 ),
                 &["toggle-queue"],
