@@ -30,6 +30,10 @@ send("user", message={"role": "user", "content": [
 answer = "Heard: " + prompt.split("\n")[0]
 send("assistant", message={"id": "msg-" + str(time.time_ns()), "role": "assistant",
                            "content": [{"type": "text", "text": answer}]})
+if "Continue the parked work." in prompt:
+    send("rate_limit_event", rate_limit_info={"status": "rejected", "rateLimitType": "five_hour"})
+    send("result", subtype="success", is_error=True, result="out for now")
+    sys.exit(1)
 send("result", subtype="success", is_error=False, result=answer)
 "#;
 
@@ -45,7 +49,12 @@ if args[:1] != ["exec"]:
     sys.exit(1)
 prompt = sys.stdin.read()
 thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-00000000c0de"
-text = json.dumps({"summary": "Summary of the older parts."}) if "--output-schema" in args else "Codex heard: " + prompt.strip().splitlines()[-1]
+if "--output-schema" in args:
+    text = json.dumps({"summary": "Summary of the older parts."})
+elif "<clarp-turn-resumed>" in prompt and "Continue the parked work." in prompt:
+    text = "Codex continued the parked work."
+else:
+    text = "Codex heard: " + prompt.strip().splitlines()[-1]
 def say(**fields):
     print(json.dumps(fields), flush=True)
 say(type="thread.started", thread_id=thread)
@@ -80,6 +89,10 @@ impl Setting {
 
     /// A Host whose tools keep their sessions in this test's home, never the machine's.
     fn start(&self) -> Host {
+        self.start_with(&[])
+    }
+
+    fn start_with(&self, args: &[&str]) -> Host {
         let claude_dir = self.home.join(".claude");
         let codex_home = self.home.join(".codex");
         std::fs::create_dir_all(&codex_home).unwrap();
@@ -102,7 +115,7 @@ impl Setting {
             ("CLARP_CLAUDE_PROGRAM", self.claude.to_str().unwrap()),
             ("CLARP_CODEX_PROGRAM", self.codex.to_str().unwrap()),
         ];
-        self.place.start_in("", &[], &world)
+        self.place.start_in("", args, &world)
     }
 
     fn rollouts(&self) -> Vec<std::path::PathBuf> {
@@ -321,6 +334,55 @@ fn transit_finishes_the_current_turn_and_runs_the_waiting_messages_on_the_target
             "Codex heard: Second pending message.",
         ]
     );
+}
+
+#[test]
+fn transit_resumes_account_parked_work_and_then_the_queue() {
+    let setting = Setting::new("agent-transit-account-parked");
+    let host = setting.start_with(&["--accounts", "follow"]);
+    let made = host.post("/agents", json!({"name": "Parked", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap();
+    host.send(session, "Continue the parked work.", "parked-1");
+    wait_for("the source account wait", || {
+        row(&host, session)["live_activity"]["state"] == "limited"
+    });
+    queue_for_transit(&host, session, "parked-2", "After the parked work.");
+    let done = transit(
+        &host,
+        json!({"session": session, "backend": "codex", "model": "gpt-5.5",
+                                    "request_id": "switch-account-wait"}),
+    );
+    assert_eq!(done["phase"], "done", "{done}");
+    wait_for("the target work and queue", || {
+        let a = row(&host, session);
+        a["backend"] == "codex" && a["busy"] == false && a["queued_turn_count"] == 0
+    });
+    let words = host.conversation(session);
+    assert_eq!(
+        words
+            .iter()
+            .filter(|(role, text)| role == "user" && text == "Continue the parked work.")
+            .count(),
+        1,
+        "the original request remains one user message"
+    );
+    let codex_answers: Vec<_> = words
+        .iter()
+        .filter_map(|(role, text)| {
+            (role == "assistant" && text.starts_with("Codex ")).then_some(text.as_str())
+        })
+        .collect();
+    assert_eq!(
+        codex_answers,
+        [
+            "Codex continued the parked work.",
+            "Codex heard: After the parked work."
+        ]
+    );
+    let rollouts = setting.rollouts();
+    assert_eq!(rollouts.len(), 1);
+    let carried = std::fs::read_to_string(&rollouts[0]).unwrap();
+    assert!(carried.contains("The word in the file is ember."));
 }
 
 #[test]

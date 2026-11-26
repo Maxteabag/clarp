@@ -1046,6 +1046,11 @@ ordering and the user's Stop pause still apply. The two busy refusals remain for
 model or effort change. A Host restart before cutover abandons the pending switch and leaves
 the mailbox with its source.
 
+With `agent_backend_transit_account_wait` (contract 203), a turn already parked for provider
+capacity can switch without waiting for the source account. Its recorded work is carried,
+and the same turn continues on the target before the mailbox starts. A failed carry leaves
+the turn waiting on the source account.
+
 **Progress.** The event `agent-transit` `{agent_id, session, transit_id, backend, model, phase,
 error, previous_backend, previous_model, carried}`; `phase` is `reading`, `translating`,
 `registering`, `switching`, then `done` or `failed`; `error` is text on `failed`, else null.

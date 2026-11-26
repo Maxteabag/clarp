@@ -185,7 +185,9 @@ clarp-admin agent transit --session lena-1a3f --backend claude --model opus --ef
 row lists (`""` for the tool's default). The command waits until the move is
 done or failed and prints its last state. From contract 202 (`agent_backend_transit_queue`),
 an in-flight turn may finish on the source, and queued messages run on the new backend
-after cutover in the usual order. A user Stop pause is kept. Older Hosts refuse while
+after cutover in the usual order. From contract 203 (`agent_backend_transit_account_wait`),
+a turn parked for provider capacity continues on the target without waiting for the old
+account. A user Stop pause is kept. Older Hosts refuse while
 a turn runs or messages wait, as does a model change on the same backend. The command
 waits for completion, so ask another agent or use the app's Backend row to switch an
 agent from its own turn. What is carried is the text
