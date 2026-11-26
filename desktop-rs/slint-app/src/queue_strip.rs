@@ -20,6 +20,8 @@ pub const SHOWN: usize = 3;
 thread_local! {
     /// The chat and count the strip last loaded the queue for.
     static FOLLOWED: RefCell<(String, i32)> = RefCell::new((String::new(), 0));
+    /// When the strip last asked the Host for the queue.
+    static LAST_READ: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
 }
 
 fn item_id(item: &Value) -> String {
@@ -83,9 +85,14 @@ pub fn follow(app: &App) {
         return;
     }
     let key = (session.clone(), count);
-    if loaded == session && FOLLOWED.with(|f| *f.borrow() == key) {
+    // Read again when the count changes, and every half minute while
+    // anything shows, so the strip follows the Host even when an event
+    // that emptied it never came.
+    let fresh = LAST_READ.with(|t| t.get().is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(30)));
+    if loaded == session && FOLLOWED.with(|f| *f.borrow() == key) && fresh {
         return;
     }
+    LAST_READ.with(|t| t.set(Some(std::time::Instant::now())));
     FOLLOWED.with(|f| *f.borrow_mut() = key);
     if let Ok(mut engine) = app.engine.try_borrow_mut() {
         engine.load_turn_queue(&session);

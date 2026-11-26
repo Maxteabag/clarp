@@ -594,3 +594,15 @@ fn a_read_row_replaces_its_row_in_place_and_keeps_what_is_newer() {
     assert_eq!(h.first(), "a", "the row keeps its place");
     h.with(|r| assert_eq!(r.replace_row(&obj(json!({"agent_id": "z", "session": "z"}))), RowChange::NotHeld));
 }
+
+#[test]
+fn the_hosts_own_queue_answer_wins_over_a_count_kept_from_a_newer_revision() {
+    let mut roster = clarp_core::roster::Roster::default();
+    roster.apply_snapshot(&serde_json::json!({"agents": [{"session": "hazel", "name": "Hazel", "queued_turn_count": 27, "queue_revision": 900}]}).as_object().unwrap().clone());
+    assert_eq!(roster.find("hazel").unwrap().queued_turn_count, 27);
+    // The Host moved the queue out; its revision went back. The /turn-queue
+    // answer says nothing waits: the count follows it.
+    roster.apply_queue_truth("hazel", 0, false, 3);
+    let hazel = roster.find("hazel").unwrap();
+    assert_eq!((hazel.queued_turn_count, hazel.queue_revision), (0, 3));
+}

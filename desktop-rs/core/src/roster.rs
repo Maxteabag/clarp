@@ -561,6 +561,24 @@ impl Roster {
         }
     }
 
+    /// The Host's own `/turn-queue` answer for `session`: what waits there
+    /// now, whatever revision this row held. A count kept from an older
+    /// revision (the Host's queue moved or restarted) never outlives it.
+    pub fn apply_queue_truth(&mut self, session: &str, count: i32, paused: bool, revision: i64) {
+        let Some(row) = self.index_of_session(session) else { return };
+        let agent = &mut self.agents[row];
+        if agent.queued_turn_count == count && agent.queue_paused == paused {
+            return;
+        }
+        agent.queued_turn_count = count;
+        agent.queue_paused = paused;
+        if revision > 0 {
+            agent.queue_revision = revision;
+        }
+        self.pending_queue_events.remove(session);
+        self.notify_row(row, &[Role::QueueCount]);
+    }
+
     pub fn apply_queue_event(&mut self, event: &Object) {
         let session = json::string(event, "session");
         let revision = json::integer(event, "queue_revision");
