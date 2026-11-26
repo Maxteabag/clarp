@@ -9,8 +9,10 @@
 //! So at its start the Host sets no-compression (`FS_NOCOMP_FL`, `chattr +m`) on its data
 //! folder, the agents' folder and every agent's folder: a file made in them afterwards inherits
 //! it. The agents' logs keep copy-on-write and btrfs's checksums. The search index, which the
-//! Host can always make again, lives in a folder of its own that is also no-copy-on-write
-//! (`FS_NOCOW_FL`, `chattr +C`).
+//! Host can always make again, lives in a folder of its own that is no-copy-on-write
+//! (`FS_NOCOW_FL`, `chattr +C`) instead: on btrfs that also means no compression, and the two
+//! flags are not taken together (`EINVAL`, seen on Linux 6.8 on 26 Nov 2026), so the folder
+//! carries only that one.
 //!
 //! Only folders are touched, never a file, and never a file SQLite has open: a flag on a folder
 //! changes nothing of what is in it already. Existing files keep their extents: moving them is
@@ -47,6 +49,20 @@ pub fn no_compression() -> IFlags {
 /// Sets `flag` on the folder `dir`, and reads it back: a filesystem that answers yes and keeps
 /// nothing does not take it.
 pub fn mark(dir: &Path, flag: IFlags) -> Result<Marked, Errno> {
+    change(dir, flag, IFlags::empty())
+}
+
+/// The search index's folder: no copy-on-write, with a no-compression flag it inherited taken
+/// off, since btrfs takes not both. Where the filesystem has no such flag, no compression alone.
+pub fn mark_search(dir: &Path) -> Result<Marked, Errno> {
+    match change(dir, IFlags::NOCOW, no_compression())? {
+        Marked::Unsupported => mark(dir, no_compression()),
+        marked => Ok(marked),
+    }
+}
+
+/// Sets `add` on the folder `dir` and takes `clear` off it, and reads it back.
+fn change(dir: &Path, add: IFlags, clear: IFlags) -> Result<Marked, Errno> {
     let folder = rustix::fs::open(
         dir,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
@@ -57,20 +73,16 @@ pub fn mark(dir: &Path, flag: IFlags) -> Result<Marked, Errno> {
         Err(why) if not_here(why) => return Ok(Marked::Unsupported),
         Err(why) => return Err(why),
     };
-    if has.contains(flag) {
+    if has.contains(add) && !has.intersects(clear) {
         return Ok(Marked::Already);
     }
-    match rustix::fs::ioctl_setflags(&folder, has | flag) {
+    match rustix::fs::ioctl_setflags(&folder, (has - clear) | add) {
         Ok(()) => {}
         Err(why) if not_here(why) => return Ok(Marked::Unsupported),
         Err(why) => return Err(why),
     }
-    let kept = rustix::fs::ioctl_getflags(&folder).is_ok_and(|now| now.contains(flag));
-    Ok(if kept {
-        Marked::Set
-    } else {
-        Marked::Unsupported
-    })
+    let kept = rustix::fs::ioctl_getflags(&folder).is_ok_and(|now| now.contains(add));
+    Ok(if kept { Marked::Set } else { Marked::Unsupported })
 }
 
 /// What a filesystem without such flags answers.
@@ -100,8 +112,8 @@ impl Done {
 }
 
 /// Marks the Host's data folders at its start, before anything in them is opened: the data
-/// folder, the agents' folder and each agent's, and the search index's own folder (made here),
-/// which is also no-copy-on-write.
+/// folder, the agents' folder and each agent's without compression, and the search index's own
+/// folder (made here) without copy-on-write.
 pub fn at_start(data: &Path) -> Done {
     let mut done = Done::default();
     let agents = data.join("agents");
@@ -112,12 +124,11 @@ pub fn at_start(data: &Path) -> Done {
         }
     }
     // The parents first: a folder made in them from now on is made with the flag.
-    for dir in [data, &agents, &search] {
+    for dir in [data, &agents] {
         done.count(dir, mark(dir, no_compression()));
     }
-    // Copy-on-write is turned off while the folder holds no index yet: a file made in it takes
-    // it from the folder, and a file made before keeps what it has.
-    done.count(&search, mark(&search, IFlags::NOCOW));
+    // A file made in it from now on takes it from the folder; one made before keeps what it has.
+    done.count(&search, mark_search(&search));
     if let Ok(each) = std::fs::read_dir(&agents) {
         for entry in each.flatten() {
             if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
@@ -172,6 +183,12 @@ mod tests {
         Scratch(dir)
     }
 
+    /// Whether the folder is on btrfs, whose flags these are: there they must be set.
+    fn on_btrfs(dir: &Path) -> bool {
+        const BTRFS: u64 = 0x9123_683E;
+        rustix::fs::statfs(dir).is_ok_and(|fs| u64::try_from(fs.f_type).ok() == Some(BTRFS))
+    }
+
     fn carries(dir: &Path, flag: IFlags) -> bool {
         let folder = rustix::fs::open(
             dir,
@@ -186,6 +203,9 @@ mod tests {
     fn a_folder_is_marked_where_its_filesystem_takes_it_and_passed_over_quietly_elsewhere() {
         let place = scratch("mark");
         let first = mark(&place.0, no_compression()).unwrap();
+        if on_btrfs(&place.0) {
+            assert_eq!(first, Marked::Set);
+        }
         match first {
             // A filesystem with the flag (btrfs): a second look finds it, and a folder made in
             // it afterwards inherits it.
@@ -216,18 +236,34 @@ mod tests {
         let done = at_start(&data);
         assert!(done.failed.is_empty(), "{done:?}");
         assert!(data.join(SEARCH_FOLDER).is_dir());
-        // The data folder, the agents', the search folder twice (both flags) and the agent's.
-        assert_eq!(done.set + done.already + done.unsupported, 5, "{done:?}");
-        // Where the filesystem takes the flag, every folder carries it now, and an agent's
-        // folder made afterwards carries it too.
+        // The data folder, the agents', the search folder and the agent's.
+        assert_eq!(done.set + done.already + done.unsupported, 4, "{done:?}");
+        let search = data.join(SEARCH_FOLDER);
+        if on_btrfs(&data) {
+            assert_eq!(done.unsupported, 0, "{done:?}");
+        }
+        // Where the filesystem takes the flags, every folder carries its own now, and a folder
+        // made in one afterwards carries it too.
         if done.unsupported == 0 {
             for dir in [&data, &data.join("agents"), &data.join("agents").join("a1")] {
                 assert!(carries(dir, no_compression()), "{}", dir.display());
             }
-            assert!(carries(&data.join(SEARCH_FOLDER), IFlags::NOCOW));
+            assert!(carries(&search, IFlags::NOCOW));
             let fresh = data.join("agents").join("a2");
             std::fs::create_dir(&fresh).unwrap();
             assert!(carries(&fresh, no_compression()));
+            let inside = search.join("inside");
+            std::fs::create_dir(&inside).unwrap();
+            assert!(carries(&inside, IFlags::NOCOW));
+            std::fs::remove_dir(&inside).unwrap();
+            // A search folder made again inside the data folder inherits no compression from
+            // it, which btrfs does not take beside no-copy-on-write: it is taken off.
+            std::fs::remove_dir(&search).unwrap();
+            std::fs::create_dir(&search).unwrap();
+            assert!(carries(&search, no_compression()));
+            assert_eq!(mark_search(&search).unwrap(), Marked::Set);
+            assert!(carries(&search, IFlags::NOCOW));
+            assert!(!carries(&search, no_compression()));
         }
         // Again: nothing more to do.
         let again = at_start(&data);
