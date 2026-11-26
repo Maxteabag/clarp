@@ -77,7 +77,7 @@ fn video() -> Request {
         path: "/media/playback-video".into(),
         title: "Synthetic clip".into(),
         poster: None,
-        duration_ms: 6000,
+        duration_ms: 12000,
         autoplay: false,
     }
 }
@@ -85,6 +85,7 @@ fn video() -> Request {
 pub fn playback_check(out: String) {
     let o = |n: usize| (0..n).map(|_| out.clone()).collect::<Vec<_>>();
     let [o1, o2, o3, o4, o5] = <[String; 5]>::try_from(o(5)).expect("five");
+    let audio_out = out.clone();
     let first: Rc<Cell<u64>> = Rc::default();
     let at: Rc<Cell<f32>> = Rc::default();
     let (first2, at2, at3, at4) = (first.clone(), at.clone(), at.clone(), at.clone());
@@ -107,7 +108,7 @@ pub fn playback_check(out: String) {
                 return false;
             }
             check(!b.get_playing() && b.get_position() < 0.2, &format!("it waits, paused at the start, until asked to play: playing={} at {}", b.get_playing(), b.get_position()));
-            check((b.get_duration() - 6.0).abs() < 0.3, &format!("it knows its length: {}", b.get_duration()));
+            check((b.get_duration() - 12.0).abs() < 0.3, &format!("it knows its length: {}", b.get_duration()));
             check(colourful(window), "the picture is the clip's, not black");
             let ranged = super::requests("GET", "/media/playback-video");
             check(!ranged.is_empty() && ranged.iter().all(|r| r["authorization"] == "Bearer probe-token"), "the clip comes from the Host with the app's token");
@@ -236,13 +237,13 @@ pub fn playback_check(out: String) {
         })),
         ("audio", Box::new(|app, window, _| {
             playback::open(app, Request {
-                key: "media:aud1".into(),
+                key: "media:playback-audio".into(),
                 session: "rachel".into(),
                 kind: Kind::Audio,
-                path: "/media/aud1".into(),
+                path: "/media/playback-audio".into(),
                 title: "Standup summary".into(),
                 poster: None,
-                duration_ms: 72000,
+                duration_ms: 6000,
                 autoplay: false,
             });
             let b = bridge(window);
@@ -271,6 +272,14 @@ pub fn playback_check(out: String) {
             playback::close();
             let left = crate::platform::audio::with(|audio| audio.media().is_some()).unwrap_or(false);
             check(!left && !playback::active(), "closing stops the audio");
+            true
+        })),
+        ("audio reaches the output", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_secs(1) {
+                return false;
+            }
+            let (rms, seconds) = sound(&format!("{audio_out}/playback-sound.wav"));
+            check(rms > 0.05 && seconds > 0.5, &format!("the audio clip reached the output: RMS {rms:.3} over {seconds:.1} s"));
             true
         })),
     ];

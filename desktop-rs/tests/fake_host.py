@@ -2025,6 +2025,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        if url.path == "/media/playback-audio":
+            if not os.environ.get("CLARP_TEST_AUDIO"):
+                return self.reply(404, {"error": "no playback audio fixture"})
+            return self.reply_range(pathlib.Path(os.environ["CLARP_TEST_AUDIO"]).read_bytes(), "audio/mpeg")
         if url.path == "/media/playback-video":
             # The playback check's synthetic clip (check.sh makes it), served
             # in the parts a player asks for, as the Host serves media.
