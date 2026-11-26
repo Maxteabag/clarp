@@ -111,10 +111,10 @@ impl Machine {
         std::fs::read_link(self.folder(tool).join(id)).ok()
     }
 
-    fn args(&self, accounts: Option<&str>) -> Vec<String> {
+    fn args(&self, tree: &Path, accounts: Option<&str>) -> Vec<String> {
         let mut args = vec![
             "--skills".to_owned(),
-            self.tree.to_str().unwrap().to_owned(),
+            tree.to_str().unwrap().to_owned(),
             "--skills-other-releases".to_owned(),
             self.python.to_str().unwrap().to_owned(),
             "--skills-chosen-before".to_owned(),
@@ -126,14 +126,35 @@ impl Machine {
         args
     }
 
+    /// A Host of this release; one that keeps the tools is waited for until it has reconciled
+    /// their links, which it does beside its start.
     fn start(&self, place: &Place, accounts: Option<&str>) -> Host {
+        let host = self.start_of(place, &self.tree, accounts, None);
+        if accounts == Some("select") {
+            wait_for("the skills reconciled", || reconciled(&host) > 0);
+        }
+        host
+    }
+
+    /// A Host of the release whose skills are `tree`, its reconciliation held while `hold`
+    /// exists, not waited for.
+    fn start_of(
+        &self,
+        place: &Place,
+        tree: &Path,
+        accounts: Option<&str>,
+        hold: Option<&Path>,
+    ) -> Host {
         let path = format!("{}:{}", self.programs.display(), sealed::PATH);
-        let args = self.args(accounts);
+        let args = self.args(tree, accounts);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let world = [
+        let mut world = vec![
             ("HOME", self.home.to_str().unwrap()),
             ("PATH", path.as_str()),
         ];
+        if let Some(hold) = hold {
+            world.push(("CLARP_TEST_SKILLS_HELD_WHILE", hold.to_str().unwrap()));
+        }
         let without = [
             "CODEX_HOME",
             "CLARP_CLAUDE_SKILLS",
@@ -183,6 +204,15 @@ impl Machine {
         }
         all
     }
+}
+
+/// How many reconciliations a Host has finished whole, as its journal says.
+fn reconciled(host: &Host) -> usize {
+    host.heard
+        .lock()
+        .unwrap()
+        .matches("clarp-host: skills reconciled in ")
+        .count()
 }
 
 fn row(listed: &Value, id: &str) -> Value {
@@ -498,6 +528,286 @@ fn a_host_that_keeps_the_tools_keeps_their_skills_installed() {
     host.kill();
 }
 
+/// The links of Clarp's (those leading into `ours`) in `folders` whose skill does not read:
+/// each must lead to a SKILL.md of one release, never to nothing.
+fn unreadable(folders: &[PathBuf], ours: &[PathBuf]) -> Vec<String> {
+    let mut wrong = Vec::new();
+    for folder in folders {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Ok(target) = std::fs::read_link(entry.path()) else {
+                continue;
+            };
+            if ours.iter().any(|root| target.starts_with(root))
+                && std::fs::read_to_string(entry.path().join("SKILL.md")).is_err()
+            {
+                wrong.push(format!(
+                    "{} -> {}",
+                    entry.path().display(),
+                    target.display()
+                ));
+            }
+        }
+    }
+    wrong
+}
+
+/// The first line a Host's journal said that holds these words.
+fn said_line(host: &Host, words: &str) -> String {
+    let heard = host.heard.lock().unwrap();
+    heard
+        .lines()
+        .find(|line| line.contains(words))
+        .unwrap()
+        .to_owned()
+}
+
+/// What a Host's journal said of the time its reconciliation took, in ms.
+fn reconciled_ms(host: &Host) -> u64 {
+    let heard = host.heard.lock().unwrap();
+    let after = heard
+        .split("clarp-host: skills reconciled in ")
+        .nth(1)
+        .unwrap();
+    after.split(" ms").next().unwrap().parse().unwrap()
+}
+
+/// Issue 935: a Host answers, streams and finishes its start while its skills are still being
+/// reconciled; the reconciliation comes after, alone with the tools' links (a change asked for
+/// meanwhile waits for it), and every link of Clarp's reads a skill of one release before,
+/// during and after it, through a rollback cut off halfway and a reconciliation that failed and
+/// was tried again. The install record names every release a link still leads into.
+#[test]
+fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() {
+    let place = Place::new("skills-beside");
+    let machine = Machine::new(&place);
+    let canonical = |path: &Path| std::fs::canonicalize(path).unwrap();
+    let (r2, r1) = (canonical(&machine.tree), canonical(&machine.older));
+    // The older release ships the same manifest: the bundle a rollback puts back.
+    std::fs::copy(
+        machine.tree.join("manifest.json"),
+        machine.older.join("manifest.json"),
+    )
+    .unwrap();
+    let folders: Vec<PathBuf> = ["claude", "codex", "agy"]
+        .iter()
+        .map(|tool| machine.folder(tool))
+        .collect();
+    let releases = machine
+        .tree
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let ours = vec![
+        canonical(&releases),
+        canonical(&machine.python),
+        releases,
+        machine.python.clone(),
+    ];
+    let state_path = place.root.join("data/install.json");
+    let state =
+        || -> Value { serde_json::from_slice(&std::fs::read(&state_path).unwrap()).unwrap() };
+    let release = |tree: &Path| tree.parent().unwrap().display().to_string();
+    let on = json!([
+        "agyown", "art1", "core1", "core2", "dep", "mine", "nosrc", "opt1", "opt2"
+    ]);
+    let hold = place.root.join("skills-held");
+    let started = |host: &Host| host.get("/host/start")["stage"] == "started";
+
+    // A fresh install: the start is done and the Host answers and streams with its skills held.
+    std::fs::write(&hold, "").unwrap();
+    let host = machine.start_of(&place, &machine.tree, Some("select"), Some(&hold));
+    wait_for("the start done while the skills are held", || {
+        started(&host)
+    });
+    let events = host.listen();
+    wait_for("the event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "server-version")
+    });
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["managed_skills"],
+        1
+    );
+    assert_eq!(reconciled(&host), 0);
+    assert!(
+        !state_path.exists(),
+        "nothing recorded before the reconciliation"
+    );
+    // What the releases before left still reads.
+    assert_eq!(
+        machine.leads("codex", "core1"),
+        Some(machine.older.join("core1"))
+    );
+    assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+    std::thread::scope(|scope| {
+        // A change asked for meanwhile waits for the reconciliation, and is made after it.
+        let change = scope.spawn(|| {
+            host.ask(
+                "POST",
+                "/managed-skills",
+                Some(&json!({ "skill_id": "opt2", "enabled": true })),
+            )
+        });
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(
+            !change.is_finished(),
+            "a change ran beside the reconciliation"
+        );
+        assert_eq!(machine.leads("claude", "opt2"), None);
+        // Every link is sampled while the links move.
+        let moving = std::sync::atomic::AtomicBool::new(true);
+        let probe = scope.spawn(|| {
+            let (mut samples, mut wrong) = (0, Vec::new());
+            while moving.load(std::sync::atomic::Ordering::Relaxed) {
+                wrong.extend(unreadable(&folders, &ours));
+                samples += 1;
+            }
+            (samples, wrong)
+        });
+        std::fs::remove_file(&hold).unwrap();
+        wait_for("the skills reconciled", || reconciled(&host) > 0);
+        let (status, answer) = change.join().unwrap();
+        assert_eq!(status, 200, "{answer}");
+        moving.store(false, std::sync::atomic::Ordering::Relaxed);
+        let (samples, wrong) = probe.join().unwrap();
+        assert!(samples > 0);
+        assert_eq!(wrong, Vec::<String>::new(), "{samples} samples");
+    });
+    // The monotonic marks of each step, on the journal line an ordinary start writes too.
+    let line = said_line(&host, "clarp-host: skills reconciled in ");
+    for step in [
+        "shelf=",
+        "lock=",
+        "enter=",
+        "held=",
+        "manifest=",
+        "choices=",
+        "roots=",
+        "links=",
+        "scan=",
+        "write=",
+        "sync=",
+        "rename=",
+        "back=",
+    ] {
+        assert!(line.contains(step), "{step} in {line}");
+    }
+    eprintln!("skills-beside: {line} (total {} ms)", reconciled_ms(&host));
+    for tool in ["claude", "codex", "agy"] {
+        assert_eq!(
+            machine.leads(tool, "core1"),
+            Some(r2.join("core1")),
+            "{tool}"
+        );
+        assert_eq!(machine.leads(tool, "opt2"), Some(r2.join("opt2")), "{tool}");
+    }
+    assert_eq!(
+        state(),
+        json!({ "skills": on, "skills_off": ["core1"], "linked_releases": [release(&r2)] })
+    );
+    // What is not Clarp's stays where it was.
+    assert_eq!(
+        machine.leads("codex", "core2"),
+        Some(place.root.join("elsewhere/core2"))
+    );
+    assert!(machine.folder("claude").join("mine/SKILL.md").is_file());
+    assert!(!machine.folder("agy").join("agyown").is_symlink());
+    assert_eq!(std::fs::read_to_string(&machine.seed).unwrap(), SEED);
+    host.kill();
+
+    // A rollback to the release before, cut off before its reconciliation: the links still
+    // read this release, and the record is as it was.
+    let recorded = std::fs::read(&state_path).unwrap();
+    std::fs::write(&hold, "").unwrap();
+    let host = machine.start_of(&place, &machine.older, Some("select"), Some(&hold));
+    wait_for("the rollback's start done", || started(&host));
+    assert_eq!(machine.leads("claude", "core1"), Some(r2.join("core1")));
+    host.kill();
+    std::fs::remove_file(&hold).unwrap();
+    assert_eq!(std::fs::read(&state_path).unwrap(), recorded);
+    assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+
+    // Started again, it cannot write one tool's folder: the skills stay whole in the release
+    // they read, the record names it, and the reconciliation is tried again until it is done.
+    use std::os::unix::fs::PermissionsExt;
+    let codex = machine.folder("codex");
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let as_root = std::fs::write(codex.join(".probe"), "").is_ok();
+    let host = machine.start_of(&place, &machine.older, Some("select"), None);
+    if as_root {
+        let _ = std::fs::remove_file(codex.join(".probe"));
+        eprintln!("skills-beside: run as root, a folder cannot be made unwritable; not tried");
+    } else {
+        wait_for("a reconciliation in part", || {
+            host.heard
+                .lock()
+                .unwrap()
+                .contains("the skills were reconciled in part in ")
+        });
+        assert_eq!(reconciled(&host), 0);
+        eprintln!(
+            "skills-beside: {}",
+            said_line(&host, "reconciled in part in ")
+        );
+        for tool in ["claude", "codex", "agy"] {
+            assert_eq!(
+                machine.leads(tool, "core1"),
+                Some(r2.join("core1")),
+                "{tool}"
+            );
+        }
+        // A skill no folder refused moved whole; the record names both releases.
+        assert_eq!(machine.leads("claude", "core2"), Some(r1.join("core2")));
+        assert_eq!(
+            state()["linked_releases"],
+            json!([release(&r1), release(&r2)])
+        );
+        assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+    }
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    wait_for("the reconciliation tried again", || reconciled(&host) > 0);
+    eprintln!(
+        "skills-beside: retried: {}",
+        said_line(&host, "clarp-host: skills reconciled in ")
+    );
+    for tool in ["claude", "codex", "agy"] {
+        assert_eq!(
+            machine.leads(tool, "core1"),
+            Some(r1.join("core1")),
+            "{tool}"
+        );
+        assert_eq!(machine.leads(tool, "opt2"), Some(r1.join("opt2")), "{tool}");
+        assert_eq!(machine.leads(tool, "opt1"), Some(r1.join("opt1")), "{tool}");
+    }
+    // The opt-out and the roots are kept, and the record says where every link leads now.
+    assert_eq!(
+        state(),
+        json!({ "skills": on, "skills_off": ["core1"], "linked_releases": [release(&r1)] })
+    );
+    assert_eq!(
+        machine.leads("codex", "core2"),
+        Some(place.root.join("elsewhere/core2"))
+    );
+    assert!(machine.folder("claude").join("mine/SKILL.md").is_file());
+    assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+    assert_eq!(
+        host.get("/managed-skills")["skills"]
+            .as_array()
+            .unwrap()
+            .len(),
+        9
+    );
+    host.kill();
+}
+
 fn health_now(host: &Host, id: &str) -> String {
     row(&host.get("/managed-skills"), id)["health"]
         .as_str()
@@ -755,12 +1065,50 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
     // A newer version gets a place of its own; the one before stays, older ones go.
     install("bbbbbbbbbbbb2222");
     install("cccccccccccc3333");
-    let mut kept: Vec<String> = std::fs::read_dir(share.join("releases"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    kept.sort();
-    assert_eq!(kept, ["bbbbbbbbbbbb", "cccccccccccc"]);
+    let kept = || -> Vec<String> {
+        let mut kept: Vec<String> = std::fs::read_dir(share.join("releases"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        kept.sort();
+        kept
+    };
+    assert_eq!(kept(), ["bbbbbbbbbbbb", "cccccccccccc"]);
+    // A release a skill's link still leads into, as the Host recorded it, stays too (issue 935):
+    // its reconciliation was not done, or this install was only of files. A path that is no
+    // release of this Host keeps nothing.
+    let record = share.join("data/install.json");
+    let releases = std::fs::canonicalize(share.join("releases")).unwrap();
+    let linked = |names: &[&str]| {
+        let mut paths: Vec<String> = names
+            .iter()
+            .map(|name| releases.join(name).display().to_string())
+            .collect();
+        paths.push(
+            place
+                .root
+                .join("elsewhere/aaaaaaaaaaaa")
+                .display()
+                .to_string(),
+        );
+        let said = json!({ "skills": [], "skills_off": [], "linked_releases": paths });
+        std::fs::write(&record, said.to_string()).unwrap();
+    };
+    linked(&["bbbbbbbbbbbb"]);
+    install("dddddddddddd4444");
+    assert_eq!(kept(), ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"]);
+    // Once the links have moved on, it goes.
+    linked(&["dddddddddddd"]);
+    install("eeeeeeeeeeee5555");
+    assert_eq!(kept(), ["dddddddddddd", "eeeeeeeeeeee"]);
+    // A record of a Host from before names none, and is never written by this tool.
+    std::fs::write(&record, "{\"skills\": [], \"skills_off\": []}\n").unwrap();
+    install("ffffffffffff6666");
+    assert_eq!(kept(), ["eeeeeeeeeeee", "ffffffffffff"]);
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        "{\"skills\": [], \"skills_off\": []}\n"
+    );
     // Nothing of a tool's skill folder is made or touched, and the other Host's record is read only.
     for folder in [".claude", ".codex", ".gemini"] {
         assert!(!home.join(folder).exists(), "{folder}");
@@ -769,4 +1117,91 @@ fn the_install_tool_ships_the_skills_tree_and_names_it_without_touching_a_tools_
         std::fs::read_to_string(&chosen).unwrap(),
         "{\"skills\": [\"clarp-media\"]}"
     );
+}
+
+/// Issue 935: the reconciliation of a machine shaped as the owner's (43 shipped skills linked
+/// from a release before into two folders, one of them reached by Claude and Codex both through
+/// links to a tree of the owner's beside 27 skills of its own, and an install record already
+/// there), with each step's time on its journal line: what the steps cost when nothing else
+/// holds the disk.
+#[test]
+fn a_machine_shaped_reconciliation_says_what_each_step_took() {
+    let place = Place::new("skills-shaped");
+    let root = &place.root;
+    let home = root.join("home");
+    let (before, tree) = (
+        root.join("share/releases/before/skills"),
+        root.join("share/releases/now/skills"),
+    );
+    let ids: Vec<String> = (0..45).map(|n| format!("clarp-skill-{n:02}")).collect();
+    let items: Vec<Value> = ids
+        .iter()
+        .map(|id| json!({ "id": id, "pack": "optional", "description": id }))
+        .collect();
+    for at in [&before, &tree] {
+        std::fs::create_dir_all(at).unwrap();
+        std::fs::write(
+            at.join("manifest.json"),
+            json!({ "version": 1, "skills": items }).to_string(),
+        )
+        .unwrap();
+        for id in &ids {
+            skill(at, id);
+        }
+    }
+    // Two skills were switched off; the other 43 lead into the release before.
+    let off = ["clarp-skill-07", "clarp-skill-31"];
+    let on: Vec<&String> = ids
+        .iter()
+        .filter(|id| !off.contains(&id.as_str()))
+        .collect();
+    let dots = root.join("dots/skills");
+    let agy = home.join(".gemini/config/skills");
+    for id in &on {
+        link(&dots.join(id), &before.join(id));
+        link(&agy.join(id), &before.join(id));
+    }
+    for n in 0..27 {
+        let own = root.join(format!("own/skill-{n:02}"));
+        skill(own.parent().unwrap(), &format!("skill-{n:02}"));
+        link(&dots.join(format!("skill-{n:02}")), &own);
+    }
+    link(&home.join(".claude/skills"), &dots);
+    link(&home.join(".codex/skills"), &dots);
+    std::fs::create_dir_all(root.join("data")).unwrap();
+    let chosen = json!({ "skills": on, "skills_off": off });
+    std::fs::write(root.join("data/install.json"), chosen.to_string()).unwrap();
+
+    let args = ["--skills", tree.to_str().unwrap(), "--accounts", "select"];
+    let world = [("HOME", home.to_str().unwrap()), ("PATH", sealed::PATH)];
+    let without = [
+        "CODEX_HOME",
+        "CLARP_CLAUDE_SKILLS",
+        "CLARP_CODEX_SKILLS",
+        "CLARP_AGY_SKILLS",
+    ];
+    let host = place.start_without("fixture", &args, &world, &without);
+    wait_for("the skills reconciled", || reconciled(&host) > 0);
+    let line = said_line(&host, "clarp-host: skills reconciled in ");
+    assert!(
+        line.contains(": 86 links put in place, 0 taken away; the links lead into 1 releases; steps ms: shelf="),
+        "{line}"
+    );
+    eprintln!("skills-shaped: {line}");
+    let now = std::fs::canonicalize(&tree).unwrap();
+    for id in &on {
+        assert_eq!(std::fs::read_link(dots.join(id)).unwrap(), now.join(id));
+        assert_eq!(std::fs::read_link(agy.join(id)).unwrap(), now.join(id));
+    }
+    for id in off {
+        assert!(!dots.join(id).exists() && !agy.join(id).exists());
+    }
+    for n in 0..27 {
+        let own = root.join(format!("own/skill-{n:02}"));
+        assert_eq!(
+            std::fs::read_link(dots.join(format!("skill-{n:02}"))).unwrap(),
+            own
+        );
+    }
+    host.kill();
 }
