@@ -247,8 +247,11 @@ start, and the command exits 1.
    On the Rust Host with `helper_state_below` (contract 210) a helper reads
    `running` while a helper below it, at any depth, that is not archived
    still reads `running`, also after you marked it `done`; it reads `done`
-   again once the last of them stops. That holds through an archived helper
-   in between; an archived helper's own work lifts no one. Your mark is kept: nothing is reopened. The
+   again once the last of them stops. A helper below that you or the user
+   gave more work after it was marked `done` or `ended-unreported` counts
+   while its turn runs, though its own state reads the same. That holds
+   through an archived helper in between; an archived helper's own work
+   lifts no one. Your mark is kept: nothing is reopened. The
    helper below it shows in the apps' lists and opens by its own session, so
    the user can follow it there. On an older Host a `done` helper reads
    `done` whatever runs below it.

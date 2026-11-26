@@ -112,9 +112,10 @@ fn fields(kind: &str, roster: &Roster<'_>, member: &Member) -> Option<Value> {
 /// depth, works and is not put away; so a helper that starts, stops, or is put away or taken
 /// back can move every helper above it, up the same line the walk of [`AboveWork`] takes,
 /// through makers that are no helpers and helpers put away alike. The walk ends at the first
-/// maker whose own work lifts the makers above it ([`AboveWork::seeds`]): what it lifts does
-/// not change. Each helper passed that is not at work itself gets a `helper-state` event of its
-/// own, carrying its row's fields and its own maker's.
+/// maker whose own work lifts the makers above it ([`AboveWork::seeds`]), that maker included:
+/// what it lifts does not change, but its own row may. Each helper passed that does not read
+/// `running` by its own state gets a `helper-state` event of its own, carrying its row's fields
+/// and its own maker's.
 pub fn makers_moved(event: &Value, roster: &Roster<'_>) -> Vec<String> {
     let kind = &event["kind"];
     if event["type"] != "agent-roster" || (kind != "helper-state" && kind != "archive-changed") {
@@ -136,12 +137,17 @@ pub fn makers_moved(event: &Value, roster: &Roster<'_>) -> Vec<String> {
             .map(|member| &**member)
             .find(|member| member.record.agent_id == parent)
     }) {
-        if AboveWork::seeds(maker) || passed.contains(&maker.record.agent_id.as_str()) {
+        if passed.contains(&maker.record.agent_id.as_str()) {
             break;
         }
         passed.push(&maker.record.agent_id);
         if maker.record.is_helper() && maker.shown_helper_state() != Some("running") {
             makers.push(maker.record.session.clone());
+        }
+        // A maker at work by itself lifts the makers above it whatever happens below it; its
+        // own row, lifted for what worked below it, is told above.
+        if AboveWork::seeds(maker) {
+            break;
         }
         below = maker;
     }

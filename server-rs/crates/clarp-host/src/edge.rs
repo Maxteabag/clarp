@@ -1755,7 +1755,7 @@ impl Families {
             if record.is_helper() {
                 family.helper_sessions.push(record.session.clone());
             }
-            if above.helper_state(member) == Some("running") {
+            if above.works(member) {
                 let view = member.agent.view();
                 // One that works only below itself is at work all the same, and says what it
                 // said itself, if anything: what works below it is on its own row.

@@ -370,3 +370,75 @@ fn the_end_of_work_below_an_archived_helper_is_told_to_the_helper_above_it() {
     assert_fields_are_the_rows(&event["fields"], &snapshot_row(&host, "upper"));
     assert_fields_are_the_rows(&event["parent"]["fields"], &snapshot_row(&host, &root));
 }
+
+/// A helper given more work after its turn ended unreported works for the helpers above it
+/// while its new turn runs, though its own state reads `ended-unreported` throughout (issue
+/// 936). Two real turns of the leaf; nothing sets any state after the middle helper is accepted.
+#[test]
+fn a_new_turn_of_an_unreported_helper_lifts_the_helper_above_it_until_it_settles() {
+    let place = Place::new("helper-below-second-turn");
+    let host = place.start_with("", &["--helpers-checked-every-ms", "50"]);
+    let heard = host.listen();
+    let root = host.new_agent("Root");
+    for (session, parent) in [("middle", root.as_str()), ("leaf", "middle")] {
+        let made = host.post(
+            "/agents",
+            json!({
+                "name": session, "backend": "scripted", "role": "helper", "parent": parent,
+                "session": session,
+            }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+    }
+    let (status, said) = host.ask(
+        "POST",
+        "/agent-helper-state",
+        Some(&json!({ "session": "middle", "state": "done" })),
+    );
+    assert_eq!(status, 200, "{said}");
+    let state_of = |session: &str| {
+        host.get(&format!("/agent-helper-state?session={session}"))["helper_state"].clone()
+    };
+    // The middle helper's newest event, its row and its maker's count say the same.
+    let middle_reads = |state: &str, root_running: usize| {
+        wait_for("the middle helper's newest event", || {
+            carried(&heard, "helper-state", "middle")
+                .is_some_and(|event| event["fields"]["helper_state"] == state)
+        });
+        let event = carried(&heard, "helper-state", "middle").unwrap();
+        let row = snapshot_row(&host, "middle");
+        assert_eq!(row["helper_state"], state, "{row}");
+        assert_fields_are_the_rows(&event["fields"], &row);
+        assert_fields_are_the_rows(&event["parent"]["fields"], &snapshot_row(&host, &root));
+        assert_eq!(snapshot_row(&host, &root)["running_children"], root_running);
+    };
+
+    // The first turn ends with no report, and the Host marks it so.
+    host.send("leaf", "sleep 1", "first");
+    wait_for("the first turn to end unreported", || {
+        state_of("leaf") == "ended-unreported" && snapshot_row(&host, "leaf")["busy"] == false
+    });
+    middle_reads("done", 0);
+
+    // A second turn: the leaf still reads ended-unreported, and works for the helpers above it.
+    host.send("leaf", "sleep 6", "second");
+    wait_for("the second turn to run", || {
+        snapshot_row(&host, "leaf")["busy"] == true
+    });
+    middle_reads("running", 1);
+    let leaf = host.get("/agents/leaf");
+    assert_eq!(
+        (&leaf["helper_state"], &leaf["busy"]),
+        (&json!("ended-unreported"), &json!(true)),
+        "{leaf}"
+    );
+    assert_eq!(snapshot_row(&host, "middle")["running_children"], 1);
+
+    // It settles: the middle helper reads the result it was given.
+    wait_for("the second turn to settle", || {
+        snapshot_row(&host, "leaf")["busy"] == false
+    });
+    middle_reads("done", 0);
+    assert_eq!(state_of("leaf"), "ended-unreported");
+    assert_eq!(snapshot_row(&host, "middle")["running_children"], 0);
+}

@@ -555,9 +555,24 @@ impl AboveWork {
         Self(Arc::new(above.into_iter().map(str::to_owned).collect()))
     }
 
-    /// Whether the agent's own work lifts the makers above it: a helper at work, not put away.
+    /// Whether the agent's own work lifts the makers above it: a helper at work by itself
+    /// ([`AboveWork::at_work`]), not put away.
     pub(crate) fn seeds(member: &Member) -> bool {
-        member.record.archived_at_ms.is_none() && member.shown_helper_state() == Some("running")
+        member.record.archived_at_ms.is_none() && Self::at_work(member)
+    }
+
+    /// Whether a helper works by itself: it reads `running` by its own state, or a turn of its
+    /// runs now whatever its own state says (a helper that was accepted or ended unreported and
+    /// was given more work). Its own state reads as it is; its makers count it as working.
+    pub(crate) fn at_work(member: &Member) -> bool {
+        member.shown_helper_state() == Some("running")
+            || (member.record.is_helper() && member.agent.view().status.live.is_some())
+    }
+
+    /// Whether its maker counts it among the helpers at work: it works by itself, or a helper
+    /// below it does.
+    pub(crate) fn works(&self, member: &Member) -> bool {
+        Self::at_work(member) || self.helper_state(member) == Some("running")
     }
 
     /// The helper state the agent is shown in, to the apps and to agents alike: its own
@@ -569,8 +584,7 @@ impl AboveWork {
 
     /// Whether it is shown `running` only for a helper below it: it is not at work itself.
     pub(crate) fn only_below(&self, member: &Member) -> bool {
-        member.shown_helper_state() != Some("running")
-            && self.helper_state(member) == Some("running")
+        !Self::at_work(member) && self.helper_state(member) == Some("running")
     }
 }
 
