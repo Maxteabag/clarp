@@ -527,6 +527,11 @@ pub struct Agent {
     last: Option<Settled>,
     /// The last turn carried the user's word (`live_user_word` while it ran).
     last_user_word: bool,
+    /// The turns put back in the queue unsent (`HeldUnsentForMove`) that carried the user's
+    /// word when they were live: they still carry it when they end. The queued flag that
+    /// orders them is not raised again, so where they wait and what they may cut is as before.
+    /// A turn leaves this set when it ends or is read into another turn.
+    held_user_word: BTreeSet<TurnId>,
     interrupted_since_ms: Option<i64>,
     /// The user's compaction whose turn ended and whose outcome is not said yet: how it ended.
     compaction_owed: Option<Settled>,
@@ -622,6 +627,7 @@ impl Default for Agent {
             stop_released: BTreeSet::new(),
             last: None,
             last_user_word: false,
+            held_user_word: BTreeSet::new(),
             interrupted_since_ms: None,
             compaction_owed: None,
             last_compaction: None,
@@ -1829,6 +1835,9 @@ impl Agent {
                     state: "may have reached the tool",
                     event: "held-unsent-for-move",
                 })?;
+                if self.live_user_word {
+                    self.held_user_word.insert(*turn);
+                }
                 self.live = None;
                 self.live_from_queue = false;
                 self.live_takeover = None;
@@ -1897,6 +1906,7 @@ impl Agent {
                 self.mailbox.remove(position);
                 self.unheld.remove(turn);
                 self.stop_released.remove(turn);
+                self.held_user_word.remove(turn);
                 if self.waited.remove(turn) {
                     self.queue_revision += 1;
                 }
@@ -2287,7 +2297,9 @@ impl Agent {
                         }
                     }
                     self.live_worked = false;
-                    self.last_user_word = std::mem::take(&mut self.live_user_word);
+                    let held_user_word = self.held_user_word.remove(&turn);
+                    self.last_user_word =
+                        std::mem::take(&mut self.live_user_word) || held_user_word;
                     self.settled += 1;
                     self.stopping = None;
                     self.stopping_since_ms = None;
@@ -2364,6 +2376,7 @@ impl Agent {
         let user_word = queued.user_word;
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
+                self.held_user_word.remove(&turn);
                 for gathered in self.gathered.remove(&turn).unwrap_or_default() {
                     self.deliveries.over(gathered.turn.0);
                 }
@@ -5075,6 +5088,120 @@ mod tests {
         a.finish(2);
         assert_eq!(a.agent.last().unwrap().id, TurnId(2));
         assert!(!a.agent.last_carried_user_word(), "an agent's own message");
+    }
+
+    #[test]
+    fn a_relay_put_back_unsent_still_carries_the_users_word_when_it_ends() {
+        let desk = || Origin::Agent {
+            agent_id: "desk".into(),
+        };
+        let from_desk = |a: &mut Driven, message_seq, user_word| {
+            a.send(Command::Accept {
+                message_seq,
+                origin: desk(),
+                admission: Admission::Later,
+                coordination: Some("desk".into()),
+                user_word,
+            })
+            .unwrap();
+        };
+        // The desk's relay of the user's word (turn 1, at once), the user (2), the desk's own (3).
+        let accepted = || {
+            let mut a = Driven::new();
+            from_desk(&mut a, 10, true);
+            a.user(11);
+            from_desk(&mut a, 12, false);
+            assert_eq!(a.live(), Some(1));
+            a
+        };
+        // Turn 1, live and never sent to the tool, goes back to the queue: the backend switch
+        // puts back an account wait, the Host move a launch it refused.
+        let put_back = |a: &mut Driven, transit: bool| {
+            if transit {
+                a.send(Command::TurnParked {
+                    turn: TurnId(1),
+                    wait: Wait::account(90_000),
+                    kind: crate::failures::NOT_STARTED.to_string(),
+                    reason: "waiting for an account".to_string(),
+                })
+                .unwrap();
+                let hold = Command::HoldUnsentForTransit { turn: TurnId(1) };
+                assert!(a.send_with_transit_hold(hold, true).unwrap().is_empty());
+            } else {
+                let to = crate::agent_moves::Target {
+                    host: "other".into(),
+                    id: "agent".into(),
+                };
+                a.send(Command::SetMoved { to: Some(to) }).unwrap();
+                a.send(Command::HoldUnsentForMove { turn: TurnId(1) })
+                    .unwrap();
+            }
+            assert_eq!(a.live(), None);
+            assert_eq!(a.waiting(), vec![1, 2, 3], "it goes back to the front");
+            let back = a.agent.waiting().next().unwrap();
+            assert!(
+                !back.user_word,
+                "the flag that orders the queue is as before"
+            );
+        };
+        let run_again = |a: &mut Driven, transit: bool| {
+            if transit {
+                a.send(Command::RunWaiting).unwrap();
+            } else {
+                a.send(Command::SetMoved { to: None }).unwrap();
+            }
+            assert_eq!(a.live(), Some(1), "the relay runs again first");
+        };
+        for transit in [true, false] {
+            let mut a = accepted();
+            put_back(&mut a, transit);
+            run_again(&mut a, transit);
+            put_back(&mut a, transit);
+            run_again(&mut a, transit);
+            a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
+            assert!(
+                a.agent.owner_goes_first(&Origin::User),
+                "what may cut the resumed relay is as before"
+            );
+            assert_eq!(
+                a.finish(1),
+                vec![Effect::StartTurn {
+                    turn: TurnId(2),
+                    message_seq: 11
+                }],
+                "the queue runs in the same order"
+            );
+            assert_eq!(a.agent.last().unwrap().id, TurnId(1));
+            assert!(
+                a.agent.last_carried_user_word(),
+                "the relay of the user's word ended without words is still the user's"
+            );
+            let replayed = Agent::replay(&a.history).unwrap();
+            assert!(
+                replayed.last_carried_user_word(),
+                "and a restart says the same"
+            );
+
+            a.finish(2);
+            a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
+            a.finish(3);
+            assert_eq!(a.agent.last().unwrap().id, TurnId(3));
+            assert!(!a.agent.last_carried_user_word(), "an agent's own message");
+            assert!(a.agent.held_user_word.is_empty());
+
+            // Put back and taken back, it can no longer end: nothing is kept for it.
+            let mut a = accepted();
+            put_back(&mut a, transit);
+            run_again(&mut a, transit);
+            put_back(&mut a, transit);
+            assert!(a.agent.held_user_word.contains(&TurnId(1)));
+            a.send(Command::Withdraw {
+                turn: TurnId(1),
+                by: "user".into(),
+            })
+            .unwrap();
+            assert!(a.agent.held_user_word.is_empty());
+        }
     }
 
     #[test]
