@@ -647,6 +647,8 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
         Some(machine.older.join("core1"))
     );
     assert_eq!(unreadable(&folders, &ours), Vec::<String>::new());
+    // Every link is sampled while the links move, until this is cleared.
+    let moving = std::sync::atomic::AtomicBool::new(true);
     std::thread::scope(|scope| {
         // A change asked for meanwhile waits for the reconciliation, and is made after it.
         let change = scope.spawn(|| {
@@ -662,8 +664,6 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
             "a change ran beside the reconciliation"
         );
         assert_eq!(machine.leads("claude", "opt2"), None);
-        // Every link is sampled while the links move.
-        let moving = std::sync::atomic::AtomicBool::new(true);
         let probe = scope.spawn(|| {
             let (mut samples, mut wrong) = (0, Vec::new());
             while moving.load(std::sync::atomic::Ordering::Relaxed) {
