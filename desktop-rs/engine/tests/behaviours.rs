@@ -79,8 +79,12 @@ fn one_event_stream_resumes_after_an_outage_and_ignores_unknown_events() {
     assert!(d.engine.error().is_empty(), "{:?}", d.engine.error());
     assert_eq!(host.requests("GET", "/events").len(), 1, "one stream");
     host.control("/__control/outage", json!({"seconds": 1.0}));
-    d.until("the stream drops", |e| e.connection_state() != "live");
-    d.until("and comes back", |e| e.connection_state() == "live");
+    // A second's outage is never said: the list stays as it was.
+    d.until("the stream drops", |e| !e.connected());
+    assert_eq!(d.engine.connection_state(), "live", "quiet within the grace");
+    assert!(d.engine.roster().transport_available(), "the rows stay as they were");
+    d.until("and comes back", |e| e.connected() && e.connection_state() == "live");
+    assert!(d.engine.error().is_empty(), "{:?}", d.engine.error());
     d.settle(Duration::from_millis(300));
     let streams = host.requests("GET", "/events");
     let resumed = streams.last().unwrap();

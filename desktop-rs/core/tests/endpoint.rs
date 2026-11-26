@@ -39,6 +39,20 @@ fn reconnect_backoff_doubles_to_the_cap() {
     assert_eq!(timing.watchdog, Duration::from_secs(25));
 }
 
+#[test]
+fn reconnect_jitter_adds_at_most_a_quarter() {
+    use clarp_core::endpoint::jitter;
+    let five = Duration::from_secs(5);
+    assert_eq!(jitter(five, 0.0), five);
+    assert_eq!(jitter(five, 1.0), Duration::from_millis(6_250));
+    assert_eq!(jitter(five, 7.0), Duration::from_millis(6_250), "clamped");
+    let timing = SseTiming::default();
+    for attempt in 0..10 {
+        let (base, waited) = (timing.reconnect_delay(attempt), timing.jittered_delay(attempt));
+        assert!(waited >= base && waited <= base + base / 4, "{attempt}: {waited:?}");
+    }
+}
+
 // Port of tst_native_core::sseCursorIsScopedToOneHost.
 #[test]
 fn sse_cursor_is_scoped_to_one_host() {

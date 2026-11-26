@@ -1,6 +1,8 @@
 //! Port of the C++ client's `SseClient`: one `/events` stream per Host,
 //! resumed with `Last-Event-ID`, aborted after a silent watchdog interval and
-//! reopened with capped exponential backoff.
+//! reopened with capped exponential backoff and jitter. A failure on the way
+//! to the Host (no answer, a dropped stream, a gateway's 502, 503 or 504) is
+//! an `Error`; any other HTTP status is the Host's refusal, `Rejected`.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +22,11 @@ pub enum SseSignal {
     /// Emitted only when the connected state actually changes.
     Connected(bool),
     Event(Object),
+    /// The way to the Host failed; the stream keeps trying.
     Error(String),
+    /// The Host (not a gateway) refused the stream with this status, a 401
+    /// for a token it no longer knows; the stream keeps trying.
+    Rejected { status: u16, message: String },
     /// A stream reopened by `resubscribe` is answering with its new query
     /// (events between the old stream and this one were not delivered).
     Resubscribed,
@@ -191,10 +197,12 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
             http.get(url).headers(headers)
         };
         let failure = match tokio::time::timeout(timing.watchdog, request.send()).await {
-            Err(_) => Some("Event stream timed out".to_owned()),
-            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some(SseSignal::Error("Event stream timed out".to_owned())),
+            Ok(Err(error)) => Some(SseSignal::Error(error.to_string())),
             Ok(Ok(response)) if !response.status().is_success() => {
-                Some(format!("Event stream failed: HTTP {}", response.status().as_u16()))
+                let status = response.status().as_u16();
+                let message = format!("Event stream failed: HTTP {}", response.status().as_u16());
+                Some(if clarp_core::outage::transient(status) { SseSignal::Error(message) } else { SseSignal::Rejected { status, message } })
             }
             Ok(Ok(mut response)) => {
                 if !set_connected(&state, &sink, run, true) {
@@ -207,9 +215,9 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
                 let mut parser = SseParser::default();
                 loop {
                     match tokio::time::timeout(timing.watchdog, response.chunk()).await {
-                        Err(_) => break Some("Event stream went silent".to_owned()),
-                        Ok(Err(error)) => break Some(error.to_string()),
-                        Ok(Ok(None)) => break Some("Event stream closed".to_owned()),
+                        Err(_) => break Some(SseSignal::Error("Event stream went silent".to_owned())),
+                        Ok(Err(error)) => break Some(SseSignal::Error(error.to_string())),
+                        Ok(Ok(None)) => break Some(SseSignal::Error("Event stream closed".to_owned())),
                         Ok(Ok(Some(bytes))) => {
                             for message in parser.feed(&bytes) {
                                 let alive = emit(&state, &sink, run, |s| Some(SseSignal::Event(s.cursor.accept(message))));
@@ -225,11 +233,11 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
         if !set_connected(&state, &sink, run, false) {
             return;
         }
-        if let Some(message) = failure
-            && !emit(&state, &sink, run, |_| Some(SseSignal::Error(message))) {
+        if let Some(signal) = failure
+            && !emit(&state, &sink, run, |_| Some(signal)) {
                 return;
             }
-        tokio::time::sleep(timing.reconnect_delay(attempt)).await;
+        tokio::time::sleep(timing.jittered_delay(attempt)).await;
         attempt += 1;
     }
 }

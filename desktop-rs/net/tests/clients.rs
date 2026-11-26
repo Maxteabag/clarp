@@ -314,6 +314,57 @@ async fn refused_connections_back_off_and_report_errors() {
     client.stop();
 }
 
+/// A gateway's 502 while the Host restarts is a failure on the way (the
+/// engine keeps it quiet for a while); the Host's own 401 is a refusal. The
+/// stream comes back by itself, resuming from the last event id.
+#[tokio::test]
+async fn gateway_failures_are_errors_refusals_are_rejected_and_the_stream_resumes() {
+    let (server, url) = listen().await;
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let seen = requests.clone();
+    tokio::spawn(async move {
+        let mut index = 0;
+        while let Ok((mut socket, _)) = server.accept().await {
+            let request = read_request(&mut socket).await;
+            seen.lock().unwrap().push(request);
+            let reply = match index {
+                0 => format!("{SSE_HEADERS}id: 7\ndata: {{\"type\":\"agent-state\"}}\n\n"),
+                1 | 2 => "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".to_owned(),
+                3 => "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_owned(),
+                _ => format!("{SSE_HEADERS}id: 8\ndata: {{\"type\":\"agent-roster\"}}\n\n"),
+            };
+            index += 1;
+            let _ = socket.write_all(reply.as_bytes()).await;
+            if index > 4 {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    });
+    let (mut client, mut signals) = sse_client();
+    client.set_endpoint(url, "tok");
+    client.start();
+    let mut seen_signals = Vec::new();
+    loop {
+        let signal = next(&mut signals).await;
+        let done = matches!(&signal, SseSignal::Event(e) if e["event_id"] == 8);
+        seen_signals.push(signal);
+        if done {
+            break;
+        }
+    }
+    let errors: Vec<&SseSignal> = seen_signals.iter().filter(|s| matches!(s, SseSignal::Error(_) | SseSignal::Rejected { .. })).collect();
+    assert!(matches!(errors[0], SseSignal::Error(m) if m.contains("closed")), "{errors:?}");
+    assert!(matches!(errors[1], SseSignal::Error(m) if m.contains("HTTP 502")), "{errors:?}");
+    assert!(matches!(errors[2], SseSignal::Error(m) if m.contains("HTTP 502")), "{errors:?}");
+    assert!(matches!(errors[3], SseSignal::Rejected { status: 401, .. }), "{errors:?}");
+    let requests = requests.lock().unwrap();
+    for resumed in &requests[1..] {
+        assert_eq!(header(resumed, "last-event-id"), Some("7"));
+    }
+    drop(requests);
+    client.stop();
+}
+
 /// The Host gzips JSON for clients that accept it (a `/log` page shrinks
 /// about 4x); the API client asks for gzip and reads the compressed reply.
 #[tokio::test]

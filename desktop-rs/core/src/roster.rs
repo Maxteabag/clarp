@@ -688,6 +688,13 @@ impl Roster {
         self.notify_row(row, &[Role::Unread]);
     }
 
+    /// The event stream dropped and is trying again: nothing shown changes
+    /// yet, but the next snapshot is the Host back up and ends a
+    /// `host-updating` line.
+    pub fn stream_dropped(&mut self) {
+        self.host_updating_down |= self.host_updating.is_some();
+    }
+
     pub fn mark_transport_unavailable(&mut self) {
         self.host_updating_down |= self.host_updating.is_some();
         if !self.transport_available {

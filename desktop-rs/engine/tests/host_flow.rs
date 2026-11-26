@@ -132,9 +132,14 @@ fn a_send_shows_at_once_and_is_confirmed_by_the_log() {
 
 #[test]
 fn an_unreachable_host_is_offline_with_an_error() {
+    // Said after the outage grace (15 s; shortened here), not at once: a
+    // Host restarting refuses connections for a moment too.
     let mut d = Driver::new("http://127.0.0.1:9");
+    d.engine.set_outage_grace(Duration::from_millis(1000));
+    let started = Instant::now();
     d.engine.start();
     d.until("offline", |e| e.connection_state() == "offline" && !e.error().is_empty());
+    assert!(started.elapsed() >= Duration::from_millis(900), "not before the grace: {:?}", started.elapsed());
     assert!(!d.engine.connected());
 }
 

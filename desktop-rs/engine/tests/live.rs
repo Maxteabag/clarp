@@ -122,9 +122,9 @@ fn a_dropped_stream_asks_for_the_snapshot_again() {
     let fetched = host.requests("GET", "/live").len();
     // The turn moves on while the stream is down: nothing arrives as events.
     host.control("/__control/outage", json!({"seconds": 0.5}));
-    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    d.until("the drop", |e| !e.connected());
     host.control("/__control/live-replay", json!({"fixture": "turn-full", "through": 6}));
-    d.until("live again", |e| e.connection_state() == "live");
+    d.until("live again", |e| e.connected() && e.connection_state() == "live");
     d.until("the turn so far", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(5)));
     assert_eq!(host.requests("GET", "/live").len(), fetched + 1);
     assert_eq!(d.engine.live_view("rachel").unwrap().item("cl:msg_01:0").unwrap()["status"], "completed");

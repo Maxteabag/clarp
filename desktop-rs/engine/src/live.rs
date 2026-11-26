@@ -370,6 +370,22 @@ impl Engine {
         }
     }
 
+    /// Whether a live view is held for `session` on this engine's Host.
+    pub(crate) fn live_holds(&self, session: &str) -> bool {
+        self.live.views.contains_key(session)
+    }
+
+    /// Views whose snapshot failed (the Host was out of reach) ask again.
+    pub(crate) fn live_retry_failed(&mut self) {
+        if !self.live.enabled {
+            return;
+        }
+        let failed: Vec<String> = self.live.views.iter().filter(|(_, v)| v.lseq().is_none() && !v.awaiting_snapshot()).map(|(s, _)| s.clone()).collect();
+        for session in failed {
+            self.request_live(&session);
+        }
+    }
+
     pub(crate) fn live_stream_dropped(&mut self) {
         self.live.dropped = true;
     }

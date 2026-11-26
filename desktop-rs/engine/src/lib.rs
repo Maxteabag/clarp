@@ -32,6 +32,7 @@ mod form_events;
 pub use form_events::{FormEventStore, FormEvents};
 mod voice;
 mod narrator;
+mod outage;
 mod host_status;
 pub mod lifecycle;
 mod live;
@@ -181,6 +182,10 @@ enum Message {
     PeerCredential { base: String, token: String, generation: u64 },
     /// Peers that could not be reached are tried again.
     PeersDue(u64),
+    /// The quiet time after the Host stopped answering is over (its epoch).
+    OutageGraceDue(u64),
+    /// `/server-info` is asked again after a failure on the way (its try).
+    ServerInfoRetryDue(u64),
 }
 
 pub struct Config {
@@ -242,6 +247,8 @@ pub struct Engine {
     connection_state: String,
     error: String,
     error_is_transport: bool,
+    /// The Host out of reach for a moment (`outage.rs`).
+    outage: outage::OutageState,
     server_name: String,
     server_version: String,
 
@@ -415,6 +422,7 @@ impl Engine {
             connection_state: "offline".into(),
             error: String::new(),
             error_is_transport: false,
+            outage: Default::default(),
             server_name: String::new(),
             server_version: String::new(),
             roster: Roster::default(),
@@ -532,6 +540,8 @@ impl Engine {
                 Message::FormEventsDue { key, token } => self.form_events_due(&key, token),
                 Message::PeerCredential { base, token, generation } => self.peer_credential(&base, token, generation),
                 Message::PeersDue(generation) => self.peers_due(generation),
+                Message::OutageGraceDue(epoch) => self.outage_grace_due(epoch),
+                Message::ServerInfoRetryDue(attempt) => self.server_info_retry_due(attempt),
             }
         }
         // What the Host said of a chat's view (#702): the primary keeps it.
@@ -936,7 +946,11 @@ impl Engine {
         self.changes.push(Change::Endpoint);
         self.set_error("");
         self.set_connecting(true);
-        self.set_connection_state("connecting");
+        // Still out of reach after the grace: say so again, not "connecting".
+        if !self.outage.outage.shown() {
+            self.set_connection_state("connecting");
+        }
+        self.outage.retry += 1;
         self.api.get("server-info", "/server-info", &[]);
         self.force_snapshot();
         if self.restored_from_cache && !self.selected.is_empty() && !clarp_core::all_hosts::is_peer_session(&self.selected) {
@@ -1642,6 +1656,7 @@ impl Engine {
             return;
         }
         if tag == "server-info" {
+            self.outage.server_info_attempt = 0;
             self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
@@ -1677,6 +1692,10 @@ impl Engine {
             }
             self.complete_snapshot_request();
             self.apply_snapshot(object);
+            // Reads answer while the stream runs: an outage of reads ends.
+            if self.connected {
+                self.host_answered();
+            }
         } else if let Some(session) = tag.strip_prefix("log-tail:") {
             self.apply_log(session, object, LoadKind::Tail);
         } else if let Some(session) = tag.strip_prefix("log-replace:") {
@@ -1758,6 +1777,10 @@ impl Engine {
             return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        // On the way to the Host, a read: kept quiet, tried again, caught up.
+        if self.outage_read_failed(tag, &detail, status) {
+            return;
+        }
         self.set_error(&detail);
         self.error_source = tag.to_owned();
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
@@ -1797,18 +1820,26 @@ impl Engine {
                     self.connected = connected;
                     self.changes.push(Change::Connection);
                 }
-                // After a deliberate stop the caller already set the state.
-                if connected || self.sse.running() {
-                    self.set_connection_state(if connected { "live" } else { "reconnecting" });
-                }
                 if connected {
+                    self.set_connection_state("live");
                     if self.error_is_transport {
                         self.set_error("");
                     }
                     self.force_snapshot();
                     self.live_reconnected();
                     self.live_resubscribed();
+                    self.host_answered();
+                } else if self.sse.running() {
+                    // Dropped: the stream tries again by itself. The list,
+                    // the open chat and any host-updating line stay as they
+                    // are for the grace (`outage.rs`); the next snapshot
+                    // ends a host-updating line.
+                    self.live_stream_dropped();
+                    self.mutate_roster(Roster::stream_dropped);
+                    self.outage.reconcile = true;
+                    self.outage_failed("event stream dropped");
                 } else {
+                    // A deliberate stop: the caller already set the state.
                     self.live_stream_dropped();
                     self.mutate_roster(Roster::mark_transport_unavailable);
                     let sessions: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1818,6 +1849,14 @@ impl Engine {
                 }
             }
             SseSignal::Error(message) => {
+                // On the way to the Host: quiet for the grace, then the
+                // calm out-of-reach treatment; never the raw words.
+                eprintln!("Engine: event stream: {message}");
+                self.outage_failed(&message);
+            }
+            SseSignal::Rejected { message, .. } => {
+                // The Host itself refused (a token it no longer knows): said
+                // at once; a stream that connects again clears it, as before.
                 self.set_error(&message);
                 self.error_is_transport = true;
             }

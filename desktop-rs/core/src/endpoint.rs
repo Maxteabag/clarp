@@ -68,6 +68,25 @@ impl SseTiming {
     pub fn reconnect_delay(&self, attempt: u32) -> Duration {
         (self.initial_reconnect * (1u32 << attempt.min(5))).min(self.maximum_reconnect)
     }
+
+    /// The delay actually waited: the backoff plus up to a quarter more,
+    /// so desktops cut off together do not all knock again together.
+    pub fn jittered_delay(&self, attempt: u32) -> Duration {
+        jitter(self.reconnect_delay(attempt), random_unit())
+    }
+}
+
+/// `delay` stretched by `unit` (0 to 1) of a quarter of it.
+pub fn jitter(delay: Duration, unit: f64) -> Duration {
+    delay + delay.mul_f64(unit.clamp(0.0, 1.0) / 4.0)
+}
+
+/// A number from 0 to 1 that differs per call and per process.
+fn random_unit() -> f64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    (hasher.finish() >> 11) as f64 / (1u64 << 53) as f64
 }
 
 /// The resume cursor for one Host. Event IDs are scoped to the Host that

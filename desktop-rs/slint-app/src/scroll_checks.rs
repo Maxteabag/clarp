@@ -1243,7 +1243,7 @@ fn always() -> Box<dyn Fn() -> bool> {
 }
 
 fn live() -> Box<dyn Fn() -> bool> {
-    Box::new(|| app_now().engine.borrow().connection_state() == "live")
+    Box::new(|| { let app = app_now(); let engine = app.engine.borrow(); engine.connection_state() == "live" && engine.connected() })
 }
 
 /// The cards, as the Host lists them: two on the chat's first replies
