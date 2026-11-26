@@ -303,9 +303,11 @@ fn on_path(name: &str) -> bool {
 struct InstallState {
     skills: Vec<String>,
     skills_off: Vec<String>,
-    /// The releases the links of Clarp's lead into, as the last reconciliation or change left
-    /// them (issue 935): install-host keeps every one of them. A Host from before writes none.
-    linked_releases: Vec<String>,
+    /// The releases the links of Clarp's may lead into (issue 935): install-host keeps every one
+    /// of them. None where that is not known (a Host from before writes none, and a folder that
+    /// could not be listed leaves it unknown); install-host then keeps every release.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    linked_releases: Option<Vec<String>>,
 }
 
 impl InstallState {
@@ -440,11 +442,20 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
                 ApiError::new(StatusCode::CONFLICT, words)
             },
         )?;
+        // The releases a link may lead into are on record before one is changed, the choice
+        // only once it is.
+        let written = shelf.written_roots();
+        let (now, unlisted) = shelf.linked_releases(&written);
+        shelf
+            .intend(&mut state, &path, now, unlisted.is_empty())
+            .map_err(disk_error)?;
         state.skills_off = rules::chosen_after(&state.skills_off, &skill, !enabled);
         state.skills =
             rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
         let undo = shelf.apply(&skill, &acts).map_err(disk_error)?;
-        state.linked_releases = shelf.linked_releases(&shelf.written_roots());
+        let (after, unlisted) = shelf.linked_releases(&written);
+        state.linked_releases =
+            settled(state.linked_releases.as_deref(), after, unlisted.is_empty());
         if let Err(error) = state.keep(&path) {
             undo.run();
             return Err(disk_error(error));
@@ -458,24 +469,20 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
 /// 935), beside the start rather than before it is done. The lock over the tools' links is taken
 /// here, before the start is done, so every `GET` and `POST /managed-skills` (held at the door
 /// until then) comes after the reconciliation and none runs beside it: one writer at a time.
+/// Nothing here touches the disk: whether this Host keeps the tools is its configuration, and
+/// where the shelf is (paths resolved link by link) is found beside the start, with the rest.
 /// Until the links have moved, a turn reads the release before's skills, which install-host
 /// keeps while a link leads into it (`linked_releases`). A reconciliation that could not put
-/// every link in place is tried again, the lock let go in between, until it has.
+/// every link in place, or could not list every folder, is tried again, the lock let go in
+/// between, until it has.
 pub async fn at_start(app: &App) {
-    let mut steps = Steps::from(std::time::Instant::now());
-    let Some(shelf) = Shelf::of(&app.config) else {
+    if !keeps(&app.config) {
         return;
-    };
-    steps.mark("shelf");
+    }
+    let mut steps = Steps::from(std::time::Instant::now());
     let held = app.skill_links.clone().lock_owned().await;
     steps.mark("lock");
-    let app = app.clone();
-    tokio::spawn(keep_reconciling(
-        app,
-        std::sync::Arc::new(shelf),
-        held,
-        steps,
-    ));
+    tokio::spawn(keep_reconciling(app.clone(), held, steps));
 }
 
 /// How long each step of one reconciliation took, by the monotonic clock, for its journal line
@@ -538,6 +545,7 @@ enum NotReconciled {
 }
 
 /// What one reconciliation did.
+#[derive(Default)]
 struct Reconciled {
     linked: usize,
     unlinked: usize,
@@ -546,21 +554,30 @@ struct Reconciled {
     releases: usize,
 }
 
-async fn keep_reconciling(
-    app: App,
-    shelf: std::sync::Arc<Shelf>,
-    mut held: tokio::sync::OwnedMutexGuard<()>,
-    mut steps: Steps,
-) {
+async fn keep_reconciling(app: App, mut held: tokio::sync::OwnedMutexGuard<()>, mut steps: Steps) {
     let mut again = std::time::Duration::from_secs(1);
     let mut first = true;
     loop {
-        let path = app.config.data_dir.join("install.json");
-        let seed = app.config.skills_chosen_before.clone();
-        let work = shelf.clone();
+        let work = app.clone();
         let (done, mut steps_done) = tokio::task::spawn_blocking(move || {
             steps.mark("enter");
-            let done = work.reconcile(&path, seed.as_deref(), &mut steps);
+            // The tests hold the reconciliation here, before anything of it touches the disk,
+            // while the file named exists (issue 935).
+            #[cfg(debug_assertions)]
+            if let Some(hold) = std::env::var_os("CLARP_TEST_SKILLS_HELD_WHILE") {
+                while Path::new(&hold).exists() {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                steps.mark("held");
+            }
+            let config = &work.config;
+            let Some(shelf) = Shelf::of(config) else {
+                return (Ok(Reconciled::default()), steps);
+            };
+            steps.mark("shelf");
+            let path = config.data_dir.join("install.json");
+            let seed = config.skills_chosen_before.as_deref();
+            let done = shelf.reconcile(&path, seed, &mut steps);
             (done, steps)
         })
         .await
@@ -618,20 +635,18 @@ async fn keep_reconciling(
 
 impl Shelf {
     /// One reconciliation of the tools' links with the release's on-list, under the lock.
+    ///
+    /// Before a link is changed, the install record names every release a link may lead into
+    /// while the links move (those named before, those the links lead into now, and this one),
+    /// durably; once they have moved, it names exactly those they lead into, where every folder
+    /// could be listed, and otherwise keeps naming every one it named. So no reconciliation cut
+    /// off, failed or half seen leaves install-host free to take away a release a link needs.
     fn reconcile(
         &self,
         path: &Path,
         seed: Option<&Path>,
         steps: &mut Steps,
     ) -> Result<Reconciled, NotReconciled> {
-        // The tests hold the reconciliation while the file named exists (issue 935).
-        #[cfg(debug_assertions)]
-        if let Some(hold) = std::env::var_os("CLARP_TEST_SKILLS_HELD_WHILE") {
-            while Path::new(&hold).exists() {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            steps.mark("held");
-        }
         let items = self.items().map_err(|Malformed| NotReconciled::Manifest)?;
         steps.mark("manifest");
         let mut state = InstallState::load(path, seed).map_err(NotReconciled::Disk)?;
@@ -644,15 +659,15 @@ impl Shelf {
         // on-list. Link ownership is checked before any of them can be removed.
         let mut candidates: BTreeSet<String> = state.skills.iter().cloned().collect();
         for root in &roots {
-            candidates.extend(self.links_in(*root));
+            candidates.extend(self.links_in(*root).unwrap_or_default());
         }
         steps.mark("roots");
-        let mut done = Reconciled {
-            linked: 0,
-            unlinked: 0,
-            failed: Vec::new(),
-            releases: 0,
-        };
+        let (now, unlisted) = self.linked_releases(&roots);
+        steps.mark("before");
+        self.intend(&mut state, path, now, unlisted.is_empty())
+            .map_err(NotReconciled::Disk)?;
+        steps.mark("intent");
+        let mut done = Reconciled::default();
         for skill in candidates {
             let enabled = state.skills.contains(&skill) && self.has_source(&skill);
             let acts: Vec<(Root, Act)> = roots
@@ -673,34 +688,97 @@ impl Shelf {
             }
         }
         steps.mark("links");
-        state.linked_releases = self.linked_releases(&roots);
-        done.releases = state.linked_releases.len();
+        let (after, unlisted) = self.linked_releases(&roots);
+        state.linked_releases =
+            settled(state.linked_releases.as_deref(), after, unlisted.is_empty());
+        done.failed.extend(unlisted);
+        done.releases = state.linked_releases.as_ref().map_or(0, Vec::len);
         steps.mark("scan");
+        // The tests hold the reconciliation here, its links moved and its record not yet
+        // settled, while the file named exists (issue 935).
+        #[cfg(debug_assertions)]
+        if let Some(hold) = std::env::var_os("CLARP_TEST_SKILLS_SAVE_HELD_WHILE") {
+            while Path::new(&hold).exists() {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
         state
             .keep_marked(path, steps)
             .map_err(NotReconciled::Disk)?;
         Ok(done)
     }
 
-    /// The names of the links in a tool's folder.
-    fn links_in(&self, root: Root) -> Vec<String> {
-        let Ok(entries) = std::fs::read_dir(self.folder(root)) else {
-            return Vec::new();
+    /// This release's folder, resolved: the one its links lead into.
+    fn own_release(&self) -> Option<String> {
+        self.tree.parent().map(text)
+    }
+
+    /// Makes the record name, durably and before a link is changed, every release a link may
+    /// lead into while they move: those it named, `also` (where the links lead now), and this
+    /// release. A record that names none, as not known, stays so unless `also` is whole: then
+    /// install-host keeps every release meanwhile. Written only when that adds one.
+    fn intend(
+        &self,
+        state: &mut InstallState,
+        path: &Path,
+        also: Vec<String>,
+        whole: bool,
+    ) -> io::Result<()> {
+        let Some(before) = state
+            .linked_releases
+            .clone()
+            .or_else(|| whole.then(Vec::new))
+        else {
+            return Ok(());
         };
-        entries
-            .flatten()
-            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_symlink()))
-            .filter_map(|entry| entry.file_name().into_string().ok())
-            .collect()
+        let mut all: BTreeSet<String> = before.into_iter().collect();
+        all.extend(also);
+        all.extend(self.own_release());
+        let all: Vec<String> = all.into_iter().collect();
+        if state.linked_releases.as_ref() == Some(&all) {
+            return Ok(());
+        }
+        state.linked_releases = Some(all);
+        state.keep(path)
+    }
+
+    /// The names of the links in a tool's folder; a folder that is not there has none.
+    fn links_in(&self, root: Root) -> io::Result<Vec<String>> {
+        let entries = match std::fs::read_dir(self.folder(root)) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_symlink() {
+                if let Ok(name) = entry.file_name().into_string() {
+                    names.push(name);
+                }
+            }
+        }
+        Ok(names)
     }
 
     /// The releases of Clarp the links in the tools' folders lead into now, resolved: this
-    /// release's and any other a link of Clarp's still reads its skill from. install-host keeps
-    /// each of them, so that no link of Clarp's leads to a release it has taken away.
-    fn linked_releases(&self, roots: &[Root]) -> Vec<String> {
+    /// release's and any other a link of Clarp's still reads its skill from, and why any folder
+    /// could not be listed (then some may be missing).
+    fn linked_releases(&self, roots: &[Root]) -> (Vec<String>, Vec<String>) {
         let mut releases = BTreeSet::new();
+        let mut unlisted = Vec::new();
         for root in roots {
-            for skill in self.links_in(*root) {
+            let names = match self.links_in(*root) {
+                Ok(names) => names,
+                Err(error) => {
+                    let folder = self.folder(*root).display();
+                    unlisted.push(format!(
+                        "the links in {folder} could not be listed: {error}"
+                    ));
+                    continue;
+                }
+            };
+            for skill in names {
                 if matches!(self.link(*root, &skill), Link::Healthy | Link::Outdated) {
                     let resolved = resolve(&self.place(*root, &skill));
                     if let Some(release) = resolved.parent().and_then(Path::parent) {
@@ -709,8 +787,20 @@ impl Shelf {
                 }
             }
         }
-        releases.into_iter().collect()
+        (releases.into_iter().collect(), unlisted)
     }
+}
+
+/// What the record names once the links have moved: exactly the releases they lead into where
+/// every folder could be listed, else every release it named before as well (still none, as
+/// not known, where it named none).
+fn settled(before: Option<&[String]>, after: Vec<String>, whole: bool) -> Option<Vec<String>> {
+    if whole {
+        return Some(after);
+    }
+    let mut all: BTreeSet<String> = before?.iter().cloned().collect();
+    all.extend(after);
+    Some(all.into_iter().collect())
 }
 
 /// Whether this Host keeps the machine's tools' skills: what lists `managed_skills`.
