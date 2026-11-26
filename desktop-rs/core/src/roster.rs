@@ -105,6 +105,9 @@ pub struct AgentRow {
     /// When the running turn stalled (epoch ms) while the Host offers Stop
     /// for it (`stall::stop_offered`), else None.
     pub stalled_since: Option<i64>,
+    /// Why the agent cannot answer now (#918), or None: it can, or the
+    /// Host is out of reach (and not updating).
+    pub availability: Option<crate::availability::Availability>,
     pub conversation_id: String,
     pub head_revision: i64,
     pub context_tokens: Option<i64>,
@@ -164,6 +167,15 @@ pub struct Roster {
     /// The Host lists the `stalled_turn` feature (contract 149): its stall
     /// fields are read. Off, an older Host shows nothing new.
     stall_feature: bool,
+    /// The Host lists `agent_availability` (#918): its `availability` is
+    /// read. Off, an older Host shows nothing new.
+    availability_feature: bool,
+    /// The Host said it restarts for an update (`host-updating`): every
+    /// agent's line until the desktop has reconnected and read the list.
+    host_updating: Option<crate::availability::Availability>,
+    /// The stream dropped since that event: the next snapshot is the Host
+    /// back up, and ends it.
+    host_updating_down: bool,
     ops: Vec<Op>,
 }
 
@@ -225,6 +237,7 @@ impl Roster {
             last_activity: agent.last_activity,
             turn_started_at: agent.turn_started_at,
             stalled_since: if live { crate::stall::stop_offered(agent) } else { None },
+            availability: self.host_updating.clone().or_else(|| if live { agent.availability.clone() } else { None }),
             conversation_id: agent.conversation_id.clone(),
             head_revision: agent.head_revision,
             context_tokens: agent.context_tokens,
@@ -334,16 +347,18 @@ impl Roster {
 
     pub fn apply_snapshot(&mut self, snapshot: &Object) {
         self.transport_available = true;
+        // A snapshot never says the Host is updating: read after the
+        // stream dropped, it is the Host back up (every row is rewritten).
+        if std::mem::take(&mut self.host_updating_down) {
+            self.host_updating = None;
+        }
         let mut next: Vec<Agent> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for value in json::array(snapshot, "agents") {
             let Some(object) = value.as_object() else { continue };
             self.turn_clock |= object.contains_key("turn_started_at");
             let mut agent = Agent::from_json(object);
-            if !self.stall_feature {
-                agent.stalled_since = None;
-                agent.stalled_action = None;
-            }
+            self.gate(&mut agent);
             if agent.session.is_empty() || agent.archived != self.archived_only {
                 continue;
             }
@@ -448,10 +463,7 @@ impl Roster {
         let Some(row) = self.index_of_session(session) else { return RowChange::NotHeld };
         let mut agent = self.agents[row].clone();
         agent.patch(fields);
-        if !self.stall_feature {
-            agent.stalled_since = None;
-            agent.stalled_action = None;
-        }
+        self.gate(&mut agent);
         self.put_row(row, agent)
     }
 
@@ -461,12 +473,22 @@ impl Roster {
         let mut agent = Agent::from_json(object);
         let Some(row) = self.index_of_session(&agent.session).filter(|_| !agent.session.is_empty()) else { return RowChange::NotHeld };
         self.turn_clock |= object.contains_key("turn_started_at");
+        self.gate(&mut agent);
+        self.keep_newer(&mut agent);
+        self.put_row(row, agent)
+    }
+
+    /// Leaves out what a Host that lacks the feature for it sent anyway:
+    /// the stall without `stalled_turn`, availability without
+    /// `agent_availability`.
+    fn gate(&self, agent: &mut Agent) {
         if !self.stall_feature {
             agent.stalled_since = None;
             agent.stalled_action = None;
         }
-        self.keep_newer(&mut agent);
-        self.put_row(row, agent)
+        if !self.availability_feature {
+            agent.availability = None;
+        }
     }
 
     fn put_row(&mut self, row: usize, agent: Agent) -> RowChange {
@@ -528,6 +550,51 @@ impl Roster {
                 self.notify_row(row, &[Role::State, Role::StatusText]);
             }
         }
+    }
+
+    /// `/server-info` answered: whether the Host offers
+    /// `agent_availability`. A Host without it shows no availability line;
+    /// a Host answering is up, so a `host-updating` line ends.
+    pub fn set_availability_feature(&mut self, on: bool) {
+        self.availability_feature = on;
+        self.host_updating_down = false;
+        let updating = self.host_updating.take().is_some();
+        for row in 0..self.agents.len() {
+            let cleared = !on && self.agents[row].availability.take().is_some();
+            if cleared || updating {
+                self.notify_row(row, &[Role::State, Role::StatusText]);
+            }
+        }
+    }
+
+    /// A `host-updating` event: the Host restarts for an update, so every
+    /// agent says so until the desktop has reconnected and read the list.
+    pub fn apply_host_updating(&mut self, event: &Object) {
+        if !self.availability_feature {
+            return;
+        }
+        self.host_updating = Some(crate::availability::host_updating(event));
+        self.host_updating_down = false;
+        self.notify_all(&[Role::State, Role::StatusText]);
+    }
+
+    /// A `/log` delta for `session` arrived: the agent's answer in it ends
+    /// its availability line (`availability::answered`) before the Host's
+    /// `ok` does.
+    pub fn apply_log_delta(&mut self, session: &str, log: &Object) {
+        let Some(row) = self.index_of_session(session) else { return };
+        let Some(availability) = &self.agents[row].availability else { return };
+        if crate::availability::answered(log, availability.since_ms) {
+            self.agents[row].availability = None;
+            self.notify_row(row, &[Role::State, Role::StatusText]);
+        }
+    }
+
+    /// Why the agent of `session` cannot answer now: the Host updating,
+    /// else its own state while the Host is in reach; None otherwise.
+    pub fn availability(&self, session: &str) -> Option<&crate::availability::Availability> {
+        let agent = self.find(session)?;
+        self.host_updating.as_ref().or_else(|| agent.availability.as_ref().filter(|_| self.transport_available))
     }
 
     /// An `agent-activity` event: a Host of contract 149 or later says on
@@ -622,6 +689,7 @@ impl Roster {
     }
 
     pub fn mark_transport_unavailable(&mut self) {
+        self.host_updating_down |= self.host_updating.is_some();
         if !self.transport_available {
             return;
         }

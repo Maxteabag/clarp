@@ -295,7 +295,7 @@ impl App {
         let chats = shown
             .into_iter()
             .map(|row| {
-                let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
+                let mut chat = chat_row(row, sidebar.depth(&row.session), selected, engine.host_clock_offset_ms(&row.session));
                 chat.host = engine.host_badge(&row.session).into();
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
                 (chat.running_helpers, chat.running_processes) = view::running_work(&chat, working_under.get(&row.session).copied().unwrap_or(0));
@@ -336,6 +336,27 @@ impl App {
                 self.chats.set_row_data(index, chat);
             }
         }
+    }
+
+    /// Every ten seconds (`view::start_turn_clock`): an agent that cannot
+    /// answer counts its wait (#918), so only the rows and panes whose line
+    /// changed are rewritten; nothing runs while no line shows.
+    pub fn tick_availability(&self) {
+        let Ok(engine) = self.engine.try_borrow() else { return };
+        let roster = engine.roster();
+        for index in 0..self.chats.row_count() {
+            let Some(mut chat) = self.chats.row_data(index) else { continue };
+            let session = chat.session.to_string();
+            let Some(availability) = roster.availability(&session) else { continue };
+            let clock = clarp_core::availability::Clock::now(engine.host_clock_offset_ms(&session));
+            let Some(line) = clarp_core::availability::line(availability, clock) else { continue };
+            if chat.activity != line.as_str() {
+                chat.activity = line.into();
+                self.chats.set_row_data(index, chat);
+            }
+        }
+        drop(engine);
+        self.tick_availability_lines();
     }
 
     /// Folds (`Some(false)`), unfolds (`Some(true)`) or toggles (`None`) the
@@ -442,7 +463,7 @@ impl App {
                 .archived()
                 .rows()
                 .iter()
-                .map(|row| ChatRow { archived: true, ..chat_row(row, 0, &selected) })
+                .map(|row| ChatRow { archived: true, ..chat_row(row, 0, &selected, 0) })
                 .collect();
             window.set_unread_rooms(engine.unread_rooms() as i32);
             drop(engine);
