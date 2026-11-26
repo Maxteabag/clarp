@@ -2234,9 +2234,12 @@ Every agent row of `GET /agents/snapshot` and `GET /agents/{session}` carries `a
 
 - `state`, one at a time, in this order of precedence:
   - `usage_limit`: no account can take the agent's turn now. Its turn waits for an account and no
-    other seat would take it, or it is idle and its row's `backend_quota` says `exhausted`.
+    other seat would take it; or it is idle and its row's `backend_quota` says `exhausted`; or its
+    last turn ended failed with kind `usage_limit` (any tool) and no other seat would take the
+    next (shown for up to five hours when no reset is known; the next turn tells again).
   - `switching_account`: its turn waits while the Host moves its tool to another account, after a
-    usage limit or after a sign-in that ran out.
+    usage limit or after a sign-in that ran out; or its last turn was refused for a usage limit
+    and another seat takes the next (shown for two minutes).
   - `restarting`: its process is starting again (an attempt after a failed one, the wait before
     the next attempt), or the agent is being opened after the Host started.
   - `unresponsive`: a turn that thinks or writes has shown no sign of life (output, its start)
