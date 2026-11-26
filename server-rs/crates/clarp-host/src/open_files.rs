@@ -1,13 +1,19 @@
 //! The Host's open files. Each agent keeps its log database open with its two companions
 //! (`-wal`, `-shm`), about three descriptors an agent, so a Host with a few hundred agents
 //! needs more than the 1,024 a container is given by default. At start the Host raises its
-//! own soft limit to the hard one, and it says once when it passes 80% of it.
+//! own soft limit to the hard one (at most 65,536), and it says once when it passes 80% of it.
 
 use nix::sys::resource::{Resource, getrlimit, setrlimit};
 
-/// The soft limit to set, when the soft limit is below the hard one: the hard limit.
+/// Cap automatic raises at the installed unit's limit. Child processes inherit the
+/// soft limit, so a high hard limit can hurt programs that scan descriptor numbers.
+const CEILING: u64 = 65_536;
+
+/// The soft limit to set, when the soft limit is below the hard one and below the ceiling:
+/// the hard limit, at most the ceiling.
 fn raised(soft: u64, hard: u64) -> Option<u64> {
-    (soft < hard).then_some(hard)
+    let wanted = hard.min(CEILING);
+    (soft < wanted).then_some(wanted)
 }
 
 /// Whether `held` descriptors are 80% of the soft limit or more.
@@ -15,8 +21,8 @@ fn past_watermark(held: u64, soft: u64) -> bool {
     held.saturating_mul(5) >= soft.saturating_mul(4)
 }
 
-/// Raises the soft open-files limit to the hard limit and says so. A limit that cannot be
-/// read or raised is said, and the Host starts all the same.
+/// Raises the soft limit toward the installation ceiling within the hard limit.
+/// The Host logs a read or update failure and continues starting.
 pub fn raise() {
     let (soft, hard) = match getrlimit(Resource::RLIMIT_NOFILE) {
         Ok(limits) => limits,
@@ -74,8 +80,16 @@ mod tests {
 
     #[test]
     fn a_soft_limit_below_the_hard_one_is_raised_to_it() {
-        assert_eq!(raised(1_024, 1_048_576), Some(1_048_576));
         assert_eq!(raised(1_024, 4_096), Some(4_096));
+        assert_eq!(raised(1_024, 65_536), Some(65_536));
+    }
+
+    #[test]
+    fn a_huge_hard_limit_raises_the_soft_one_only_to_the_ceiling() {
+        assert_eq!(raised(1_024, 1_048_576), Some(65_536));
+        assert_eq!(raised(1_024, 524_288), Some(65_536));
+        assert_eq!(raised(65_536, 1_048_576), None);
+        assert_eq!(raised(100_000, 1_048_576), None);
     }
 
     #[test]
