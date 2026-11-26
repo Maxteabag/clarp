@@ -34549,7 +34549,7 @@ fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
     let before = screen.printed.len();
     screen.types("much\n");
     screen.until("that was much");
-    assert_eq!(screen.printed[before..].matches('x').count(), 300_000);
+    assert_eq!(much_printed(&screen.printed[before..]), 300_000);
     assert!(
         screen.largest <= 64 * 1024 && screen.largest > 1024,
         "{}",
@@ -34690,6 +34690,30 @@ fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
     assert_eq!(said_of(&screen.printed, "kept"), "None");
 }
 
+/// The x's the stand-in shell printed for `much`, in what a terminal printed after it was typed:
+/// one unbroken run, less the sizes the shell said meanwhile. A resize signals the shell twice
+/// (the terminal's own SIGWINCH to its group, and the Host's to the shell), and the second
+/// `winch: 132x43` can come after the first was waited for, even in the middle of the run, with
+/// an x of its own (issue 873). A chunk the terminal or the relay repeated would still show.
+fn much_printed(printed: &str) -> usize {
+    let mut rest = printed.to_owned();
+    while let Some(at) = rest.find("winch: ") {
+        let end = rest[at..].find('\n').map_or(rest.len(), |n| at + n + 1);
+        rest.replace_range(at..end, "");
+    }
+    let runs: Vec<&str> = rest
+        .split(|c| c != 'x')
+        .filter(|run| !run.is_empty())
+        .collect();
+    assert_eq!(
+        runs.len(),
+        1,
+        "the x's of `much` in one run: {} runs",
+        runs.len()
+    );
+    runs[0].len()
+}
+
 /// One terminal through the stand-in relay: the number of its stream, and what it printed.
 struct RelayedTerminal {
     sid: u32,
@@ -34785,7 +34809,7 @@ fn a_terminal_is_carried_through_the_relay_as_it_is_at_the_door() {
     let before = terminal.printed.len();
     terminal.types(&mut session, b"much\n");
     terminal.until(&mut session, "that was much");
-    assert_eq!(terminal.printed[before..].matches('x').count(), 300_000);
+    assert_eq!(much_printed(&terminal.printed[before..]), 300_000);
     assert!(terminal.largest <= 64 * 1024, "{}", terminal.largest);
     // Other requests are answered while it is open.
     assert_eq!(session.get_as(&full, "/server-info").status, 200);
