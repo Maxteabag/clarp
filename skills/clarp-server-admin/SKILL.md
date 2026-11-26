@@ -290,7 +290,12 @@ io, cpu or memory pressure was high, `turn_pressure_admission`). `GET /lane-sett
 tool anew, per tool; feature `lanes_live`): look there first when helpers seem slow to start or
 the machine is loaded. The memory reserve is what protects the machine: a lane starts only while
 `MemAvailable` stays above `lane_reserve_percent`, and idle lanes leave when memory runs short; no
-turn waits for it. With `lane_limits = "fixed"`,
+turn waits for it. Over the limits (other programs took the memory, or the owner lowered fixed
+limits below what is held), a turn's lane still starts in the place of the idle lanes idle
+longest that pay for it, and is refused only when no idle lane may leave for it; the owner's
+turns choose first, and a helper's lane never ends an idle lane of an agent he is talking with
+(issue 908). The Host's log says `no place for the <tool> lane of <agent>` when a turn ran in a
+process of its own for want of one. With `lane_limits = "fixed"`,
 the count of lanes (`codex_lane_most`, 8) and the memory budget (`lane_memory_mb`, 2,200 MB)
 bound them instead:
 

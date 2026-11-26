@@ -5921,6 +5921,14 @@ impl Worker {
         if ended.is_some_and(|last| last.origin.is_user_send()) {
             crate::lane::mark_owners_turn(&self.setup.profile.run_dir, &self.setup.record.agent_id);
         }
+        // Whose the agent's lanes are, by the turn that ended last (issue 908).
+        if let Some(last) = ended {
+            crate::lane::mark_last_turn(
+                &self.setup.profile.run_dir,
+                &self.setup.record.agent_id,
+                &last.origin,
+            );
+        }
         if let Some(last) = ended
             && matches!(
                 last.outcome,
