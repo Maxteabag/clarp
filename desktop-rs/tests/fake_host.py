@@ -1974,6 +1974,20 @@ class Handler(BaseHTTPRequestHandler):
             # An image that takes its time: the message must not grow when it lands.
             time.sleep(1.5)
             return self.reply_bytes(200, solid_png(300, 300, (150, 60, 200, 255)), "image/png")
+        if url.path == "/media/playback-moved":
+            # Moved to another origin (this Host by another name): the app
+            # must not follow it with its token.
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{self.server.server_address[1]}/media/playback-stolen")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if url.path == "/media/playback-here":
+            self.send_response(302)
+            self.send_header("Location", "/media/playback-video")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if url.path == "/media/playback-video":
             # The playback check's synthetic clip (check.sh makes it), served
             # in the parts a player asks for, as the Host serves media.

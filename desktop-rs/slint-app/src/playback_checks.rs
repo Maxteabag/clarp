@@ -71,7 +71,7 @@ fn sound(path: &str) -> (f64, f64) {
 
 fn video() -> Request {
     Request {
-        artifact_id: "playback-video".into(),
+        key: "media:playback-video".into(),
         session: "rachel".into(),
         kind: Kind::Video,
         path: "/media/playback-video".into(),
@@ -189,7 +189,10 @@ pub fn playback_check(out: String) {
                 return elapsed > Duration::from_secs(2) && { check(false, "Escape left fullscreen"); true };
             }
             check(!key(window, slint::platform::Key::Escape), "out of fullscreen, Escape is the viewer's (it closes)");
+            let started = std::time::Instant::now();
             playback::close();
+            let took = started.elapsed();
+            check(took < Duration::from_millis(50), &format!("closing never waits for the player: {took:?}"));
             check(!playback::active() && b.get_kind().is_empty() && !b.get_has_frame() && !b.get_playing(), "closing ends it: no item, no picture");
             true
         })),
@@ -203,9 +206,37 @@ pub fn playback_check(out: String) {
             check(rms > 0.05 && seconds > 1.0, &format!("the clip's tone was played (written to {file}): RMS {rms:.3} over {seconds:.1} s"));
             true
         })),
+        ("redirect elsewhere", Box::new(|app, window, _| {
+            playback::open(app, Request { key: "media:moved".into(), path: "/media/playback-moved".into(), ..video() });
+            check(bridge(window).get_kind() == "video", "a video that moved opens");
+            true
+        })),
+        ("refused, token kept home", Box::new(|_, window, elapsed| {
+            let b = bridge(window);
+            if b.get_message().is_empty() {
+                return elapsed > Duration::from_secs(8) && { check(false, "a video moved to another origin fails"); true };
+            }
+            check(!b.get_has_frame() && !b.get_playing(), &format!("it doesn't play: {:?}", b.get_message()));
+            check(super::requests("GET", "/media/playback-stolen").is_empty(), "nothing went to the other origin (no token crossed)");
+            true
+        })),
+        ("redirect at home", Box::new(|app, window, _| {
+            playback::open(app, Request { key: "media:here".into(), path: "/media/playback-here".into(), ..video() });
+            check(bridge(window).get_message().is_empty(), "the failed one closed with it");
+            true
+        })),
+        ("plays from where it moved", Box::new(|_, window, elapsed| {
+            let b = bridge(window);
+            if !b.get_has_frame() {
+                return elapsed > Duration::from_secs(10) && { check(false, &format!("a video moved on its own Host plays: {:?}", b.get_message())); true };
+            }
+            check(colourful(window), "its picture shows");
+            playback::close();
+            true
+        })),
         ("audio", Box::new(|app, window, _| {
             playback::open(app, Request {
-                artifact_id: "playback-audio".into(),
+                key: "media:aud1".into(),
                 session: "rachel".into(),
                 kind: Kind::Audio,
                 path: "/media/aud1".into(),

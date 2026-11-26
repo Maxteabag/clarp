@@ -90,8 +90,10 @@ struct Lib {
     create: unsafe extern "C" fn() -> *mut c_void,
     initialize: unsafe extern "C" fn(*mut c_void) -> c_int,
     set_option_string: unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char) -> c_int,
-    set_property: unsafe extern "C" fn(*mut c_void, *const c_char, c_int, *mut c_void) -> c_int,
-    command: unsafe extern "C" fn(*mut c_void, *mut *const c_char) -> c_int,
+    // The window's thread only uses the async calls: they queue and return,
+    // so a busy player never holds up drawing.
+    set_property_async: unsafe extern "C" fn(*mut c_void, u64, *const c_char, c_int, *mut c_void) -> c_int,
+    command_async: unsafe extern "C" fn(*mut c_void, u64, *mut *const c_char) -> c_int,
     observe_property: unsafe extern "C" fn(*mut c_void, u64, *const c_char, c_int) -> c_int,
     wait_event: unsafe extern "C" fn(*mut c_void, f64) -> *mut RawEvent,
     wakeup: unsafe extern "C" fn(*mut c_void),
@@ -171,8 +173,8 @@ fn load() -> Result<Lib, String> {
         create: sym!("mpv_create"),
         initialize: sym!("mpv_initialize"),
         set_option_string: sym!("mpv_set_option_string"),
-        set_property: sym!("mpv_set_property"),
-        command: sym!("mpv_command"),
+        set_property_async: sym!("mpv_set_property_async"),
+        command_async: sym!("mpv_command_async"),
         observe_property: sym!("mpv_observe_property"),
         wait_event: sym!("mpv_wait_event"),
         wakeup: sym!("mpv_wakeup"),
@@ -519,12 +521,18 @@ impl Player {
             }
         };
         {
-            let (stopping, alive, mpv) = (player.stopping.clone(), player.alive.clone(), player.mpv);
+            let (stopping, alive, wake, mpv) = (player.stopping.clone(), player.alive.clone(), player.wake.clone(), player.mpv);
             let spawned = std::thread::Builder::new().name("clarp-video-events".into()).spawn(move || {
                 event_loop(lib, mpv, &stopping, &*deliver);
+                // From here the window's calls leave mpv alone (they check
+                // `stopping` holding `alive`), also when mpv ended by itself.
+                {
+                    let _alive = alive.lock();
+                    stopping.store(true, Ordering::SeqCst);
+                }
                 // Tear down: the renderer first (it frees the context), then mpv.
+                wake.ring();
                 let _ = renderer.join();
-                drop(alive.lock());
                 // SAFETY: no thread uses the handle any more.
                 unsafe { (lib.terminate_destroy)(mpv.0) };
                 sources().lock().expect("sources").remove(&source);
@@ -543,26 +551,39 @@ impl Player {
 
     fn command(&self, args: &[&CStr]) {
         let Ok(lib) = lib() else { return };
+        let _alive = self.alive.lock();
+        if self.stopping.load(Ordering::SeqCst) {
+            return;
+        }
         let mut argv: Vec<*const c_char> = args.iter().map(|a| a.as_ptr()).collect();
         argv.push(std::ptr::null());
-        // SAFETY: a live handle (the player isn't dropped) and a NULL-ended argv.
-        unsafe { (lib.command)(self.mpv.0, argv.as_mut_ptr()) };
+        // SAFETY: a live handle (the player isn't dropped) and a NULL-ended
+        // argv, which mpv copies before returning.
+        unsafe { (lib.command_async)(self.mpv.0, 0, argv.as_mut_ptr()) };
     }
 
     fn set_flag(&self, name: &str, value: bool) {
         let Ok(lib) = lib() else { return };
+        let _alive = self.alive.lock();
+        if self.stopping.load(Ordering::SeqCst) {
+            return;
+        }
         let n = CString::new(name).expect("property");
         let mut flag: c_int = value.into();
-        // SAFETY: a live handle; FLAG takes an int.
-        unsafe { (lib.set_property)(self.mpv.0, n.as_ptr(), FORMAT_FLAG, (&raw mut flag).cast()) };
+        // SAFETY: a live handle; FLAG takes an int, copied before returning.
+        unsafe { (lib.set_property_async)(self.mpv.0, 0, n.as_ptr(), FORMAT_FLAG, (&raw mut flag).cast()) };
     }
 
     fn set_double(&self, name: &str, value: f64) {
         let Ok(lib) = lib() else { return };
+        let _alive = self.alive.lock();
+        if self.stopping.load(Ordering::SeqCst) {
+            return;
+        }
         let n = CString::new(name).expect("property");
         let mut v = value;
-        // SAFETY: a live handle; DOUBLE takes a double.
-        unsafe { (lib.set_property)(self.mpv.0, n.as_ptr(), FORMAT_DOUBLE, (&raw mut v).cast()) };
+        // SAFETY: a live handle; DOUBLE takes a double, copied before returning.
+        unsafe { (lib.set_property_async)(self.mpv.0, 0, n.as_ptr(), FORMAT_DOUBLE, (&raw mut v).cast()) };
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -597,13 +618,14 @@ impl Player {
 
 impl Drop for Player {
     fn drop(&mut self) {
-        // The sound stops now, whatever teardown takes.
+        // The sound stops now, whatever teardown takes; nothing here waits
+        // for mpv (the event thread tears it down).
         let stop = CString::new("stop").expect("stop");
         self.command(&[stop.as_c_str()]);
         let alive = self.alive.lock();
-        self.stopping.store(true, Ordering::SeqCst);
+        let live = !self.stopping.swap(true, Ordering::SeqCst);
         self.wake.ring();
-        if let Ok(lib) = lib() {
+        if live && let Ok(lib) = lib() {
             // SAFETY: `alive` keeps the handle from being destroyed until
             // this returns; wakes the event thread to tear down.
             unsafe { (lib.wakeup)(self.mpv.0) };

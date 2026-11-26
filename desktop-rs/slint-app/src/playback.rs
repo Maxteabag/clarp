@@ -26,9 +26,12 @@ pub enum Kind {
 /// An item to play.
 #[derive(Clone)]
 pub struct Request {
-    pub artifact_id: String,
+    /// The item's stable key (Publications: `media:<asset_id>` or
+    /// `artifact:<id>`); `active_key` gives it back.
+    pub key: String,
     /// The chat it was published in, as the engine knows it (a peer
-    /// Host's is prefixed): its media comes from that chat's Host.
+    /// Host's is prefixed): its media comes from that chat's Host with that
+    /// Host's token, never another's; an unread peer's item doesn't play.
     pub session: String,
     pub kind: Kind,
     /// The artifact's media on the Host (`/media/...`); only the Host's own
@@ -92,8 +95,8 @@ pub fn active() -> bool {
     NOW.with(|now| now.borrow().is_some())
 }
 
-/// The artifact open in the player.
-pub fn active_artifact() -> Option<String> {
+/// The key of the item open in the player.
+pub fn active_key() -> Option<String> {
     NOW.with(|now| now.borrow().as_ref().map(|p| p.artifact.clone()))
 }
 
@@ -122,13 +125,11 @@ pub fn open(app: &crate::App, request: Request) {
     bridge.set_message(SharedString::new());
     bridge.set_has_volume(false);
     bridge.set_fullscreen(false);
+    // Only the Host's own media plays.
     let path = request.path.trim().to_owned();
-    if !path.starts_with('/') || path.starts_with("//") {
-        bridge.set_message(format!("{} unavailable", if request.kind == Kind::Video { "Video" } else { "Audio" }).into());
-        return;
-    }
+    let on_host = path.starts_with('/') && !path.starts_with("//");
     let mut playing = Playing {
-        artifact: request.artifact_id.clone(),
+        artifact: request.key.clone(),
         kind: request.kind,
         path: path.clone(),
         length,
@@ -142,9 +143,10 @@ pub fn open(app: &crate::App, request: Request) {
     let primary = endpoint.is_some() && endpoint == app.engine.borrow().endpoint();
     let missing = mpv::unavailable();
     match (request.kind, missing) {
+        _ if !on_host => bridge.set_message(format!("{} unavailable", if request.kind == Kind::Video { "Video" } else { "Audio" }).into()),
         (Kind::Audio, Some(_)) if primary => {
             if request.autoplay {
-                let id = request.artifact_id.clone();
+                let id = request.key.clone();
                 platform::audio::with(|audio| audio.toggle_media(&id, &path));
             }
             let ticker = slint::Timer::default();
