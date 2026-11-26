@@ -311,39 +311,57 @@ fn from_artifact(row: &Value) -> Option<Publication> {
 /// when the file is a listed image; of two artifacts naming one file the
 /// newer stands.
 pub fn merge(media: &[Value], artifacts: &[Value], horizon: Option<i64>) -> Vec<Publication> {
-    let mut items: Vec<Publication> = Vec::new();
-    let mut at: HashMap<String, usize> = HashMap::new();
-    let shown = |item: &Publication| horizon.is_none_or(|h| item.created_at >= h);
+    /// Everything read under one key: the listed file, the artifact that
+    /// stands for it, and the newest time and largest size among them.
+    #[derive(Default)]
+    struct Parts {
+        file: Option<Publication>,
+        artifact: Option<Publication>,
+        newest: i64,
+        bytes: i64,
+    }
+    // Of two rows for one thing the newer stands (by time, then id), so the
+    // result does not depend on the order rows were read in.
+    let newer = |held: &Option<Publication>, item: &Publication, id: fn(&Publication) -> &str| {
+        held.as_ref().is_none_or(|held| (item.created_at, id(item)) > (held.created_at, id(held)))
+    };
+    let mut parts: HashMap<String, Parts> = HashMap::new();
     for item in media.iter().filter_map(from_media) {
-        if at.contains_key(&item.key) {
-            continue;
+        let part = parts.entry(item.key.clone()).or_default();
+        part.newest = part.newest.max(item.created_at);
+        part.bytes = part.bytes.max(item.bytes);
+        if newer(&part.file, &item, |p| p.asset_id.as_str()) {
+            part.file = Some(item);
         }
-        at.insert(item.key.clone(), items.len());
-        items.push(item);
     }
     for item in artifacts.iter().filter_map(from_artifact) {
-        match at.get(&item.key) {
-            None => {
-                at.insert(item.key.clone(), items.len());
-                items.push(item);
-            }
-            Some(&index) => {
-                let held = &mut items[index];
-                if held.artifact_id.is_empty() {
-                    // The listed file, now with the artifact's words.
-                    let image = held.kind == Kind::Image;
-                    let created_at = held.created_at.max(item.created_at);
-                    let bytes = held.bytes.max(item.bytes);
-                    let media_url = std::mem::take(&mut held.media_url);
-                    *held = Publication { kind: if image { Kind::Image } else { item.kind }, created_at, bytes, media_url, ..item };
-                } else if item.created_at > held.created_at {
-                    let kind = held.kind;
-                    *held = Publication { kind: if kind == Kind::Image { kind } else { item.kind }, ..item };
-                }
-            }
+        let part = parts.entry(item.key.clone()).or_default();
+        part.newest = part.newest.max(item.created_at);
+        part.bytes = part.bytes.max(item.bytes);
+        if newer(&part.artifact, &item, |p| p.artifact_id.as_str()) {
+            part.artifact = Some(item);
         }
     }
-    items.retain(|item| shown(item));
+    let mut items: Vec<Publication> = parts
+        .into_values()
+        .filter_map(|part| {
+            let Parts { file, artifact, newest, bytes } = part;
+            let item = match (file, artifact) {
+                (Some(file), Some(artifact)) => Publication {
+                    // A listed image stays an image; the artifact gives the words.
+                    kind: if file.kind == Kind::Image { Kind::Image } else { artifact.kind },
+                    // Read where the Host's list said.
+                    media_url: file.media_url,
+                    ..artifact
+                },
+                (Some(item), None) | (None, Some(item)) => item,
+                (None, None) => return None,
+            };
+            Some(Publication { created_at: newest, bytes, ..item })
+        })
+        .filter(|item| horizon.is_none_or(|h| item.created_at >= h))
+        .collect();
+    // Keys are unique: the order is total and the same on every rebuild.
     items.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| b.key.cmp(&a.key)));
     items
 }
@@ -778,6 +796,33 @@ mod tests {
         assert_eq!(all.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(), ["media:a", "artifact:d", "media:b"]);
         let held = merge(&media, &artifacts, Some(20));
         assert_eq!(held.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(), ["media:a", "artifact:d"]);
+    }
+
+    #[test]
+    fn duplicates_with_different_times_merge_the_same_in_any_order() {
+        let media = vec![image("a1", 10), image("b", 40)];
+        let artifacts = vec![
+            artifact("f-old", "file", 30, json!({"url": "/media/files/a1", "mime_type": "image/png", "size_bytes": 7})),
+            artifact("f-new", "file", 50, json!({"url": "/media/a1", "mime_type": "image/png"})),
+            artifact("f-tie", "file", 50, json!({"asset_id": "a1", "mime_type": "image/png"})),
+            artifact("doc", "document", 40, json!({"content": "x"})),
+        ];
+        let expected = merge(&media, &artifacts, None);
+        let keys: Vec<&str> = expected.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(keys, ["media:a1", "media:b", "artifact:doc"], "newest first; a tie in time goes by key");
+        let a1 = &expected[0];
+        assert_eq!((a1.artifact_id.as_str(), a1.created_at, a1.kind, a1.bytes), ("f-tie", 50, Kind::Image, 7), "newest artifact (ties by id) with the newest time");
+        assert_eq!(a1.media_path().as_deref(), Some("/media/a1"), "the listed file's own path");
+        // Every order the rows could be read in gives the same list.
+        let mut media_rev = media.clone();
+        media_rev.reverse();
+        for shift in 0..artifacts.len() {
+            let mut rows = artifacts.clone();
+            rows.rotate_left(shift);
+            assert_eq!(merge(&media, &rows, None), expected, "rotation {shift}");
+            rows.reverse();
+            assert_eq!(merge(&media_rev, &rows, None), expected, "reversed rotation {shift}");
+        }
     }
 
     #[test]
