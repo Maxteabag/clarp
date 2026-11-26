@@ -188,13 +188,14 @@ fn a_busy_send_waits_or_takes_over_as_it_asks_and_without_asking_waits_as_always
                "text": "This agent can't take a message mid-turn: stopped and sent"}),
         "{steer}"
     );
-    // The cut turn ends long before its sixty seconds, and the send runs before what waited.
-    wait_for("the steered send's answer", || {
-        rows_saying(&host, &session, "assistant", "steered") == 1
+    // The cut turn ends long before its sixty seconds (a wait gives up after thirty), and the
+    // send runs before what waited. The user's waiting messages may be read together into one
+    // turn, so what is looked at is the order of their rows.
+    wait_for("every waiting send run", || {
+        ["steered", "plain", "after", "scheduled"]
+            .iter()
+            .all(|text| rows_saying(&host, &session, "user", text) == 1)
     });
-    for text in ["plain", "after", "scheduled"] {
-        wait_for(text, || rows_saying(&host, &session, "assistant", text) == 1);
-    }
     let rows = host.turns(&session);
     let at = |text: &str| {
         rows.iter()
