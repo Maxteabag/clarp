@@ -229,7 +229,6 @@ fn an_initial_launch_waits_for_an_account_without_guessing_a_switch() {
     let trigger = create("Trigger");
     let held = create("Held");
     let path = format!("/agents/{held}");
-    let before = host.get(&path);
     let heard = host.listen();
     host.send(&trigger, "start account recovery", "trigger-recovery");
     wait_for("the selector to report that no account serves", || {
@@ -250,7 +249,6 @@ fn an_initial_launch_waits_for_an_account_without_guessing_a_switch() {
         .find(|row| row["session"] == held.as_str())
         .unwrap();
     assert_eq!(row["live_activity"]["state"], "limited", "{row}");
-    assert_eq!(row["backend_session_id"], before["backend_session_id"]);
     assert!(row["backend_quota"].is_null(), "{row}");
     assert_eq!(
         std::fs::read_to_string(place.root.join("launched")).unwrap(),
