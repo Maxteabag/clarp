@@ -8,7 +8,7 @@ gateway = [json.loads(l) for l in open(f"{d}/gateway.jsonl")]
 def at(ms, base): return f"{(ms - base) / 1000:+.2f}s"
 def short(seen):
     rows = [r["text"][:28] for r in seen["rows"]]
-    return f'label={seen["label"]:<12} connected={str(seen["connected"]):<5} banner={seen["banner"]!r} row={seen["row_state"]} avail={seen["availability"]!r} outage={seen["outage"]} rows={len(rows)} last={rows[-1:]!r}'
+    return f'label={seen["label"]:<12} connected={str(seen["connected"]):<5} banner={seen["banner"]!r} row={seen["row_state"]} avail={seen["availability"]!r} outage={seen["outage"]} catching_up={seen.get("catching_up")} rows={len(rows)} last={rows[-1:]!r}'
 print("== timeline (relative to each scenario start)")
 for name, start, end in (("S1 502 burst", "s1-502-on", "s2-sigterm"), ("S2 restart + 44.5 s 502", "s2-sigterm", "s3-start")):
     print(f"-- {name}")
@@ -44,10 +44,18 @@ if indicator:
     print(f"     indicator {at(indicator['wall_ms'], drop['wall_ms'])} after the drop was seen ({at(indicator['wall_ms'], marks['s2-sigterm'])} after SIGTERM); row={indicator['seen']['row_state']} avail={indicator['seen']['availability']!r}")
     check(indicator["wall_ms"] - drop["wall_ms"] >= 14800, "S2: nothing shown before 15 s")
     check(all((e["seen"]["availability"] or "").startswith("Host updating") for e in s2 if indicator["wall_ms"] <= e["wall_ms"] < marks["s2-502-off"]), "S2: the host-updating line stays through the outage (not replaced by gateway words)")
+held = [e for e in s2 if marks["s2-502-off"] <= e["wall_ms"] < marks["s2-reads-pass"]]
+reopened = next((e for e in held if e["seen"]["connected"]), None)
+check(reopened is not None, "S2: the stream came back while the gateway still refused the reads")
+if reopened:
+    print(f"     stream back {at(reopened['wall_ms'], marks['s2-502-off'])} after /events passed; reads held 502 until {at(marks['s2-reads-pass'], marks['s2-502-off'])}")
+check(all(e["seen"]["label"] != "live" and e["seen"]["outage"] != "none" for e in held), "S2: a reopened stream alone does not end the outage (no live, outage kept while reads fail)")
+check(all(not any(r["text"] == "gap two" for r in e["seen"]["rows"]) for e in held), "S2: nothing new was read while the reads failed (the probe is honest)")
 back = next((e for e in s2 if e["wall_ms"] > marks["s2-502-off"] and e["seen"]["label"] == "live" and e["seen"]["connected"]), None)
-check(back is not None, "S2: recovers by itself")
+check(back is not None and back["wall_ms"] >= marks["s2-reads-pass"], "S2: live only after the catch-up reads answered")
 if back:
-    print(f"     live again {at(back['wall_ms'], marks['s2-502-off'])} after the gateway passed ({at(back['wall_ms'], marks['s2-sigterm'])} after SIGTERM)")
+    print(f"     live again {at(back['wall_ms'], marks['s2-reads-pass'])} after the reads passed ({at(back['wall_ms'], marks['s2-sigterm'])} after SIGTERM)")
+    check(any(r["text"] == "gap two" for r in back["seen"]["rows"]) and back["seen"]["row_state"] != "offline", "S2: when it says live, the roster and the open chat are already caught up")
 final = timeline[-1]["seen"]
 texts = [r["text"] for r in final["rows"]]
 users = [t for t in texts if not t.startswith("Reply to")]
@@ -58,7 +66,7 @@ check(replies == ["Reply to [history before", "Reply to [gap one", "Reply to [ga
 idx = {t: i for i, t in enumerate(texts)}
 caught = next((e for e in s2 if any(r["text"] == "gap two" for r in e["seen"]["rows"])), None)
 if caught:
-    print(f"     gap two shown {at(caught['wall_ms'], marks['s2-502-off'])} after the gateway passed")
+    print(f"     gap two shown {at(caught['wall_ms'], marks['s2-reads-pass'])} after the reads passed")
 check(final["row_state"] != "offline" and final["availability"] is None, "after recovery the row is back and the host-updating line gone")
 check(final["server_id"] and all(e["seen"]["server_id"] in ("", final["server_id"]) for e in timeline), f"one server identity throughout: {final['server_id']}")
 resumes = [g for g in gateway if g.get("request", "").startswith("GET /events") and g.get("outcome") == "forwarded"]

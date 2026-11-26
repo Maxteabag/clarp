@@ -186,6 +186,10 @@ enum Message {
     OutageGraceDue(u64),
     /// `/server-info` is asked again after a failure on the way (its try).
     ServerInfoRetryDue(u64),
+    /// A chat's `/log` is read again after a failure on the way (its token).
+    LogRetryDue { session: String, token: u64 },
+    /// A catch-up round's `/live` is read again (the round's generation).
+    LiveRetryDue { session: String, generation: u64 },
 }
 
 pub struct Config {
@@ -542,6 +546,8 @@ impl Engine {
                 Message::PeersDue(generation) => self.peers_due(generation),
                 Message::OutageGraceDue(epoch) => self.outage_grace_due(epoch),
                 Message::ServerInfoRetryDue(attempt) => self.server_info_retry_due(attempt),
+                Message::LogRetryDue { session, token } => self.log_retry_due(&session, token),
+                Message::LiveRetryDue { session, generation } => self.live_retry_due(&session, generation),
             }
         }
         // What the Host said of a chat's view (#702): the primary keeps it.
@@ -950,7 +956,7 @@ impl Engine {
         if !self.outage.outage.shown() {
             self.set_connection_state("connecting");
         }
-        self.outage.retry += 1;
+        self.outage_reconnecting();
         self.api.get("server-info", "/server-info", &[]);
         self.force_snapshot();
         if self.restored_from_cache && !self.selected.is_empty() && !clarp_core::all_hosts::is_peer_session(&self.selected) {
@@ -1413,6 +1419,7 @@ impl Engine {
         self.with_conversation(session, |c| c.set_loading(true));
         let mut query = vec![("session", session), ("limit", "100"), ("include_automated", "0"), ("before", before.as_str())];
         query.extend(self.coordination_query(session, false));
+        self.log_request_sent(session, true);
         self.api.get(&format!("log-older:{session}"), "/log", &query);
     }
 
@@ -1451,6 +1458,7 @@ impl Engine {
         let tag = format!("{}{session}", if replace { "log-replace:" } else { "log-tail:" });
         let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0")];
         query.extend(self.coordination_query(&session, false));
+        self.log_request_sent(&session, false);
         self.api.get(&tag, "/log", &query);
     }
 
@@ -1464,11 +1472,13 @@ impl Engine {
         let after = self.conversations.get(&session).map_or(0, |c| c.latest_revision()).to_string();
         let mut query = vec![("session", session.as_str()), ("limit", "100"), ("include_automated", "0"), ("after_revision", after.as_str())];
         query.extend(self.coordination_query(&session, true));
+        self.log_request_sent(&session, false);
         self.api.get(&format!("log-delta:{session}"), "/log", &query);
     }
 
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
         self.log_in_flight.remove(session);
+        let answered = self.outage.log_sent.remove(session);
         self.ensure_conversation(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") && self.catching_up.remove(session) {
             // A chat opened from a copy over a page behind: its latest page
@@ -1479,6 +1489,7 @@ impl Engine {
             self.order_check.remove(session);
             self.request_tail(session, true);
             self.continue_pending_log_request(session);
+            self.catch_up_log(session, answered);
             return;
         }
         self.with_conversation(session, |c| c.apply_log(object, kind));
@@ -1499,6 +1510,7 @@ impl Engine {
             self.catching_up.remove(session);
         }
         self.continue_pending_log_request(session);
+        self.catch_up_log(session, answered);
     }
 
     // ---- sending ---------------------------------------------------------
@@ -1692,10 +1704,9 @@ impl Engine {
             }
             self.complete_snapshot_request();
             self.apply_snapshot(object);
-            // Reads answer while the stream runs: an outage of reads ends.
-            if self.connected {
-                self.host_answered();
-            }
+            // A fresh roster for a catch-up round (`outage.rs`).
+            let generation = self.snapshot_generation;
+            self.catch_up_snapshot(generation);
         } else if let Some(session) = tag.strip_prefix("log-tail:") {
             self.apply_log(session, object, LoadKind::Tail);
         } else if let Some(session) = tag.strip_prefix("log-replace:") {
@@ -1720,7 +1731,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail, status) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
@@ -1752,6 +1763,7 @@ impl Engine {
             // stale, and the engine retries on its own.
             if generation.parse::<u64>().ok() == Some(self.snapshot_generation) {
                 self.snapshot_failed(&detail);
+                self.catch_up_snapshot_failed(status);
             }
             return;
         }
@@ -1796,6 +1808,10 @@ impl Engine {
                 c.set_loading(false);
                 c.set_error(&detail);
             });
+            // The Host answered (with a refusal): a catch-up round has
+            // nothing more to read for this chat.
+            let answered = self.outage.log_sent.remove(&session);
+            self.catch_up_log(&session, answered);
         } else if let Some(client_id) = tag.strip_prefix("send:") {
             // The chat that sent it, also after its timer marked it failed.
             let owner = self.send_answered(client_id);
@@ -1821,14 +1837,8 @@ impl Engine {
                     self.changes.push(Change::Connection);
                 }
                 if connected {
-                    self.set_connection_state("live");
-                    if self.error_is_transport {
-                        self.set_error("");
-                    }
-                    self.force_snapshot();
-                    self.live_reconnected();
-                    self.live_resubscribed();
-                    self.host_answered();
+                    // Live at once, or after a catch-up round (`outage.rs`).
+                    self.outage_stream_connected();
                 } else if self.sse.running() {
                     // Dropped: the stream tries again by itself. The list,
                     // the open chat and any host-updating line stay as they
@@ -1836,8 +1846,7 @@ impl Engine {
                     // ends a host-updating line.
                     self.live_stream_dropped();
                     self.mutate_roster(Roster::stream_dropped);
-                    self.outage.reconcile = true;
-                    self.outage_failed("event stream dropped");
+                    self.outage_stream_dropped();
                 } else {
                     // A deliberate stop: the caller already set the state.
                     self.live_stream_dropped();

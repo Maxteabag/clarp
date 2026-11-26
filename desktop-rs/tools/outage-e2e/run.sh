@@ -59,7 +59,7 @@ DEVICE=$(curl -sS -m 10 -H 'Content-Type: application/json' -X POST "http://127.
 case "$DEVICE" in cld_*) ;; *) echo "pairing failed: $DEVICE" >&2; exit 1;; esac
 python3 "$E2E/gateway.py" "$PROXY_PORT" "$HOST_PORT" "$D/proxy-mode" "$D/gateway.jsonl" & echo $! > "$D/proxy.pid"
 sleep 0.5
-CLARP_PROBE_URL="http://127.0.0.1:$PROXY_PORT" CLARP_PROBE_TOKEN="$DEVICE" CLARP_PROBE_SESSION="$SESSION" CLARP_PROBE_SECONDS=150 \
+CLARP_PROBE_URL="http://127.0.0.1:$PROXY_PORT" CLARP_PROBE_TOKEN="$DEVICE" CLARP_PROBE_SESSION="$SESSION" CLARP_PROBE_SECONDS=160 \
   HOME="$D/home" XDG_CONFIG_HOME="$D/home/.config" XDG_DATA_HOME="$D/home/.local/share" XDG_CACHE_HOME="$D/home/.cache" \
   "$PROBE" > "$D/timeline.jsonl" 2> "$D/probe.log" & echo $! > "$D/probe.pid"
 sleep 8; mark baseline
@@ -70,7 +70,7 @@ send "gap one" g1; wait_reply "gap one"; sleep 1
 mark s1-502-off; echo pass > "$D/proxy-mode"
 sleep 20
 
-# S2: a planned restart (SIGTERM) with ~44.5 s of 502 at the gateway.
+# S2: a planned restart (SIGTERM) with ~44.5 s of 502 at the gateway, then 6 s more of 502 for reads only.
 mark s2-sigterm; T0=$(now_ms); kill -TERM "$(cat "$D/host.pid")"
 while kill -0 "$(cat "$D/host.pid")" 2>/dev/null; do sleep 0.05; done; mark s2-host-exited
 while [ $(( $(now_ms) - T0 )) -lt 36000 ]; do sleep 0.1; done
@@ -78,8 +78,12 @@ echo 502 > "$D/proxy-mode"; mark s2-gateway-holds-502
 mark host-start-2; start_host 2; mark s2-host-up
 send "gap two" g2; wait_reply "gap two"; mark s2-turn-done
 while [ $(( $(now_ms) - T0 )) -lt 44500 ]; do sleep 0.05; done
-mark s2-502-off; echo pass > "$D/proxy-mode"
-sleep 30; mark s2-end
+# The stream may come back now, but the reads a catch-up needs still fail for 6 s: a reopened
+# stream alone must not end the outage.
+mark s2-502-off; echo reads > "$D/proxy-mode"
+while [ $(( $(now_ms) - T0 )) -lt 50500 ]; do sleep 0.05; done
+mark s2-reads-pass; echo pass > "$D/proxy-mode"
+sleep 25; mark s2-end
 kill "$(cat "$D/probe.pid")" 2>/dev/null || true; sleep 0.5
 
 # S3: a refusal is said at once (a token this Host never issued).

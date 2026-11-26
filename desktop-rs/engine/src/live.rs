@@ -68,6 +68,10 @@ pub(crate) struct Live {
     /// before its live hub serves sends neither, and those chats keep the
     /// old activity rows and typing indicator.
     pub heard: std::collections::HashSet<String>,
+    /// `GET /live` requests sent and not yet answered, per chat: a catch-up
+    /// round counts a chat's `/live` as read only once none is outstanding,
+    /// so an answer to a request from before the round cannot end it.
+    pub outstanding: std::collections::HashMap<String, u32>,
 }
 
 impl Engine {
@@ -311,7 +315,50 @@ impl Engine {
         if !self.connected {
             self.live.joining.insert(session.to_owned());
         }
+        self.get_live(session);
+    }
+
+    /// Sends `GET /live` for `session`, counted as outstanding.
+    fn get_live(&mut self, session: &str) {
+        *self.live.outstanding.entry(session.to_owned()).or_default() += 1;
         self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
+    }
+
+    /// One `/live` answer (or failure) for `session` came: true when none is
+    /// outstanding any more.
+    fn live_answered(&mut self, session: &str) -> bool {
+        match self.live.outstanding.get_mut(session) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                false
+            }
+            _ => {
+                self.live.outstanding.remove(session);
+                true
+            }
+        }
+    }
+
+    /// The chats always watched live (`kept_watched`), for a catch-up round.
+    pub(crate) fn live_kept_sessions(&self) -> std::collections::HashSet<String> {
+        self.kept_watched()
+    }
+
+    /// A catch-up round begins: every held view asks for a fresh snapshot
+    /// (events were missed); returns the `required` chats whose `/live` the
+    /// round waits for.
+    pub(crate) fn live_catch_up(&mut self, required: &[String]) -> std::collections::HashSet<String> {
+        self.live.dropped = false;
+        self.live.joining.clear();
+        if !self.live.enabled {
+            return Default::default();
+        }
+        let mut sessions: Vec<String> = self.live.views.keys().cloned().collect();
+        sessions.sort();
+        for session in &sessions {
+            self.request_live(session);
+        }
+        required.iter().filter(|s| self.live.views.contains_key(*s)).cloned().collect()
     }
 
     /// The selected chat, the shown ones and the few opened last, as
@@ -370,22 +417,6 @@ impl Engine {
         }
     }
 
-    /// Whether a live view is held for `session` on this engine's Host.
-    pub(crate) fn live_holds(&self, session: &str) -> bool {
-        self.live.views.contains_key(session)
-    }
-
-    /// Views whose snapshot failed (the Host was out of reach) ask again.
-    pub(crate) fn live_retry_failed(&mut self) {
-        if !self.live.enabled {
-            return;
-        }
-        let failed: Vec<String> = self.live.views.iter().filter(|(_, v)| v.lseq().is_none() && !v.awaiting_snapshot()).map(|(s, _)| s.clone()).collect();
-        for session in failed {
-            self.request_live(&session);
-        }
-    }
-
     pub(crate) fn live_stream_dropped(&mut self) {
         self.live.dropped = true;
     }
@@ -415,7 +446,7 @@ impl Engine {
             self.changes.push(Change::Live(session.clone()));
         }
         if effects.contains(&FETCH_LIVE) {
-            self.api.get(&format!("live:{session}"), "/live", &[("session", &session)]);
+            self.get_live(&session);
         }
     }
 
@@ -426,10 +457,11 @@ impl Engine {
             return true;
         }
         let Some(session) = tag.strip_prefix("live:") else { return false };
+        self.live_answered(session);
         if let Some(view) = self.live.views.get_mut(session) {
             let effects = view.apply_snapshot(object);
             if effects.contains(&FETCH_LIVE) {
-                self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
+                self.get_live(session);
             }
             let Some(view) = self.live.views.get_mut(session) else { return true };
             let server_now = object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0);
@@ -444,12 +476,15 @@ impl Engine {
             }
             self.changes.push(Change::Live(session.to_owned()));
         }
+        if !self.live.outstanding.contains_key(session) {
+            self.catch_up_live(session);
+        }
         true
     }
 
     /// A failed `GET /live`: the chat keeps what it shows and the next event
     /// may ask again. Never a chat error (an older Host may lack the route).
-    pub(crate) fn live_failure(&mut self, tag: &str, detail: &str) -> bool {
+    pub(crate) fn live_failure(&mut self, tag: &str, detail: &str, status: u16) -> bool {
         if tag == "tool-explanations-settings" {
             // The Host kept its setting: show what it has, and say why.
             eprintln!("Engine: tool explanations setting failed: {detail}");
@@ -460,10 +495,21 @@ impl Engine {
         }
         let Some(session) = tag.strip_prefix("live:") else { return false };
         eprintln!("Engine: GET /live for {session} failed: {detail}");
+        let settled = self.live_answered(session);
         if let Some(view) = self.live.views.get_mut(session) {
             view.snapshot_failed();
         }
+        if settled {
+            self.catch_up_live_failed(session, status);
+        }
         true
+    }
+
+    /// A catch-up round's `/live` read is asked again (its generation).
+    pub(crate) fn live_retry_due(&mut self, session: &str, generation: u64) {
+        if generation == self.outage.generation && self.live.views.contains_key(session) && !self.live.outstanding.contains_key(session) {
+            self.request_live(session);
+        }
     }
 }
 

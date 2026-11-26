@@ -37,6 +37,7 @@ fn seen(engine: &Engine, session: &str) -> Value {
         "availability": engine.roster().availability(session).and_then(|a| line(a, Clock::now(0))),
         "rows": rows,
         "outage": if engine.outage_shown() { "shown" } else if engine.outage_active() { "quiet" } else { "none" },
+        "catching_up": engine.outage_catching_up(),
         "server_version": engine.server_version(),
         "server_id": engine.server_id(),
     })
