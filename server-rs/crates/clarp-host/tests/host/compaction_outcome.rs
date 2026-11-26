@@ -11,7 +11,7 @@ use super::*;
 /// result; `die` ends without a result. Given anything else it answers, and says how much its
 /// conversation holds; given words with `auto` in them it first compacts by itself, as the
 /// tool does when its conversation is full. It writes down what it was given.
-const CLAUDE: &str = r#"#!/usr/bin/env python3
+pub(super) const CLAUDE: &str = r#"#!/usr/bin/env python3
 import json, os, sys, time
 here = os.path.dirname(os.path.abspath(__file__))
 args = sys.argv[1:]

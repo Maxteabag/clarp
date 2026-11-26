@@ -355,33 +355,12 @@ fn a_steer_that_is_no_words_waits_for_the_turn_to_end() {
     host.post("/stop", json!({"session": session}));
 }
 
-/// A Claude Code stand-in whose compaction (`/compact` as its whole message) goes on until it is
-/// stopped; anything else it answers at once.
-const COMPACTING: &str = r#"#!/usr/bin/env python3
-import json, sys, time
-if "--version" in sys.argv:
-    print("2.1.321 (Claude Code)")
-    raise SystemExit(0)
-args = sys.argv[1:]
-blocks = [part.get("text", "") for part in json.loads(sys.stdin.readline())["message"]["content"]]
-named = "--resume" if "--resume" in args else "--session-id"
-session = args[args.index(named) + 1]
-def say(**event):
-    print(json.dumps({**event, "session_id": session}), flush=True)
-say(type="system", subtype="init", model="stand-in")
-if blocks == ["/compact"]:
-    say(type="system", subtype="status", status="compacting")
-    time.sleep(60)
-say(type="assistant", message={"id": "msg_1", "role": "assistant", "model": "stand-in",
-    "content": [{"type": "text", "text": "on it"}]})
-say(type="result", subtype="success", is_error=False, result="on it", num_turns=1)
-"#;
-
 #[test]
 fn a_steer_or_take_over_meets_a_turn_that_cannot_be_stopped_and_waits_for_it() {
     let place = Place::new("steer-not-cuttable");
     let claude = place.root.join("claude");
-    program(&claude, COMPACTING);
+    program(&claude, super::compaction_outcome::CLAUDE);
+    std::fs::write(place.root.join("modes"), r#"["stall"]"#).unwrap();
     let home = place.root.join("home");
     let world = [
         ("HOME", home.to_str().unwrap()),
@@ -398,6 +377,10 @@ fn a_steer_or_take_over_meets_a_turn_that_cannot_be_stopped_and_waits_for_it() {
             .iter()
             .any(|row| row["session"] == session && row["compacting"] == true)
     };
+    host.send(&session, "first turn", "first");
+    wait_for("the first turn to establish a session", || {
+        host.state(&session) == "done"
+    });
     host.post("/compact", json!({ "session": session }));
     wait_for("the compaction to run", compacting);
 
@@ -410,6 +393,9 @@ fn a_steer_or_take_over_meets_a_turn_that_cannot_be_stopped_and_waits_for_it() {
                "text": "This turn can't be stopped: your message waits for it"}),
         "{steer}"
     );
+    let (status, refused) = host.ask("POST", "/turn-queue/steered/take-over", None);
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["code"], "turn_not_cuttable", "{refused}");
     let taken = send_while_busy(&host, &session, "taken", "taken", "take_over");
     assert_eq!(taken["while_busy"], "after_turn", "{taken}");
     assert_eq!(taken["fallback"]["from"], "take_over", "{taken}");
