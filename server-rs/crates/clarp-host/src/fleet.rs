@@ -260,10 +260,11 @@ pub struct AgentRecord {
 }
 
 /// Who put an agent away ([`AgentRecord::archived_by`]), as the apps are told it:
-/// `{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}` or `{"kind": "host"}`.
+/// `{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}`, `{"kind": "host-token"}` or
+/// `{"kind": "host"}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchivedBy {
-    /// `agent`, `owner` or `host`.
+    /// `agent`, `owner`, `host-token` or `host`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub session: String,
@@ -281,10 +282,19 @@ impl ArchivedBy {
         }
     }
 
-    /// The owner, with his own token (`POST /agent-archive`).
+    /// The owner: a paired device of his, or an app of his on this machine
+    /// (`POST /agent-archive`).
     pub fn owner() -> Self {
         Self {
             kind: "owner".into(),
+            ..Self::default()
+        }
+    }
+
+    /// The Host's own token, presented by no app: a script, or `clarp-admin` with it.
+    pub fn host_token() -> Self {
+        Self {
+            kind: "host-token".into(),
             ..Self::default()
         }
     }
@@ -4287,7 +4297,10 @@ impl Fleet {
         let renamed = record.persona != before.persona && !assigned;
         let roster_kind = if record.muted != before.muted {
             Some("mute-changed")
-        } else if record.archived_at_ms.is_some() != before.archived_at_ms.is_some() {
+        } else if record.archived_at_ms.is_some() != before.archived_at_ms.is_some()
+            || record.archived_by != before.archived_by
+        {
+            // Put away again by someone else: the apps are told who it is now.
             Some("archive-changed")
         } else {
             None

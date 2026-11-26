@@ -162,7 +162,8 @@ clarp-admin agent archive --session <session> --restore  # take it back
 ```
 
 An archived agent keeps everything and can still be written to. It carries `archived_by`
-(`{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}` or `{"kind": "host"}`)
+(`{"kind": "agent", "session", "agent_id"}`, `{"kind": "owner"}`, `{"kind": "host-token"}`
+for the Host's token from a script, or `{"kind": "host"}`)
 while it is away, so the apps show who archived it, and the Host logs every archive and
 restore. Without a verified turn the command is refused. On an older Host (contract 193 to
 199) it works only for yourself and your own helpers.

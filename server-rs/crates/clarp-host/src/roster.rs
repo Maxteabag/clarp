@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 
 use axum::body::Bytes;
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::extract::{Extension, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -25,7 +25,7 @@ use clarp_kernel::roster as rules;
 use clarp_kernel::told;
 use serde_json::{Map, Value, json};
 
-use crate::edge::{self, ApiError, App};
+use crate::edge::{self, ApiError, App, Presented, Principal};
 use crate::fleet::{AgentRecord, Amend, ArchivedBy, NotAmended};
 
 pub(crate) type Fields = Map<String, Value>;
@@ -171,9 +171,15 @@ async fn rename(State(app): State<App>, body: Bytes) -> Answered {
 }
 
 /// `POST /agent-archive` with `{session, archived}`: puts an agent away, or takes it out
-/// again. An agent that is put away keeps everything and can still be written to. Asked with
-/// the owner's token, so the owner put it away.
-async fn archive(State(app): State<App>, body: Bytes) -> Answered {
+/// again. An agent that is put away keeps everything and can still be written to. Who asked
+/// is kept as [`asked_by`] says.
+async fn archive(
+    State(app): State<App>,
+    principal: Option<Extension<Principal>>,
+    presented: Option<Extension<Presented>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Answered {
     let asked = object(&body)?;
     let session = text(&asked, "session");
     let (false, Some(archived)) = (
@@ -182,9 +188,33 @@ async fn archive(State(app): State<App>, body: Bytes) -> Answered {
     ) else {
         return Err(bad("session and archived required"));
     };
-    Ok(Json(
-        put_away(&app, &session, archived, ArchivedBy::owner()).await?,
-    ))
+    let by = asked_by(
+        principal.map(|Extension(principal)| principal),
+        presented.map(|Extension(presented)| presented),
+        &headers,
+    );
+    Ok(Json(put_away(&app, &session, archived, by).await?))
+}
+
+/// Who put an agent away through `POST /agent-archive`: the owner where a paired device asked,
+/// or an app of his on this machine (the Host's token with `X-Clarp-Client`, or in the web
+/// app's cookie); the Host's token where anything else presented it (a script, a `clarp-admin`
+/// with the owner's token, a call with no token on a Host that has none).
+fn asked_by(
+    principal: Option<Principal>,
+    presented: Option<Presented>,
+    headers: &HeaderMap,
+) -> ArchivedBy {
+    let from_an_app = headers
+        .get("x-clarp-client")
+        .is_some_and(|value| !value.as_bytes().iter().all(u8::is_ascii_whitespace));
+    match principal {
+        Some(Principal::Device { .. }) => ArchivedBy::owner(),
+        Some(Principal::Administrator) if from_an_app || presented == Some(Presented::Cookie) => {
+            ArchivedBy::owner()
+        }
+        _ => ArchivedBy::host_token(),
+    }
 }
 
 /// An agent is put away (`archived`) or taken back, as `POST /agent-archive` does it: answered

@@ -298,13 +298,34 @@ fn any_agent_puts_away_any_agent_and_the_host_keeps_and_logs_who() {
     wait_for("the restore event", || told(false).is_some());
     assert!(told(false).unwrap().get("archived_by").is_none());
 
-    // The owner's own archive says the owner.
+    // The Host's token from no app (a script, clarp-admin with it) says so.
     assert_eq!(
         host.post(
             "/agent-archive",
             json!({ "session": ben, "archived": true })
         )["archived_by"],
-        json!({ "kind": "owner" })
+        json!({ "kind": "host-token" })
+    );
+    assert_eq!(row(&ben)["archived_by"], json!({ "kind": "host-token" }));
+    // An app of the owner's on this machine (the Host's token with X-Clarp-Client) is the owner.
+    let body = json!({ "session": ben, "archived": true }).to_string();
+    let answered = fetch(
+        &host,
+        admin,
+        "POST",
+        "/agent-archive",
+        &[
+            ("X-Clarp-Client", "desktop/1 contract=1"),
+            ("Content-Type", "application/json"),
+        ],
+        body.as_bytes(),
+    );
+    assert_eq!(answered.status, 200);
+    let answered: Value = serde_json::from_slice(&answered.body).unwrap();
+    assert_eq!(
+        answered["archived_by"],
+        json!({ "kind": "owner" }),
+        "{answered}"
     );
     assert_eq!(row(&ben)["archived_by"], json!({ "kind": "owner" }));
 
@@ -312,6 +333,8 @@ fn any_agent_puts_away_any_agent_and_the_host_keeps_and_logs_who() {
     let heard = || host.heard.lock().unwrap().clone();
     let owners = format!("clarp-host: agent archived: {ben} ({ben_id}) by owner at ");
     wait_for("the lines", || heard().contains(&owners));
+    let script = format!("clarp-host: agent archived: {ben} ({ben_id}) by host-token at ");
+    assert!(heard().contains(&script), "{}", heard());
     let heard = heard();
     for what in ["archived", "restored"] {
         let line = format!("clarp-host: agent {what}: {ben} ({ben_id}) by {ada} ({ada_id}) at ");
