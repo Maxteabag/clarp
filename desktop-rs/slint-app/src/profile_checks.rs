@@ -275,8 +275,8 @@ pub(super) fn profile_check(out: String) {
             check(info.prompts_shown, "prompt history is back once the Host answers it");
             let error = boxes(move |t| t == said);
             let heading = boxes(|t| t == "THIS CHAT");
-            // The card's title sits 10 px in from the content's edge.
-            let inside = matches!((error.as_slice(), heading.as_slice()), ([e], [h]) if (e.0 - (h.0 - 10.0)).abs() < 2.0);
+            // In line with the cards' titles, inside the panel's padding.
+            let inside = matches!((error.as_slice(), heading.as_slice()), ([e], [h]) if (e.0 - h.0).abs() < 1.0);
             check(inside, &format!("said once, inside the panel's padding: {error:?} {heading:?}"));
             shot(&out5, "profile-05-error");
             headless::press(Key::Escape);
