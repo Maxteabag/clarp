@@ -75,7 +75,10 @@ server-rs/tools/install-from-release --relay on
 
 This writes `[network] relay_enabled = true` into the Host's own config. (A Host
 started by hand takes the same switch with `clarp-host --relay-config FILE`,
-where FILE has `[network] relay_enabled = true` and `relay.json` beside it.) The Host
+where FILE has `[network] relay_enabled = true` and `relay.json` beside it.) Many
+agents need many open files, about three for each agent: the Host raises its own soft
+open-files limit to the hard limit at start, so in a container give it a high hard limit
+(`docker run --ulimit nofile=65536:65536`); `install-host` writes `LimitNOFILE=65536`. The Host
 dials the relay only when it has an administrator token (`CLARP_HOST_TOKEN`): a Host
 anyone could speak to is never put on the relay.
 

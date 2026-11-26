@@ -4,6 +4,7 @@
 //! rejoins the turns that are running), and serves the apps. Stopping it stops none of the
 //! turns: they belong to their shims, and the next Host finds them.
 
+mod open_files;
 mod shutdown;
 
 use std::process::ExitCode;
@@ -540,11 +541,14 @@ async fn serve(config: Config) -> Result<(), String> {
     let pruning = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut open_files = open_files::Watermark::default();
         loop {
             tick.tick().await;
             if let Err(why) = pruning.calls.prune_openings(&pruning).await {
                 eprintln!("clarp-host: opening retention: {}", why.0);
             }
+            // On the same minute: whether the Host nears its open-files limit (issue 914).
+            open_files.check(pruning.fleet.directory().members.len());
         }
     });
     // And the chips of the phones are kept current from now on.
@@ -751,6 +755,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     clarp_host::set_lane_limits_default(config.lane_limits_default.as_deref());
+    // Before any store is opened: a container's default of 1,024 open files is too few for a
+    // few hundred agents.
+    open_files::raise();
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
