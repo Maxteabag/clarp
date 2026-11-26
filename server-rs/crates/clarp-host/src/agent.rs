@@ -5735,7 +5735,8 @@ impl Worker {
             // How the turn ended, for whether its backend works (the experience watcher's
             // `backend_failures`): a done turn answered when it left a note or any row of it,
             // in any audience, is a reply with words; a coordination reply hidden from the user
-            // still answered. What cannot be read is never counted against the backend.
+            // still answered. A front desk's relay of the user's word is the user's turn: its
+            // silence counts. What cannot be read is never counted against the backend.
             if let Some(last) = ended
                 && !self.setup.record.is_test
                 && let Some(end) = self.ended.as_ref().filter(|end| end.turn == last.id.0)
@@ -5752,9 +5753,12 @@ impl Worker {
                         },
                         Ok(None) | Err(_) => true,
                     };
-                if let Some(how) =
-                    crate::experience_watch::judged(&last.outcome, &last.origin, answered)
-                {
+                if let Some(how) = crate::experience_watch::judged(
+                    &last.outcome,
+                    &last.origin,
+                    answered,
+                    actor.carried_user_word(last),
+                ) {
                     self.setup.hub.turn_ended(crate::experience_watch::Ended {
                         agent_id: self.setup.record.agent_id.clone(),
                         session: self.setup.record.session.clone(),
