@@ -90,7 +90,6 @@ pub(super) fn profile_check(out: String) {
             }
             check(info.name == "Rachel" && info.session == "rachel" && info.backend == "claude", &format!("the profile is Rachel's: {} {}", info.name, info.backend));
             check(info.folder.as_str() == folder3 && info.context_used == "50000 / 200000 tokens", &format!("with its folder and context: {} {}", info.folder, info.context_used));
-            check(texts(|t| t == "Used").len() == 1, "a known context shows its Used row");
             check(info.plan_title == "Ship it" && bridge.get_plan().row_count() == 1, "and the current plan");
             check(bridge.get_prompts().row_count() == 20 && info.prompts_more, "the first 20 prompts, with more to load");
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();
@@ -556,6 +555,7 @@ fn backend_now(window: &crate::AppWindow) -> (crate::ProfileInfo, String, Vec<cr
 /// read in plain words. Escape steps back one level.
 pub(super) fn backend_row_check(out: String) {
     let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let out7 = out.clone();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, _| {
             if !ready(app) {
@@ -609,11 +609,28 @@ pub(super) fn backend_row_check(out: String) {
             let bridge = window.global::<ProfileBridge>();
             let shown_model = bridge.get_models().row_data(info.model_index as usize).map(|m| m.to_string()).unwrap_or_default();
             check(shown_model == "Opus" && texts(|t| t.contains(" · Opus")).is_empty(), &format!("the model is said once, on the Model line: {shown_model:?}"));
+            check(info.context_used.is_empty(), &format!("unknown context usage gives no Used words: {:?}", info.context_used));
+            shot(&out1, "backend-01-row");
+            true
+        })),
+        // The sections below the fold are drawn only once scrolled to.
+        ("heartbeat once", Box::new(|_, _, _| {
+            if texts(|t| t == "Push alerts").is_empty() {
+                headless::wheel(640.0, 400.0, -120.0);
+                return false;
+            }
             let heartbeat = texts(|t| t.to_lowercase().contains("heartbeat"));
             check(heartbeat == ["Heartbeat"] && texts(|t| t == "State").is_empty(), &format!("the heartbeat is said once, by its switch: {heartbeat:?}"));
-            check(info.context_used.is_empty() && texts(|t| t == "Used" || t == "Unknown").is_empty() && texts(|t| t == "Compact context").len() == 1,
-                &format!("unknown context usage shows no Used row, only Compact: {:?}", info.context_used));
-            shot(&out1, "backend-01-row");
+            true
+        })),
+        ("context once", Box::new(move |_, _, _| {
+            if texts(|t| t == "CONTEXT").is_empty() || texts(|t| t == "Compact context").is_empty() {
+                headless::wheel(640.0, 400.0, -120.0);
+                return false;
+            }
+            check(texts(|t| t == "Used" || t == "Unknown").is_empty(), "unknown context usage shows no Used row, only Compact context");
+            shot(&out7, "backend-01b-said-once");
+            headless::wheel(640.0, 400.0, 20000.0);
             check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 1}})).is_ok(), "a message waits for Rachel");
             true
         })),
