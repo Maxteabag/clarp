@@ -288,7 +288,7 @@ impl Withheld {
 
 /// What a `transcript-updated` carries of a chat's rows (feature `events_rows`): left out of a
 /// withheld agent's event, never blanked.
-const CARRIED: [&str; 2] = ["rows", "rows_latest"];
+const CARRIED: [&str; 4] = ["rows", "rows_latest", "rows_coordination", "hidden_after"];
 
 /// The keys that say whose an object is.
 /// An object is the agent's that says it is from it, for it, about it or done by it: its own
@@ -1568,6 +1568,7 @@ mod tests {
         let frame = concat!(
             "id: 9\ndata: {\"type\":\"transcript-updated\",\"session\":\"ada\",",
             "\"head_revision\":12,\"rows_from\":10,\"rows_latest\":12,",
+            "\"rows_coordination\":{\"visibility\":\"hide\"},\"hidden_after\":{\"count\":2},",
             "\"rows\":[{\"id\":\"r1\",\"role\":\"assistant\",\"revision\":11,",
             "\"timestamp\":\"2026-11-26T05:00:00Z\",\"trace_id\":\"t1\",\"text\":\"secret\"}]}\n\n"
         );
@@ -1575,7 +1576,9 @@ mod tests {
         let data = out.strip_prefix("id: 9\ndata: ").unwrap().trim_end();
         let event: Value = serde_json::from_str(data).unwrap();
         assert!(
-            event.get("rows").is_none() && event.get("rows_latest").is_none(),
+            ["rows", "rows_latest", "rows_coordination", "hidden_after"]
+                .iter()
+                .all(|field| event.get(field).is_none()),
             "{event}"
         );
         assert_eq!(

@@ -1435,12 +1435,40 @@ sent no `rows`, and one that reads `/log` with other options (`view`, `coordinat
 `include_automated=0`, `include_tool_details` other than `0`) reads `/log` as before. A reader
 that may not read the agent (bound privacy) is sent its `transcript-updated` without `rows` and
 `rows_latest`, and `/log` refuses it (403 `bound_conversation`), as before.
-Measured with the apps' way of listening and `gzip=1` (`server-rs/tools/build wire-read`, issue
-879), one short answer cost such a client 4.4 KB and no `/log` call, against 11.4 KB with nine
-`/log` calls without it.
+The rows are read with `include_automated=1` and no `coordination`, which is not how the apps
+read `/log` (they hide coordination and automated rows): with feature `events_rows_options` below,
+the rows are read with the reader's own options.
 
 A connection without `rows=1` gets `rows_from` on `transcript-updated` and nothing more. A Host
 without the feature ignores `rows=1`: send it only where `GET /server-info` lists `events_rows`.
+
+#### The carried rows read with the reader's options (feature `events_rows_options`, Rust Host contract 207)
+
+`GET /events?rows=1&rows_automated=0|1&rows_coordination=auto` reads the carried rows as the
+client reads `/log`: `rows` are what
+`GET /log?session=&after_revision=<rows_from>&include_automated=<rows_automated>&include_tool_details=0`
+answers, with `&coordination=auto` when `rows_coordination=auto` is asked. Both are optional;
+without them the rows are as above (`include_automated=1`, no coordination). With
+`rows_coordination=auto` the event also carries what that read says of coordination, under
+`/log`'s names: `rows_coordination` (`hidden`, `source`, `visibility`, as `/log`'s
+`coordination`) and `hidden_after` where it has one.
+
+Every condition above stays (20 rows, 16 KB, about 200 ms, the same conversation, bound privacy).
+And no rows are carried where `/log` would answer `replace_required`: on a connection with
+`rows_coordination=auto`, when the chat's `visibility` differs from the one its last carried rows
+of that chat were read under, the event goes without rows, and the client reads `/log` with its
+`coordination_read` and is told to read the chat anew. A client that merges carried rows checks,
+as on `/log`, that `rows_coordination.visibility` is the one its cache was read under; where it is
+not, it reads `/log`. The rows are read once per event for each set of options connections ask
+for (at most four), not once per connection.
+
+Measured with the apps' real options (`rows_automated=0&rows_coordination=auto`, and `/log` read
+the same way), the medians over six short answers per mode were 27.5 KB without stream gzip,
+11.8 KB with gzip, and 4.4 KB with gzip and carried rows (`server-rs/tools/build wire-read`,
+issue 928). The gzipped modes had 9 and 0
+`/log` reads per answer, respectively. Event-stream bytes rose from 3.6 KB to 4.1 KB with
+carried rows. Events arrived a median of 0.2 ms and p95 of 2.5 ms later than on the adjacent
+plain stream.
 
 #### A compacted catch-up, and no cut (feature `compact_resume`, Rust Host contract 201)
 

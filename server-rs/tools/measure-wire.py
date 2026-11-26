@@ -5,7 +5,7 @@ A stand-in for Claude Code answers each message with a short reply streamed as C
 streams it (a little thinking, then about forty text deltas over two seconds). A client that
 does what the apps do listens on `/events?live=<its chat>` and, on each `transcript-updated` of
 its chat that it does not already hold, fetches the delta from `/log` with the apps' options
-(`include_automated=1&include_tool_details=0`), asking for gzip throughout. Per answer it counts
+(`include_automated=0&include_tool_details=0&coordination=auto`, issue 928), asking for gzip throughout. Per answer it counts
 the bytes that came over the wire from the send to two seconds after the turn's end: the event
 stream (its HTTP chunks as sent), the `/log` answers (headers and body as sent) and the send's
 answer. It prints the median of several answers, split by event type, for each way of listening
@@ -263,8 +263,10 @@ def lags(plain, packed):
             if (key := event_key(event)) in seen]
 
 
-QUERIES = {"apps": "", "gzip": "&gzip=1", "rows": "&gzip=1&rows=1"}
-NEEDS = {"apps": None, "gzip": "events_gzip", "rows": "events_rows"}
+# How the apps read /log (issue 928): no automated rows, coordination as the chat says.
+APP_LOG_OPTIONS = "include_automated=0&include_tool_details=0&coordination=auto"
+QUERIES = {"apps": "", "gzip": "&gzip=1", "rows": "&gzip=1&rows=1&rows_automated=0&rows_coordination=auto"}
+NEEDS = {"apps": None, "gzip": "events_gzip", "rows": "events_rows_options"}
 
 
 def answer(target, session, mode, n, cursor):
@@ -299,8 +301,8 @@ def answer(target, session, mode, n, cursor):
                         continue
                     if (event.get("head_revision") or 0) and event["head_revision"] <= cursor["revision"]:
                         continue
-                    path = (f"/log?session={session}&limit=100&include_automated=1"
-                            f"&include_tool_details=0&after_revision={cursor['revision']}")
+                    path = (f"/log?session={session}&limit=100&{APP_LOG_OPTIONS}"
+                            f"&after_revision={cursor['revision']}")
                     status, headers, data, wire = target.request("GET", path, headers={"Accept-Encoding": "gzip"})
                     if status != 200:
                         raise RuntimeError(f"/log answered {status}")

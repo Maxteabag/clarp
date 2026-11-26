@@ -85,6 +85,8 @@ mod enter_at_start;
 mod events_gzip;
 #[path = "host/events_rows.rs"]
 mod events_rows;
+#[path = "host/events_rows_options.rs"]
+mod events_rows_options;
 #[path = "host/folder_missing.rs"]
 mod folder_missing;
 #[path = "host/goal_ledger.rs"]

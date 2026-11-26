@@ -153,6 +153,9 @@ gzip, leave it out.
 On a Host with feature `events_rows` (contract 199), add `rows=1`: a
 `transcript-updated` then carries `rows` and `rows_latest`, and a watcher that
 holds its `rows_from` revision or more merges them instead of reading `GET /log`.
+With feature `events_rows_options` (contract 207) add `rows_automated=0` and
+`rows_coordination=auto` when you read `/log` that way, so the carried rows
+match your own reads.
 
 Never expose provider API keys to the phone or place them in prompts. Creating
 or editing a persona does not authorize deleting its conversation history.

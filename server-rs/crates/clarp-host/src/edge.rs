@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 206;
+pub const HOST_CONTRACT: u64 = 207;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -527,6 +527,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `agent-roster` event of kind `availability`; and every event stream is sent one
     // `host-updating` before the Host stops (`crate::availability`, issue 918).
     ("agent_availability", 206),
+    // `GET /events?rows=1&rows_automated=0|1&rows_coordination=auto`: the carried rows are read
+    // with the reader's own `/log` options, echo `/log`'s coordination fields (`rows_coordination`,
+    // `hidden_after`), and are not carried where the chat's visibility changed since the
+    // connection's last rows of it; one read per event and set of options (issue 928).
+    ("events_rows_options", 207),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -4867,27 +4872,42 @@ struct EventsQuery {
     /// `1`: a `transcript-updated` carries the rows it stands for, where they are few and small
     /// (feature `events_rows`).
     rows: Option<String>,
+    /// `0`: the rows leave out what a watcher or the Host's own routine began, as `/log`'s
+    /// `include_automated=0` (feature `events_rows_options`).
+    rows_automated: Option<String>,
+    /// `auto`: the rows follow the chat's coordination setting, as `/log`'s `coordination=auto`
+    /// (feature `events_rows_options`).
+    rows_coordination: Option<String>,
     /// `1`: a resume and a lag are caught up compacted, told first, and never cut; no replay
     /// without `Last-Event-ID` (feature `compact_resume`).
     compact: Option<String>,
 }
 
 /// The rows a `transcript-updated` stands for, as `/log` answers a delta from its `rows_from`
-/// with `include_automated=1&include_tool_details=0`, put in the event for a connection that
-/// asked (`carried`): read once for every such connection, and not waited for past
+/// with `include_tool_details=0` and the connection's own options (`include_automated`, and
+/// `coordination=auto` where asked), put in the event for a connection that asked (`carried`):
+/// read once for every connection that asks with the same options, and not waited for past
 /// `carried::WITHIN`. `None`: the event goes as it is.
-async fn with_rows(app: &App, published: &Published) -> Option<Arc<str>> {
+async fn with_rows(
+    app: &App,
+    published: &Published,
+    options: crate::carried::Options,
+) -> Option<crate::carried::Carried> {
     if !published.json.contains("\"rows_from\"") {
         return None;
     }
-    let read = || rows_of(app.clone(), published.json.clone());
+    let read = || rows_of(app.clone(), published.json.clone(), options);
     app.hub
         .carried
-        .get(published.id, crate::carried::WITHIN, read)
+        .get(published.id, options, crate::carried::WITHIN, read)
         .await
 }
 
-async fn rows_of(app: App, json: String) -> Option<String> {
+async fn rows_of(
+    app: App,
+    json: String,
+    options: crate::carried::Options,
+) -> Option<crate::carried::Carried> {
     let mut event: Value = serde_json::from_str(&json).ok()?;
     if event["type"] != "transcript-updated" {
         return None;
@@ -4897,12 +4917,23 @@ async fn rows_of(app: App, json: String) -> Option<String> {
         session: event["session"].as_str()?.to_string(),
         limit: Some(crate::carried::ROWS_MAX),
         after_revision: Some(from),
-        include_automated: Some("1".to_string()),
+        include_automated: Some(if options.automated { "1" } else { "0" }.to_string()),
         include_tool_details: Some("0".to_string()),
+        coordination: options.coordination.then(|| "auto".to_string()),
         ..LogQuery::default()
     };
+    let session = event["session"].as_str()?.to_string();
     let answer = log_answer(&app, query).await.ok()?;
-    crate::carried::carry(&mut event, answer).then(|| event.to_string())
+    let visibility = answer["coordination"]["visibility"]
+        .as_str()
+        .map(str::to_string);
+    crate::carried::carry(&mut event, answer, options.coordination).then(|| {
+        crate::carried::Carried {
+            json: Arc::from(event.to_string()),
+            session,
+            visibility,
+        }
+    })
 }
 
 /// What a `live` event is sent as: no number, and no name, as every other event without one.
@@ -4959,6 +4990,18 @@ async fn events(
         query.rows.as_deref().map(str::trim),
         Some("1" | "true" | "yes")
     );
+    // The `/log` options the rows are read with (feature `events_rows_options`).
+    let options = crate::carried::Options {
+        automated: !matches!(
+            query.rows_automated.as_deref().map(str::trim),
+            Some("0" | "false" | "no")
+        ),
+        coordination: query
+            .rows_coordination
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|said| said.eq_ignore_ascii_case("auto")),
+    };
     // The turns the connection asked to be shown as they run. What they show is never kept:
     // nothing of it is among what was missed.
     let wanted: Option<HashSet<String>> = query.live.map(|live| {
@@ -5016,8 +5059,8 @@ async fn events(
     // apps reconnect to the next Host about five seconds sooner (issue 880).
     let closing = Some(Box::pin(app.hub.closing()));
     let stream = stream::unfold(
-        (first, live, watched, closing, last),
-        move |(mut first, mut live, mut watched, mut closing, mut last)| {
+        (first, live, watched, closing, last, HashMap::new()),
+        move |(mut first, mut live, mut watched, mut closing, mut last, mut read_under)| {
             let clock = clock.clone();
             let (app, listener) = (app.clone(), listener.clone());
             async move {
@@ -5026,7 +5069,10 @@ async fn events(
                 let beat_at = tokio::time::Instant::now() + HEARTBEAT;
                 loop {
                     if let Some(event) = first.pop_front() {
-                        return Some((Ok(event), (first, live, watched, closing, last)));
+                        return Some((
+                            Ok(event),
+                            (first, live, watched, closing, last, read_under),
+                        ));
                     }
                     // The Host stopped and its last word was sent: the stream ends.
                     let Some(stopping) = closing.as_mut() else {
@@ -5061,13 +5107,25 @@ async fn events(
                             }
                             // What it stands for, to a connection that asked for its rows.
                             let carried = if rows {
-                                with_rows(&app, &published).await
+                                with_rows(&app, &published, options).await
                             } else {
                                 None
                             };
+                            // Rows read under another coordination visibility than this
+                            // connection's last rows of the chat are not carried: the client
+                            // reads `/log`, which tells it to read the chat anew
+                            // (`replace_required`), as it would have without the rows.
+                            let carried = carried.filter(|carried| {
+                                let Some(visibility) = &carried.visibility else {
+                                    return true;
+                                };
+                                let before: Option<String> =
+                                    read_under.insert(carried.session.clone(), visibility.clone());
+                                before.is_none_or(|before| before == *visibility)
+                            });
                             match carried {
-                                Some(json) => SseEvent::default()
-                                    .data(&*json)
+                                Some(carried) => SseEvent::default()
+                                    .data(&*carried.json)
                                     .id(published.id.to_string()),
                                 None => numbered(&published),
                             }
@@ -5113,7 +5171,7 @@ async fn events(
                                 .data(beat.to_string())
                         }
                     };
-                    return Some((Ok(event), (first, live, watched, closing, last)));
+                    return Some((Ok(event), (first, live, watched, closing, last, read_under)));
                 }
             }
         },
@@ -5248,6 +5306,8 @@ mod tests {
                 last_event_id: None,
                 live: None,
                 rows: None,
+                rows_automated: None,
+                rows_coordination: None,
                 compact: compact.then(|| "1".to_string()),
             };
             let answer = events(
