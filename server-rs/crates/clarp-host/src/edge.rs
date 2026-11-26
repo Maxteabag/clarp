@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 198;
+pub const HOST_CONTRACT: u64 = 199;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -505,6 +505,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // (`rows_from`, `rows`, `rows_latest`), and `gzip=1` with `Accept-Encoding: gzip` sends the
     // stream gzipped, flushed at each event. `GET /live?text=0` answers as `text=0` sends.
     ("events_slim", 198),
+    // `GET /log?max_bytes=N` bounds a page's rows in bytes (`budget` says what it did), and a
+    // row larger than `row_max` comes as a placeholder (`placeholder`: kind, bytes, preview,
+    // `fetch`); `GET /log?session=&message_id=` answers that row whole (issue 881).
+    ("log_budget", 199),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -3010,6 +3014,161 @@ struct LogQuery {
     delivery_bootstrap: Option<String>,
     delivery_runtime_release: Option<String>,
     delivery_runtime_instance: Option<String>,
+    /// The most bytes of rows the page may hold (feature `log_budget`, issue 881).
+    max_bytes: Option<String>,
+    /// With `max_bytes`: a row larger than this comes as a placeholder.
+    row_max: Option<String>,
+    /// One row by its id, whole: what a placeholder says to fetch (feature `log_budget`).
+    message_id: Option<String>,
+}
+
+/// Where a page of a conversation was read from, which says where a budget cuts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// The newest rows, or older history: the newest of them are kept.
+    Back,
+    /// What changed after a revision: the oldest of it is kept, and the cursor stops there.
+    Forward,
+    /// One row by its id.
+    One,
+}
+
+/// A page's budget in bytes (feature `log_budget`, issue 881): one large row (a tool's long
+/// output, a pasted file) no longer makes a page as large as itself, so a phone on a slow
+/// line never downloads megabytes to open a chat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Budget {
+    max_bytes: usize,
+    row_max: usize,
+}
+
+impl Budget {
+    const SMALLEST: usize = 16 * 1024;
+    const LARGEST: usize = 16 << 20;
+
+    fn of(query: &LogQuery) -> Result<Option<Self>, ApiError> {
+        let bytes = |given: &Option<String>, name: &str| -> Result<Option<usize>, ApiError> {
+            given
+                .as_deref()
+                .map(str::trim)
+                .filter(|given| !given.is_empty())
+                .map(|given| {
+                    given.parse::<usize>().map_err(|_| {
+                        ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            format!("{name} must be a number of bytes"),
+                        )
+                    })
+                })
+                .transpose()
+        };
+        let Some(max_bytes) = bytes(&query.max_bytes, "max_bytes")? else {
+            return Ok(None);
+        };
+        let max_bytes = max_bytes.clamp(Self::SMALLEST, Self::LARGEST);
+        let row_max = bytes(&query.row_max, "row_max")?
+            .unwrap_or((max_bytes / 2).clamp(4 * 1024, 64 * 1024))
+            .clamp(1024, max_bytes);
+        Ok(Some(Self { max_bytes, row_max }))
+    }
+
+    /// Puts a placeholder for each row over `row_max`, then cuts the page to `max_bytes`,
+    /// keeping one row at least: from a reading back the newest, from a reading forward the
+    /// oldest (and the cursor stops at it). Says what it did under `budget`.
+    fn apply(self, answer: &mut Value, reading: Reading, session: &str) {
+        let mut placeholders = 0;
+        let mut cut = false;
+        if let Some(rows) = answer["turns"].as_array_mut() {
+            for row in rows.iter_mut() {
+                let size = row.to_string().len();
+                if size > self.row_max && reading != Reading::One {
+                    *row = placeholder(row, size, session);
+                    placeholders += 1;
+                }
+            }
+            let sizes: Vec<usize> = rows.iter().map(|row| row.to_string().len() + 1).collect();
+            let fits = |sizes: &mut dyn Iterator<Item = &usize>| {
+                let mut sum = 0;
+                sizes
+                    .take_while(|size| {
+                        sum += **size;
+                        sum <= self.max_bytes
+                    })
+                    .count()
+                    .max(1)
+            };
+            if sizes.iter().sum::<usize>() > self.max_bytes && rows.len() > 1 {
+                match reading {
+                    Reading::Forward => {
+                        let keep = fits(&mut sizes.iter());
+                        rows.truncate(keep);
+                        cut = true;
+                    }
+                    Reading::Back => {
+                        let keep = fits(&mut sizes.iter().rev());
+                        rows.drain(..rows.len() - keep);
+                        cut = true;
+                    }
+                    Reading::One => {}
+                }
+            }
+        }
+        if cut {
+            answer["has_more"] = json!(true);
+            if reading == Reading::Forward {
+                let last = answer["turns"].as_array().and_then(|rows| rows.last());
+                let revision = last.and_then(|row| row["revision"].as_u64());
+                let at = last.map(|row| row["timestamp"].clone());
+                if let Some(revision) = revision {
+                    answer["latest_revision"] = json!(revision);
+                }
+                if let Some(at) = at {
+                    answer["latest_ts"] = at;
+                }
+            }
+        }
+        answer["budget"] = json!({
+            "max_bytes": self.max_bytes,
+            "row_max": self.row_max,
+            "cut": cut,
+            "placeholders": placeholders,
+        });
+    }
+}
+
+/// What a page holds of a row too large for it: the row without its words and tools, and
+/// `placeholder` with its kind, its size, the start of its words and where to read it whole.
+fn placeholder(row: &Value, bytes: usize, session: &str) -> Value {
+    const HEAVY: [&str; 3] = ["text", "tools", "display_cells"];
+    let text = row["text"].as_str().unwrap_or("");
+    let mut kept = serde_json::Map::new();
+    if let Some(fields) = row.as_object() {
+        for (key, value) in fields {
+            if !HEAVY.contains(&key.as_str()) && value.to_string().len() <= 512 {
+                kept.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    let id = row["id"].as_str().unwrap_or("");
+    let encoded =
+        |value: &str| url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+    let kind = row["kind"]
+        .as_str()
+        .filter(|kind| !kind.is_empty())
+        .or_else(|| row["role"].as_str());
+    kept.insert("text".to_string(), json!(""));
+    kept.insert(
+        "placeholder".to_string(),
+        json!({
+            "kind": kind,
+            "bytes": bytes,
+            "text_chars": text.chars().count(),
+            "tools": row["tools"].as_array().map_or(0, Vec::len),
+            "preview": text.chars().take(280).collect::<String>(),
+            "fetch": format!("/log?session={}&message_id={}", encoded(session), encoded(id)),
+        }),
+    );
+    Value::Object(kept)
 }
 
 async fn log(
@@ -3074,7 +3233,32 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     };
     // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
     let after = query.after_revision.filter(|revision| *revision > 0);
-    let (page, replace) = if let Some(revision) = after {
+    let budget = Budget::of(&query)?;
+    let one = query
+        .message_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    let reading = match (&one, after) {
+        (Some(_), _) => Reading::One,
+        (None, Some(_)) => Reading::Forward,
+        (None, None) => Reading::Back,
+    };
+    let (page, replace) = if let Some(id) = one {
+        // One row whole, as a page of it alone: what a placeholder says to fetch.
+        let not_found = || ApiError::new(StatusCode::NOT_FOUND, "message not found");
+        let version = member.agent.row(id).await?.ok_or_else(not_found)?;
+        let head = member.agent.view().status.head_revision;
+        let page = clarp_actor::conversation::Page {
+            latest_revision: version.revision,
+            head_revision: head.max(version.revision),
+            helper_chat: member.record.is_helper_chat(),
+            entries: vec![version],
+            ..clarp_actor::conversation::Page::default()
+        };
+        (page, false)
+    } else if let Some(revision) = after {
         let page = member.agent.after(revision, limit, which).await?;
         // A client that holds another conversation must drop what it has.
         let replace = page.ended_for(revision);
@@ -3148,6 +3332,9 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
         && !answer["missing"].as_bool().unwrap_or_default()
     {
         answer["view"] = json!(view);
+    }
+    if let Some(budget) = budget {
+        budget.apply(&mut answer, reading, &member.record.session);
     }
     Ok(answer)
 }

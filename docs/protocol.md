@@ -920,6 +920,51 @@ Sub-agent cells (`kind: "subagents"`) come from two backends:
   exist. The Host does not import sub-agent transcripts as conversations.
   They appear only as these cells.
 
+#### A page bounded in bytes (feature `log_budget`, Rust Host contract 199)
+
+A page of `/log` is bounded in rows (`limit`), not in bytes, so one very large row (a tool's long
+output, a pasted file) makes it as large as that row. A client that names a budget gets a page
+bounded in bytes; one that does not is answered exactly as before.
+
+```
+GET /log?session=rachel&limit=100&max_bytes=65536
+GET /log?session=rachel&limit=100&max_bytes=65536&row_max=8192&after_revision=812
+GET /log?session=rachel&message_id=<id>
+```
+
+| Parameter | Meaning |
+|---|---|
+| `max_bytes=N` | The page's rows, as JSON, hold at most about N bytes (16 KB to 16 MB; outside, the nearest). |
+| `row_max=M` | With `max_bytes`: a row larger than M bytes comes as a placeholder. Default: half the budget, between 4 KB and 64 KB; at least 1 KB and at most the budget. |
+| `message_id=<id>` | One row by its `id`, whole: an answer of `/log` with that row alone in `turns` (404 `message not found`). Takes `include_tool_details` as any page. |
+
+With a budget, a row over `row_max` is replaced by a row with the same `id`, `revision`, `role`,
+`kind`, `timestamp` and the other short fields, `text` empty, no `tools` or `display_cells`, and
+`placeholder`:
+
+```json
+{"kind": "assistant", "bytes": 81234, "text_chars": 80012, "tools": 0,
+ "preview": "the first 280 signs of the words…",
+ "fetch": "/log?session=rachel&message_id=msg-41"}
+```
+
+`kind` is the row's `kind`, or its `role` where it has none. Draw it as a folded row of that size
+and fetch `fetch` when it is opened; merge what it answers by `id` and `revision` as any row. A
+row is never cut in the middle of its words.
+
+Then the page is cut to the budget, keeping one row at least: a newest page (no cursor) and an
+older page (`before`) keep their newest rows, and say `has_more: true` (page on with `before` the
+oldest kept `id`); a delta (`after_revision`) keeps its oldest rows and says `has_more: true` with
+`latest_revision` the last kept row's revision, so the next delta asks after it. Every answer with
+a budget says what was done:
+
+```json
+"budget": {"max_bytes": 65536, "row_max": 32768, "cut": true, "placeholders": 1}
+```
+
+A Host without the feature ignores the parameters and sends no `budget` and no placeholder: send
+them only where `GET /server-info` lists `log_budget`.
+
 #### Conversation and session views
 
 Rust Host feature `chat_view` (issue 702, contract 145). Every `/log` row carries `view`,

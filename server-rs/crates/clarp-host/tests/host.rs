@@ -237,6 +237,8 @@ mod voice_names;
 mod voice_pool;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
+#[path = "host/log_budget.rs"]
+mod log_budget;
 #[path = "host/events_slim.rs"]
 mod events_slim;
 

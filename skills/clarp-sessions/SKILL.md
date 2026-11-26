@@ -36,6 +36,12 @@ or ask again later. An agent bound to a model provider of its own is not
 searched for you unless you may read it, and naming it with `--session` is
 refused (`bound_conversation`).
 
+A script that reads a chat with `GET /log` on a Rust Host with feature
+`log_budget` (contract 199) can add `max_bytes=65536` so one huge row never makes
+the page huge: a row over `row_max` comes with empty `text` and a `placeholder`
+whose `fetch` (`/log?session=...&message_id=...`) reads it whole; when the page
+was cut, `has_more` is true. Without the feature, leave the parameter out.
+
 Apps call `GET /search?q=WORDS[&session=][&limit=][&before=]` with the same
 answer. A Python Host and Rust Hosts before contract 196 have no search: read
 `GET /log` of the likely agents instead.
