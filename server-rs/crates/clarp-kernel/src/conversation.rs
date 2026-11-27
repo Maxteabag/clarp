@@ -829,6 +829,7 @@ mod tests {
                 trace_id: None,
                 tools: vec!["toolu_2".to_string()],
                 backend_session: None,
+                conversation_reply: false,
             }),
             Entry::Tool(ToolCall {
                 origin: Origin::User,

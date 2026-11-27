@@ -395,6 +395,7 @@ impl Draft {
             origin: self.origin.clone(),
             tools: Vec::new(),
             backend_session: None,
+            conversation_reply: false,
         });
         Versioned {
             live: true,

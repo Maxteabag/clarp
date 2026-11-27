@@ -742,6 +742,7 @@ impl ClaudeInterpreter {
             trace_id: None,
             tools: draft.tools.clone(),
             backend_session: None,
+            conversation_reply: false,
         }));
         for call in draft.tools {
             if let Some(call) = self.tools.get_mut(&call) {
@@ -1643,6 +1644,7 @@ mod tests {
                     trace_id: None,
                     tools: vec!["toolu_1".to_string()],
                     backend_session: None,
+                    conversation_reply: false,
                 }),
                 Signal::Tool(tool(ToolStatus::Running, None, None)),
                 Signal::Tool(tool(ToolStatus::Ok, Some("a.txt"), Some(1_130))),
