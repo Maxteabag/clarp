@@ -540,8 +540,10 @@ fn unreadable(folders: &[PathBuf], ours: &[PathBuf]) -> Vec<String> {
             let Ok(target) = std::fs::read_link(entry.path()) else {
                 continue;
             };
+            // Read the target of this sample. Looking up the entry again can race a
+            // deliberate unlink of a skill that is no longer shipped.
             if ours.iter().any(|root| target.starts_with(root))
-                && std::fs::read_to_string(entry.path().join("SKILL.md")).is_err()
+                && std::fs::read_to_string(target.join("SKILL.md")).is_err()
             {
                 wrong.push(format!(
                     "{} -> {}",

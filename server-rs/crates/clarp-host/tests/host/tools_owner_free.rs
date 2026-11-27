@@ -251,7 +251,14 @@ fn any_agent_puts_away_any_agent_and_the_host_keeps_and_logs_who() {
         args.extend_from_slice(more);
         as_tools(&host, &dir, &tools, turn, &args)
     };
-    let events = host.listen();
+    let events = host.listen_at(&format!("/events?token={admin}"));
+    wait_for("the authenticated event stream", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "server-version")
+    });
 
     // Without a verified turn nobody can be said to ask: nothing is done, as before.
     let (code, _, said) = archive(None, &ben, &[]);

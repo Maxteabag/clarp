@@ -11236,7 +11236,7 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
             "/agent-archive",
             json!({ "session": ada, "archived": true })
         ),
-        json!({ "ok": true, "session": "ada", "archived": true })
+        json!({ "ok": true, "session": "ada", "archived": true, "archived_by": { "kind": "host-token" } })
     );
     let put_away_at = row(&host, &ada)["archived_at"].as_i64().unwrap();
     assert!(put_away_at > 1_600_000_000_000);
@@ -11731,6 +11731,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             "helper_state": "running",
             "helper_completed_at": null,
             "archived_at": null,
+            "archived_by": null,
         })
     );
     assert_eq!(lineage(&maker)["role"], "agent");
@@ -43078,16 +43079,21 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         .spawn()
         .unwrap();
     let mut err = BufReader::new(child.stderr.take().unwrap());
-    let mut listening = String::new();
-    err.read_line(&mut listening).unwrap();
-    let local = listening
-        .trim()
-        .strip_prefix("clarp-host listens on ")
-        .unwrap()
-        .to_owned();
+    let mut startup = String::new();
+    let local = loop {
+        let mut line = String::new();
+        assert!(
+            err.read_line(&mut line).unwrap() > 0,
+            "the Host exited before listening: {startup}"
+        );
+        if let Some(address) = line.trim().strip_prefix("clarp-host listens on ") {
+            break address.to_owned();
+        }
+        startup.push_str(&line);
+    };
     let errors = std::thread::spawn(move || {
-        err.read_to_string(&mut listening).unwrap();
-        listening
+        err.read_to_string(&mut startup).unwrap();
+        startup
     });
     let mut out = child.stdout.take().unwrap();
     let output = std::thread::spawn(move || {
