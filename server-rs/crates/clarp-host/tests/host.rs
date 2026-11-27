@@ -18252,10 +18252,13 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
         "{err}"
     );
 
-    // The token of an agent's tools opens the door for tools, and not the one beside it.
+    // A local agent can publish the same bytes through the HTTP route.
     let said = [("X-Session", maker.as_str()), ("Content-Type", "image/png")];
     let beside = fetch(&host, &tools, "POST", "/media", &said, &png);
-    assert_eq!(beside.status, 403, "{}", beside.text());
+    assert_eq!(beside.status, 200, "{}", beside.text());
+    let beside: Value = serde_json::from_slice(&beside.body).unwrap();
+    assert_eq!(beside["asset"]["session"], maker);
+    assert_eq!(beside["asset"]["created_by"], "agent");
     // Nothing at all is no file, at either door.
     let nothing = fetch(&host, token, "POST", "/media", &said, b"");
     assert_eq!(
