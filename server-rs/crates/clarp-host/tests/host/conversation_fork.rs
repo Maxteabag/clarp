@@ -27,7 +27,7 @@ sid = after("--session-id") or after("--resume") or "stand-in"
 root = pathlib.Path(__file__).resolve().parent
 incoming = json.loads(sys.stdin.readline())
 prompt = incoming["message"]["content"][0]["text"]
-whose = "fork" if "short-lived fork" in prompt else "main"
+whose = "fork" if "You are a short-lived fork of your own session." in prompt else "main"
 said = next((line for line in prompt.splitlines() if line.startswith("U:")), "")
 with (root / "launches").open("a") as lines:
     lines.write(json.dumps({"whose": whose, "said": said, "session": sid}) + "\n")
@@ -44,6 +44,8 @@ def send(kind, **fields):
     print(json.dumps({"type": kind, "session_id": sid, **fields}), flush=True)
 
 send("system", subtype="init")
+if whose == "main" and 'The fork replied: "Here, from the fork."' in prompt:
+    (root / "fork-note-read").write_text(sid)
 if whose == "fork" and "QUIET" not in prompt:
     # Streamed, as Claude Code streams: the reply is whole at its message_stop.
     def event(body):
@@ -348,6 +350,75 @@ fn the_users_message_during_an_agents_turn_is_answered_by_a_fork_that_a_stop_end
         assert_eq!(std::fs::read_to_string(&gone).unwrap(), "stopped");
     }
     forking.grace();
+}
+
+#[test]
+fn conversation_words_answer_beside_the_owners_work_and_return_as_a_note() {
+    for busy in ["steer", "take_over"] {
+        let forking = Forking::new(busy);
+        let host = &forking.host;
+        host.send("oak", "U: work on my build.", "owner-work");
+        waited(host, "the owner's running work", || {
+            forking.at("main-running").exists()
+                && row(host, "oak")["backend_session_id"]
+                    .as_str()
+                    .is_some_and(|key| !key.is_empty())
+        });
+        let shown = live(host, "oak");
+        assert_eq!(shown["turn"]["audience"], "user");
+        let main_id = shown["turn"]["turn_id"].clone();
+
+        let sent = std::time::Instant::now();
+        host.post(
+            "/send",
+            json!({
+                "session": "oak", "text": "U: hello, how are you",
+                "client_msg_id": "owner-greeting", "while_busy": busy,
+            }),
+        );
+        waited(host, "the fork's reply before the work ends", || {
+            let rows = host.get("/log?session=oak&limit=100");
+            rows["turns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["text"] == "Here, from the fork.")
+        });
+        eprintln!(
+            "owner-fork {busy} durable reply {} ms (fixture)",
+            sent.elapsed().as_millis()
+        );
+        let alongside = live(host, "oak");
+        assert_eq!(alongside["main_turn"]["turn_id"], main_id, "{alongside:#}");
+        assert_eq!(alongside["main_turn"]["status"], "running");
+        assert!(!forking.at("main-gone").exists());
+
+        std::fs::write(forking.at("finish-fork"), "").unwrap();
+        waited(host, "the fork to yield the chat", || {
+            live(host, "oak")["turn"]["turn_id"] == main_id
+        });
+        std::fs::write(forking.at("finish-main"), "").unwrap();
+        waited(host, "the same work to finish", || {
+            row(host, "oak")["busy"] == false
+        });
+        assert_eq!(
+            std::fs::read_to_string(forking.at("main-gone")).unwrap(),
+            "finished"
+        );
+
+        host.send("oak", "U: continue with my next task.", "owner-next");
+        waited(host, "the main session to read the fork's note", || {
+            forking.at("fork-note-read").exists()
+        });
+        assert_eq!(
+            forking.launches(),
+            [
+                ("main".into(), "U: work on my build.".into()),
+                ("fork".into(), "U: hello, how are you".into()),
+                ("main".into(), "U: continue with my next task.".into())
+            ]
+        );
+    }
 }
 
 #[test]

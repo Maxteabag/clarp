@@ -44,7 +44,7 @@ fn names(section: Option<&toml::Value>, agent_id: &str, session: &str) -> bool {
 
 /// Whether a message of the user's to this agent may go to its fork: Claude Code, the chat
 /// seen in Conversation view (Session view is the one session, and is never forked), and the
-/// agent named in the owner's setting. Whether its own turn works for other agents is the
+/// agent named in the owner's setting. Whether its tool has a running session to copy is the
 /// actor's to say ([`clarp_actor::Actor::fork_take`]).
 pub(crate) fn may_fork(backend: &str, view: View, agent_id: &str, session: &str) -> bool {
     backend == "claude" && view == View::Conversation && named(agent_id, session)

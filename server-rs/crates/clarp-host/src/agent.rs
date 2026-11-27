@@ -3777,6 +3777,22 @@ impl Worker {
             other => other,
         };
         let mut ask = ask;
+        // Ordinary words in the named agent's Conversation view belong to its
+        // conversation fork. A busy-send preference must not steer or cut the work.
+        let conversation = matches!(
+            &ask,
+            Ask::Send { message, admission: Admission::Queue, reservation: None, marks, .. }
+                if message.origin.is_user_send()
+                    && marks.coordination.is_none()
+                    && Actor::fork_answers(message)
+                    && !message.text.trim_start().starts_with('/')
+                    && clarp_backend::agy_acp::attached(&message.text).is_empty()
+        ) && crate::conversation_forks::may_fork(
+            &self.setup.record.backend,
+            chat_view(&self.setup),
+            &self.setup.record.agent_id,
+            &self.setup.record.session,
+        );
         // What the owner's send does while the agent works is read against the turn as its
         // spool says it is now (feature `send_while_busy`). A take-over is said direct from
         // here on, so that what holds the turn for the tool's own takeover lets it go first.
@@ -3798,12 +3814,14 @@ impl Worker {
                     break;
                 }
             }
-            let plan =
-                self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
-            if matches!(plan, Plan::Direct(_)) {
-                *admission = Admission::Direct;
+            if !conversation {
+                let plan =
+                    self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
+                if matches!(plan, Plan::Direct(_)) {
+                    *admission = Admission::Direct;
+                }
+                *while_busy = Busy::Planned(plan);
             }
-            *while_busy = Busy::Planned(plan);
         }
         // A Stop of the fork's turn touches nothing of the agent's own: its goals, its
         // takeover, its pool.
@@ -4052,6 +4070,7 @@ impl Worker {
                 ..
             }
         );
+        can_offer_steering &= !conversation;
         if can_offer_steering {
             // Read any input fence that reached the spool before this send, even if its
             // wakeup is still behind the send in the mailbox: to its end, each window shown
@@ -4085,19 +4104,12 @@ impl Worker {
             && *admission == Admission::Queue
             && marks.coordination.is_none()
             && !transit_holds_queue
+            && !conversation
             // The owner asked for it to wait for the running turn (feature `send_while_busy`).
             && !matches!(while_busy, Busy::Planned(Plan::Wait(_) | Plan::Steer))
             && let Some(actor) = self.actor.as_ref()
             && let Some(goes) = actor.owner_goes_first(&message.origin)?
             && !(can_offer_steering && actor.can_steer(message))
-            && !(Actor::fork_answers(message)
-                && actor.fork_beside()?.is_some()
-                && crate::conversation_forks::may_fork(
-                    &self.setup.record.backend,
-                    chat_view(&self.setup),
-                    &self.setup.record.agent_id,
-                    &self.setup.record.session,
-                ))
         {
             *admission = Admission::Direct;
             made_way = goes.note.map(|note| (note, goes.coordination));
@@ -4257,22 +4269,9 @@ impl Worker {
                     if let Some(c) = &self.setup.hub.capture {
                         c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                     }
-                    // In Conversation view, a message of the user's to an agent whose own turn
-                    // works for other agents is answered at once by its fork (issue 718).
-                    let direct_user = admission == Admission::Queue
-                        && message.origin.is_user_send()
-                        && marks.coordination.is_none();
-                    // One the owner asked to wait for the running turn waits for it.
-                    let forked = if sent.queued
-                        && !transit_holds_queue
-                        && direct_user
-                        && !waits
-                        && crate::conversation_forks::may_fork(
-                            &self.setup.record.backend,
-                            chat_view(&self.setup),
-                            &self.setup.record.agent_id,
-                            &self.setup.record.session,
-                        ) {
+                    // A successful fork reads the queued words alongside the work. If
+                    // it cannot start, the already accepted message remains durable.
+                    let forked = if conversation && sent.queued && !transit_holds_queue {
                         let (taken, fork) = actor.fork_take(turn, now)?;
                         if taken {
                             out.actions.extend(fork.actions);
@@ -4317,8 +4316,8 @@ impl Worker {
                     };
                     if let Some(action) = steer {
                         out.actions.push(action);
-                    } else if forked {
-                    } else if sent.queued
+                    } else if !conversation
+                        && sent.queued
                         && !waits
                         && matches!(self.setup.record.backend.as_str(), "claude" | "agy")
                         && let Ok(Some(offer)) = actor.request_takeover_hold(turn, now)
