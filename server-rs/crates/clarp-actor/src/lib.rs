@@ -50,6 +50,8 @@ pub mod native_goal;
 mod native_goal_reservation;
 mod orphan;
 mod outside;
+pub mod phases;
+pub use phases::Phases;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -1618,8 +1620,15 @@ impl Actor {
         teams: Option<Arc<dyn teams::Runtime>>,
         launch_defaults: Option<LaunchDefaults>,
     ) -> Result<(Self, Outputs), ActorError> {
-        let (mut actor, older_imports) =
-            Self::read_books(profile, backend, log, now_ms, teams, launch_defaults)?;
+        let (mut actor, older_imports) = Self::read_books(
+            profile,
+            backend,
+            log,
+            now_ms,
+            teams,
+            launch_defaults,
+            &mut Phases::default(),
+        )?;
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
         actor.recover_imported_accounts(older_imports, now_ms)?;
@@ -1687,27 +1696,35 @@ impl Actor {
     /// (a goal ledger installed, a resend, a line cut off, a turn rejoined or ended, a takeover
     /// recovered), no action is asked for, and no reply that was shown and not stored is
     /// answered: what it reads is what was committed. A log that cannot be written refuses any
-    /// write that would slip through, and the glance is then not had.
+    /// write that would slip through, and the glance is then not had. Each of its steps is
+    /// timed in `phases`; one that fails is left under way there, as the step it stopped in.
     pub fn glance(
         profile: Profile,
         backend: Arc<dyn Backend>,
         log: Box<dyn AgentLog>,
         now_ms: i64,
+        phases: &mut Phases,
     ) -> Result<Self, ActorError> {
-        let (mut actor, _) = Self::read_books(profile, backend, log, now_ms, None, None)?;
+        let (mut actor, _) =
+            Self::read_books(profile, backend, log, now_ms, None, None, phases)?;
+        phases.begin("held");
         actor.read_held()?;
+        phases.begin("notes");
         actor.read_turn_notes()?;
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt)),
             _ => None,
         };
+        phases.begin("spool");
         if let Some((turn, message_seq, attempt)) = live
             && SpoolReader::new(actor.profile.spool_path_of(turn, attempt)).exists()
         {
             actor.take_up_spool(turn, message_seq, attempt, now_ms, true)?;
         }
+        phases.begin("parked");
         actor.hold_parked()?;
+        phases.end();
         Ok(actor)
     }
 
@@ -1720,8 +1737,11 @@ impl Actor {
         now_ms: i64,
         teams: Option<Arc<dyn teams::Runtime>>,
         launch_defaults: Option<LaunchDefaults>,
+        phases: &mut Phases,
     ) -> Result<(Self, std::collections::BTreeMap<String, i64>), ActorError> {
+        phases.begin("recorder");
         let recorder = Recorder::open(log)?;
+        phases.begin("jobs");
         let mut jobs = JobBook::new();
         let mut provider_sessions = std::collections::BTreeMap::new();
         let mut after = 0;
@@ -1751,6 +1771,7 @@ impl Actor {
         }
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
+        phases.begin("goals");
         let mut goals = GoalBook::new();
         let mut older_imports = std::collections::BTreeMap::new();
         records(
@@ -1769,6 +1790,7 @@ impl Actor {
                 goals.apply(&record);
             },
         )?;
+        phases.begin("artifacts");
         let mut artifacts = ArtifactBook::new();
         records(
             recorder.log(),
@@ -1778,6 +1800,7 @@ impl Actor {
                 artifacts.apply(&record);
             },
         )?;
+        phases.begin("media");
         let mut media = MediaBook::new();
         records(
             recorder.log(),
@@ -1787,6 +1810,7 @@ impl Actor {
                 media.apply(&asset);
             },
         )?;
+        phases.begin("speech");
         let mut speech = SpeechBook::new();
         records(recorder.log(), kind::SPEECH, kind::LINE, |line: Spoken| {
             speech.apply(&line);
@@ -1796,7 +1820,9 @@ impl Actor {
         // Those who watch a turn are shown its answers only once they are decided: what was
         // shown as an answer never turns into narration (issue 771).
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session).growing();
+        phases.begin("delegation");
         let delegation = delegation::active(recorder.log())?;
+        phases.end();
         let actor = Self {
             launch_defaults,
             teams,

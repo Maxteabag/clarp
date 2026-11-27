@@ -1694,6 +1694,133 @@ fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
     assert_eq!(changed, ["r-b", "n-1-turn-interrupted"]);
 }
 
+/// The steps of a glance, in the order they run ([`clarp_actor::Phases`]).
+const GLANCE_STEPS: [&str; 11] = [
+    "recorder",
+    "jobs",
+    "goals",
+    "artifacts",
+    "media",
+    "speech",
+    "delegation",
+    "held",
+    "notes",
+    "spool",
+    "parked",
+];
+
+/// A committed log whose scan of one kind of book waits, or fails: as a disk under pressure
+/// holds one read of a reading (issue 935).
+struct Paced {
+    inner: Box<dyn AgentLog>,
+    /// The books whose scan waits this long.
+    slow: (Kinds, std::time::Duration),
+    /// The books whose scan fails.
+    failing: Option<Kinds>,
+}
+
+impl Paced {
+    fn is(kinds: Kinds, of: Kinds) -> bool {
+        (kinds.min, kinds.max) == (of.min, of.max)
+    }
+}
+
+impl AgentLog for Paced {
+    fn append(&mut self, items: &[clarp_ports::log::NewItem]) -> Result<u64, LogError> {
+        self.inner.append(items)
+    }
+    fn last_seq(&self) -> Result<u64, LogError> {
+        self.inner.last_seq()
+    }
+    fn read_after(
+        &self,
+        after: u64,
+        kinds: Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, LogError> {
+        if self.failing.is_some_and(|failing| Self::is(kinds, failing)) {
+            return Err(LogError::Storage("a read that fails".to_string()));
+        }
+        if after == 0 && Self::is(kinds, self.slow.0) {
+            std::thread::sleep(self.slow.1);
+        }
+        self.inner.read_after(after, kinds, limit)
+    }
+    fn read_before(
+        &self,
+        before: u64,
+        kinds: Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, LogError> {
+        self.inner.read_before(before, kinds, limit)
+    }
+    fn find(&self, key: &str) -> Result<Option<clarp_ports::log::Item>, LogError> {
+        self.inner.find(key)
+    }
+}
+
+/// Issue 935: a glance whose scan of the goals waits is said by that step, and the steps around
+/// it are each their own; a glance whose scan of the artifacts fails stops in that step, and
+/// says so.
+#[test]
+fn a_slow_step_of_a_glance_is_its_own_and_a_failed_one_is_where_it_stopped() {
+    let mut world = World::new("glance-steps");
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
+    world.hint(&mut actor);
+    drop(actor);
+    let codecs = standard_set("zstd").unwrap();
+    let held = std::time::Duration::from_millis(300);
+    let read = |failing: Option<Kinds>| Paced {
+        inner: world
+            .engine
+            .read_committed(&world.profile.dir, codecs.clone())
+            .unwrap(),
+        slow: (kind::GOALS, held),
+        failing,
+    };
+
+    let mut phases = clarp_actor::Phases::default();
+    let now = world.now_ms;
+    Actor::glance(
+        world.profile.clone(),
+        world.backend.clone(),
+        Box::new(read(None)),
+        now,
+        &mut phases,
+    )
+    .unwrap();
+    let took = |step: &str| {
+        phases
+            .done()
+            .iter()
+            .find(|(done, _)| *done == step)
+            .map(|(_, took)| *took)
+            .unwrap()
+    };
+    let steps: Vec<&str> = phases.done().iter().map(|(step, _)| *step).collect();
+    assert_eq!(steps, GLANCE_STEPS);
+    assert!(took("goals") >= held, "{}", phases.said());
+    assert!(took("jobs") < held && took("artifacts") < held, "{}", phases.said());
+    assert!(phases.said().contains(" goals="), "{}", phases.said());
+
+    let mut phases = clarp_actor::Phases::default();
+    let failed = Actor::glance(
+        world.profile.clone(),
+        world.backend.clone(),
+        Box::new(read(Some(kind::ARTIFACTS))),
+        now,
+        &mut phases,
+    );
+    assert!(failed.is_err());
+    assert_eq!(phases.under_way(), Some("artifacts"));
+    let steps: Vec<&str> = phases.done().iter().map(|(step, _)| *step).collect();
+    assert_eq!(steps, &GLANCE_STEPS[..3]);
+    assert!(phases.said().contains("stopped in artifacts="), "{}", phases.said());
+}
+
 /// Issue 935: an agent read from what its log committed, while its own thread still opens it,
 /// shows the running turn and the conversation as its opening then shows them, and writes
 /// nothing: the turn's id and start, the tools it showed, the rows and their revisions.
@@ -1723,7 +1850,19 @@ fn a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_
         .read_committed(&world.profile.dir, codecs)
         .unwrap();
     let now = world.tick();
-    let mut glance = Actor::glance(world.profile.clone(), world.backend.clone(), log, now).unwrap();
+    let mut phases = clarp_actor::Phases::default();
+    let mut glance = Actor::glance(
+        world.profile.clone(),
+        world.backend.clone(),
+        log,
+        now,
+        &mut phases,
+    )
+    .unwrap();
+    // Every step of the reading is timed, in its order, and none is left under way.
+    let steps: Vec<&str> = phases.done().iter().map(|(step, _)| *step).collect();
+    assert_eq!(steps, GLANCE_STEPS);
+    assert_eq!(phases.under_way(), None);
     assert_eq!(
         writer.last_seq().unwrap(),
         committed,

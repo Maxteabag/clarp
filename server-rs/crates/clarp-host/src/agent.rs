@@ -2470,8 +2470,9 @@ impl Worker {
         loop {
             if self.actor.is_none() && !self.glance_read {
                 self.glance_read = true;
-                let _held = crate::held::Held::new(&thread, "its glance");
-                self.glance();
+                let mut held = crate::held::Held::new(&thread, "its glance");
+                // Its steps are said with the one line of a slow glance, once it is decided.
+                held.steps(self.glance());
             }
             if self.actor.is_none() {
                 let opened = {
@@ -6137,8 +6138,12 @@ impl Worker {
     /// is answered from it. Read on a connection that writes nothing ([`LogEngine::read_committed`])
     /// by the actor's own opening, without its repairs ([`Actor::glance`]). Where it cannot be
     /// read so, nothing is published and the agent is read once it is open, as before.
-    fn glance(&mut self) {
+    fn glance(&mut self) -> clarp_actor::Phases {
+        // Each step timed on the monotonic clock (issue 935): said only with the line of a slow
+        // glance, where the whole was all that was known.
+        let mut phases = clarp_actor::Phases::default();
         let now = self.now_ms();
+        phases.begin("open");
         let glanced = self
             .setup
             .engine
@@ -6150,6 +6155,7 @@ impl Worker {
                     self.setup.backend.clone(),
                     log,
                     now,
+                    &mut phases,
                 )
                 .map_err(|error| error.to_string())
             });
@@ -6157,29 +6163,37 @@ impl Worker {
             Ok(actor) => actor,
             Err(why) => {
                 // Quietly: a new agent has no log yet, and the memory engine reads only through
-                // its writer. Said where the log is there and could not be read.
+                // its writer. Said where the log is there and could not be read, with the step it
+                // stopped in.
                 if self.setup.profile.dir.join("log.db").is_file() {
                     eprintln!(
-                        "clarp-host: agent {} is read once it is open: {why}",
-                        self.setup.record.session
+                        "clarp-host: agent {} is read once it is open: {why} (its glance stopped \
+                         in {})",
+                        self.setup.record.session,
+                        phases.under_way().unwrap_or("open")
                     );
                 }
                 self.glance.set(None);
-                return;
+                return phases;
             }
         };
         self.actor = Some(actor);
+        phases.begin("previews");
         self.update_previews();
+        phases.begin("ends");
         self.ended = self.last_end();
         self.finished = self.last_finished();
+        phases.begin("books");
         self.refresh_books(true);
         if let Some(actor) = &self.actor {
             self.speech = Arc::new(actor.speech().clone());
             self.glanced = Some(actor.status());
         }
+        phases.begin("view");
         let view = self.view_as(Some(OPENING));
         // Its opening reads its lines again, and counts them where they are new to it.
         self.speech = Arc::default();
+        phases.begin("publish");
         // The glance is there before its view says so: whoever sees the view finds it.
         if let Some(actor) = self.actor.take() {
             self.glance.set(Some(Arc::new(Glance {
@@ -6190,6 +6204,8 @@ impl Worker {
         if let Some(view) = view {
             self.view.send_replace(view);
         }
+        phases.end();
+        phases
     }
 
     /// Takes every send kept for the agent while it was opened (`crate::accepted`), in order,
@@ -7349,7 +7365,14 @@ mod mailbox_tests {
         );
         let committed = writer.tail(10).unwrap();
         let read = engine.read_committed(&profile.dir, codecs).unwrap();
-        let glance = Actor::glance(profile, backend, read, 1_002).unwrap();
+        let glance = Actor::glance(
+            profile,
+            backend,
+            read,
+            1_002,
+            &mut clarp_actor::Phases::default(),
+        )
+        .unwrap();
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(clarp_ports::clock::SystemClock);
 
         // The glance is read, and its view says so; the opening is still held.
