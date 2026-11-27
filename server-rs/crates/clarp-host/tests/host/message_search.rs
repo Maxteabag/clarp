@@ -259,17 +259,14 @@ fn an_agent_finds_what_its_turn_may_read_of_log_and_no_more() {
     let said: Value = serde_json::from_slice(&answered.body).unwrap();
     assert!(!said.to_string().contains(&ada), "{said}");
 
-    // The agents' tools token is refused on the route, as on /log.
+    // The agents' tools token can read these routes with the same bound privacy rules.
     let tools = clarp_host::tool_token(&host.token);
-    assert_eq!(
-        host.ask_as(&tools, "GET", "/search?q=customer", None).0,
-        403
-    );
-    assert_eq!(
-        host.ask_as(&tools, "GET", &format!("/log?session={cid}"), None)
-            .0,
-        403
-    );
+    let (status, said) = host.ask_as(&tools, "GET", "/search?q=customer", None);
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(sessions_of(&said), readable, "{said}");
+    let (status, said) = host.ask_as(&tools, "GET", &path, None);
+    assert_eq!(status, 403, "{said}");
+    assert_eq!(said["error"], "bound_conversation");
 
     // In the agents' tool, Ben's turn finds what his turn reads, with either token.
     for owner in [true, false] {

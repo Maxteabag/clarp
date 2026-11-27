@@ -55,8 +55,8 @@ pub(crate) fn error(id: &str, failure: Failure) -> Denied {
     ApiError::new(status, failure.words()).into()
 }
 
-fn allow(headers: &HeaderMap) -> Result<(), Denied> {
-    if crate::coordination::from_an_agent(headers) {
+fn allow(principal: &Principal, headers: &HeaderMap) -> Result<(), Denied> {
+    if principal.is_agent_request(headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not").into());
     }
     Ok(())
@@ -99,6 +99,7 @@ fn changed(app: &App, image: &Image, change: &str, at: i64, favorite: Option<boo
 
 pub(crate) async fn favorite(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     headers: HeaderMap,
     body: Bytes,
@@ -110,7 +111,7 @@ pub(crate) async fn favorite(
     else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found").into());
     };
-    allow(&headers)?;
+    allow(&principal, &headers)?;
     let wanted = gallery::wanted(&json_body(&body)?).map_err(|why| error(&id, why.into()))?;
     let operation = app.clone();
     let key = id.clone();
@@ -161,7 +162,7 @@ pub(crate) async fn delete(
     if id.is_empty() || id.contains('/') {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found").into());
     }
-    allow(&headers)?;
+    allow(&principal, &headers)?;
     let by = principal_name(&app, &principal);
     let operation = app.clone();
     let key = id.clone();
@@ -182,7 +183,7 @@ pub(crate) async fn delete_batch(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, Denied> {
-    allow(&headers)?;
+    allow(&principal, &headers)?;
     let body = json_body(&body)?;
     let ids: Vec<String> = gallery::ids(&body)
         .map_err(|why| error("", why.into()))?

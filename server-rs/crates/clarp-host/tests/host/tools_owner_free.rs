@@ -1,5 +1,5 @@
-//! The Host's tests of what an agent's tools do without the owner's token (#795): the fleet's
-//! reads they are given, through bound privacy; the contacts, pictures and helpers an agent
+//! The Host's tests of what an agent's tools do without the owner's token: HTTP routes through
+//! bound privacy; the contacts, pictures and helpers an agent
 //! manages for itself from its own turn; and the lines that name who still uses the owner's
 //! token. One file a piece, declared in `host.rs`.
 
@@ -38,7 +38,7 @@ fn as_tools(
 }
 
 #[test]
-fn an_agents_tools_read_the_fleet_through_bound_privacy_and_change_nothing_else() {
+fn an_agents_tools_read_the_fleet_through_bound_privacy() {
     let place = Place::new("tools-read-fleet");
     let codex = place.root.join("codex");
     program(&codex, CODEX);
@@ -87,22 +87,186 @@ fn an_agents_tools_read_the_fleet_through_bound_privacy_and_change_nothing_else(
     );
     assert_eq!(answered.status, 200);
 
-    // Nothing else outside the tools opens to it.
-    for (method, path) in [
-        ("POST", "/turn-queue/resume"),
-        ("GET", "/attention"),
-        ("GET", &format!("/log?session={ben}") as &str),
-        ("POST", "/personas"),
-        ("POST", "/agent-archive"),
-        ("POST", "/agent-portraits"),
-    ] {
-        let body = json!({ "session": ben });
-        assert_eq!(
-            host.ask_as(&tools, method, path, Some(&body)).0,
-            403,
-            "{method} {path}"
+    let (status, _) = host.ask_as(&tools, "GET", &format!("/log?session={ben}"), None);
+    assert_eq!(status, 200);
+    let (status, refused) = host.ask_as(&tools, "GET", &format!("/log?session={ada}"), None);
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"], "bound_conversation", "{refused}");
+}
+
+#[test]
+fn an_agents_issued_token_can_read_and_change_voice_with_its_own_attribution() {
+    let place = Place::new("agent-token-voice");
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        r#"#!/bin/sh
+read -r line
+umask 077
+printf '%s\n%s\n' "$CLARP_TOOL_TOKEN" "$CLARP_PROVIDER_TURN" > "$0.credentials"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"voice-fixture"}'
+printf '%s\n' '{"type":"assistant","session_id":"voice-fixture","message":{"id":"voice-1","role":"assistant","content":[{"type":"text","text":"Ready"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture","result":"done"}'
+"#,
+    );
+    let owners = place.root.join("speech.toml");
+    std::fs::write(&owners, "[tts]\nprovider='cartesia'\n").unwrap();
+    let (endpoint, requests) = speech_reply_stand_in(
+        "200 OK",
+        r#"{"data":[{"id":"f0000000-0000-4000-8000-000000000011","name":"Fixture Voice"}]}"#,
+    );
+    let endpoint = endpoint.replace("/v1/speech-to-text", "/tts/bytes");
+    let admin = "agent-token-fixture-owner";
+    let host = place.start_in(
+        admin,
+        &["--speech-keys", owners.to_str().unwrap()],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CARTESIA_API_KEY", "fixture-cartesia-key"),
+            ("CLARP_CARTESIA_ENDPOINT", &endpoint),
+        ],
+    );
+    let made = host.post(
+        "/agents",
+        json!({"name":"Voice Worker","session":"voice-worker","backend":"claude"}),
+    );
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/personas",
+            Some(&json!({"name":"Voice Contact","voice_id":"prior-voice","generate_avatar":false})),
+        )
+        .0,
+        201
+    );
+    host.send("voice-worker", "Choose a voice.", "voice-task");
+    let kept = claude.with_extension("credentials");
+    wait_for("the fixture credentials written by the turn", || {
+        kept.exists()
+    });
+    wait_for("the fixture turn to finish", || {
+        host.state("voice-worker") == "done"
+    });
+    let issued = std::fs::read_to_string(kept).unwrap();
+    let (tools, turn) = issued.trim_end().split_once('\n').unwrap();
+    assert!(!tools.is_empty() && tools != admin && !turn.is_empty());
+
+    let row = "/agents/voice-worker";
+    let voice = "f0000000-0000-4000-8000-000000000011";
+    let ask = |method, path, body: Value| {
+        let text = if body.is_null() {
+            String::new()
+        } else {
+            body.to_string()
+        };
+        let answer = fetch(
+            &host,
+            tools,
+            method,
+            path,
+            &[("X-Clarp-Turn", turn), ("Content-Type", "application/json")],
+            text.as_bytes(),
         );
-    }
+        assert_eq!(answer.status, 200, "{method} {path}: {}", answer.text());
+        serde_json::from_slice::<Value>(&answer.body).unwrap()
+    };
+    let listed = ask("GET", "/cartesia-voices", Value::Null);
+    assert_eq!(listed["voices"][0]["id"], voice, "{listed}");
+    assert!(
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.starts_with("GET /voices"))
+    );
+    assert_eq!(
+        ask("GET", row, Value::Null)["agent_id"],
+        made["agent"]["agent_id"]
+    );
+    assert_eq!(
+        ask(
+            "POST",
+            "/agent-voice",
+            json!({"session":"voice-worker","voice_id":voice,"provider":"cartesia"})
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        ask("GET", row, Value::Null)["voice_id"],
+        json!({"cartesia":voice}).to_string()
+    );
+    let contact_voice = r#"{"elevenlabs":"new-voice"}"#;
+    let edited = ask(
+        "POST",
+        "/personas/update",
+        json!({"original_name":"Voice Contact","name":"Voice Contact","voice_id":contact_voice}),
+    );
+    assert_eq!(edited["persona"]["voice_id"], contact_voice);
+    let agent = made["agent"]["agent_id"].as_str().unwrap();
+    wait_for("agent-attributed audit of all four routes", || {
+        let seen = host.heard.lock().unwrap();
+        [
+            "GET /cartesia-voices",
+            "GET /agents/{session}",
+            "POST /agent-voice",
+            "POST /personas/update",
+        ]
+        .iter()
+        .all(|route| {
+            seen.contains(&format!(
+                "agent token (agent {agent} turn 1): {route} -> 200"
+            ))
+        })
+    });
+    let seen = host.heard.lock().unwrap();
+    assert!(!seen.contains(tools) && !seen.contains(turn));
+}
+
+#[test]
+fn an_agent_tokens_http_access_cannot_answer_an_owner_decision() {
+    let place = Place::new("agent-token-decision-owner");
+    let owner = "fixture-owner";
+    let host = place.start_with_token(owner);
+    let session = host.new_agent("Approval Fixture");
+    host.send(&session, "Ready", "first-turn");
+    wait_for("the fixture turn to finish", || {
+        host.state(&session) == "done"
+    });
+    let (status, created) = host.ask(
+        "POST",
+        "/decisions",
+        Some(&json!({
+            "session": session, "title": "Fixture decision", "question": "Approve?",
+        })),
+    );
+    assert_eq!(status, 201, "{created}");
+    let choice = &created["artifact"]["decision"];
+    let id = choice["decision_id"].as_str().unwrap();
+    let path = format!("/decisions/{id}/resolve");
+    let body = json!({"choice":"accepted","expected_revision":choice["revision"]});
+    let tools = clarp_host::tool_token(owner);
+    let (status, refused) = host.ask_as(&tools, "POST", &path, Some(&body));
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"], "verified turn identity required");
+    let turn = first_turn_token(&place, &agent_id(&host, &session));
+    let signed = fetch(
+        &host,
+        &tools,
+        "POST",
+        &path,
+        &[
+            ("X-Clarp-Turn", &turn),
+            ("Content-Type", "application/json"),
+        ],
+        body.to_string().as_bytes(),
+    );
+    assert_eq!(signed.status, 403, "{}", signed.text());
+    assert!(
+        signed
+            .text()
+            .contains("agent resolution requires on_behalf_session")
+    );
+    assert_eq!(host.get("/attention")["items"][0]["decision_id"], id);
 }
 
 #[test]

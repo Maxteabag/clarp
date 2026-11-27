@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 215;
+pub const HOST_CONTRACT: u64 = 216;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -567,6 +567,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("text_turn_ack", 214),
     // Provider-attributed OpenCode turn accounting and OpenRouter's own key usage.
     ("opencode_provider_usage", 215),
+    // The local tools token reaches HTTP routes with the agent's own identity and privacy.
+    ("agent_token_api", 216),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1285,6 +1287,20 @@ pub enum Principal {
     Tools,
 }
 
+impl Principal {
+    /// An agent's token is never a user's request, even when no turn was named.
+    pub(crate) fn is_agent_request(&self, headers: &HeaderMap) -> bool {
+        *self == Self::Tools || crate::coordination::from_an_agent(headers)
+    }
+}
+
+/// The signed turn a request using the tools token presents, when it names one.
+#[derive(Clone)]
+struct ToolCaller {
+    agent_id: String,
+    turn: u64,
+}
+
 /// Where the token a request was let in by was found (the Python Host's
 /// `_request_auth_source`): nowhere on a Host that has none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1368,28 +1384,12 @@ fn of_the_oracle(request: &Request, path: &str) -> bool {
     read_or_done && (path == "/oracle" || path.starts_with("/oracle/"))
 }
 
-/// Whether this caller is kept from this request by its scope.
-/// What an agent's tools read of the fleet besides `/tools/` (#795): what an agent is shown of
-/// the others, the owner's cards, and an agent's waiting messages.
-const TOOLS_READ: [&str; 3] = ["/agents/snapshot", "/attention/inbox", "/turn-queue"];
-
+/// Whether this caller is kept from this request by its device scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     // An agent's own tools are asked for from this machine, with the token a turn was given
     // or the administrator's. No device asks for them.
     if path.starts_with("/tools/") {
         return !matches!(principal, Principal::Administrator | Principal::Tools);
-    }
-    // Scripts may read the public job list or ask the user's phone for a calendar
-    // event. Job detail, cancellation and other app routes keep their own scope. They may read
-    // the fleet as an agent reads it (#795): the agents, the cards and an agent's waiting
-    // messages, each answered through `bound_privacy` with the reader of the turn they present,
-    // and with none an agent that cannot say whose it is: a bound agent's words are withheld.
-    if matches!(principal, Principal::Tools) {
-        let read = method == Method::GET || method == Method::HEAD;
-        return !((method == Method::POST && path == "/calendar/request")
-            || (method == Method::GET && path == "/background-jobs")
-            || (method == Method::GET && path == "/lane-settings")
-            || (read && TOOLS_READ.contains(&path)));
     }
     let Principal::Device {
         scope: Scope::Limited,
@@ -1546,12 +1546,8 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 ApiError::new(StatusCode::UNAUTHORIZED, why).into_response()
             }
             Some((principal, _)) if out_of_scope(&principal, request.method(), &path) => {
-                let why = if path == "/agent-moved" && matches!(principal, Principal::Tools) {
-                    "agents_may_not"
-                } else if path == "/agent-moved" {
+                let why = if path == "/agent-moved" {
                     "full device access required"
-                } else if matches!(principal, Principal::Tools) {
-                    "an agent's tools may ask for tools only"
                 } else {
                     clarp_kernel::devices::LIMITED_REFUSAL
                 };
@@ -1603,10 +1599,38 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                         }
                     }
                 }
+                let audit = if principal == Principal::Tools {
+                    let caller = crate::coordination::token_of(&app, turn_of(request.headers()))
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|(agent_id, turn)| ToolCaller { agent_id, turn });
+                    if let Some(caller) = &caller {
+                        request.extensions_mut().insert(caller.clone());
+                    }
+                    let route = request.extensions().get::<MatchedPath>().map_or_else(
+                        || "/unmatched".to_owned(),
+                        |route| route.as_str().to_owned(),
+                    );
+                    Some((request.method().clone(), route, caller))
+                } else {
+                    None
+                };
                 request.extensions_mut().insert(Asker { source });
                 request.extensions_mut().insert(principal);
                 request.extensions_mut().insert(presented);
-                next.run(request).await
+                let response = next.run(request).await;
+                if let Some((method, route, caller)) = audit {
+                    let who = caller.map_or_else(
+                        || "unattributed agent".to_owned(),
+                        |caller| format!("agent {} turn {}", caller.agent_id, caller.turn),
+                    );
+                    eprintln!(
+                        "clarp-host: agent token ({who}): {method} {route} -> {}",
+                        response.status().as_u16()
+                    );
+                }
+                response
             }
         }
     };
@@ -3528,7 +3552,7 @@ async fn send(
             false,
         ) == "user";
     made.text_chat = user_send
-        && !crate::coordination::from_an_agent(&headers)
+        && !principal.is_agent_request(&headers)
         && crate::text_turn_ack::is_text(&request);
     let mut agent_id = String::new();
     if user_send {
@@ -3566,9 +3590,18 @@ async fn made_by(
 ) -> Result<crate::coordination::Made, ApiError> {
     let named = request.trace_id.as_deref().map(python::strip);
     let trace_named = named.is_some_and(|trace| !trace.is_empty());
-    let peer = crate::coordination::from_a_peer(headers);
+    let agent = *principal == Principal::Tools;
+    let peer = !agent && crate::coordination::from_a_peer(headers);
     let owner_token = has_owner_token(app, principal);
-    crate::coordination::made(app, turn_of(headers), peer, trace_named, owner_token).await
+    let made =
+        crate::coordination::made(app, turn_of(headers), peer, trace_named, owner_token).await?;
+    if agent && !matches!(made.turn, Some((_, Some(_)))) {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "verified turn identity required",
+        ));
+    }
+    Ok(made)
 }
 
 /// `POST /orchestrator/route-delegation`: a message the app could not tell the agent of. It
@@ -3688,7 +3721,8 @@ async fn sent_from(
     if !call_id.is_empty() && !python::strip(&request.text).is_empty() {
         let caller = match principal {
             Principal::Device { device_id, .. } => device_id.as_str(),
-            Principal::Administrator | Principal::Tools => clarp_kernel::calls::ADMINISTRATOR,
+            Principal::Administrator => clarp_kernel::calls::ADMINISTRATOR,
+            Principal::Tools => return crate::calls::call_identity_required().into_response(),
         };
         let named = match python::strip(&request.session) {
             "" => addressed::DEFAULT_SESSION,
@@ -5171,8 +5205,15 @@ pub(crate) struct IssueRequest {
 /// The administrator has a code made for a device.
 async fn pairing_issue(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(request): Json<IssueRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    if principal == Principal::Tools {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "pairing requires an administrator or paired device",
+        ));
+    }
     issue_pairing(&app, request).await.map(Json)
 }
 
@@ -5248,6 +5289,12 @@ async fn revoke_device(
             device_id,
             scope: Scope::Limited,
         } => Some(device_id.as_str()),
+        Principal::Tools => {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "pairing requires an administrator or paired device",
+            ));
+        }
         _ => None,
     };
     revoke_pairing(&app, &request.device_id, limited_id).await?;
@@ -5333,13 +5380,13 @@ fn sorted(names: HashSet<String>) -> Vec<String> {
     names
 }
 
-/// Whose stream it is, for a change of what it follows: a device by its id, the Host's own
-/// token and the agents' tools each as one.
-fn stream_owner(principal: &Principal) -> String {
+/// Whose stream it is, for a change of what it follows: a device by its id, the Host's
+/// own token, or the agent named by its signed turn.
+fn stream_owner(principal: &Principal, caller: Option<&ToolCaller>) -> Option<String> {
     match principal {
-        Principal::Device { device_id, .. } => format!("device:{device_id}"),
-        Principal::Administrator => "administrator".to_string(),
-        Principal::Tools => "tools".to_string(),
+        Principal::Device { device_id, .. } => Some(format!("device:{device_id}")),
+        Principal::Administrator => Some("administrator".to_string()),
+        Principal::Tools => caller.map(|caller| format!("agent:{}", caller.agent_id)),
     }
 }
 
@@ -5351,6 +5398,7 @@ fn stream_owner(principal: &Principal) -> String {
 async fn change_live(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    caller: Option<Extension<ToolCaller>>,
     Path(stream_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
@@ -5370,11 +5418,9 @@ async fn change_live(
         }),
     };
     let live = sorted(crate::live_change::followed(named));
-    match app
-        .hub
-        .streams
-        .change(&stream_id, &stream_owner(&principal), live, visible)
-    {
+    let owner = stream_owner(&principal, caller.as_ref().map(|caller| &caller.0))
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "stream not found"))?;
+    match app.hub.streams.change(&stream_id, &owner, live, visible) {
         crate::live_change::Changed::Taken(change) => {
             let mut answer = json!({
                 "ok": true,
@@ -5477,6 +5523,9 @@ async fn not_for(app: &App, published: &Published, principal: &str) -> bool {
     if event["type"] != "agent-ring" {
         return false;
     }
+    if principal.is_empty() {
+        return true;
+    }
     // A ring is shown to whom the recovered calls say. The stream answers before the start has
     // recovered them (issue 935): a ring that comes first waits for them, and the stream behind
     // it, so that it is neither shown to the wrong reader, lost, nor told out of order.
@@ -5488,14 +5537,15 @@ async fn not_for(app: &App, published: &Published, principal: &str) -> bool {
 async fn events(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    caller: Option<Extension<ToolCaller>>,
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
-    // Who listens, as the rings know a client: a phone by its id, anybody else as the
-    // administrator.
+    // Rings belong to devices or the administrator, each under its own identity.
     let listener = match &principal {
         Principal::Device { device_id, .. } => device_id.clone(),
-        _ => clarp_kernel::calls::ADMINISTRATOR.to_string(),
+        Principal::Administrator => clarp_kernel::calls::ADMINISTRATOR.to_string(),
+        Principal::Tools => String::new(),
     };
     let after = headers
         .get("last-event-id")
@@ -5536,12 +5586,16 @@ async fn events(
         crate::chat_previews::Previews::new(crate::live_change::followed(visible))
     });
     // A stream whose chats may change while it is open: its id is its first word.
-    let changing = opted(query.live_change.as_deref()).then(|| {
-        let visible = previews
-            .as_ref()
-            .map(|previews| sorted(previews.visible.clone()));
-        app.hub.streams.open(stream_owner(&principal), visible)
-    });
+    let changing = if opted(query.live_change.as_deref()) {
+        stream_owner(&principal, caller.as_ref().map(|caller| &caller.0)).map(|owner| {
+            let visible = previews
+                .as_ref()
+                .map(|previews| sorted(previews.visible.clone()));
+            app.hub.streams.open(owner, visible)
+        })
+    } else {
+        None
+    };
     // A chat watched live by one of the owner's apps is a chat open on his device: its agent's
     // lanes are his while the connection lasts (the owner's rule of 25 Nov 2026). Only a paired
     // device or the Host's own token, which the app on the Host's machine presents, counts;
@@ -6573,54 +6627,8 @@ mod tests {
             );
             assert!(!out_of_scope(&full, &method, path), "{method} {path}");
             assert!(!out_of_scope(&Principal::Administrator, &method, path));
-            // The token of an agent's tools opens none of what the apps read and do, but the
-            // fleet's reads it is given (#795).
-            let read = method == Method::GET && TOOLS_READ.contains(&path);
-            assert_eq!(
-                out_of_scope(&Principal::Tools, &method, path),
-                !read,
-                "{method} {path}"
-            );
+            assert!(!out_of_scope(&Principal::Tools, &method, path));
         }
-    }
-
-    #[test]
-    fn an_agents_tools_read_the_fleet_and_change_nothing_of_it() {
-        for path in TOOLS_READ {
-            assert!(
-                !out_of_scope(&Principal::Tools, &Method::GET, path),
-                "{path}"
-            );
-            assert!(
-                !out_of_scope(&Principal::Tools, &Method::HEAD, path),
-                "{path}"
-            );
-            for method in [Method::POST, Method::PUT, Method::DELETE] {
-                assert!(
-                    out_of_scope(&Principal::Tools, &method, path),
-                    "{method} {path}"
-                );
-            }
-        }
-        // What lies beside them stays the apps' and the owner's.
-        for path in [
-            "/agents/snapshot/x",
-            "/attention",
-            "/turn-queue/resume",
-            "/agents",
-            "/decisions/d1/resolve",
-            "/log",
-        ] {
-            assert!(
-                out_of_scope(&Principal::Tools, &Method::GET, path),
-                "{path}"
-            );
-        }
-        assert!(out_of_scope(
-            &Principal::Tools,
-            &Method::POST,
-            "/turn-queue/resume"
-        ));
     }
 
     #[test]
