@@ -51,7 +51,6 @@ mod native_goal_reservation;
 mod orphan;
 mod outside;
 pub mod phases;
-pub use phases::Phases;
 use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -70,6 +69,7 @@ use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, Record, ShimEvent, SpoolReader};
 pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
+pub use phases::Phases;
 use said::{Shown, Unfollowed, unfollowed, unfollowed_at_start};
 
 pub mod conversation;
@@ -1705,8 +1705,7 @@ impl Actor {
         now_ms: i64,
         phases: &mut Phases,
     ) -> Result<Self, ActorError> {
-        let (mut actor, _) =
-            Self::read_books(profile, backend, log, now_ms, None, None, phases)?;
+        let (mut actor, _) = Self::read_books(profile, backend, log, now_ms, None, None, phases)?;
         phases.begin("held");
         actor.read_held()?;
         phases.begin("notes");
