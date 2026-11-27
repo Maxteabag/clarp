@@ -249,6 +249,25 @@ fn an_agent_tokens_http_access_cannot_answer_an_owner_decision() {
     assert_eq!(status, 403, "{refused}");
     assert_eq!(refused["error"], "verified turn identity required");
     let turn = first_turn_token(&place, &agent_id(&host, &session));
+    let stop = json!({"session":session,"actor":"user"});
+    let (status, refused) = host.ask_as(&tools, "POST", "/stop", Some(&stop));
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"], "verified turn identity required");
+    let stood = fetch(
+        &host,
+        &tools,
+        "POST",
+        "/stop",
+        &[
+            ("X-Clarp-Turn", &turn),
+            ("Content-Type", "application/json"),
+        ],
+        stop.to_string().as_bytes(),
+    );
+    assert_eq!(stood.status, 200, "{}", stood.text());
+    let stood: Value = serde_json::from_slice(&stood.body).unwrap();
+    assert_eq!(stood["stop_actor"], format!("agent:{session}"));
+    assert_eq!(stood["stop_actor_verified"], true);
     let signed = fetch(
         &host,
         &tools,
