@@ -1694,6 +1694,61 @@ fn what_a_turn_said_before_a_restart_is_followed_by_the_tool_work_after_it() {
     assert_eq!(changed, ["r-b", "n-1-turn-interrupted"]);
 }
 
+/// Issue 935: an agent read from what its log committed, while its own thread still opens it,
+/// shows the running turn and the conversation as its opening then shows them, and writes
+/// nothing: the turn's id and start, the tools it showed, the rows and their revisions.
+#[test]
+fn a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_nothing() {
+    let mut world = World::new("glance");
+    world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
+    world.backend = Arc::new(Claude::new());
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    claude_message(&mut world, 1, "a", "Looking.", &["t1"]);
+    claude_returns(&mut world, 1, "t1", "a.txt", false);
+    claude_message(&mut world, 1, "b", "", &["t2"]);
+    world.hint(&mut actor);
+    let was = actor.status().live.unwrap();
+    // The Host goes while the turn runs.
+    drop(actor);
+
+    let codecs = standard_set("zstd").unwrap();
+    let writer = world.engine.open(&world.profile.dir, codecs.clone()).unwrap();
+    let committed = writer.last_seq().unwrap();
+    let log = world
+        .engine
+        .read_committed(&world.profile.dir, codecs)
+        .unwrap();
+    let now = world.tick();
+    let mut glance =
+        Actor::glance(world.profile.clone(), world.backend.clone(), log, now).unwrap();
+    assert_eq!(writer.last_seq().unwrap(), committed, "a glance writes nothing");
+    assert!(world.followed.is_empty(), "nor is anything asked of the turn's shim");
+    let live = glance.status().live.unwrap();
+    assert_eq!(
+        (live.turn, live.started_at_ms, live.starting),
+        (was.turn, was.started_at_ms, false),
+        "the running turn, as the Host before had it"
+    );
+    let glanced_page = glance.tail(10).unwrap();
+    let glanced_live = glance.shown_whole(now);
+    drop(writer);
+
+    // Its opening shows the same.
+    let mut opened = world.open();
+    let page = opened.tail(10).unwrap();
+    assert_eq!(chat(&glanced_page), chat(&page));
+    assert_eq!(glanced_page.latest_revision, page.latest_revision);
+    let shown = opened.shown_whole(now);
+    assert_eq!(glanced_live["turn"], shown["turn"]);
+    assert_eq!(glanced_live["items"], shown["items"]);
+    assert_eq!(glanced_live["epoch"], shown["epoch"]);
+    assert!(
+        glanced_live["items"].as_array().is_some_and(|items| !items.is_empty()),
+        "{glanced_live}"
+    );
+}
+
 #[test]
 fn only_an_interrupted_turn_changes_what_its_tools_left_unfinished() {
     let mut world = World::new("message-rows-unfinished");

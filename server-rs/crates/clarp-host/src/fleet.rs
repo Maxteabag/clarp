@@ -2176,7 +2176,30 @@ const RETIRE: &str = "agent-ledger";
 
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
-pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+    let (fleet, agents) = read(works, store)?;
+    agents.begin();
+    Ok(fleet)
+}
+
+/// The agents of a fleet that is read, whose threads are not started yet (issue 935).
+#[must_use = "an agent whose thread is not begun is never opened"]
+pub struct Unopened(Vec<agent::Unopened>);
+
+impl Unopened {
+    /// Starts every agent's thread: each reads its agent and then opens it, beside the others.
+    pub fn begin(self) {
+        for agent in self.0 {
+            agent.begin();
+        }
+    }
+}
+
+/// Opens the fleet from its store and returns the way to the fleet's own thread, with every
+/// agent's handle in place and its thread still to begin ([`Unopened::begin`]). Everything the
+/// fleet reads of its store at a start is read here, before any agent opens (issue 935): opened
+/// all at once, the agents' logs keep the disk busy, and a read behind them waits as long.
+pub fn read(works: Works, mut store: Box<dyn KeyValue>) -> Result<(FleetHandle, Unopened), String> {
     // Every kind the Host keeps, read once before anything is opened: the count at the door is
     // whole, and a book's record that cannot be read is set aside first (`kept.rs`).
     crate::kept::walk(store.as_mut(), &works.left_out, &works.log).map_err(|e| e.to_string())?;
@@ -2214,6 +2237,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let versions = Arc::new(crate::cli_version::Cache::default());
     let mut members = Vec::new();
+    let mut unopened = Vec::new();
     let mut gone = BTreeMap::new();
     // Every record of every kind is read alone: one that cannot be read is left out, counted
     // and said, and never written over (`kept.rs`). Its names stay its own.
@@ -2273,10 +2297,11 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 .map_err(|e| e.to_string())?;
         }
         match setup(&works, &delegation_desk, &versions, &record) {
-            Ok(setup) => members.push(Arc::new(Member {
-                record,
-                agent: agent::spawn(setup),
-            })),
+            Ok(setup) => {
+                let (agent, thread) = agent::prepare(setup);
+                unopened.push(thread);
+                members.push(Arc::new(Member { record, agent }));
+            }
             // The agent stays in the store, and its names its own; a Host that has its
             // backend will run it.
             Err(why) => {
@@ -2395,14 +2420,17 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         .name("fleet".to_string())
         .spawn(move || fleet.run(&rx))
         .map_err(|error| format!("the fleet's thread could not be started: {error}"))?;
-    Ok(FleetHandle {
-        delegation_view,
-        peer_snapshot: Arc::default(),
-        tx,
-        directory: read,
-        log,
-        left_out,
-    })
+    Ok((
+        FleetHandle {
+            delegation_view,
+            peer_snapshot: Arc::default(),
+            tx,
+            directory: read,
+            log,
+            left_out,
+        },
+        Unopened(unopened),
+    ))
 }
 
 fn read_opening_audio(

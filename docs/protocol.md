@@ -2430,14 +2430,37 @@ moment of its start, and holds what it cannot answer yet until it can: a request
 for being early, and none is answered with what the start has not yet recovered.
 
 - `GET /server-info` and `GET /host/start` answer at once.
-- `GET /log`, `GET /live` and `POST /send` for one agent answer once that agent is open (its own
-  thread opens it before it answers anything), whatever other agents are still being opened. A
-  send that belongs to a call (`call_id`, `call_opening`) answers once the start is done: the
-  calls are recovered last.
-- `GET /agents/snapshot` answers once every agent is open: no row stands for an agent that is
-  still being opened.
-- `GET /events` answers once the start is done: the stream shows a call's rings to whom the
-  recovered calls say.
+- Every agent is read from what its log committed before its own thread opens it, on a
+  connection that writes nothing (Rust Host since issue 935's early reads; no new field). Until it
+  is open, its row, `GET /log` and `GET /live` are answered from that reading: the conversation,
+  its revisions and the running turn (its id, start and the tools it showed) as the Host before
+  left them, with no reply that was shown and not stored. An agent whose log cannot be read so
+  answers once it is open. What its opening then finds otherwise (a turn that ended while the
+  Hosts changed, rows it wrote) is told as any change is: `agent-state` and `transcript-updated`.
+- A plain `POST /send` of the owner's in a chat to an agent that is still being opened is first
+  checked against what the agent's log committed, as its send checks it: a message the log has
+  already is answered as had, a `trace_id` named by the caller that another message has is
+  refused `409` as always. It is then kept on disk (`accepted.db`, apart from the agent's log)
+  and answered as soon as it is kept, with its `trace_id` and, as the agent's log stood,
+  `queued` and `queue_depth` (no `while_busy`: that is decided when the agent takes it). The
+  same `client_msg_id` sent again is kept once. The agent takes what was kept for it, in order,
+  through its ordinary send before anything else of its mailbox, and lets it go once its log
+  has it (one its log has already is had once); if its send answers anything else, it stays
+  kept and the agent is not opened. Until then each kept send is shown where the agent's send
+  will put it: the first one kept for an agent that was idle (no turn, nothing waiting, the
+  mailbox not held) is the newest row of its `GET /log` (its revision above the committed head
+  and below what the opening writes, a `transcript-updated` saying so); every other one is in
+  its `GET /turn-queue` (answered from the start, with `status: queued`) and is told as
+  `queue-updated` with `joined`, behind what waited already. Its turn starts once the agent is
+  open. Every other send (in a call, an agent's, the Host's own) waits in the agent's mailbox
+  until it is open. A send that belongs to a call (`call_id`, `call_opening`) waits until the
+  start is done: the calls are recovered last.
+- `GET /agents/snapshot` answers once every agent's row is its own (read or open) and the Host's
+  own janitors are installed: no row stands for an agent that is neither.
+- `GET /events` answers at once, with the same replay, resync and `Last-Event-ID` rules as after a
+  start. A call's ring (`agent-ring`) on it waits until the start has recovered the calls, and
+  holds what comes after it on that stream in order, never the stream's answer or what came
+  before it: it is shown to whom the recovered calls say.
 - Every other route answers once the whole start is done (the gallery, portraits, janitors and
   calls recovered).
 
@@ -2449,7 +2472,8 @@ how far its start has come; both fields are always there together:
  "left_out": {}, "not_run": {}, "judged_when_read": true}
 ```
 
-`stage` is `starting` (the Host answers its liveness), `agents` (every agent is open) or
+`stage` is `starting` (the Host answers its liveness, and the roster once every row is its
+own), `agents` (every agent is open) or
 `started` (the start is done). `instance` is the run, as `GET /live` names it `epoch`: a new run
 is a new Host. `install-host` holds an install or rollback good only once the run that answered
 first says `started`; another run answering in between is a start that failed. A Host before

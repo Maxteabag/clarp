@@ -19,13 +19,14 @@ const DRAIN: Duration = Duration::from_secs(5);
 const RESTART_MARK_BUDGET: Duration = Duration::from_millis(100);
 
 /// Close every event stream immediately when the Host is asked to stop (issue 880).
-/// The planned restart frame uses the estimate loaded at startup. It runs as a task of its own
-/// while the rest of the start goes on beside it (issue 935).
+/// The planned restart frame uses the estimate read at startup, beside the answers: until it is
+/// read, the default. It runs as a task of its own while the rest of the start goes on beside
+/// it (issue 935).
 pub(super) async fn serve(
     listener: TcpListener,
     router: Router,
     app: clarp_host::edge::App,
-    restart_ms: i64,
+    restart_ms: Arc<std::sync::atomic::AtomicI64>,
 ) -> io::Result<()> {
     let hub = &app.hub;
     let open = Arc::new(AtomicUsize::new(0));
@@ -49,7 +50,10 @@ pub(super) async fn serve(
             let deadline = tokio::time::Instant::now() + DRAIN;
             let stopped_at = planned_restart.then(|| app.clock.now_ms());
             if let Some(at) = stopped_at {
-                hub.close_streams_with(&clarp_host::availability::host_updating(at, restart_ms));
+                hub.close_streams_with(&clarp_host::availability::host_updating(
+                    at,
+                    restart_ms.load(std::sync::atomic::Ordering::Relaxed),
+                ));
             } else {
                 hub.close_streams();
             }

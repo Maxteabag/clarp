@@ -12,6 +12,7 @@
 // The snapshot's row is one literal with every field of the contract.
 #![recursion_limit = "256"]
 
+pub mod accepted;
 pub mod admin;
 mod admin_pair;
 pub mod admin_tool;

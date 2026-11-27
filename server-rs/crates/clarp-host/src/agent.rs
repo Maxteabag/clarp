@@ -745,6 +745,9 @@ pub struct View {
     /// What keeps a message of the owner's said now waiting, and what runs before it
     /// ([`Worker::owner_waits`]): read on the agent's thread with the status above.
     pub(crate) owner_waits: crate::availability::OwnerWaits,
+    /// The view was read from what the agent's log had committed while its thread still opens
+    /// it ([`OPENING`], issue 935): its row is its own, read and never written.
+    pub glanced: bool,
 }
 
 impl View {
@@ -830,6 +833,110 @@ pub struct AgentHandle {
     /// no turn runs: kept apart from the view, which is not made anew for every line a tool
     /// prints (`availability`, issue 918).
     alive: Arc<AtomicI64>,
+    /// The agent as its committed log says, while its thread still opens it (issue 935).
+    glance: Arc<GlanceSlot>,
+    /// Where a plain send of the owner's goes: `false` while the agent is opened, when it is
+    /// kept for it (`crate::accepted`), `true` once its thread has taken what was kept and its
+    /// mailbox takes every send. Held by a send while it is kept, and by the thread while it
+    /// takes what was kept: no send is kept after that, nor lost between the two.
+    route: Arc<tokio::sync::Mutex<bool>>,
+}
+
+/// Where an agent's glance is kept between its reading and its opening: what is asked of an
+/// agent that is still being opened is answered from it, and nothing else is.
+struct GlanceSlot(watch::Sender<Glanced>);
+
+/// How far an agent's glance has come.
+#[derive(Clone)]
+enum Glanced {
+    /// Not read yet: a read asked of the agent waits for it.
+    Pending,
+    /// Read: what is asked of the agent while it opens is answered from it.
+    Ready(Arc<Glance>),
+    /// Not had (no log yet, an engine that reads only through its writer, a log that could not be
+    /// read) or done with: the agent's own thread answers, once it is open.
+    Gone,
+}
+
+impl Default for GlanceSlot {
+    fn default() -> Self {
+        Self(watch::Sender::new(Glanced::Pending))
+    }
+}
+
+impl GlanceSlot {
+    fn set(&self, glance: Option<Arc<Glance>>) {
+        self.0
+            .send_replace(glance.map_or(Glanced::Gone, Glanced::Ready));
+    }
+
+    /// The glance once it is decided: `None` where there is none to read.
+    async fn decided(&self) -> Option<Arc<Glance>> {
+        let mut seen = self.0.subscribe();
+        let decided = seen
+            .wait_for(|glanced| !matches!(glanced, Glanced::Pending))
+            .await;
+        match decided.as_deref() {
+            Ok(Glanced::Ready(glance)) => Some(glance.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// The side of an agent's glance slot that decides it: its worker's. However the worker goes (its
+/// thread could not be started, it ended, it panicked), its glance goes with it, pending or read:
+/// a read that waits for it, or comes after, goes to the mailbox, which says the agent is closed.
+struct GlanceProducer(Arc<GlanceSlot>);
+
+impl GlanceProducer {
+    fn set(&self, glance: Option<Arc<Glance>>) {
+        self.0.set(glance);
+    }
+}
+
+impl Drop for GlanceProducer {
+    fn drop(&mut self) {
+        (self.0).0.send_if_modified(|glanced| {
+            let had = !matches!(glanced, Glanced::Gone);
+            *glanced = Glanced::Gone;
+            had
+        });
+    }
+}
+
+/// What became of a plain send of the owner's to an agent that is still being opened.
+#[derive(Debug)]
+pub enum Early {
+    /// Kept on disk for the agent, placed against the glance it was checked against.
+    Kept(Box<KeptEarly>),
+    /// The agent's log has it already: the same message, sent again.
+    Had,
+    /// Its caller named a trace another message has: refused, as the agent's send refuses it.
+    TraceTaken,
+    /// The store did not keep it: it goes to the agent's mailbox, as every send did before.
+    Unkept(String),
+}
+
+/// A send kept for an agent while it is opened, with what its answer and its word to those who
+/// watch say of it, all from the one glance it was checked against.
+#[derive(Debug)]
+pub struct KeptEarly {
+    pub kept: crate::accepted::Kept,
+    /// The agent as its glance has it: what places the send and what its word is told with.
+    pub status: Status,
+    /// It waits when the agent takes it: a turn runs, something waits, the mailbox is held, or
+    /// another kept send is ahead of it. Else its turn starts with it.
+    pub queued: bool,
+    /// The agent's route, held until what is told of the send is told: the agent takes nothing
+    /// kept before that, so its own events of the send come after it (drop it then).
+    pub route: tokio::sync::OwnedMutexGuard<bool>,
+}
+
+/// An agent read from what its log committed ([`Actor::glance`]): one reading at a time, as
+/// on its own thread, and with its own clock.
+struct Glance {
+    actor: Mutex<Actor>,
+    clock: Arc<dyn Clock + Send + Sync>,
 }
 
 #[derive(Default)]
@@ -871,6 +978,15 @@ pub(crate) const REMOVING: &str =
 pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
+    /// Resolves once the agent's row is its own (issue 935): read from what its log committed,
+    /// or open, or known not to open.
+    pub async fn row_is_its_own(&self) {
+        let mut view = self.view.clone();
+        let _ = view
+            .wait_for(|view| view.glanced || view.broken.as_deref() != Some(OPENING))
+            .await;
+    }
+
     /// The running turn's last sign of life, where a turn runs.
     pub fn last_alive_ms(&self) -> Option<i64> {
         Some(self.alive.load(Ordering::Relaxed)).filter(|at| *at > 0)
@@ -885,6 +1001,166 @@ impl AgentHandle {
     }
     pub(crate) fn visit_provider(&self, native: &str) {
         let _ = self.tx.send(Ask::VisitProvider(native.to_owned()));
+    }
+
+    /// What is read of an agent that is still being opened, read from its glance (issue 935):
+    /// `None` once it is open (or failed to open), or where it has no glance, and the agent's
+    /// own thread answers. A read that comes before the glance is decided waits for it, not for
+    /// the opening behind it. A glance is only ever read: nothing it answers is written.
+    async fn from_glance<T: Send + 'static>(
+        &self,
+        read: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError> + Send + 'static,
+    ) -> Option<Result<T, Unavailable>> {
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return None;
+        }
+        let glance = self.glance.decided().await?;
+        // Opened meanwhile: the agent answers for itself.
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return None;
+        }
+        let read = tokio::task::spawn_blocking(move || {
+            let now = glance.clock.now_ms();
+            let mut actor = glance.actor.lock().unwrap_or_else(PoisonError::into_inner);
+            read(&mut actor, now).map_err(|error| unavailable(&error))
+        })
+        .await;
+        Some(read.unwrap_or_else(|error| Err(Unavailable::new(error.to_string()))))
+    }
+
+    /// Keeps a plain send of the owner's for this agent while it is being opened (issue 935): on
+    /// disk before this answers, taken by the agent's thread, in order, through its ordinary
+    /// send once it is open (`crate::accepted`). It is checked first against what the agent's
+    /// log committed, as the agent's send checks it: a message the log has already is had (and
+    /// kept nowhere), a trace its caller named that another message has is refused. `None`
+    /// where it goes to the mailbox instead: the agent is open (or could not be opened), it has
+    /// no glance to check against, or this process keeps no sends.
+    pub async fn keep_while_opening(
+        &self,
+        accepted: crate::accepted::Accepted,
+    ) -> Option<Result<Early, Unavailable>> {
+        let desk = crate::accepted::shared()?;
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return None;
+        }
+        let glance = self.glance.decided().await?;
+        let route = self.route.clone().lock_owned().await;
+        if *route || self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return None;
+        }
+        if let Err(why) = self.accepting_work() {
+            return Some(Err(why));
+        }
+        let (desk_again, agent_id) = (desk.clone(), accepted.agent_id.clone());
+        let kept = tokio::task::spawn_blocking(move || {
+            // Held until it is on disk, and handed on with it: the agent takes nothing kept
+            // until what is told of it is told.
+            let checked = {
+                let actor = glance.actor.lock().unwrap_or_else(PoisonError::into_inner);
+                let had = actor.has_message(&accepted.message.id);
+                let taken = accepted.trace_named && !matches!(had, Ok(true));
+                let taken = if taken {
+                    actor.named_trace_taken(&accepted.message)
+                } else {
+                    Ok(false)
+                };
+                had.and_then(|had| taken.map(|taken| (had, taken, actor.status())))
+            };
+            match checked {
+                Err(error) => Err(unavailable(&error)),
+                Ok((true, _, _)) => Ok(Early::Had),
+                Ok((false, true, _)) => Ok(Early::TraceTaken),
+                Ok((false, false, status)) => match desk.keep(accepted) {
+                    Ok(kept) => {
+                        let queued = !crate::accepted::takes_at_once(&status) || kept.ahead > 0;
+                        Ok(Early::Kept(Box::new(KeptEarly {
+                            kept,
+                            status,
+                            queued,
+                            route,
+                        })))
+                    }
+                    Err(crate::accepted::Refused::TraceTaken) => Ok(Early::TraceTaken),
+                    Err(crate::accepted::Refused::Store(why)) => Ok(Early::Unkept(why)),
+                },
+            }
+        })
+        .await;
+        let kept = kept.unwrap_or_else(|error| Err(Unavailable::new(error.to_string())));
+        // An agent whose removal began while its send was kept takes nothing more: what was
+        // kept for it now is let go, and the send refused as a send to it is.
+        if let (Ok(Early::Kept(early)), Err(why)) = (&kept, self.accepting_work())
+            && !early.kept.again
+        {
+            let (desk, agent_id, key) = (desk_again, agent_id, early.kept.key.clone());
+            let _ = tokio::task::spawn_blocking(move || desk.taken(&agent_id, &key)).await;
+            return Some(Err(why));
+        }
+        Some(kept)
+    }
+
+    /// The sends kept for this agent while it is being opened, in its order: what its `/log`
+    /// and its queue show of them meanwhile. None once it is open. Never waits for the store.
+    pub fn kept_while_opening(&self, agent_id: &str) -> Vec<crate::accepted::Accepted> {
+        let Some(desk) = crate::accepted::shared() else {
+            return Vec::new();
+        };
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return Vec::new();
+        }
+        desk.waiting_now(agent_id)
+    }
+
+    /// The agent's queue while it is being opened, from its glance (issue 935). `None` once it
+    /// is open, or where it has no glance.
+    /// Its queue as its sends will make it, read from one glance: the glance's own, then every
+    /// send kept for it (`kept`, all of them, in order) that will wait when it takes them: all but
+    /// the first where the glance's agent takes a send at once, and none its log has already
+    /// (taken before a crash and kept still). Placed against the same glance that answers the
+    /// queue, never against a view read before it was decided.
+    pub async fn queue_while_opening(
+        &self,
+        kept: Vec<crate::accepted::Accepted>,
+    ) -> Option<Result<(Vec<Waiting>, QueueState), Unavailable>> {
+        self.from_glance(move |actor, _| {
+            let mut waiting = actor.queue()?;
+            let at_once = crate::accepted::takes_at_once(&actor.status());
+            for accepted in kept.iter().skip(usize::from(at_once)) {
+                let item = accepted.waiting();
+                let listed = waiting.iter().any(|had| had.client_id == item.client_id);
+                if !listed && !actor.has_message(&item.message_id)? {
+                    waiting.push(item);
+                }
+            }
+            Ok((waiting, actor.queue_state()))
+        })
+        .await
+    }
+
+    /// Whether the agent's glance takes a send at once (`accepted::takes_at_once`): what places
+    /// the first send kept for it in its log rather than its queue. `None` once it is open.
+    pub async fn glance_takes_at_once(&self) -> Option<bool> {
+        self.from_glance(|actor, _| Ok(crate::accepted::takes_at_once(&actor.status())))
+            .await?
+            .ok()
+    }
+
+    /// The sends kept for this agent while it is being opened, once what was kept is read: what
+    /// its queue lists, which never says a kept send is gone. None once it is open.
+    pub async fn kept_while_opening_read(&self, agent_id: &str) -> Vec<crate::accepted::Accepted> {
+        let Some(desk) = crate::accepted::shared() else {
+            return Vec::new();
+        };
+        if self.view.borrow().broken.as_deref() != Some(OPENING) {
+            return Vec::new();
+        }
+        let agent_id = agent_id.to_string();
+        tokio::task::spawn_blocking(move || desk.waiting(&agent_id))
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, accepted)| accepted)
+            .collect()
     }
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
@@ -1123,6 +1399,12 @@ impl AgentHandle {
 
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
+        if let Some(read) = self
+            .from_glance(|actor, now| Ok(actor.shown_whole(now)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Shown { answer }).await
     }
 
@@ -1266,6 +1548,12 @@ impl AgentHandle {
     }
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.tail_of(limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Tail {
             limit,
             which,
@@ -1280,6 +1568,12 @@ impl AgentHandle {
         limit: usize,
         which: Which,
     ) -> Result<Page, Unavailable> {
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::After {
             revision,
             limit,
@@ -1295,6 +1589,13 @@ impl AgentHandle {
         limit: usize,
         which: Which,
     ) -> Result<Option<Page>, Unavailable> {
+        let asked = id.clone();
+        if let Some(read) = self
+            .from_glance(move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)))
+            .await
+        {
+            return read;
+        }
         self.ask(|answer| Ask::Before {
             id,
             limit,
@@ -1380,6 +1681,10 @@ impl AgentHandle {
     }
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
+        let asked = id.clone();
+        if let Some(read) = self.from_glance(move |actor, _| actor.row(&asked)).await {
+            return read;
+        }
         self.ask(|answer| Ask::Row { id, answer }).await
     }
 
@@ -1391,6 +1696,19 @@ impl AgentHandle {
         query: clarp_kernel::delivery::Query,
         scope: clarp_kernel::delivery::Scope,
     ) -> Result<(Vec<Value>, serde_json::Map<String, Value>), Unavailable> {
+        if self.view.borrow().broken.as_deref() == Some(OPENING) {
+            let (glanced, asked, scoped) = (turns.clone(), query.clone(), scope.clone());
+            if let Some(read) = self
+                .from_glance(move |actor, _| {
+                    let mut turns = glanced;
+                    let top = actor.delivery(&mut turns, &asked, &scoped);
+                    Ok((turns, top))
+                })
+                .await
+            {
+                return read;
+            }
+        }
         self.ask(|answer| Ask::Delivery {
             turns,
             query,
@@ -1694,6 +2012,34 @@ pub(crate) fn never_ran() -> Status {
 
 /// Starts an agent's thread. The agent is opened on that thread, not here.
 pub fn spawn(setup: Setup) -> AgentHandle {
+    let (handle, unopened) = prepare(setup);
+    unopened.begin();
+    handle
+}
+
+/// An agent whose handle is there and whose thread is not started yet: what is asked of it
+/// waits in its mailbox, as for any agent still being opened (issue 935).
+pub struct Unopened {
+    worker: Worker,
+    rx: mpsc::Receiver<Ask>,
+}
+
+impl Unopened {
+    /// Starts the agent's thread, which reads it and then opens it.
+    pub fn begin(self) {
+        let Self { worker, rx } = self;
+        let name = format!("agent-{}", worker.setup.record.session);
+        let spawned = std::thread::Builder::new()
+            .name(name)
+            .spawn(move || worker.run(&rx));
+        if let Err(error) = spawned {
+            eprintln!("clarp-host: an agent's thread could not be started: {error}");
+        }
+    }
+}
+
+/// An agent's handle, and its thread to be started.
+pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
     let (tx, rx) = mpsc::channel();
     let idle = never_ran();
     let (view_tx, view) = watch::channel(Arc::new(View {
@@ -1719,9 +2065,12 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         speech: Arc::default(),
         broken: Some(OPENING.to_string()),
         owner_waits: Default::default(),
+        glanced: false,
     }));
     let now_ms = setup.clock.now_ms();
     let alive = Arc::new(AtomicI64::new(0));
+    let glance: Arc<GlanceSlot> = Arc::default();
+    let route: Arc<tokio::sync::Mutex<bool>> = Arc::default();
     let worker = Worker {
         native: native_goal::Native::default(),
         claude_bypass: None,
@@ -1774,20 +2123,20 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         clock_seen: (Instant::now(), now_ms),
         stall: Stall::default(),
         alive: alive.clone(),
+        glance: GlanceProducer(glance.clone()),
+        route: route.clone(),
+        glance_read: false,
+        glanced: None,
     };
-    let name = format!("agent-{}", worker.setup.record.session);
-    let spawned = std::thread::Builder::new()
-        .name(name)
-        .spawn(move || worker.run(&rx));
-    if let Err(error) = spawned {
-        eprintln!("clarp-host: an agent's thread could not be started: {error}");
-    }
-    AgentHandle {
+    let handle = AgentHandle {
         tx,
         view,
         close: Arc::default(),
         alive,
-    }
+        glance,
+        route,
+    };
+    (handle, Unopened { worker, rx })
 }
 
 enum QueueEdit {
@@ -1898,6 +2247,15 @@ struct Worker {
     stall: Stall,
     /// The running turn's last sign of life, shared with the agent's handle.
     alive: Arc<AtomicI64>,
+    /// Where the agent's glance is kept while it is opened, shared with its handle.
+    glance: GlanceProducer,
+    /// Where a plain send of the owner's goes, shared with its handle.
+    route: Arc<tokio::sync::Mutex<bool>>,
+    /// Whether the agent was read before its first opening.
+    glance_read: bool,
+    /// What its glance showed, while the clients may hold it: told again where its opening
+    /// found it otherwise.
+    glanced: Option<Status>,
 }
 
 #[derive(Default)]
@@ -2110,6 +2468,11 @@ impl Worker {
         // How the journal names this thread when one request holds it long.
         let thread = self.thread_name();
         loop {
+            if self.actor.is_none() && !self.glance_read {
+                self.glance_read = true;
+                let _held = crate::held::Held::new(&thread, "its glance");
+                self.glance();
+            }
             if self.actor.is_none() {
                 let opened = {
                     let _held = crate::held::Held::new(&thread, "its opening");
@@ -2762,8 +3125,44 @@ impl Worker {
             .collect();
         self.count_requests(self.now_ms());
         self.read_speech();
+        // What was kept for it while it was opened is taken first, in the order it was kept,
+        // before anything of its mailbox (issue 935).
+        let route = self.route.clone();
+        let mut open = route.blocking_lock();
+        let taken = if *open {
+            Vec::new()
+        } else {
+            match self.take_accepted() {
+                Ok(taken) => {
+                    *open = true;
+                    taken
+                }
+                // Not open: the agent is opened again, as after any failed opening, and takes
+                // what stays kept again first, in its order (what it took already is had once),
+                // before anything of its mailbox.
+                Err(error) => {
+                    self.actor = None;
+                    return Err(error.to_string());
+                }
+            }
+        };
+        drop(open);
         self.publish_view();
+        // Its own view is out: what is asked of it is answered by it from now on.
+        self.glance.set(None);
+        // Only now is what was kept let go: until its own view was out, a reader was answered
+        // from its glance and what was kept, and a send it took is in its log, its queue or both
+        // only from here. Kept a moment longer is had once at a next opening; let go sooner, a
+        // reader would have found it in neither (an app takes that for a send deleted).
+        // Not waited for: the store's writer may be held by a keep that waits for the disk, and
+        // this agent answers from now on. Until it is let go, a next opening has it once.
+        if let Some(desk) = crate::accepted::shared()
+            && !taken.is_empty()
+        {
+            desk.let_go(&self.setup.record.agent_id, taken);
+        }
         self.after(out);
+        self.tell_glanced();
         self.watch_native();
         self.reconcile_native();
         self.advance_native_goal()
@@ -5726,9 +6125,175 @@ impl Worker {
         std::mem::replace(&mut self.stall.since, since) != since
     }
 
-    fn publish_view(&self) {
-        let Some(actor) = &self.actor else {
+
+    /// Reads the agent from what its log committed, before its thread opens it (issue 935): its
+    /// view is published from that reading, still being opened, and what is asked of it meanwhile
+    /// is answered from it. Read on a connection that writes nothing ([`LogEngine::read_committed`])
+    /// by the actor's own opening, without its repairs ([`Actor::glance`]). Where it cannot be
+    /// read so, nothing is published and the agent is read once it is open, as before.
+    fn glance(&mut self) {
+        let now = self.now_ms();
+        let glanced = self
+            .setup
+            .engine
+            .read_committed(&self.setup.profile.dir, self.setup.codecs.clone())
+            .map_err(|error| error.to_string())
+            .and_then(|log| {
+                Actor::glance(
+                    self.setup.profile.clone(),
+                    self.setup.backend.clone(),
+                    log,
+                    now,
+                )
+                .map_err(|error| error.to_string())
+            });
+        let actor = match glanced {
+            Ok(actor) => actor,
+            Err(why) => {
+                // Quietly: a new agent has no log yet, and the memory engine reads only through
+                // its writer. Said where the log is there and could not be read.
+                if self.setup.profile.dir.join("log.db").is_file() {
+                    eprintln!(
+                        "clarp-host: agent {} is read once it is open: {why}",
+                        self.setup.record.session
+                    );
+                }
+                self.glance.set(None);
+                return;
+            }
+        };
+        self.actor = Some(actor);
+        self.update_previews();
+        self.ended = self.last_end();
+        self.finished = self.last_finished();
+        self.refresh_books(true);
+        if let Some(actor) = &self.actor {
+            self.speech = Arc::new(actor.speech().clone());
+            self.glanced = Some(actor.status());
+        }
+        let view = self.view_as(Some(OPENING));
+        // Its opening reads its lines again, and counts them where they are new to it.
+        self.speech = Arc::default();
+        // The glance is there before its view says so: whoever sees the view finds it.
+        if let Some(actor) = self.actor.take() {
+            self.glance.set(Some(Arc::new(Glance {
+                actor: Mutex::new(actor),
+                clock: self.setup.clock.clone(),
+            })));
+        }
+        if let Some(view) = view {
+            self.view.send_replace(view);
+        }
+    }
+
+    /// Takes every send kept for the agent while it was opened (`crate::accepted`), in order,
+    /// through its ordinary send, and answers where each was kept, to be let go once its log has
+    /// it and its own view is out ([`Worker::open`]). One its log has
+    /// already (kept again after a crash between the two) is had, and let go. A send its agent
+    /// refuses is let go too, and said in the journal: its sender had its receipt.
+    fn take_accepted(&mut self) -> Result<Vec<String>, ActorError> {
+        let Some(desk) = crate::accepted::shared() else {
+            return Ok(Vec::new());
+        };
+        let agent_id = self.setup.record.agent_id.clone();
+        let mut taken = Vec::new();
+        for (key, accepted) in desk.waiting(&agent_id) {
+            let while_busy = accepted
+                .while_busy
+                .as_deref()
+                .and_then(clarp_kernel::while_busy::WhileBusy::named)
+                .map_or(Busy::Unasked, Busy::Asked);
+            let (answer, mut reply) = oneshot::channel();
+            let mark = crate::accepted::mark(&accepted.message.id);
+            self.handle(Ask::Send {
+                reservation: None,
+                message: accepted.message,
+                admission: accepted.admission,
+                marks: clarp_actor::Marks {
+                    trace_named: accepted.trace_named,
+                    ..clarp_actor::Marks::default()
+                },
+                while_busy,
+                answer,
+            })?;
+            let now = self.now_ms();
+            // Let go only once the agent's log has it: taken now, or had already. Anything else
+            // leaves it kept, and this opening fails: it is taken at the next one, in its order,
+            // never lost and never passed by what was kept after it.
+            let sent = match reply.try_recv() {
+                Ok(Ok(Ok(sent))) => sent,
+                refused => {
+                    let why = match refused {
+                        Ok(Ok(Err(_))) => "its trace is another message's".to_string(),
+                        Ok(Err(why)) => why.0,
+                        _ => "the agent did not answer".to_string(),
+                    };
+                    return Err(ActorError::Io(format!(
+                        "send {mark} kept for it was not taken, and stays kept: {why}"
+                    )));
+                }
+            };
+            taken.push(key);
+            eprintln!(
+                "clarp-host: send {mark} kept for agent {} was taken {} ms after it was kept \
+                 (queued {}, again {})",
+                self.setup.record.session,
+                now - accepted.at_ms,
+                sent.queued,
+                sent.duplicate
+            );
+        }
+        Ok(taken)
+    }
+
+    /// What its glance showed and its opening found otherwise is told: its state, and that its
+    /// conversation changed. Nothing else of the opening is news.
+    fn tell_glanced(&mut self) {
+        let Some(glanced) = self.glanced.take() else {
             return;
+        };
+        let Some(status) = self.actor.as_ref().map(Actor::status) else {
+            return;
+        };
+        if glanced.head_revision != status.head_revision
+            || glanced.backend_session != status.backend_session
+        {
+            self.tell_transcript();
+        }
+        if let Some(actor) = &self.actor
+            && told_state(&glanced) != told_state(&status)
+        {
+            tell_work(
+                &self.setup.hub,
+                actor,
+                &self.setup.record,
+                &status,
+                actor.backend_id(),
+                (self.ended.as_ref(), self.stall.since),
+                self.now_ms(),
+            );
+        }
+    }
+
+    /// Publishes the agent's view, which says it can answer.
+    fn publish_view(&self) {
+        let prior_broken = self.view.borrow().broken.is_some();
+        if let Some(view) = self.view_as(None) {
+            self.view.send_replace(view);
+            // An agent that was being opened can answer now (`availability`).
+            if prior_broken {
+                self.setup
+                    .hub
+                    .availability_moved(&self.setup.record.agent_id);
+            }
+        }
+    }
+
+    /// The agent's view as its actor has it: `broken` says why it cannot answer, `None` where it
+    /// can. `None` without an actor.
+    fn view_as(&self, broken: Option<&str>) -> Option<Arc<View>> {
+        let Some(actor) = &self.actor else {
+            return None;
         };
         let shown_since = self.now_ms() - JOB_SHOWN_FOR_MS;
         let status = actor.status();
@@ -5769,7 +6334,7 @@ impl Worker {
             })
             .map_or(0, |row| row.ts_ms)
             .max(prior.last_real_message_ms);
-        self.view.send_replace(Arc::new(View {
+        Some(Arc::new(View {
             team_activity_ms: prior.team_activity_ms.max(at).max(last_real_message_ms),
             last_real_message_ms,
             native_goal: self.native.goal(),
@@ -5817,15 +6382,10 @@ impl Worker {
                 .collect(),
             books: self.books.clone(),
             speech: self.speech.clone(),
-            broken: None,
+            broken: broken.map(str::to_string),
             owner_waits: self.owner_waits(),
-        }));
-        // An agent that was being opened can answer now (`availability`).
-        if prior.broken.is_some() {
-            self.setup
-                .hub
-                .availability_moved(&self.setup.record.agent_id);
-        }
+            glanced: broken.is_some(),
+        }))
     }
 
     /// Publishes the agent's view and tells the clients what changed since they were last told.
@@ -6363,6 +6923,9 @@ impl Worker {
         let mut view = (**self.view.borrow()).clone();
         view.broken = Some(why.to_string());
         view.stalled_since = None;
+        // An agent that could not be opened is no longer read from its glance.
+        view.glanced = false;
+        self.glance.set(None);
         self.view.send_replace(Arc::new(view));
         self.setup
             .hub
@@ -6722,6 +7285,112 @@ fn refuse_for(
 mod mailbox_tests {
     use super::*;
 
+    /// Issue 935: a read asked of an agent that is still being opened, before its glance is
+    /// read, waits for the glance and is answered from it while the agent's opening is still
+    /// held: nothing of it goes to the agent's own thread, which is busy opening. A read once
+    /// there is no glance to have goes to that thread, as before.
+    #[tokio::test]
+    async fn a_read_asked_before_the_glance_is_answered_from_it_while_the_opening_is_held() {
+        use clarp_ports::log::LogEngine as _;
+        let (mut handle, rx) = agent_mailbox();
+        let opening = View {
+            broken: Some(OPENING.to_string()),
+            ..(**handle.view.borrow()).clone()
+        };
+        let (view_tx, view) = watch::channel(Arc::new(opening.clone()));
+        handle.view = view;
+        let asked = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.tail(10, Which::All).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!asked.is_finished(), "a read waits for the glance");
+        assert!(rx.try_recv().is_err(), "and not in the opening agent's mailbox");
+
+        // What its log committed: one row.
+        let root = std::env::temp_dir().join(format!("clarp-glance-read-{}", std::process::id()));
+        let profile = clarp_actor::Profile {
+            agent_id: "a1".to_string(),
+            session: "maximus".to_string(),
+            conversation_id: "conv-1".to_string(),
+            dir: root.join("agents/a1"),
+            run_dir: root.join("run"),
+            cwd: root.join("work"),
+            model: None,
+            effort: None,
+            told: None,
+            tool_env: Vec::new(),
+            stop_grace_ms: 3_000,
+            keep_spools: false,
+            accounts: clarp_kernel::recovery::Accounts::None,
+            epoch: "epoch-test".to_string(),
+            hides_coordination: false,
+        };
+        let engine = clarp_store_mem::MemEngine::new();
+        let codecs = clarp_codec::standard_set("zstd").unwrap();
+        let backend: Arc<dyn clarp_backend::Backend> =
+            Arc::new(clarp_backend::scripted::Scripted::echo());
+        let log = engine.open(&profile.dir, codecs.clone()).unwrap();
+        let (mut writer, _) = Actor::open(profile.clone(), backend.clone(), log, 1_000).unwrap();
+        assert!(writer.note("n-committed", "committed before the restart", 1_001).unwrap().0);
+        let committed = writer.tail(10).unwrap();
+        let read = engine.read_committed(&profile.dir, codecs).unwrap();
+        let glance = Actor::glance(profile, backend, read, 1_002).unwrap();
+        let clock: Arc<dyn Clock + Send + Sync> = Arc::new(clarp_ports::clock::SystemClock);
+
+        // The glance is read, and its view says so; the opening is still held.
+        handle.glance.set(Some(Arc::new(Glance {
+            actor: Mutex::new(glance),
+            clock,
+        })));
+        view_tx.send_replace(Arc::new(View {
+            glanced: true,
+            ..opening
+        }));
+        let page = asked.await.unwrap().unwrap();
+        assert_eq!(page.entries.len(), committed.entries.len());
+        assert_eq!(page.latest_revision, committed.latest_revision);
+        assert_eq!(
+            page.entries.last().map(|row| row.entry.id().to_string()),
+            Some("n-committed".to_string())
+        );
+        assert!(rx.try_recv().is_err(), "the opening agent's mailbox was never asked");
+
+        // A worker that goes without deciding its glance (its thread could not be started)
+        // leaves no read waiting: the read goes to the mailbox, which says the agent is closed.
+        let (mut gone, closed) = agent_mailbox();
+        gone.view = watch::channel(Arc::new(View {
+            glanced: false,
+            ..(**handle.view.borrow()).clone()
+        }))
+        .1;
+        let producer = GlanceProducer(gone.glance.clone());
+        let read = {
+            let gone = gone.clone();
+            tokio::spawn(async move { gone.tail(10, Which::All).await })
+        };
+        tokio::task::yield_now().await;
+        assert!(!read.is_finished(), "a read waits for the glance");
+        drop(closed);
+        drop(producer);
+        let refused = tokio::time::timeout(Duration::from_secs(5), read).await;
+        assert!(
+            matches!(refused, Ok(Ok(Err(_)))),
+            "the read is answered that the agent is closed"
+        );
+
+        // Where there is no glance to have, the agent's own thread answers, once it is open.
+        handle.glance.set(None);
+        let asked = {
+            let handle = handle.clone();
+            tokio::spawn(async move { handle.tail(10, Which::All).await })
+        };
+        let waiting = tokio::task::spawn_blocking(move || rx.recv().ok().map(|ask| ask.kind()));
+        assert_eq!(waiting.await.unwrap(), Some("Tail"));
+        asked.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     fn agent_mailbox() -> (AgentHandle, mpsc::Receiver<Ask>) {
         let (tx, rx) = mpsc::channel();
         let (_, view) = watch::channel(Arc::new(View {
@@ -6747,6 +7416,7 @@ mod mailbox_tests {
             speech: Arc::default(),
             broken: None,
             owner_waits: Default::default(),
+            glanced: false,
         }));
         (
             AgentHandle {
@@ -6754,6 +7424,8 @@ mod mailbox_tests {
                 view,
                 close: Arc::default(),
                 alive: Arc::default(),
+                glance: Arc::default(),
+                route: Arc::default(),
             },
             rx,
         )

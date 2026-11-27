@@ -81,6 +81,57 @@ impl LogEngine for SqliteEngine {
             file: agent_dir.join(LOG_FILE),
         }))
     }
+
+    /// A read-only connection that holds one read transaction for as long as it lives, so that
+    /// every read through it sees the same commit (issue 935). It sets no pragma and creates no
+    /// file: a log that is not there, is not in WAL mode or has another schema is refused, and
+    /// its agent is read once its writer has opened it. In WAL mode the writer appends beside
+    /// it and is never held by it; only a checkpoint stops short of what it still reads.
+    fn read_committed(
+        &self,
+        agent_dir: &Path,
+        codecs: CodecSet,
+    ) -> Result<Box<dyn AgentLog>, LogError> {
+        let file = agent_dir.join(LOG_FILE);
+        if !file.is_file() {
+            return Err(LogError::Storage(format!("{} is not there", file.display())));
+        }
+        let conn = Connection::open_with_flags(
+            &file,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(storage)?;
+        conn.execute_batch("BEGIN DEFERRED").map_err(storage)?;
+        // The first read takes the moment every later read of this connection sees.
+        let _: i64 = conn
+            .query_row("SELECT COALESCE(MAX(seq), 0) FROM item", [], |row| {
+                row.get(0)
+            })
+            .map_err(storage)?;
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .map_err(storage)?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            return Err(LogError::Storage(format!(
+                "{} is in {mode} mode: it is read only through its writer",
+                file.display()
+            )));
+        }
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .map_err(storage)?;
+        if version != SCHEMA_VERSION {
+            return Err(LogError::Storage(format!(
+                "{} has schema {version}, this build reads schema {SCHEMA_VERSION}",
+                file.display()
+            )));
+        }
+        Ok(Box::new(SqliteLog {
+            conn,
+            codecs,
+            file,
+        }))
+    }
 }
 
 struct SqliteLog {
