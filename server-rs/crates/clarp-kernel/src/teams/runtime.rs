@@ -32,6 +32,7 @@ pub struct Brief {
     pub protocol: String,
     pub digest: String,
     pub chat_view: crate::chat_view::View,
+    pub clean_conversation: bool,
     /// Every unread id in the snapshot, including those too old to quote in the brief.
     pub ids: Vec<String>,
 }

@@ -474,7 +474,7 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
 pub fn has_conversation(backend: &str) -> bool {
     matches!(
         backend,
-        "claude" | "codex" | "opencode" | "deepseek" | "agy" | "agy-acp" | "muse"
+        "claude" | "codex" | "opencode" | "deepseek" | "agy" | "agy-acp" | "grok" | "muse"
     )
 }
 

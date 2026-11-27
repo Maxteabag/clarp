@@ -27,7 +27,7 @@ impl View {
         }
     }
 
-    pub fn reminder(self, session: &str) -> String {
+    pub fn reminder(self, session: &str, clean_conversation: bool) -> String {
         if self != Self::Conversation {
             return String::new();
         }
@@ -36,6 +36,11 @@ impl View {
         } else {
             session
         };
+        if clean_conversation {
+            return format!(
+                "Conversation view: the user sees deliberate messages and replies from the conversation session. Your ordinary work text appears in Session view. Deliver any answer or update for the user in a <speak> block, or send a note with `clarp-admin tell-user --from {session} --text '...'` if your backend supports notes."
+            );
+        }
         format!(
             "Conversation view: the user reads this chat in Conversation view. Your final reply reaches them; text you write in between, and your tool work, does not. To tell them something mid-turn, run `clarp-admin tell-user --from {session} --text '...'`."
         )

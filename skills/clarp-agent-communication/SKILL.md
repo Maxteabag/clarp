@@ -224,6 +224,14 @@ shown at once and notified). Your final reply always reaches them, so end every
 turn with one that stands on its own. In Session view, the default, everything
 is shown as before.
 
+On a Rust Host with `clean_conversation` (contract 217) and an agent named for
+`conversation_fork`, supporting clients show the owner's messages, deliberate
+notes and `<speak>` blocks, and the conversation session's answers. A work turn
+can address the owner with a note or a `<speak>` block. Its ordinary text is in
+Session view. While work runs, plain text in Conversation can go to a separate
+session on the same backend. The work session receives what was said as a note
+before its next turn.
+
 On a Rust Host advertising `text_turn_ack` (contract 214), the owner can
 set the optional text-turn acknowledgment in a supporting client. It starts
 off. A full device or Host administrator reads

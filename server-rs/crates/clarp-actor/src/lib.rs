@@ -5747,7 +5747,11 @@ impl Actor {
                 clarp_kernel::hidden_coordination::reminder(&self.profile.session, sender);
             brief.append_protocol(&reminder);
         } else {
-            brief.append_protocol(&brief.chat_view.reminder(&self.profile.session));
+            brief.append_protocol(
+                &brief
+                    .chat_view
+                    .reminder(&self.profile.session, brief.clean_conversation),
+            );
         }
         if self.teams.is_some() && !bare {
             let key = clarp_kernel::journal::team_transit::launch_key(turn, attempt);

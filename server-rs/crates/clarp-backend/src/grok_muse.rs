@@ -104,22 +104,47 @@ impl Backend for Adapter {
     }
 
     fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
-        if self.tool != Tool::Muse {
-            return None;
-        }
         let mut launch = self.launch(spec);
-        launch.args.retain(|arg| arg != "--yolo");
-        let restrictions = [
-            "--disable-write",
-            "--disable-shell",
-            "--disable-web-tools",
-            "--disable-request-user-input",
-            "--no-foreign-personal-context",
-            "--no-session-log",
-        ];
-        launch
-            .args
-            .splice(1..1, restrictions.into_iter().map(str::to_owned));
+        match self.tool {
+            Tool::Grok => {
+                launch.args.retain(|arg| arg != "--always-approve");
+                // Grok keeps MCP meta-tools even with a built-in allowlist. A hard
+                // permission rule covers their calls. Deny the remaining read tool too.
+                let restrictions = [
+                    "--sandbox",
+                    "read-only",
+                    "--permission-mode",
+                    "dontAsk",
+                    "--tools",
+                    "read_file",
+                    "--deny",
+                    "Read",
+                    "--deny",
+                    "MCPTool",
+                    "--disable-web-search",
+                    "--no-subagents",
+                    "--no-auto-update",
+                ];
+                launch
+                    .args
+                    .splice(..0, restrictions.into_iter().map(str::to_owned));
+                launch.env.push(("GROK_MEMORY".into(), "0".into()));
+            }
+            Tool::Muse => {
+                launch.args.retain(|arg| arg != "--yolo");
+                let restrictions = [
+                    "--disable-write",
+                    "--disable-shell",
+                    "--disable-web-tools",
+                    "--disable-request-user-input",
+                    "--no-foreign-personal-context",
+                    "--no-session-log",
+                ];
+                launch
+                    .args
+                    .splice(1..1, restrictions.into_iter().map(str::to_owned));
+            }
+        }
         Some(launch)
     }
 

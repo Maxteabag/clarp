@@ -1918,7 +1918,22 @@ fn conversation_text(entry: &Entry, row: &Value) -> Option<String> {
         Entry::Note(_) => text.to_owned(),
         Entry::Reply(reply) if reply.conversation_reply => text.to_owned(),
         Entry::Reply(_) => markup::speak_blocks(text, false).join("\n\n"),
-        Entry::Imported(_) if row["role"] == "user" && row["origin"] == "user" => text.to_owned(),
+        Entry::Imported(_) => {
+            if let Some(shown) = row.get("conversation_text") {
+                shown.as_str()?.to_owned()
+            } else if row["kind"] == coordination::NOTE_KIND
+                || (row["role"] == "user"
+                    && row["origin"]
+                        .as_str()
+                        .is_some_and(|origin| coordination::USER_WORD_ORIGINS.contains(&origin)))
+            {
+                text.to_owned()
+            } else if row["role"] == "assistant" {
+                markup::speak_blocks(&markup::strip_hidden_blocks(text), false).join("\n\n")
+            } else {
+                return None;
+            }
+        }
         _ => return None,
     };
     (!shown.trim().is_empty()).then_some(shown)

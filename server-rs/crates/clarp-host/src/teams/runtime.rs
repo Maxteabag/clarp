@@ -79,16 +79,26 @@ impl clarp_actor::teams::Runtime for TurnTeams {
                 .collect();
             (teams, digest, ids)
         });
+        let chat_view = directory
+            .as_deref()
+            .map(|directory| crate::chat_view::preference(directory, agent))
+            .unwrap_or_default();
         Brief {
             protocol: runtime::protocol(&teams, agent, session, origin, &person, || {
                 super::leader_memory::context(session)
             }),
             digest,
             ids,
-            chat_view: directory
-                .as_deref()
-                .map(|directory| crate::chat_view::preference(directory, agent))
-                .unwrap_or_default(),
+            chat_view,
+            clean_conversation: chat_view == clarp_kernel::chat_view::View::Conversation
+                && reader.as_ref().is_some_and(|member| {
+                    let record = &member.record;
+                    crate::conversation_forks::Named::read().allows(
+                        &record.backend,
+                        &record.agent_id,
+                        &record.session,
+                    )
+                }),
         }
     }
 

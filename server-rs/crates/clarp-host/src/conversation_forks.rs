@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn session_view_and_unsupported_backends_never_fork() {
         // The setting is not read for these: nothing names them on a test machine either.
-        assert!(!may_fork("grok", View::Conversation, "a-1", "x"));
+        assert!(!may_fork("scripted", View::Conversation, "a-1", "x"));
         assert!(!may_fork("claude", View::Session, "a-1", "x"));
     }
 

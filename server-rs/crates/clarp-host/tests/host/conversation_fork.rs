@@ -75,14 +75,17 @@ import time
 
 backend = pathlib.Path(__file__).name
 agy = backend == 'agy'
+grok = backend == 'grok'
 muse = backend == 'muse'
 if '--version' in sys.argv:
-    print('1.5.18' if agy else ('muse 1.4.25' if muse else 'codex-cli 0.167.1'))
+    print({'agy':'1.5.18', 'grok':'grok 1.0.70', 'muse':'muse 1.4.25'}.get(backend, 'codex-cli 0.167.1'))
     raise SystemExit(0)
 
 root = pathlib.Path(__file__).resolve().parent
 if agy:
     prompt = next((v.removeprefix('--print=') for v in sys.argv if v.startswith('--print=')), '')
+elif grok:
+    prompt = sys.argv[sys.argv.index('-p') + 1]
 elif muse:
     prompt = sys.argv[sys.argv.index('--') + 1]
 else:
@@ -101,6 +104,12 @@ def reply(text):
     if agy:
         say('step_update', step_update={'conversation_id':sid, 'step_index':1, 'state':'DONE',
                 'step_type':'agent_response', 'text_delta':text})
+    elif grok:
+        say('assistant', text=text)
+        if side:
+            say('end')
+        elif 'Continue with the next work request.' not in prompt:
+            say('tool_call', toolCallId='test-tool', toolName='read_file', rawInput={})
     elif muse:
         say('delta', payload_type='run.output.delta', payload={'text':text})
         if side:
@@ -121,6 +130,8 @@ signal.signal(signal.SIGINT, stopped)
 signal.signal(signal.SIGTERM, stopped)
 if agy:
     say('init', conversation_id=sid)
+elif grok:
+    say('turn_started')
 elif muse:
     say('start', payload_type='run.lifecycle.started')
 else:
@@ -133,6 +144,14 @@ if side:
         settings = json.loads(sys.argv[sys.argv.index('--settings') + 1])
         assert settings['toolPermission'] == 'strict'
         assert 'write_file(*)' in settings['permissions']['deny'] and 'command(*)' in settings['permissions']['deny']
+    elif grok:
+        assert all(flag not in sys.argv for flag in ('--always-approve', '--resume', '--session-id'))
+        assert sys.argv[sys.argv.index('--sandbox') + 1] == 'read-only'
+        assert sys.argv[sys.argv.index('--permission-mode') + 1] == 'dontAsk'
+        assert sys.argv[sys.argv.index('--tools') + 1] == 'read_file'
+        assert {sys.argv[i+1] for i, v in enumerate(sys.argv) if v == '--deny'} == {'Read', 'MCPTool'}
+        assert '--disable-web-search' in sys.argv and '--no-subagents' in sys.argv
+        assert os.environ.get('GROK_MEMORY') == '0'
     elif muse:
         assert '--yolo' not in sys.argv and '--session-id' not in sys.argv
         assert '--disable-write' in sys.argv and '--disable-shell' in sys.argv
@@ -152,6 +171,7 @@ elif 'Continue with the next work request.' in prompt:
         (root / 'note-read').touch()
     reply('Next work turn.')
 else:
+    (root / 'main-prompt').write_text(prompt)
     reply('Earlier raw work. <speak>Deliberate work announcement.</speak>')
     (root / 'main-running').touch()
     while not ((root / 'finish-main').exists() or (root / 'finish').exists()):
@@ -159,6 +179,10 @@ else:
     (root / 'main-finished').touch()
 if agy:
     say('result', result={'conversation_id':sid, 'status':'SUCCESS', 'response':last})
+elif grok:
+    if not side:
+        say('tool_call_update', toolCallId='test-tool', status='completed')
+        say('end')
 elif muse:
     say('finished', payload_type='run.terminal.completed')
 else:
@@ -339,6 +363,11 @@ fn antigravity_conversation_uses_a_fresh_session_and_its_own_permissions() {
 }
 
 #[test]
+fn grok_conversation_uses_a_fresh_session_with_work_tools_denied() {
+    fresh_conversation("grok-conversation", "grok", "CLARP_GROK_PROGRAM");
+}
+
+#[test]
 fn muse_conversation_uses_fresh_exec_with_work_tools_disabled() {
     fresh_conversation("muse-conversation", "muse", "CLARP_MUSE_PROGRAM");
 }
@@ -350,10 +379,17 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     waited(host, "the separate work turn", || {
         forking.at("main-running").exists()
     });
+    let prompt = std::fs::read_to_string(forking.at("main-prompt")).unwrap();
+    assert!(prompt.contains("Your ordinary work text appears in Session view."));
+    assert!(prompt.contains("clarp-admin tell-user --from oak"));
     let main = live(host, "oak");
     assert_ne!(main["conversation_turn"], true);
     let main_id = main["turn"]["turn_id"].clone();
     assert!(main_id.is_string());
+    let heard = follow(host, "/events?live=oak");
+    waited(host, "the conversation subscription", || {
+        !heard.lock().unwrap().is_empty()
+    });
     host.post("/send", json!({
         "session":"oak", "text":"Hello, how are you?", "client_msg_id":"greeting", "while_busy":"take_over",
     }));
@@ -367,6 +403,13 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     let shown = live(host, "oak");
     assert_eq!(shown["conversation_turn"], true, "{shown}");
     assert_eq!(shown["main_turn"]["turn_id"], main_id, "{shown}");
+    waited(host, "a conversation-marked live event", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "live"
+                && event["session"] == "oak"
+                && event["conversation_turn"] == true
+        })
+    });
     assert!(!forking.at("main-stopped").exists());
     let rows = host.turns("oak");
     let work = rows
@@ -403,6 +446,12 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
         "the next work prompt includes the conversation note",
         || forking.at("note-read").exists(),
     );
+    waited(host, "the next work text in the full log", || {
+        host.turns("oak").iter().any(|row| {
+            row["text"] == "Next work turn."
+                && row.get("conversation_text").is_some_and(Value::is_null)
+        })
+    });
 }
 
 /// Waits for `ready`; when it does not come, says what the agent's chat, its live view, its
