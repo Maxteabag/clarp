@@ -132,12 +132,14 @@ pub fn claude_output(event: &Value) -> bool {
     }
 }
 
+type ClaudeReadCall = (String, Value, Option<(Value, bool)>);
+
 /// Completed, cross-checked Claude output at a potential Transit boundary.
 /// Only synchronous read tools are eligible while the original attempt is still running.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ClaudeCheckpointProgress {
     text: Vec<String>,
-    calls: BTreeMap<String, (String, Value, Option<(Value, bool)>)>,
+    calls: BTreeMap<String, ClaudeReadCall>,
     open_blocks: BTreeSet<u64>,
     streamed_calls: BTreeSet<String>,
     streamed_messages: BTreeSet<String>,
