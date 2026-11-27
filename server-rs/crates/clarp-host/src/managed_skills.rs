@@ -880,10 +880,10 @@ impl Shelf {
         let mut names = Vec::new();
         for entry in entries {
             let entry = entry?;
-            if entry.file_type()?.is_symlink() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    names.push(name);
-                }
+            if entry.file_type()?.is_symlink()
+                && let Ok(name) = entry.file_name().into_string()
+            {
+                names.push(name);
             }
         }
         Ok(names)

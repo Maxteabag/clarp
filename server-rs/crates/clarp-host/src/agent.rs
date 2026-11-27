@@ -1007,7 +1007,7 @@ impl AgentHandle {
     /// `None` once it is open (or failed to open), or where it has no glance, and the agent's
     /// own thread answers. A read that comes before the glance is decided waits for it, not for
     /// the opening behind it. A glance is only ever read: nothing it answers is written.
-    async fn from_glance<T: Send + 'static>(
+    async fn read_glance<T: Send + 'static>(
         &self,
         read: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError> + Send + 'static,
     ) -> Option<Result<T, Unavailable>> {
@@ -1122,7 +1122,7 @@ impl AgentHandle {
         &self,
         kept: Vec<crate::accepted::Accepted>,
     ) -> Option<Result<(Vec<Waiting>, QueueState), Unavailable>> {
-        self.from_glance(move |actor, _| {
+        self.read_glance(move |actor, _| {
             let mut waiting = actor.queue()?;
             let at_once = crate::accepted::takes_at_once(&actor.status());
             for accepted in kept.iter().skip(usize::from(at_once)) {
@@ -1140,7 +1140,7 @@ impl AgentHandle {
     /// Whether the agent's glance takes a send at once (`accepted::takes_at_once`): what places
     /// the first send kept for it in its log rather than its queue. `None` once it is open.
     pub async fn glance_takes_at_once(&self) -> Option<bool> {
-        self.from_glance(|actor, _| Ok(crate::accepted::takes_at_once(&actor.status())))
+        self.read_glance(|actor, _| Ok(crate::accepted::takes_at_once(&actor.status())))
             .await?
             .ok()
     }
@@ -1400,7 +1400,7 @@ impl AgentHandle {
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
         if let Some(read) = self
-            .from_glance(|actor, now| Ok(actor.shown_whole(now)))
+            .read_glance(|actor, now| Ok(actor.shown_whole(now)))
             .await
         {
             return read;
@@ -1549,7 +1549,7 @@ impl AgentHandle {
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
         if let Some(read) = self
-            .from_glance(move |actor, _| actor.tail_of(limit, actor.chat_read(which)))
+            .read_glance(move |actor, _| actor.tail_of(limit, actor.chat_read(which)))
             .await
         {
             return read;
@@ -1569,7 +1569,7 @@ impl AgentHandle {
         which: Which,
     ) -> Result<Page, Unavailable> {
         if let Some(read) = self
-            .from_glance(move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)))
+            .read_glance(move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)))
             .await
         {
             return read;
@@ -1591,7 +1591,7 @@ impl AgentHandle {
     ) -> Result<Option<Page>, Unavailable> {
         let asked = id.clone();
         if let Some(read) = self
-            .from_glance(move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)))
+            .read_glance(move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)))
             .await
         {
             return read;
@@ -1682,7 +1682,7 @@ impl AgentHandle {
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
         let asked = id.clone();
-        if let Some(read) = self.from_glance(move |actor, _| actor.row(&asked)).await {
+        if let Some(read) = self.read_glance(move |actor, _| actor.row(&asked)).await {
             return read;
         }
         self.ask(|answer| Ask::Row { id, answer }).await
@@ -1699,7 +1699,7 @@ impl AgentHandle {
         if self.view.borrow().broken.as_deref() == Some(OPENING) {
             let (glanced, asked, scoped) = (turns.clone(), query.clone(), scope.clone());
             if let Some(read) = self
-                .from_glance(move |actor, _| {
+                .read_glance(move |actor, _| {
                     let mut turns = glanced;
                     let top = actor.delivery(&mut turns, &asked, &scoped);
                     Ok((turns, top))
