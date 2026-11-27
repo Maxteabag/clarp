@@ -126,6 +126,7 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLAUDE_PWA_TEAM_LEADER_QUIET_PERIOD_SEC", "timing"),
     // A provider's key or credential.
     ("OPENAI_API_KEY", "key"),
+    ("OPENROUTER_API_KEY", "key"),
     ("GEMINI_API_KEY", "key"),
     ("GOOGLE_VERTEX_API_KEY", "key"),
     ("ELEVEN_API_KEY", "key"),

@@ -139,6 +139,7 @@ pub type UsedUp = BTreeMap<String, Value>;
 /// What the tools said of their accounts.
 #[derive(Default)]
 pub struct Desk {
+    pub(crate) opencode_usage: crate::usage::opencode::Desk,
     /// What is kept: read from the fleet once, and written back with every change. One at a
     /// time reads and changes it.
     known: tokio::sync::Mutex<Known>,

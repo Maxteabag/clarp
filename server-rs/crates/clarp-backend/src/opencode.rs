@@ -6,6 +6,7 @@ use crate::{
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::live::Glimpse;
 use clarp_kernel::turn::{Activity, RunOutcome};
+use clarp_kernel::usage::ProviderUse;
 use clarp_kernel::{opencode as rules, python, told};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Map, Value, json};
@@ -134,8 +135,32 @@ struct Stream {
     tools: BTreeMap<String, ToolCall>,
     tokens: Option<(u64, u64)>,
     cost: Option<f64>,
+    message_providers: BTreeMap<String, Option<String>>,
+    message_charges: BTreeMap<String, Charges>,
+    charged_parts: BTreeSet<String>,
     errors: Vec<String>,
     stderr: ErrorTail,
+}
+
+#[derive(Default)]
+struct Charges {
+    tokens_in: Option<u64>,
+    tokens_out: Option<u64>,
+    cost: Option<f64>,
+}
+
+impl Charges {
+    fn add(&mut self, other: &Self) {
+        if let Some(tokens) = other.tokens_in {
+            self.tokens_in = Some(self.tokens_in.unwrap_or(0).saturating_add(tokens));
+        }
+        if let Some(tokens) = other.tokens_out {
+            self.tokens_out = Some(self.tokens_out.unwrap_or(0).saturating_add(tokens));
+        }
+        if let Some(cost) = other.cost {
+            self.cost = Some(self.cost.unwrap_or(0.0) + cost);
+        }
+    }
 }
 
 fn word<'a>(v: &'a Value, k: &str) -> &'a str {
@@ -411,6 +436,10 @@ impl Stream {
         }
     }
     fn usage(&mut self, p: &Value) {
+        let part = word(p, "id");
+        if !part.is_empty() && !self.charged_parts.insert(part.to_owned()) {
+            return;
+        }
         let tokens = &p["tokens"];
         if tokens["input"].is_number() || tokens["output"].is_number() {
             let old = self.tokens.get_or_insert((0, 0));
@@ -424,7 +453,47 @@ impl Stream {
         if let Some(cost) = p["cost"].as_f64() {
             *self.cost.get_or_insert(0.0) += cost;
         }
+        let count = |value: &Value| {
+            value
+                .as_f64()
+                .filter(|number| number.is_finite() && *number >= 0.0)
+                .map(|number| number as u64)
+        };
+        let charge = Charges {
+            tokens_in: count(&tokens["input"]),
+            tokens_out: count(&tokens["output"]),
+            cost: p["cost"]
+                .as_f64()
+                .filter(|cost| cost.is_finite() && *cost >= 0.0),
+        };
+        if charge.tokens_in.is_some() || charge.tokens_out.is_some() || charge.cost.is_some() {
+            self.message_charges
+                .entry(word(p, "messageID").to_owned())
+                .or_default()
+                .add(&charge);
+        }
     }
+
+    fn usage_by_provider(&self) -> Vec<ProviderUse> {
+        let mut providers = BTreeMap::<Option<String>, Charges>::new();
+        for (message, charge) in &self.message_charges {
+            let provider = self.message_providers.get(message).cloned().flatten();
+            providers.entry(provider).or_default().add(charge);
+        }
+        providers
+            .into_iter()
+            .map(|(provider_id, charge)| ProviderUse {
+                provider_id,
+                tokens_in: charge.tokens_in,
+                tokens_out: charge.tokens_out,
+                cost_micros: charge
+                    .cost
+                    .filter(|cost| cost.is_finite())
+                    .map(|cost| (cost * 1e6).round() as u64),
+            })
+            .collect()
+    }
+
     fn step(&mut self, out: &mut Vec<Signal>) {
         self.flush(out);
         self.step += 1;
@@ -512,7 +581,24 @@ impl Stream {
         }
         let props = &v["properties"];
         let part = &v["part"];
-        match rules::event_kind(v) {
+        let kind = rules::event_kind(v);
+        let info = &props["info"];
+        if kind == "message.updated" && info["role"] == "assistant" {
+            let message = word(info, "id");
+            let provider = word(info, "providerID");
+            if !message.is_empty() && rules::valid_provider_id(provider) {
+                let provider = Some(provider.to_owned());
+                self.message_providers
+                    .entry(message.into())
+                    .and_modify(|recorded| {
+                        if *recorded != provider {
+                            *recorded = None;
+                        }
+                    })
+                    .or_insert(provider);
+            }
+        }
+        match kind {
             "message.part.updated" => self.serve(&props["part"], t, out),
             "message.part.delta" if props["field"] == "text" => {
                 let id = word(props, "partID");
@@ -636,6 +722,10 @@ impl Interpreter for Stream {
                     out.push(Signal::TurnCost {
                         micros: (cost * 1e6).round() as u64,
                     });
+                }
+                let providers = self.usage_by_provider();
+                if !providers.is_empty() {
+                    out.push(Signal::ProviderUsage(providers));
                 }
                 out.push(Signal::Ended(result));
             }

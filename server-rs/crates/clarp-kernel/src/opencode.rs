@@ -178,3 +178,13 @@ pub fn models(raw: &str, deepseek: bool, at: &str) -> Vec<Value> {
     }
     rows
 }
+
+/// Provider IDs used in OpenCode's configuration and assistant message metadata.
+pub fn valid_provider_id(id: &str) -> bool {
+    let letter = |byte: u8| byte.is_ascii_lowercase() || byte.is_ascii_digit();
+    id.len() <= 100
+        && id.bytes().next().is_some_and(letter)
+        && id
+            .bytes()
+            .all(|byte| letter(byte) || b"._-".contains(&byte))
+}

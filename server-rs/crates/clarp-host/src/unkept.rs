@@ -1251,6 +1251,7 @@ pub(crate) mod at_the_port {
             tokens_in: 4321,
             tokens_out: 8765,
             cost_usd: Some(0.125),
+            providers: Vec::new(),
         };
         let name = "1795000000000-agent-quiet-turn-7".to_string();
         tell.send(crate::usage::Told::Used(name, used)).unwrap();

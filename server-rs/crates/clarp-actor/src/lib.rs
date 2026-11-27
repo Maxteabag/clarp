@@ -819,6 +819,7 @@ struct LiveTurn {
     /// What the tool said its conversation has cost so far, and what it had cost before the
     /// turn, where that is known: nothing for a conversation that begins with the turn.
     per_turn_cost: Option<u64>,
+    provider_usage: Vec<clarp_kernel::usage::ProviderUse>,
     cost: Option<u64>,
     cost_before: Option<u64>,
     interpreter: Box<dyn Interpreter>,
@@ -897,6 +898,7 @@ impl LiveTurn {
             backend: self.backend,
             concluded: self.concluded,
             per_turn_cost: self.per_turn_cost,
+            provider_usage: self.provider_usage.clone(),
             cost: self.cost,
             cost_before: self.cost_before,
             notes: 0,
@@ -1425,6 +1427,7 @@ struct Facts {
     backend: &'static str,
     concluded: bool,
     per_turn_cost: Option<u64>,
+    provider_usage: Vec<clarp_kernel::usage::ProviderUse>,
     cost: Option<u64>,
     cost_before: Option<u64>,
     /// How many notes the turn left for its user.
@@ -1500,6 +1503,7 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
     // was taken up, or one from before totals were kept), or the total fell, the share is not
     // known either, and the total is kept for the turn after.
     end.cost_micros = facts.per_turn_cost;
+    end.provider_usage = facts.provider_usage;
     if let Some(so_far) = facts.cost {
         end.cost_micros = clarp_kernel::usage::rise(facts.cost_before, so_far);
         end.cost_so_far = batch.agent().backend_session().map(|session| CostSoFar {
@@ -1942,6 +1946,7 @@ impl Actor {
                 backend: actor.backend.id(),
                 concluded: false,
                 per_turn_cost: None,
+                provider_usage: Vec::new(),
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
                 offset: 0,
@@ -5887,6 +5892,7 @@ impl Actor {
             // What the conversation has cost so far is said again by the next attempt, with
             // what this one cost in it.
             per_turn_cost: None,
+            provider_usage: Vec::new(),
             cost: None,
             cost_before,
             interpreter,
@@ -6053,6 +6059,7 @@ impl Actor {
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
         let mut per_turn_cost = None;
+        let mut provider_usage = Vec::new();
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
         let (mut total, mut limits) = (None, None);
         let mut compacted = None;
@@ -6210,6 +6217,7 @@ impl Actor {
                         Signal::Concluded => concluded = true,
                         Signal::Limits(said) => limits = Some((record.t, said)),
                         Signal::TurnCost { micros } => per_turn_cost = Some(micros),
+                        Signal::ProviderUsage(used) => provider_usage = used,
                         Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
                             if let clarp_kernel::live::Glimpse::Plan { steps, .. } = &glimpse {
@@ -6229,6 +6237,7 @@ impl Actor {
                         context,
                         limits: limits.clone(),
                         per_turn_cost,
+                        provider_usage: provider_usage.clone(),
                         cost,
                         ..Facts::default()
                     };
@@ -6326,6 +6335,7 @@ impl Actor {
             backend: self.backend.id(),
             concluded,
             per_turn_cost,
+            provider_usage,
             cost,
             cost_before: self.cost_before(turn)?,
             interpreter,
@@ -7427,6 +7437,10 @@ impl Actor {
                         }
                         Signal::OutUntil { at_ms } => {
                             live.out_until_ms = Some(at_ms);
+                            continue;
+                        }
+                        Signal::ProviderUsage(used) => {
+                            live.provider_usage = used;
                             continue;
                         }
                         Signal::TurnCost { micros } => {

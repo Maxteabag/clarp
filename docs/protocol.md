@@ -2628,6 +2628,38 @@ send(text):
 One fetch per session at a time. If a wake-up arrives while a fetch is in
 flight, run one more fetch after it completes rather than starting a second.
 
+
+### OpenCode provider usage
+
+With feature `opencode_provider_usage` (Host contract 215), the administrator and
+full paired devices also receive `opencode_provider_usage` from `GET /backend-usage`.
+The older response keeps its existing schema. The new object contains
+`source: "clarp-turn-accounting"`, `providers` keyed by OpenCode provider ID, and
+`unattributed` local windows or null. OpenCode and the DeepSeek card share this
+accounting because both run through OpenCode.
+
+Each provider has `local` and `remote`. Local windows are named `five_hour` and
+`seven_day` and carry `turns`, `window_minutes`, `tokens_in`, `tokens_out` and
+`cost_usd`. Null amounts mean the tool supplied no amount for that window.
+The amounts sum the measurements OpenCode supplied for completed steps on this Host.
+A turn can contribute to more than one provider. A step without explicit
+provider attribution and older unsplit tallies go into `unattributed`.
+
+The remote `status` is `available`, `unavailable`, `unsupported` or `disabled`.
+An available OpenRouter reading has `source: "openrouter_key"`, an ISO
+`observed_at` and nullable `usage_monthly_usd`, `key_limit_usd`,
+`key_limit_remaining_usd` and `key_limit_reset`. These amounts describe the
+configured inference key. The reset period may be `daily`, `weekly` or
+`monthly`. Wallet credits are separate.
+
+The Host reads its saved OpenCode inference credential for the stock OpenRouter
+provider, or its OPENROUTER_API_KEY when there is no saved entry. The Host reads
+the key metadata when its existing `--ask-usage` option is on.
+Results and failures are cached by credential for five minutes, including on
+`?refresh=1`. Fireworks is unavailable and Hugging Face has no supported remote
+reading for ordinary inference credentials. Local totals can still be shown
+for either. Limited access and older Hosts omit the new object.
+
 ## Extension surfaces
 
 These are the routes only the native app uses today. A new client may adopt
