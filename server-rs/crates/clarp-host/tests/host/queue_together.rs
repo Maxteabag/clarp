@@ -156,3 +156,68 @@ fn three_messages_that_wait_behind_a_turn_go_to_the_tool_in_one_prompt_and_are_a
         .collect();
     assert_eq!(ids, ["u-m1", "u-m2", "u-m3", "u-m4"]);
 }
+
+#[test]
+fn queued_utterances_share_one_answer_only_within_their_call() {
+    let place = Place::new("call-utterances-together");
+    let agy = place.root.join("agy");
+    program(&agy, AGY);
+    let host = place.start_in("", &[], &[("CLARP_AGY_PROGRAM", agy.to_str().unwrap())]);
+    let agent = host.post("/agents", json!({"name":"Caller","backend":"agy"}));
+    let session = agent["session"].as_str().unwrap();
+    host.send(session, "hold", "occupied");
+    wait_for("the previous turn to run", || {
+        place.root.join("holding").exists()
+    });
+
+    let call = || host.post("/calls", json!({"agents":[session]}))["call"]["call_id"].clone();
+    let send = |call: &Value, id: &str, text: &str| {
+        let sent = host.post(
+            "/send",
+            json!({"session":session,"call_id":call,"transcription_id":id,
+                "synthesize_audio":false,"text":text,"client_msg_id":id,"trace_id":id}),
+        );
+        assert_eq!(sent["queued"], true, "{sent}");
+    };
+    let first = call();
+    assert!(first.is_string(), "{first}");
+    send(&first, "call-first", "first captured words");
+    send(&first, "call-second", "second captured words");
+    host.post("/calls/end", json!({"call_id":first}));
+    let second = call();
+    assert!(second.is_string() && second != first, "{second}");
+    send(&second, "other-call", "separate call words");
+    let typed = host.send(session, "typed follow-up", "typed");
+    assert_eq!(typed["queued"], true, "{typed}");
+
+    std::fs::write(place.root.join("release"), "").unwrap();
+    wait_for("every message to be answered", || {
+        let rows = host.turns(session);
+        rows.iter()
+            .any(|row| row["role"] == "assistant" && row["text"] == "agy answer 4")
+            && host.state(session) == "done"
+    });
+    let prompts: Vec<String> = std::fs::read_to_string(place.root.join("prompts"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(prompts.len(), 4, "{prompts:?}");
+    let joined = clarp_kernel::told::together(&["first captured words", "second captured words"]);
+    assert!(
+        prompts[1].contains(&joined),
+        "{prompt:?}",
+        prompt = prompts[1]
+    );
+    assert!(prompts[2].contains("separate call words"), "{prompts:?}");
+    assert!(prompts[3].contains("typed follow-up"), "{prompts:?}");
+    let rows = host.turns(session);
+    for id in ["u-call-first", "u-call-second", "u-other-call", "u-typed"] {
+        assert_eq!(rows.iter().filter(|row| row["id"] == id).count(), 1, "{id}");
+    }
+    let reply = rows
+        .iter()
+        .find(|row| row["text"] == "agy answer 2")
+        .unwrap();
+    assert_eq!(reply["trace_id"], "call-second", "{reply}");
+}

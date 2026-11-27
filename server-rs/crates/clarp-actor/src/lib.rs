@@ -1905,7 +1905,14 @@ impl Actor {
         if let Some(Turn::Parked(parked)) = actor.recorder.agent().live() {
             let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
             let message = actor.message_at(message_seq)?;
-            let in_call = opening_message(&message) || message.call.is_some();
+            let in_call = opening_message(&message) || message.in_call();
+            let latest = actor
+                .recorder
+                .agent()
+                .gathered(turn)
+                .last()
+                .map(|one| actor.message_at(one.message_seq))
+                .transpose()?;
             actor.live = Some(LiveTurn {
                 steering: steering::State::default(),
                 opening: opening_message(&message),
@@ -1920,8 +1927,8 @@ impl Actor {
                     .backend
                     .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt)),
                 client_id: message.told_id().to_string(),
+                trace_id: together::reply_trace(&message, latest.as_ref()),
                 message_id: message.id,
-                trace_id: message.trace_id,
                 origin: message.origin,
                 sender_agent_id: message.sender.map(|sender| sender.agent_id),
                 model: None,
@@ -2257,7 +2264,7 @@ impl Actor {
     fn text_turn_ack(&self, message: &Message) -> bool {
         message.text_chat
             && message.origin == Origin::User
-            && message.call.is_none()
+            && !message.in_call()
             && self.teams.as_ref().is_some_and(|host| host.text_turn_ack())
     }
 
@@ -3181,7 +3188,7 @@ impl Actor {
                 .waiting()
                 .find(|queued| queued.id == turn)
                 .is_some_and(|queued| agent.goes_together(queued))
-            && message.call.is_none()
+            && message.can_be_read_together()
             && self.mark(turn.0)?.is_none();
         Ok(Waiting {
             read_together,
@@ -5615,19 +5622,20 @@ impl Actor {
         let gather = attempt <= 1
             && origin_is_user
             && takeover.is_none()
-            && message.call.is_none()
+            && message.can_be_read_together()
             && !self.fork_runs()
             && !self.lingers()
             && self.mark(turn.0)?.is_none();
         let together = if bare || opening.is_some() {
             Vec::new()
         } else {
-            self.together(turn, gather, out, now_ms)?
+            self.together(turn, gather.then_some(&message), out, now_ms)?
         };
         // Each of the user's sends carries the app's audio setting when it was sent: the
         // newest of those read together says whether the turn is spoken.
         let speak = together.last().map_or(message.speak, |one| one.speak);
         let unheard = message.unheard || together.iter().any(|one| one.unheard);
+        let reply_trace = together::reply_trace(&message, together.last());
         let text = if together.is_empty() {
             message.text.clone()
         } else {
@@ -5835,7 +5843,7 @@ impl Actor {
             ),
             None => (message.id.clone(), None, None, None, None),
         };
-        let in_call = opening.is_some() || message.call.is_some();
+        let in_call = opening.is_some() || message.in_call();
         let said = Unfollowed::from_log(unfollowed(self.recorder.log(), turn)?);
         self.live = Some(LiveTurn {
             steering: steering::State::for_prompt(
@@ -5858,7 +5866,7 @@ impl Actor {
             told_speech: speak,
             client_id,
             message_id: message.id,
-            trace_id: message.trace_id,
+            trace_id: reply_trace,
             origin: message.origin,
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             model,
@@ -6266,12 +6274,15 @@ impl Actor {
         // into its prompt said (they have no echo of their own to replay); then the newest of
         // the user's messages read into it decides, and another sender's can only ask for
         // speech. A call's turn is never turned off by a message read into it.
-        let in_call = opening_message(&message) || message.call.is_some();
-        let gathered = self.recorder.agent().gathered(turn).last();
-        let launched = match gathered.map(|one| one.message_seq) {
-            Some(seq) => self.message_at(seq)?.speak,
-            None => message.speak,
-        };
+        let in_call = opening_message(&message) || message.in_call();
+        let latest = self
+            .recorder
+            .agent()
+            .gathered(turn)
+            .last()
+            .map(|one| self.message_at(one.message_seq))
+            .transpose()?;
+        let launched = latest.as_ref().map_or(message.speak, |one| one.speak);
         let speak = if in_call {
             launched || steering.joined_told
         } else {
@@ -6292,8 +6303,8 @@ impl Actor {
                 .or_else(|| self.launch_preferences(&message).model),
             turn,
             client_id: message.told_id().to_string(),
+            trace_id: together::reply_trace(&message, latest.as_ref()),
             message_id: message.id,
-            trace_id: message.trace_id,
             origin: message.origin,
             sender_agent_id: message.sender.map(|sender| sender.agent_id),
             last_row,
