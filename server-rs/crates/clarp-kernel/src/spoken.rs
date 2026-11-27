@@ -114,6 +114,9 @@ pub struct Line {
     /// What an app last said of playing the clip (`play-start`, `play-ok`, `play-fail`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub played: Option<String>,
+    /// The receipt the log copied. Older Hosts can read the playback status itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback_revision: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub queued_at_ms: i64,
@@ -415,6 +418,7 @@ impl SpeechBook {
                         line.state = LineState::Queued;
                         line.claimed_at_ms = None;
                         (line.clip_id, line.clip, line.event_id) = (None, None, None);
+                        line.playback_revision = None;
                         (line.provider, line.voice) = (None, None);
                     } else {
                         line.state = LineState::Failed;

@@ -18,7 +18,7 @@ use clarp_backend::scripted::Scripted;
 use clarp_codec::standard_set;
 use clarp_kernel::conversation::{Entry, Message, ToolStatus};
 use clarp_kernel::journal::kind;
-use clarp_kernel::spoken::{CUT_OFF, KEPT_FOR_MS, LineState, Said};
+use clarp_kernel::spoken::{CUT_OFF, KEPT_FOR_MS, Line, LineState, Said};
 use clarp_kernel::turn::{Admission, Origin, Outcome, TurnId};
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::{AgentLog, Kinds, LogEngine, LogError};
@@ -2016,22 +2016,16 @@ fn what_a_reply_marks_for_the_ear_waits_to_be_spoken_and_goes_one_way() {
             .is_none(),
         "over once"
     );
-    assert!(actor.line_played(41, "play-ok", None, now).unwrap());
-    assert!(
-        !actor.line_played(99, "play-ok", None, now).unwrap(),
-        "nobody's clip"
-    );
-    assert_eq!(
-        actor.speech().by_clip(41).unwrap().played.as_deref(),
-        Some("play-ok")
-    );
+    let receipt = |line: &Line| (line.clip_id == Some(41)).then(|| line.played("play-ok", None));
+    assert!(!actor.mirror_playback(receipt, now).unwrap());
+    assert_eq!(actor.speech().by_clip(41).unwrap().played, None);
 
     // The next line is taken, and the Host goes away while it is being spoken, for long.
     let taken = actor.claim_line(world.tick()).unwrap().unwrap();
     assert_eq!(taken.id, "s-c-1");
     drop(actor);
     world.now_ms += 3 * 60 * 1_000;
-    let actor = world.open();
+    let mut actor = world.open();
     // What was spoken is still spoken; what was cut off long ago is not begun again.
     assert_eq!(
         lines(&actor),
@@ -2041,6 +2035,13 @@ fn what_a_reply_marks_for_the_ear_waits_to_be_spoken_and_goes_one_way() {
         ]
     );
     assert_eq!(actor.speech().lines()[1].error.as_deref(), Some(CUT_OFF));
+    assert!(actor.mirror_playback(receipt, world.tick()).unwrap());
+    drop(actor);
+    let actor = world.open();
+    assert_eq!(
+        actor.speech().by_clip(41).unwrap().played.as_deref(),
+        Some("play-ok")
+    );
     // What is in the conversation is as it was: speech is beside it, not in it.
     assert_eq!(
         chat(&actor.tail(10).unwrap())

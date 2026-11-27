@@ -59,7 +59,7 @@ use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, k
 use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
-use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
+use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, LineState, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
 use clarp_kernel::turn::{
     Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, TRANSIT_SUMMARY,
@@ -3661,19 +3661,22 @@ impl Actor {
         Ok(true)
     }
 
-    /// What an app says of playing a clip. Answers whether the agent has that clip.
-    pub fn line_played(
+    /// Copies playback receipts after the lines already waiting or being spoken.
+    /// The caller projects only playback state over the actor's current lines.
+    pub fn mirror_playback(
         &mut self,
-        clip_id: u64,
-        status: &str,
-        error: Option<&str>,
+        project: impl FnMut(&Spoken) -> Option<Spoken>,
         now_ms: i64,
     ) -> Result<bool, ActorError> {
-        let Some(line) = self.speech.by_clip(clip_id) else {
+        let lines = self.speech.lines();
+        if lines
+            .iter()
+            .any(|line| matches!(line.state, LineState::Queued | LineState::Speaking))
+        {
             return Ok(false);
-        };
-        let played = line.played(status, error);
-        self.write_lines(std::slice::from_ref(&played), now_ms)?;
+        }
+        let copied: Vec<_> = lines.iter().filter_map(project).collect();
+        self.write_lines(&copied, now_ms)?;
         Ok(true)
     }
 

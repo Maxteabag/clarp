@@ -2288,6 +2288,7 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
                 .await?
                 .record(
                     agent.clone(),
+                    member.agent.clone(),
                     line,
                     status.to_string(),
                     error.map(str::to_string),

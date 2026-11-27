@@ -1,8 +1,7 @@
-//! A client's receipts belong to this Host's playback desk. Only the agent writes
-//! its conversation log. Playback and the next line can therefore make progress
-//! while the receipt's own durable write waits.
+//! A client's receipts belong to this Host's playback desk. The agent copies their
+//! playback status to its own log when its speech has drained, for older Hosts.
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -13,13 +12,15 @@ use clarp_store_sqlite::SqliteKeyValue;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-use crate::agent::Unavailable;
+use crate::agent::{AgentHandle, Unavailable};
 
 const TABLE: &str = "receipt";
 
 #[derive(Clone, Deserialize, Serialize)]
 struct Receipt {
     line: String,
+    #[serde(default)]
+    revision: u64,
     #[serde(default)]
     base_played: Option<String>,
     #[serde(default)]
@@ -67,24 +68,39 @@ impl Receipts {
         }))
     }
 
-    /// A receipt applies to the exact line and clip it was recorded over.
-    /// A changed status in the log can come from a Host that wrote there again.
+    /// A mirror from this book carries its revision. A different legacy status
+    /// without that revision can come from an older Host writing the log again.
     pub(crate) fn shown<'a>(&self, agent: &str, line: &'a Line) -> Cow<'a, Line> {
         let Some(clip) = line.clip_id else {
             return Cow::Borrowed(line);
         };
         let kept = self.kept.read().unwrap_or_else(PoisonError::into_inner);
-        let Some(receipt) = kept.get(&place(agent, clip)).filter(|receipt| {
-            receipt.line == line.id
-                && receipt.base_played == line.played
-                && receipt.base_error == line.error
-        }) else {
+        let Some(receipt) = kept.get(&place(agent, clip)) else {
             return Cow::Borrowed(line);
         };
+        let applies = line.playback_revision.map_or_else(
+            || receipt.base_played == line.played && receipt.base_error == line.error,
+            |revision| revision < receipt.revision,
+        );
+        if receipt.line != line.id || !applies {
+            return Cow::Borrowed(line);
+        }
         let Some(status) = receipt.played.as_deref() else {
             return Cow::Borrowed(line);
         };
-        Cow::Owned(line.played(status, receipt.error.as_deref()))
+        let mut copied = line.played(status, receipt.error.as_deref());
+        copied.playback_revision = Some(receipt.revision);
+        Cow::Owned(copied)
+    }
+
+    /// Who may still have a receipt to copy after the Host has restarted.
+    pub(crate) fn agents(&self) -> HashSet<String> {
+        self.kept
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .filter_map(|key| key.rsplit_once('/').map(|(agent, _)| agent.to_string()))
+            .collect()
     }
 
     /// Return only after the new status is durable. The only serialization is
@@ -92,6 +108,7 @@ impl Receipts {
     pub(crate) async fn record(
         self: &Arc<Self>,
         agent: String,
+        handle: AgentHandle,
         line: Line,
         status: String,
         error: Option<String>,
@@ -106,11 +123,24 @@ impl Receipts {
             let shown = book.shown(&agent, &line);
             let played = shown.played(&status, error.as_deref());
             if *shown == played {
+                if matches!(shown, Cow::Owned(_)) {
+                    handle.mirror_playback(book);
+                }
                 return Ok(());
             }
             let key = place(&agent, clip);
+            let previous = book
+                .kept
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(&key)
+                .filter(|receipt| receipt.line == line.id)
+                .map_or(0, |receipt| receipt.revision);
             let receipt = Receipt {
                 line: played.id,
+                revision: previous
+                    .max(line.playback_revision.unwrap_or_default())
+                    .saturating_add(1),
                 base_played: line.played,
                 base_error: line.error,
                 played: played.played,
@@ -123,6 +153,9 @@ impl Receipts {
                 .write()
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(key, receipt);
+            // Do this in the committing task so an HTTP disconnect after the
+            // write still leaves a copy requested. The agent decides when to write.
+            handle.mirror_playback(book);
             Ok(())
         })
         .await

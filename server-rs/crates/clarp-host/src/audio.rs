@@ -94,9 +94,19 @@ impl Desk {
             .get_or_try_init(|| async {
                 let path = Self::playback_path(app);
                 let persistent = app.config.engine == "sqlite";
-                tokio::task::spawn_blocking(move || Receipts::open(&path, persistent))
-                    .await
-                    .map_err(|error| Unavailable::new(error.to_string()))?
+                let (book, agents) = tokio::task::spawn_blocking(move || {
+                    let book = Receipts::open(&path, persistent)?;
+                    let agents = book.agents();
+                    Ok::<_, Unavailable>((book, agents))
+                })
+                .await
+                .map_err(|error| Unavailable::new(error.to_string()))??;
+                for member in &app.fleet.directory().members {
+                    if agents.contains(&member.record.agent_id) {
+                        member.agent.mirror_playback(book.clone());
+                    }
+                }
+                Ok(book)
             })
             .await
     }

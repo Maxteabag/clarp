@@ -41,6 +41,7 @@ use clarp_ports::log::LogEngine;
 use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
+use crate::audio::Receipts;
 use crate::fleet::{AgentRecord, non_empty};
 use crate::goaltool;
 use crate::hub::Hub;
@@ -540,6 +541,8 @@ enum Ask {
         across: bool,
         answer: Answer<bool>,
     },
+    /// The desk has kept a receipt. Copy its latest playback state when speech drains.
+    MirrorPlayback(Arc<Receipts>),
     /// From a turn's thread: the live turn's spool may have grown.
     TakeoverHeld {
         offer: clarp_actor::takeover::Offer,
@@ -685,6 +688,7 @@ impl Ask {
             Self::LineBegun { .. } => "LineBegun",
             Self::LineEnded { .. } => "LineEnded",
             Self::LineAnnounced { .. } => "LineAnnounced",
+            Self::MirrorPlayback(_) => "MirrorPlayback",
             Self::TakeoverHeld { .. } => "TakeoverHeld",
             Self::TransitCheckpointHeld { .. } => "TransitCheckpointHeld",
             Self::SpoolChanged => "SpoolChanged",
@@ -1781,6 +1785,10 @@ impl AgentHandle {
         });
     }
 
+    pub(crate) fn mirror_playback(&self, book: Arc<Receipts>) {
+        let _ = self.enqueue(Ask::MirrorPlayback(book));
+    }
+
     /// What the agent is doing, as it last said.
     /// Asks something of the agent's artifacts. The inner error is what the rules refuse.
     pub async fn artifact(&self, want: Want) -> Result<Result<Done, Refused>, Unavailable> {
@@ -2103,6 +2111,7 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
         goals_looked_at: 0,
         books: Arc::default(),
         speech: Arc::default(),
+        playback_to_mirror: None,
         artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
         stall: Stall::default(),
@@ -2224,6 +2233,8 @@ struct Worker {
     /// What the agent says aloud, as it was last published. A week of lines at most: it is
     /// written anew whenever a line changes, which is a few times for every line.
     speech: Arc<SpeechBook>,
+    /// A receipt is waiting to be copied after the speech already in the agent's log.
+    playback_to_mirror: Option<Arc<Receipts>>,
     /// Each artifact as the clients were last told of it.
     artifacts_told: BTreeMap<String, ToldArtifact>,
     /// The two clocks as they were read together last: what tells a sleep of the machine.
@@ -2634,6 +2645,10 @@ impl Worker {
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
             // waits for.
+            let speech_before = self
+                .playback_to_mirror
+                .as_ref()
+                .map(|_| self.speech.clone());
             if let Err(error) = self.handle(ask).and_then(|()| {
                 let _held = crate::held::Held::new(&thread, "its goals after a request");
                 self.check_goals().and_then(|()| self.advance_native_goal())
@@ -2646,6 +2661,11 @@ impl Worker {
             }
             self.tell_shown();
             self.steer_when_can();
+            if self.playback_to_mirror.is_some()
+                && speech_before.is_none_or(|before| !Arc::ptr_eq(&before, &self.speech))
+            {
+                self.keep_playback_mirror();
+            }
         }
     }
 
@@ -3222,6 +3242,32 @@ impl Worker {
             Err(error) => {
                 let _ = answer.send(Err(unavailable(&error)));
                 Err(error)
+            }
+        }
+    }
+
+    fn keep_playback_mirror(&mut self) {
+        let now = self.now_ms();
+        let Some((actor, book)) = self.actor.as_mut().zip(self.playback_to_mirror.as_ref()) else {
+            return;
+        };
+        let agent = &self.setup.record.agent_id;
+        let project = |line: &SpokenLine| match book.shown(agent, line) {
+            std::borrow::Cow::Owned(copied) => Some(copied),
+            std::borrow::Cow::Borrowed(_) => None,
+        };
+        match actor.mirror_playback(project, now) {
+            Ok(false) => {}
+            Ok(true) => {
+                self.playback_to_mirror = None;
+                if self.read_speech() {
+                    self.publish_view();
+                }
+            }
+            Err(why) => {
+                eprintln!("clarp-host: playback copy failed for {agent}: {why}");
+                self.playback_to_mirror = None;
+                self.actor = None;
             }
         }
     }
@@ -3940,6 +3986,10 @@ impl Worker {
                 let announced =
                     |actor: &mut Actor, now| actor.line_announced(clip, (event_id, across), now);
                 return self.handle_speech(announced, answer);
+            }
+            Ask::MirrorPlayback(book) => {
+                self.playback_to_mirror = Some(book);
+                return Ok(());
             }
             other => other,
         };
@@ -4835,7 +4885,8 @@ impl Worker {
             | Ask::ClaimLine { .. }
             | Ask::LineBegun { .. }
             | Ask::LineEnded { .. }
-            | Ask::LineAnnounced { .. } => return Ok(()),
+            | Ask::LineAnnounced { .. }
+            | Ask::MirrorPlayback(_) => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
                 let whole = held.left_ms > 0
                     && held.partial_out == 0
@@ -7259,6 +7310,7 @@ fn refuse_for(
             ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged
+                | Ask::MirrorPlayback(_)
                 | Ask::TakeoverHeld { .. }
                 | Ask::TransitCheckpointHeld { .. }
                 | Ask::ShimGone { .. }
