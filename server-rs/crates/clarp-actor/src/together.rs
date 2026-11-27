@@ -21,6 +21,16 @@ use super::{Actor, ActorError, Outputs, steering};
 /// turn's prompt: an identity no attempt, steer or fork of its own ever has.
 const TOGETHER_ATTEMPT: u32 = 2_001;
 
+/// The reply to several utterances follows the one the caller most recently sent.
+pub(super) fn reply_trace(carrier: &Message, latest: Option<&Message>) -> Option<String> {
+    if carrier.voice_call.is_some()
+        && let Some(trace) = latest.and_then(|one| one.trace_id.as_ref())
+    {
+        return Some(trace.clone());
+    }
+    carrier.trace_id.clone()
+}
+
 impl Actor {
     /// The user's messages a turn's prompt holds after its own, in the order they were sent.
     /// At the start of the turn's first attempt (`gather`) those that wait directly behind its
@@ -28,12 +38,12 @@ impl Actor {
     pub(super) fn together(
         &mut self,
         turn: TurnId,
-        gather: bool,
+        carrier: Option<&Message>,
         out: &mut Outputs,
         now_ms: i64,
     ) -> Result<Vec<Message>, ActorError> {
-        if gather {
-            self.gather(turn, out, now_ms)?;
+        if let Some(carrier) = carrier {
+            self.gather(turn, carrier, out, now_ms)?;
         }
         self.recorder
             .agent()
@@ -43,7 +53,13 @@ impl Actor {
             .collect()
     }
 
-    fn gather(&mut self, turn: TurnId, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
+    fn gather(
+        &mut self,
+        turn: TurnId,
+        carrier: &Message,
+        out: &mut Outputs,
+        now_ms: i64,
+    ) -> Result<(), ActorError> {
         let agent = self.recorder.agent();
         let mut taken = Vec::new();
         for next in agent.waiting_together() {
@@ -55,9 +71,12 @@ impl Actor {
             let Ok(message) = self.message_at(queued.message_seq) else {
                 break;
             };
-            // Another agent's words the user only carried, and a message of a call, keep
-            // their own turns: the first is answered to its sender, the second in its call.
-            if !matches!(self.mark(next.0), Ok(None)) || message.call.is_some() {
+            // A different call, legacy call header or carried message keeps its
+            // own turn. Stop at that boundary to preserve the order of the words.
+            if !message.can_be_read_together()
+                || message.voice_call != carrier.voice_call
+                || !matches!(self.mark(next.0), Ok(None))
+            {
                 break;
             }
             taken.push((next, message));
