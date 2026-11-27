@@ -98,6 +98,9 @@ if (root / "slow-exit").exists():
     import time
     time.sleep(10)
 note("exits", session)
+if turn_env == "set":
+    # A turn's own process, not a lane: noted apart, after its exit, by the session it ran.
+    note("cold-exits", session)
 "#;
 
 pub(super) fn noted(place: &Place, name: &str) -> String {
@@ -694,13 +697,17 @@ fn over_the_limits_with_every_lane_busy_a_turn_runs_on_its_own() {
         "the turn ran in a process of its own"
     );
     assert_eq!(crowd.cold(), cold + 1);
-    assert!(there(&one) && there(&two), "no busy lane was touched");
     // The turn's own process ends with its turn, and its stand-in notes that exit as a lane's
-    // would: bd4a41ad2 counted it as a lane that left, and failed every run. Its exit is the
-    // only one.
-    let exits = || noted(&crowd.place, "exits").lines().count();
-    wait_for("the turn's own process to end", || exits() >= 1);
-    assert_eq!(exits(), 1, "no lane left");
+    // would: bd4a41ad2 counted it as a lane that left, and failed every run. It is told apart by
+    // the session it ran, and it is the only process that ended: both lanes still answer, before
+    // either held turn is let go.
+    wait_for("the turn's own process to end", || {
+        !noted(&crowd.place, "cold-exits").is_empty()
+    });
+    let turns_own = noted(&crowd.place, "cold-exits");
+    assert_eq!(turns_own.lines().count(), 1, "{turns_own}");
+    assert_eq!(noted(&crowd.place, "exits"), turns_own, "no lane left");
+    assert!(there(&one) && there(&two), "no busy lane was touched");
     crowd.release("one");
     crowd.release("two");
 }
