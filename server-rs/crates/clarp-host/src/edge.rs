@@ -1031,7 +1031,10 @@ pub fn router(app: App) -> Router {
         .method_not_allowed_fallback(no_route)
         // A request waits until the start has come as far as it needs (issue 935): liveness at
         // once, the agents' rows once every agent is open, the rest once the start is done.
-        .layer(middleware::from_fn_with_state(app.clone(), crate::start::door))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            crate::start::door,
+        ))
         .layer(middleware::from_fn_with_state(app.clone(), looked_at_only))
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
@@ -3390,10 +3393,9 @@ async fn with_kept(
     if after.is_some_and(|after| revision <= after) {
         return page;
     }
-    let ts_ms = page
-        .entries
-        .last()
-        .map_or(first.at_ms, |row| first.at_ms.max(row.ts_ms.saturating_add(1)));
+    let ts_ms = page.entries.last().map_or(first.at_ms, |row| {
+        first.at_ms.max(row.ts_ms.saturating_add(1))
+    });
     page.entries.push(clarp_actor::conversation::Versioned::of(
         clarp_kernel::conversation::Entry::Message(first.message),
         revision,
@@ -4160,7 +4162,12 @@ async fn send_as(
             trace_named: made.trace_named,
             at_ms: app.clock.now_ms(),
         };
-        let early = match member.agent.keep_while_opening(accepted).await.transpose()? {
+        let early = match member
+            .agent
+            .keep_while_opening(accepted)
+            .await
+            .transpose()?
+        {
             Some(crate::agent::Early::Unkept(why)) => {
                 eprintln!(
                     "clarp-host: send {} for agent {} goes to its mailbox: {why}",

@@ -3299,9 +3299,13 @@ impl Worker {
             let held = tokio::task::spawn_blocking(move || {
                 crate::launcher::takeover_request(
                     &socket,
-                    clarp_shim::Request::Hold { ms: clarp_shim::HOLD_MOST_MS },
-                ).and_then(|reply| reply.held)
-            }).await;
+                    clarp_shim::Request::Hold {
+                        ms: clarp_shim::HOLD_MOST_MS,
+                    },
+                )
+                .and_then(|reply| reply.held)
+            })
+            .await;
             if let Ok(Some(held)) = held {
                 let _ = tx.send(Ask::TransitCheckpointHeld { offer, held });
             }
@@ -4843,13 +4847,16 @@ impl Worker {
             | Ask::LineAnnounced { .. }
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
-                let whole = held.left_ms > 0 && held.partial_out == 0
-                    && held.partial_err == 0 && held.partial_reports == 0;
+                let whole = held.left_ms > 0
+                    && held.partial_out == 0
+                    && held.partial_err == 0
+                    && held.partial_reports == 0;
                 let acceptable = if whole
                     && let Some(native) = crate::takeover::native_transit_progress(
-                        &crate::config::home(), &self.setup.record.cwd, &offer,
-                    )
-                {
+                        &crate::config::home(),
+                        &self.setup.record.cwd,
+                        &offer,
+                    ) {
                     actor.expect_transit_checkpoint(&offer, held.spool, &native, now)?
                 } else {
                     false
@@ -6125,7 +6132,6 @@ impl Worker {
         std::mem::replace(&mut self.stall.since, since) != since
     }
 
-
     /// Reads the agent from what its log committed, before its thread opens it (issue 935): its
     /// view is published from that reading, still being opened, and what is asked of it meanwhile
     /// is answered from it. Read on a connection that writes nothing ([`LogEngine::read_committed`])
@@ -7305,7 +7311,10 @@ mod mailbox_tests {
         };
         tokio::task::yield_now().await;
         assert!(!asked.is_finished(), "a read waits for the glance");
-        assert!(rx.try_recv().is_err(), "and not in the opening agent's mailbox");
+        assert!(
+            rx.try_recv().is_err(),
+            "and not in the opening agent's mailbox"
+        );
 
         // What its log committed: one row.
         let root = std::env::temp_dir().join(format!("clarp-glance-read-{}", std::process::id()));
@@ -7332,7 +7341,12 @@ mod mailbox_tests {
             Arc::new(clarp_backend::scripted::Scripted::echo());
         let log = engine.open(&profile.dir, codecs.clone()).unwrap();
         let (mut writer, _) = Actor::open(profile.clone(), backend.clone(), log, 1_000).unwrap();
-        assert!(writer.note("n-committed", "committed before the restart", 1_001).unwrap().0);
+        assert!(
+            writer
+                .note("n-committed", "committed before the restart", 1_001)
+                .unwrap()
+                .0
+        );
         let committed = writer.tail(10).unwrap();
         let read = engine.read_committed(&profile.dir, codecs).unwrap();
         let glance = Actor::glance(profile, backend, read, 1_002).unwrap();
@@ -7354,7 +7368,10 @@ mod mailbox_tests {
             page.entries.last().map(|row| row.entry.id().to_string()),
             Some("n-committed".to_string())
         );
-        assert!(rx.try_recv().is_err(), "the opening agent's mailbox was never asked");
+        assert!(
+            rx.try_recv().is_err(),
+            "the opening agent's mailbox was never asked"
+        );
 
         // A worker that goes without deciding its glance (its thread could not be started)
         // leaves no read waiting: the read goes to the mailbox, which says the agent is closed.

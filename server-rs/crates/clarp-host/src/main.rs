@@ -213,9 +213,7 @@ fn still_opening(app: &App) -> usize {
         .members
         .iter()
         .chain(directory.janitors.iter())
-        .filter(|member| {
-            member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING)
-        })
+        .filter(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
         .count()
 }
 
@@ -646,12 +644,9 @@ async fn serve(config: Config) -> Result<(), String> {
         // What follows needs the agents opened: it waits for them, twenty seconds at most.
         let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
         while tokio::time::Instant::now() < opened_by
-            && app
-                .fleet
-                .directory()
-                .members
-                .iter()
-                .any(|member| member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING))
+            && app.fleet.directory().members.iter().any(|member| {
+                member.agent.view().broken.as_deref() == Some(clarp_host::agent::OPENING)
+            })
         {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }

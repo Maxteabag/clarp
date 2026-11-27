@@ -57,12 +57,18 @@ fn a_start_that_fails_after_the_host_answers_ends_it_and_never_says_started() {
         if let Some((200, started)) = answer(&address, "/host/start") {
             break started;
         }
-        assert!(Instant::now() < deadline, "the Host never answered its liveness");
+        assert!(
+            Instant::now() < deadline,
+            "the Host never answered its liveness"
+        );
         std::thread::sleep(Duration::from_millis(20));
     };
     let run = started["instance"].as_str().unwrap().to_string();
     assert_ne!(started["stage"], "started", "{started}");
-    assert_eq!(answer(&address, "/server-info").map(|(status, _)| status), Some(200));
+    assert_eq!(
+        answer(&address, "/server-info").map(|(status, _)| status),
+        Some(200)
+    );
 
     // A step of its start fails: the Host ends, failed, and that run never said `started`.
     std::fs::write(&fail, []).unwrap();
@@ -75,7 +81,10 @@ fn a_start_that_fails_after_the_host_answers_ends_it_and_never_says_started() {
             assert_eq!(now["instance"], run.as_str());
             assert_ne!(now["stage"], "started", "{now}");
         }
-        assert!(Instant::now() < deadline, "the Host did not end when its start failed");
+        assert!(
+            Instant::now() < deadline,
+            "the Host did not end when its start failed"
+        );
         std::thread::sleep(Duration::from_millis(20));
     };
     assert!(!status.success());

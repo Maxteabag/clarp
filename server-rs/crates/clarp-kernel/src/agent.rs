@@ -86,9 +86,13 @@ pub enum Command {
         to: Option<crate::agent_moves::Target>,
     },
     /// The actor knows this live slot never reached the tool.
-    HoldUnsentForMove { turn: TurnId },
+    HoldUnsentForMove {
+        turn: TurnId,
+    },
     /// A continuation that may have reached the tool cannot be replayed here.
-    InterruptMovedRetry { turn: TurnId },
+    InterruptMovedRetry {
+        turn: TurnId,
+    },
     /// A message was written to the log at `message_seq` and wants a turn.
     Accept {
         message_seq: u64,
@@ -101,59 +105,106 @@ pub enum Command {
         user_word: bool,
     },
     /// Reserve a queued message for input to the live turn.
-    Join { turn: TurnId, join: Join },
+    Join {
+        turn: TurnId,
+        join: Join,
+    },
     /// The live process echoed this follow-up.
-    JoinRead { turn: TurnId },
+    JoinRead {
+        turn: TurnId,
+    },
     /// An answer settled this follow-up, or the process ended after reading it.
-    JoinSettled { turn: TurnId },
+    JoinSettled {
+        turn: TurnId,
+    },
     /// Take a waiting message back.
-    Withdraw { turn: TurnId, by: String },
+    Withdraw {
+        turn: TurnId,
+        by: String,
+    },
     /// Let one waiting message run now, whatever holds the mailbox: its user sends it by
     /// hand. Only when no turn runs.
-    SendNow { turn: TurnId, by: String },
+    SendNow {
+        turn: TurnId,
+        by: String,
+    },
     /// The owner's waiting message takes over (issue 867): the live turn ends as stopped for
     /// it, as for a newer message of the owner's said direct (`owner_preempts`), and it runs
     /// the moment that turn is over, ahead of everything, held by nothing. Nothing is paused.
     /// Only while a turn runs: with none, the message is sent as any other.
-    TakeOver { turn: TurnId, by: String },
+    TakeOver {
+        turn: TurnId,
+        by: String,
+    },
     /// The words of a waiting message were written anew, at `message_seq`: its turn answers
     /// those. It keeps its place among what waits.
-    Reword { turn: TurnId, message_seq: u64 },
+    Reword {
+        turn: TurnId,
+        message_seq: u64,
+    },
     /// End the live turn and hold the mailbox: who asks it, and why.
-    Stop { by: Control },
+    Stop {
+        by: Control,
+    },
     /// A non-deferred Stop that lets the user's already waiting messages run.
-    StopAndStartWaiting { by: Control },
+    StopAndStartWaiting {
+        by: Control,
+    },
     /// Someone looked for a turn of the agent that nothing runs, and gives it back: nothing is
     /// ended and nothing is held or let go. What is kept is a note of who and why, on the state.
-    Repair { by: Control },
+    Repair {
+        by: Control,
+    },
     /// Let the mailbox run again.
-    Resume { by: String },
+    Resume {
+        by: String,
+    },
     /// Run the first eligible message after releasing a transient launch fence.
     RunWaiting,
-    ExpectTransitCheckpoint { checkpoint: TransitCheckpoint, recorded_work: bool },
-    ParkTransitCheckpoint { checkpoint: TransitCheckpoint },
+    ExpectTransitCheckpoint {
+        checkpoint: TransitCheckpoint,
+        recorded_work: bool,
+    },
+    ParkTransitCheckpoint {
+        checkpoint: TransitCheckpoint,
+    },
     HoldUnsentForTransit {
         turn: TurnId,
     },
     /// The agent says, in a few words, what it is busy with beyond its turns: work it left
     /// running. An empty label takes that back.
-    Label { text: String },
+    Label {
+        text: String,
+    },
     /// A label that outlived its time is taken back, if it is still the one that was set at
     /// `set_at_ms`: one set again since stands.
-    RetireLabel { set_at_ms: i64 },
+    RetireLabel {
+        set_at_ms: i64,
+    },
     /// The shim: the tool process is up.
-    TurnStarted { turn: TurnId },
+    TurnStarted {
+        turn: TurnId,
+    },
     /// The shim: the tool process could not be started.
-    StartFailed { turn: TurnId, reason: String },
+    StartFailed {
+        turn: TurnId,
+        reason: String,
+    },
     /// The shim: the tool named its own session.
     TurnBound {
         turn: TurnId,
         backend_session: String,
     },
     /// The shim: the tool is doing something else now.
-    TurnMoved { turn: TurnId, activity: Activity },
+    TurnMoved {
+        turn: TurnId,
+        activity: Activity,
+    },
     /// The shim: the tool process is gone, and this is how it went.
-    TurnEnded { turn: TurnId, outcome: RunOutcome },
+    TurnEnded {
+        turn: TurnId,
+        outcome: RunOutcome,
+    },
     /// Record who is about to ask a shim to hold, before it can send SIGSTOP.
     OfferTakeover {
         from: TurnId,
@@ -165,9 +216,13 @@ pub enum Command {
         selected: crate::takeover::Selection,
     },
     /// The held tool was not killed for takeover. Leave the next message in the queue.
-    ClearTakeover { from: TurnId },
+    ClearTakeover {
+        from: TurnId,
+    },
     /// The shim durably marked the selected attempt and ended its tool.
-    FinishTakeover { from: TurnId },
+    FinishTakeover {
+        from: TurnId,
+    },
     /// The tool process is gone on a failure that does not end the turn: it waits for its
     /// next attempt. `kind` and `reason` are the failure, read and in the tool's words.
     TurnParked {
@@ -177,15 +232,23 @@ pub enum Command {
         reason: String,
     },
     /// The wait is over: start the turn's next attempt.
-    TurnRetried { turn: TurnId },
+    TurnRetried {
+        turn: TurnId,
+    },
     /// The turn waited for the network, which was gone, and it is back: start its next
     /// attempt. That attempt is no try against a bad line.
-    NetworkBack { turn: TurnId },
+    NetworkBack {
+        turn: TurnId,
+    },
     /// The wait did not end well: the turn ends on the failure it waited on.
-    WaitOver { turn: TurnId },
+    WaitOver {
+        turn: TurnId,
+    },
     /// The turn waited for the network, and it did not come back in time: the turn ends on
     /// the failure it waited on, and says that the network was gone.
-    NetworkGone { turn: TurnId },
+    NetworkGone {
+        turn: TurnId,
+    },
     /// The agent comes from another Host, with the tool's session it had there.
     Adopt {
         from: String,
@@ -193,7 +256,9 @@ pub enum Command {
     },
     /// The agent begins with a session its tool kept on this machine: its first turn
     /// continues it. Only before its first turn.
-    TakeUp { backend_session: String },
+    TakeUp {
+        backend_session: String,
+    },
     /// The agent goes on with another tool, `backend`, after `from`. Its conversation was
     /// written as a session of that tool, which its next turn continues; or, where none was
     /// (`None`), its next turn begins one that opens with the Host's record of it. Only
@@ -213,7 +278,10 @@ pub enum Command {
     StartAgain,
     /// What the user's compaction did, said once its turn has ended (`compaction`): only for
     /// that turn, and only once.
-    RecordCompaction { turn: TurnId, said: LastCompaction },
+    RecordCompaction {
+        turn: TurnId,
+        said: LastCompaction,
+    },
 }
 
 /// Launch settings recorded with the backend switch for restart recovery.
@@ -247,7 +315,9 @@ pub enum AgentEvent {
     MoveMarked {
         mark: Option<crate::agent_moves::Mark>,
     },
-    TransitCheckpointExpected { checkpoint: TransitCheckpoint },
+    TransitCheckpointExpected {
+        checkpoint: TransitCheckpoint,
+    },
     HeldUnsentForMove {
         turn: TurnId,
     },
@@ -955,7 +1025,9 @@ impl Agent {
     }
 
     pub fn resumed_by_transit(&self, turn: TurnId, attempt: u32) -> bool {
-        self.transit_attempt.as_ref().is_some_and(|next| next.turn == turn && next.attempt == attempt)
+        self.transit_attempt
+            .as_ref()
+            .is_some_and(|next| next.turn == turn && next.attempt == attempt)
     }
 
     pub fn changed_selection(&self) -> Option<&ToolSelection> {
@@ -1559,7 +1631,10 @@ impl Agent {
                 }
                 work.record(AgentEvent::HeldUnsentForMove { turn });
             }
-            Command::ExpectTransitCheckpoint { checkpoint, recorded_work } => {
+            Command::ExpectTransitCheckpoint {
+                checkpoint,
+                recorded_work,
+            } => {
                 work.agent.require_here()?;
                 let identity = match work.agent.live.as_ref() {
                     Some(Turn::Starting(source)) => (source.id, source.attempt),
@@ -1587,7 +1662,10 @@ impl Agent {
                 work.record(AgentEvent::Turn {
                     turn,
                     change: TurnEvent::Parked {
-                        wait: Wait::Retry { until_ms: now_ms, resume: true },
+                        wait: Wait::Retry {
+                            until_ms: now_ms,
+                            resume: true,
+                        },
                         kind: TRANSIT_CHECKPOINT.into(),
                         reason: "provider checkpoint for backend Transit".into(),
                         at_ms: now_ms,
@@ -1606,10 +1684,12 @@ impl Agent {
             } => {
                 work.agent.require_here()?;
                 let resume = if work.transit_held {
-                    work.agent.parked_for_transit().map(|waiting| TransitAttempt {
-                        turn: waiting.id,
-                        attempt: waiting.attempts.saturating_add(1),
-                    })
+                    work.agent
+                        .parked_for_transit()
+                        .map(|waiting| TransitAttempt {
+                            turn: waiting.id,
+                            attempt: waiting.attempts.saturating_add(1),
+                        })
                 } else {
                     None
                 };
@@ -2703,9 +2783,9 @@ mod tests {
             transit_held: bool,
         ) -> Result<Vec<Effect>, Refusal> {
             self.now_ms += 10;
-            let decision = self
-                .agent
-                .decide_with_transit_hold(command, self.now_ms, transit_held)?;
+            let decision =
+                self.agent
+                    .decide_with_transit_hold(command, self.now_ms, transit_held)?;
             for event in &decision.events {
                 self.agent.apply(event).expect("a decided event applies");
             }
@@ -4530,7 +4610,10 @@ mod tests {
                 assert_eq!(a.waiting(), vec![1, 2]);
                 assert_eq!(
                     a.send(Command::RunWaiting).unwrap(),
-                    vec![Effect::StartTurn { turn: TurnId(1), message_seq: 10 }]
+                    vec![Effect::StartTurn {
+                        turn: TurnId(1),
+                        message_seq: 10
+                    }]
                 );
             }
         }
@@ -4557,7 +4640,10 @@ mod tests {
         let change = Command::ChangeTool {
             from: "claude".into(),
             backend: "codex".into(),
-            selection: Some(ToolSelection { model: "gpt-6.2-sol".into(), effort: "medium".into() }),
+            selection: Some(ToolSelection {
+                model: "gpt-6.2-sol".into(),
+                effort: "medium".into(),
+            }),
             backend_session: Some("new-codex-thread".into()),
             opening: None,
         };
@@ -4569,18 +4655,29 @@ mod tests {
 
         assert_eq!(
             a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap(),
-            vec![Effect::RetryTurn { turn: TurnId(1), message_seq: 10, attempt: 2 }]
+            vec![Effect::RetryTurn {
+                turn: TurnId(1),
+                message_seq: 10,
+                attempt: 2
+            }]
         );
         assert!(a.agent.resumed_by_transit(TurnId(1), 2));
         assert_eq!(a.agent.transit_resume(), None);
         a.send(park(TurnId(1))).unwrap();
-        assert_eq!(a.agent.transit_resume(), None, "a new target wait is a distinct wait");
+        assert_eq!(
+            a.agent.transit_resume(),
+            None,
+            "a new target wait is a distinct wait"
+        );
         a.send(Command::TurnRetried { turn: TurnId(1) }).unwrap();
         assert!(!a.agent.resumed_by_transit(TurnId(1), 3));
         a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
         assert_eq!(
             a.finish(1),
-            vec![Effect::StartTurn { turn: TurnId(2), message_seq: 11 }]
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: 11
+            }]
         );
     }
 

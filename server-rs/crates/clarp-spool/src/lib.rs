@@ -60,7 +60,9 @@ pub enum ShimEvent {
         replaced_by: u64,
     },
     /// The shim committed a Transit checkpoint. The attempt is gone only after Exited.
-    TransitCheckpoint { fence: u64 },
+    TransitCheckpoint {
+        fence: u64,
+    },
     /// The process is gone. A process that was killed has a signal and no code.
     Exited {
         code: Option<i32>,

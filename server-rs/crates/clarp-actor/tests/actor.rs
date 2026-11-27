@@ -1713,17 +1713,26 @@ fn a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_
     drop(actor);
 
     let codecs = standard_set("zstd").unwrap();
-    let writer = world.engine.open(&world.profile.dir, codecs.clone()).unwrap();
+    let writer = world
+        .engine
+        .open(&world.profile.dir, codecs.clone())
+        .unwrap();
     let committed = writer.last_seq().unwrap();
     let log = world
         .engine
         .read_committed(&world.profile.dir, codecs)
         .unwrap();
     let now = world.tick();
-    let mut glance =
-        Actor::glance(world.profile.clone(), world.backend.clone(), log, now).unwrap();
-    assert_eq!(writer.last_seq().unwrap(), committed, "a glance writes nothing");
-    assert!(world.followed.is_empty(), "nor is anything asked of the turn's shim");
+    let mut glance = Actor::glance(world.profile.clone(), world.backend.clone(), log, now).unwrap();
+    assert_eq!(
+        writer.last_seq().unwrap(),
+        committed,
+        "a glance writes nothing"
+    );
+    assert!(
+        world.followed.is_empty(),
+        "nor is anything asked of the turn's shim"
+    );
     let live = glance.status().live.unwrap();
     assert_eq!(
         (live.turn, live.started_at_ms, live.starting),
@@ -1744,7 +1753,9 @@ fn a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_
     assert_eq!(glanced_live["items"], shown["items"]);
     assert_eq!(glanced_live["epoch"], shown["epoch"]);
     assert!(
-        glanced_live["items"].as_array().is_some_and(|items| !items.is_empty()),
+        glanced_live["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
         "{glanced_live}"
     );
 }

@@ -1929,15 +1929,25 @@ fn transit_checkpoint_is_durable_before_the_held_attempt_exits() {
         &Request::CheckpointForTransit { fence: fence + 1 },
     );
     assert_eq!(wrong.killed, Some(false));
-    let exact = ask_in(name, &running.socket, &Request::CheckpointForTransit { fence });
+    let exact = ask_in(
+        name,
+        &running.socket,
+        &Request::CheckpointForTransit { fence },
+    );
     assert_eq!(exact.killed, Some(true));
     ends(&mut running.shim);
 
     let tail = after(&running.spool, fence);
-    assert_eq!(tail[0].entry, Entry::Shim(ShimEvent::TransitCheckpoint { fence }));
+    assert_eq!(
+        tail[0].entry,
+        Entry::Shim(ShimEvent::TransitCheckpoint { fence })
+    );
     assert_eq!(
         tail.last().unwrap().entry,
-        Entry::Shim(ShimEvent::Exited { code: None, signal: Some(9) })
+        Entry::Shim(ShimEvent::Exited {
+            code: None,
+            signal: Some(9)
+        })
     );
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
