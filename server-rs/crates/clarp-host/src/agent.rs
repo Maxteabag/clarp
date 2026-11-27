@@ -8,6 +8,7 @@
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -135,6 +136,11 @@ pub struct Spoke {
     pub bytes: u64,
     pub provider: String,
     pub voice: String,
+}
+
+pub(crate) struct ClaimedLine {
+    pub line: SpokenLine,
+    pub owner_reply: bool,
 }
 
 /// What an agent's thread is asked.
@@ -505,7 +511,7 @@ enum Ask {
     /// The one that speaks takes the agent's next line. `None`: nothing of this agent's is
     /// to be said now.
     ClaimLine {
-        answer: Answer<Option<SpokenLine>>,
+        answer: Answer<Option<ClaimedLine>>,
     },
     /// The line that was taken has a clip: its number and its file, the engine and the
     /// voice that are asked first, and the event the clip was announced with. Answers
@@ -1724,28 +1730,36 @@ impl AgentHandle {
         self.ask(|answer| Ask::RevisionAt { ts_ms, answer }).await
     }
 
-    /// Takes the agent's next line to be said. `None`: nothing of its is to be said now.
-    pub async fn claim_line(&self) -> Result<Option<SpokenLine>, Unavailable> {
+    /// Takes the agent's next line to be said and says whether it answers the owner.
+    pub(crate) async fn claim_line(&self) -> Result<Option<ClaimedLine>, Unavailable> {
         self.ask(|answer| Ask::ClaimLine { answer }).await
     }
 
     /// Writes that a line that was taken has a clip. Answers whether it was still the
     /// taker's line.
-    pub async fn line_begun(
+    pub fn line_begun(
         &self,
         id: String,
         clip: (u64, String),
         asked: (String, String),
         event_id: Option<u64>,
-    ) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::LineBegun {
+    ) -> impl Future<Output = Result<bool, Unavailable>> + use<> {
+        // Enqueue before the Herald can release this clip. Waiting for the write
+        // must not hold the Herald lock.
+        let (answer, reply) = oneshot::channel();
+        let queued = self.enqueue(Ask::LineBegun {
             id,
             clip,
             asked,
             event_id,
             answer,
-        })
-        .await
+        });
+        async move {
+            queued?;
+            reply
+                .await
+                .map_err(|_| Unavailable::new("the agent did not answer".into()))?
+        }
     }
 
     /// Writes how a line that was taken ended. Answers whether it was still the taker's.
@@ -1764,21 +1778,15 @@ impl AgentHandle {
         .await
     }
 
-    /// Writes that a clip that was held back is announced, and with which event. Answers
-    /// whether the agent has that clip.
-    pub async fn line_announced(
-        &self,
-        clip: u64,
-        event_id: u64,
-        across: bool,
-    ) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::LineAnnounced {
+    /// Records the announcement through its agent's writer after publishing it.
+    pub fn line_announced(&self, clip: u64, event_id: u64, across: bool) {
+        let (answer, _) = oneshot::channel();
+        let _ = self.enqueue(Ask::LineAnnounced {
             clip,
             event_id,
             across,
             answer,
-        })
-        .await
+        });
     }
 
     /// Writes what an app says of playing a clip. Answers whether the agent has that clip.
@@ -3902,7 +3910,15 @@ impl Worker {
                 return Ok(());
             }
             Ask::ClaimLine { answer } => {
-                return self.handle_speech(|actor, now| actor.claim_line(now), answer);
+                return self.handle_speech(
+                    |actor, now| {
+                        Ok(actor.claim_line(now)?.map(|line| {
+                            let owner_reply = actor.line_answers_owner(&line);
+                            ClaimedLine { line, owner_reply }
+                        }))
+                    },
+                    answer,
+                );
             }
             Ask::LineBegun {
                 id,

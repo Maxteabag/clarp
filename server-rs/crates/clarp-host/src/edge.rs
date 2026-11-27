@@ -4057,10 +4057,6 @@ async fn send_as(
             .as_deref()
             .is_some_and(|call| !python::strip(call).is_empty());
     let spoken_unasked = in_a_call && origin == Origin::User;
-    // What the Host sends by itself on its own schedule (the Python Host's
-    // `ROUTINE_AUTOMATION_ORIGINS`).
-    let routine = matches!(&origin, Origin::Trigger { name }
-        if matches!(name.as_str(), "heartbeat" | "leader_tick" | "dreaming" | "janitor"));
     // Only a person moves the focus: the user, and the Oracle acting on what the user said
     // (the Python Host's `origins.FOCUS_ORIGINS`).
     let by_a_person = origin.is_user_send();
@@ -4132,11 +4128,9 @@ async fn send_as(
         Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),
         _ => None,
     };
-    if !routine {
-        // For a minute this agent's answer is the one that is waited for: it is heard at
-        // once, and the others raise their hands (`clarp_kernel::herald`). What the Host
-        // sends by itself on its own schedule is waited for by nobody. Said before the
-        // agent has the message, so that no answer is faster than this.
+    if by_a_person {
+        // The herald follows the owner's attention. A message from an agent or an
+        // automation cannot move it away from the chat or call the owner is using.
         app.mouth.sent(&member.record.session).await;
     }
     let user_word = crate::coordination::front_desk_word(app, made).await;

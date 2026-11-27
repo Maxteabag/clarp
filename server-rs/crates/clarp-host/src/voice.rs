@@ -188,8 +188,6 @@ impl Growing {
 /// A clip the herald holds for its agent's turn: what it takes to announce it then.
 #[derive(Debug, Clone)]
 struct HeldClip {
-    turn: u64,
-    bound: bool,
     agent_id: String,
     clip: u64,
     name: String,
@@ -240,9 +238,8 @@ pub struct Mouth {
     previews: PathBuf,
     preview_locks: [tokio::sync::Mutex<()>; 16],
     /// The herald: what is held for agents whose user is with another, and whose hand is
-    /// up ([`clarp_kernel::herald`]). One thing at a time happens to it: whoever asks it
-    /// keeps it until what it said is told to the apps and written, so that a clip is
-    /// never let go before its line knows it.
+    /// up ([`clarp_kernel::herald`]). Decisions and publication stay in order.
+    /// The agents record those decisions on their own threads.
     herald: tokio::sync::Mutex<Herald<HeldClip>>,
     /// The agents whose lines wait for their call's binding to be recovered (`held.rs`).
     pub held: held::Held,
@@ -1219,11 +1216,11 @@ impl Mouth {
             let Some(member) = members.find(|member| member.record.agent_id == agent_id) else {
                 return;
             };
-            let Ok(Some(line)) = member.agent.claim_line().await else {
+            let Ok(Some(claimed)) = member.agent.claim_line().await else {
                 return;
             };
             let looked_at = directory.focus.as_deref() == Some(agent_id.as_str());
-            Self::say(&self, member, line, looked_at).await;
+            Self::say(&self, member, claimed.line, claimed.owner_reply, looked_at).await;
         }
     }
 
@@ -1303,16 +1300,18 @@ impl Mouth {
         else {
             return;
         };
-        if let Some(fields) = tag["tag"].as_object() {
-            for (k, v) in fields {
-                event[k] = v.clone();
-            }
-        }
+        add_opening_tag(event, &tag);
     }
 
-    /// Says one line: into a clip the apps are told of before its first byte is there,
-    /// unless the herald holds it for its agent's turn.
-    async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
+    /// Says one line. Replies to the owner and bound call openings are offered at
+    /// once. The herald decides when to offer the other lines.
+    async fn say(
+        self: &Arc<Self>,
+        member: &Arc<Member>,
+        line: Line,
+        owner_reply: bool,
+        looked_at: bool,
+    ) {
         let record = &member.record;
         // An agent whose words stay off speech providers in the cloud is not spoken: this Host
         // has no engine that speaks on this machine.
@@ -1327,9 +1326,9 @@ impl Mouth {
                 .unsaid(member, &line, None, "opening lookup unavailable", None)
                 .await;
         }
-        let bound = match self.opening_audio(&record.agent_id, line.turn).await {
-            Ok(None) => false,
-            Ok(Some(tag)) if tag["skip"] != true => true,
+        let opening = match self.opening_audio(&record.agent_id, line.turn).await {
+            Ok(None) => None,
+            Ok(Some(tag)) if tag["skip"] != true => Some(tag),
             Ok(Some(_)) => {
                 return self
                     .unsaid(member, &line, None, "listen-first opening fenced", None)
@@ -1392,38 +1391,57 @@ impl Mouth {
             progress: watch::channel(start).0,
         });
         self.held().insert(clip, growing.clone());
-        // The herald says whether the clip is played now. When it is, the apps are told
-        // where it is, and then the line is written as having it; when it is held, the
-        // line has it and nobody is told yet. A line that is not this one's any more
-        // leaves a clip that is nobody's.
-        let ours = HeldClip {
-            turn: line.turn,
-            bound,
-            agent_id: record.agent_id.clone(),
-            clip,
-            name: name.clone(),
-            trace_id: line.trace_id.clone(),
+        let direct = owner_reply || opening.is_some();
+        let (begun, raised) = if direct {
+            // The file is reachable as it grows. Give the listener its event before
+            // waiting for the agent's clip write or beginning synthesis.
+            let mut event = wire::audio(record, clip, &name, line.trace_id.as_deref());
+            if let Some(tag) = &opening {
+                add_opening_tag(&mut event, tag);
+            }
+            let event_id = self.hub.publish(event, self.now_ms());
+            let begun = member.agent.line_begun(
+                line.id.clone(),
+                (clip, name),
+                by[0].clone(),
+                Some(event_id),
+            );
+            (begun, None)
+        } else {
+            let ours = HeldClip {
+                agent_id: record.agent_id.clone(),
+                clip,
+                name: name.clone(),
+                trace_id: line.trace_id.clone(),
+            };
+            let signs = i64::try_from(text.chars().count()).unwrap_or(i64::MAX);
+            let mut heralding = self.herald.lock().await;
+            let directory = self.fleet.directory();
+            let open = open_session(&directory);
+            let at = Moment {
+                open: &open,
+                now_ms: self.now_ms(),
+            };
+            let settings = herald_settings(&directory);
+            let taken =
+                heralding.ingest((&record.session, ours), (Some(signs), true), at, settings);
+            let (event_id, raised) = match taken {
+                Taken::Decided(plays) => (self.tell(&directory, plays, Some(clip), None), None),
+                Taken::Raise(attempt) => (None, Some(attempt)),
+            };
+            let begun =
+                member
+                    .agent
+                    .line_begun(line.id.clone(), (clip, name), by[0].clone(), event_id);
+            (begun, raised)
         };
-        let signs = i64::try_from(text.chars().count()).unwrap_or(i64::MAX);
-        let mut heralding = self.herald.lock().await;
-        let directory = self.fleet.directory();
-        let open = open_session(&directory);
-        let at = Moment {
-            open: &open,
-            now_ms: self.now_ms(),
-        };
-        let settings = herald_settings(&directory);
-        let taken = heralding.ingest((&record.session, ours), (Some(signs), true), at, settings);
-        let (event_id, raised) = match taken {
-            Taken::Decided(plays) => (self.tell(&directory, plays, Some(clip), None).await, None),
-            Taken::Raise(attempt) => (None, Some(attempt)),
-        };
-        let begun = member
-            .agent
-            .line_begun(line.id.clone(), (clip, name), by[0].clone(), event_id);
         if !matches!(begun.await, Ok(true)) {
-            heralding.withdraw(&record.session, |held| held.clip == clip);
-            drop(heralding);
+            if !direct {
+                self.herald
+                    .lock()
+                    .await
+                    .withdraw(&record.session, |held| held.clip == clip);
+            }
             growing.progress.send_replace(Progress {
                 bytes: 0,
                 made: Made::Failed,
@@ -1432,7 +1450,6 @@ impl Mouth {
             let _ = std::fs::remove_file(&path);
             return;
         }
-        drop(heralding);
         if let Some(attempt) = raised {
             // The agent raises its hand while its reply is being said into the clip.
             tokio::spawn(self.clone().raise(attempt, member.clone()));
@@ -1509,9 +1526,12 @@ impl Mouth {
             Err((why, host_failed)) => {
                 // A clip nothing came of is no file before anybody is told so, and is not
                 // played later either.
-                let mut heralding = self.herald.lock().await;
-                heralding.withdraw(&record.session, |held| held.clip == clip);
-                drop(heralding);
+                if !direct {
+                    self.herald
+                        .lock()
+                        .await
+                        .withdraw(&record.session, |held| held.clip == clip);
+                }
                 if written == 0 {
                     let _ = std::fs::remove_file(&path);
                 }
@@ -1534,6 +1554,14 @@ impl Mouth {
 }
 
 // ---- the herald --------------------------------------------------------------------------------
+
+fn add_opening_tag(event: &mut Value, tag: &Value) {
+    if let Some(fields) = tag["tag"].as_object() {
+        for (k, v) in fields {
+            event[k] = v.clone();
+        }
+    }
+}
 
 /// The session of the agent that is open; empty when none is.
 fn open_session(directory: &Directory) -> String {
@@ -1558,7 +1586,7 @@ impl Mouth {
     /// each clip's line the event it was told with. `this` is a clip whose line is written
     /// by whoever asks (it is being begun): the event it was told with is answered, when it
     /// is among them. `herald_file` is the herald's own clip, when one was made.
-    async fn tell(
+    fn tell(
         &self,
         directory: &Directory,
         plays: Vec<Play<HeldClip>>,
@@ -1584,22 +1612,16 @@ impl Mouth {
                         continue;
                     };
                     let trace = held.trace_id.as_deref();
-                    let mut event = if across {
+                    let event = if across {
                         wire::audio_across(&member.record, held.clip, &held.name, trace)
                     } else {
                         wire::audio(&member.record, held.clip, &held.name, trace)
                     };
-                    if held.bound {
-                        self.tag_opening(&mut event, held.turn).await;
-                    }
                     let event_id = self.hub.publish(event, self.now_ms());
                     if this == Some(held.clip) {
                         told_this = Some(event_id);
                     } else {
-                        let _ = member
-                            .agent
-                            .line_announced(held.clip, event_id, across)
-                            .await;
+                        member.agent.line_announced(held.clip, event_id, across);
                     }
                 }
             }
@@ -1622,7 +1644,7 @@ impl Mouth {
         let plays = heralding.made(&attempt, made.is_some(), at);
         let played = plays.iter().any(|play| matches!(play, Play::Herald { .. }));
         let name = made.as_ref().map(|(name, _)| name.as_str());
-        self.tell(&directory, plays, None, name).await;
+        self.tell(&directory, plays, None, name);
         drop(heralding);
         if let (Some((_, path)), false) = (made, played) {
             let _ = std::fs::remove_file(path);
@@ -1789,7 +1811,7 @@ impl Mouth {
     pub(crate) async fn opened(&self, session: &str) {
         let mut heralding = self.herald.lock().await;
         let plays = heralding.opened(session);
-        self.tell(&self.fleet.directory(), plays, None, None).await;
+        self.tell(&self.fleet.directory(), plays, None, None);
     }
 
     /// A message went to an agent: for a minute its answer is the one that is waited for,
@@ -1797,7 +1819,7 @@ impl Mouth {
     pub(crate) async fn sent(&self, session: &str) {
         let mut heralding = self.herald.lock().await;
         let plays = heralding.sent(session, self.now_ms());
-        self.tell(&self.fleet.directory(), plays, None, None).await;
+        self.tell(&self.fleet.directory(), plays, None, None);
     }
 
     /// The user said something. A yes with the name of an agent whose hand is up lets what
@@ -1811,7 +1833,7 @@ impl Mouth {
             member.map_or_else(String::new, |member| member.record.persona.clone())
         };
         let (granted, declined, plays) = heralding.said(text, &name_of);
-        self.tell(&directory, plays, None, None).await;
+        self.tell(&directory, plays, None, None);
         !(granted.is_empty() && declined.is_empty())
     }
 }

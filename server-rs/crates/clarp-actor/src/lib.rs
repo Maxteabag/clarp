@@ -3598,6 +3598,16 @@ impl Actor {
         Ok(taken)
     }
 
+    /// A spoken line answers the owner if its durable reply says so. This also
+    /// reads lines kept before the current Host version, without reprojecting a chat.
+    pub fn line_answers_owner(&self, line: &Spoken) -> bool {
+        let Some(item) = self.recorder.log().find(&line.reply).ok().flatten() else {
+            return false;
+        };
+        matches!(Entry::from_item(&item), Ok(Some(Entry::Reply(reply)))
+            if reply.turn == line.turn && reply.origin.is_user_send())
+    }
+
     /// The line an engine took has a clip: its number on this Host and its file, the
     /// engine and the voice that are asked first, and the number of the event the clip was
     /// announced with. `None`: the agent has no such line being spoken without a clip.

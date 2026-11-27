@@ -21228,6 +21228,15 @@ fn an_agent_whose_user_is_with_another_raises_its_hand_and_is_heard_when_its_tur
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(audio().len(), 1);
 
+    // Rachel writing to Mike cannot grant his request to interrupt the owner.
+    let peer = host.post(
+        "/tools/run",
+        json!({"tool": "clarp-admin", "argv": ["prompt", "--from", rachel, "--to", mike,
+            "--text", "Can you check this for me?"]}),
+    );
+    assert_eq!(peer["exit"], 0, "{peer}");
+    assert!(offered(&mike).is_empty(), "a peer released Mike's speech");
+
     // The user says yes and his name: a word to the herald, and no message. What Mike
     // held is played, in the order he said it, whichever agent is open.
     let hear = || -> Value {
