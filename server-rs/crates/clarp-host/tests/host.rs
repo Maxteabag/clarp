@@ -11344,7 +11344,7 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
             "/agent-archive",
             json!({ "session": bob, "archived": false })
         ),
-        json!({ "ok": true, "session": "bob", "archived": false })
+        json!({ "ok": true, "session": "bob", "archived": false, "archived_by": null })
     );
     assert_eq!(row(&host, &bob)["archived_at"], Value::Null);
     assert_eq!(host.get("/agents/archived")["total"], 1);
@@ -11781,18 +11781,39 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         (&json!("helper"), &json!(maker_id), &json!("running"))
     );
 
-    let roster_told = |session: &str| {
-        heard
-            .lock()
-            .unwrap()
+    // The stream can repeat its current helper fields when a turn starts or ends.
+    // Check the ordered changes the apps saw, including the separate archive change.
+    let moves_through = |session: &str, expected: &[(&str, bool)]| {
+        let events = heard.lock().unwrap();
+        let mut moves: Vec<_> = events
             .iter()
             .filter(|event| {
                 event["type"] == "agent-roster"
                     && event["kind"] == "helper-state"
                     && event["session"] == session
             })
-            .count()
+            .filter_map(|event| {
+                let fields = &event["fields"];
+                Some((
+                    fields["helper_state"].as_str()?,
+                    fields["archived_at"].is_i64(),
+                ))
+            })
+            .collect();
+        moves.dedup();
+        moves
+            .into_iter()
+            .skip_while(|move_| *move_ == ("running", false))
+            .take(expected.len())
+            .eq(expected.iter().copied())
     };
+    let helper_moves = [
+        ("ended-unreported", false),
+        ("reported", false),
+        ("running", false),
+        ("ended-unreported", false),
+        ("failed", false),
+    ];
     let agent_message = |to: &str, from: &str, text: &str, id: &str| {
         host.post(
             "/send",
@@ -11853,7 +11874,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         state(helper) == "ended-unreported"
     });
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 1
+        moves_through(helper, &helper_moves[..1])
     });
     assert_eq!(
         row(helper)["queued_turn_revision"],
@@ -11910,7 +11931,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     agent_message(&maker, helper, "the slice is done", "h4");
     wait_for("the report to be noted", || state(helper) == "reported");
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 2
+        moves_through(helper, &helper_moves[..2])
     });
     wait_for("the maker to be at rest", || host.state(&maker) == "done");
     let makers = row(&maker);
@@ -11933,7 +11954,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         state(helper) == "running"
     });
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 3
+        moves_through(helper, &helper_moves[..3])
     });
     wait_for("the helper's turn", || host.state(helper) == "done");
     // That turn too settled without a report.
@@ -11942,7 +11963,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         || state(helper) == "ended-unreported",
     );
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 4
+        moves_through(helper, &helper_moves[..4])
     });
 
     // Marked by hand: by the agent that made it, or by the user.
@@ -11991,7 +12012,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
     // The state it has already is no change and no refusal.
     assert_eq!(mark(json!({ "session": helper, "state": "failed" })).0, 200);
     wait_for("the apps to hear of the helper's move", || {
-        roster_told(helper) == 5
+        moves_through(helper, &helper_moves[..5])
     });
     // Opened again by the user, and the moment it ended is forgotten.
     assert_eq!(
@@ -12077,7 +12098,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
         lineage("tool-helper")["archived_at"].as_i64().is_some()
     });
     wait_for("the apps to hear that it is done and put away", || {
-        roster_told("tool-helper") == 2
+        moves_through("tool-helper", &[("done", false), ("done", true)])
     });
     assert_eq!(
         row(&maker)["child_count"],
