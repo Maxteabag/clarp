@@ -121,9 +121,7 @@ mod tests {
         for path in ["/server-info", "/host/start", "/live", "/log", "/send"] {
             assert_eq!(needs(path), Stage::Starting, "{path}");
         }
-        for path in ["/agents/snapshot"] {
-            assert_eq!(needs(path), Stage::Agents, "{path}");
-        }
+        assert_eq!(needs("/agents/snapshot"), Stage::Agents, "/agents/snapshot");
         for path in ["/events", "/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
             assert_eq!(needs(path), Stage::Started, "{path}");
         }

@@ -571,6 +571,15 @@ async fn archived(
     let teams = app
         .teams
         .read(|teams, _| clarp_kernel::teams::memberships(teams));
+    let context = edge::AgentRowContext {
+        directory: &directory,
+        families: &families,
+        faces: &app.faces,
+        owners: &owners,
+        quota: &quota,
+        forks: &forks,
+        at: &at,
+    };
     let agents: Vec<Value> = order[page.start..page.end]
         .iter()
         .filter_map(|(_, agent_id)| {
@@ -578,9 +587,7 @@ async fn archived(
                 .members
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
-            let mut row = edge::agent_row(
-                &directory, &families, member, &app.faces, &owners, &quota, &forks, &at,
-            );
+            let mut row = edge::agent_row(member, &context);
             let session = &member.record.session;
             row["team_ids"] = json!(teams.get(agent_id).map_or(&[][..], Vec::as_slice));
             row["live_call_available"] = json!(live_available.contains(session));
