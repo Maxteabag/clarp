@@ -201,6 +201,9 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_TEST_CLOCK_OFFSET_FILE", "switch"),
     // Each commit to an agent's log waits this long, as on a disk under pressure (issue 831).
     ("CLARP_TEST_APPEND_DELAY_MS", "switch"),
+    ("CLARP_TEST_SKILLS_HELD_WHILE", "switch"),
+    ("CLARP_TEST_SKILLS_SAVE_HELD_WHILE", "switch"),
+    ("CLARP_TEST_START_FAILS_WHEN", "switch"),
     ("OPENCODE_PERMISSION", "switch"),
     ("LC_ALL", "switch"),
     ("TERM", "switch"),
@@ -241,6 +244,8 @@ pub const NOT_READ: &[&str] = &[
     "GET",
     "INGRID",
     "LS",
+    // Set from the chosen cwd for the shim child, never read from the ambient environment.
+    "PWD",
     // Looked up in an OpenCode turn's own environment, which names the file the lane's server
     // reads (issue 763); never read from the Host's.
     "OPENCODE_CONFIG",

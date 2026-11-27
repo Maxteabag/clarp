@@ -1703,7 +1703,7 @@ impl Actor {
             _ => None,
         };
         if let Some((turn, message_seq, attempt)) = live
-            && SpoolReader::new(&actor.profile.spool_path_of(turn, attempt)).exists()
+            && SpoolReader::new(actor.profile.spool_path_of(turn, attempt)).exists()
         {
             actor.take_up_spool(turn, message_seq, attempt, now_ms, true)?;
         }
