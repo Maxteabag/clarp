@@ -540,13 +540,6 @@ enum Ask {
         across: bool,
         answer: Answer<bool>,
     },
-    /// An app says something of playing a clip. Answers whether the agent has that clip.
-    LinePlayed {
-        clip: u64,
-        status: String,
-        error: Option<String>,
-        answer: Answer<bool>,
-    },
     /// From a turn's thread: the live turn's spool may have grown.
     TakeoverHeld {
         offer: clarp_actor::takeover::Offer,
@@ -692,7 +685,6 @@ impl Ask {
             Self::LineBegun { .. } => "LineBegun",
             Self::LineEnded { .. } => "LineEnded",
             Self::LineAnnounced { .. } => "LineAnnounced",
-            Self::LinePlayed { .. } => "LinePlayed",
             Self::TakeoverHeld { .. } => "TakeoverHeld",
             Self::TransitCheckpointHeld { .. } => "TransitCheckpointHeld",
             Self::SpoolChanged => "SpoolChanged",
@@ -1787,22 +1779,6 @@ impl AgentHandle {
             across,
             answer,
         });
-    }
-
-    /// Writes what an app says of playing a clip. Answers whether the agent has that clip.
-    pub async fn line_played(
-        &self,
-        clip: u64,
-        status: String,
-        error: Option<String>,
-    ) -> Result<bool, Unavailable> {
-        self.ask(|answer| Ask::LinePlayed {
-            clip,
-            status,
-            error,
-            answer,
-        })
-        .await
     }
 
     /// What the agent is doing, as it last said.
@@ -3965,17 +3941,6 @@ impl Worker {
                     |actor: &mut Actor, now| actor.line_announced(clip, (event_id, across), now);
                 return self.handle_speech(announced, answer);
             }
-            Ask::LinePlayed {
-                clip,
-                status,
-                error,
-                answer,
-            } => {
-                let played = |actor: &mut Actor, now| {
-                    actor.line_played(clip, &status, error.as_deref(), now)
-                };
-                return self.handle_speech(played, answer);
-            }
             other => other,
         };
         let now = self.now_ms();
@@ -4870,8 +4835,7 @@ impl Worker {
             | Ask::ClaimLine { .. }
             | Ask::LineBegun { .. }
             | Ask::LineEnded { .. }
-            | Ask::LineAnnounced { .. }
-            | Ask::LinePlayed { .. } => return Ok(()),
+            | Ask::LineAnnounced { .. } => return Ok(()),
             Ask::TransitCheckpointHeld { offer, held } => {
                 let whole = held.left_ms > 0
                     && held.partial_out == 0
@@ -7291,8 +7255,7 @@ fn refuse_for(
             Ok(
                 Ask::LineBegun { answer, .. }
                 | Ask::LineEnded { answer, .. }
-                | Ask::LineAnnounced { answer, .. }
-                | Ask::LinePlayed { answer, .. },
+                | Ask::LineAnnounced { answer, .. },
             ) => drop(answer.send(Err(refusal()))),
             Ok(
                 Ask::SpoolChanged

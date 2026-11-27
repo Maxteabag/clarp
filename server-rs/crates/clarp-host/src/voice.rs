@@ -2279,16 +2279,23 @@ async fn ack(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiErro
     } else {
         None
     };
-    let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?, line.turn))) {
-        Some((member, clip, turn)) => {
-            let error = error.map(str::to_string);
-            let played = member.agent.line_played(clip, status.to_string(), error);
-            let updated = played.await?;
-            // What an app says of a clip is seen as it says it, for the clip's books.
-            if updated {
-                crate::audio::said(&app, &member.record.agent_id, clip, turn, status).await;
-            }
-            updated
+    let updated = match found.and_then(|(member, line)| Some((member, line.clip_id?, line))) {
+        Some((member, clip, line)) => {
+            let agent = &member.record.agent_id;
+            let turn = line.turn;
+            app.audio
+                .playback(&app)
+                .await?
+                .record(
+                    agent.clone(),
+                    line,
+                    status.to_string(),
+                    error.map(str::to_string),
+                    app.clock.now_ms(),
+                )
+                .await?;
+            crate::audio::said(&app, agent, clip, turn, status).await;
+            true
         }
         None => false,
     };
@@ -2323,7 +2330,7 @@ fn lines_of(directory: &Directory, session: &str) -> Vec<(Arc<Member>, Arc<View>
 async fn recoverable(
     State(app): State<App>,
     Query(asked): Query<HashMap<String, String>>,
-) -> Json<Value> {
+) -> Result<Json<Value>, ApiError> {
     let session = asked.get("session").map_or("", |session| session.trim());
     let directory = app.fleet.directory();
     let views = lines_of(&directory, session);
@@ -2335,7 +2342,16 @@ async fn recoverable(
         })
         .filter(|(_, line)| line.clip_id.is_some())
         .collect();
-    let lines: Vec<&Line> = clips.iter().map(|(_, line)| *line).collect();
+    let receipts = app.audio.playback_if_kept(&app).await?;
+    let shown: Vec<_> = clips
+        .iter()
+        .map(|(record, line)| {
+            receipts.map_or(std::borrow::Cow::Borrowed(*line), |book| {
+                book.shown(&record.agent_id, line)
+            })
+        })
+        .collect();
+    let lines: Vec<&Line> = shown.iter().map(AsRef::as_ref).collect();
     let mut events = Vec::new();
     for place in spoken::offered_again(&lines, app.clock.now_ms()) {
         let (record, line) = clips[place];
@@ -2344,7 +2360,7 @@ async fn recoverable(
             events.push(event);
         }
     }
-    Json(json!({ "events": events }))
+    Ok(Json(json!({ "events": events })))
 }
 
 /// `GET /clips/message?session=&message_id=`: the clips of one reply, to be played again.

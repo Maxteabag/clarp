@@ -17,7 +17,11 @@
 //! clip is kept to be played again; then it is forgotten, written down or not.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+
+mod playback;
+pub(crate) use playback::Receipts;
 
 use clarp_kernel::janitors::audio::{self as rules, Fact, Seen};
 use clarp_kernel::spoken::{self, Line, LineState, SpeechBook};
@@ -34,6 +38,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The kind of thing a fact is, among what is left with the fleet.
 const FACTS: &str = "audio-facts";
+const RECEIPTS_FILE: &str = "playback-receipts.sqlite";
 /// What a run of the bookkeeper is named before its fact's number.
 const RUN: &str = "audio-bookkeeping-";
 /// How long ago a line may have been said for its clip to be looked at on the tick: what
@@ -46,6 +51,7 @@ const FORGETS_EVERY_MS: i64 = 3_600_000;
 #[derive(Default)]
 pub struct Desk {
     held: tokio::sync::Mutex<Option<Held>>,
+    playback: tokio::sync::OnceCell<Arc<Receipts>>,
 }
 
 struct Held {
@@ -79,6 +85,39 @@ fn stages(line: &Line) -> Vec<String> {
 }
 
 impl Desk {
+    fn playback_path(app: &App) -> PathBuf {
+        app.config.data_dir.join(RECEIPTS_FILE)
+    }
+
+    pub(crate) async fn playback(&self, app: &App) -> Result<&Arc<Receipts>, Unavailable> {
+        self.playback
+            .get_or_try_init(|| async {
+                let path = Self::playback_path(app);
+                let persistent = app.config.engine == "sqlite";
+                tokio::task::spawn_blocking(move || Receipts::open(&path, persistent))
+                    .await
+                    .map_err(|error| Unavailable::new(error.to_string()))?
+            })
+            .await
+    }
+
+    pub(crate) async fn playback_if_kept(
+        &self,
+        app: &App,
+    ) -> Result<Option<&Arc<Receipts>>, Unavailable> {
+        if let Some(receipts) = self.playback.get() {
+            return Ok(Some(receipts));
+        }
+        let kept = tokio::fs::try_exists(Self::playback_path(app))
+            .await
+            .map_err(|error| Unavailable::new(error.to_string()))?;
+        if kept {
+            Ok(Some(self.playback(app).await?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// What was seen, read where it is kept the first time it is asked for. The numbers
     /// given so far stay given: no smaller than any fact that is kept, nor than any run
     /// the janitors' book still names by one.
@@ -146,6 +185,13 @@ pub(crate) async fn keep(app: &App) {
         return;
     };
     let now = app.clock.now_ms();
+    let playback = match app.audio.playback_if_kept(app).await {
+        Ok(playback) => playback,
+        Err(why) => {
+            app.fleet.unread("playback receipts", &why.0);
+            None
+        }
+    };
     let directory = app.fleet.directory();
     let mut changed: Vec<Fact> = Vec::new();
     for member in &directory.members {
@@ -162,7 +208,8 @@ pub(crate) async fn keep(app: &App) {
             else {
                 continue;
             };
-            for stage in stages(line) {
+            let effective = playback.map(|receipts| receipts.shown(agent_id, line));
+            for stage in stages(effective.as_deref().unwrap_or(line)) {
                 let fresh = held
                     .seen
                     .observe(clip, agent_id, Some(line.turn), &stage, now);
@@ -215,6 +262,11 @@ pub(crate) async fn keep(app: &App) {
         held.forgot_at = now;
         for gone in held.seen.forget_before(now - spoken::KEPT_FOR_MS) {
             app.fleet.keep_said(FACTS, place(&gone), None).await;
+        }
+        if let Some(receipts) = playback
+            && let Err(why) = receipts.forget_before(now - spoken::KEPT_FOR_MS).await
+        {
+            app.fleet.unkept("playback receipts", &why.0);
         }
     }
 }
