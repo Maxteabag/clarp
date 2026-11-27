@@ -18,7 +18,7 @@ pub(crate) async fn set(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if matches!(principal, Principal::Tools) || crate::coordination::from_an_agent(&headers) {
+    if principal.is_agent_request(&headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     if matches!(

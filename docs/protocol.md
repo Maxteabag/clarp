@@ -1249,9 +1249,10 @@ Who finds what is decided at each request, as `GET /log` decides it (feature `bo
 the words of an agent bound to a provider of its own are not searched for a reader who may not
 read them (another agent, another Host, a tool that cannot say whose turn it is), and a
 `session` that names such an agent is refused, 403 `bound_conversation`. A device paired with
-limited access searches as it reads `/log`. The agents' tools token (`CLARP_TOOL_TOKEN`) is
-refused, as on `/log`; an agent searches with `clarp-admin search WORDS... [--session S]
-[--limit N] [--before CURSOR]`, which answers the same JSON as the reader of its turn.
+limited access searches as it reads `/log`. From Rust Host contract 216 (`agent_token_api`),
+the local agents' tools token (`CLARP_TOOL_TOKEN`) can search and read `/log` with the
+same privacy checks. `X-Clarp-Turn` identifies the reader. On older Hosts, an agent
+searches with `clarp-admin search WORDS... [--session S] [--limit N] [--before CURSOR]`.
 
 ### 3. Stay in sync: `GET /events` (SSE)
 
@@ -2286,8 +2287,8 @@ apply the broadcast, not re-post `/select`, or two clients loop.
       token) or the agent's files.
     - A Python peer Host, which sends no `X-Clarp-Peer` on its reads and is answered as a
       paired device.
-    - `POST` answers that carry words (`/task-plan/action`, `/decisions/<id>/resolve`) are
-      not blanked; an agent's tool token cannot reach them.
+    - On Rust Host contract 216, goal, decision and artifact changes using the tool token
+      check that the agent may read the target's words before returning its document.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a
