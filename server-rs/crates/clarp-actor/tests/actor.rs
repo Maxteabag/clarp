@@ -6750,6 +6750,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            provider_usage: Vec::new(),
             cost_so_far: None,
             total: None,
             limits: None,

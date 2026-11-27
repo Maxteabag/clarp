@@ -13,12 +13,84 @@ use tokio::process::Command;
 const LIMIT: u64 = 2 * 1024 * 1024;
 const DIRECT: Duration = Duration::from_secs(8);
 
+fn direct_agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .proxy(None)
+        .build()
+        .into()
+}
+
 pub(crate) struct Provider {
     pub loopback: Option<SocketAddr>,
 }
 pub(crate) struct Reading {
     pub value: Value,
     pub source: &'static str,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct OpenRouterKeyUsage {
+    pub usage_monthly_usd: Option<f64>,
+    pub key_limit_usd: Option<f64>,
+    pub key_limit_remaining_usd: Option<f64>,
+    pub key_limit_reset: Option<&'static str>,
+}
+
+/// GET metadata for the exact inference credential, never account billing.
+pub(crate) fn openrouter_key(token: &str, local: Option<SocketAddr>) -> Option<OpenRouterKeyUsage> {
+    let address = local.map_or_else(
+        || "https://openrouter.ai/api/v1/key".to_owned(),
+        |addr| format!("http://{addr}/api/v1/key"),
+    );
+    let agent = direct_agent(Duration::from_secs(3));
+    let mut authorization = axum::http::HeaderValue::from_str(&format!("Bearer {token}")).ok()?;
+    authorization.set_sensitive(true);
+    let mut response = agent
+        .get(address.as_str())
+        .header("Accept", "application/json")
+        .header("Authorization", authorization)
+        .call()
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let payload: Value = response
+        .body_mut()
+        .with_config()
+        .limit(16 * 1024)
+        .read_json()
+        .ok()?;
+    let data = payload.get("data")?.as_object()?;
+    if data.get("is_management_key") == Some(&Value::Bool(true))
+        || data.get("is_provisioning_key") == Some(&Value::Bool(true))
+    {
+        return None;
+    }
+    let amount = |key| {
+        data.get(key)?
+            .as_f64()
+            .filter(|value| value.is_finite() && *value >= 0.0)
+    };
+    let usage_monthly_usd = amount("usage_monthly");
+    let key_limit_usd = amount("limit");
+    let key_limit_remaining_usd = amount("limit_remaining");
+    if usage_monthly_usd.is_none() && key_limit_usd.is_none() && key_limit_remaining_usd.is_none() {
+        return None;
+    }
+    let key_limit_reset = match data.get("limit_reset").and_then(Value::as_str) {
+        Some("daily") => Some("daily"),
+        Some("weekly") => Some("weekly"),
+        Some("monthly") => Some("monthly"),
+        _ => None,
+    };
+    Some(OpenRouterKeyUsage {
+        usage_monthly_usd,
+        key_limit_usd,
+        key_limit_remaining_usd,
+        key_limit_reset,
+    })
 }
 
 fn codex_url(home: &Path) -> Option<String> {
@@ -109,12 +181,7 @@ fn http(
             }
         )
     });
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(DIRECT))
-        .max_redirects(0)
-        .proxy(None)
-        .build();
-    let agent: ureq::Agent = config.into();
+    let agent = direct_agent(DIRECT);
     let mut request = agent
         .get(address.as_str())
         .header("Accept", "application/json")

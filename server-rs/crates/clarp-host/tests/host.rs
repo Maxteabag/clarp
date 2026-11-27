@@ -161,6 +161,8 @@ mod native_goal_folder;
 mod network_wait;
 #[path = "host/opencode_chat_lane.rs"]
 mod opencode_chat_lane;
+#[path = "host/opencode_usage.rs"]
+mod opencode_usage;
 #[path = "host/outside_signal.rs"]
 mod outside_signal;
 #[path = "host/owner_preempts.rs"]

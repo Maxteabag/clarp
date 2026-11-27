@@ -33,13 +33,6 @@ pub(crate) fn store(home: &Path, variable: &str, default: &str, file: &str) -> M
         .unwrap_or_default()
 }
 
-fn valid_custom(id: &str) -> bool {
-    let letter = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
-    id.len() <= 100
-        && id.bytes().next().is_some_and(letter)
-        && id.bytes().all(|c| letter(c) || b"._-".contains(&c))
-}
-
 fn from_env(entry: &Value) -> bool {
     entry["env"]
         .as_array()
@@ -94,7 +87,7 @@ fn signed(home: &Path, deepseek: bool) -> Vec<Value> {
     let mut rows = Vec::new();
     for id in ids {
         let entry = catalogue.get(id).filter(|v| v.is_object());
-        if entry.is_none() && !valid_custom(id) {
+        if entry.is_none() && !clarp_kernel::opencode::valid_provider_id(id) {
             continue;
         }
         let entry = entry.unwrap_or(&Value::Null);
@@ -130,6 +123,29 @@ fn signed(home: &Path, deepseek: bool) -> Vec<Value> {
     }
     rows.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
     rows.into_iter().map(|(_, _, row)| row).collect()
+}
+
+/// Names only. Used by the Accounts usage projection alongside the recorded turns.
+pub(crate) fn signed_provider_ids(home: &Path) -> BTreeSet<String> {
+    signed(home, false)
+        .iter()
+        .filter_map(|row| row["id"].as_str())
+        .filter(|id| clarp_kernel::opencode::valid_provider_id(id))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The stock provider's existing Host-wide inference credential. A project can
+/// run with another key; the usage reader reports only this key's own cap.
+pub(crate) fn openrouter_key(home: &Path) -> Option<String> {
+    let auth = store(home, "XDG_DATA_HOME", ".local/share", "auth.json");
+    let key = match auth.get("openrouter") {
+        Some(saved) if saved["type"] == "api" => saved["key"].as_str()?.to_owned(),
+        Some(_) => return None,
+        None => std::env::var("OPENROUTER_API_KEY").ok()?,
+    };
+    let key = key.trim();
+    (!key.is_empty()).then(|| key.to_owned())
 }
 
 pub(super) fn row(home: &Path, tool: &str, name: &str) -> Value {

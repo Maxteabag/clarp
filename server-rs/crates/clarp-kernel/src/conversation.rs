@@ -332,6 +332,9 @@ pub struct TurnEnd {
     /// conversation cost more at the turn's end than before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_micros: Option<u64>,
+    /// The provider of the steps OpenCode accounted for, where its stream named one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_usage: Vec<crate::usage::ProviderUse>,
     /// What the tool said its whole conversation had cost at the turn's end, where it said so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_so_far: Option<CostSoFar>,
@@ -448,6 +451,7 @@ impl TurnEnd {
             tokens_out: None,
             context_tokens: None,
             cost_micros: None,
+            provider_usage: Vec::new(),
             cost_so_far: None,
             total: None,
             limits: None,
@@ -858,6 +862,7 @@ mod tests {
                 tokens_out: None,
                 context_tokens: None,
                 cost_micros: None,
+                provider_usage: Vec::new(),
                 cost_so_far: None,
                 total: None,
                 limits: None,

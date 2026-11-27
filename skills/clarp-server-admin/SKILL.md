@@ -80,6 +80,16 @@ agent is open (a send in a call once `started`), and everything else once
 request is held, never refused. An install counts only once the run that
 answered says `started`.
 
+## OpenCode usage in Accounts
+
+A Rust Host with feature `opencode_provider_usage` (contract 215) includes
+recorded OpenCode and DeepSeek costs and tokens by provider in the administrator
+or full device's `GET /backend-usage`. Use the local label for these amounts.
+Unattributed older records have their own totals. On a Host configured with
+`--ask-usage`, the remote OpenRouter row reports the saved inference key's
+monthly spend and remaining key cap if present. This is the key's allowance.
+If the remote result is unavailable, unsupported or disabled, show that status.
+
 ## Install a Host on a new machine
 
 On Linux with systemd and glibc 2.34+ (x86_64 or aarch64), as the user the Host is to run as,

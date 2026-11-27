@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 214;
+pub const HOST_CONTRACT: u64 = 215;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -565,6 +565,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("events_chat_previews", 212),
     // The owner's optional visible first acknowledgment for a newly started text turn.
     ("text_turn_ack", 214),
+    // Provider-attributed OpenCode turn accounting and OpenRouter's own key usage.
+    ("opencode_provider_usage", 215),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

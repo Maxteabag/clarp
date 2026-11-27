@@ -16,17 +16,20 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use clarp_kernel::conversation::LimitsSaid;
 use clarp_kernel::usage::{self, Used};
 use clarp_ports::clock::Clock;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
-use crate::edge::App;
+use crate::edge::{App, Principal};
 use crate::fleet::FleetHandle;
 use crate::hub::Hub;
+use crate::pairing::Scope;
 use crate::quota;
+
+pub(crate) mod opencode;
 
 /// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
 pub(crate) const KEPT: &[crate::kept::Kind] = &[
@@ -190,18 +193,31 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
 /// Host's fields.
 async fn told(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     axum::extract::Query(query): axum::extract::Query<Vec<(String, String)>>,
 ) -> Json<Value> {
     let force = query.iter().any(|(k, v)| {
         k == "refresh" && matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true")
     });
-    Json(view(&app, force).await)
+    let accounts = matches!(
+        principal,
+        Principal::Administrator
+            | Principal::Device {
+                scope: Scope::Full,
+                ..
+            }
+    );
+    Json(view_for(&app, force, accounts).await)
 }
 
 /// What `GET /backend-usage` answers: the providers are asked first only on a Host that was
 /// told to ask them (`--ask-usage`), and asked again before their time only where `force`.
 /// What the Quota keeper reads, as the Python Host's reads `get_backend_usage()`.
 pub(crate) async fn view(app: &App, force: bool) -> Value {
+    view_for(app, force, false).await
+}
+
+async fn view_for(app: &App, force: bool, accounts: bool) -> Value {
     let home = crate::config::home();
     let mut events = Vec::new();
     if app.config.ask_usage {
@@ -269,7 +285,7 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
             ((*tool).to_string(), provider)
         })
         .collect();
-    json!({
+    let mut answer = json!({
         "backends": backends,
         "capability_catalog_schema_version": 2,
         "computer_id": app.server_id,
@@ -277,7 +293,22 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
         "observed_at": crate::wire::iso(now),
         "providers": providers,
         "schema_version": 1,
-    })
+    });
+    if accounts {
+        answer["opencode_provider_usage"] = json!(
+            app.limits
+                .opencode_usage
+                .view(
+                    &home,
+                    &kept,
+                    app.config.ask_usage,
+                    app.config.usage_loopback,
+                    now
+                )
+                .await
+        );
+    }
+    answer
 }
 
 /// What the accounts that are read said of themselves: Codex's, Claude's and Antigravity's.

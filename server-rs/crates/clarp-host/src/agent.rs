@@ -6628,7 +6628,7 @@ impl Worker {
                 .ended
                 .as_ref()
                 .filter(|end| end.ended_at_ms > counted_since)
-                && let Some(used) = clarp_kernel::usage::Used::said(
+                && let Some(mut used) = clarp_kernel::usage::Used::said(
                     backend,
                     end.ended_at_ms,
                     (end.tokens_in, end.tokens_out),
@@ -6637,6 +6637,7 @@ impl Worker {
                 )
             {
                 let agent_id = &self.setup.record.agent_id;
+                used.providers.clone_from(&end.provider_usage);
                 self.setup.tally.ended(agent_id, end.turn, used);
             }
             // And what the tool wrote of its account's limits meanwhile is read, whatever

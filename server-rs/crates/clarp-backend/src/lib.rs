@@ -209,6 +209,8 @@ pub enum Signal {
     Cost {
         micros: u64,
     },
+    /// What OpenCode measured for the steps of each provider in this turn.
+    ProviderUsage(Vec<clarp_kernel::usage::ProviderUse>),
     /// The charge for this turn alone.
     TurnCost {
         micros: u64,

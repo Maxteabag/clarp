@@ -35,6 +35,16 @@ pub const SOURCE: &str = "clarp-turn-accounting";
 /// What is said where no turn of a tool was counted yet.
 pub const NONE_YET: &str = "no turns recorded yet";
 
+/// The amounts OpenCode reported for a provider's steps in one turn. Unknown
+/// provenance and unreported amounts are represented independently.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderUse {
+    pub provider_id: Option<String>,
+    pub tokens_in: Option<u64>,
+    pub tokens_out: Option<u64>,
+    pub cost_micros: Option<u64>,
+}
+
 /// What one turn used, as its tool said when the turn ended.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Used {
@@ -46,6 +56,8 @@ pub struct Used {
     pub tokens_out: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<ProviderUse>,
 }
 
 impl Used {
@@ -69,6 +81,7 @@ impl Used {
             tokens_in: tokens_in.unwrap_or(0),
             tokens_out: tokens_out.unwrap_or(0),
             cost_usd,
+            providers: Vec::new(),
         })
     }
 }
