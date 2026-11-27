@@ -366,6 +366,63 @@ pub fn log_engine_conformance(
     assert_eq!(log.read_tail(Kinds::ALL, 1).expect("read tail")[0].seq, 6);
 }
 
+/// What every [`LogEngine`] that reads beside its writer must do ([`LogEngine::read_committed`],
+/// issue 935). `dir` is an agent's directory with no log yet; `absent` one that is never opened.
+pub fn read_committed_conformance(engine: &dyn LogEngine, dir: &Path, absent: &Path, codecs: &CodecSet) {
+    assert!(
+        engine.read_committed(absent, codecs.clone()).is_err(),
+        "a log that is not there is not read, and not made"
+    );
+    assert!(
+        engine.read_committed(absent, codecs.clone()).is_err(),
+        "nor is it there after it was asked for"
+    );
+    let mut writer = engine.open(dir, codecs.clone()).expect("the writer opens");
+    writer
+        .append(&[
+            item(None, 1, 1_000, Some("one"), b"first"),
+            item(Some(1), 2, 1_001, None, b"second"),
+        ])
+        .expect("the writer appends");
+    let mut reader = engine
+        .read_committed(dir, codecs.clone())
+        .expect("a committed log is read beside its writer");
+    assert_eq!(reader.last_seq().expect("the reader reads"), 2);
+    // The writer goes on beside the reader, and the reader stays at its moment.
+    assert_eq!(
+        writer
+            .append(&[item(None, 3, 1_002, Some("one"), b"later")])
+            .expect("the writer is never held by a reader"),
+        3
+    );
+    assert_eq!(
+        reader.last_seq().expect("the reader reads again"),
+        2,
+        "every read of one reader sees the same moment"
+    );
+    let read = reader.read_after(0, Kinds::ALL, 10).expect("read what was committed");
+    assert_eq!(read.len(), 2);
+    assert_eq!(read[0].body, b"first");
+    assert_eq!(
+        reader.find("one").expect("find by key").expect("the key").seq,
+        1,
+        "a key is found as it was at the reader's moment"
+    );
+    assert!(
+        reader
+            .append(&[item(None, 4, 1_003, None, b"never")])
+            .is_err(),
+        "a reader writes nothing"
+    );
+    drop(reader);
+    assert_eq!(writer.last_seq().expect("the writer reads"), 3, "the refused write left nothing");
+    // A reader taken later sees what was committed since.
+    let reader = engine
+        .read_committed(dir, codecs.clone())
+        .expect("read again");
+    assert_eq!(reader.last_seq().expect("the new reader reads"), 3);
+}
+
 /// What every [`KeyValueEngine`] must do. `path_a` and `path_b` are two stores.
 pub fn key_value_conformance(engine: &dyn KeyValueEngine, path_a: &Path, path_b: &Path) {
     assert!(!engine.name().is_empty(), "an engine has a name");

@@ -546,11 +546,12 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("events_live_change", 209),
     // `GET /host/start` says which run of the Host answers (`instance`) and how far its start has
     // come (`stage`: `starting`, `agents`, `started`). The Host answers `/server-info`,
-    // `/host/start` and a named agent's `/log`, `/live` and `/send` from the first moment of its
-    // start (the last three once that agent is open; a send in a call once `started`), the roster
-    // once every agent is open, `/events` and everything else once `started`: a request is held,
-    // never refused. An installer holds
-    // an install good once the run that answered says `started` (issue 935).
+    // `/host/start`, `/events` (a call's ring once the calls are recovered) and a named agent's
+    // `/log` and `/live` from the first moment of its start, the last two from what the agent's
+    // log committed until it is open; an owner's plain `/send` once it is kept on disk, any
+    // other once its agent is open (in a call once `started`), the roster once every agent's row is read or open, everything else once
+    // `started`: a request is held, never refused. An installer holds an install good once the
+    // run that answered says `started` (issue 935).
     ("host_start_readiness", 210),
     // A helper reads `running` while a helper below it, at any depth and not put away, works,
     // and its own state again once the last of them stops; its makers count it as working
@@ -3255,6 +3256,7 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     };
     // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
     let after = query.after_revision.filter(|revision| *revision > 0);
+    let older = query.before.is_some();
     let (page, replace) = if let Some(revision) = after {
         let page = member.agent.after(revision, limit, which).await?;
         // A client that holds another conversation must drop what it has.
@@ -3271,6 +3273,12 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
         (older.unwrap_or_default(), false)
     } else {
         (member.agent.tail(limit, which).await?, false)
+    };
+    // A send kept while the agent is opened is where its send will put it (issue 935).
+    let page = if older {
+        page
+    } else {
+        with_kept(&member, page, after).await
     };
     // This view may have advanced since the actor returned the page. It only
     // supplies conversation identity. The page owns the cursor for its rows.
@@ -3331,6 +3339,51 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
         answer["view"] = json!(view);
     }
     Ok(answer)
+}
+
+/// A page of an agent that is still being opened, with the plain send of the owner's kept for it
+/// meanwhile (`crate::accepted`, issue 935) where the agent's own send will put it: the first one
+/// kept for an agent whose glance takes a send at once starts its turn, and is the newest row of
+/// its conversation; every other one waits, and is in its queue (`queue`), placed against the same
+/// glance. Each kept send is in one of the two, never in neither: an app that finds a waiting send
+/// of its own in neither takes it for one deleted. Its revision is above every revision the log
+/// had and below every one the agent's opening writes: the row its send then writes, with the same
+/// id, comes after it for a client that holds it.
+async fn with_kept(
+    member: &Member,
+    mut page: clarp_actor::conversation::Page,
+    after: Option<u64>,
+) -> clarp_actor::conversation::Page {
+    // Placed against the glance itself, as its queue places the others (`queue`).
+    if member.agent.glance_takes_at_once().await != Some(true) {
+        return page;
+    }
+    let kept = member.agent.kept_while_opening(&member.record.agent_id);
+    let Some(first) = kept.into_iter().next() else {
+        return page;
+    };
+    let id = first.message.id.clone();
+    if page.entries.iter().any(|row| row.entry.id() == id)
+        || matches!(member.agent.row(id).await, Ok(Some(_)))
+    {
+        return page;
+    }
+    let revision = page.head_revision + 1;
+    if after.is_some_and(|after| revision <= after) {
+        return page;
+    }
+    let ts_ms = page
+        .entries
+        .last()
+        .map_or(first.at_ms, |row| first.at_ms.max(row.ts_ms.saturating_add(1)));
+    page.entries.push(clarp_actor::conversation::Versioned::of(
+        clarp_kernel::conversation::Entry::Message(first.message),
+        revision,
+        ts_ms,
+    ));
+    page.latest_revision = page.latest_revision.max(revision);
+    page.head_revision = page.head_revision.max(revision);
+    page
 }
 
 /// `GET /message-tool-details?session=&message_id=`: the cards of one row whole, for an app
@@ -4066,6 +4119,133 @@ async fn send_as(
     };
     let proof = binding
         .map(|(ring, _, epoch)| json!({"ring_id":ring,"kind":"greeting_reply","epoch":epoch}));
+    // A plain send of the owner's in a chat, to an agent that is still being opened, is kept on
+    // disk and answered at once; the agent takes it when it is open (issue 935).
+    let plain = binding.is_none()
+        && !in_a_call
+        && !own
+        && message.origin == Origin::User
+        && coordination.is_none()
+        && made.turn.is_none()
+        && !made.peer
+        && !made.housekeeping
+        && !user_word;
+    if plain && guard.is_none() {
+        let accepted = crate::accepted::Accepted {
+            agent_id: member.record.agent_id.clone(),
+            message: message.clone(),
+            admission,
+            while_busy: request
+                .while_busy
+                .as_deref()
+                .map(|word| python::strip(word).to_string()),
+            trace_named: made.trace_named,
+            at_ms: app.clock.now_ms(),
+        };
+        let early = match member.agent.keep_while_opening(accepted).await.transpose()? {
+            Some(crate::agent::Early::Unkept(why)) => {
+                eprintln!(
+                    "clarp-host: send {} for agent {} goes to its mailbox: {why}",
+                    crate::accepted::mark(&message.id),
+                    member.record.session
+                );
+                None
+            }
+            early => early,
+        };
+        if let Some(early) = early {
+            let kept = match early {
+                crate::agent::Early::TraceTaken => {
+                    return Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        clarp_actor::TRACE_TAKEN,
+                    ));
+                }
+                crate::agent::Early::Had | crate::agent::Early::Unkept(_) => None,
+                crate::agent::Early::Kept(kept) => Some(*kept),
+            };
+            let at = crate::accepted::mark(&message.id);
+            match &kept {
+                Some(early) => eprintln!(
+                    "clarp-host: send {at} kept for agent {} while it is opened ({} ahead, again {}, \
+                     queued {})",
+                    member.record.session, early.kept.ahead, early.kept.again, early.queued
+                ),
+                None => eprintln!(
+                    "clarp-host: send {at} for agent {} while it is opened: its log has it",
+                    member.record.session
+                ),
+            }
+            // The focus is the fleet's to keep: written beside the answer, never before it.
+            if by_a_person && chosen {
+                let (app, session) = (app.clone(), member.record.session.clone());
+                tokio::spawn(async move {
+                    if let Err(why) = app.fleet.open(session).await {
+                        app.fleet.unkept("focus", &why.0);
+                    }
+                });
+            }
+            // One the log had already stands where it stands: nothing is told of it.
+            let Some(early) = kept else {
+                return Ok(SendResponse {
+                    ok: true,
+                    session: member.record.session.clone(),
+                    dispatch: member.record.backend.clone(),
+                    trace_id,
+                    queued: Some(false),
+                    queue_depth: Some(0),
+                    queue_revision: Some(0),
+                    ..SendResponse::default()
+                });
+            };
+            // Where it stands and what is told of it, as the glance it was checked against has
+            // the agent (never a view read after it), told while the agent's route is still
+            // held: the agent takes nothing kept before this word is out, so its own word of
+            // the send (its start, its row) comes after this one.
+            let crate::agent::KeptEarly {
+                kept,
+                status,
+                queued,
+                route,
+            } = early;
+            let depth = status.listed_queue_depth + kept.ahead + 1;
+            if !kept.again {
+                let now = app.clock.now_ms();
+                if queued {
+                    // It waits: those who watch see it join the queue, as a waiting send does.
+                    let mut told = wire::queue_joined(
+                        &member.record,
+                        &status,
+                        wire::QueueIdentity {
+                            client_id: message.told_id(),
+                            origin: &message.origin,
+                            sender_agent_id: None,
+                            sender_name: None,
+                        },
+                        false,
+                    );
+                    told["queue_depth"] = json!(depth);
+                    app.hub.publish(told, now);
+                } else {
+                    // Its row is the newest of the conversation now (`with_kept`).
+                    let mut told = wire::transcript_updated(&member.record, &status);
+                    told["head_revision"] = json!(status.head_revision + 1);
+                    app.hub.publish(told, now);
+                }
+            }
+            drop(route);
+            return Ok(SendResponse {
+                ok: true,
+                session: member.record.session.clone(),
+                dispatch: member.record.backend.clone(),
+                trace_id,
+                queued: Some(queued),
+                queue_depth: Some(if queued { depth as u64 } else { 0 }),
+                queue_revision: Some(if queued { status.queue_revision } else { 0 }),
+                ..SendResponse::default()
+            });
+        }
+    }
     let marks = clarp_actor::Marks {
         coordination,
         trace_named: made.trace_named,
@@ -4548,7 +4728,19 @@ async fn queue(
     let member = app
         .anyone(&query.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
-    let (waiting, state) = member.agent.queue().await?;
+    // An agent that is still being opened answers from its glance, with the sends kept for it
+    // that will wait behind what waited already (issue 935): its queue as its sends will make it.
+    // What was kept is read before the glance: a send taken meanwhile is in the agent's own
+    // queue or log once its view is out, and a read that finds the view out asks the agent.
+    // Read whole, as the store has it: a queue that is short of a kept send says it is gone.
+    let kept = member
+        .agent
+        .kept_while_opening_read(&member.record.agent_id)
+        .await;
+    let (waiting, state) = match member.agent.queue_while_opening(kept).await {
+        Some(read) => read?,
+        None => member.agent.queue().await?,
+    };
     let directory = app.fleet.directory();
     let items: Vec<Value> = waiting
         .iter()
@@ -5232,8 +5424,15 @@ async fn not_for(app: &App, published: &Published, principal: &str) -> bool {
         return false;
     }
     let event: Value = serde_json::from_str(&published.json).unwrap_or(Value::Null);
+    if event["type"] != "agent-ring" {
+        return false;
+    }
+    // A ring is shown to whom the recovered calls say. The stream answers before the start has
+    // recovered them (issue 935): a ring that comes first waits for them, and the stream behind
+    // it, so that it is neither shown to the wrong reader, lost, nor told out of order.
+    app.start.calls_recovered().await;
     let ring_id = event["ring_id"].as_str().unwrap_or("");
-    event["type"] == "agent-ring" && !app.calls.shows(app, ring_id, principal).await
+    !app.calls.shows(app, ring_id, principal).await
 }
 
 async fn events(
@@ -5319,9 +5518,9 @@ async fn events(
         let resumed = app.hub.resume(after);
         let gap = after.is_some() && (!resumed.missed.is_empty() || resumed.truncated);
         let first = if gap {
-            catch_up(&app, resumed.missed, resumed.truncated, &listener, &given).await
+            catch_up(resumed.missed, resumed.truncated, &given)
         } else {
-            VecDeque::from([unnumbered(&json!({ "type": "agent-roster" }))])
+            VecDeque::from([Frame::Ready(unnumbered(&json!({ "type": "agent-roster" })))])
         };
         (first, resumed.live, resumed.head)
     } else {
@@ -5331,17 +5530,17 @@ async fn events(
         let (missed, live) = app.hub.subscribe(after);
         let mut first = VecDeque::with_capacity(missed.len() + 1);
         for published in &missed {
-            if given(published) && !not_for(&app, published, &listener).await {
-                first.push_back(numbered(published));
+            if given(published) {
+                first.push_back(Frame::of(published));
             }
         }
-        first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
+        first.push_back(Frame::Ready(unnumbered(&json!({ "type": "agent-roster" }))));
         (first, live, 0)
     };
     if let Some(held) = &changing {
-        first.push_front(unnumbered(
+        first.push_front(Frame::Ready(unnumbered(
             &json!({ "type": "stream", "stream_id": held.id }),
-        ));
+        )));
     }
     let clock = app.clock.clone();
     // The stream ends the moment the Host is told to stop, not when its process is gone: its
@@ -5375,7 +5574,14 @@ async fn events(
                 // heard meanwhile and was not for this connection.
                 let beat_at = tokio::time::Instant::now() + HEARTBEAT;
                 loop {
-                    if let Some(event) = first.pop_front() {
+                    // What waits to be sent goes in its order. A replayed ring is judged here, when
+                    // its turn comes: what came before it is sent already, and what comes after it
+                    // waits behind it (issue 935).
+                    let hidden = |published: Arc<Published>| {
+                        let (app, listener) = (app.clone(), listener.clone());
+                        async move { not_for(&app, &published, &listener).await }
+                    };
+                    if let Some(event) = next_frame(&mut first, hidden).await {
                         return Some((
                             Ok(event),
                             (
@@ -5412,7 +5618,7 @@ async fn events(
                         let directory = app.fleet.directory();
                         let now = tokio::time::Instant::now();
                         for preview in previews.take_due(&directory, now) {
-                            first.push_back(unnumbered(&preview));
+                            first.push_back(Frame::Ready(unnumbered(&preview)));
                         }
                         continue;
                     }
@@ -5533,9 +5739,7 @@ async fn events(
                             let given = |published: &Published| {
                                 replayed(previews.as_ref(), followed, published)
                             };
-                            first =
-                                catch_up(&app, caught.missed, caught.truncated, &listener, &given)
-                                    .await;
+                            first = catch_up(caught.missed, caught.truncated, &given);
                             continue;
                         }
                         Ok(Heard::Shown(Err(RecvError::Lagged(_)))) if compact => continue,
@@ -5636,26 +5840,64 @@ fn replayed(
 /// What a connection is given of a gap: the marker, then the newest of what it missed, each with
 /// its own number, in order, then the word to look at everything that ends every replay (feature
 /// `compact_resume`): the marker only says where the catch-up starts.
-async fn catch_up(
-    app: &App,
+fn catch_up(
     missed: Vec<Arc<Published>>,
     truncated: bool,
-    listener: &str,
     replayed: &(dyn Fn(&Published) -> bool + Sync),
-) -> VecDeque<SseEvent> {
+) -> VecDeque<Frame> {
     let (given, skipped) = crate::catch_up::compacted(missed);
     // On a stream that shows previews, what a preview stands for is not given either.
     let (given, previewed): (Vec<_>, Vec<_>) = given.into_iter().partition(|p| replayed(p));
     let skipped = skipped + previewed.len();
     let mut out = VecDeque::with_capacity(given.len() + 2);
-    out.push_back(unnumbered(&crate::catch_up::marker(truncated, skipped)));
+    out.push_back(Frame::Ready(unnumbered(&crate::catch_up::marker(
+        truncated, skipped,
+    ))));
     for published in &given {
-        if !not_for(app, published, listener).await {
-            out.push_back(numbered(published));
+        out.push_back(Frame::of(published));
+    }
+    out.push_back(Frame::Ready(unnumbered(&json!({ "type": "agent-roster" }))));
+    out
+}
+
+/// A frame a stream still has to send, in order: one that is ready, or an event that may be a
+/// ring, judged for its reader only when its turn comes ([`not_for`], issue 935). A ring that
+/// waits for the calls to be recovered then holds only what comes after it, never the stream's
+/// answer or what was ready before it.
+enum Frame {
+    Ready(SseEvent),
+    Judged(Arc<Published>),
+}
+
+/// The next of the frames that wait to be sent, in their order: a frame that may be a ring is
+/// judged when its turn comes, and passed over where `hidden` says its reader may not be told of
+/// it. `None` once none waits.
+async fn next_frame<F, Judging>(first: &mut VecDeque<Frame>, mut hidden: F) -> Option<SseEvent>
+where
+    F: FnMut(Arc<Published>) -> Judging,
+    Judging: std::future::Future<Output = bool>,
+{
+    while let Some(frame) = first.pop_front() {
+        match frame {
+            Frame::Ready(event) => return Some(event),
+            Frame::Judged(published) => {
+                if !hidden(published.clone()).await {
+                    return Some(numbered(&published));
+                }
+            }
         }
     }
-    out.push_back(unnumbered(&json!({ "type": "agent-roster" })));
-    out
+    None
+}
+
+impl Frame {
+    fn of(published: &Arc<Published>) -> Self {
+        if published.json.contains("\"agent-ring\"") {
+            Self::Judged(published.clone())
+        } else {
+            Self::Ready(numbered(published))
+        }
+    }
 }
 
 /// Marks the chats a connection watches live as open, for their agents' lanes, every
@@ -5712,6 +5954,59 @@ enum Heard {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    /// Issue 935: a replay or catch-up is made without judging anything, and a ring in it is
+    /// judged only when its turn comes. A ring whose judging waits for the calls to be recovered
+    /// holds what comes after it on its stream, in order, never what came before it: the marker
+    /// of a compact catch-up and the events before the ring are sent while it waits.
+    #[tokio::test]
+    async fn a_ring_in_a_replay_holds_only_what_comes_after_it() {
+        let event = |id: u64, json: Value| {
+            Arc::new(Published {
+                id,
+                at_ms: 0,
+                json: json.to_string(),
+            })
+        };
+        let missed = vec![
+            event(7, json!({"type": "agent-activity", "session": "a"})),
+            event(8, json!({"type": "agent-ring", "ring_id": "r-1"})),
+            event(9, json!({"type": "agent-state", "session": "b"})),
+        ];
+        let mut first = catch_up(missed, true, &|_: &Published| true);
+        let (recovered, calls) = tokio::sync::watch::channel(false);
+        let judged = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let hidden = {
+            let judged = judged.clone();
+            move |_ring: Arc<Published>| {
+                let (mut calls, judged) = (calls.clone(), judged.clone());
+                async move {
+                    let _ = calls.wait_for(|recovered| *recovered).await;
+                    judged.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    // This reader may be told of it.
+                    false
+                }
+            }
+        };
+        let said = |event: Option<SseEvent>| format!("{:?}", event.unwrap());
+        // The marker, then the event before the ring, while the calls are not recovered.
+        assert!(said(next_frame(&mut first, hidden.clone()).await).contains("resync"));
+        assert!(said(next_frame(&mut first, hidden.clone()).await).contains("agent-activity"));
+        // The ring waits, and what comes after it with it.
+        let mut held = Box::pin(next_frame(&mut first, hidden.clone()));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), held.as_mut())
+                .await
+                .is_err()
+        );
+        assert_eq!(judged.load(std::sync::atomic::Ordering::SeqCst), 0);
+        recovered.send_replace(true);
+        assert!(said(held.await).contains("agent-ring"));
+        assert!(said(next_frame(&mut first, hidden.clone()).await).contains("agent-state"));
+        assert!(said(next_frame(&mut first, hidden.clone()).await).contains("agent-roster"));
+        assert!(next_frame(&mut first, hidden).await.is_none());
+        assert_eq!(judged.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
     #[tokio::test]
     async fn transfer_coding_is_refused_without_polling_even_one_body_frame() {
         use axum::body::{Body, Bytes};

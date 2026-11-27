@@ -262,7 +262,11 @@ fn an_event_stream_is_told_the_host_is_updating_before_it_stops() {
     assert!(data.join("host-stopped-at-ms").exists());
     let host = place.start();
     assert!(host.get("/server-info")["contract"].is_object());
-    assert!(!data.join("host-stopped-at-ms").exists());
+    // Kept beside the answers since issue 935, so that a disk that is slow to write holds no
+    // answer: it is taken soon after the Host answers, not before.
+    wait_for("the stop to be taken", || {
+        !data.join("host-stopped-at-ms").exists()
+    });
     if let Ok(took) = std::fs::read_to_string(data.join("host-restart-ms")) {
         let took: i64 = took.trim().parse().unwrap();
         assert!((1_000..=900_000).contains(&took), "{took}");

@@ -1618,6 +1618,109 @@ impl Actor {
         teams: Option<Arc<dyn teams::Runtime>>,
         launch_defaults: Option<LaunchDefaults>,
     ) -> Result<(Self, Outputs), ActorError> {
+        let (mut actor, older_imports) =
+            Self::read_books(profile, backend, log, now_ms, teams, launch_defaults)?;
+        actor.open_team_effects()?;
+        actor.open_goal_ledger(now_ms)?;
+        actor.recover_imported_accounts(older_imports, now_ms)?;
+        // The goals' check-ins that the apps were shown as the user's words are sent again,
+        // once, so that the apps show them as the Host's own (`conversation::resend`).
+        let resent =
+            conversation::resend::goal_wakes(actor.recorder.log(), actor.recorder.floor(), now_ms)?;
+        if !resent.is_empty() {
+            let mut batch = actor.recorder.batch();
+            for item in resent {
+                batch.item(item);
+            }
+            batch.commit()?;
+        }
+        actor.read_held()?;
+        // A line an engine was speaking when the Host went: begun a moment ago, it waits
+        // again; begun long ago, it is over. And one that waited for a Host that was away
+        // too long is not spoken any more.
+        let cut_off = actor.speech.after_a_restart(now_ms);
+        actor.write_lines(&cut_off, now_ms)?;
+        let mut out = Outputs::default();
+        out.changed.speech = actor.speech.next().is_some();
+        actor.read_turn_notes()?;
+        // The process of the turn that ended last may still run: no turn is launched before
+        // it is gone, the fork's held turn and the live turn included.
+        actor.take_up_lingering(&mut out, now_ms);
+        // The fork is taken up before the agent's own turn is rejoined: a turn of the user's
+        // that was held for the fork's turn (never launched) is held again, not started
+        // beside it.
+        actor.fork_take_up(&mut out, now_ms)?;
+        if let Some(mut recovered) = actor.recover_takeover(now_ms)? {
+            recovered.changed.speech |= out.changed.speech;
+            recovered.actions.splice(0..0, out.actions);
+            actor.fork_restore(&mut recovered, now_ms)?;
+            return Ok((actor, recovered));
+        }
+        let live = match actor.recorder.agent().live() {
+            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
+            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
+            _ => None,
+        };
+        if let Some((turn, message_seq, attempt, starting)) = live {
+            actor.rejoin(turn, message_seq, attempt, starting, &mut out, now_ms)?;
+        }
+        // A turn that waited for its next attempt still waits: no tool ran for it meanwhile.
+        actor.hold_parked()?;
+        // A compaction whose turn ended and whose outcome an actor before this one did not
+        // write: it is said now, from how the turn ended.
+        actor.say_owed_compaction()?;
+        if let Some(settled) = actor.settle_moved_wait(now_ms)? {
+            out.actions.extend(settled.actions);
+            out.changed.status |= settled.changed.status;
+            out.changed.queue |= settled.changed.queue;
+            out.changed.conversation |= settled.changed.conversation;
+        }
+        // What the fork had waiting goes on, now that the agent's own turn is where it was.
+        actor.fork_restore(&mut out, now_ms)?;
+        Ok((actor, out))
+    }
+
+    /// The agent as its log says it is at this moment, read and never written (issue 935): what
+    /// a Host shows of an agent while its own thread still opens it. The same reads as
+    /// [`Actor::open`]: its books, what its sends' delivery holds, and its live turn taken up
+    /// from its spool as far as the log says it was read. None of the opening's repairs is made
+    /// (a goal ledger installed, a resend, a line cut off, a turn rejoined or ended, a takeover
+    /// recovered), no action is asked for, and no reply that was shown and not stored is
+    /// answered: what it reads is what was committed. A log that cannot be written refuses any
+    /// write that would slip through, and the glance is then not had.
+    pub fn glance(
+        profile: Profile,
+        backend: Arc<dyn Backend>,
+        log: Box<dyn AgentLog>,
+        now_ms: i64,
+    ) -> Result<Self, ActorError> {
+        let (mut actor, _) = Self::read_books(profile, backend, log, now_ms, None, None)?;
+        actor.read_held()?;
+        actor.read_turn_notes()?;
+        let live = match actor.recorder.agent().live() {
+            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt)),
+            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt)),
+            _ => None,
+        };
+        if let Some((turn, message_seq, attempt)) = live
+            && SpoolReader::new(&actor.profile.spool_path_of(turn, attempt)).exists()
+        {
+            actor.take_up_spool(turn, message_seq, attempt, now_ms, true)?;
+        }
+        actor.hold_parked()?;
+        Ok(actor)
+    }
+
+    /// What the agent's log holds of it, read: its journal and its books. Nothing is written.
+    /// Also the goals imported before bookkeeping whose accounts are still to be cached.
+    fn read_books(
+        profile: Profile,
+        backend: Arc<dyn Backend>,
+        log: Box<dyn AgentLog>,
+        now_ms: i64,
+        teams: Option<Arc<dyn teams::Runtime>>,
+        launch_defaults: Option<LaunchDefaults>,
+    ) -> Result<(Self, std::collections::BTreeMap<String, i64>), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
         let mut provider_sessions = std::collections::BTreeMap::new();
@@ -1694,7 +1797,7 @@ impl Actor {
         // shown as an answer never turns into narration (issue 771).
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session).growing();
         let delegation = delegation::active(recorder.log())?;
-        let mut actor = Self {
+        let actor = Self {
             launch_defaults,
             teams,
             team_effect_through: 0,
@@ -1733,24 +1836,15 @@ impl Actor {
             fork: fork::Lane::default(),
             lingering: None,
         };
-        actor.open_team_effects()?;
-        actor.open_goal_ledger(now_ms)?;
-        actor.recover_imported_accounts(older_imports, now_ms)?;
-        // The goals' check-ins that the apps were shown as the user's words are sent again,
-        // once, so that the apps show them as the Host's own (`conversation::resend`).
-        let resent =
-            conversation::resend::goal_wakes(actor.recorder.log(), actor.recorder.floor(), now_ms)?;
-        if !resent.is_empty() {
-            let mut batch = actor.recorder.batch();
-            for item in resent {
-                batch.item(item);
-            }
-            batch.commit()?;
-        }
-        actor.remembered = actor.remembered_in_log()?;
-        // The sends whose turn is not over are what the agent's state holds, as they were;
-        // each one's names are read from its message, once (a queue's length of reads).
-        let held: Vec<_> = actor
+        Ok((actor, older_imports))
+    }
+
+    /// What the agent's state holds that its log says only in other words: what its last
+    /// turns' ends say for its row, and the sends whose turn is not over, each one's names read
+    /// from its message, once (a queue's length of reads).
+    fn read_held(&mut self) -> Result<(), ActorError> {
+        self.remembered = self.remembered_in_log()?;
+        let held: Vec<_> = self
             .recorder
             .agent()
             .deliveries()
@@ -1758,49 +1852,31 @@ impl Actor {
             .cloned()
             .collect();
         for send in held {
-            let names = actor.send_names(send.message_seq)?;
-            actor.deliveries.changed(send, names);
+            let names = self.send_names(send.message_seq)?;
+            self.deliveries.changed(send, names);
         }
-        // A line an engine was speaking when the Host went: begun a moment ago, it waits
-        // again; begun long ago, it is over. And one that waited for a Host that was away
-        // too long is not spoken any more.
-        let cut_off = actor.speech.after_a_restart(now_ms);
-        actor.write_lines(&cut_off, now_ms)?;
-        let mut out = Outputs::default();
-        out.changed.speech = actor.speech.next().is_some();
-        // The notes the live turn has left so far, for its end: read from its own items, never
-        // from the conversation before it.
-        let noting = match actor.recorder.agent().live() {
+        Ok(())
+    }
+
+    /// The notes the live turn has left so far, for its end: read from its own items, never
+    /// from the conversation before it.
+    fn read_turn_notes(&mut self) -> Result<(), ActorError> {
+        let noting = match self.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq)),
             Some(Turn::Parked(turn)) => Some((turn.id, turn.message_seq)),
             _ => None,
         };
         if let Some((turn, message_seq)) = noting {
-            actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
+            self.turn_notes = (turn.0, self.notes_since(turn, message_seq)?);
         }
-        // The process of the turn that ended last may still run: no turn is launched before
-        // it is gone, the fork's held turn and the live turn included.
-        actor.take_up_lingering(&mut out, now_ms);
-        // The fork is taken up before the agent's own turn is rejoined: a turn of the user's
-        // that was held for the fork's turn (never launched) is held again, not started
-        // beside it.
-        actor.fork_take_up(&mut out, now_ms)?;
-        if let Some(mut recovered) = actor.recover_takeover(now_ms)? {
-            recovered.changed.speech |= out.changed.speech;
-            recovered.actions.splice(0..0, out.actions);
-            actor.fork_restore(&mut recovered, now_ms)?;
-            return Ok((actor, recovered));
-        }
-        let live = match actor.recorder.agent().live() {
-            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
-            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
-            _ => None,
-        };
-        if let Some((turn, message_seq, attempt, starting)) = live {
-            actor.rejoin(turn, message_seq, attempt, starting, &mut out, now_ms)?;
-        }
-        // A turn that waited for its next attempt still waits: no tool ran for it meanwhile.
+        Ok(())
+    }
+
+    /// A turn that waited for its next attempt still waits: no tool ran for it meanwhile. It is
+    /// held as live, from its message; nothing is written.
+    fn hold_parked(&mut self) -> Result<(), ActorError> {
+        let actor = self;
         if let Some(Turn::Parked(parked)) = actor.recorder.agent().live() {
             let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
             let message = actor.message_at(message_seq)?;
@@ -1855,18 +1931,7 @@ impl Actor {
                 ended_at: None,
             });
         }
-        // A compaction whose turn ended and whose outcome an actor before this one did not
-        // write: it is said now, from how the turn ended.
-        actor.say_owed_compaction()?;
-        if let Some(settled) = actor.settle_moved_wait(now_ms)? {
-            out.actions.extend(settled.actions);
-            out.changed.status |= settled.changed.status;
-            out.changed.queue |= settled.changed.queue;
-            out.changed.conversation |= settled.changed.conversation;
-        }
-        // What the fork had waiting goes on, now that the agent's own turn is where it was.
-        actor.fork_restore(&mut out, now_ms)?;
-        Ok((actor, out))
+        Ok(())
     }
 
     /// What those who watch the agent are to be sent now: the events of its turn that nobody
@@ -3238,13 +3303,7 @@ impl Actor {
         if !matches!(which, Which::Chat { .. }) {
             return which;
         }
-        let marked = self
-            .recorder
-            .log()
-            .find(kind::HELPER_CHAT_KEY)
-            .ok()
-            .flatten()
-            .is_some_and(|item| item.kind == kind::HELPER_CHAT);
+        let marked = self.helper_chat_marked();
         if which.is_helper_chat() && !marked {
             let mut batch = self.recorder.batch();
             batch.item(
@@ -3254,6 +3313,25 @@ impl Actor {
             let _ = batch.commit();
         }
         which.of_helper(which.is_helper_chat() || marked)
+    }
+
+    /// How a chat is read, as [`Actor::chat_of`] reads it, without marking it: what a glance
+    /// answers (issue 935). The mark is written by the actor's own first read.
+    pub fn chat_read(&self, which: Which) -> Which {
+        if !matches!(which, Which::Chat { .. }) {
+            return which;
+        }
+        which.of_helper(which.is_helper_chat() || self.helper_chat_marked())
+    }
+
+    /// Whether the chat was once read as a helper's.
+    fn helper_chat_marked(&self) -> bool {
+        self.recorder
+            .log()
+            .find(kind::HELPER_CHAT_KEY)
+            .ok()
+            .flatten()
+            .is_some_and(|item| item.kind == kind::HELPER_CHAT)
     }
 
     /// The newest `limit` things a reader asks for.
@@ -3944,6 +4022,20 @@ impl Actor {
         };
         let first = (row.kind == kind::MESSAGE).then_some(row.seq);
         Ok(conversation::original_mark(log, turn)?.map(|_| (TurnId(turn), first)))
+    }
+
+    /// Whether a send of this message with a trace its caller named would be refused for it
+    /// ([`Actor::send_marked`]): the trace is another message's. Read only: what a Host checks
+    /// of an agent it cannot write to yet (issue 935).
+    pub fn named_trace_taken(&self, message: &Message) -> Result<bool, ActorError> {
+        Ok(self
+            .trace_owner(message.trace_id.as_deref())?
+            .is_some_and(|owner| owner != trace_owner_of(message)))
+    }
+
+    /// Whether the log has this message (by its id) already.
+    pub fn has_message(&self, id: &str) -> Result<bool, ActorError> {
+        Ok(self.recorder.log().find(id)?.is_some())
     }
 
     /// The message a trace belongs to, by one look by key.
@@ -5859,6 +5951,42 @@ impl Actor {
             out.changed.conversation = true;
             return self.carry_out(effects, out, now_ms);
         }
+        let input_skipped = self.take_up_spool(turn, message_seq, attempt, now_ms, false)?;
+        out.changed.conversation = true;
+        out.actions.push(Action::Follow {
+            turn,
+            attempt,
+            socket: self.profile.socket_path_of(turn, attempt),
+        });
+        if input_skipped || self.recorder.agent().stopping().is_some() {
+            // The stop was decided; whether the shim ever heard it is not known. Telling it
+            // twice does no harm.
+            out.actions.push(Action::Stop {
+                turn,
+                socket: self.profile.socket_path_of(turn, attempt),
+                grace_ms: self.profile.stop_grace_ms,
+            });
+        }
+        // What the tool wrote while nobody was reading.
+        self.pump(out, now_ms)
+    }
+
+    /// Takes up the live turn whose shim wrote this spool: reads it up to the position in the
+    /// log, only to be where the actor before this one was (what those lines meant is in the log
+    /// already), and holds the turn as live. Answers whether the tool skipped input. A glance
+    /// ([`Actor::glance`], issue 935) reads the same and writes nothing: it makes no revision of
+    /// its own and shows no reply that is not stored, so nothing it answers is above what was
+    /// committed.
+    fn take_up_spool(
+        &mut self,
+        turn: TurnId,
+        message_seq: Seq,
+        attempt: u32,
+        now_ms: i64,
+        glancing: bool,
+    ) -> Result<bool, ActorError> {
+        let spool = self.profile.spool_path_of(turn, attempt);
+        let reader = SpoolReader::new(&spool);
         // A shim took this turn. Read its spool up to the position in the log, only to be where
         // the actor before this one was: what those lines meant is in the log already.
         let until = self.recorder.spool_offset(turn);
@@ -6068,17 +6196,23 @@ impl Actor {
         // What the turn read, those who watch it are told again: its working line goes below it.
         let read = self.read_rows(turn, &message.origin);
         let _ = self.shown.read_rows_at(&read, now_ms);
-        // One write to the log, so that every revision from here on is above every revision the
-        // actor before this one gave to something it showed and did not store.
-        let mut batch = self.recorder.batch();
-        batch.cursor(turn, offset, now_ms);
-        batch.commit()?;
         self.unstored_changes = 0;
-        let base = self.recorder.last_seq() * REVISION_STEP;
-        for draft in &mut drafts {
-            self.unstored_changes += 1;
-            draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
-            self.shown_revision = draft.revision;
+        if glancing {
+            // What was shown and not stored is not what was committed: a glance answers none of
+            // it, and gives nothing a revision.
+            drafts.clear();
+        } else {
+            // One write to the log, so that every revision from here on is above every revision
+            // the actor before this one gave to something it showed and did not store.
+            let mut batch = self.recorder.batch();
+            batch.cursor(turn, offset, now_ms);
+            batch.commit()?;
+            let base = self.recorder.last_seq() * REVISION_STEP;
+            for draft in &mut drafts {
+                self.unstored_changes += 1;
+                draft.revision = base + self.unstored_changes.min(REVISION_STEP - 1);
+                self.shown_revision = draft.revision;
+            }
         }
         // As when the turn ran. It began as the newest of the user's messages read together
         // into its prompt said (they have no echo of their own to replay); then the newest of
@@ -6150,23 +6284,7 @@ impl Actor {
             answered: false,
             ended_at: None,
         });
-        out.changed.conversation = true;
-        out.actions.push(Action::Follow {
-            turn,
-            attempt,
-            socket: self.profile.socket_path_of(turn, attempt),
-        });
-        if input_skipped || self.recorder.agent().stopping().is_some() {
-            // The stop was decided; whether the shim ever heard it is not known. Telling it
-            // twice does no harm.
-            out.actions.push(Action::Stop {
-                turn,
-                socket: self.profile.socket_path_of(turn, attempt),
-                grace_ms: self.profile.stop_grace_ms,
-            });
-        }
-        // What the tool wrote while nobody was reading.
-        self.pump(out, now_ms)
+        Ok(input_skipped)
     }
 
     /// What the user's compaction did, where its turn ended in a write that did not say it: a

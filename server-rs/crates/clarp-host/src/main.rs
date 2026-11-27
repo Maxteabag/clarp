@@ -367,6 +367,21 @@ async fn serve(config: Config) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     let teams =
         Arc::new(clarp_host::teams::Desk::open(team_disk).map_err(|error| error.to_string())?);
+    // Where a plain send of the owner's is kept while its agent is opened (issue 935): made
+    // before any agent opens, which takes what was kept for it. Its store is opened by its own
+    // thread, beside the start: a disk that is slow to make it holds no answer of the Host's.
+    {
+        let (engine, path) = (config.engine.clone(), config.data_dir.join("accepted.db"));
+        let at = path.clone();
+        clarp_host::accepted::install(
+            &path,
+            Box::new(move || {
+                let (_, tables) = engines(&engine)
+                    .ok_or_else(|| format!("there is no engine named `{engine}`"))?;
+                tables.open(&at).map_err(|error| error.to_string())
+            }),
+        )?;
+    }
     let works = Works {
         teams: Some(teams.clone()),
         runtime: tokio::runtime::Handle::current(),
@@ -399,7 +414,10 @@ async fn serve(config: Config) -> Result<(), String> {
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
     steps.mark("stores");
-    let fleet = fleet::start(works, store)?;
+    // Every agent's handle is there; its thread begins once the Host answers (issue 935): what
+    // the start reads of its stores before it answers is read before the agents' logs keep the
+    // disk busy.
+    let (fleet, unopened) = fleet::read(works, store)?;
     steps.mark("fleet");
     for pool in &pools {
         pool.attach(fleet.clone());
@@ -562,10 +580,29 @@ async fn serve(config: Config) -> Result<(), String> {
     // Whether each agent can answer now is told as it changes; and how long the Host took to
     // come back since it was last told to stop is kept, for what it says when it is told again.
     clarp_host::availability::run(&app);
-    clarp_host::availability::host_started(&app.config.data_dir, app.clock.now_ms());
-    let restart_ms = clarp_host::availability::restart_estimate(&app.config.data_dir);
-    let mut server = tokio::spawn(shutdown::serve(listener, router, app.clone(), restart_ms));
+    let restart_ms = Arc::new(std::sync::atomic::AtomicI64::new(
+        clarp_host::availability::RESTART_DEFAULT_MS,
+    ));
+    let mut server = tokio::spawn(shutdown::serve(
+        listener,
+        router,
+        app.clone(),
+        restart_ms.clone(),
+    ));
     steps.mark("answering");
+    // Every agent is read from what its log committed, and then opened, each on its own thread
+    // and beside the others: what is asked of one meanwhile is answered from its reading.
+    unopened.begin();
+    // How long this Host was away is kept beside the answers: a write that waits for the disk
+    // holds none of them (issue 935).
+    {
+        let (data, now) = (app.config.data_dir.clone(), app.clock.now_ms());
+        tokio::task::spawn_blocking(move || {
+            clarp_host::availability::host_started(&data, now);
+            let estimate = clarp_host::availability::restart_estimate(&data);
+            restart_ms.store(estimate, std::sync::atomic::Ordering::Relaxed);
+        });
+    }
     let finishing = async {
         // The tests make a start fail after the Host has begun to answer (issue 935): once the
         // file named exists.
@@ -577,18 +614,35 @@ async fn serve(config: Config) -> Result<(), String> {
             }
             return Err("a step of the start failed (CLARP_TEST_START_FAILS_WHEN)".to_string());
         }
-        // Where this Host keeps the machine's tools, the chosen skills are linked to its release;
-        // anywhere else this writes nothing. A turn that starts before they are finds the release
-        // before's skills, which install-host keeps until the links have moved.
-        clarp_host::managed_skills::at_start(&app).await;
-        steps.mark("skills");
         // The janitors a Host has of its own are installed, each once, paused. Before anything
-        // waits for the agents to be open: with these, every agent the start admits is in the
+        // waits for the agents' rows: with these, every agent the start admits is in the
         // roster, and "every agent is open" means all of them (issue 935).
         if let Err(why) = clarp_host::janitors::install(&app).await {
             eprintln!("clarp-host: its own janitors were not installed: {}", why.0);
         }
         steps.mark("janitors");
+        // The roster answers once every agent's row is its own: read from what its log
+        // committed, or open (issue 935). Said once, with when, from beside the start.
+        {
+            let app = app.clone();
+            let began = steps.began;
+            tokio::spawn(async move {
+                let directory = app.fleet.directory();
+                for member in directory.members.iter().chain(directory.janitors.iter()) {
+                    member.agent.row_is_its_own().await;
+                }
+                app.start.reach(clarp_host::start::Stage::Rows);
+                eprintln!(
+                    "clarp-host: every agent's row was its own {} ms after the start began",
+                    began.elapsed().as_millis()
+                );
+            });
+        }
+        // Where this Host keeps the machine's tools, the chosen skills are linked to its release;
+        // anywhere else this writes nothing. A turn that starts before they are finds the release
+        // before's skills, which install-host keeps until the links have moved.
+        clarp_host::managed_skills::at_start(&app).await;
+        steps.mark("skills");
         // What follows needs the agents opened: it waits for them, twenty seconds at most.
         let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
         while tokio::time::Instant::now() < opened_by
@@ -644,6 +698,8 @@ async fn serve(config: Config) -> Result<(), String> {
         steps.mark("rings");
         app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
         steps.mark("calls");
+        // A ring on an event stream is judged by these from now on (issue 935).
+        app.start.recovered_calls();
         app.mouth.bindings_ready.notify_one();
         clarp_host::calls::resume(&app);
         let staging = app.clone();
