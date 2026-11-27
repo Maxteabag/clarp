@@ -76,9 +76,10 @@ impl Engine {
             self.credential_looked_up(&base, String::new());
             return;
         }
+        let backend = clarp_net::credentials::Backend::from_settings(&self.settings);
         let (sender, wake) = (self.sender.clone(), self.wake.clone());
         self.runtime.spawn(async move {
-            let token = clarp_net::credentials::lookup(&base).await;
+            let token = backend.lookup(&base).await;
             if sender.send(Message::Credential { base, token }).is_ok() {
                 wake();
             }
@@ -122,9 +123,13 @@ impl Engine {
     }
 
     /// A device token that worked is worth keeping; plain tokens from the
-    /// environment or config are not written to the keyring.
+    /// environment or config are not written, nor are read-only backends.
     pub(crate) fn keep_working_token(&mut self) {
         if self.token.starts_with("cld_") {
+            let backend = clarp_net::credentials::Backend::from_settings(&self.settings);
+            if !backend.supports_store() {
+                return;
+            }
             let token = self.token.clone();
             self.store_credential(token);
         }
@@ -136,9 +141,10 @@ impl Engine {
             eprintln!("Engine: keyring off; not storing the device token for {base}");
             return;
         }
+        let backend = clarp_net::credentials::Backend::from_settings(&self.settings);
         let (sender, wake) = (self.sender.clone(), self.wake.clone());
         self.runtime.spawn(async move {
-            let result = clarp_net::credentials::store(&base, &token).await;
+            let result = backend.store(&base, &token).await;
             if sender.send(Message::CredentialStored { base, result }).is_ok() {
                 wake();
             }
@@ -165,9 +171,10 @@ impl Engine {
             self.credential_removed(&base, Ok(()));
             return;
         }
+        let backend = clarp_net::credentials::Backend::from_settings(&self.settings);
         let (sender, wake) = (self.sender.clone(), self.wake.clone());
         self.runtime.spawn(async move {
-            let result = clarp_net::credentials::remove(&base).await;
+            let result = backend.remove(&base).await;
             if sender.send(Message::CredentialRemoved { base, result }).is_ok() {
                 wake();
             }

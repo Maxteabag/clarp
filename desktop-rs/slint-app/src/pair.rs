@@ -46,18 +46,11 @@ fn device_name() -> String {
     if host.is_empty() { "Clarp desktop".into() } else { format!("Clarp desktop on {host}") }
 }
 
-/// What to do when the keyring is locked, as over SSH on macOS.
-const UNLOCK_HINT: &str = if cfg!(target_os = "macos") {
-    "over SSH the login Keychain is locked to this session: run `security unlock-keychain ~/Library/Keychains/login.keychain-db` (it asks for the Mac's login password), or run --pair in Terminal on the Mac"
-} else {
-    "unlock the desktop keyring (log in to the desktop session)"
-};
-
 /// Stores and removes a throwaway item: what pairing will need.
-async fn keyring_writable() -> Result<(), String> {
+async fn backend_writable(backend: &clarp_net::credentials::Backend) -> Result<(), String> {
     let probe = format!("clarp-pair-probe://{}", std::process::id());
-    let stored = clarp_net::credentials::store(&probe, "cld_probe").await;
-    let removed = clarp_net::credentials::remove(&probe).await;
+    let stored = backend.store(&probe, "cld_probe").await;
+    let removed = backend.remove(&probe).await;
     stored?;
     removed.map_err(|error| format!("could not remove the probe item {probe}: {error}"))
 }
@@ -67,23 +60,33 @@ fn pair(parsed: Result<(String, String), String>, mut settings: clarp_core::sett
     let base = url::Url::parse(&url).map_err(|error| error.to_string())?;
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|error| format!("no async runtime: {error}"))?;
     let keyring = std::env::var("CLARP_KEYRING").map_or(true, |v| v != "off");
+    let backend = clarp_net::credentials::Backend::from_settings(&settings);
+    let backend_label = backend.label();
+    let unlock_hint = backend.unlock_hint();
     // The Host spends the code on the exchange: first make sure the token
     // can be kept, or the Host is left with a device nobody holds.
     if keyring {
-        runtime.block_on(keyring_writable()).map_err(|error| {
-            format!("{} cannot be written: {error}. The code was not used: {UNLOCK_HINT}, then pair again with the same code.", clarp_net::credentials::KEYRING_NAME)
-        })?;
+        if !backend.supports_store() {
+            return Err(format!(
+                "{backend_label} cannot store new tokens (no storeCommand configured). The code was not used: {unlock_hint}, then pair again with the same code."
+            ));
+        }
+        if backend.needs_write_probe() {
+            runtime.block_on(backend_writable(&backend)).map_err(|error| {
+                format!("{backend_label} cannot be written: {error}. The code was not used: {unlock_hint}, then pair again with the same code.")
+            })?;
+        }
     }
     let token = runtime.block_on(clarp_net::pairing::exchange(&base, &code, &device_name()))?;
     let kept = if keyring {
-        let stored = runtime.block_on(clarp_net::credentials::store(&url, &token));
+        let stored = runtime.block_on(backend.store(&url, &token));
         stored.map_err(|error| {
-            format!("{url} paired, but the device token could not be kept in {}: {error}. The code is used up: revoke the new device on the Host, {UNLOCK_HINT}, and pair with a new code.", clarp_net::credentials::KEYRING_NAME)
+            format!("{url} paired, but the device token could not be kept in {backend_label}: {error}. The code is used up: revoke the new device on the Host, {unlock_hint}, and pair with a new code.")
         })?;
-        if runtime.block_on(clarp_net::credentials::lookup(&url)) != token {
-            return Err(format!("the device token for {url} did not read back from {}", clarp_net::credentials::KEYRING_NAME));
+        if runtime.block_on(backend.lookup(&url)) != token {
+            return Err(format!("the device token for {url} did not read back from {backend_label}"));
         }
-        format!("the device token is in {}", clarp_net::credentials::KEYRING_NAME)
+        format!("the device token is in {backend_label}")
     } else {
         "the device token is not kept (CLARP_KEYRING=off)".into()
     };

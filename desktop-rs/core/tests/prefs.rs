@@ -289,3 +289,27 @@ fn chat_zoom_is_a_setting_of_its_own_from_60_to_250_percent() {
     prefs::reset(&mut settings, spec, &theme);
     assert!(settings.get("conversation/chatZoom").is_none(), "reset leaves 100% and nothing stored");
 }
+
+#[test]
+fn credential_backend_settings_accept_choices_and_optional_commands() {
+    let mut settings = Settings::in_memory();
+    assert_eq!(prefs::choice_of(&settings, "credentialsbackend"), "keyring");
+    assert_eq!(prefs::text_of(&settings, "credentialscommand"), "");
+    assert_eq!(prefs::text_of(&settings, "credentialsstorecommand"), "");
+    assert_eq!(prefs::text_of(&settings, "credentialsremovecommand"), "");
+    assert_eq!(prefs::text_of(&settings, "credentialsfile"), "");
+
+    let (name, value) = prefs::split_assignment("credentialsbackend=command");
+    prefs::set_text(&mut settings, &name, &value).unwrap();
+    let (name, value) = prefs::split_assignment("credentialscommand=secret-tool --url={url} {host}");
+    prefs::set_text(&mut settings, &name, &value).unwrap();
+    assert_eq!(prefs::choice_of(&settings, "credentialsbackend"), "command");
+    assert_eq!(prefs::text_of(&settings, "credentialscommand"), "secret-tool --url={url} {host}");
+
+    // Clearing an optional text setting resets it to its empty default.
+    prefs::set_text(&mut settings, "credentialscommand", "").unwrap();
+    assert!(settings.get("credentials/command").is_none());
+    assert!(prefs::set_text(&mut settings, "credentialsbackend", "invalid").is_err());
+    // Required text settings (non-empty default) still reject empty text.
+    assert!(prefs::set_text(&mut settings, "codefont", "").is_err());
+}

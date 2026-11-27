@@ -275,9 +275,10 @@ impl Engine {
                 self.peer_credential(&host.url, token, generation);
                 continue;
             }
+            let backend = clarp_net::credentials::Backend::from_settings(&self.settings);
             let (sender, wake, base) = (self.sender.clone(), self.wake.clone(), host.url.clone());
             self.runtime.spawn(async move {
-                let token = clarp_net::credentials::lookup(&base).await;
+                let token = backend.lookup(&base).await;
                 if sender.send(Message::PeerCredential { base, token, generation }).is_ok() {
                     wake();
                 }

@@ -347,6 +347,7 @@ fn range_of(spec: &Spec, theme: &str) -> String {
         }
         Kind::Choice { .. } => format!("default {default}"),
         Kind::Color { .. } => format!("#rrggbb · the theme's {default}"),
+        Kind::Text { .. } if default.is_empty() => "empty by default".into(),
         Kind::Text { .. } => format!("default {default}"),
         Kind::Toggle { .. } => format!("on or off · default {default}"),
     }

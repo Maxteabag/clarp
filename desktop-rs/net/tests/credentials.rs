@@ -61,3 +61,93 @@ async fn token_round_trips_through_the_keychain() {
     assert_eq!(credentials::lookup(&server).await, "");
     credentials::remove(&server).await.expect("removing nothing succeeds");
 }
+
+#[tokio::test]
+async fn file_backend_round_trips_and_enforces_private_permissions() {
+    let dir = std::env::temp_dir().join(format!("clarp-cred-file-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let path = dir.join("credentials.json");
+    let backend = credentials::Backend::File { path: Some(path.clone()) };
+    let server = "https://file-backend.invalid";
+
+    assert_eq!(backend.lookup(server).await, "");
+    backend.store(server, "cld_first").await.expect("store");
+    backend.store(&format!("{server}/"), "cld_second").await.expect("replace normalized");
+    assert_eq!(backend.lookup(server).await, "cld_second");
+    assert_eq!(backend.lookup("https://other.invalid").await, "");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "credentials file must be 0600, got {:o}", mode);
+    }
+
+    backend.remove(server).await.expect("remove");
+    assert_eq!(backend.lookup(server).await, "");
+    backend.remove(server).await.expect("removing missing succeeds");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn command_backend_round_trips_with_placeholders_env_and_stdin() {
+    let dir = std::env::temp_dir().join(format!("clarp-cred-cmd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir_str = dir.display().to_string();
+
+    let backend = credentials::Backend::Command {
+        lookup: format!("cat '{dir_str}/{{host}}.tok'"),
+        store: Some(format!("cat > '{dir_str}/{{host}}.tok' && printf '%s' \"$CLARP_SERVER_URL\" > '{dir_str}/{{host}}.url'")),
+        remove: Some(format!("rm -f '{dir_str}/{{host}}.tok' '{dir_str}/{{host}}.url'")),
+    };
+    let server = "https://cmd-host.example.test";
+
+    assert!(backend.supports_store());
+    assert!(!backend.needs_write_probe());
+    assert_eq!(backend.lookup(server).await, "");
+    backend.store(server, "cld_from_command").await.expect("store via command");
+    assert_eq!(backend.lookup(server).await, "cld_from_command");
+    assert_eq!(std::fs::read_to_string(dir.join("cmd-host.example.test.url")).unwrap(), server);
+    backend.remove(server).await.expect("remove via command");
+    assert_eq!(backend.lookup(server).await, "");
+
+    let read_only = credentials::Backend::Command {
+        lookup: "printf 'cld_readonly\\n'".into(),
+        store: None,
+        remove: None,
+    };
+    assert!(!read_only.supports_store());
+    assert_eq!(read_only.lookup(server).await, "cld_readonly");
+    assert!(read_only.store(server, "cld_x").await.is_err());
+    assert!(read_only.remove(server).await.is_err());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backend_resolves_from_settings() {
+    let mut settings = clarp_core::settings::Settings::in_memory();
+    assert_eq!(credentials::Backend::from_settings(&settings), credentials::Backend::Keyring);
+
+    clarp_core::prefs::set_text(&mut settings, "credentialsbackend", "file").unwrap();
+    clarp_core::prefs::set_text(&mut settings, "credentialsfile", "/tmp/my-creds.json").unwrap();
+    assert_eq!(
+        credentials::Backend::from_settings(&settings),
+        credentials::Backend::File { path: Some(std::path::PathBuf::from("/tmp/my-creds.json")) }
+    );
+
+    clarp_core::prefs::set_text(&mut settings, "credentialsbackend", "command").unwrap();
+    clarp_core::prefs::set_text(&mut settings, "credentialscommand", "get-token {host}").unwrap();
+    clarp_core::prefs::set_text(&mut settings, "credentialsstorecommand", "put-token {url}").unwrap();
+    assert_eq!(
+        credentials::Backend::from_settings(&settings),
+        credentials::Backend::Command {
+            lookup: "get-token {host}".into(),
+            store: Some("put-token {url}".into()),
+            remove: None,
+        }
+    );
+}

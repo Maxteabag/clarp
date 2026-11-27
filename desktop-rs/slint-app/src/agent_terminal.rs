@@ -56,7 +56,8 @@ async fn token_for(host: &str, settings: &Settings) -> String {
         return token;
     }
     if std::env::var("CLARP_KEYRING").map_or(true, |v| v != "off") {
-        let token = clarp_net::credentials::lookup(host).await;
+        let backend = clarp_net::credentials::Backend::from_settings(settings);
+        let token = backend.lookup(host).await;
         if !token.trim().is_empty() {
             return token.trim().to_owned();
         }

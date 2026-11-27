@@ -94,6 +94,7 @@ const ACTIVITY: &[(&str, &str)] =
 const DETAIL: &[(&str, &str)] =
     &[("raw", "Raw (no AI)"), ("brief", "Brief"), ("plain", "Plain English"), ("explained", "Explained"), ("teaching", "Teaching")];
 const LINKS: &[(&str, &str)] = &[("browser", "Open in the browser"), ("copy", "Copy the address")];
+const CREDENTIAL_BACKENDS: &[(&str, &str)] = &[("keyring", "OS keyring"), ("file", "Private file (0600)"), ("command", "Custom command")];
 /// The avatar view's sizes (slint-app `avatar_view::CHOICES`).
 const AVATARS: &[(&str, &str)] = &[("small", "Small · 36 px"), ("medium", "Medium · 44 px"), ("large", "Large · 52 px")];
 const SCROLLBARS: &[(&str, &str)] = &[("auto", "When scrollable"), ("always", "Always"), ("never", "Never")];
@@ -620,6 +621,56 @@ pub static SPECS: &[Spec] = &[
         kind: toggle(true),
         scope: G,
     },
+    Spec {
+        name: "credentialsbackend",
+        key: "credentials/backend",
+        label: "Credential store",
+        description: "Where device tokens are kept and read from: the OS keyring, a private 0600 file, or a custom shell command",
+        aliases: &["credential backend", "keyring", "unlock", "token store", "password manager", "secrets"],
+        section: BEHAVIOUR,
+        kind: Kind::Choice { default: "keyring", options: CREDENTIAL_BACKENDS, indexed: false },
+        scope: G,
+    },
+    Spec {
+        name: "credentialscommand",
+        key: "credentials/command",
+        label: "Credential lookup command",
+        description: "Shell command that prints the device token when Credential store is Custom command (uses {url}, {host}, CLARP_SERVER_URL, CLARP_SERVER_HOST)",
+        aliases: &["credential command", "unlock command", "token command", "lookup command", "secret command"],
+        section: BEHAVIOUR,
+        kind: Kind::Text { default: "" },
+        scope: G,
+    },
+    Spec {
+        name: "credentialsstorecommand",
+        key: "credentials/storeCommand",
+        label: "Credential store command",
+        description: "Optional shell command run when pairing to save a token; reads the token from standard input and receives {url}, {host}, CLARP_SERVER_URL, CLARP_SERVER_HOST",
+        aliases: &["store command", "save token command", "credential save command"],
+        section: BEHAVIOUR,
+        kind: Kind::Text { default: "" },
+        scope: G,
+    },
+    Spec {
+        name: "credentialsremovecommand",
+        key: "credentials/removeCommand",
+        label: "Credential remove command",
+        description: "Optional shell command run when forgetting a Host's token (uses {url}, {host}, CLARP_SERVER_URL, CLARP_SERVER_HOST)",
+        aliases: &["remove command", "delete token command", "forget token command"],
+        section: BEHAVIOUR,
+        kind: Kind::Text { default: "" },
+        scope: G,
+    },
+    Spec {
+        name: "credentialsfile",
+        key: "credentials/file",
+        label: "Credential file path",
+        description: "Optional path for the private 0600 token file when Credential store is Private file (defaults to credentials.json in the config folder)",
+        aliases: &["credential file", "token file", "credentials path"],
+        section: BEHAVIOUR,
+        kind: Kind::Text { default: "" },
+        scope: G,
+    },
 ];
 
 pub fn specs() -> &'static [Spec] {
@@ -751,8 +802,8 @@ pub fn validate(spec: &Spec, value: &Value) -> Result<Value, String> {
             .and_then(normalized_color)
             .map(Value::from)
             .ok_or_else(|| format!("{} must be a colour like #1a2b3c, not {value}", spec.name)),
-        Kind::Text { .. } => match value.as_str().map(str::trim) {
-            Some(text) if !text.is_empty() => Ok(Value::from(text)),
+        Kind::Text { default } => match value.as_str().map(str::trim) {
+            Some(text) if !text.is_empty() || default.is_empty() => Ok(Value::from(text)),
             _ => Err(format!("{} must be a non-empty text, not {value}", spec.name)),
         },
     }
@@ -801,6 +852,10 @@ pub fn flag(settings: &Settings, name: &str) -> bool {
 }
 
 pub fn choice_of(settings: &Settings, name: &str) -> String {
+    find(name).map(|spec| current(settings, spec, &theme_of(settings))).and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+}
+
+pub fn text_of(settings: &Settings, name: &str) -> String {
     find(name).map(|spec| current(settings, spec, &theme_of(settings))).and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
 }
 
@@ -1200,6 +1255,7 @@ pub fn schema() -> Value {
                 json!({"type": "string", "enum": options_of(spec).into_iter().map(|(id, _)| id).collect::<Vec<_>>(), "default": default_value(spec, theme)})
             }
             (_, Kind::Color { .. }) => json!({"type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"}),
+            (_, Kind::Text { default }) if default.is_empty() => json!({"type": "string", "default": default}),
             (_, Kind::Text { default }) => json!({"type": "string", "minLength": 1, "default": default}),
         };
         let mut property = property;
