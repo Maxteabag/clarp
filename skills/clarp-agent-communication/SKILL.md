@@ -187,9 +187,19 @@ waits is `queued_turn_count`. On a Host with contract 206 to 212, `busy`
 means any running turn and `queue_ahead` is `queued_turn_count`. `text` is the line the apps
 show. A launch held by the pool without a known cause says "Waiting for account".
 `back_at_ms` is when the Host expects it to answer (epoch ms, or `null`).
-Use it to decide, not to refuse: a message to an agent that cannot answer now
-still waits in its queue and runs later. When the work cannot wait for
-`back_at_ms`, ask another agent, or tell the user why through their front desk.
+Send routine messages without a capacity check. When there is a concrete reason
+to expect a capacity problem, such as a shared Claude account pool nearing
+exhaustion or a recipient already waiting for usage, use recent reliable
+availability or make one quick read before assigning work. Reuse that result
+across related messages while it is current.
+
+If the agent is out of capacity and the work can wait, send it once if that
+recipient still needs it. Tell the user it is waiting when the delay affects
+their request. If it is urgent, handle it yourself within your authority or
+route it to an agent who can act now. Verify that the recipient picked up the
+work and tell the user where it landed. A queued or delivered message alone
+does not show that the work started.
+
 An older Host has no `availability`: read `busy` and `queued_turn_count`.
 
 ## When the user does not see the turn
