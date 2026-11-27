@@ -91,6 +91,141 @@ say("result", result={"conversation_id": conversation, "status": "SUCCESS", "res
 "#;
 
 #[test]
+fn agy_voice_keeps_long_then_short_in_order_without_result_replay() {
+    let place = Place::new("agy-cumulative-speech");
+    let agy = place.root.join("agy");
+    let conversation = "11111111-2222-3333-4444-555555555555";
+    let long = format!(
+        "<speak>First line. {}</speak>",
+        "The longer opening stays ahead of the short answer. ".repeat(8)
+    );
+    let short = "<speak>First summary.</speak>";
+    let next = "<speak>Next turn only.</speak>";
+    let init = json!({"event":"init","conversation_id":conversation});
+    let step = |index, said: &str| {
+        json!({"event":"step_update","step_update":{"conversation_id":conversation,
+            "step_type":"agent_response","step_index":index,"state":"DONE","text_delta":said}})
+    };
+    let result = |said: &str| {
+        json!({"event":"result","result":{"conversation_id":conversation,
+            "status":"SUCCESS","response":said}})
+    };
+    program(
+        &agy,
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in\n*voice-fixture-next*)\ncat <<'NEXT'\n{init}\n{}\nNEXT\n;;\n*)\ncat <<'FIRST'\n{init}\n{}\n{}\n{}\nFIRST\n;;\nesac\n",
+            result(next),
+            step(1, &long),
+            step(2, short),
+            result(&format!("{long}{short}")),
+        ),
+    );
+    let voice = cartesia_stand_in(vec![23; 2000]);
+    let owners = place.root.join("synthetic-voice.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\n",
+    )
+    .unwrap();
+    let host = place.start_in(
+        "",
+        &["--speech-keys", owners.to_str().unwrap()],
+        &[
+            ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+            ("CLARP_CARTESIA_ENDPOINT", &voice.address),
+        ],
+    );
+    let made = host.post(
+        "/agents",
+        json!({"name":"AGY voice test","backend":"agy","voice_id":"{\"cartesia\":\"fixture\"}"}),
+    );
+    let session = made["session"].as_str().unwrap();
+    host.post("/select", json!({"session": session}));
+    let heard = host.listen();
+    wait_for("the event stream to answer", || {
+        !heard.lock().unwrap().is_empty()
+    });
+    let clips = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "audio" && event["session"] == session)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let requested = || {
+        voice
+            .asked()
+            .iter()
+            .filter_map(|req| req["transcript"].as_str().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    voice.held.store(true, Ordering::SeqCst);
+    let first = host.send_aloud(session, "voice-fixture-first", "first-voice");
+    wait_for("the long clip to announce and begin", || {
+        requested()
+            .first()
+            .is_some_and(|said| said.contains("First line."))
+            && clips().len() == 1
+    });
+    let second = host.send_aloud(session, "voice-fixture-next", "second-voice");
+    wait_for("the next turn's terminal-only answer", || {
+        host.turns(session).iter().any(|row| {
+            row["role"] == "assistant"
+                && row["text"]
+                    .as_str()
+                    .is_some_and(|said| said.contains("Next turn only."))
+        })
+    });
+    let held = clips();
+    voice.held.store(false, Ordering::SeqCst);
+    assert_eq!(
+        held.len(),
+        1,
+        "a later line announced while the first was still making"
+    );
+
+    let replies: Vec<_> = host
+        .turns(session)
+        .into_iter()
+        .filter(|row| row["role"] == "assistant")
+        .collect();
+    assert_eq!(
+        replies.len(),
+        3,
+        "the cumulative result must not write a second copy of the first turn"
+    );
+    wait_for("three clips, in the original speech order", || {
+        requested().len() >= 3 && clips().len() >= 3
+    });
+    let requested = requested();
+    assert_eq!(requested.len(), 3);
+    for (actual, marker) in
+        requested
+            .iter()
+            .zip(["First line.", "First summary.", "Next turn only."])
+    {
+        assert!(
+            actual.starts_with(marker),
+            "unexpected synthesis order: {requested:?}"
+        );
+    }
+    let clips = clips();
+    assert_eq!(clips.len(), 3);
+    assert_eq!(clips[0]["trace_id"], first["trace_id"]);
+    assert_eq!(clips[1]["trace_id"], first["trace_id"]);
+    assert_eq!(clips[2]["trace_id"], second["trace_id"]);
+    assert_ne!(first["trace_id"], second["trace_id"]);
+    assert!(
+        clips
+            .windows(2)
+            .all(|pair| pair[0]["event_id"].as_u64().unwrap()
+                < pair[1]["event_id"].as_u64().unwrap())
+    );
+}
+
+#[test]
 fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
     let place = Place::new("spoken-when-asked");
     let (claude, agy) = (place.root.join("claude"), place.root.join("agy"));
