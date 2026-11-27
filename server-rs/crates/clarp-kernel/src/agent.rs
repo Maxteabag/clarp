@@ -78,6 +78,11 @@ fn joins_live(waiting: &Queued) -> bool {
     }
 }
 
+/// What belongs ahead of an ordinary automatic or agent turn at dispatch.
+fn has_owner_priority(waiting: &Queued) -> bool {
+    waiting.admission == Admission::Direct || waiting.user_word || waiting.origin.is_user_send()
+}
+
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -387,7 +392,7 @@ pub enum AgentEvent {
         by: String,
         at_ms: i64,
     },
-    /// A waiting turn was sent by hand: it is the next to run, and no hold holds it.
+    /// A waiting turn was selected to run next, by hand or by the Host's owner priority rule.
     SentNow {
         turn: TurnId,
         by: String,
@@ -1140,12 +1145,14 @@ impl Agent {
         if self.moved.is_some() {
             return None;
         }
-        self.mailbox.iter().find(|queued| {
-            !self.joins.contains_key(&queued.id)
-                && (!self.paused
-                    || queued.admission == Admission::Direct
-                    || self.unheld.contains(&queued.id))
-        })
+        self.mailbox.iter().find(|queued| self.runnable(queued))
+    }
+
+    fn runnable(&self, queued: &Queued) -> bool {
+        !self.joins.contains_key(&queued.id)
+            && (!self.paused
+                || queued.admission == Admission::Direct
+                || self.unheld.contains(&queued.id))
     }
 
     /// A fresh user message reaching the agent is a continuation after a user Stop.
@@ -1177,26 +1184,15 @@ impl Agent {
             && !self.joins.values().any(|held| held.join.uuid == join.uuid)
     }
 
-    /// How many waiting messages run before a message of the owner's said now (issue 918): those
-    /// in front of the place his word takes in the mailbox ([`crate::user_word::slot`]: his own
-    /// earlier words, a front desk's relay of them, a card he answered, a take-over), less those
-    /// the live turn reads in and those a Stop holds, which do not run before it. Another
-    /// agent's message or automation waits behind his word and is not counted.
+    /// How many waiting messages run before a message of the owner's said now (issue 918):
+    /// the owner's earlier words, verified relays and take-overs that can run.
     pub fn ahead_of_owner(&self) -> usize {
-        let at = crate::user_word::slot(
-            self.mailbox
-                .iter()
-                .map(|waiting| waiting.user_word || waiting.admission == Admission::Direct),
-        );
         self.mailbox
             .iter()
-            .take(at)
             .filter(|waiting| {
-                let held = self.paused
-                    && (self.import_held
-                        || (waiting.admission != Admission::Direct
-                            && !self.unheld.contains(&waiting.id)));
-                !held && !self.joins.contains_key(&waiting.id)
+                has_owner_priority(waiting)
+                    && self.runnable(waiting)
+                    && !(self.paused && self.import_held)
             })
             .count()
     }
@@ -2671,8 +2667,23 @@ impl Work {
                 at_ms: now_ms,
             });
         }
-        let Some(next) = self.agent.next_to_run() else {
+        let Some(head) = self.agent.next_to_run() else {
             return;
+        };
+        let sent_by_hand = self
+            .decision
+            .events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == head.id));
+        let next = if sent_by_hand || takeover.is_some() || has_owner_priority(head) {
+            head
+        } else {
+            // A replayed or restored queue can still contain an agent ahead of the owner.
+            self.agent
+                .mailbox
+                .iter()
+                .find(|waiting| has_owner_priority(waiting) && self.agent.runnable(waiting))
+                .unwrap_or(head)
         };
         let continues = self.agent.continues_user_queue(next);
         // A message the user's Stop let through runs as part of that Stop, and one the user
@@ -2681,13 +2692,17 @@ impl Work {
         // resume. Were it to end when the last of the Stop's own starts, the queue a Stop
         // leaves would depend on how soon the stopped turn's process exits, and agree with what
         // the Stop answered only when it was read before that.
-        let sent_by_hand = self
-            .decision
-            .events
-            .iter()
-            .any(|event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == next.id));
         let released = self.agent.stop_released.contains(&next.id) || sent_by_hand;
         let (turn, message_seq) = (next.id, next.message_seq);
+        if turn != head.id {
+            // Record the selection before Started, so historical and older readers replay the
+            // same head. The selected message was already runnable under any existing Stop.
+            self.record(AgentEvent::SentNow {
+                turn,
+                by: "host".to_string(),
+                at_ms: now_ms,
+            });
+        }
         self.record(AgentEvent::Turn {
             turn,
             change: TurnEvent::Started {
@@ -4768,10 +4783,19 @@ mod tests {
     }
 
     #[test]
-    fn prior_queue_order_is_replayed_and_old_user_words_protect_their_places() {
+    fn a_replayed_queue_runs_the_owners_words_before_waiting_agents() {
+        let agent = |message_seq| Command::Accept {
+            message_seq,
+            origin: Origin::Agent {
+                agent_id: "peer".to_string(),
+            },
+            admission: Admission::Later,
+            coordination: None,
+            user_word: false,
+        };
         let mut a = Driven::new();
         a.user(1);
-        a.background(2);
+        a.send(agent(2)).unwrap();
         let legacy = AgentEvent::Turn {
             turn: TurnId(3),
             change: TurnEvent::Accepted {
@@ -4786,10 +4810,21 @@ mod tests {
         };
         a.agent.apply(&legacy).unwrap();
         a.history.push(legacy);
-        a.background(4);
+        a.send(agent(4)).unwrap();
         a.user(5);
         let waiting: Vec<_> = a.agent.waiting().map(|queued| queued.id).collect();
         assert_eq!(waiting, [TurnId(2), TurnId(3), TurnId(5), TurnId(4)]);
+        let ahead = a.agent.ahead_of_owner();
+        for (finished, starts) in [(1, 3), (3, 5), (5, 2), (2, 4)] {
+            assert_eq!(
+                a.finish(finished),
+                vec![Effect::StartTurn {
+                    turn: TurnId(starts),
+                    message_seq: starts,
+                }],
+            );
+        }
+        assert_eq!(ahead, 2);
     }
 
     #[test]
