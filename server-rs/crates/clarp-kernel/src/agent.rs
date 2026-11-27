@@ -78,11 +78,6 @@ fn joins_live(waiting: &Queued) -> bool {
     }
 }
 
-/// What belongs ahead of an ordinary automatic or agent turn at dispatch.
-fn has_owner_priority(waiting: &Queued) -> bool {
-    waiting.admission == Admission::Direct || waiting.user_word || waiting.origin.is_user_send()
-}
-
 /// What can be asked of an agent, by a client or by the shim that runs its turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -1148,6 +1143,14 @@ impl Agent {
         self.mailbox.iter().find(|queued| self.runnable(queued))
     }
 
+    fn has_owner_priority(&self, waiting: &Queued) -> bool {
+        waiting.admission == Admission::Direct
+            || waiting.user_word
+            || waiting.origin.is_user_send()
+            // An unsent relay returned by a move or Transit retains its verified word here.
+            || self.held_user_word.contains(&waiting.id)
+    }
+
     fn runnable(&self, queued: &Queued) -> bool {
         !self.joins.contains_key(&queued.id)
             && (!self.paused
@@ -1190,7 +1193,7 @@ impl Agent {
         self.mailbox
             .iter()
             .filter(|waiting| {
-                has_owner_priority(waiting)
+                self.has_owner_priority(waiting)
                     && self.runnable(waiting)
                     && !(self.paused && self.import_held)
             })
@@ -2675,14 +2678,16 @@ impl Work {
             .events
             .iter()
             .any(|event| matches!(event, AgentEvent::SentNow { turn, .. } if *turn == head.id));
-        let next = if sent_by_hand || takeover.is_some() || has_owner_priority(head) {
+        let next = if sent_by_hand || takeover.is_some() || self.agent.has_owner_priority(head) {
             head
         } else {
             // A replayed or restored queue can still contain an agent ahead of the owner.
             self.agent
                 .mailbox
                 .iter()
-                .find(|waiting| has_owner_priority(waiting) && self.agent.runnable(waiting))
+                .find(|waiting| {
+                    self.agent.has_owner_priority(waiting) && self.agent.runnable(waiting)
+                })
                 .unwrap_or(head)
         };
         let continues = self.agent.continues_user_queue(next);
