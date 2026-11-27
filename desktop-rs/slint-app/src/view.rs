@@ -287,7 +287,7 @@ pub(crate) fn initial(name: &str) -> SharedString {
 
 /// Text for a one-line slot: runs of whitespace (newlines and tabs too)
 /// become one space, since `overflow: elide` still draws every line.
-fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

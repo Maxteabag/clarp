@@ -861,7 +861,9 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     }
     let total = output.and_then(|o| int(o, "total_lines")).unwrap_or(tail.len() as i64).max(tail.len() as i64) as usize;
     let preview: Vec<String> = diff.map(|d| text(d, "preview").lines().map(str::to_owned).collect()).unwrap_or_default();
-    entry.expandable = !tail.is_empty() || !preview.is_empty();
+    let command = tool.get("command").and_then(Value::as_str).filter(|command| !command.is_empty()).unwrap_or(label);
+    let multiline_command = command.lines().nth(1).is_some();
+    entry.expandable = multiline_command || !tail.is_empty() || !preview.is_empty();
     if entry.expanded {
         if !preview.is_empty() {
             entry.lines = preview;
@@ -870,6 +872,12 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
             if total > tail.len() {
                 entry.more = format!("+{} earlier lines", total - tail.len());
             }
+        }
+        if multiline_command {
+            // The label is drawn in one line. Keep the original input in
+            // the measured expanded body, separate from its output.
+            let separator = (!entry.lines.is_empty()).then(String::new);
+            entry.lines.splice(0..0, command.lines().map(str::to_owned).chain(separator));
         }
     } else if !tail.is_empty() && (status == "running" || status == "failed" || !exit.is_empty()) {
         // A running or failed command shows its last lines; a clean one folds.

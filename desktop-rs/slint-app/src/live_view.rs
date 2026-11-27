@@ -307,7 +307,12 @@ pub(crate) fn shimmer_colours(theme: &clarp_core::json::Object, tone: &str) -> O
 pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow {
     let message = entry.kind == Kind::Message;
     let tone = shimmer(entry.kind, &entry.status);
-    let letters: Vec<SharedString> = if tone.is_empty() { Vec::new() } else { entry.title.chars().map(|c| c.to_string().into()).collect() };
+    // The label and the line under it are one line each in a box of a
+    // line's height: a multi-line command (a heredoc) would draw its other
+    // lines over the rows around it.
+    let title = crate::view::one_line(&entry.title);
+    let secondary = crate::view::one_line(&entry.secondary);
+    let letters: Vec<SharedString> = if tone.is_empty() { Vec::new() } else { title.chars().map(|c| c.to_string().into()).collect() };
     MessageRow {
         id: entry.key.clone().into(),
         author: if message { "assistant" } else { "live" }.into(),
@@ -330,9 +335,9 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             kind: entry.kind.name().into(),
             key: entry.key.clone().into(),
             status: entry.status.clone().into(),
-            title: entry.title.clone().into(),
+            title: title.into(),
             meta: entry.meta.clone().into(),
-            secondary: entry.secondary.clone().into(),
+            secondary: secondary.into(),
             reserve: entry.reserve_secondary,
             explaining: entry.explaining,
             lines: ModelRc::new(VecModel::from(entry.lines.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>())),
@@ -597,6 +602,29 @@ mod tests {
         assert_eq!(done.live.letters.row_count(), 0);
         let thinking = row_of(&Entry { key: "live:r".into(), kind: Kind::Reasoning, status: "running".into(), title: "Thinking…".into(), ..Entry::default() });
         assert_eq!(thinking.live.shimmer, "muted");
+    }
+
+    /// A command over several lines (a heredoc) is one line in the row's
+    /// label and the line under it, running or settled.
+    #[test]
+    fn a_multi_line_command_is_one_line_in_its_row() {
+        use clarp_core::live_present::{Entry, Kind};
+        use slint::Model;
+        let running = Entry {
+            key: "live:t".into(),
+            kind: Kind::Tool,
+            status: "running".into(),
+            title: "Running python3 - <<'PY'\nfrom pathlib import Path\n\tp = Path('a')\nPY".into(),
+            secondary: "python3 - <<'PY'\nprint(1)\nPY".into(),
+            ..Entry::default()
+        };
+        let built = row_of(&running);
+        assert_eq!(built.live.title, "Running python3 - <<'PY' from pathlib import Path p = Path('a') PY");
+        assert_eq!(built.live.secondary, "python3 - <<'PY' print(1) PY");
+        let letters: Vec<String> = built.live.letters.iter().map(|l| l.to_string()).collect();
+        assert_eq!(letters.concat(), built.live.title.as_str(), "the shimmer's letters are the one line");
+        let done = row_of(&Entry { status: "completed".into(), title: "Ran python3 - <<'PY'\nprint(1)\nPY".into(), ..running });
+        assert_eq!(done.live.title, "Ran python3 - <<'PY' print(1) PY");
     }
 
     fn row_of(entry: &clarp_core::live_present::Entry) -> crate::MessageRow {

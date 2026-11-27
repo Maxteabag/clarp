@@ -6,17 +6,21 @@
 //! a turn that folded and the next reply drawn on top of each other.
 //!
 //! Rows are read from the element tree by their accessible ids; a text's
-//! own height is shaped the way the renderer draws it, at its width.
+//! own height is shaped the way the renderer draws it, at its width, and
+//! placed in its box the way it is aligned, so a text of several lines in
+//! a one-line box (a heredoc command in a tool's label) is caught where it
+//! is drawn over the rows around it (the owner's photo, 2026-11-27).
 
 use std::pin::Pin;
 
 use i_slint_core::accessibility::AccessibleStringProperty;
 use i_slint_core::item_rendering::{RenderString, RenderText};
 use i_slint_core::item_tree::ItemRc;
-use i_slint_core::items::{ComplexText, SimpleText, StyledTextItem, TextWrap};
+use i_slint_core::item_tree::ParentItemTraversalMode;
+use i_slint_core::items::{Clip, ComplexText, SimpleText, StyledTextItem, TextVerticalAlignment, TextWrap};
 use i_slint_core::lengths::LogicalLength;
 use i_slint_core::window::WindowInner;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 
 use super::{app_now, check};
 
@@ -41,6 +45,38 @@ struct Fit {
     what: String,
     /// It wraps: its height is the layout's measure of its lines.
     wraps: bool,
+    /// Its lines as written (a newline starts one), 1 for a styled text.
+    lines: usize,
+    /// Where its lines sit in its box: 0 at the top, 0.5 centred, 1 at the bottom.
+    align: f32,
+    /// The band a clipping element around it (inside its row) lets show.
+    clip: (f32, f32),
+}
+
+impl Fit {
+    /// Where its lines are drawn (top, bottom), aligned in its box and cut
+    /// to what clips it.
+    fn drawn(&self) -> (f32, f32) {
+        let top = self.top + (self.given - self.needs) * self.align;
+        (top.max(self.clip.0), (top + self.needs).min(self.clip.1))
+    }
+}
+
+/// The band the clipping elements around `item`, up to its row, let show.
+fn clipped(item: &ItemRc) -> (f32, f32) {
+    let mut band = (f32::NEG_INFINITY, f32::INFINITY);
+    let mut parent = item.parent_item(ParentItemTraversalMode::StopAtPopups);
+    while let Some(current) = parent {
+        if id_of(&current).is_some_and(|id| id.starts_with("row:")) {
+            break;
+        }
+        if current.downcast::<Clip>().is_some_and(|clip| clip.as_pin_ref().clip()) {
+            let (_, top, _, height) = rect(&current);
+            band = (band.0.max(top), band.1.min(top + height));
+        }
+        parent = current.parent_item(ParentItemTraversalMode::StopAtPopups);
+    }
+    band
 }
 
 #[derive(Debug, Clone)]
@@ -111,20 +147,26 @@ fn fit_of(item: &ItemRc) -> Option<Fit> {
     if width <= 0.0 || given <= 0.0 {
         return None;
     }
-    let (wrap, needs, what) = if let Some(text) = item.downcast::<StyledTextItem>() {
+    let lines_of = |text: &str| text.trim_end_matches('\n').split('\n').count().max(1);
+    let (wrap, needs, what, lines, vertical) = if let Some(text) = item.downcast::<StyledTextItem>() {
         let text = text.as_pin_ref();
         let what = styled_words(&format!("{:?}", text.text()));
-        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, what)
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, what, 1, RenderText::alignment(text).1)
     } else if let Some(text) = item.downcast::<SimpleText>() {
         let text = text.as_pin_ref();
-        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()), lines_of(text.text().as_str()), RenderText::alignment(text).1)
     } else if let Some(text) = item.downcast::<ComplexText>() {
         let text = text.as_pin_ref();
-        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()), lines_of(text.text().as_str()), RenderText::alignment(text).1)
     } else {
         return None;
     };
-    (!what.is_empty()).then_some(Fit { top, given, needs, what, wraps: wrap != TextWrap::NoWrap })
+    let align = match vertical {
+        TextVerticalAlignment::Center => 0.5,
+        TextVerticalAlignment::Bottom => 1.0,
+        _ => 0.0,
+    };
+    (!what.is_empty()).then_some(Fit { top, given, needs, what, wraps: wrap != TextWrap::NoWrap, lines, align, clip: (f32::NEG_INFINITY, f32::INFINITY) })
 }
 
 /// The active chat's viewport (top, bottom) and the rows drawn in it.
@@ -158,7 +200,10 @@ fn drawn() -> Option<((f32, f32), Vec<Drawn>)> {
                 if !inside.is_visible() {
                     return true;
                 }
-                if let Some(fit) = fit_of(inside) {
+                if let Some(mut fit) = fit_of(inside) {
+                    if !fit.wraps && fit.lines > 1 && fit.needs > fit.given + SLACK {
+                        fit.clip = clipped(inside);
+                    }
                     texts.push(fit);
                 }
                 false
@@ -195,8 +240,31 @@ pub(super) fn tiling() -> Result<String, String> {
             ));
         }
     }
-    for row in &rows {
+    for (at, row) in rows.iter().enumerate() {
         for text in &row.texts {
+            // A text of several lines that does not wrap draws every line,
+            // aligned in its box, however tall the box is: lines that land
+            // outside the box are drawn over what is around it.
+            let (from, to) = text.drawn();
+            if !text.wraps && text.lines > 1 && (from < text.top - SLACK || to > text.top + text.given + SLACK) {
+                let over: Vec<&str> = rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(other, drawn)| *other != at && drawn.top < to && drawn.bottom > from)
+                    .map(|(_, drawn)| drawn.id.as_str())
+                    .collect();
+                faults.push(format!(
+                    "row {} ({:.1}..{:.1}): its {}-line text \"{}\" in a {:.1}px box at {:.1} is drawn at {from:.1}..{to:.1}{}",
+                    row.id,
+                    row.top,
+                    row.bottom,
+                    text.lines,
+                    text.what,
+                    text.given,
+                    text.top,
+                    if over.is_empty() { String::new() } else { format!(", over row {}", over.join(", row ")) }
+                ));
+            }
             // A one-line text in a box of its own height (a countdown's
             // digits) may have glyphs a little taller than the box: only a
             // wrapped text's lines are measured by the layout.
@@ -384,6 +452,113 @@ fn live_turn_ends() -> serde_json::Value {
         {"op": "turn", "turn": {"turn_id": "t-d", "status": "completed", "started_at_ms": now - 9_000, "ended_at_ms": now, "worked_ms": 9_000, "tool_count": 0}},
         {"op": "status", "activity": {"state": "idle", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": now, "turn_id": null, "turn_started_ms": null}},
     ])
+}
+
+/// A command over many lines, as an agent runs Python from a heredoc.
+fn heredoc() -> String {
+    [
+        "python3 - <<'PY'",
+        "from collections import Counter",
+        "baskets = {",
+        "    'north': ['pear', 'lime'],",
+        "    'south': ['plum', 'pear'],",
+        "    'east': ['lime', 'orange'],",
+        "    'west': ['plum'],",
+        "}",
+        "totals = Counter()",
+        "for name, fruit in baskets.items():",
+        "    print(name.upper(), len(fruit))",
+        "    totals.update(fruit)",
+        "for fruit, count in sorted(totals.items()):",
+        "    print(f'{fruit}: {count}')",
+        "assert totals['pear'] == 2",
+        "print('inventory complete')",
+        "PY",
+    ]
+    .join("\n")
+}
+
+/// The heredoc's tool as the Host sends it: its label the command cut
+/// short, the command whole, and the last lines of its output.
+fn heredoc_tool(status: &str, rev: i64, tail: &[&str], now: i64) -> serde_json::Value {
+    let command = heredoc();
+    let label = format!("{}…", command.lines().take(14).collect::<Vec<_>>().join("\n"));
+    serde_json::json!({"op": "upsert", "id": "e-tool", "kind": "tool", "rev": rev, "item": {"id": "e-tool", "turn_id": "t-e", "kind": "tool", "status": status, "ordinal": 2,
+        "started_at_ms": now - 3_000, "ended_at_ms": if status == "running" { serde_json::Value::Null } else { serde_json::json!(now) },
+        "tool": {"name": "Bash", "call_id": "e-call", "category": "exec", "label": label, "command": command,
+            "output": {"tail": tail, "total_lines": tail.len()}}}})
+}
+
+fn heredoc_message(id: &str, ordinal: i64, text: &str, now: i64) -> serde_json::Value {
+    serde_json::json!({"op": "upsert", "id": id, "kind": "message", "rev": 1, "item": {"id": id, "turn_id": "t-e", "kind": "message", "status": "completed", "ordinal": ordinal,
+        "started_at_ms": now, "ended_at_ms": now, "phase": "commentary", "text": text}})
+}
+
+const HEREDOC_NOTE: &str = "The four baskets are ready to count. I will group the fruit by kind and check the totals against the labels.";
+const HEREDOC_NEXT: &str = "The first basket contains two pieces. The rest of the inventory will go into the summary after the count.";
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
+/// A running turn: a paragraph, the heredoc running, a plan of three
+/// steps; its fold is open, so each is a row of its own.
+fn heredoc_turn_starts() -> serde_json::Value {
+    let now = now_ms();
+    let step = |text: &str| serde_json::json!({"text": text, "status": "pending"});
+    serde_json::json!([
+        {"op": "turn", "turn": {"turn_id": "t-e", "status": "running", "started_at_ms": now - 5_000, "ended_at_ms": null, "worked_ms": null, "tool_count": 1}},
+        {"op": "status", "activity": {"state": "tool", "tool": "Bash", "running_tools": 1, "headline": "Running a command", "item_id": "e-tool", "since_ms": now, "turn_id": "t-e", "turn_started_ms": now - 5_000}},
+        heredoc_message("e-m1", 1, HEREDOC_NOTE, now),
+        heredoc_tool("running", 1, &["cloning into 'repo'…", "fetching 23 refs"], now),
+        {"op": "upsert", "id": "e-plan", "kind": "plan", "rev": 1, "item": {"id": "e-plan", "turn_id": "t-e", "kind": "plan", "status": "running", "ordinal": 3, "started_at_ms": now,
+            "plan": {"steps": [step("Collect the open issues and pull requests"), step("Fetch the threads and make the working copies on the build machine"), step("Record the walkthrough and write its summary")]}}},
+    ])
+}
+
+/// The heredoc's output grows and a paragraph lands under the plan.
+fn heredoc_turn_grows() -> serde_json::Value {
+    let now = now_ms();
+    let tail: Vec<String> = (1..=8).map(|n| format!("tree {n}: refs/review/{} checked out at ../trees/{}", 900 + n, 900 + n)).collect();
+    let tail: Vec<&str> = tail.iter().map(String::as_str).collect();
+    serde_json::json!([heredoc_tool("running", 2, &tail, now), heredoc_message("e-m2", 4, HEREDOC_NEXT, now)])
+}
+
+/// The heredoc settles with no output and one more paragraph lands.
+fn heredoc_turn_settles() -> serde_json::Value {
+    let now = now_ms();
+    serde_json::json!([heredoc_tool("completed", 3, &["(no output)"], now), heredoc_message("e-m3", 5, "The listing confirmed 14 open issues and 23 open pull requests.", now)])
+}
+
+fn heredoc_turn_ends() -> serde_json::Value {
+    let now = now_ms();
+    serde_json::json!([
+        {"op": "turn", "turn": {"turn_id": "t-e", "status": "completed", "started_at_ms": now - 12_000, "ended_at_ms": now, "worked_ms": 12_000, "tool_count": 1}},
+        {"op": "status", "activity": {"state": "idle", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": now, "turn_id": null, "turn_started_ms": null}},
+    ])
+}
+
+/// The same turn in `/log`: the paragraphs, the heredoc and the reply.
+fn heredoc_history() -> serde_json::Value {
+    let mut tool = tool_row("e-tool-h", "2026-10-05T10:09:02Z", "t-e", &heredoc());
+    tool["tools"][0]["result"] = serde_json::json!("(no output)");
+    serde_json::json!([
+        text_row("e-a1", "2026-10-05T10:09:01Z", "t-e", "commentary", HEREDOC_NOTE),
+        tool,
+        text_row("e-a2", "2026-10-05T10:09:03Z", "t-e", "commentary", HEREDOC_NEXT),
+        summed(text_row("e-final", "2026-10-05T10:09:12Z", "t-e", "final", "The listing confirmed 14 open issues and 23 open pull requests. A background job makes the working copies and wakes me when it ends."), "t-e", 12_000, 1),
+    ])
+}
+
+/// The live rows whose label starts with `title`, folded or open.
+fn titled(title: &str, expanded: bool) -> Vec<String> {
+    crate::window()
+        .map(|w| super::rows(&w))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.live.title.starts_with(title) && r.live.expanded == expanded)
+        .map(|r| r.live.key.to_string())
+        .collect()
 }
 
 /// A stage that waits `ms` after `ready`, asserts the rows tile, then acts.
@@ -800,6 +975,7 @@ pub(super) fn row_overlap_check(out: String) {
     };
     let (shot1, shot2, shot3, shot4) = (shot("row-overlap-01-history"), shot("row-overlap-02-prompt"), shot("row-overlap-03-settled"), shot("row-overlap-04-next-turn"));
     let shot5 = shot("row-overlap-05-narrow-large");
+    let (shot6, shot7) = (shot("row-overlap-06-heredoc-live"), shot("row-overlap-07-heredoc-history"));
     let (font_small, font_large, font_default) = (shot("font-scale-01-small-11px"), shot("font-scale-02-large-22px"), shot("font-scale-03-theme-default"));
     let (composer_small, composer_large) = (shot("font-scale-04-composer-11px"), shot("font-scale-05-composer-22px"));
     let surveys: Vec<std::rc::Rc<std::cell::RefCell<Survey>>> = (0..3).map(|_| std::rc::Rc::default()).collect();
@@ -971,7 +1147,56 @@ pub(super) fn row_overlap_check(out: String) {
         moment("at the end again", 800, || true, |_, _| {
             live_event(live_turn_ends());
         }),
-        moment("the live turn ends", 1500, || true, |_, _| {}),
+        moment("the live turn ends", 1500, || true, |app, _| {
+            // A tool that ran a long heredoc, opened, between an agent's
+            // paragraphs and its plan (the owner's photo, 2026-11-27).
+            upsert(serde_json::json!([{"id": "e-prompt", "role": "user", "timestamp": "2026-10-05T10:09:00Z", "text": "Collect the open issues and pull requests.", "origin": "user", "trace_id": "t-e"}]));
+            agent_state("thinking");
+            app.expanded.borrow_mut().insert("live:fold:t-e".to_owned());
+            live_event(heredoc_turn_starts());
+        }),
+        moment("a heredoc runs between a paragraph and the plan", 1000, || live_row("live:e-tool").is_some() && live_row("live:e-plan").is_some(), |app, _| {
+            crate::artifacts_view::toggle_live(app, "live:e-tool");
+        }),
+        moment("the running heredoc opens", 800, || live_row("live:e-tool").is_some_and(|r| r.live.expanded), |_, _| {
+            let command = heredoc();
+            let expected: Vec<&str> = command.lines().collect();
+            let includes_command = live_row("live:e-tool").is_some_and(|row| {
+                row.live.lines.iter().take(expected.len()).map(|line| line.to_string()).eq(expected.iter().copied())
+            });
+            check(includes_command, "the expanded tool contains every original command line, including the terminator");
+            live_event(heredoc_turn_grows());
+        }),
+        moment("its output grows and a paragraph lands under the plan", 800, || live_row("live:e-m2").is_some(), |_, _| {
+            live_event(heredoc_turn_settles());
+        }),
+        moment("it settles opened and one more paragraph lands", 800, || live_row("live:e-tool").is_some_and(|r| r.live.status == "completed"), move |app, _| {
+            shot6();
+            crate::artifacts_view::toggle_live(app, "live:e-tool");
+        }),
+        moment("it folds to its label", 600, || live_row("live:e-tool").is_some_and(|r| !r.live.expanded), |app, _| {
+            crate::artifacts_view::toggle_live(app, "live:e-tool");
+        }),
+        moment("and opens again", 600, || live_row("live:e-tool").is_some_and(|r| r.live.expanded), |_, _| {
+            live_event(heredoc_turn_ends());
+            upsert(heredoc_history());
+            agent_state("idle");
+        }),
+        moment("the turn ends and goes to history", 1500, || has_row("e-final"), |app, _| {
+            if !app.expanded.borrow().contains("live:fold:t-e") {
+                crate::artifacts_view::toggle_live(app, "live:fold:t-e");
+            }
+        }),
+        moment("its fold is open on the settled heredoc", 1000, || !titled("Ran python3", false).is_empty() || !titled("Ran python3", true).is_empty(), |app, _| {
+            for key in titled("Ran python3", false) {
+                crate::artifacts_view::toggle_live(app, &key);
+            }
+        }),
+        moment("the settled heredoc opens", 800, || true, move |_, _| {
+            shot7();
+        }),
+        read_through("reading the chat with the heredoc"),
+        moment("at the end with the heredoc", 600, || true, |_, _| {}),
     ]);
     super::run_stages(stages);
 }
