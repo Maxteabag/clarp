@@ -187,8 +187,7 @@ impl Backend for Agy {
         };
         let prompt = match &spec.told {
             Some(told) => {
-                let head = told::at_head(&told.persona, &spec.session, told.spoken);
-                let head = told::in_call(head, told.call.as_deref());
+                let head = told.at_head(&spec.session);
                 told::headed(&head, None, &prompt)
             }
             None => prompt,

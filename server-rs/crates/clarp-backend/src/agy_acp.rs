@@ -133,8 +133,7 @@ pub fn order(spec: &TurnSpec) -> Order {
     };
     let (headed, append) = match &spec.told {
         Some(told) => {
-            let head = told::at_head(&told.persona, &spec.session, told.spoken);
-            let head = told::in_call(head, told.call.as_deref());
+            let head = told.at_head(&spec.session);
             (told::headed(&head, None, &prompt), head)
         }
         None => (prompt.clone(), String::new()),

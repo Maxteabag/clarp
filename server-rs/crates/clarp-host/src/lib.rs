@@ -131,6 +131,7 @@ mod takeover;
 pub mod teams;
 pub mod telling;
 pub mod terminal;
+mod text_turn_ack;
 pub mod thumbnails;
 pub mod tools;
 pub mod turn_identity;

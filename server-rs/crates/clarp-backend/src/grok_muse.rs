@@ -66,10 +66,7 @@ impl Backend for Adapter {
             spec.effort.as_deref().unwrap_or(""),
         );
         let prompt = match &spec.told {
-            Some(t) => {
-                let head = told::at_head(&t.persona, &spec.session, t.spoken);
-                told::headed(&told::in_call(head, t.call.as_deref()), None, &spec.prompt)
-            }
+            Some(t) => told::headed(&t.at_head(&spec.session), None, &spec.prompt),
             None => spec.prompt.clone(),
         };
         let mut stdin = Vec::new();

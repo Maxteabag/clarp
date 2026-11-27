@@ -49,10 +49,7 @@ impl Backend for OpenCode {
         let prompt = spec.told.as_ref().map_or_else(
             || spec.prompt.clone(),
             |t| {
-                let head = told::in_call(
-                    told::at_head(&t.persona, &spec.session, t.spoken),
-                    t.call.as_deref(),
-                );
+                let head = t.at_head(&spec.session);
                 told::headed(&head, None, &spec.prompt)
             },
         );

@@ -39,6 +39,13 @@ impl TurnTeams {
 }
 
 impl clarp_actor::teams::Runtime for TurnTeams {
+    fn text_turn_ack(&self) -> bool {
+        self.hub
+            .queue_directory()
+            .as_deref()
+            .is_some_and(crate::text_turn_ack::enabled)
+    }
+
     fn brief(&self, agent: &str, session: &str, origin: &str) -> Brief {
         let directory = self.hub.queue_directory();
         let person = |agent: &str| person(directory.as_deref(), agent);

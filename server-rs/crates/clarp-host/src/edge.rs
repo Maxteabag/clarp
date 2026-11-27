@@ -71,7 +71,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 213;
+pub const HOST_CONTRACT: u64 = 214;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -563,6 +563,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // place of its transcript, activity, state and status lines; `POST /events/{id}/live`
     // sets `visible` with `live` (issues 905 and 913).
     ("events_chat_previews", 212),
+    // The owner's optional visible first acknowledgment for a newly started text turn.
+    ("text_turn_ack", 214),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -3511,7 +3513,7 @@ async fn send(
     headers: HeaderMap,
     Json(request): Json<SendRequest>,
 ) -> Response {
-    let made = match made_by(&app, &principal, &headers, &request).await {
+    let mut made = match made_by(&app, &principal, &headers, &request).await {
         Ok(made) => made,
         Err(why) => return why.into_response(),
     };
@@ -3523,6 +3525,9 @@ async fn send(
             &coordination::Principal::default(),
             false,
         ) == "user";
+    made.text_chat = user_send
+        && !crate::coordination::from_an_agent(&headers)
+        && crate::text_turn_ack::is_text(&request);
     let mut agent_id = String::new();
     if user_send {
         let asked = python::strip(&request.session);
@@ -4102,6 +4107,8 @@ async fn send_as(
     // profile says once that speech is not set up.
     let speak = request.synthesize_audio.unwrap_or(spoken_unasked)
         && app.mouth.can_speak(&member.record).await;
+    let text_chat =
+        made.text_chat && origin == Origin::User && coordination.is_none() && !in_a_call && !own;
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
@@ -4114,6 +4121,7 @@ async fn send_as(
         sender,
         client: request.client.as_deref().and_then(client_name),
         speak,
+        text_chat,
         unheard,
         // An agent the user spoke to in a call, not long ago, is told who else is in the
         // call and what was said since it last spoke.

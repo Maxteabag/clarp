@@ -737,6 +737,10 @@ pub fn routes() -> Router<App> {
             "/personalities/settings",
             get(personalities).post(set_personalities),
         )
+        .route(
+            "/text-turn-ack/settings",
+            get(crate::text_turn_ack::get).post(crate::text_turn_ack::set),
+        )
         .route("/voice-humanness", get(humanness).post(set_humanness))
         .route("/herald/settings", get(herald).post(set_herald))
         .route(

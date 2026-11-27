@@ -135,3 +135,95 @@ fn chat_views_keep_the_settled_reply_and_remember_how_the_user_reads() {
     let restarted = start();
     assert_eq!(view(&restarted), "conversation");
 }
+
+#[test]
+fn the_owner_controls_the_optional_text_acknowledgment() {
+    let place = Place::new("text-ack-settings");
+    let token = "text-ack-administrator";
+    let host = place.start_with_token(token);
+    let path = "/text-turn-ack/settings";
+    let (full, _) = pair(&host, "Full", "full");
+    let (limited, _) = pair(&host, "Limited", "limited");
+    let tools = clarp_host::tool_token(token);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["text_turn_ack"],
+        214
+    );
+    assert_eq!(
+        host.ask_as(&full, "GET", path, None),
+        (200, json!({"enabled": false}))
+    );
+    let on = json!({"enabled": true});
+    for denied in [&limited, &tools] {
+        assert_eq!(host.ask_as(denied, "GET", path, None).0, 403);
+        assert_eq!(host.ask_as(denied, "POST", path, Some(&on)).0, 403);
+    }
+    assert_eq!(
+        host.ask_as(&full, "POST", path, Some(&json!({"enabled": "true"})))
+            .0,
+        400
+    );
+    assert_eq!(host.get(path), json!({"enabled": false}));
+    assert_eq!(
+        host.ask_as(&full, "POST", path, Some(&on)),
+        (200, on.clone())
+    );
+    host.kill();
+    let host = place.start_with_token(token);
+    assert_eq!(host.get(path), on);
+}
+
+#[test]
+fn only_new_user_text_turns_get_the_enabled_instruction() {
+    let place = Place::new("text-ack-prompt");
+    let claude = place.root.join("claude");
+    program(&claude, CLAUDE);
+    std::fs::write(place.root.join("finish"), []).unwrap();
+    let host = place.start_in(
+        "",
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    let made = host.post("/agents", json!({"name": "Reader", "backend": "claude"}));
+    let session = made["session"].as_str().unwrap();
+    let prompts = place.root.join("prompts.jsonl");
+    let marker = "make the first acknowledgment visible before starting";
+    let cases = [
+        (false, "Off text", json!({}), false),
+        (true, "On text", json!({}), true),
+        (
+            true,
+            "Voice in text",
+            json!({"transcription_id": "voice"}),
+            false,
+        ),
+        (
+            true,
+            "Scheduled words",
+            json!({"origin": "schedule"}),
+            false,
+        ),
+        (false, "Off again", json!({}), false),
+    ];
+    for (index, (enabled, text, extra, expected)) in cases.into_iter().enumerate() {
+        host.post("/text-turn-ack/settings", json!({"enabled": enabled}));
+        let mut body =
+            json!({"session": session, "text": text, "client_msg_id": format!("ack-{index}")});
+        let body = body.as_object_mut().unwrap();
+        body.extend(extra.as_object().unwrap().clone());
+        host.post("/send", json!(body));
+        wait_for("the test backend to finish its turn", || {
+            std::fs::read_to_string(&prompts).is_ok_and(|lines| lines.lines().count() == index + 1)
+                && host.state(session) == "done"
+        });
+        let lines = std::fs::read_to_string(&prompts).unwrap();
+        let prompt: String = serde_json::from_str(lines.lines().nth(index).unwrap()).unwrap();
+        assert!(prompt.contains(text));
+        assert_eq!(
+            prompt.matches(marker).count(),
+            usize::from(expected),
+            "{prompt}"
+        );
+        assert!(host.turns(session).iter().any(|row| row["text"] == text));
+    }
+}

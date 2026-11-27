@@ -503,6 +503,7 @@ impl Desk {
         let (filed, marked) = Message::filed(id);
         let msg = Message {
             managed_model: None,
+            text_chat: false,
             sent_at_ms: None,
             id: filed,
             marked,

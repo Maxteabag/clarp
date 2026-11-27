@@ -410,6 +410,31 @@ pub struct Turn {
     /// The header of the call the turn is a part of: who else is in it, and what was said
     /// since this agent last spoke (`clarp_kernel::calls`).
     pub call: Option<String>,
+    /// The owner enabled the visible acknowledgment for this new text turn.
+    pub text_ack: bool,
+}
+
+impl Turn {
+    pub fn beside(&self, session: &str) -> String {
+        self.finish(beside(&self.persona, session, self.spoken), session)
+    }
+
+    pub fn at_head(&self, session: &str) -> String {
+        self.finish(at_head(&self.persona, session, self.spoken), session)
+    }
+
+    fn finish(&self, mut instruction: String, session: &str) -> String {
+        if self.text_ack && self.spoken.is_none() && self.call.is_none() {
+            instruction.push_str(&format!(
+                "\n\nFor substantial text work or several tool calls, make the first acknowledgment \
+                 visible before starting. Count any acknowledgment already visible for this request. \
+                 If pre-tool text is folded, use `clarp-admin tell-user --from {session} --text '...'` \
+                 before any other tool for that single short line confirming the request and first \
+                 action. Answer quick questions directly."
+            ));
+        }
+        in_call(instruction, self.call.as_deref())
+    }
 }
 
 /// What a turn is told, with the header of its call after everything else: where the

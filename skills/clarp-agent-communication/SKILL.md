@@ -223,3 +223,14 @@ heard mid-turn, post: `clarp-admin tell-user --from "$ME" --text "..."` (a note,
 shown at once and notified). Your final reply always reaches them, so end every
 turn with one that stands on its own. In Session view, the default, everything
 is shown as before.
+
+On a Rust Host advertising `text_turn_ack` (contract 214), the owner can
+set the optional text-turn acknowledgment in a supporting client. It starts
+off. A full device or Host administrator reads
+`GET /text-turn-ack/settings` and writes `POST /text-turn-ack/settings`
+with `{"enabled":true}` or `{"enabled":false}`. The response contains
+the saved `enabled` boolean. Where the option is on, eligible new text turns
+get a reminder to make their first acknowledgment visible. Use the one
+already shown if the request has been acknowledged. In Conversation view,
+`clarp-admin tell-user` is the existing way to show that line before the
+rest of the work. Older clients keep their existing chat and note behavior.

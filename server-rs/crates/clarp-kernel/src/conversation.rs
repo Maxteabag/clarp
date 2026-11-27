@@ -54,6 +54,10 @@ pub struct Message {
     /// a call's clips and live rings, which are audio by nature, set it themselves.
     #[serde(default, skip_serializing_if = "is_false")]
     pub speak: bool,
+    /// Admitted directly from the user's text chat. Kept so a waiting message has the same
+    /// provenance when it starts, including after a restart.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub text_chat: bool,
     /// The app said its user began to speak before hearing what this agent last said
     /// aloud: the agent's tool is told so with this message.
     #[serde(default, skip_serializing_if = "is_false")]

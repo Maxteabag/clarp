@@ -545,6 +545,7 @@ impl Actor {
                 persona: told.persona.clone(),
                 spoken: message.speak.then_some(told.sound),
                 call: None,
+                text_ack: self.text_turn_ack(&message),
             }),
         });
         if !record.begun {

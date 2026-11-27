@@ -35,6 +35,9 @@ pub struct Made {
     /// The local prompt tool or scheduler is delivering housekeeping.
     #[serde(skip)]
     pub housekeeping: bool,
+    /// The authenticated HTTP chat send carried text rather than speech.
+    #[serde(skip)]
+    pub text_chat: bool,
     /// The caller named the send's trace itself (else the Host names one).
     pub trace_named: bool,
 }
@@ -89,6 +92,7 @@ pub(crate) async fn made(
         owner_token,
         internal_sender: None,
         housekeeping: false,
+        text_chat: false,
     })
 }
 

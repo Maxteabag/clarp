@@ -852,6 +852,7 @@ impl Actor {
                 persona: told.persona.clone(),
                 spoken: Some(told.sound),
                 call: None,
+                text_ack: false,
             });
         let blocks = match &tell {
             Some(told) => self

@@ -201,8 +201,7 @@ impl Backend for Codex {
         // conversation finds the user's words again (`told::unheaded`).
         let prompt = match &spec.told {
             Some(told) => {
-                let head = told::at_head(&told.persona, &spec.session, told.spoken);
-                let head = told::in_call(head, told.call.as_deref());
+                let head = told.at_head(&spec.session);
                 told::headed(&head, None, &spec.prompt)
             }
             None => spec.prompt.clone(),
@@ -1100,6 +1099,7 @@ mod tests {
                 call: Some(
                     "[Group call] You are Rachel, on a voice call with the user.".to_string(),
                 ),
+                text_ack: false,
             }),
             ..spec()
         });

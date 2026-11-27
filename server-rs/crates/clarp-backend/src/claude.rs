@@ -310,8 +310,7 @@ const REMINDER: (&str, &str) = ("<system-reminder>", "</system-reminder>");
 /// What the Host says after the user's words: who the agent is, whose turn it is, and how to
 /// speak when the answer is read aloud.
 fn reminder(told: &told::Turn, session: &str) -> String {
-    let said = told::beside(&told.persona, session, told.spoken);
-    let said = told::in_call(said, told.call.as_deref());
+    let said = told.beside(session);
     let (opens, ends) = REMINDER;
     format!("{opens}\n{said}\n{ends}")
 }
@@ -2435,6 +2434,7 @@ mod tests {
                 call: Some(
                     "[Group call] You are Maximus, on a voice call with the user.".to_string(),
                 ),
+                text_ack: false,
             }),
             ..spec.clone()
         });
@@ -2471,6 +2471,7 @@ mod tests {
                 persona: "Maximus".to_string(),
                 spoken: None,
                 call: None,
+                text_ack: false,
             }),
             ..spec.clone()
         });
@@ -2517,6 +2518,7 @@ mod tests {
                     persona: "Maximus".to_string(),
                     spoken: None,
                     call: None,
+                    text_ack: false,
                 }),
                 ..spec.clone()
             });

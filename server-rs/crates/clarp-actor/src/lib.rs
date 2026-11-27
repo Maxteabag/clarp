@@ -2254,6 +2254,15 @@ impl Actor {
         self.profile.told = told;
     }
 
+    fn text_turn_ack(&self, message: &Message) -> bool {
+        message.text_chat
+            && message.origin == Origin::User
+            && !message.speak
+            && !message.unheard
+            && message.call.is_none()
+            && self.teams.as_ref().is_some_and(|host| host.text_turn_ack())
+    }
+
     /// Sets whether the agent's turns that answer another agent are shown as such: only an
     /// agent that can leave a note for its user is (`coordination::can_leave_note`), which
     /// the Host decides. A turn begun before is shown as it was begun.
@@ -5759,6 +5768,13 @@ impl Actor {
                 persona: told.persona.clone(),
                 spoken: speak.then_some(told.sound),
                 call: message.call.clone(),
+                text_ack: !speak
+                    && opening.is_none()
+                    && !resuming
+                    && recovering.is_none()
+                    && !resumed_by_transit
+                    && together.iter().all(|message| message.text_chat)
+                    && self.text_turn_ack(&message),
             }),
         });
         // A goal lane sends no prompt and an opening of a call is answered by itself: neither

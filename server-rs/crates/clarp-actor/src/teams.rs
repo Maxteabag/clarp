@@ -12,6 +12,10 @@ const CURSOR: &str = "team-effect-through";
 pub trait Runtime: Send + Sync {
     fn brief(&self, agent: &str, session: &str, origin: &str) -> Brief;
     fn apply(&self, agent: &str, effect: &Effect, at: i64) -> Result<(), String>;
+    /// Host setting read when preparing a user-facing text turn, including a fork.
+    fn text_turn_ack(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) fn capture(batch: &mut Batch<'_>, reply: &Reply, at: i64) -> Result<(), ActorError> {
