@@ -438,7 +438,12 @@ pub enum Amend {
         effort: String,
     },
     /// The voices it was given, as they are stored: one for each engine it has one for.
-    Voice { provider: String, voice: String },
+    Voice {
+        provider: String,
+        voice: String,
+        target_id: String,
+        by_agent: Option<String>,
+    },
     /// How much it says while it works, from 0 to 3.
     Narration(i64),
     /// Whether it is a janitor: an agent is made one, and a janitor is let go.
@@ -4315,7 +4320,30 @@ impl Fleet {
                 record.cloud_speech = cloud_speech;
             }
             Amend::Readers(readers) => record.readers = readers,
-            Amend::Voice { provider, voice } => {
+            Amend::Voice {
+                provider,
+                voice,
+                target_id,
+                by_agent,
+            } => {
+                if record.agent_id != target_id {
+                    return Ok(Err(NotAmended::Unknown));
+                }
+                // The binding or reader grant may have changed since the route's check.
+                if let Some(by) = by_agent.as_ref() {
+                    let caller = self
+                        .members
+                        .iter()
+                        .find(|member| member.record.agent_id == *by);
+                    if !caller.is_some_and(|caller| {
+                        crate::bound_privacy::may_read(
+                            &crate::bound_privacy::Reader::agent(&caller.record),
+                            &record,
+                        )
+                    }) {
+                        return Ok(Err(NotAmended::Unknown));
+                    }
+                }
                 let occupied = self
                     .members
                     .iter()
