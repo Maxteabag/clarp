@@ -1933,17 +1933,28 @@ pub(crate) fn preview_fields(directory: &Directory, member: &Member) -> Value {
     Value::Object(fields)
 }
 
+/// The shared inputs used to build agent rows for one response.
+pub(crate) struct AgentRowContext<'a> {
+    pub directory: &'a Directory,
+    pub families: &'a Families,
+    pub faces: &'a crate::faces::Faces,
+    pub owners: &'a toml::Table,
+    pub quota: &'a crate::quota::Rows,
+    pub forks: &'a crate::conversation_forks::Named,
+    pub at: &'a crate::availability::At,
+}
+
 /// An agent's row in the snapshot: who it is and what it is doing.
-pub(crate) fn agent_row(
-    directory: &Directory,
-    families: &Families,
-    member: &Member,
-    faces: &crate::faces::Faces,
-    owners: &toml::Table,
-    quota: &crate::quota::Rows,
-    forks: &crate::conversation_forks::Named,
-    at: &crate::availability::At,
-) -> Value {
+pub(crate) fn agent_row(member: &Member, context: &AgentRowContext<'_>) -> Value {
+    let AgentRowContext {
+        directory,
+        families,
+        faces,
+        owners,
+        quota,
+        forks,
+        at,
+    } = *context;
     let view = member.agent.view();
     let (
         mut row,
@@ -2142,14 +2153,21 @@ async fn agent_rows(
             .get(&member.record.agent_id)
             .map_or(&[][..], Vec::as_slice)
     };
+    let context = AgentRowContext {
+        directory,
+        families,
+        faces: &app.faces,
+        owners: &owners,
+        quota: &quota,
+        forks: &forks,
+        at: &at,
+    };
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| wanted(member))
         .map(|member| {
-            let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks, &at,
-            );
+            let mut row = agent_row(member, &context);
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(live_available.contains(&member.record.session));
             if live_defaults.contains(&member.record.session) {
@@ -2164,9 +2182,7 @@ async fn agent_rows(
     if directory.janitors.iter().any(|member| wanted(member)) {
         let jobs = crate::janitors::jobs(app).await;
         for member in directory.janitors.iter().filter(|member| wanted(member)) {
-            let mut row = agent_row(
-                directory, families, member, &app.faces, &owners, &quota, &forks, &at,
-            );
+            let mut row = agent_row(member, &context);
             row["team_ids"] = json!(team_ids(member));
             row["live_call_available"] = json!(false);
             let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
@@ -2796,14 +2812,16 @@ async fn made_as(app: &App, record: &AgentRecord) -> Value {
             // Whether its tool's account is used up is none of the fields of this answer.
             let (families, unasked) = (Families::of(&directory), crate::quota::Rows::unasked());
             agent_row(
-                &directory,
-                &families,
                 member,
-                &app.faces,
-                &app.mouth.owners(),
-                &unasked,
-                &crate::conversation_forks::Named::read(),
-                &crate::availability::At::of(app),
+                &AgentRowContext {
+                    directory: &directory,
+                    families: &families,
+                    faces: &app.faces,
+                    owners: &app.mouth.owners(),
+                    quota: &unasked,
+                    forks: &crate::conversation_forks::Named::read(),
+                    at: &crate::availability::At::of(app),
+                },
             )
         })
         .unwrap_or_default();
@@ -5590,9 +5608,7 @@ async fn events(
                         ));
                     }
                     // The Host stopped and its last word was sent: the stream ends.
-                    let Some(stopping) = closing.as_mut() else {
-                        return None;
-                    };
+                    let stopping = closing.as_mut()?;
                     // What a turn shows, for a connection that asked for it; for one that did
                     // not, a wait that never ends.
                     let shown = async {

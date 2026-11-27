@@ -211,8 +211,8 @@ pub fn decide(facts: &Facts<'_>) -> Availability {
         at_state(state, text, since_ms, back_at_ms, queue_ahead)
     };
     // The account in use is used up and no other seat would take the turn.
-    let used_up = Some(facts.backend_quota)
-        .filter(|_| !facts.bound)
+    let used_up = (!facts.bound)
+        .then_some(facts.backend_quota)
         .filter(|row| row["state"] == "exhausted");
     let when = |field: &str| {
         used_up
@@ -458,7 +458,7 @@ pub fn start_estimate(backend: &str) -> i64 {
     starts
         .get(backend)
         .filter(|kept| kept.len() >= STARTS_TRUSTED)
-        .map_or(START_DEFAULT_MS, |kept| median(kept))
+        .map_or(START_DEFAULT_MS, median)
 }
 
 fn median(kept: &VecDeque<i64>) -> i64 {
