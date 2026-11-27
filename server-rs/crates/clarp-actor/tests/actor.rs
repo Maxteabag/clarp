@@ -7043,6 +7043,56 @@ fn the_users_waiting_messages_are_one_turn_and_its_retry_is_given_all_of_them() 
     assert_eq!(actor.status().waiting, vec![]);
 }
 
+#[test]
+fn one_same_call_prompt_survives_a_failed_launch_and_host_restart() {
+    let mut world = World::new("call-together-unissued");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "occupy the agent", Admission::Queue);
+    for (id, text) in [("u-2", "first utterance"), ("u-3", "second utterance")] {
+        let said = Message {
+            voice_call: Some("fixture-call".into()),
+            call: Some("In a call with the owner".into()),
+            ..message(id, text)
+        };
+        let (sent, out) = actor.send(&said, Admission::Queue, world.tick()).unwrap();
+        assert!(sent.queued);
+        world.carry_out(&mut actor, out);
+    }
+    world.says(1, "The previous turn answered.");
+    world.exits(1, Some(0), None);
+    let out = actor.spool_changed(world.tick()).unwrap();
+    let order = r121_launch(&out).expect("one launch for the waiting call words");
+    assert_eq!((order.turn, order.attempt), (TurnId(2), 1));
+    assert!(!order.spool.exists());
+    assert_eq!(world.took, [1]);
+
+    // No shim was started, so the ordinary launch refusal parks these words for retry.
+    let refused = r121_no_shim(&mut actor, order, world.tick());
+    assert!(r121_launch(&refused).is_none());
+    assert!(actor.retry_at().is_some());
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(world.took, [1], "the unissued launch has no receipt");
+    let out = world.due(&mut actor).expect("the same call turn is due");
+    let order = r121_launch(&out).expect("the retry kept the call turn");
+    assert_eq!((order.turn, order.attempt), (TurnId(2), 2));
+    world.carry_out(&mut actor, out);
+    let together = clarp_kernel::told::together(&["first utterance", "second utterance"]);
+    assert_eq!(world.took, [1, 2]);
+    assert_eq!(world.prompts.len(), 2);
+    assert!(world.prompts[1].contains(&together));
+
+    world.says(2, "The call turn answered both.");
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let rows = shown(&actor);
+    for id in ["u-2", "u-3"] {
+        assert_eq!(rows.iter().filter(|(row, _)| row == id).count(), 1, "{id}");
+    }
+    assert!(actor.queue().unwrap().is_empty());
+    assert_eq!(world.took, [1, 2]);
+}
+
 /// Android's CL-042 (issues 858 and 859): two of the user's messages wait behind a turn, and the
 /// next turn takes the second with its own at its start. While that turn runs, the live turn and
 /// a chat read agree on both: the message read with its own is in `read_rows` from the turn's
