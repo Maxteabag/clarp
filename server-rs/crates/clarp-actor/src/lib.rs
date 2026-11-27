@@ -3181,14 +3181,15 @@ impl Actor {
         };
         let message = self.message_at(message_seq)?;
         // What a turn that runs now does not take goes with the user's other waiting messages
-        // once it is over (`together`): as the start of the next turn will take them.
+        // once it is over (`together`). The queue hint is for ordinary messages. A call's
+        // utterances are told as read together only once the start has checked the call boundary.
         let read_together = status == QueueItemStatus::Queued
             && agent.live().is_some()
             && agent
                 .waiting()
                 .find(|queued| queued.id == turn)
                 .is_some_and(|queued| agent.goes_together(queued))
-            && message.can_be_read_together()
+            && !message.in_call()
             && self.mark(turn.0)?.is_none();
         Ok(Waiting {
             read_together,

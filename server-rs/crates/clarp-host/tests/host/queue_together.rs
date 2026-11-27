@@ -165,6 +165,7 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
     let host = place.start_in("", &[], &[("CLARP_AGY_PROGRAM", agy.to_str().unwrap())]);
     let agent = host.post("/agents", json!({"name":"Caller","backend":"agy"}));
     let session = agent["session"].as_str().unwrap();
+    let heard = host.listen();
     host.send(session, "hold", "occupied");
     wait_for("the previous turn to run", || {
         place.root.join("holding").exists()
@@ -193,6 +194,30 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
     send(&second, "other-call", "separate call words");
     let typed = host.send(session, "typed follow-up", "typed");
     assert_eq!(typed["queued"], true, "{typed}");
+
+    let queue = host.get(&format!("/turn-queue?session={session}"));
+    let singleton = queue["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "other-call")
+        .expect("the second call has a single waiting utterance");
+    assert_eq!(
+        singleton["read_together"], false,
+        "a singleton from another call is not advertised as grouped"
+    );
+    wait_for(
+        "the second call's utterance to be announced as waiting",
+        || {
+            heard.lock().unwrap().iter().any(|event| {
+                event["type"] == "queue-updated"
+                    && event["session"] == session
+                    && event["client_msg_id"] == "other-call"
+                    && event["queue_started"] == false
+                    && event["read_together"] == false
+            })
+        },
+    );
 
     std::fs::write(place.root.join("release"), "").unwrap();
     wait_for("every message to be answered", || {
