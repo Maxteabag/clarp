@@ -205,7 +205,10 @@ impl Hub {
                 return self;
             }
         };
-        let recent = self.recent.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let recent = self
+            .recent
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
         if floor > recent.first_id && recent.events.is_empty() {
             recent.first_id = floor;
             recent.next_id = floor;
@@ -643,8 +646,12 @@ impl Reserved {
     }
 
     fn refused(&self, why: &std::io::Error) {
-        self.lapsed.store(true, std::sync::atomic::Ordering::Release);
-        if !self.refused.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        self.lapsed
+            .store(true, std::sync::atomic::Ordering::Release);
+        if !self
+            .refused
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
             eprintln!(
                 "clarp-host: the numbers of its events could not be reserved on disk ({why}): a \
                  client that resumes across a crash of this run may be told it missed nothing"
@@ -757,7 +764,9 @@ mod tests {
         let b = old.publish(roster("one"), now);
         let last = old.publish(roster("two"), now + 1);
         let unreserved = Hub::new(now + 500);
-        let reused: Vec<u64> = (0..3).map(|n| unreserved.publish(roster("new"), now + 500 + n)).collect();
+        let reused: Vec<u64> = (0..3)
+            .map(|n| unreserved.publish(roster("new"), now + 500 + n))
+            .collect();
         assert_eq!(reused, vec![b, b + 1, b + 2]);
         assert!(!unreserved.resume(Some(last)).truncated);
 
@@ -767,19 +776,31 @@ mod tests {
         let a_ids: Vec<u64> = (0..20).map(|n| a.publish(roster("a"), now + n)).collect();
         drop(a);
         let b_run = run(now + 300);
-        let b_ids: Vec<u64> = (0..5).map(|n| b_run.publish(roster("b"), now + 300 + n)).collect();
-        assert!(b_ids[0] > *a_ids.last().unwrap(), "{b_ids:?} after {a_ids:?}");
+        let b_ids: Vec<u64> = (0..5)
+            .map(|n| b_run.publish(roster("b"), now + 300 + n))
+            .collect();
+        assert!(
+            b_ids[0] > *a_ids.last().unwrap(),
+            "{b_ids:?} after {a_ids:?}"
+        );
         drop(b_run);
         let c = run(now + 600);
         let c_first = c.publish(roster("c"), now + 600);
-        assert!(c_first > *b_ids.last().unwrap(), "{c_first} after {b_ids:?}");
+        assert!(
+            c_first > *b_ids.last().unwrap(),
+            "{c_first} after {b_ids:?}"
+        );
         // A client resuming from B's last number is told it missed something, and given C's.
         let resumed = c.resume(Some(*b_ids.last().unwrap()));
         assert!(resumed.truncated);
         assert_eq!(resumed.missed.len(), 1);
 
         // Every number given out was below the reservation on disk when it was given out.
-        let on_disk: u64 = std::fs::read_to_string(&file).unwrap().trim().parse().unwrap();
+        let on_disk: u64 = std::fs::read_to_string(&file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
         assert!(on_disk > c_first);
         // A reservation file that is there and cannot be read is kept as it is: never written over
         // with a lower end, the run lapsed from its start, its numbers unreserved.
@@ -793,24 +814,43 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(100));
             assert_eq!(std::fs::read_to_string(&path).unwrap(), kept, "{name}");
             let reserved = unknown.reserved.as_ref().unwrap();
-            assert!(reserved.lapsed.load(std::sync::atomic::Ordering::Acquire), "{name}");
-            assert_eq!(reserved.attempts.load(std::sync::atomic::Ordering::Relaxed), 0, "{name}");
+            assert!(
+                reserved.lapsed.load(std::sync::atomic::Ordering::Acquire),
+                "{name}"
+            );
+            assert_eq!(
+                reserved.attempts.load(std::sync::atomic::Ordering::Relaxed),
+                0,
+                "{name}"
+            );
         }
         let folder = place.join("a-folder");
         std::fs::create_dir_all(&folder).unwrap();
         let unreadable = Hub::new(now).reserving_in_blocks(folder.clone(), 8);
         unreadable.publish(roster("unknown"), now);
         assert!(folder.is_dir());
-        assert!(unreadable.reserved.as_ref().unwrap().unknown.load(std::sync::atomic::Ordering::Acquire));
+        assert!(
+            unreadable
+                .reserved
+                .as_ref()
+                .unwrap()
+                .unknown
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
         // A reservation that cannot be written lapses: the hub goes on giving out numbers, and no
         // publish touches the disk; it is tried again in the background, at most every 30 s.
         let unwritable = Hub::new(now).reserving_in_blocks(place.join("no/such/folder/file"), 8);
-        let given: Vec<u64> = (0..100).map(|n| unwritable.publish(roster("still"), now + n)).collect();
+        let given: Vec<u64> = (0..100)
+            .map(|n| unwritable.publish(roster("still"), now + n))
+            .collect();
         assert!(given.windows(2).all(|pair| pair[1] == pair[0] + 1));
         std::thread::sleep(std::time::Duration::from_millis(200));
         let reserved = unwritable.reserved.as_ref().unwrap();
         let tried = reserved.attempts.load(std::sync::atomic::Ordering::Relaxed);
-        assert!(tried <= 2, "the disk was tried {tried} times for 100 events");
+        assert!(
+            tried <= 2,
+            "the disk was tried {tried} times for 100 events"
+        );
         assert!(reserved.lapsed.load(std::sync::atomic::Ordering::Acquire));
         std::fs::remove_dir_all(&place).unwrap();
     }

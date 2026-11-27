@@ -81,7 +81,8 @@ impl Readiness {
 
     /// The calls are recovered: a ring is shown to whom they say from now on.
     pub fn recovered_calls(&self) {
-        self.calls.send_if_modified(|now| !std::mem::replace(now, true));
+        self.calls
+            .send_if_modified(|now| !std::mem::replace(now, true));
     }
 
     /// Resolves once the calls are recovered.
@@ -161,7 +162,13 @@ mod tests {
             assert_eq!(needs(path), Stage::Starting, "{path}");
         }
         assert_eq!(needs("/agents/snapshot"), Stage::Rows);
-        for path in ["/gallery", "/calls", "/janitors", "/media", "/agents/snapshot/x"] {
+        for path in [
+            "/gallery",
+            "/calls",
+            "/janitors",
+            "/media",
+            "/agents/snapshot/x",
+        ] {
             assert_eq!(needs(path), Stage::Started, "{path}");
         }
     }

@@ -915,9 +915,9 @@ impl Batch<'_> {
     /// A command the agent refuses adds nothing: the refusal is returned and the batch stands.
     pub fn command(&mut self, command: Command, now_ms: i64) -> Result<(), Refusal> {
         let team_prompt = self.team_prompt_key(&command);
-        let decision = self
-            .work
-            .decide_with_transit_hold(command, now_ms, self.recorder.transit_held)?;
+        let decision =
+            self.work
+                .decide_with_transit_hold(command, now_ms, self.recorder.transit_held)?;
         if let Some(key) = &team_prompt {
             self.team_prompt_read(key, now_ms);
         }
@@ -2910,11 +2910,17 @@ mod tests {
             [
                 AgentEvent::Turn {
                     turn: TurnId(4),
-                    change: TurnEvent::Settled { outcome: crate::turn::Outcome::Interrupted { .. }, .. },
+                    change: TurnEvent::Settled {
+                        outcome: crate::turn::Outcome::Interrupted { .. },
+                        ..
+                    },
                 },
                 AgentEvent::Turn {
                     turn: TurnId(5),
-                    change: TurnEvent::Settled { outcome: crate::turn::Outcome::Withdrawn { .. }, .. },
+                    change: TurnEvent::Settled {
+                        outcome: crate::turn::Outcome::Withdrawn { .. },
+                        ..
+                    },
                 },
                 AgentEvent::Turn {
                     turn: TurnId(6),

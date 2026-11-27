@@ -368,7 +368,12 @@ pub fn log_engine_conformance(
 
 /// What every [`LogEngine`] that reads beside its writer must do ([`LogEngine::read_committed`],
 /// issue 935). `dir` is an agent's directory with no log yet; `absent` one that is never opened.
-pub fn read_committed_conformance(engine: &dyn LogEngine, dir: &Path, absent: &Path, codecs: &CodecSet) {
+pub fn read_committed_conformance(
+    engine: &dyn LogEngine,
+    dir: &Path,
+    absent: &Path,
+    codecs: &CodecSet,
+) {
     assert!(
         engine.read_committed(absent, codecs.clone()).is_err(),
         "a log that is not there is not read, and not made"
@@ -400,11 +405,17 @@ pub fn read_committed_conformance(engine: &dyn LogEngine, dir: &Path, absent: &P
         2,
         "every read of one reader sees the same moment"
     );
-    let read = reader.read_after(0, Kinds::ALL, 10).expect("read what was committed");
+    let read = reader
+        .read_after(0, Kinds::ALL, 10)
+        .expect("read what was committed");
     assert_eq!(read.len(), 2);
     assert_eq!(read[0].body, b"first");
     assert_eq!(
-        reader.find("one").expect("find by key").expect("the key").seq,
+        reader
+            .find("one")
+            .expect("find by key")
+            .expect("the key")
+            .seq,
         1,
         "a key is found as it was at the reader's moment"
     );
@@ -415,7 +426,11 @@ pub fn read_committed_conformance(engine: &dyn LogEngine, dir: &Path, absent: &P
         "a reader writes nothing"
     );
     drop(reader);
-    assert_eq!(writer.last_seq().expect("the writer reads"), 3, "the refused write left nothing");
+    assert_eq!(
+        writer.last_seq().expect("the writer reads"),
+        3,
+        "the refused write left nothing"
+    );
     // A reader taken later sees what was committed since.
     let reader = engine
         .read_committed(dir, codecs.clone())

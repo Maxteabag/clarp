@@ -163,7 +163,9 @@ impl Desk {
                     writer.serve(command, &own);
                 }
             })
-            .map_err(|error| format!("the thread of the accepted sends could not start: {error}"))?;
+            .map_err(|error| {
+                format!("the thread of the accepted sends could not start: {error}")
+            })?;
         Ok(desk)
     }
 
@@ -459,8 +461,7 @@ mod tests {
     /// there for a desk that opens the store again, as after a crash; what was taken is gone.
     #[test]
     fn kept_once_in_order_and_still_there_after_a_crash() {
-        let path =
-            std::env::temp_dir().join(format!("clarp-accepted-{}.db", std::process::id()));
+        let path = std::env::temp_dir().join(format!("clarp-accepted-{}.db", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let desk = open(&path);
         let first = desk.keep(accepted("a", "m-1", "t-1")).unwrap();
@@ -469,7 +470,10 @@ mod tests {
         assert!(!first.again && !other.again && !second.again);
         assert_eq!((first.ahead, second.ahead), (0, 1));
         let again = desk.keep(accepted("a", "m-1", "t-1")).unwrap();
-        assert_eq!((again.key.as_str(), again.again, again.ahead), (first.key.as_str(), true, 0));
+        assert_eq!(
+            (again.key.as_str(), again.again, again.ahead),
+            (first.key.as_str(), true, 0)
+        );
         assert_eq!(
             desk.keep(accepted("a", "m-9", "t-1")),
             Err(Refused::TraceTaken),
@@ -494,7 +498,11 @@ mod tests {
         assert_eq!(desk.waiting("b").len(), 1);
         drop(desk);
         let desk = open(&path);
-        let ids: Vec<String> = desk.waiting("a").into_iter().map(|(_, m)| m.message.id).collect();
+        let ids: Vec<String> = desk
+            .waiting("a")
+            .into_iter()
+            .map(|(_, m)| m.message.id)
+            .collect();
         assert_eq!(ids, ["m-2", "m-3"], "the order holds across a reopening");
         // Once nothing is kept the store goes, and a start finds nothing to read. Let go in the
         // background, as an agent that answers lets go: the writer takes it in its order.

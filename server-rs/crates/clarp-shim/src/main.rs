@@ -964,9 +964,7 @@ impl Control {
         // The expired timer cannot resume the group after this request has committed.
         let signal = killpg(self.group(), Signal::SIGKILL);
         if let Err(error) = signal {
-            log(&format!(
-                "clarp-shim: cannot end a held tool: {error}"
-            ));
+            log(&format!("clarp-shim: cannot end a held tool: {error}"));
             return Reply::failed("the held tool could not be ended");
         }
         *hold = Hold::Ended;

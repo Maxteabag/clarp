@@ -94,7 +94,10 @@ impl LogEngine for SqliteEngine {
     ) -> Result<Box<dyn AgentLog>, LogError> {
         let file = agent_dir.join(LOG_FILE);
         if !file.is_file() {
-            return Err(LogError::Storage(format!("{} is not there", file.display())));
+            return Err(LogError::Storage(format!(
+                "{} is not there",
+                file.display()
+            )));
         }
         let conn = Connection::open_with_flags(
             &file,
@@ -126,11 +129,7 @@ impl LogEngine for SqliteEngine {
                 file.display()
             )));
         }
-        Ok(Box::new(SqliteLog {
-            conn,
-            codecs,
-            file,
-        }))
+        Ok(Box::new(SqliteLog { conn, codecs, file }))
     }
 }
 
