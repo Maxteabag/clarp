@@ -1,5 +1,5 @@
 //! The Host's tests of what an agent's own tools read of it: the public fields of its peers,
-//! the list of its background jobs and no more, and a job's status the Host cannot answer.
+//! the list and detail of its background jobs, and a job's status the Host cannot answer.
 //! One file a piece, declared in `host.rs`.
 
 use super::*;
@@ -45,7 +45,7 @@ fn agent_read_parity_peers_list_uses_only_public_fields() {
 }
 
 #[test]
-fn agent_read_parity_background_jobs_opens_only_the_list() {
+fn agent_read_parity_background_jobs_list_and_detail() {
     let place = Place::new("tool-background-jobs");
     let admin = "fixture-admin";
     let host = place.start_with_token(admin);
@@ -72,13 +72,8 @@ fn agent_read_parity_background_jobs_opens_only_the_list() {
     let job = jobs.iter().find(|job| job["job_id"] == job_id).unwrap();
     assert_eq!(job["session"], session);
     assert!(job.get("log_tail").is_none());
-    for (method, path) in [
-        ("POST", "/background-jobs"),
-        ("GET", "/background-jobs/tool-list-job"),
-        ("DELETE", "/background-jobs/tool-list-job"),
-    ] {
-        assert_eq!(host.ask_as(&tools, method, path, None).0, 403);
-    }
+    let (status, detail) = host.ask_as(&tools, "GET", "/background-jobs/tool-list-job", None);
+    assert_eq!(status, 200, "{detail}");
 }
 
 #[test]

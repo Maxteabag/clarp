@@ -167,10 +167,9 @@ pub use child::{OWN_SECRETS, child_environment};
 ///
 /// It follows from the administrator's token, so it is the same after the Host is started
 /// again and a turn that went on meanwhile still reaches its Host; and it does not give the
-/// administrator's token away. It opens the agents' tools (`/tools/`) from this machine, and
-/// the one thing an agent asks of its user's phone by a script that speaks to the Host
-/// itself (an event for the calendar); nothing else: not the conversations, not the
-/// devices, not the pairing. A Host without a token gives its turns none.
+/// administrator's token away. From this machine it authenticates as an agent's tools.
+/// The turn's separate signed token identifies the agent for attribution and ownership.
+/// A Host without a token gives its turns none.
 pub fn tool_token(administrators: &str) -> String {
     if administrators.is_empty() {
         return String::new();
