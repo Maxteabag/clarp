@@ -2470,9 +2470,18 @@ impl Worker {
         loop {
             if self.actor.is_none() && !self.glance_read {
                 self.glance_read = true;
-                let mut held = crate::held::Held::new(&thread, "its glance");
-                // Its steps are said with the one line of a slow glance, once it is decided.
-                held.steps(self.glance());
+                // Said as a slow hold of its thread is said, in the one line, with how long each
+                // of its steps took, once it is decided (issue 935).
+                let began = Instant::now();
+                let steps = self.glance();
+                let held = began.elapsed();
+                if held >= crate::held::SLOW {
+                    eprintln!(
+                        "clarp-host: {thread} was held {} ms by its glance (steps, ms: {})",
+                        held.as_millis(),
+                        steps.said()
+                    );
+                }
             }
             if self.actor.is_none() {
                 let opened = {
@@ -6162,6 +6171,8 @@ impl Worker {
         let actor = match glanced {
             Ok(actor) => actor,
             Err(why) => {
+                // What it took is what it took until its read answered: not the look below.
+                phases.stop();
                 // Quietly: a new agent has no log yet, and the memory engine reads only through
                 // its writer. Said where the log is there and could not be read, with the step it
                 // stopped in.

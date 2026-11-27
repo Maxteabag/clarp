@@ -1627,7 +1627,7 @@ impl Actor {
             now_ms,
             teams,
             launch_defaults,
-            &mut Phases::default(),
+            &mut Phases::off(),
         )?;
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
