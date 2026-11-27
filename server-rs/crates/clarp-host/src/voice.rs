@@ -2342,7 +2342,7 @@ async fn recoverable(
         })
         .filter(|(_, line)| line.clip_id.is_some())
         .collect();
-    let receipts = app.audio.playback_if_kept(&app).await?;
+    let receipts = app.audio.playback_if_kept(&app).await;
     let shown: Vec<_> = clips
         .iter()
         .map(|(record, line)| {

@@ -20,6 +20,10 @@ const TABLE: &str = "receipt";
 #[derive(Clone, Deserialize, Serialize)]
 struct Receipt {
     line: String,
+    #[serde(default)]
+    base_played: Option<String>,
+    #[serde(default)]
+    base_error: Option<String>,
     played: Option<String>,
     error: Option<String>,
     at_ms: i64,
@@ -63,24 +67,24 @@ impl Receipts {
         }))
     }
 
-    /// Legacy status in a line is the starting point until this Host has a
-    /// receipt for that exact line and clip.
+    /// A receipt applies to the exact line and clip it was recorded over.
+    /// A changed status in the log can come from a Host that wrote there again.
     pub(crate) fn shown<'a>(&self, agent: &str, line: &'a Line) -> Cow<'a, Line> {
         let Some(clip) = line.clip_id else {
             return Cow::Borrowed(line);
         };
         let kept = self.kept.read().unwrap_or_else(PoisonError::into_inner);
-        match kept.get(&place(agent, clip)).filter(|r| r.line == line.id) {
-            Some(receipt) => {
-                let mut told = line.clone();
-                told.played.clone_from(&receipt.played);
-                if receipt.played.as_deref() == Some("play-fail") {
-                    told.error.clone_from(&receipt.error);
-                }
-                Cow::Owned(told)
-            }
-            None => Cow::Borrowed(line),
-        }
+        let Some(receipt) = kept.get(&place(agent, clip)).filter(|receipt| {
+            receipt.line == line.id
+                && receipt.base_played == line.played
+                && receipt.base_error == line.error
+        }) else {
+            return Cow::Borrowed(line);
+        };
+        let Some(status) = receipt.played.as_deref() else {
+            return Cow::Borrowed(line);
+        };
+        Cow::Owned(line.played(status, receipt.error.as_deref()))
     }
 
     /// Return only after the new status is durable. The only serialization is
@@ -107,6 +111,8 @@ impl Receipts {
             let key = place(&agent, clip);
             let receipt = Receipt {
                 line: played.id,
+                base_played: line.played,
+                base_error: line.error,
                 played: played.played,
                 error: played.error,
                 at_ms: now_ms,

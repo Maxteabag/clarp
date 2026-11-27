@@ -101,20 +101,21 @@ impl Desk {
             .await
     }
 
-    pub(crate) async fn playback_if_kept(
-        &self,
-        app: &App,
-    ) -> Result<Option<&Arc<Receipts>>, Unavailable> {
+    pub(crate) async fn playback_if_kept(&self, app: &App) -> Option<&Arc<Receipts>> {
         if let Some(receipts) = self.playback.get() {
-            return Ok(Some(receipts));
+            return Some(receipts);
         }
-        let kept = tokio::fs::try_exists(Self::playback_path(app))
-            .await
-            .map_err(|error| Unavailable::new(error.to_string()))?;
-        if kept {
-            Ok(Some(self.playback(app).await?))
-        } else {
-            Ok(None)
+        let loaded = match tokio::fs::try_exists(Self::playback_path(app)).await {
+            Ok(false) => return None,
+            Ok(true) => self.playback(app).await,
+            Err(why) => Err(Unavailable::new(why.to_string())),
+        };
+        match loaded {
+            Ok(receipts) => Some(receipts),
+            Err(why) => {
+                app.fleet.unread("playback receipts", &why.0);
+                None
+            }
         }
     }
 
@@ -185,13 +186,7 @@ pub(crate) async fn keep(app: &App) {
         return;
     };
     let now = app.clock.now_ms();
-    let playback = match app.audio.playback_if_kept(app).await {
-        Ok(playback) => playback,
-        Err(why) => {
-            app.fleet.unread("playback receipts", &why.0);
-            None
-        }
-    };
+    let playback = app.audio.playback_if_kept(app).await;
     let directory = app.fleet.directory();
     let mut changed: Vec<Fact> = Vec::new();
     for member in &directory.members {
