@@ -230,7 +230,8 @@ off. A full device or Host administrator reads
 `GET /text-turn-ack/settings` and writes `POST /text-turn-ack/settings`
 with `{"enabled":true}` or `{"enabled":false}`. The response contains
 the saved `enabled` boolean. Where the option is on, eligible new text turns
-get a reminder to make their first acknowledgment visible. Use the one
-already shown if the request has been acknowledged. In Conversation view,
-`clarp-admin tell-user` is the existing way to show that line before the
-rest of the work. Older clients keep their existing chat and note behavior.
+get a reminder to make their first acknowledgment visible. An existing
+visible acknowledgment counts. Otherwise the reminder uses
+`clarp-admin tell-user` to show the line before the rest of the work, both
+in Conversation view and when the client hides streaming answers. Older
+clients keep their existing chat and note behavior.

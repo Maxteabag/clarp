@@ -428,9 +428,9 @@ impl Turn {
             instruction.push_str(&format!(
                 "\n\nFor substantial text work or several tool calls, make the first acknowledgment \
                  visible before starting. Count any acknowledgment already visible for this request. \
-                 If pre-tool text is folded, use `clarp-admin tell-user --from {session} --text '...'` \
-                 before any other tool for that single short line confirming the request and first \
-                 action. Answer quick questions directly."
+                 Otherwise, before any other tool, use `clarp-admin tell-user --from {session} --text '...'` \
+                 for that single short line confirming the request and first action. Answer quick \
+                 questions directly."
             ));
         }
         in_call(instruction, self.call.as_deref())

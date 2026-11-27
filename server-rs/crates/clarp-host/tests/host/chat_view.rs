@@ -187,7 +187,8 @@ fn only_new_user_text_turns_get_the_enabled_instruction() {
     let made = host.post("/agents", json!({"name": "Reader", "backend": "claude"}));
     let session = made["session"].as_str().unwrap();
     let prompts = place.root.join("prompts.jsonl");
-    let marker = "make the first acknowledgment visible before starting";
+    let marker =
+        format!("Otherwise, before any other tool, use `clarp-admin tell-user --from {session}");
     let cases = [
         (false, "Off text", json!({}), false),
         (true, "On text", json!({}), true),
@@ -220,7 +221,7 @@ fn only_new_user_text_turns_get_the_enabled_instruction() {
         let prompt: String = serde_json::from_str(lines.lines().nth(index).unwrap()).unwrap();
         assert!(prompt.contains(text));
         assert_eq!(
-            prompt.matches(marker).count(),
+            prompt.matches(marker.as_str()).count(),
             usize::from(expected),
             "{prompt}"
         );
