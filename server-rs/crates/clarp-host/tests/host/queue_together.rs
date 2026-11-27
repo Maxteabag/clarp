@@ -170,7 +170,11 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
         place.root.join("holding").exists()
     });
 
-    let call = || host.post("/calls", json!({"agents":[session]}))["call"]["call_id"].clone();
+    let principal = "fixture-caller";
+    let call = || {
+        host.post("/calls", json!({"agents":[session],"principal":principal}))["call"]["call_id"]
+            .clone()
+    };
     let send = |call: &Value, id: &str, text: &str| {
         let sent = host.post(
             "/send",
@@ -183,7 +187,7 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
     assert!(first.is_string(), "{first}");
     send(&first, "call-first", "first captured words");
     send(&first, "call-second", "second captured words");
-    host.post("/calls/end", json!({"call_id":first}));
+    host.post("/calls/end", json!({"call_id":first,"principal":principal}));
     let second = call();
     assert!(second.is_string() && second != first, "{second}");
     send(&second, "other-call", "separate call words");
