@@ -103,6 +103,26 @@ impl Backend for Adapter {
         })
     }
 
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        if self.tool != Tool::Muse {
+            return None;
+        }
+        let mut launch = self.launch(spec);
+        launch.args.retain(|arg| arg != "--yolo");
+        let restrictions = [
+            "--disable-write",
+            "--disable-shell",
+            "--disable-web-tools",
+            "--disable-request-user-input",
+            "--no-foreign-personal-context",
+            "--no-session-log",
+        ];
+        launch
+            .args
+            .splice(1..1, restrictions.into_iter().map(str::to_owned));
+        Some(launch)
+    }
+
     fn answered(&self, printed: &str) -> Result<String, String> {
         let answer = self.tool.answer(printed);
         if answer.trim().is_empty() {

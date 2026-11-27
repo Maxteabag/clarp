@@ -73,13 +73,20 @@ import signal
 import sys
 import time
 
-agy = pathlib.Path(__file__).name == 'agy'
+backend = pathlib.Path(__file__).name
+agy = backend == 'agy'
+muse = backend == 'muse'
 if '--version' in sys.argv:
-    print('1.5.18' if agy else 'codex-cli 0.167.1')
+    print('1.5.18' if agy else ('muse 1.4.25' if muse else 'codex-cli 0.167.1'))
     raise SystemExit(0)
 
 root = pathlib.Path(__file__).resolve().parent
-prompt = next((v.removeprefix('--print=') for v in sys.argv if v.startswith('--print=')), '') if agy else sys.stdin.read()
+if agy:
+    prompt = next((v.removeprefix('--print=') for v in sys.argv if v.startswith('--print=')), '')
+elif muse:
+    prompt = sys.argv[sys.argv.index('--') + 1]
+else:
+    prompt = sys.stdin.read()
 side = 'short-lived conversation session' in prompt
 thread = 'fresh-side' if side else 'work-thread'
 sid = '55555555-6666-7777-8888-999999999999' if side else '11111111-2222-3333-4444-555555555555'
@@ -94,6 +101,15 @@ def reply(text):
     if agy:
         say('step_update', step_update={'conversation_id':sid, 'step_index':1, 'state':'DONE',
                 'step_type':'agent_response', 'text_delta':text})
+    elif muse:
+        say('delta', payload_type='run.output.delta', payload={'text':text})
+        if side:
+            say('turn.answered')
+        elif 'Continue with the next work request.' not in prompt:
+            say('tool', payload_type='tool.result', payload={
+                'call_id':'test-tool','tool_name':'read_file','text':'fixture',
+                'correlation_facts':{'outcome':'success'},
+            })
     else:
         say('item.completed', item={'type':'agent_message', 'id':'words', 'text':text})
 
@@ -105,6 +121,8 @@ signal.signal(signal.SIGINT, stopped)
 signal.signal(signal.SIGTERM, stopped)
 if agy:
     say('init', conversation_id=sid)
+elif muse:
+    say('start', payload_type='run.lifecycle.started')
 else:
     say('thread.started',thread_id=thread)
     say('turn.started')
@@ -115,6 +133,10 @@ if side:
         settings = json.loads(sys.argv[sys.argv.index('--settings') + 1])
         assert settings['toolPermission'] == 'strict'
         assert 'write_file(*)' in settings['permissions']['deny'] and 'command(*)' in settings['permissions']['deny']
+    elif muse:
+        assert '--yolo' not in sys.argv and '--session-id' not in sys.argv
+        assert '--disable-write' in sys.argv and '--disable-shell' in sys.argv
+        assert '--disable-web-tools' in sys.argv and '--no-session-log' in sys.argv
     else:
         assert '--ephemeral' in sys.argv and 'read-only' in sys.argv
         assert 'resume' not in sys.argv and '--dangerously-bypass-approvals-and-sandbox' not in sys.argv
@@ -137,6 +159,8 @@ else:
     (root / 'main-finished').touch()
 if agy:
     say('result', result={'conversation_id':sid, 'status':'SUCCESS', 'response':last})
+elif muse:
+    say('finished', payload_type='run.terminal.completed')
 else:
     say('turn.completed', usage={'input_tokens':6,'output_tokens':4})
 "#;
@@ -312,6 +336,11 @@ fn codex_conversation_reads_committed_context_and_leaves_work_and_projection_int
 #[test]
 fn antigravity_conversation_uses_a_fresh_session_and_its_own_permissions() {
     fresh_conversation("agy-conversation", "agy", "CLARP_AGY_PROGRAM");
+}
+
+#[test]
+fn muse_conversation_uses_fresh_exec_with_work_tools_disabled() {
+    fresh_conversation("muse-conversation", "muse", "CLARP_MUSE_PROGRAM");
 }
 
 fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
