@@ -3162,11 +3162,13 @@ mod tests {
         );
         // Nothing compacted yet: the row says so (compaction_outcome).
         assert_eq!(row["last_compaction"], serde_json::Value::Null);
+        // An active agent has no archiver (Rust contract 200, archive_by_anyone).
+        assert_eq!(row.get("archived_by"), Some(&serde_json::Value::Null));
         assert_eq!(
             row.as_object().unwrap().len(),
-            // The Python Host's 55, and `transit` (Rust contract 158).
-            56,
-            "the fields of the Python Host's row"
+            // The Python Host's 55, plus Rust's `transit` and `archived_by`.
+            57,
+            "the fields of the snapshot row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
         assert_eq!(typed.session, "maximus");
