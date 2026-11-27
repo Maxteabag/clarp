@@ -441,10 +441,8 @@ fn conversation_admission_settles_work_only_through_the_captured_spool_prefix() 
             }
         }
         assert!(written >= 3, "the prefix spanned several windows");
-        assert_eq!(
-            actor.live_turn(),
-            Some(if terminal_at_send { older } else { carrier })
-        );
+        let work = if terminal_at_send { older } else { carrier };
+        assert_eq!(actor.live_turn(), Some(work));
         assert_eq!(
             actions
                 .iter()
@@ -457,12 +455,14 @@ fn conversation_admission_settles_work_only_through_the_captured_spool_prefix() 
             .unwrap();
         assert!(sent.queued);
         let (forked, out) = actor.fork_take(sent.turn.unwrap(), world.tick()).unwrap();
-        assert_eq!(forked, !terminal_at_send);
-        assert_eq!(
+        // The actor can answer beside a tool that is still being started. If the
+        // terminal was visible, the fork is already beside the older queued work.
+        assert!(forked);
+        assert_eq!(actor.live_turn(), Some(work));
+        assert!(
             out.actions
                 .iter()
-                .any(|action| matches!(action, Action::Fork { .. })),
-            !terminal_at_send
+                .any(|action| matches!(action, Action::Fork { .. }))
         );
         assert!(
             !out.actions
