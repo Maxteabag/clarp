@@ -9,16 +9,32 @@ use clarp_kernel::python;
 use clarp_protocol::responses::StopResponse;
 use serde_json::{Map, Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
+
+#[derive(Clone, Copy)]
+pub(crate) enum Caller {
+    Device,
+    AgentToken,
+    Claimed,
+}
+
+impl From<&Principal> for Caller {
+    fn from(principal: &Principal) -> Self {
+        match principal {
+            Principal::Device { .. } => Self::Device,
+            Principal::Tools => Self::AgentToken,
+            Principal::Administrator => Self::Claimed,
+        }
+    }
+}
 
 /// Who stops or repairs an agent, and why: the agent whose own turn asks, by the token it
-/// presents (`token`); the user, where a paired device (`device`) says so; else the claim, which
+/// presents (`token`); the user, where a paired device says so; else the claim, which
 /// the Host does not know to be true. A token whose agent cannot be said is answered so (503),
-/// never taken for the claim: an agent's Stop taken for the user's would do what only the user's
-/// does. A token of nobody is no turn's, and the claim stands.
+/// never taken for the claim. The agent token requires a verified turn before acting.
 pub(crate) async fn control_of(
     app: &App,
-    device: bool,
+    caller: Caller,
     token: Option<&str>,
     actor: Option<&Value>,
     reason: Option<&Value>,
@@ -33,7 +49,17 @@ pub(crate) async fn control_of(
             found.map(|member| member.record.session.clone())
         }
     };
-    let (actor, verified) = control::acting(&claimed, turn_of.as_deref(), device);
+    if matches!(caller, Caller::AgentToken) && turn_of.is_none() {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "verified turn identity required",
+        ));
+    }
+    let (actor, verified) = control::acting(
+        &claimed,
+        turn_of.as_deref(),
+        matches!(caller, Caller::Device),
+    );
     Ok(Control {
         actor,
         verified,
@@ -83,7 +109,7 @@ pub(crate) async fn stop(
 pub(crate) async fn repair(
     app: &App,
     data: &Map<String, Value>,
-    device: bool,
+    caller: Caller,
     token: Option<&str>,
 ) -> Result<Value, ApiError> {
     let session = control::field(data.get("session"));
@@ -92,7 +118,7 @@ pub(crate) async fn repair(
     let Some(member) = member.filter(|_| !session.is_empty()) else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "agent not found"));
     };
-    let by = control_of(app, device, token, data.get("actor"), data.get("reason")).await?;
+    let by = control_of(app, caller, token, data.get("actor"), data.get("reason")).await?;
     if by.reason.is_empty() {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "reason is required"));
     }

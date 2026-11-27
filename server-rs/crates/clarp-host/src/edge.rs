@@ -4433,7 +4433,7 @@ async fn stop(
 ) -> Result<Json<StopResponse>, ApiError> {
     let by = crate::controls::control_of(
         &app,
-        matches!(principal, Principal::Device { .. }),
+        (&principal).into(),
         turn_of(&headers),
         request.actor.as_ref(),
         request.reason.as_ref(),
@@ -4462,8 +4462,8 @@ async fn repair_slot(
     let Ok(Value::Object(data)) = serde_json::from_slice::<Value>(&body) else {
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
     };
-    let device = matches!(principal, Principal::Device { .. });
-    let repaired = crate::controls::repair(&app, &data, device, turn_of(&headers)).await?;
+    let repaired =
+        crate::controls::repair(&app, &data, (&principal).into(), turn_of(&headers)).await?;
     Ok(Json(repaired))
 }
 
@@ -4695,6 +4695,8 @@ fn expected_generation(query: &CancelQuery, body: &[u8]) -> Result<Option<u64>, 
 /// is still that run.
 async fn cancel_background_job(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Path(job_id): Path<String>,
     Query(query): Query<CancelQuery>,
     body: axum::body::Bytes,
@@ -4704,6 +4706,24 @@ async fn cancel_background_job(
         return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
     };
     let owned = job_and_owner(&app, &job_id).await?;
+    let agent = if principal == Principal::Tools {
+        let caller = crate::turn_identity::presented(&app, turn_of(&headers)).await?;
+        let caller = caller
+            .filter(|caller| {
+                owned
+                    .as_ref()
+                    .is_some_and(|(member, _)| member.record.agent_id == caller.record.agent_id)
+            })
+            .ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "only the owning agent may cancel this job",
+                )
+            })?;
+        Some(caller)
+    } else {
+        None
+    };
     if let Some((member, current)) = &owned
         && current.provider_owned()
     {
@@ -4724,7 +4744,12 @@ async fn cancel_background_job(
     let command = JobCommand::Cancel {
         id: job_id.clone(),
         expected_generation: expected,
-        reason: "user_cancelled".to_string(),
+        reason: if agent.is_some() {
+            "agent_cancelled"
+        } else {
+            "user_cancelled"
+        }
+        .to_string(),
     };
     let change = match &member {
         Some(member) => member
@@ -4775,8 +4800,11 @@ async fn cancel_background_job(
             token => token,
         };
         let handle = job.handle();
+        let caller = agent
+            .as_ref()
+            .map_or("the user", |agent| agent.record.session.as_str());
         let text = format!(
-            "the user cancelled background job {}: {} (handle {handle}; pid={worker_pid} \
+            "{caller} cancelled background job {}: {} (handle {handle}; pid={worker_pid} \
              start_token={token}). Before stopping anything, run `clarp-agent-bg {} job-cancelled \
              {handle}`. Proceed only if it returns 0 and the target process still matches that \
              exact worker identity; otherwise this cleanup was superseded by a newer generation.",
