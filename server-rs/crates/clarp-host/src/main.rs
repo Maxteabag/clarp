@@ -762,6 +762,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clarp_host::keeper::run(&app);
         // And an idle agent's own label that outlived its time is taken back.
         clarp_host::labels::run(&app);
+        app.hub.event_numbers_ready().await;
         steps.mark("started");
         // Said once the start has finished. The Host has answered since `answering`; whoever
         // waits for this line (the tests, an installer) finds the whole start done.
@@ -808,7 +809,6 @@ async fn serve(config: Config) -> Result<(), String> {
         }
         // The start is done once every agent is open too: what waits for that is answered now.
         app.start.reached(clarp_host::start::Stage::Agents).await;
-        app.hub.event_numbers_ready().await;
         app.start.reach(clarp_host::start::Stage::Started);
         steps.mark("ready");
         // Said last of its start, after every line the start has always said.

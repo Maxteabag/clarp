@@ -44,6 +44,7 @@ use clarp_protocol::server_info::{
     Capabilities, ClientCompatibility, Compatibility, Contract, LocalConnection, ServerInfo,
 };
 use futures_util::StreamExt as _;
+use futures_util::future::Either;
 use futures_util::stream::{self, Stream};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -5491,19 +5492,25 @@ async fn events(
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
-    // Open the SSE response while a reservation is on its way. A comment has
-    // no cursor and does not change the first event of either replay protocol.
-    let connecting = app
-        .hub
-        .event_numbers_pending()
-        .then(|| Ok(SseEvent::default().comment("")));
-    let frames = stream::once(async move {
-        tokio::select! {
-            () = app.hub.event_numbers_ready() => Some(event_frames(app, principal, headers, query)),
-            () = app.hub.closing() => None,
-        }
-    }).filter_map(std::future::ready).flatten();
-    Sse::new(stream::iter(connecting).chain(frames))
+    // App clients mark their stream connected on a successful HTTP response.
+    // Keep that boundary behind the reservation, with the usual final notice
+    // if this Host stops while a client is waiting.
+    let stopped = app.hub.event_numbers_pending()
+        && tokio::select! {
+            biased;
+            () = app.hub.closing() => true,
+            () = app.hub.event_numbers_ready() => false,
+        };
+    let frames = if stopped {
+        let farewell = app
+            .hub
+            .farewell()
+            .map(|said| Ok(SseEvent::default().data(&*said)));
+        Either::Left(stream::iter(farewell))
+    } else {
+        Either::Right(event_frames(app, principal, headers, query))
+    };
+    Sse::new(frames)
 }
 
 fn event_frames(
