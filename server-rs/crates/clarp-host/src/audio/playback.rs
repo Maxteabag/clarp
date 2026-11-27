@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, PoisonError, RwLock};
 
-use clarp_kernel::spoken::Line;
+use clarp_kernel::spoken::{Line, LineState};
 use clarp_ports::kv::{KeyValue, KeyValueEngine, Write};
 use clarp_store_mem::MemKeyValue;
 use clarp_store_sqlite::SqliteKeyValue;
@@ -25,6 +25,8 @@ struct Receipt {
     base_played: Option<String>,
     #[serde(default)]
     base_error: Option<String>,
+    #[serde(default)]
+    while_speaking: bool,
     played: Option<String>,
     error: Option<String>,
     at_ms: i64,
@@ -78,8 +80,14 @@ impl Receipts {
         let Some(receipt) = kept.get(&place(agent, clip)) else {
             return Cow::Borrowed(line);
         };
+        let failed_later = receipt.while_speaking && line.state == LineState::Failed;
         let applies = line.playback_revision.map_or_else(
-            || receipt.base_played == line.played && receipt.base_error == line.error,
+            || {
+                receipt.base_played == line.played
+                    && (line.played.as_deref() != Some("play-fail")
+                        || failed_later
+                        || receipt.base_error == line.error)
+            },
             |revision| revision < receipt.revision,
         );
         if receipt.line != line.id || !applies {
@@ -89,6 +97,11 @@ impl Receipts {
             return Cow::Borrowed(line);
         };
         let mut copied = line.played(status, receipt.error.as_deref());
+        if failed_later {
+            // A producer error that came after the client spoke survives as
+            // it did when the actor recorded playback before finishing the line.
+            copied.error.clone_from(&line.error);
+        }
         copied.playback_revision = Some(receipt.revision);
         Cow::Owned(copied)
     }
@@ -143,6 +156,7 @@ impl Receipts {
                     .saturating_add(1),
                 base_played: line.played,
                 base_error: line.error,
+                while_speaking: line.state == LineState::Speaking,
                 played: played.played,
                 error: played.error,
                 at_ms: now_ms,
