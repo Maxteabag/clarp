@@ -299,7 +299,7 @@ fn a_stream_with_previews_sends_the_chats_it_does_not_show_whole_as_previews() {
     let kept = numbered_of(&everything, &kinds, &listed);
     assert_eq!(kept, numbered_of(&as_before, &kinds, &listed));
     assert!(
-        numbered_of(&everything, &["queue-updated"], &listed).len() >= 1,
+        !numbered_of(&everything, &["queue-updated"], &listed).is_empty(),
         "the queue was exercised: {kept:?}"
     );
 }
