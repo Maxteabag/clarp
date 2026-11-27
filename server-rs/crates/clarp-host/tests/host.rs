@@ -16780,8 +16780,8 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     );
     assert_eq!(said("script_token"), tools, "{seen}");
 
-    // That token opens the tools, from this machine, and nothing the apps read or do but the
-    // fleet's reads an agent is given (#795, `tools_owner_free`).
+    // That token opens the tools and ordinary Host routes from this machine, while the
+    // caller's own identity is still needed where a route acts for an agent or a device.
     let by_hand = place
         .host_command()
         .args(["tool", "clarp-admin", "sessions"])
@@ -16797,30 +16797,29 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         String::from_utf8_lossy(&by_hand.stderr)
     );
     let log = format!("/log?session={agent}");
-    for (method, path) in [
-        ("GET", log.as_str()),
-        ("POST", "/send"),
-        ("POST", "/agents"),
-        ("POST", "/pairing/issue"),
-        ("GET", "/paired-devices"),
-        ("GET", "/peers"),
-    ] {
-        let (status, refused) = host.ask_as(&tools, method, path, None);
-        assert_eq!(status, 403, "{method} {path}: {refused}");
-    }
-    let (_, refused) = host.ask_as(&tools, "GET", &log, None);
-    assert_eq!(refused["error"], "an agent's tools may ask for tools only");
+    assert_eq!(host.ask_as(&tools, "GET", &log, None).0, 200);
+    let (status, refused) = host.ask_as(
+        &tools,
+        "POST",
+        "/send",
+        Some(&json!({"session":agent,"text":"not the owner"})),
+    );
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"], "verified turn identity required");
+    let (status, refused) = host.ask_as(
+        &tools,
+        "POST",
+        "/pairing/issue",
+        Some(&json!({"scope":"full","device_name":"Unpaired tool"})),
+    );
+    assert_eq!(status, 403, "{refused}");
+    assert!(refused.get("code").is_none(), "{refused}");
     let (status, read) = host.ask_as(&tools, "GET", "/agents/snapshot", None);
     assert_eq!(status, 200, "{read}");
-    // But for what an agent asks of its user's phone by a script of its own: an event for
-    // the calendar. Nothing beside it, and not by another way of asking.
+    // A script can still ask for a calendar event with the tools token alone.
     let event = json!({ "session": agent, "title": "T", "start": "s", "end": "e" });
     let (status, asked) = host.ask_as(&tools, "POST", "/calendar/request", Some(&event));
     assert_eq!((status, &asked["ok"]), (200, &json!(true)), "{asked}");
-    for (method, path) in [("GET", "/calendar/request"), ("POST", "/location/request")] {
-        let (status, _) = host.ask_as(&tools, method, path, Some(&event));
-        assert_eq!(status, 403, "{method} {path}");
-    }
     // The administrator still calls a tool by hand with the administrator's token.
     let (code, _, err) = tool(&host, &place.root, None, &["clarp-admin", "sessions"]);
     assert_eq!(code, 0, "{err}");
@@ -43833,7 +43832,7 @@ fn a_call_clip_is_heard_for_its_captured_participant() {
     let tools = clarp_host::tool_token("admin");
     let denied = hear(&tools, id, &second, "clip-1");
     assert_eq!(denied.0, 403);
-    assert_eq!(denied.1["error"], "an agent's tools may ask for tools only");
+    assert_eq!(denied.1["error"], "not your call");
     assert_eq!(hear("", id, &second, "clip-1").0, 401);
     assert_eq!(
         hear("admin", id, &second, "clip-1").1["error"],

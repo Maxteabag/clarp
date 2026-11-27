@@ -1068,13 +1068,21 @@ fn opening_line(reply: &clarp_kernel::conversation::Reply) -> bool {
 /// that may only read and send has no call.
 pub fn caller(principal: &Principal) -> Result<String, ApiError> {
     match principal {
-        Principal::Administrator | Principal::Tools => Ok(ADMINISTRATOR.to_string()),
+        Principal::Administrator => Ok(ADMINISTRATOR.to_string()),
+        Principal::Tools => Err(call_identity_required()),
         Principal::Device {
             device_id,
             scope: Scope::Full,
         } => Ok(device_id.clone()),
         Principal::Device { .. } => Err(ApiError::new(StatusCode::UNAUTHORIZED, FULL_ONLY)),
     }
+}
+
+pub(crate) fn call_identity_required() -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        "call requires a device or administrator identity",
+    )
 }
 
 fn answered(asked: Result<Result<Value, Refused>, Unavailable>) -> Response {
