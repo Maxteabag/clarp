@@ -5624,7 +5624,7 @@ fn event_frames(
     // The stream ends the moment the Host is told to stop, not when its process is gone: its
     // apps reconnect to the next Host about five seconds sooner (issue 880).
     let closing = Some(Box::pin(app.hub.closing()));
-    let stream = stream::unfold(
+    stream::unfold(
         (
             first,
             live,
@@ -5892,8 +5892,7 @@ fn event_frames(
                 }
             }
         },
-    );
-    stream
+    )
 }
 
 /// Whether a replay or a catch-up gives an event: on a stream that shows previews, not the
