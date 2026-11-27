@@ -6203,6 +6203,7 @@ mod tests {
             let answer = events(
                 State(app.clone()),
                 Extension(Principal::Administrator),
+                None,
                 HeaderMap::new(),
                 Query(query),
             )
