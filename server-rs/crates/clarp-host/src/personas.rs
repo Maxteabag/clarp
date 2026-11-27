@@ -16,13 +16,13 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use clarp_kernel::kept_portraits::{self as kept, Portrait};
 use clarp_kernel::personas::{self as rules, Owner};
 use clarp_kernel::python;
 use serde_json::{Map, Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::{AgentRecord, Amend, PersonaSaid, picture_name};
 use crate::{ids, media, thumbnails};
 
@@ -75,7 +75,13 @@ fn refused(why: String) -> ApiError {
 /// `POST /personas` with `{name, voice_id?, avatar_symbol?, personality?, avatar_base64?}`:
 /// the owner makes a persona. Without a voice, or with the word for none (`{}`), it is given
 /// one that no agent and no persona has.
-async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiError> {
+async fn create(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let persona = made(&app, &object(&body)?).await?;
     Ok((StatusCode::CREATED, Json(json!({ "persona": persona }))).into_response())
 }
@@ -103,9 +109,15 @@ pub(crate) async fn made(app: &App, asked: &Map<String, Value>) -> Result<Value,
     Ok(persona)
 }
 
-/// `POST /personas/update` with `{original_name, name, voice_id, ...}`: the owner changes
-/// the persona that was called `original_name`.
-async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+/// `POST /personas/update` with `{original_name, name, voice_id, ...}`. A signed agent may
+/// change an entry in this shared catalog under the same rules as the owner.
+async fn update(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let asked = object(&body)?;
     let original = text(&asked, "original_name");
     let fetched = app.mouth.cached_voice_names().0;
@@ -119,7 +131,13 @@ async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
 
 /// `DELETE /personas/<name>`: the owner removes a persona of his own. One that is built in,
 /// or that is not there, is not removed.
-async fn remove(State(app): State<App>, Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
+async fn remove(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let name = name.trim_matches('/').to_string();
     use crate::fleet::PersonaRemoval;
     match app.fleet.persona_remove(name).await? {

@@ -17,14 +17,14 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use clarp_kernel::said::{self, resolve_voice};
 use clarp_kernel::voices::{self, Agent, Speech};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use toml::Table;
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::{Amend, Directory};
 use crate::media::header_text;
 use crate::owner;
@@ -258,7 +258,12 @@ async fn settings_voices(
 
 /// `POST /agent-voice` with `{session, voice_id, provider}`: an agent is given a voice, for
 /// one engine when the engine is named. A voice another agent has is refused.
-async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, ApiError> {
+async fn agent_voice(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
     let said: Map<String, Value> = if body.is_empty() {
         Map::new()
     } else {
@@ -273,6 +278,7 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
     if session.is_empty() || voice.is_empty() {
         return Err(bad("session and voice_id required"));
     }
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let provider = if provider.is_empty() {
         said::infer_provider(voice)
             .unwrap_or(said::ELEVENLABS)
@@ -288,9 +294,11 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
             return Err(bad("unknown voice"));
         }
     }
-    if app.fleet.directory().by_session(session).is_none() {
+    let directory = app.fleet.directory();
+    let Some(target) = directory.by_session(session) else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "no such agent"));
-    }
+    };
+    by.require_readable(&target.record)?;
     match app
         .fleet
         .amend(
@@ -298,6 +306,8 @@ async fn agent_voice(State(app): State<App>, body: Bytes) -> Result<Response, Ap
             Amend::Voice {
                 provider,
                 voice: voice.to_string(),
+                target_id: target.record.agent_id.clone(),
+                by_agent: by.agent_id().map(str::to_owned),
             },
         )
         .await?

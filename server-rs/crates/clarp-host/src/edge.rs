@@ -4448,7 +4448,7 @@ async fn stop(
 
 /// The token of the turn a request says it comes from (`X-Clarp-Turn`), where it says so. A
 /// header that is no text is a token of nobody.
-fn turn_of(headers: &HeaderMap) -> Option<&str> {
+pub(crate) fn turn_of(headers: &HeaderMap) -> Option<&str> {
     let token = headers.get(crate::turn_identity::HEADER);
     token.map(|token| token.to_str().unwrap_or_default())
 }
@@ -4893,12 +4893,16 @@ struct ShownQuery {
 /// Lets a held mailbox run again.
 async fn resume(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Json(request): Json<SessionRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let member = app
         .member(&request.session)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "agent not found"))?;
-    let (_, state) = member.agent.resume("user".to_string()).await?;
+    by.require_readable(&member.record)?;
+    let (_, state) = member.agent.resume(by.actor).await?;
     Ok(Json(json!({
         "session": member.record.session,
         "count": state.listed,
@@ -4912,11 +4916,12 @@ async fn resume(
 async fn waiting_named(
     app: &App,
     id: &str,
+    by: &crate::controls::MutationCaller,
 ) -> Result<Option<(Arc<Member>, clarp_actor::Waiting)>, ApiError> {
     let directory = app.fleet.directory();
     let mut named: Option<(Arc<Member>, clarp_actor::Waiting)> = None;
     for member in &directory.members {
-        if member.agent.view().status.waiting.is_empty() {
+        if !by.may_read(&member.record) || member.agent.view().status.waiting.is_empty() {
             continue;
         }
         let (waiting, _) = member.agent.queue().await?;
@@ -4944,16 +4949,16 @@ fn not_waiting() -> ApiError {
 /// A hold that held nothing else is over.
 async fn take_back(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
+    let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting());
     };
     // It may have gone to run since it was looked for.
-    let (waited, _) = member
-        .agent
-        .withdraw(waiting.turn, "user".to_string())
-        .await?;
+    let (waited, _) = member.agent.withdraw(waiting.turn, by.actor).await?;
     if !waited {
         return Err(not_waiting());
     }
@@ -4967,6 +4972,8 @@ async fn take_back(
 /// conversation was said, and stands.
 async fn reword(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
@@ -4977,7 +4984,8 @@ async fn reword(
         return Err(ApiError::new(StatusCode::BAD_REQUEST, "text required"));
     }
     let speak = audio_asked(&said)?;
-    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
+    let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting());
     };
     // A goal's wake is the Host's own: its queue item shows a check-in, not its words, and
@@ -5026,6 +5034,8 @@ fn audio_asked(said: &Value) -> Result<Option<bool>, ApiError> {
 /// past it. Answered as a send that did not have to wait.
 async fn send_by_hand(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
@@ -5038,7 +5048,8 @@ async fn send_by_hand(
             .map_err(|_| ApiError::new(StatusCode::BAD_REQUEST, "invalid JSON body"))?
     };
     let speak = audio_asked(&said)?;
-    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
+    let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting());
     };
     // Not aloud where nothing on this Host could speak the agent (issue 802).
@@ -5046,11 +5057,7 @@ async fn send_by_hand(
         Some(true) => Some(app.mouth.can_speak(&member.record).await),
         asked => asked,
     };
-    match member
-        .agent
-        .send_now(waiting.turn, "user".to_string(), speak)
-        .await?
-    {
+    match member.agent.send_now(waiting.turn, by.actor, speak).await? {
         ByHand::Sent => {
             let answer = json!({
                 "ok": true,
@@ -5099,9 +5106,12 @@ fn not_the_owners() -> ApiError {
 /// any more), it waits on, untouched.
 async fn steer_waiting(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
+    let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting_coded());
     };
     match member.agent.steer(waiting.turn).await? {
@@ -5134,15 +5144,17 @@ async fn steer_waiting(
 /// holds it; what else waits goes on after it. With no turn running there is nothing to take
 /// over: the message is sent as any other. A message already being read into the turn cannot
 /// take it over.
-async fn take_over(State(app): State<App>, Path(id): Path<String>) -> Result<Response, ApiError> {
-    let Some((member, waiting)) = waiting_named(&app, &id).await? else {
+async fn take_over(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
+    let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting_coded());
     };
-    match member
-        .agent
-        .take_over(waiting.turn, "user".to_string())
-        .await?
-    {
+    match member.agent.take_over(waiting.turn, by.actor).await? {
         TakenOver::Done => {
             let answer = json!({
                 "ok": true,
