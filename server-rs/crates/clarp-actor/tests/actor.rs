@@ -18,7 +18,7 @@ use clarp_backend::scripted::Scripted;
 use clarp_codec::standard_set;
 use clarp_kernel::conversation::{Entry, Message, ToolStatus};
 use clarp_kernel::journal::kind;
-use clarp_kernel::spoken::{CUT_OFF, KEPT_FOR_MS, Line, LineState, Said};
+use clarp_kernel::spoken::{CUT_OFF, KEPT_FOR_MS, Line as SpokenLine, LineState, Said};
 use clarp_kernel::turn::{Admission, Origin, Outcome, TurnId};
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::{AgentLog, Kinds, LogEngine, LogError};
@@ -2016,7 +2016,8 @@ fn what_a_reply_marks_for_the_ear_waits_to_be_spoken_and_goes_one_way() {
             .is_none(),
         "over once"
     );
-    let receipt = |line: &Line| (line.clip_id == Some(41)).then(|| line.played("play-ok", None));
+    let receipt =
+        |line: &SpokenLine| (line.clip_id == Some(41)).then(|| line.played("play-ok", None));
     assert!(!actor.mirror_playback(receipt, now).unwrap());
     assert_eq!(actor.speech().by_clip(41).unwrap().played, None);
 
