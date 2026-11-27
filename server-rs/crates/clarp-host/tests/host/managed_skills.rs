@@ -704,10 +704,12 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
         "before=",
         "intent=",
         "links=",
+        "folders=",
         "scan=",
         "write=",
         "sync=",
         "rename=",
+        "dirsync=",
         "back=",
     ] {
         assert!(line.contains(step), "{step} in {line}");
