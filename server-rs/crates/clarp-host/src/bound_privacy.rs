@@ -584,6 +584,7 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/peers/snapshot", Words(Query)),
     ("/persona-avatars/{id}", NoWords),
     ("/personalities/settings", NoWords),
+    ("/text-turn-ack/settings", NoWords),
     ("/pinned-artifacts", Words(Query)),
     ("/podcast-history", Words(Query)),
     ("/podcast-history/sources", Words(Query)),

@@ -16,12 +16,12 @@ pub(crate) fn enabled(directory: &Directory) -> bool {
     directory.setting(KEY) == Some("true")
 }
 
-/// Recognize the chat send before voice routing, TTS availability or call admission can
-/// turn a spoken request into one whose answer happens to be text.
+/// The source of the user's words, before voice routing or reply playback is chosen.
+/// Older clients can send dictated words without any marker.
 pub(crate) fn is_text(request: &SendRequest) -> bool {
     let absent =
         |value: Option<&str>| value.is_none_or(|s| clarp_kernel::python::strip(s).is_empty());
-    request.synthesize_audio != Some(true)
+    request.input_kind.as_deref() == Some("text")
         && request.hands_free != Some(true)
         && request.orchestrator_fallback != Some(true)
         && absent(request.call_id.as_deref())

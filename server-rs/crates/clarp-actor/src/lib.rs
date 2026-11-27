@@ -2257,8 +2257,6 @@ impl Actor {
     fn text_turn_ack(&self, message: &Message) -> bool {
         message.text_chat
             && message.origin == Origin::User
-            && !message.speak
-            && !message.unheard
             && message.call.is_none()
             && self.teams.as_ref().is_some_and(|host| host.text_turn_ack())
     }
@@ -5768,8 +5766,7 @@ impl Actor {
                 persona: told.persona.clone(),
                 spoken: speak.then_some(told.sound),
                 call: message.call.clone(),
-                text_ack: !speak
-                    && opening.is_none()
+                text_ack: opening.is_none()
                     && !resuming
                     && recovering.is_none()
                     && !resumed_by_transit

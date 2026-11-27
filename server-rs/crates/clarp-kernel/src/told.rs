@@ -150,14 +150,26 @@ pub fn narration_options() -> Value {
 /// What a turn is told with its prompt by a tool that can be told beside it. `spoken` is
 /// how the answer is to sound, when it is read aloud.
 pub fn beside(persona: &str, session: &str, spoken: Option<Sound>) -> String {
+    beside_for_turn(persona, session, spoken, false)
+}
+
+fn beside_for_turn(persona: &str, session: &str, spoken: Option<Sound>, text_ack: bool) -> String {
     let mut parts = vec![text("guidance").to_string()];
     let whose = whose(persona, session);
     if !whose.is_empty() {
         parts.push(whose);
     }
     if let Some(sound) = spoken {
-        let speak = text("speak_by_hook");
-        parts.push(format!("{speak}{}", natural(sound.humanness, sound.tags)));
+        let (input, opening) = if text_ack {
+            (text("typed_input_with_speech"), "")
+        } else {
+            (text("spoken_input"), text("speak_by_hook_opening"))
+        };
+        let speak = text("speak_by_hook").replace("{opening}", opening);
+        parts.push(format!(
+            "{input}{speak}{}",
+            natural(sound.humanness, sound.tags)
+        ));
         let narration = narration(sound.narration);
         if !narration.is_empty() {
             parts.push(narration.to_string());
@@ -168,13 +180,22 @@ pub fn beside(persona: &str, session: &str, spoken: Option<Sound>) -> String {
 
 /// The same for a tool that is told in the words before the user's.
 pub fn at_head(persona: &str, session: &str, spoken: Option<Sound>) -> String {
+    at_head_for_turn(persona, session, spoken, false)
+}
+
+fn at_head_for_turn(persona: &str, session: &str, spoken: Option<Sound>, text_ack: bool) -> String {
     let mut parts = vec![text("guidance").to_string()];
     let whose = whose(persona, session);
     if !whose.is_empty() {
         parts.push(whose);
     }
     if let Some(sound) = spoken {
-        parts.push(text("speak_at_head").to_string());
+        let opening = if text_ack {
+            ""
+        } else {
+            text("speak_at_head_opening")
+        };
+        parts.push(text("speak_at_head").replace("{opening}", opening));
         parts.push(natural(sound.humanness, sound.tags));
         let narration = narration(sound.narration);
         if !narration.is_empty() {
@@ -416,15 +437,21 @@ pub struct Turn {
 
 impl Turn {
     pub fn beside(&self, session: &str) -> String {
-        self.finish(beside(&self.persona, session, self.spoken), session)
+        self.finish(session, beside_for_turn)
     }
 
     pub fn at_head(&self, session: &str) -> String {
-        self.finish(at_head(&self.persona, session, self.spoken), session)
+        self.finish(session, at_head_for_turn)
     }
 
-    fn finish(&self, mut instruction: String, session: &str) -> String {
-        if self.text_ack && self.spoken.is_none() && self.call.is_none() {
+    fn finish(
+        &self,
+        session: &str,
+        guidance: fn(&str, &str, Option<Sound>, bool) -> String,
+    ) -> String {
+        let text_ack = self.text_ack && self.call.is_none();
+        let mut instruction = guidance(&self.persona, session, self.spoken, text_ack);
+        if text_ack {
             instruction.push_str(&format!(
                 "\n\nFor substantial text work or several tool calls, make the first acknowledgment \
                  visible before starting. Count any acknowledgment already visible for this request. \

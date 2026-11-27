@@ -1742,6 +1742,12 @@ Rules:
 - While a turn process of the agent is still running, no second one starts:
   every send waits until it exits, even after the Host recorded that turn as
   finished.
+- On a Host with `text_turn_ack` (contract 214), a client can mark a typed
+  chat message with `"input_kind": "text"`. It can mark spoken input with
+  `"input_kind": "voice"`. This identifies how the user supplied the words.
+  `synthesize_audio` controls how the reply is presented. Call, hands-free,
+  routed speech, utterance and transcription markers take precedence. The
+  optional acknowledgment applies only to explicitly marked text messages.
 - `synthesize_audio: true` asks for the answer to be spoken: the agent's tool is
   told how to speak, and what it marks with `<speak>` becomes clips. Send it when
   the app's voice output is on. Without it, or with `false`, the answer is text

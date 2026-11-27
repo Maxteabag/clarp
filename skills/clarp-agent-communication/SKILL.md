@@ -234,4 +234,7 @@ get a reminder to make their first acknowledgment visible. An existing
 visible acknowledgment counts. Otherwise the reminder uses
 `clarp-admin tell-user` to show the line before the rest of the work, both
 in Conversation view and when the client hides streaming answers. Older
-clients keep their existing chat and note behavior.
+clients keep their existing chat and note behavior. A supporting client may
+send `"input_kind":"text"` on `POST /send` so a typed chat gets this reminder
+with spoken replies enabled. Known spoken and call input keep their usual
+flow.

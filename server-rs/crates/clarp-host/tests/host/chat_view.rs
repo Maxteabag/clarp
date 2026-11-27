@@ -12,7 +12,8 @@ if "--version" in sys.argv:
 
 root = pathlib.Path(__file__).resolve().parent
 incoming = json.loads(sys.stdin.readline())
-prompt = incoming["message"]["content"][0]["text"]
+prompt = "\n\n".join(block["text"] for block in incoming["message"]["content"]
+                  if block.get("type") == "text")
 with (root / "prompts.jsonl").open("a") as lines:
     lines.write(json.dumps(prompt) + "\n")
 
@@ -179,34 +180,94 @@ fn only_new_user_text_turns_get_the_enabled_instruction() {
     let claude = place.root.join("claude");
     program(&claude, CLAUDE);
     std::fs::write(place.root.join("finish"), []).unwrap();
+    let voice = cartesia_stand_in(vec![23; 2000]);
+    let owners = place.root.join("synthetic-voice.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\nmodel='sonic-3'\n",
+    )
+    .unwrap();
     let host = place.start_in(
         "",
-        &[],
-        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+        &["--speech-keys", owners.to_str().unwrap()],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ],
     );
-    let made = host.post("/agents", json!({"name": "Reader", "backend": "claude"}));
+    let made = host.post(
+        "/agents",
+        json!({"name": "Reader", "backend": "claude",
+            "voice_id": json!({"cartesia": "fixture-ack-voice"}).to_string()}),
+    );
     let session = made["session"].as_str().unwrap();
     let prompts = place.root.join("prompts.jsonl");
     let marker =
         format!("Otherwise, before any other tool, use `clarp-admin tell-user --from {session}");
     let cases = [
-        (false, "Off text", json!({}), false),
-        (true, "On text", json!({}), true),
+        (
+            false,
+            "Off text",
+            json!({"input_kind": "text"}),
+            false,
+            false,
+        ),
         (
             true,
-            "Voice in text",
-            json!({"transcription_id": "voice"}),
+            "On text",
+            json!({"input_kind": "text", "synthesize_audio": false}),
+            true,
+            false,
+        ),
+        (
+            true,
+            "Typed with spoken reply",
+            json!({
+                "input_kind": "text", "synthesize_audio": true, "hands_free": false,
+                "unheard_audio_sessions": [], "force_session": false,
+                "orchestrator_fallback": false, "queue_if_busy": false
+            }),
+            true,
+            true,
+        ),
+        (true, "Legacy send with text reply", json!({}), false, false),
+        (
+            true,
+            "Legacy send with spoken reply",
+            json!({"synthesize_audio": true}),
+            false,
+            true,
+        ),
+        (
+            true,
+            "Voice with text reply",
+            json!({"input_kind": "voice", "synthesize_audio": false}),
+            false,
+            false,
+        ),
+        (
+            true,
+            "Voice marked as text",
+            json!({"input_kind": "text", "transcription_id": "voice"}),
+            false,
             false,
         ),
         (
             true,
             "Scheduled words",
-            json!({"origin": "schedule"}),
+            json!({"input_kind": "text", "origin": "schedule"}),
+            false,
             false,
         ),
-        (false, "Off again", json!({}), false),
+        (
+            false,
+            "Off again",
+            json!({"input_kind": "text"}),
+            false,
+            false,
+        ),
     ];
-    for (index, (enabled, text, extra, expected)) in cases.into_iter().enumerate() {
+    for (index, (enabled, text, extra, acknowledgment, spoken)) in cases.into_iter().enumerate() {
         host.post("/text-turn-ack/settings", json!({"enabled": enabled}));
         let mut body =
             json!({"session": session, "text": text, "client_msg_id": format!("ack-{index}")});
@@ -222,7 +283,17 @@ fn only_new_user_text_turns_get_the_enabled_instruction() {
         assert!(prompt.contains(text));
         assert_eq!(
             prompt.matches(marker.as_str()).count(),
-            usize::from(expected),
+            usize::from(acknowledgment),
+            "{prompt}"
+        );
+        assert_eq!(
+            prompt.contains("wrapped in <speak>...</speak> tags"),
+            spoken,
+            "{prompt}"
+        );
+        assert_eq!(
+            prompt.contains("Your VERY FIRST output"),
+            spoken && !acknowledgment,
             "{prompt}"
         );
         assert!(host.turns(session).iter().any(|row| row["text"] == text));

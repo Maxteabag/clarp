@@ -19,6 +19,10 @@ pub struct SendRequest {
     pub trace_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub utterance_id: Option<String>,
+    /// How the user supplied the message: "text" or "voice" (feature "text_turn_ack").
+    /// Older clients leave it out. This is independent of how the reply is presented.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synthesize_audio: Option<bool>,
     /// Dictated hands-free: the Host then looks whom it is for, unless `force_session` says
