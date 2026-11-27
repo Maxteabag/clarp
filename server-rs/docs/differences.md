@@ -798,10 +798,12 @@ Conversation forks (issue 718, contract 153, feature `conversation_fork`) are av
 on the Rust Host only, for the agents its owner names in `[conversation_forks] agents` of the
 Host's `config.toml` (read anew at each message and each snapshot; the snapshot says so per
 agent as `conversation_fork`). In Conversation view, a message of the user's to such a Claude
-Code agent while its own turn works for other agents is answered at once by a fork of the
+Code agent while its own turn is working is answered by a separate fork of the
 agent's session (`--resume <session> --fork-session --session-id <fork>`), in the same
 conversation; the next message goes to the same fork, and the agent's own next turn opens with
-a note of what the fork was asked, said and did. `/live` shows the fork's turn, with the agent's
+a note of what the fork was asked, said and did. Ordinary words use the fork before
+busy-send steering or takeover policy. If the session cannot be forked, the accepted
+message stays in the durable queue while the work continues. `/live` shows the fork's turn, with the agent's
 own as `main_turn`; `POST /stop` stops the fork's turn first (`target: "main"` for the agent's
 own). A fork's tools run with `CLARP_FORK=1`: `clarp-agent-bg job-upsert|job-restart`,
 `clarp-admin agent create|fork` and `clarp-sub-agent start|fork` refuse it (exit 77), and

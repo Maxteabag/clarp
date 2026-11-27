@@ -1,7 +1,7 @@
 //! The agent's conversation fork (issue 718).
 //!
-//! In Conversation view, while the agent's own session works on a turn for other agents, a
-//! message of the user's need not wait for it. The Host copies the tool's session (Claude
+//! In Conversation view, while the agent's own session is working, a message of the user's
+//! need not wait for it. The Host copies the tool's session (Claude
 //! Code's `--fork-session`, which keeps the context the provider has cached) and that copy,
 //! the fork, answers the user at once in the same chat, as the agent. Further messages of the
 //! user's go to the same fork. The agent's own session's next turn opens with a short note of
@@ -54,7 +54,7 @@ const SHORT: usize = 600;
 /// What a fork's turn is told after the user's words. After them, so that everything before
 /// is what the agent's own session has cached.
 pub const BRIEF: &str = "<system-reminder>\nYou are a short-lived fork of your own session. \
-Your main session is busy with a turn for other agents; the user wrote to you meanwhile, and \
+Your main session is busy with a turn; the user wrote to you meanwhile, and \
 you answer them now, here, as yourself. Keep it short. You may read files and state, tell the \
 user with clarp-admin tell-user, and relay work to other agents with clarp-admin prompt. The \
 Host refuses you file edits, helpers, background jobs and new agents. Do not start builds, \
@@ -276,7 +276,7 @@ fn note(record: &Record) -> Option<String> {
         return None;
     }
     Some(format!(
-        "<system-reminder>\nWhile you were busy with a turn for other agents, a short-lived fork \
+        "<system-reminder>\nWhile you were busy with a turn, a short-lived fork \
 of this session answered the user in this chat, as you. What it said and did is yours: do not \
 answer it again unless something is left to do.\n{}\n</system-reminder>",
         told.join("\n")
@@ -377,42 +377,35 @@ impl Actor {
         (running.turn.0 == turn).then(|| running.message.trace_id.clone().unwrap_or_default())
     }
 
-    /// The agent's own turn beside which a fork could answer the user now: one whose tool
-    /// runs and works for other agents, of an agent whose tool is Claude Code, with a session
-    /// to copy and a fork that did not break. `None`: no fork answers now.
-    pub fn fork_beside(&self) -> Result<Option<TurnId>, ActorError> {
+    /// The agent's own turn beside which a fork could answer the user now: one whose
+    /// Claude Code tool is running, has a session to copy, and has a usable fork.
+    fn fork_beside(&self) -> Option<TurnId> {
         if self.backend.id() != "claude" {
-            return Ok(None);
+            return None;
         }
         let agent = self.recorder.agent();
-        let Some(live) = agent.live().filter(|live| live.has_process()) else {
-            return Ok(None);
-        };
+        let live = agent.live().filter(|live| live.has_process())?;
         if agent.stopping().is_some() || agent.backend_session().is_none() {
-            return Ok(None);
-        }
-        if self.audience_of(live.id())? != clarp_kernel::coordination::AGENTS {
-            return Ok(None);
+            return None;
         }
         let broken = self.fork.record.as_ref().is_some_and(|record| {
             record.broken && matches!(record.state, State::Open | State::Offered { .. })
         });
-        Ok((!broken).then_some(live.id()))
+        (!broken).then_some(live.id())
     }
 
     /// Whether a fork can answer this message: words, and not said in a call.
     pub fn fork_answers(message: &Message) -> bool {
-        message.call.is_none() && !message.text.trim().is_empty()
+        !message.in_call() && !message.text.trim().is_empty()
     }
 
     /// Whether a message of the user's that waits is taken by the agent's fork, which answers
-    /// it at once: only while the agent's own turn works for other agents, and only for an
-    /// agent whose tool is Claude Code. The Host decides beforehand whether the agent may fork
-    /// at all (its setting, the chat's view). `false`: nothing changed, and the message is
+    /// beside the agent's running Claude Code turn. The Host decides which agents and
+    /// chat views use this route. `false`: nothing changed, and the message is
     /// what it would have been without a fork.
     pub fn fork_take(&mut self, turn: TurnId, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
         let no = || Ok((false, Outputs::default()));
-        let Some(main) = self.fork_beside()? else {
+        let Some(main) = self.fork_beside() else {
             return no();
         };
         let Some(message_seq) = self
