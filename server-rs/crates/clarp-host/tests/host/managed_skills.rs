@@ -804,9 +804,28 @@ fn the_skills_are_reconciled_beside_the_start_and_every_link_reads_throughout() 
             state()["linked_releases"],
             json!([release(&r1), release(&r2)])
         );
+        // Then it may list the folder but not read a link in it: where those lead is not
+        // known either, and the record still names both releases (counted as read, the links
+        // it could not read would have left only r1).
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o400)).unwrap();
+        let seen = parts();
+        wait_within(
+            "a whole try with the links not readable",
+            Duration::from_secs(120),
+            || parts() > seen + 1,
+        );
+        assert_eq!(reconciled(&host), 0);
+        assert_eq!(
+            state()["linked_releases"],
+            json!([release(&r1), release(&r2)])
+        );
     }
     std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
-    wait_for("the reconciliation tried again", || reconciled(&host) > 0);
+    wait_within(
+        "the reconciliation tried again",
+        Duration::from_secs(120),
+        || reconciled(&host) > 0,
+    );
     eprintln!(
         "skills-beside: retried: {}",
         said_line(&host, "clarp-host: skills reconciled in ")

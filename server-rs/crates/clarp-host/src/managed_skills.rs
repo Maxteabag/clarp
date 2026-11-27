@@ -763,7 +763,7 @@ impl Shelf {
 
     /// The releases of Clarp the links in the tools' folders lead into now, resolved: this
     /// release's and any other a link of Clarp's still reads its skill from, and why any folder
-    /// could not be listed (then some may be missing).
+    /// could not be listed, or any link in it read (then some may be missing).
     fn linked_releases(&self, roots: &[Root]) -> (Vec<String>, Vec<String>) {
         let mut releases = BTreeSet::new();
         let mut unlisted = Vec::new();
@@ -779,6 +779,14 @@ impl Shelf {
                 }
             };
             for skill in names {
+                // A link listed whose target cannot be read (a folder that may be listed but not
+                // searched) may lead into any release: the folder counts as not listed.
+                let place = self.place(*root, &skill);
+                if let Err(error) = std::fs::read_link(&place) {
+                    let place = place.display();
+                    unlisted.push(format!("the link {place} could not be read: {error}"));
+                    continue;
+                }
                 if matches!(self.link(*root, &skill), Link::Healthy | Link::Outdated) {
                     let resolved = resolve(&self.place(*root, &skill));
                     if let Some(release) = resolved.parent().and_then(Path::parent) {
