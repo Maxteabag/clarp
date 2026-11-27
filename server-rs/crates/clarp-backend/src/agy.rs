@@ -539,9 +539,12 @@ pub struct AgyInterpreter {
     bound: bool,
     /// What the agent said in each step in which it answered, by the step's number.
     said: BTreeMap<u64, String>,
-    /// The steps whose message is in the conversation, and the last thing so written.
+    /// The steps whose message is in the conversation.
     written: BTreeSet<u64>,
-    last_written: String,
+    /// The completed messages concatenated in the order they were emitted.
+    written_text: String,
+    /// The start of the last completed message in `written_text`.
+    last_written_at: usize,
     /// The tool calls of this turn, by the id Antigravity or their step gives them.
     tools: BTreeMap<String, ToolCall>,
     activity: Option<Activity>,
@@ -568,7 +571,8 @@ impl AgyInterpreter {
             bound: false,
             said: BTreeMap::new(),
             written: BTreeSet::new(),
-            last_written: String::new(),
+            written_text: String::new(),
+            last_written_at: 0,
             tools: BTreeMap::new(),
             activity: None,
             took: Took::default(),
@@ -685,7 +689,8 @@ impl AgyInterpreter {
                 // The step is over: what was said in it is a message of the conversation.
                 if !said.trim().is_empty() && self.written.insert(step) {
                     out.push(Signal::Glimpse(Glimpse::Done { id: shown }));
-                    self.last_written.clone_from(&said);
+                    self.last_written_at = self.written_text.len();
+                    self.written_text.push_str(&said);
                     out.push(Signal::Reply(Reply {
                         origin: clarp_kernel::turn::Origin::User,
                         id: reply,
@@ -800,9 +805,14 @@ impl AgyInterpreter {
             self.result = Some(Err(shorten(&format!("status={status}: {why}"), 600)));
             return;
         }
-        // The answer as the result says it stands, where no step's message is that already.
+        // A result can echo the last completed message or concatenate all completed
+        // messages of this turn. Those messages already own their rows and speech.
         let response = text_of(&result["response"]);
-        if !response.trim().is_empty() && response.trim() != self.last_written.trim() {
+        let trimmed = response.trim();
+        if !trimmed.is_empty()
+            && trimmed != self.written_text[self.last_written_at..].trim()
+            && trimmed != self.written_text.trim()
+        {
             out.push(Signal::Reply(Reply {
                 origin: clarp_kernel::turn::Origin::User,
                 id: format!("r-{}-result", self.name),
