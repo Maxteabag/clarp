@@ -37,7 +37,7 @@ rusqlite.workspace = true
 # A lane that does not let go is signalled through a handle on its process (`pidfd`), which
 # nix does not offer without unsafe code.
 # The socket a unit hands the Host on its standard input is taken through it too (issue 935).
-rustix = { version = "1.1", features = ["process", "fs", "net", "stdio"] }
+rustix = { version = "1.1", features = ["process", "fs", "net", "stdio", "time"] }
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true

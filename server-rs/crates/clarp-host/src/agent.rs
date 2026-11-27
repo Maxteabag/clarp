@@ -825,9 +825,30 @@ pub struct TerminalFacts {
     pub run_dir: std::path::PathBuf,
 }
 
+// These marks are for one selected synthetic agent in the disposable #935 build.
+pub(crate) fn startup_probe(session: &str, subject: &'static str) -> Option<&'static str> {
+    static SELECTED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    (SELECTED
+        .get_or_init(|| std::env::var("RR935_TRACE_SESSION").ok())
+        .as_deref()
+        == Some(session))
+    .then_some(subject)
+}
+
+pub(crate) fn startup_mark(subject: Option<&str>, mark: &str) {
+    if let Some(subject) = subject {
+        let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+        eprintln!(
+            "rr935-start {}.{:09} {subject} {mark}",
+            now.tv_sec, now.tv_nsec
+        );
+    }
+}
+
 /// The way to an agent's thread.
 #[derive(Clone)]
 pub struct AgentHandle {
+    probe_startup: bool,
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
     close: Arc<CloseState>,
@@ -1012,21 +1033,39 @@ impl AgentHandle {
     async fn read_glance<T: Send + 'static>(
         &self,
         read: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError> + Send + 'static,
+        probe: Option<&'static str>,
     ) -> Option<Result<T, Unavailable>> {
+        startup_mark(probe, "glance-enter");
         if self.view.borrow().broken.as_deref() != Some(OPENING) {
             return None;
         }
-        let glance = self.glance.decided().await?;
+        let glance = self.glance.decided().await;
+        startup_mark(
+            probe,
+            if glance.is_some() {
+                "glance-ready"
+            } else {
+                "glance-gone"
+            },
+        );
+        let glance = glance?;
         // Opened meanwhile: the agent answers for itself.
         if self.view.borrow().broken.as_deref() != Some(OPENING) {
             return None;
         }
+        startup_mark(probe, "projection-dispatch");
         let read = tokio::task::spawn_blocking(move || {
+            startup_mark(probe, "projection-thread");
             let now = glance.clock.now_ms();
             let mut actor = glance.actor.lock().unwrap_or_else(PoisonError::into_inner);
-            read(&mut actor, now).map_err(|error| unavailable(&error))
+            startup_mark(probe, "projection-locked");
+            let answer = read(&mut actor, now).map_err(|error| unavailable(&error));
+            drop(actor);
+            startup_mark(probe, "projection-complete");
+            answer
         })
         .await;
+        startup_mark(probe, "glance-reply");
         Some(read.unwrap_or_else(|error| Err(Unavailable::new(error.to_string()))))
     }
 
@@ -1124,27 +1163,33 @@ impl AgentHandle {
         &self,
         kept: Vec<crate::accepted::Accepted>,
     ) -> Option<Result<(Vec<Waiting>, QueueState), Unavailable>> {
-        self.read_glance(move |actor, _| {
-            let mut waiting = actor.queue()?;
-            let at_once = crate::accepted::takes_at_once(&actor.status());
-            for accepted in kept.iter().skip(usize::from(at_once)) {
-                let item = accepted.waiting();
-                let listed = waiting.iter().any(|had| had.client_id == item.client_id);
-                if !listed && !actor.has_message(&item.message_id)? {
-                    waiting.push(item);
+        self.read_glance(
+            move |actor, _| {
+                let mut waiting = actor.queue()?;
+                let at_once = crate::accepted::takes_at_once(&actor.status());
+                for accepted in kept.iter().skip(usize::from(at_once)) {
+                    let item = accepted.waiting();
+                    let listed = waiting.iter().any(|had| had.client_id == item.client_id);
+                    if !listed && !actor.has_message(&item.message_id)? {
+                        waiting.push(item);
+                    }
                 }
-            }
-            Ok((waiting, actor.queue_state()))
-        })
+                Ok((waiting, actor.queue_state()))
+            },
+            None,
+        )
         .await
     }
 
     /// Whether the agent's glance takes a send at once (`accepted::takes_at_once`): what places
     /// the first send kept for it in its log rather than its queue. `None` once it is open.
     pub async fn glance_takes_at_once(&self) -> Option<bool> {
-        self.read_glance(|actor, _| Ok(crate::accepted::takes_at_once(&actor.status())))
-            .await?
-            .ok()
+        self.read_glance(
+            |actor, _| Ok(crate::accepted::takes_at_once(&actor.status())),
+            self.probe_startup.then_some("log-kept"),
+        )
+        .await?
+        .ok()
     }
 
     /// The sends kept for this agent while it is being opened, once what was kept is read: what
@@ -1401,13 +1446,17 @@ impl AgentHandle {
 
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
+        let probe = self.probe_startup.then_some("live");
         if let Some(read) = self
-            .read_glance(|actor, now| Ok(actor.shown_whole(now)))
+            .read_glance(|actor, now| Ok(actor.shown_whole(now)), probe)
             .await
         {
             return read;
         }
-        self.ask(|answer| Ask::Shown { answer }).await
+        startup_mark(probe, "mailbox-dispatch");
+        let reply = self.ask(|answer| Ask::Shown { answer }).await;
+        startup_mark(probe, "mailbox-reply");
+        reply
     }
 
     /// What was said in the agent's conversation, the newest `most` signs of it and one more
@@ -1550,18 +1599,26 @@ impl AgentHandle {
     }
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
+        let probe = self.probe_startup.then_some("log-tail");
         if let Some(read) = self
-            .read_glance(move |actor, _| actor.tail_of(limit, actor.chat_read(which)))
+            .read_glance(
+                move |actor, _| actor.tail_of(limit, actor.chat_read(which)),
+                probe,
+            )
             .await
         {
             return read;
         }
-        self.ask(|answer| Ask::Tail {
-            limit,
-            which,
-            answer,
-        })
-        .await
+        startup_mark(probe, "mailbox-dispatch");
+        let reply = self
+            .ask(|answer| Ask::Tail {
+                limit,
+                which,
+                answer,
+            })
+            .await;
+        startup_mark(probe, "mailbox-reply");
+        reply
     }
 
     pub async fn after(
@@ -1571,7 +1628,10 @@ impl AgentHandle {
         which: Which,
     ) -> Result<Page, Unavailable> {
         if let Some(read) = self
-            .read_glance(move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)))
+            .read_glance(
+                move |actor, _| actor.after_of(revision, limit, actor.chat_read(which)),
+                None,
+            )
             .await
         {
             return read;
@@ -1593,7 +1653,10 @@ impl AgentHandle {
     ) -> Result<Option<Page>, Unavailable> {
         let asked = id.clone();
         if let Some(read) = self
-            .read_glance(move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)))
+            .read_glance(
+                move |actor, _| actor.before_of(&asked, limit, actor.chat_read(which)),
+                None,
+            )
             .await
         {
             return read;
@@ -1684,7 +1747,10 @@ impl AgentHandle {
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
         let asked = id.clone();
-        if let Some(read) = self.read_glance(move |actor, _| actor.row(&asked)).await {
+        if let Some(read) = self
+            .read_glance(move |actor, _| actor.row(&asked), None)
+            .await
+        {
             return read;
         }
         self.ask(|answer| Ask::Row { id, answer }).await
@@ -1698,26 +1764,34 @@ impl AgentHandle {
         query: clarp_kernel::delivery::Query,
         scope: clarp_kernel::delivery::Scope,
     ) -> Result<(Vec<Value>, serde_json::Map<String, Value>), Unavailable> {
+        let probe = self.probe_startup.then_some("log-delivery");
         if self.view.borrow().broken.as_deref() == Some(OPENING) {
             let (glanced, asked, scoped) = (turns.clone(), query.clone(), scope.clone());
             if let Some(read) = self
-                .read_glance(move |actor, _| {
-                    let mut turns = glanced;
-                    let top = actor.delivery(&mut turns, &asked, &scoped);
-                    Ok((turns, top))
-                })
+                .read_glance(
+                    move |actor, _| {
+                        let mut turns = glanced;
+                        let top = actor.delivery(&mut turns, &asked, &scoped);
+                        Ok((turns, top))
+                    },
+                    probe,
+                )
                 .await
             {
                 return read;
             }
         }
-        self.ask(|answer| Ask::Delivery {
-            turns,
-            query,
-            scope,
-            answer,
-        })
-        .await
+        startup_mark(probe, "mailbox-dispatch");
+        let reply = self
+            .ask(|answer| Ask::Delivery {
+                turns,
+                query,
+                scope,
+                answer,
+            })
+            .await;
+        startup_mark(probe, "mailbox-reply");
+        reply
     }
 
     /// The revision the agent's conversation had at a time: what is newer than it
@@ -2020,6 +2094,10 @@ impl Unopened {
     /// Starts the agent's thread, which reads it and then opens it.
     pub fn begin(self) {
         let Self { worker, rx } = self;
+        startup_mark(
+            startup_probe(&worker.setup.record.session, "agent"),
+            "spawn",
+        );
         let name = format!("agent-{}", worker.setup.record.session);
         let spawned = std::thread::Builder::new()
             .name(name)
@@ -2063,6 +2141,7 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
     let alive = Arc::new(AtomicI64::new(0));
     let glance: Arc<GlanceSlot> = Arc::default();
     let route: Arc<tokio::sync::Mutex<bool>> = Arc::default();
+    let probe_startup = startup_probe(&setup.record.session, "agent").is_some();
     let worker = Worker {
         native: native_goal::Native::default(),
         claude_bypass: None,
@@ -2122,6 +2201,7 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
         glanced: None,
     };
     let handle = AgentHandle {
+        probe_startup,
         tx,
         view,
         close: Arc::default(),
@@ -2458,6 +2538,8 @@ impl Mailbox {
 
 impl Worker {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
+        let probe = startup_probe(&self.setup.record.session, "agent");
+        startup_mark(probe, "worker-enter");
         let mut wait = REOPEN_FIRST;
         let mut mailbox = Mailbox::default();
         // How the journal names this thread when one request holds it long.
@@ -2468,8 +2550,12 @@ impl Worker {
                 // Said as a slow hold of its thread is said, in the one line, with how long each
                 // of its steps took, once it is decided (issue 935).
                 let began = Instant::now();
+                startup_mark(probe, "glance-begin");
                 let steps = self.glance();
                 let held = began.elapsed();
+                if probe.is_some() {
+                    startup_mark(probe, &format!("glance-end {}", steps.said()));
+                }
                 if held >= crate::held::SLOW {
                     eprintln!(
                         "clarp-host: {thread} was held {} ms by its glance (steps, ms: {})",
@@ -2481,7 +2567,17 @@ impl Worker {
             if self.actor.is_none() {
                 let opened = {
                     let _held = crate::held::Held::new(&thread, "its opening");
-                    self.open()
+                    startup_mark(probe, "writer-open-begin");
+                    let opened = self.open();
+                    startup_mark(
+                        probe,
+                        if opened.is_ok() {
+                            "writer-open-end"
+                        } else {
+                            "writer-open-failed"
+                        },
+                    );
+                    opened
                 };
                 match opened {
                     Ok(()) => wait = REOPEN_FIRST,
@@ -6179,17 +6275,20 @@ impl Worker {
     /// by the actor's own opening, without its repairs ([`Actor::glance`]). Where it cannot be
     /// read so, nothing is published and the agent is read once it is open, as before.
     fn glance(&mut self) -> clarp_actor::Phases {
+        let probe = startup_probe(&self.setup.record.session, "agent");
         // Each step timed on the monotonic clock (issue 935): said only with the line of a slow
         // glance, where the whole was all that was known.
         let mut phases = clarp_actor::Phases::default();
         let now = self.now_ms();
         phases.begin("open");
+        startup_mark(probe, "committed-open-begin");
         let glanced = self
             .setup
             .engine
             .read_committed(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())
             .and_then(|log| {
+                startup_mark(probe, "committed-open-end");
                 Actor::glance(
                     self.setup.profile.clone(),
                     self.setup.backend.clone(),
@@ -6215,6 +6314,7 @@ impl Worker {
                         phases.under_way().unwrap_or("open")
                     );
                 }
+                startup_mark(probe, "committed-glance-failed");
                 self.glance.set(None);
                 return phases;
             }
@@ -6242,6 +6342,7 @@ impl Worker {
                 actor: Mutex::new(actor),
                 clock: self.setup.clock.clone(),
             })));
+            startup_mark(probe, "committed-glance-published");
         }
         if let Some(view) = view {
             self.view.send_replace(view);
@@ -7503,6 +7604,7 @@ mod mailbox_tests {
         }));
         (
             AgentHandle {
+                probe_startup: false,
                 tx,
                 view,
                 close: Arc::default(),

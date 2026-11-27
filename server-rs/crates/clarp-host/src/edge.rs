@@ -3229,6 +3229,8 @@ async fn log(
 
 /// The answer to `GET /log` with this query.
 async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
+    let probe = crate::agent::startup_probe(&query.session, "http-log");
+    crate::agent::startup_mark(probe, "handler-enter");
     let mode =
         clarp_kernel::hidden_coordination::Mode::parse(query.coordination.as_deref().unwrap_or(""))
             .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
@@ -3364,6 +3366,7 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     {
         answer["view"] = json!(view);
     }
+    crate::agent::startup_mark(probe, "handler-reply");
     Ok(answer)
 }
 
@@ -4815,11 +4818,14 @@ async fn shown(
     Query(query): Query<ShownQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let session = query.session.unwrap_or_default();
+    let probe = crate::agent::startup_probe(session.trim(), "http-live");
+    crate::agent::startup_mark(probe, "handler-enter");
     let member = app
         .anyone(session.trim())
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
     let mut whole = member.agent.shown().await?;
     whole["tool_explanations"] = apps::explanations_told(&app);
+    crate::agent::startup_mark(probe, "handler-reply");
     Ok(Json(whole))
 }
 
