@@ -598,7 +598,15 @@ async fn resume(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
         .env
         .get(crate::turn_identity::TURN_ENV)
         .map(String::as_str);
-    let by = match crate::controls::control_of(app, false, token, Some(&claimed), None).await {
+    let by = match crate::controls::control_of(
+        app,
+        crate::controls::Caller::Claimed,
+        token,
+        Some(&claimed),
+        None,
+    )
+    .await
+    {
         Ok(by) => by,
         Err(why) => return ToolAnswer::said(1, why.message()),
     };
@@ -651,8 +659,13 @@ async fn control(app: &App, call: &ToolCall, command: &str, args: &[String]) -> 
     let token = call.env.get(crate::turn_identity::TURN_ENV);
     let token = token.map(String::as_str).filter(|token| !token.is_empty());
     let answered = if command == "stop" {
-        let by =
-            crate::controls::control_of(app, false, token, body.get("actor"), body.get("reason"));
+        let by = crate::controls::control_of(
+            app,
+            crate::controls::Caller::Claimed,
+            token,
+            body.get("actor"),
+            body.get("reason"),
+        );
         match by.await {
             Ok(by) => crate::controls::stop(app, session, by, true)
                 .await
@@ -669,7 +682,7 @@ async fn control(app: &App, call: &ToolCall, command: &str, args: &[String]) -> 
         }
     } else {
         let data = body.as_object().cloned().unwrap_or_default();
-        crate::controls::repair(app, &data, false, token).await
+        crate::controls::repair(app, &data, crate::controls::Caller::Claimed, token).await
     };
     match answered {
         Ok(answer) => ToolAnswer::printed(0, python_indented(&answer)),

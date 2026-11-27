@@ -626,8 +626,29 @@ pub(crate) async fn mark_helper(app: &App, asked: &Fields) -> Result<Value, Refu
     }
 }
 
-async fn helper_state_post(State(app): State<App>, body: Bytes) -> Answered {
-    Ok(Json(mark_helper(&app, &object(&body)?).await?))
+async fn helper_state_post(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Answered {
+    let mut asked = object(&body)?;
+    if principal == Principal::Tools {
+        let turn = headers
+            .get(crate::turn_identity::HEADER)
+            .and_then(|value| value.to_str().ok());
+        let caller = crate::turn_identity::presented(&app, turn)
+            .await
+            .map_err(Refusal::Plain)?
+            .ok_or_else(|| {
+                Refusal::Plain(ApiError::new(
+                    StatusCode::FORBIDDEN,
+                    "verified turn identity required",
+                ))
+            })?;
+        asked.insert("by".to_string(), json!(caller.record.session));
+    }
+    Ok(Json(mark_helper(&app, &asked).await?))
 }
 
 /// Who made an agent and how its work stands, without the whole list.
