@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::fork::{FORK_ATTEMPT, FORK_ENV};
-use clarp_actor::{Action, Actor, Marks, Outputs, Profile, ShimOrder};
+use clarp_actor::{Action, Actor, Marks, Outputs, Profile, ShimOrder, Stepped};
 use clarp_backend::claude::Claude;
 use clarp_codec::standard_set;
 use clarp_kernel::conversation::{Entry, Message, Sender};
@@ -397,6 +397,79 @@ fn the_fork_answers_at_once_takes_the_next_message_and_opens_the_next_turn_with_
         conversation,
         "a fork never renames the conversation"
     );
+}
+
+#[test]
+fn conversation_admission_settles_work_only_through_the_captured_spool_prefix() {
+    for terminal_at_send in [false, true] {
+        let mut world = World::new("spool-prefix");
+        let mut actor = world.open();
+        busy_for_an_agent(&mut world, &mut actor);
+        let carrier = actor.live_turn().unwrap();
+        let spool = world.main(carrier.0);
+        let (older, _) = actor
+            .send(
+                &message("older", "Older work"),
+                Admission::Later,
+                world.tick(),
+            )
+            .unwrap();
+        assert!(older.queued);
+        let older = older.turn.unwrap();
+
+        // Fill several windows, then place the carrier's exit on either side of the
+        // captured end. A growing spool cannot move that end after the user sends.
+        for _ in 0..4_100 {
+            world.write(&spool, Line::Out("{}".to_owned()));
+        }
+        if terminal_at_send {
+            world.ends(&spool, "Finished before the send.");
+        }
+        let prefix = actor.spool_prefix().unwrap();
+        if !terminal_at_send {
+            world.ends(&spool, "Finished after the send.");
+        }
+        let mut written = 0;
+        let mut actions = Vec::new();
+        loop {
+            let (out, step) = actor.spool_step_through(prefix, world.tick()).unwrap();
+            actions.extend(out.actions);
+            match step {
+                Stepped::Wrote => written += 1,
+                Stepped::More => {}
+                Stepped::Done => break,
+            }
+        }
+        assert!(written >= 3, "the prefix spanned several windows");
+        assert_eq!(
+            actor.live_turn(),
+            Some(if terminal_at_send { older } else { carrier })
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .any(|action| matches!(action, Action::Launch(order) if order.turn == older)),
+            terminal_at_send
+        );
+
+        let (sent, _) = actor
+            .send(&message("owner", "Hello"), Admission::Queue, world.tick())
+            .unwrap();
+        assert!(sent.queued);
+        let (forked, out) = actor.fork_take(sent.turn.unwrap(), world.tick()).unwrap();
+        assert_eq!(forked, !terminal_at_send);
+        assert_eq!(
+            out.actions
+                .iter()
+                .any(|action| matches!(action, Action::Fork { .. })),
+            !terminal_at_send
+        );
+        assert!(
+            !out.actions
+                .iter()
+                .any(|action| matches!(action, Action::Stop { .. }))
+        );
+    }
 }
 
 #[test]

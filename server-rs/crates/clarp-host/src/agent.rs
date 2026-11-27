@@ -2679,14 +2679,17 @@ impl Worker {
     /// next turn it starts) is done after that. Answers what is left to do and to tell of the
     /// window, the agent's state with the rest, once that next turn is what the actor follows,
     /// and whether the spool may hold more (issue 831).
-    fn spool_step(&mut self) -> Result<(Outputs, bool), ActorError> {
+    fn spool_step(
+        &mut self,
+        prefix: Option<clarp_actor::SpoolPrefix>,
+    ) -> Result<(Outputs, bool), ActorError> {
         let mut out = Outputs::default();
         loop {
             let now = self.now_ms();
             let Some(actor) = self.actor.as_mut() else {
                 return Ok((out, false));
             };
-            let (step, stepped) = actor.spool_step(now)?;
+            let (step, stepped) = actor.spool_step_through(prefix, now)?;
             out.absorb(step);
             match stepped {
                 clarp_actor::Stepped::Wrote => {
@@ -2696,6 +2699,17 @@ impl Worker {
                 }
                 clarp_actor::Stepped::More => return Ok((out, true)),
                 clarp_actor::Stepped::Done => return Ok((out, false)),
+            }
+        }
+    }
+
+    fn read_spool(&mut self, prefix: Option<clarp_actor::SpoolPrefix>) -> Result<(), ActorError> {
+        loop {
+            let (read, more) = self.spool_step(prefix)?;
+            self.after(read);
+            self.tell_shown();
+            if !more {
+                return Ok(());
             }
         }
     }
@@ -3787,15 +3801,17 @@ impl Worker {
         } = &mut ask
             && let Busy::Asked(asked) = *while_busy
         {
-            loop {
-                let (read, more) = self.spool_step()?;
-                self.after(read);
-                self.tell_shown();
-                if !more {
-                    break;
+            if conversation {
+                // An already-written end still settles before the send. Work appended later
+                // can advance through ordinary spool wakes while the conversation answers.
+                if let Some(actor) = self.actor.as_ref()
+                    && let Some(prefix) = actor.spool_prefix()?
+                {
+                    self.read_spool(Some(prefix))?;
+                    let _ = self.tx.send(Ask::SpoolChanged);
                 }
-            }
-            if !conversation {
+            } else {
+                self.read_spool(None)?;
                 let plan =
                     self.plan_while_busy(asked, message, *admission, marks.coordination.is_some());
                 if matches!(plan, Plan::Direct(_)) {
@@ -4056,14 +4072,7 @@ impl Worker {
             // wakeup is still behind the send in the mailbox: to its end, each window shown
             // as soon as it is on disk (issue 831).
             let _held = crate::held::Held::new(&thread, "a send's reading of the spool first");
-            loop {
-                let (read, more) = self.spool_step()?;
-                self.after(read);
-                self.tell_shown();
-                if !more {
-                    break;
-                }
-            }
+            self.read_spool(None)?;
         }
         // The owner's message never waits behind a turn that is not a person's (issue 839):
         // another agent's, a trigger's, a goal's wake. Where that turn takes it on its input
@@ -4967,7 +4976,7 @@ impl Worker {
                 // One window of the spool at a time: what it wrote is shown when this ask is
                 // done, and the next window is read with another, behind what waits in the
                 // mailbox (issue 831).
-                let (out, more) = self.spool_step()?;
+                let (out, more) = self.spool_step(None)?;
                 if more {
                     let _ = self.tx.send(Ask::SpoolChanged);
                 }

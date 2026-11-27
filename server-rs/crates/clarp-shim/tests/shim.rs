@@ -1631,6 +1631,54 @@ input()'"#;
 }
 
 #[test]
+fn opencode_conversation_never_falls_back_to_cli_when_its_server_cannot_listen() {
+    let dir = dir_of("opencode-conversation-no-port");
+    std::fs::create_dir_all(&dir).unwrap();
+    let tool = dir.join("opencode");
+    std::fs::write(
+        &tool,
+        "#!/bin/sh\nprintf '%s\\n' \"$1\" >> invocations\n[ \"$1\" = run ]\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&tool, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    for conversation in [true, false] {
+        let invoked = dir.join("invocations");
+        std::fs::write(&invoked, "").unwrap();
+        let mut child = shim_in(&dir)
+            .args(["opencode-turn", tool.to_str().unwrap()])
+            .current_dir(&dir)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let order = serde_json::json!({
+            "prompt": "Hello",
+            "session": "",
+            "conversation": conversation,
+        });
+        serde_json::to_writer(child.stdin.take().unwrap(), &order).unwrap();
+        let result = child.wait_with_output().unwrap();
+        let invocations = std::fs::read_to_string(&invoked).unwrap();
+        assert!(invocations.lines().any(|line| line == "serve"));
+        assert_eq!(
+            invocations.lines().any(|line| line == "run"),
+            !conversation,
+            "{invocations}"
+        );
+        assert_eq!(result.status.success(), !conversation);
+        if conversation {
+            let error = String::from_utf8_lossy(&result.stderr);
+            assert!(
+                error.contains("OpenCode conversation server did not start"),
+                "{error}"
+            );
+        }
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn a_served_tool_is_not_held() {
     // The shim's own OpenCode driver with a stand-in server that never says where it listens.
     let dir = dir_of("hold-served");

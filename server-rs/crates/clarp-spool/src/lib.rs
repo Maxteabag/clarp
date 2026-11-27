@@ -201,7 +201,7 @@ impl SpoolReader {
         self.read_window(offset, u64::MAX, usize::MAX)
     }
 
-    /// Reads whole lines that start at or after `from` and before `until`, at most `max_lines`
+    /// Reads whole lines from `from` through byte position `until`, at most `max_lines`
     /// of them. A long spool is read in windows, so that no read holds more than a window of it.
     pub fn read_window(&self, from: u64, until: u64, max_lines: usize) -> io::Result<Read1> {
         let mut found = Read1 {
@@ -221,7 +221,7 @@ impl SpoolReader {
             line.clear();
             let read = reader
                 .by_ref()
-                .take(MAX_LINE)
+                .take(MAX_LINE.min(until - found.next_offset))
                 .read_until(b'\n', &mut line)?;
             if read == 0 || line.last() != Some(&b'\n') {
                 // The end, or a line still being written (or torn by a crash): not ours yet.
@@ -445,11 +445,15 @@ mod tests {
         // Half a record, as a crash or a reader arriving mid-write would see it.
         let mut raw = OpenOptions::new().append(true).open(&path).unwrap();
         raw.write_all(br#"{"t":2,"s":"out","d":"ha"#).unwrap();
+        let prefix = raw.metadata().unwrap().len();
         let reader = SpoolReader::new(&path);
         let found = reader.read_from(0).unwrap();
         assert_eq!(found.records, vec![out(1, "whole")]);
         // The rest of the line arrives; the same offset now yields it.
         raw.write_all(b"lf\"}\n").unwrap();
+        let bounded = reader.read_window(found.next_offset, prefix, 10).unwrap();
+        assert!(bounded.records.is_empty() && bounded.damaged.is_empty());
+        assert_eq!(bounded.next_offset, found.next_offset);
         assert_eq!(
             reader.read_from(found.next_offset).unwrap().records,
             vec![out(2, "half")]

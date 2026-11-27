@@ -5439,6 +5439,25 @@ impl Actor {
         Ok(out)
     }
 
+    /// Captures the work spool already present for a conversation send. New output, or
+    /// the spool of the next attempt, belongs to the ordinary spool mailbox.
+    pub fn spool_prefix(&self) -> Result<Option<SpoolPrefix>, ActorError> {
+        let Some(live) = self.live.as_ref().filter(|live| !live.over) else {
+            return Ok(None);
+        };
+        let spool = self.profile.spool_path_of(live.turn, live.attempt);
+        let end = match std::fs::metadata(&spool) {
+            Ok(meta) => meta.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(io_error(&spool, error)),
+        };
+        Ok(Some(SpoolPrefix {
+            turn: live.turn,
+            attempt: live.attempt,
+            end,
+        }))
+    }
+
     /// The live turn's spool may have grown: a step of reading it. A step that reads writes
     /// one window of it to the log in one commit, the records up to where the turn moved on to
     /// something else, and stops there ([`Stepped::Wrote`]), for what it wrote to be shown at
@@ -5446,6 +5465,16 @@ impl Actor {
     /// says whether the spool may hold more. A long reading so shows each window as soon as it
     /// is on disk, and a turn's answer before the turn after it starts (issue 831).
     pub fn spool_step(&mut self, now_ms: i64) -> Result<(Outputs, Stepped), ActorError> {
+        self.spool_step_through(None, now_ms)
+    }
+
+    /// Steps as above, with an optional boundary for the main turn. An already-read terminal
+    /// record still gets its ordinary effects before the next send is admitted.
+    pub fn spool_step_through(
+        &mut self,
+        prefix: Option<SpoolPrefix>,
+        now_ms: i64,
+    ) -> Result<(Outputs, Stepped), ActorError> {
         let mut out = Outputs::default();
         if let Some(effects) = self.step_owes.take() {
             let began = std::time::Instant::now();
@@ -5458,7 +5487,7 @@ impl Actor {
             let more = self.live.as_ref().is_some_and(|live| !live.over);
             return Ok((out, if more { Stepped::More } else { Stepped::Done }));
         }
-        let stepped = self.pump_as(&mut out, now_ms, Reading::Window)?;
+        let stepped = self.pump_as(&mut out, now_ms, Reading::Window(prefix))?;
         Ok((out, stepped))
     }
 
@@ -6924,10 +6953,21 @@ impl Actor {
                 return Ok(Stepped::Done);
             };
             let turn = live.turn;
+            let until = match reading {
+                Reading::Window(Some(prefix))
+                    if prefix.turn == turn
+                        && prefix.attempt == live.attempt
+                        && live.offset < prefix.end =>
+                {
+                    prefix.end
+                }
+                Reading::Window(Some(_)) => return Ok(Stepped::Done),
+                _ => u64::MAX,
+            };
             let spool = self.profile.spool_path_of(turn, live.attempt);
             let began = std::time::Instant::now();
             let read = SpoolReader::new(&spool)
-                .read_window(live.offset, u64::MAX, WINDOW)
+                .read_window(live.offset, until, WINDOW)
                 .map_err(|error| io_error(&spool, error))?;
             held(&self.profile.session, "a window's read", began);
             let began = std::time::Instant::now();
@@ -7757,7 +7797,7 @@ impl Actor {
             }
             // Reading one window, what follows from it waits for the next step: what the window
             // wrote is shown first.
-            if reading == Reading::Window {
+            if matches!(reading, Reading::Window(_)) {
                 self.step_owes = Some(committed.effects);
             } else {
                 self.carry_out(committed.effects, out, now_ms)?;
@@ -7776,7 +7816,7 @@ impl Actor {
             }
             // One window is in the log: a step ends here, for what it wrote to be shown before
             // anything follows from it.
-            if reading == Reading::Window {
+            if matches!(reading, Reading::Window(_)) {
                 return Ok(Stepped::Wrote);
             }
         }
@@ -7814,13 +7854,21 @@ pub enum Stepped {
     Done,
 }
 
+/// The committed reader may process this attempt through one captured disk position.
+#[derive(Clone, Copy)]
+pub struct SpoolPrefix {
+    turn: TurnId,
+    attempt: u32,
+    end: u64,
+}
+
 /// How far [`Actor::pump`] reads the live turn's spool.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum Reading {
     /// To its end.
     All,
-    /// One window of it.
-    Window,
+    /// One window of it, ending no later than the prefix when one was captured.
+    Window(Option<SpoolPrefix>),
 }
 
 /// What an app is told the turn that holds the agent is doing: a turn that has not started

@@ -199,6 +199,10 @@ pub fn run(binary: &str) -> Result<u8> {
         if stop_requested(&stop) {
             return Err("turn stopped".into());
         }
+        if req["conversation"] == true {
+            // Only the served path can open a fresh session with deny permissions.
+            return Err("OpenCode conversation server did not start".into());
+        }
         let mut args = opencode::command(
             req["session"].as_str().unwrap_or(""),
             req["model"].as_str().unwrap_or(""),
