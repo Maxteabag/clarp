@@ -1,144 +1,52 @@
-name: Host release
-
-# Builds the Host in Rust (clarp-host and clarp-shim) for Linux x86_64 and aarch64 on every change
-# to it or to the skills on main, and publishes them with the skills and the installer of the same
-# commit as the assets of the rolling pre-release "host-builds". server-rs/tools/install-from-release
-# installs a Host from them, on a clean machine:
-#   curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash
-#
-# The assets, each replaced by the next build:
-#   clarp-host-<arch>-linux.tar.gz   clarp-host, clarp-shim, their SHA256SUMS and COMMIT: what
-#                                    install-host takes with --from
-#   clarp-skills.tar.gz              skills/ with its manifest.json (--skills-from)
-#   clarp-host-tools.tar.gz          install-host and what it installs beside the Host (its helper
-#                                    scripts, the media publisher, the agents' pictures), in the
-#                                    repository's layout
-#   SHA256SUMS                       the sums of all of the above
-#
-# It is a release, not a test: nothing here runs a test. Started by hand with another release name,
-# it publishes there instead (to try a branch without touching host-builds):
-#   gh workflow run host-release.yml -R Maxteabag/clarp --ref <branch> -f release=<name>
+name: Host startup benchmark build
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "server-rs/**"
-      - "skills/**"
-      - ".github/workflows/host-release.yml"
   workflow_dispatch:
-    inputs:
-      release:
-        description: "The pre-release to publish to (default: host-builds from main, host-builds-test from any other branch)"
-        default: ""
 
 permissions:
-  contents: write
-
-env:
-  # Only main publishes host-builds by itself: a branch publishes to a release of its own.
-  RELEASE: ${{ inputs.release || (github.ref == 'refs/heads/main' && 'host-builds' || 'host-builds-test') }}
+  contents: read
 
 jobs:
   build:
     strategy:
       matrix:
         include:
-          # 22.04: the binaries need glibc 2.34 or newer on the machine they run on, which the
-          # current Debian, Ubuntu, Fedora and RHEL 9 have (RHEL 8 and Amazon Linux 2 do not).
-          - arch: x86_64
-            runner: ubuntu-22.04
-          - arch: aarch64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
+          - arm: before
+            commit: 4de6bbd8a51f6b48545b7b544506bd2fb0e0c493
+          - arm: after
+            commit: 61b493c68f349d4203612265a9ac746ee85a62a0
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
-    # A newer push makes a running build moot: an install only wants the latest. Cancelling a
-    # build here skips its publish.
-    concurrency:
-      group: host-release-build-${{ matrix.arch }}-${{ inputs.release || github.ref }}
-      cancel-in-progress: true
     steps:
-      - name: Only main publishes host-builds
-        if: env.RELEASE == 'host-builds' && github.ref != 'refs/heads/main'
-        run: |
-          echo "host-builds is main's release; name another one (-f release=...) to publish from $GITHUB_REF" >&2
-          exit 1
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.commit }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: server-rs
-          shared-key: host-release-${{ matrix.arch }}
-      - name: Build
+          shared-key: host-release-x86_64
+      - name: Compile the exact Host and shim
         working-directory: server-rs
-        run: cargo build --release --locked -p clarp-host -p clarp-shim
-      - name: The binaries need no glibc newer than the installer promises
-        # install-from-release refuses a glibc older than 2.34; a newer runner or dependency that
-        # raised what the binaries need would make that promise false, so the build stops here.
+        env:
+          BENCH_COMMIT: ${{ matrix.commit }}
         run: |
-          needs=$(objdump -T server-rs/target/release/clarp-host server-rs/target/release/clarp-shim |
-            grep -o 'GLIBC_[0-9][0-9.]*' | sed 's/^GLIBC_//' | sort -uV | tail -1)
-          echo "the binaries need glibc $needs"
-          if [ "$(printf '%s\n' 2.34 "$needs" | sort -V | tail -1)" != 2.34 ]; then
-            echo "they need glibc $needs, newer than the 2.34 install-from-release checks for" >&2
-            exit 1
-          fi
-      - name: Package
+          test "$(git rev-parse HEAD)" = "$BENCH_COMMIT"
+          rustc -Vv
+          cargo build --release --locked -p clarp-host -p clarp-shim
+      - name: Save exact binaries for the comparison
+        env:
+          BENCH_COMMIT: ${{ matrix.commit }}
         run: |
-          dir="clarp-host-${{ matrix.arch }}-linux"
-          mkdir "$dir"
-          cp server-rs/target/release/clarp-host server-rs/target/release/clarp-shim "$dir/"
-          echo "$GITHUB_SHA" > "$dir/COMMIT"
-          (cd "$dir" && sha256sum clarp-host clarp-shim > SHA256SUMS)
-          tar -czf "$dir.tar.gz" -C "$dir" clarp-host clarp-shim SHA256SUMS COMMIT
+          mkdir dist
+          cp server-rs/target/release/{clarp-host,clarp-shim} dist/
+          printf '%s\n' "$BENCH_COMMIT" > dist/COMMIT
+          rustc -Vv > dist/RUSTC
+          (cd dist && sha256sum clarp-host clarp-shim > SHA256SUMS)
+          tar -czf host.tar.gz -C dist clarp-host clarp-shim COMMIT RUSTC SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: clarp-host-${{ matrix.arch }}-linux
-          path: clarp-host-${{ matrix.arch }}-linux.tar.gz
+          name: clarp-host-rr935-${{ matrix.arm }}
+          path: host.tar.gz
           retention-days: 3
-
-  publish:
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    # A publish that has started finishes: cancelled in the middle of its uploads, it would leave
-    # the release with assets of two commits, which the installer refuses, until the next one.
-    concurrency:
-      group: host-release-publish-${{ inputs.release || github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: built
-          merge-multiple: true
-      - name: Package the skills and the installer
-        run: |
-          mkdir assets
-          mv built/*.tar.gz assets/
-          tar -czf assets/clarp-skills.tar.gz skills
-          tar -czf assets/clarp-host-tools.tar.gz \
-            server-rs/tools/install-host \
-            server-rs/tools/soak \
-            server-rs/tools/whisper-worker.py \
-            server-rs/tools/transcription-download.py \
-            server-rs/tools/voice-metrics.py \
-            scripts/clarp-media-publish.py \
-            static/avatars \
-            static/janitor-avatars
-          (cd assets && sha256sum *.tar.gz > SHA256SUMS && cat SHA256SUMS)
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          notes="The Host in Rust for Linux (x86_64, aarch64), built from $GITHUB_SHA, with the skills and the installer of that commit. Every build replaces these assets. Install with:
-
-          curl -fsSL https://raw.githubusercontent.com/Maxteabag/clarp/main/server-rs/tools/install-from-release | bash"
-          if gh release view "$RELEASE" >/dev/null 2>&1; then
-            gh release edit "$RELEASE" --notes "$notes"
-          else
-            gh release create "$RELEASE" --prerelease --title "Host builds" --notes "$notes" --target "$GITHUB_SHA"
-          fi
-          # The release's tag names the commit its assets were built from.
-          git push --force origin "$GITHUB_SHA:refs/tags/$RELEASE"
-          gh release upload "$RELEASE" assets/* --clobber
