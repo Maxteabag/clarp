@@ -590,9 +590,6 @@ async fn serve(config: Config) -> Result<(), String> {
     ));
     steps.mark("answering");
     app.hub.reserve_at_start();
-    // Every agent is read from what its log committed, and then opened, each on its own thread
-    // and beside the others: what is asked of one meanwhile is answered from its reading.
-    unopened.begin();
     // How long this Host was away is kept beside the answers: a write that waits for the disk
     // holds none of them (issue 935).
     {
@@ -604,6 +601,10 @@ async fn serve(config: Config) -> Result<(), String> {
         });
     }
     let finishing = async {
+        // Identity can answer while the reservation is written. Keep the agents'
+        // opening reads and writes behind the first reservation attempt.
+        app.hub.event_numbers_ready().await;
+        unopened.begin();
         // The tests make a start fail after the Host has begun to answer (issue 935): once the
         // file named exists.
         #[cfg(debug_assertions)]
@@ -762,7 +763,6 @@ async fn serve(config: Config) -> Result<(), String> {
         clarp_host::keeper::run(&app);
         // And an idle agent's own label that outlived its time is taken back.
         clarp_host::labels::run(&app);
-        app.hub.event_numbers_ready().await;
         steps.mark("started");
         // Said once the start has finished. The Host has answered since `answering`; whoever
         // waits for this line (the tests, an installer) finds the whole start done.
