@@ -65,7 +65,7 @@ send("result", subtype="success", is_error=False, result="done")
 
 const OWNER: &str = "fixture-owner-token";
 
-const CODEX: &str = r#"#!/usr/bin/env python3
+const FRESH: &str = r#"#!/usr/bin/env python3
 import json
 import os
 import pathlib
@@ -73,20 +73,29 @@ import signal
 import sys
 import time
 
+agy = pathlib.Path(__file__).name == 'agy'
 if '--version' in sys.argv:
-    print('codex-cli 0.167.1')
+    print('1.5.18' if agy else 'codex-cli 0.167.1')
     raise SystemExit(0)
 
 root = pathlib.Path(__file__).resolve().parent
-prompt = sys.stdin.read()
+prompt = next((v.removeprefix('--print=') for v in sys.argv if v.startswith('--print=')), '') if agy else sys.stdin.read()
 side = 'short-lived conversation session' in prompt
 thread = 'fresh-side' if side else 'work-thread'
+sid = '55555555-6666-7777-8888-999999999999' if side else '11111111-2222-3333-4444-555555555555'
+last = ''
 
 def say(kind, **fields):
-    print(json.dumps({'type':kind, **fields}), flush=True)
+    print(json.dumps({('event' if agy else 'type'):kind, **fields}), flush=True)
 
 def reply(text):
-    say('item.completed', item={'type':'agent_message', 'id':'words', 'text':text})
+    global last
+    last = text
+    if agy:
+        say('step_update', step_update={'conversation_id':sid, 'step_index':1, 'state':'DONE',
+                'step_type':'agent_response', 'text_delta':text})
+    else:
+        say('item.completed', item={'type':'agent_message', 'id':'words', 'text':text})
 
 def stopped(*_):
     (root / ('side-stopped' if side else 'main-stopped')).touch()
@@ -94,11 +103,21 @@ def stopped(*_):
 
 signal.signal(signal.SIGINT, stopped)
 signal.signal(signal.SIGTERM, stopped)
-say('thread.started',thread_id=thread)
-say('turn.started')
+if agy:
+    say('init', conversation_id=sid)
+else:
+    say('thread.started',thread_id=thread)
+    say('turn.started')
 if side:
-    assert '--ephemeral' in sys.argv and 'read-only' in sys.argv
-    assert 'resume' not in sys.argv and '--dangerously-bypass-approvals-and-sandbox' not in sys.argv
+    if agy:
+        assert '--conversation' not in sys.argv and '--dangerously-skip-permissions' not in sys.argv
+        assert '--sandbox' in sys.argv and '--disable-slash-commands' in sys.argv
+        settings = json.loads(sys.argv[sys.argv.index('--settings') + 1])
+        assert settings['toolPermission'] == 'strict'
+        assert 'write_file(*)' in settings['permissions']['deny'] and 'command(*)' in settings['permissions']['deny']
+    else:
+        assert '--ephemeral' in sys.argv and 'read-only' in sys.argv
+        assert 'resume' not in sys.argv and '--dangerously-bypass-approvals-and-sandbox' not in sys.argv
     assert not os.environ.get('CLARP_TOOL_TOKEN') and not os.environ.get('CLARP_PROVIDER_TURN')
     assert 'Owner work marker' in prompt and 'Earlier raw work' in prompt
     (root / 'side-prompt').write_text(prompt)
@@ -116,7 +135,10 @@ else:
     while not ((root / 'finish-main').exists() or (root / 'finish').exists()):
         time.sleep(0.02)
     (root / 'main-finished').touch()
-say('turn.completed', usage={'input_tokens':6,'output_tokens':4})
+if agy:
+    say('result', result={'conversation_id':sid, 'status':'SUCCESS', 'response':last})
+else:
+    say('turn.completed', usage={'input_tokens':6,'output_tokens':4})
 "#;
 
 fn row(host: &Host, session: &str) -> Value {
@@ -284,7 +306,16 @@ impl Forking {
 
 #[test]
 fn codex_conversation_reads_committed_context_and_leaves_work_and_projection_intact() {
-    let forking = Forking::new_on("codex-conversation", "codex", "CLARP_CODEX_PROGRAM", CODEX);
+    fresh_conversation("codex-conversation", "codex", "CLARP_CODEX_PROGRAM");
+}
+
+#[test]
+fn antigravity_conversation_uses_a_fresh_session_and_its_own_permissions() {
+    fresh_conversation("agy-conversation", "agy", "CLARP_AGY_PROGRAM");
+}
+
+fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
+    let forking = Forking::new_on(name, backend, program_env, FRESH);
     let host = &forking.host;
     host.send("oak", "Owner work marker", "work");
     waited(host, "the separate work turn", || {
@@ -297,7 +328,7 @@ fn codex_conversation_reads_committed_context_and_leaves_work_and_projection_int
     host.post("/send", json!({
         "session":"oak", "text":"Hello, how are you?", "client_msg_id":"greeting", "while_busy":"take_over",
     }));
-    waited(host, "the fresh Codex conversation reply", || {
+    waited(host, "the fresh conversation reply", || {
         forking.at("side-running").exists()
             && host
                 .turns("oak")

@@ -472,7 +472,10 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
 
 /// Which backends can answer a conversation without taking up the work session.
 pub fn has_conversation(backend: &str) -> bool {
-    matches!(backend, "claude" | "codex" | "opencode" | "deepseek")
+    matches!(
+        backend,
+        "claude" | "codex" | "opencode" | "deepseek" | "agy"
+    )
 }
 
 /// Codex for one agent bound to a provider of its own ([`own_provider`]): it runs in that

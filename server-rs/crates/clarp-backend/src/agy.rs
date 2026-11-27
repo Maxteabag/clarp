@@ -211,6 +211,29 @@ impl Backend for Agy {
         Box::new(AgyInterpreter::new(turn, name))
     }
 
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        let mut launch = self.launch(spec);
+        launch
+            .args
+            .retain(|arg| arg != "--dangerously-skip-permissions");
+        // A terminal sandbox by itself can write the workspace. These session-only deny
+        // rules also apply to direct edits, commands, browser activity and MCP calls.
+        let settings = json!({
+            "toolPermission": "strict",
+            "permissions": {"deny": [
+                "read_file(*)", "write_file(*)", "command(*)", "unsandboxed(*)",
+                "mcp(*)", "read_url(*)", "execute_url(*)",
+            ]},
+        });
+        launch.args.extend([
+            "--sandbox".into(),
+            "--disable-slash-commands".into(),
+            "--settings".into(),
+            settings.to_string(),
+        ]);
+        Some(launch)
+    }
+
     fn own_home(&self) -> Option<OwnHome> {
         Some(OWN_HOME)
     }
