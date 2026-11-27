@@ -402,36 +402,58 @@ impl InstallState {
         }
     }
 
-    fn keep(&self, path: &Path) -> io::Result<()> {
+    fn keep(&self, path: &Path) -> Result<(), NotKept> {
         self.keep_marked(path, &mut Steps::none())
     }
 
     /// The same, its write, flush and rename each marked.
-    fn keep_marked(&self, path: &Path, steps: &mut Steps) -> io::Result<()> {
+    fn keep_marked(&self, path: &Path, steps: &mut Steps) -> Result<(), NotKept> {
+        let unpublished = |error: io::Error| NotKept {
+            error,
+            published: false,
+        };
         let beside = path.with_file_name(format!(".install.json.{}.next", crate::ids::hex(8)));
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(&beside)?;
-        let write = (|| {
+            .open(&beside)
+            .map_err(unpublished)?;
+        let write = (|| -> io::Result<()> {
             serde_json::to_writer(&mut file, self)?;
             file.write_all(b"\n")?;
             steps.mark("write");
             file.sync_all()?;
             steps.mark("sync");
-            std::fs::rename(&beside, path)?;
-            steps.mark("rename");
-            // The rename is on the disk only once the folder is: before a link is moved after
-            // it, and before the record is taken as said (issue 935).
-            sync_dir(path.parent().unwrap_or(Path::new(".")))?;
-            steps.mark("dirsync");
-            Ok(())
+            std::fs::rename(&beside, path)
         })();
-        if write.is_err() {
+        if let Err(error) = write {
             let _ = std::fs::remove_file(beside);
+            return Err(unpublished(error));
         }
-        write
+        steps.mark("rename");
+        // The rename is on the disk only once the folder is: before a link is moved after it,
+        // and before the record is taken as said (issue 935). Failing here, the record is in
+        // place all the same, and readers see it: published.
+        sync_dir(path.parent().unwrap_or(Path::new("."))).map_err(|error| NotKept {
+            error,
+            published: true,
+        })?;
+        steps.mark("dirsync");
+        Ok(())
+    }
+}
+
+/// Why the install record could not be kept, and whether it was put in place (published, so
+/// read by whoever reads it) all the same, only its folder not flushed.
+struct NotKept {
+    error: io::Error,
+    published: bool,
+}
+
+impl From<NotKept> for io::Error {
+    fn from(not: NotKept) -> Self {
+        not.error
     }
 }
 
@@ -536,9 +558,28 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
         let (after, unlisted) = shelf.linked_releases(&written);
         let whole = unlisted.is_empty() && unflushed.is_empty();
         state.linked_releases = settled(state.linked_releases.as_deref(), after, whole);
-        if let Err(error) = state.keep(&path) {
-            undo.run();
-            return Err(disk_error(error));
+        match state.keep(&path) {
+            Ok(()) => {}
+            // Not put in place: the record read is the one before the change, which names
+            // every release the links led into, and the links are put back.
+            Err(NotKept {
+                error,
+                published: false,
+            }) => {
+                undo.run();
+                return Err(disk_error(error));
+            }
+            // Put in place, its folder not flushed: the record read says where the links lead
+            // now, and the change stands. Undone, the links would lead into releases it no
+            // longer names. Should the disk lose it, the record before it (flushed before any
+            // link moved) names every release either way.
+            Err(NotKept {
+                error,
+                published: true,
+            }) => eprintln!(
+                "clarp-host: a skill was changed and its record saved, and the record's folder \
+                 could not be flushed: {error}"
+            ),
         }
         Ok(rules::changed(item.unwrap_or(&Value::Null), enabled))
     })
@@ -787,7 +828,7 @@ impl Shelf {
         }
         state
             .keep_marked(path, steps)
-            .map_err(NotReconciled::Disk)?;
+            .map_err(|not| NotReconciled::Disk(not.error))?;
         Ok(done)
     }
 
@@ -799,7 +840,9 @@ impl Shelf {
     /// Makes the record name, durably and before a link is changed, every release a link may
     /// lead into while they move: those it named, `also` (where the links lead now), and this
     /// release. A record that names none, as not known, stays so unless `also` is whole: then
-    /// install-host keeps every release meanwhile. Written only when that adds one.
+    /// install-host keeps every release meanwhile. Written only when that adds one; where it
+    /// adds none, the record's folder is flushed all the same, so that a record an earlier try
+    /// put in place without flushing it is on the disk before a link moves.
     fn intend(
         &self,
         state: &mut InstallState,
@@ -807,22 +850,24 @@ impl Shelf {
         also: Vec<String>,
         whole: bool,
     ) -> io::Result<()> {
+        let flushed = || sync_dir(path.parent().unwrap_or(Path::new(".")));
         let Some(before) = state
             .linked_releases
             .clone()
             .or_else(|| whole.then(Vec::new))
         else {
-            return Ok(());
+            return flushed();
         };
         let mut all: BTreeSet<String> = before.into_iter().collect();
         all.extend(also);
         all.extend(self.own_release());
         let all: Vec<String> = all.into_iter().collect();
         if state.linked_releases.as_ref() == Some(&all) {
-            return Ok(());
+            return flushed();
         }
         state.linked_releases = Some(all);
-        state.keep(path)
+        state.keep(path)?;
+        Ok(())
     }
 
     /// The names of the links in a tool's folder; a folder that is not there has none.
