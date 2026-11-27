@@ -12,7 +12,7 @@ jobs:
       matrix:
         include:
           - arm: after
-            commit: 3dffc0827017102c672ceee5928f8b16fe063f5e
+            commit: b9e6a804e38667b24312721e4eb4a12733bdb7ff
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -33,6 +33,13 @@ jobs:
           test "$(git rev-parse HEAD)" = "$BENCH_COMMIT"
           rustc -Vv
           cargo build --release --locked -p clarp-host -p clarp-shim
+      - name: Check opening live snapshot parity
+        working-directory: server-rs
+        run: |
+          set -euo pipefail
+          name=a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_nothing
+          cargo test --release --locked -p clarp-actor --test actor "$name" -- --exact | tee "$RUNNER_TEMP/glance-parity.log"
+          grep -F "test $name ... ok" "$RUNNER_TEMP/glance-parity.log"
       - name: Save exact binaries for the comparison
         env:
           BENCH_COMMIT: ${{ matrix.commit }}
