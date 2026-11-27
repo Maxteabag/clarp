@@ -216,20 +216,11 @@ impl Backend for Agy {
         launch
             .args
             .retain(|arg| arg != "--dangerously-skip-permissions");
-        // A terminal sandbox by itself can write the workspace. These session-only deny
-        // rules also apply to direct edits, commands, browser activity and MCP calls.
-        let settings = json!({
-            "toolPermission": "strict",
-            "permissions": {"deny": [
-                "read_file(*)", "write_file(*)", "command(*)", "unsandboxed(*)",
-                "mcp(*)", "read_url(*)", "execute_url(*)",
-            ]},
-        });
         launch.args.extend([
             "--sandbox".into(),
             "--disable-slash-commands".into(),
             "--settings".into(),
-            settings.to_string(),
+            clarp_acp::agy::CONVERSATION_SETTINGS.into(),
         ]);
         Some(launch)
     }

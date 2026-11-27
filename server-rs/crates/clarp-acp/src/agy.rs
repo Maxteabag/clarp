@@ -86,9 +86,23 @@ pub fn kind_of(path: &Path) -> Option<(Kind, &'static str)> {
     })
 }
 
+/// Settings passed to a fresh conversation process. The workspace sandbox alone permits
+/// writes inside the workspace.
+pub const CONVERSATION_SETTINGS: &str = r#"{
+    "toolPermission": "strict",
+    "permissions": {
+        "deny": [
+            "read_file(*)", "write_file(*)", "command(*)", "unsandboxed(*)",
+            "mcp(*)", "read_url(*)", "execute_url(*)"
+        ]
+    }
+}"#;
+
 /// The turn order, as the backend writes it on the driver's standard input.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Order {
+    /// A fresh conversation offering a text answer from the supplied context.
+    pub conversation: bool,
     /// The conversation to continue; empty for a new one.
     pub session: String,
     pub cwd: String,
@@ -115,7 +129,7 @@ pub struct Order {
 
 impl Order {
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut value = json!({
             "session": self.session,
             "cwd": self.cwd,
             "prompt": self.prompt,
@@ -126,12 +140,17 @@ impl Order {
             "attachments": self.attachments,
             "silence_ms": self.silence_ms,
             "uuid": self.uuid,
-        })
+        });
+        if self.conversation {
+            value["conversation"] = json!(true);
+        }
+        value
     }
 
     pub fn from_json(value: &Value) -> Self {
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
         Self {
+            conversation: value["conversation"] == true,
             session: text("session"),
             cwd: text("cwd"),
             prompt: text("prompt"),
@@ -334,6 +353,7 @@ mod tests {
     #[test]
     fn an_order_reads_back_as_it_was_written() {
         let order = Order {
+            conversation: false,
             session: "c-1".into(),
             cwd: "/w".into(),
             prompt: "hi".into(),

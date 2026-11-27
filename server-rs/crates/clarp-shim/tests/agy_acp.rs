@@ -36,6 +36,7 @@ impl Place {
 
     fn order(&self, session: &str) -> Order {
         Order {
+            conversation: false,
             session: session.into(),
             cwd: self.dir.join("work").display().to_string(),
             prompt: "hi".into(),
@@ -278,6 +279,45 @@ fn a_tool_call_and_its_permission_are_answered_and_recorded() {
     assert_eq!(
         answer["result"]["outcome"],
         json!({"outcome": "selected", "optionId": "red"})
+    );
+}
+
+#[test]
+fn a_conversation_opens_a_fresh_acp_session_and_declines_tool_requests() {
+    let place = Place::new("conversation", "tool");
+    let mut order = place.order("conv-old");
+    order.conversation = true;
+    let (printed, status) = place.run(&order);
+    assert!(status.success(), "{printed:?}");
+    assert!(place.sent_of("session/resume").is_empty());
+    assert_eq!(place.sent_of("session/new").len(), 1);
+    let permission = place
+        .sent()
+        .into_iter()
+        .find(|message| message["id"] == "perm-1")
+        .unwrap();
+    assert_eq!(
+        permission["result"]["outcome"],
+        json!({"outcome":"cancelled"})
+    );
+    let argv: Value = serde_json::from_str(
+        std::fs::read_to_string(place.dir.join("argv"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let argv = argv["argv"].as_array().unwrap();
+    assert_eq!(argv[0], "--settings");
+    assert_eq!(argv[2..], [json!("acp"), json!("--sandbox")]);
+    let settings: Value = serde_json::from_str(argv[1].as_str().unwrap()).unwrap();
+    assert_eq!(settings["toolPermission"], "strict");
+    assert!(
+        settings["permissions"]["deny"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("write_file(*)"))
     );
 }
 

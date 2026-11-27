@@ -82,6 +82,8 @@ fn ms(since: Instant) -> u64 {
 
 /// What the driver does with what Antigravity says besides its answers.
 struct Record {
+    /// Conversation turns answer with the supplied context and grant no tool request.
+    conversation: bool,
     /// What Antigravity says now is the replay of a conversation it loaded, not the turn's.
     quiet: bool,
     /// When agy was started, and when it first said something of the prompt.
@@ -292,7 +294,7 @@ impl Handler for Record {
         }
         let options = schema::permission_options(params);
         // After a Stop, nothing more is allowed: the request is answered as cancelled.
-        let chosen = if self.stopping {
+        let chosen = if self.stopping || self.conversation {
             None
         } else {
             schema::chosen(&options)
@@ -415,11 +417,18 @@ fn stop_watch(inbound: Sender<Inbound>) -> Result<()> {
     Ok(())
 }
 
-fn command(program: &str, cwd: &Path) -> Command {
+fn command(program: &str, cwd: &Path, conversation: bool) -> Command {
     let mut command = Command::new(program);
+    if conversation {
+        command.args(["--settings", shared::CONVERSATION_SETTINGS]);
+    }
+    command.arg("acp");
+    if conversation {
+        command.arg("--sandbox");
+    } else {
+        command.arg("--dangerously-skip-permissions");
+    }
     command
-        .arg("acp")
-        .arg("--dangerously-skip-permissions")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -976,7 +985,11 @@ pub fn run(program: &str) -> Result<u8> {
     let mut from_host = io::BufReader::new(io::stdin());
     let mut first = String::new();
     from_host.read_line(&mut first)?;
-    let order = Order::from_json(&serde_json::from_str(&first)?);
+    let mut order = Order::from_json(&serde_json::from_str(&first)?);
+    if order.conversation {
+        order.session.clear();
+        order.attachments.clear();
+    }
     let owner = inbound.clone();
     let cwd = if order.cwd.trim().is_empty() {
         std::env::current_dir()?
@@ -984,7 +997,7 @@ pub fn run(program: &str) -> Result<u8> {
         PathBuf::from(&order.cwd)
     };
     let launched = Instant::now();
-    let mut child = command(program, &cwd).spawn()?;
+    let mut child = command(program, &cwd, order.conversation).spawn()?;
     let output = child.stdout.take().ok_or("agy's output is missing")?;
     let input = child.stdin.take().ok_or("agy's input is missing")?;
     client::read_into(output, inbound);
@@ -1003,6 +1016,7 @@ pub fn run(program: &str) -> Result<u8> {
     let mut turn = Turn {
         client: Client::new(input, received),
         record: Record {
+            conversation: order.conversation,
             quiet: false,
             launched,
             prompting: false,

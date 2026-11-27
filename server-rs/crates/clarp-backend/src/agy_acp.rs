@@ -139,6 +139,7 @@ pub fn order(spec: &TurnSpec) -> Order {
         None => (prompt.clone(), String::new()),
     };
     Order {
+        conversation: false,
         session: given(&spec.backend_session),
         cwd: spec.cwd.display().to_string(),
         prompt,
@@ -155,6 +156,23 @@ pub fn order(spec: &TurnSpec) -> Order {
             spec.trace_id.as_deref(),
             spec.attempt,
         ),
+    }
+}
+
+impl AgyAcp {
+    fn launch_order(&self, session: &str, order: &Order) -> Launch {
+        Launch {
+            prompt_as_file: false,
+            before_stop: Some(("SIGUSR1", STOP_GRACE_MS)),
+            program: "clarp-shim".to_string(),
+            args: vec![shared::DRIVER.to_string(), self.program.clone()],
+            env: vec![
+                (SESSION_ENV.to_string(), session.to_owned()),
+                (MANAGED.to_string(), "1".to_string()),
+            ],
+            // A steered turn keeps input open for the lines that follow this order.
+            stdin: format!("{}\n", order.to_json()).into_bytes(),
+        }
     }
 }
 
@@ -192,19 +210,15 @@ impl Backend for AgyAcp {
     }
 
     fn launch(&self, spec: &TurnSpec) -> Launch {
-        Launch {
-            prompt_as_file: false,
-            before_stop: Some(("SIGUSR1", STOP_GRACE_MS)),
-            program: "clarp-shim".to_string(),
-            args: vec![shared::DRIVER.to_string(), self.program.clone()],
-            env: vec![
-                (SESSION_ENV.to_string(), spec.session.clone()),
-                (MANAGED.to_string(), "1".to_string()),
-            ],
-            // One line: a turn the Host steers keeps the driver's input open after it, for
-            // the messages the user sends while it runs (`Backend::steers`).
-            stdin: format!("{}\n", order(spec).to_json()).into_bytes(),
-        }
+        self.launch_order(&spec.session, &order(spec))
+    }
+
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        let mut order = order(spec);
+        order.conversation = true;
+        order.session.clear();
+        order.attachments.clear();
+        Some(self.launch_order(&spec.session, &order))
     }
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {

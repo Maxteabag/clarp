@@ -23,7 +23,8 @@ def keep(conversation):
     open(os.path.join(store, conversation + ".db"), "a").close()
 
 
-if sys.argv[1:2] != ["acp"]:
+command = sys.argv[3:4] if sys.argv[1:2] == ["--settings"] else sys.argv[1:2]
+if command != ["acp"]:
     # `agy --print=<message>`, as the `agy` card runs a turn: one conversation, continued by
     # `--conversation <id>`, its turn told as stream-json. Anything else (`agy models`) is silent.
     told = [arg[len("--print="):] for arg in sys.argv[1:] if arg.startswith("--print=")]
