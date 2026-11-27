@@ -676,10 +676,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
             Some(Principal::Administrator) if app.config.auth_token.is_empty() => "",
             Some(Principal::Administrator) => clarp_kernel::calls::ADMINISTRATOR,
             Some(Principal::Tools) => {
-                return Err(refuse(
-                    StatusCode::FORBIDDEN,
-                    "an agent's tools may ask for tools only",
-                ));
+                return Err(refuse(StatusCode::FORBIDDEN, "not your call"));
             }
             None => return Err(refuse(StatusCode::UNAUTHORIZED, "authentication required")),
         };

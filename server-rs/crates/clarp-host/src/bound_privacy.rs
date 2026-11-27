@@ -432,8 +432,13 @@ pub fn refusal_words(persona: &str) -> String {
 
 /// The refusal of a read of a withheld agent's words.
 pub fn refused(persona: &str) -> Response {
-    let body = json!({ "error": REFUSED, "message": refusal_words(persona) });
-    (StatusCode::FORBIDDEN, axum::Json(body)).into_response()
+    words_refused(persona).into_response()
+}
+
+pub(crate) fn words_refused(persona: &str) -> crate::edge::ApiError {
+    let message = refusal_words(persona);
+    let body = json!({ "error": REFUSED, "message": message });
+    crate::edge::ApiError::custom(StatusCode::FORBIDDEN, message, body)
 }
 
 // ---- the routes ----------------------------------------------------------------------------------
