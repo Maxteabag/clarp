@@ -2289,6 +2289,11 @@ apply the broadcast, not re-post `/select`, or two clients loop.
       paired device.
     - On Rust Host contract 216, goal, decision and artifact changes using the tool token
       check that the agent may read the target's words before returning its document.
+      Queue controls using that token require a signed turn and apply the same bound
+      privacy rule when resolving the target. A Stop or queue action from an agent
+      keeps its verified identity. Voice writes require a signed turn for the tool
+      token and check the target agent again when applying the change. Signed agents
+      edit the shared persona catalog under its existing contact and built-in rules.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a
