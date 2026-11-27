@@ -34,6 +34,7 @@ struct Recent {
     first_id: u64,
     next_id: u64,
     events: VecDeque<Arc<Published>>,
+    reservation_pending: bool,
 }
 
 /// Where a connection takes up the events after the last one it was sent (feature
@@ -134,6 +135,9 @@ pub struct Hub {
     pub(crate) availability_quota: watch::Sender<Arc<crate::quota::Rows>>,
     /// The numbers its events may have, reserved on disk (`Reserved`); none for a hub of a test.
     reserved: Option<Arc<Reserved>>,
+    /// The initial reservation is written beside the start. Until it is ready,
+    /// numbered events are kept in the usual recent history without being sent.
+    event_numbers_ready: watch::Sender<bool>,
 }
 
 impl Hub {
@@ -160,6 +164,7 @@ impl Hub {
                 first_id: (seconds << 20).max(1),
                 next_id: (seconds << 20).max(1),
                 events: VecDeque::new(),
+                reservation_pending: false,
             }),
             live,
             waiting: Mutex::new(BTreeMap::new()),
@@ -173,18 +178,18 @@ impl Hub {
             availability_woken: tokio::sync::Notify::new(),
             availability_quota: watch::Sender::new(Arc::new(crate::quota::Rows::unasked())),
             reserved: None,
+            event_numbers_ready: watch::Sender::new(true),
         }
     }
 
-    /// This run's events take their numbers from a reservation kept in the file at `path`:
-    /// from at or above the end of the last one any run made, and none before its own first block
-    /// is on disk (`Reserved`, issue 935).
+    /// Reads the previous run's reservation. Its successor is written separately
+    /// by reserve_at_start, beside authenticated reads.
     #[must_use]
-    pub fn reserving(self, path: std::path::PathBuf) -> Self {
-        self.reserving_in_blocks(path, BLOCK)
+    pub fn preparing_reservation(self, path: std::path::PathBuf) -> Self {
+        self.preparing_in_blocks(path, BLOCK)
     }
 
-    fn reserving_in_blocks(mut self, path: std::path::PathBuf, block: u64) -> Self {
+    fn preparing_in_blocks(mut self, path: std::path::PathBuf, block: u64) -> Self {
         let reserved = Arc::new(Reserved::new(path, block));
         let floor = match reserved.read() {
             Ok(floor) => floor,
@@ -213,12 +218,90 @@ impl Hub {
             recent.first_id = floor;
             recent.next_id = floor;
         }
-        let first = recent.next_id;
-        if let Err(why) = reserved.reserve(first.saturating_add(block)) {
-            reserved.refused(&why);
-        }
+        recent.reservation_pending = true;
         self.reserved = Some(reserved);
+        self.event_numbers_ready.send_replace(false);
         self
+    }
+
+    #[cfg(test)]
+    fn reserving_in_blocks(self, path: std::path::PathBuf, block: u64) -> Self {
+        let hub = self.preparing_in_blocks(path, block);
+        hub.finish_reservation();
+        hub
+    }
+
+    /// Whether a new stream is still waiting for its initial numbered history.
+    pub(crate) fn event_numbers_pending(&self) -> bool {
+        !*self.event_numbers_ready.borrow()
+    }
+
+    /// Resolves at the end of the initial reservation attempt.
+    pub fn event_numbers_ready(
+        &self,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static + use<> {
+        let mut ready = self.event_numbers_ready.subscribe();
+        async move {
+            let _ = ready.wait_for(|ready| *ready).await;
+        }
+    }
+
+    /// Writes the initial reservation off the HTTP and agent threads. If the
+    /// disk refuses it, keep the same explicit unreserved fallback as before.
+    pub fn reserve_at_start(self: &Arc<Self>) {
+        if !self.event_numbers_pending() {
+            return;
+        }
+        let hub = self.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("event-reserve-first".into())
+            .spawn(move || hub.finish_reservation())
+        {
+            if let Some(reserved) = &self.reserved {
+                reserved.refused(&error);
+            }
+            let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
+            self.send_initial_history(&mut recent);
+        }
+    }
+
+    fn finish_reservation(&self) {
+        let Some(reserved) = &self.reserved else {
+            return;
+        };
+        if !self.event_numbers_pending() {
+            return;
+        }
+        let mut end = self
+            .recent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .first_id
+            .saturating_add(reserved.block);
+        loop {
+            // Never hold recent history while waiting for the filesystem.
+            let result = reserved.reserve(end);
+            let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Err(error) = result {
+                reserved.refused(&error);
+                self.send_initial_history(&mut recent);
+                return;
+            }
+            if recent.next_id <= end {
+                self.send_initial_history(&mut recent);
+                return;
+            }
+            end = recent.next_id.saturating_add(reserved.block);
+        }
+    }
+
+    /// The lock excludes a publisher between these events and the next live one.
+    fn send_initial_history(&self, recent: &mut Recent) {
+        for published in &recent.events {
+            let _ = self.live.send(published.clone());
+        }
+        recent.reservation_pending = false;
+        self.event_numbers_ready.send_replace(true);
     }
 
     /// When this run of the Host started.
@@ -389,7 +472,8 @@ impl Hub {
         }
         let mut recent = self.recent.lock().unwrap_or_else(PoisonError::into_inner);
         let id = recent.next_id;
-        if let Some(reserved) = &self.reserved {
+        let pending = recent.reservation_pending;
+        if !pending && let Some(reserved) = &self.reserved {
             reserved.cover(id);
         }
         recent.next_id += 1;
@@ -413,7 +497,9 @@ impl Hub {
         recent.events.push_back(published.clone());
         // Sent while the lock is held, so that what a new listener is given from the kept
         // events and what it then hears live join up without a gap or a repeat.
-        let _ = self.live.send(published);
+        if !pending {
+            let _ = self.live.send(published);
+        }
         id
     }
 
@@ -721,6 +807,61 @@ mod tests {
 
     fn roster(kind: &str) -> Value {
         json!({ "type": "agent-roster", "kind": kind })
+    }
+
+    #[tokio::test]
+    async fn startup_numbers_are_kept_off_the_wire_until_the_reservation_is_written() {
+        let place =
+            std::env::temp_dir().join(format!("clarp-deferred-events-{}", crate::ids::hex(8)));
+        std::fs::create_dir(&place).unwrap();
+        let file = place.join("event-numbers");
+        let floor = (1_700_000_000_u64 << 20) + 16;
+        std::fs::write(&file, format!("{floor}\n")).unwrap();
+        let now = 1_700_000_000_000;
+        let hub = Arc::new(Hub::new(now).preparing_in_blocks(file.clone(), 8));
+        let mut heard = hub.live.subscribe();
+        let first = hub.publish(roster("first"), now);
+        let second = hub.publish(roster("second"), now + 1);
+        assert_eq!((first, second), (floor, floor + 1));
+        assert!(hub.event_numbers_pending());
+        assert!(matches!(
+            heard.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!("{floor}\n")
+        );
+
+        hub.reserve_at_start();
+        tokio::time::timeout(std::time::Duration::from_secs(5), hub.event_numbers_ready())
+            .await
+            .unwrap();
+        let end: u64 = std::fs::read_to_string(&file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(end > second);
+        assert_eq!(heard.try_recv().unwrap().id, first);
+        assert_eq!(heard.try_recv().unwrap().id, second);
+        assert!(matches!(
+            heard.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        let mut resumed = hub.resume(Some(floor - 1));
+        assert!(resumed.truncated);
+        assert_eq!(
+            resumed
+                .missed
+                .iter()
+                .map(|event| event.id)
+                .collect::<Vec<_>>(),
+            [first, second]
+        );
+        let next = hub.publish(roster("next"), now + 2);
+        assert_eq!(resumed.live.try_recv().unwrap().id, next);
+        std::fs::remove_dir_all(place).unwrap();
     }
 
     #[test]

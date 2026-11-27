@@ -5491,6 +5491,27 @@ async fn events(
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    // Open the SSE response while a reservation is on its way. A comment has
+    // no cursor and does not change the first event of either replay protocol.
+    let connecting = app
+        .hub
+        .event_numbers_pending()
+        .then(|| Ok(SseEvent::default().comment("")));
+    let frames = stream::once(async move {
+        tokio::select! {
+            () = app.hub.event_numbers_ready() => Some(event_frames(app, principal, headers, query)),
+            () = app.hub.closing() => None,
+        }
+    }).filter_map(std::future::ready).flatten();
+    Sse::new(stream::iter(connecting).chain(frames))
+}
+
+fn event_frames(
+    app: App,
+    principal: Principal,
+    headers: HeaderMap,
+    query: EventsQuery,
+) -> impl Stream<Item = Result<SseEvent, Infallible>> {
     // Who listens, as the rings know a client: a phone by its id, anybody else as the
     // administrator.
     let listener = match &principal {
@@ -5865,7 +5886,7 @@ async fn events(
             }
         },
     );
-    Sse::new(stream)
+    stream
 }
 
 /// Whether a replay or a catch-up gives an event: on a stream that shows previews, not the

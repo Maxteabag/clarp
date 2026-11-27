@@ -304,8 +304,9 @@ async fn serve(config: Config) -> Result<(), String> {
     // Its events' numbers are reserved on disk before any is given out, above every number an
     // earlier run may have given out however it ended (issue 935): a client resuming from an
     // earlier run's number is told it missed something.
-    let mut hub = Hub::new(clock.now_ms()).reserving(config.data_dir.join("event-numbers"));
-    // One write and flush on the way to answering: said on its own in the start's steps.
+    let mut hub =
+        Hub::new(clock.now_ms()).preparing_reservation(config.data_dir.join("event-numbers"));
+    // Only read the previous floor here. The new block is written beside the HTTP server.
     steps.mark("events");
     hub.capture = Some(capture.clone());
     let hub = Arc::new(hub);
@@ -588,6 +589,7 @@ async fn serve(config: Config) -> Result<(), String> {
         restart_ms.clone(),
     ));
     steps.mark("answering");
+    app.hub.reserve_at_start();
     // Every agent is read from what its log committed, and then opened, each on its own thread
     // and beside the others: what is asked of one meanwhile is answered from its reading.
     unopened.begin();
@@ -806,6 +808,7 @@ async fn serve(config: Config) -> Result<(), String> {
         }
         // The start is done once every agent is open too: what waits for that is answered now.
         app.start.reached(clarp_host::start::Stage::Agents).await;
+        app.hub.event_numbers_ready().await;
         app.start.reach(clarp_host::start::Stage::Started);
         steps.mark("ready");
         // Said last of its start, after every line the start has always said.

@@ -1312,6 +1312,11 @@ impl Mouth {
         owner_reply: bool,
         looked_at: bool,
     ) {
+        // A clip's event number is kept in its line. Do not offer the clip
+        // until the event history can publish that number.
+        if self.hub.event_numbers_pending() {
+            self.hub.event_numbers_ready().await;
+        }
         let record = &member.record;
         // An agent whose words stay off speech providers in the cloud is not spoken: this Host
         // has no engine that speaks on this machine.
