@@ -98,6 +98,9 @@ On Rust Hosts advertising `agent_token_api` (contract 216), use the local
 `/agent-voice` and `/personas/update`. Send the current turn's
 `CLARP_PROVIDER_TURN` in `X-Clarp-Turn` for attribution. These requests retain
 the agent's identity and the endpoint's usual privacy and ownership checks.
+Voice and persona writes with the tools token require that signed turn. The
+voice of a bound agent can be edited only by a caller allowed to read that
+agent. The persona catalog is shared, with its existing rules for built-ins.
 
 `GET /cartesia-voices` returns the English catalog: `name`, `tagline`,
 `description`, `gender`, `country`, `preview_url`, `selection_value`, and

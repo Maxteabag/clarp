@@ -98,6 +98,8 @@ fn an_agents_tools_read_the_fleet_through_bound_privacy() {
 fn an_agents_issued_token_can_read_and_change_voice_with_its_own_attribution() {
     let place = Place::new("agent-token-voice");
     let claude = place.root.join("claude");
+    let codex = place.root.join("codex");
+    program(&codex, CODEX);
     program(
         &claude,
         r#"#!/bin/sh
@@ -122,6 +124,7 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
         &["--speech-keys", owners.to_str().unwrap()],
         &[
             ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
             ("CARTESIA_API_KEY", "fixture-cartesia-key"),
             ("CLARP_CARTESIA_ENDPOINT", &endpoint),
         ],
@@ -130,6 +133,7 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
         "/agents",
         json!({"name":"Voice Worker","session":"voice-worker","backend":"claude"}),
     );
+    let private = bound_agent(&host, "Private Voice", &own_home(&place, "voice-private"));
     assert_eq!(
         host.ask(
             "POST",
@@ -153,6 +157,35 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
 
     let row = "/agents/voice-worker";
     let voice = "f0000000-0000-4000-8000-000000000011";
+    let contact_voice = r#"{"elevenlabs":"new-voice"}"#;
+    let set_voice = json!({"session":"voice-worker","voice_id":voice,"provider":"cartesia"});
+    let set_contact = json!({
+        "original_name":"Voice Contact","name":"Voice Contact","voice_id":contact_voice,
+    });
+    for (path, body) in [
+        ("/agent-voice", &set_voice),
+        ("/personas/update", &set_contact),
+    ] {
+        let (status, refused) = host.ask_as(tools, "POST", path, Some(body));
+        assert_eq!(status, 403, "{refused}");
+        assert_eq!(refused["error"], "verified turn identity required");
+    }
+    let private_path = format!("/agents/{private}");
+    let previous_voice = host.get(&private_path)["voice_id"].clone();
+    let denied = fetch(
+        &host,
+        tools,
+        "POST",
+        "/agent-voice",
+        &[("X-Clarp-Turn", turn), ("Content-Type", "application/json")],
+        json!({"session":private,"voice_id":voice,"provider":"cartesia"})
+            .to_string()
+            .as_bytes(),
+    );
+    assert_eq!(denied.status, 403, "{}", denied.text());
+    assert!(denied.text().contains("bound_conversation"));
+    assert_eq!(host.get(&private_path)["voice_id"], previous_voice);
+
     let ask = |method, path, body: Value| {
         let text = if body.is_null() {
             String::new()
@@ -183,24 +216,12 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
         ask("GET", row, Value::Null)["agent_id"],
         made["agent"]["agent_id"]
     );
-    assert_eq!(
-        ask(
-            "POST",
-            "/agent-voice",
-            json!({"session":"voice-worker","voice_id":voice,"provider":"cartesia"})
-        )["ok"],
-        true
-    );
+    assert_eq!(ask("POST", "/agent-voice", set_voice)["ok"], true);
     assert_eq!(
         ask("GET", row, Value::Null)["voice_id"],
         json!({"cartesia":voice}).to_string()
     );
-    let contact_voice = r#"{"elevenlabs":"new-voice"}"#;
-    let edited = ask(
-        "POST",
-        "/personas/update",
-        json!({"original_name":"Voice Contact","name":"Voice Contact","voice_id":contact_voice}),
-    );
+    let edited = ask("POST", "/personas/update", set_contact);
     let voices: Value =
         serde_json::from_str(edited["persona"]["voice_id"].as_str().unwrap()).unwrap();
     assert_eq!(voices["elevenlabs"], "new-voice");
@@ -222,6 +243,127 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
     });
     let seen = host.heard.lock().unwrap();
     assert!(!seen.contains(tools) && !seen.contains(turn));
+}
+
+#[test]
+fn direct_queue_controls_record_the_signed_agent_and_keep_owner_work_held_on_stop() {
+    use clarp_kernel::agent::AgentEvent;
+    use clarp_kernel::journal::kind;
+    use clarp_kernel::turn::{Outcome, TurnEvent};
+    use clarp_ports::log::{Kinds, LogEngine};
+
+    let place = Place::new("agent-token-queue-controls");
+    let owner = "agent-queue-owner";
+    let host = place.start_with_token(owner);
+    let from = host.new_agent("Queue Caller");
+    let target = host.new_agent("Queue Target");
+    host.send(&from, "Ready", "first");
+    wait_for("the caller has a turn", || host.state(&from) == "done");
+    let token = first_turn_token(&place, &agent_id(&host, &from));
+    let tools = clarp_host::tool_token(owner);
+    let signed = |method: &str, path: &str, body: Value| {
+        fetch(
+            &host,
+            &tools,
+            method,
+            path,
+            &[
+                ("X-Clarp-Turn", &token),
+                ("Content-Type", "application/json"),
+            ],
+            body.to_string().as_bytes(),
+        )
+    };
+    host.send(&target, "sleep 60", "live");
+    wait_for("the target is working", || {
+        host.state(&target) == "thinking"
+    });
+    for (id, text) in [
+        ("interrupt", "sleep 60"),
+        ("withdraw", "Never said"),
+        ("by-hand", "Sent explicitly"),
+        ("resume", "Resumed normally"),
+    ] {
+        assert_eq!(
+            host.post(
+                "/send",
+                json!({"session":target,"text":text,"client_msg_id":id,"queue_if_busy":true}),
+            )["queued"],
+            true
+        );
+    }
+    let (status, refused) = host.ask_as(&tools, "DELETE", "/turn-queue/withdraw", None);
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["error"], "verified turn identity required");
+    let cut = signed("POST", "/turn-queue/interrupt/take-over", json!({}));
+    assert_eq!(cut.status, 202, "{}", cut.text());
+    wait_for("the selected replacement starts", || {
+        host.turns(&target)
+            .iter()
+            .any(|row| row["id"] == "u-interrupt")
+            && host.state(&target) == "thinking"
+    });
+
+    let stopped = signed("POST", "/stop", json!({"session":target,"actor":"user"}));
+    assert_eq!(stopped.status, 200, "{}", stopped.text());
+    wait_for("the replacement stops", || {
+        host.state(&target) == "interrupted"
+    });
+    let queue = host.get(&format!("/turn-queue?session={target}"));
+    assert_eq!(queue["paused"], true);
+    assert_eq!(queue["items"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        signed("DELETE", "/turn-queue/withdraw", json!({})).status,
+        200
+    );
+    let sent = signed("POST", "/turn-queue/by-hand/send", json!({}));
+    assert_eq!(sent.status, 202, "{}", sent.text());
+    wait_for("the hand-selected message finishes", || {
+        host.state(&target) == "done"
+    });
+    let resumed = signed("POST", "/turn-queue/resume", json!({"session":target}));
+    assert_eq!(resumed.status, 200, "{}", resumed.text());
+    wait_for("the remainder runs after resume", || {
+        host.turns(&target)
+            .iter()
+            .any(|row| row["text"] == "Resumed normally" && row["role"] == "assistant")
+    });
+
+    let id = agent_id(&host, &target);
+    let log = clarp_store_sqlite::SqliteEngine::new()
+        .read_committed(
+            &place.root.join("data/agents").join(id),
+            clarp_codec::standard_set("zstd").unwrap(),
+        )
+        .unwrap();
+    let by = format!("agent:{from}");
+    let recorded: Vec<_> = log
+        .read_after(0, Kinds::only(kind::AGENT_EVENT), 100)
+        .unwrap()
+        .iter()
+        .filter_map(|item| {
+            let event = serde_json::from_slice::<AgentEvent>(&item.body).unwrap();
+            match event {
+                AgentEvent::SentNow { by: actor, .. } if actor == by => Some("sent"),
+                AgentEvent::Paused {
+                    by: actor,
+                    verified: true,
+                    ..
+                } if actor == by => Some("stop"),
+                AgentEvent::Turn {
+                    change:
+                        TurnEvent::Settled {
+                            outcome: Outcome::Withdrawn { by: actor },
+                            ..
+                        },
+                    ..
+                } if actor == by => Some("withdraw"),
+                AgentEvent::Resumed { by: actor, .. } if actor == by => Some("resume"),
+                _ => None,
+            }
+        })
+        .collect();
+    assert_eq!(recorded, ["sent", "stop", "withdraw", "sent", "resume"]);
 }
 
 #[test]
