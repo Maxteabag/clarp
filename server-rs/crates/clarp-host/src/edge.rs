@@ -3705,6 +3705,20 @@ async fn sent_from(
             Err(unavailable) => return ApiError::from(unavailable).into_response(),
         }
     }
+    let spoken_in_call = in_call.is_some()
+        && (request.input_kind.as_deref() == Some("voice")
+            || [
+                request.utterance_id.as_deref(),
+                request.transcription_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|id| !python::strip(id).is_empty()));
+    let call_sender = spoken_in_call.then(|| crate::coordination::Made {
+        voice_call: Some(call_id.clone()),
+        ..made.clone()
+    });
+    let made = call_sender.as_ref().unwrap_or(made);
     // What was dictated hands-free and is not said to be for the agent it names is shown
     // to the router of spoken messages first, when there is one: it may give the message
     // to another agent, ask its user whom it was for, or do what was asked for in it.
@@ -4105,6 +4119,12 @@ async fn send_as(
         && app.mouth.can_speak(&member.record).await;
     let text_chat =
         made.text_chat && origin == Origin::User && coordination.is_none() && !in_a_call && !own;
+    let voice_call = made.voice_call.clone().filter(|call| {
+        by_a_person
+            && coordination.is_none()
+            && binding.is_none()
+            && request.call_id.as_deref().map(python::strip) == Some(call.as_str())
+    });
     let message = Message {
         managed_model: None,
         sent_at_ms: None,
@@ -4123,6 +4143,7 @@ async fn send_as(
         // call and what was said since it last spoke.
         call: Some(app.calls.header(app, &member.record.session).await)
             .filter(|header| !header.is_empty()),
+        voice_call,
     };
     let writer = match &message.origin {
         Origin::Agent { agent_id } if !agent_id.is_empty() => Some(agent_id.clone()),

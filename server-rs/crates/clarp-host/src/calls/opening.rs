@@ -509,6 +509,7 @@ impl Desk {
             marked,
             unminted: true,
             call: None,
+            voice_call: None,
             sender: None,
             client: None,
             speak: true,

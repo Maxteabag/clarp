@@ -66,6 +66,10 @@ pub struct Message {
     /// told to the agent's tool with this message, and no part of what the user said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<String>,
+    /// The live call that admitted the owner's speech. Separate from its
+    /// rendered header so that only utterances of that call can be read together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_call: Option<String>,
     /// The id its app minted came with the mark already, as the phone's ids do: the app's
     /// id is `id` whole. Otherwise the app's id is `id` without the mark.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -87,6 +91,16 @@ pub struct Message {
 pub const SENT_AT: &str = "sent_at_ms";
 
 impl Message {
+    pub fn in_call(&self) -> bool {
+        self.call.is_some() || self.voice_call.is_some()
+    }
+
+    /// A legacy call header still keeps its own turn. A verified call can
+    /// gather newer utterances of that same call.
+    pub fn can_be_read_together(&self) -> bool {
+        self.voice_call.is_some() || !self.in_call()
+    }
+
     /// Where a message is filed for the id its app gave it, and whether that id came with
     /// the mark: an id that has the mark is filed as it is, any other with the mark before
     /// it. So the Python Host files a message (`message_id_for_client`), and so an app
