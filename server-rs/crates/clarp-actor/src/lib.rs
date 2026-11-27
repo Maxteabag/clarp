@@ -967,6 +967,27 @@ impl NetworkStep {
     }
 }
 
+/// The running turn projected from one opening glance's committed state and spool.
+pub struct GlanceLive {
+    shown: live::Hub,
+    retry: Option<String>,
+}
+
+impl GlanceLive {
+    pub fn snapshot(&mut self, now_ms: i64) -> Result<serde_json::Value, ActorError> {
+        // As with the actor's own snapshot, use the request's time to update
+        // status and flush pending items.
+        let _ = self.shown.account_recovery(None, now_ms);
+        let _ = self.shown.provider_retry(self.retry.as_deref(), now_ms);
+        self.shown
+            .snapshot(now_ms)
+            .map(|(snapshot, _)| snapshot)
+            .ok_or_else(|| {
+                ActorError::Corrupt("the restored live projection has no turn".to_string())
+            })
+    }
+}
+
 pub struct Actor {
     launch_defaults: Option<LaunchDefaults>,
     teams: Option<Arc<dyn teams::Runtime>>,
@@ -2003,6 +2024,31 @@ impl Actor {
         }
         let events = self.shown.patch(item, fields, None, now_ms);
         self.shown_events.extend(events);
+    }
+
+    /// Takes the projection already restored from the committed spool of an opening glance.
+    /// The remaining actor answers the glance's journal reads. Live is rendered at request time,
+    /// separately from those reads. Use the actor as before if a turn still needs to be shown.
+    pub fn take_glance_live(&mut self) -> Option<GlanceLive> {
+        let Some(Turn::Running(running)) = self.recorder.agent().live() else {
+            return None;
+        };
+        if self.held_for_an_account
+            || self.fork.has_live_view()
+            || self.shown.turn().is_none()
+            || self
+                .shown_turn
+                .as_ref()
+                .is_none_or(|(shown, _)| *shown != running.id)
+        {
+            return None;
+        }
+        let retry = match &running.activity {
+            Activity::Retrying(retry) => Some(retry.headline()),
+            _ => None,
+        };
+        let shown = std::mem::replace(&mut self.shown, live::Hub::new("", "", ""));
+        Some(GlanceLive { shown, retry })
     }
 
     /// Everything that is shown of the agent's turn, as `GET /live` answers it. An agent

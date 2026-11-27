@@ -196,6 +196,12 @@ pub(super) struct Lane {
     deferred: Option<(TurnId, u64, u32)>,
 }
 
+impl Lane {
+    pub(super) fn has_live_view(&self) -> bool {
+        self.running.is_some() || self.shown.is_some()
+    }
+}
+
 /// The fork's turn as those who watch the agent see it (`GET /live` and its events), in a hub
 /// of its own: the agent's own turn goes on in its hub meanwhile, and is told beside the
 /// fork's as `main_turn`. Neither turn is ended for the other. When one hub takes over from

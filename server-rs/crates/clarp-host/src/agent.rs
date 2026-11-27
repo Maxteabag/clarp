@@ -934,11 +934,40 @@ pub struct KeptEarly {
     pub route: tokio::sync::OwnedMutexGuard<bool>,
 }
 
-/// An agent read from what its log committed ([`Actor::glance`]): one reading at a time, as
-/// on its own thread, and with its own clock.
+/// An agent's opening reads from one committed snapshot and its own clock.
 struct Glance {
     actor: Mutex<Actor>,
+    live: Option<Box<Mutex<clarp_actor::GlanceLive>>>,
     clock: Arc<dyn Clock + Send + Sync>,
+}
+
+impl Glance {
+    fn new(mut actor: Actor, clock: Arc<dyn Clock + Send + Sync>) -> Self {
+        let live = actor
+            .take_glance_live()
+            .map(|live| Box::new(Mutex::new(live)));
+        Self {
+            actor: Mutex::new(actor),
+            live,
+            clock,
+        }
+    }
+
+    fn actor(&self) -> std::sync::MutexGuard<'_, Actor> {
+        self.actor.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn read<T: Send + 'static>(
+        self: Arc<Self>,
+        read: impl FnOnce(&Self, i64) -> Result<T, ActorError> + Send + 'static,
+    ) -> Result<T, Unavailable> {
+        tokio::task::spawn_blocking(move || {
+            let now = self.clock.now_ms();
+            read(&self, now).map_err(|error| unavailable(&error))
+        })
+        .await
+        .unwrap_or_else(|error| Err(Unavailable::new(error.to_string())))
+    }
 }
 
 #[derive(Default)]
@@ -1013,21 +1042,21 @@ impl AgentHandle {
         &self,
         read: impl FnOnce(&mut Actor, i64) -> Result<T, ActorError> + Send + 'static,
     ) -> Option<Result<T, Unavailable>> {
+        let glance = self.opening_glance().await?;
+        Some(
+            glance
+                .read(move |glance, now| read(&mut glance.actor(), now))
+                .await,
+        )
+    }
+
+    async fn opening_glance(&self) -> Option<Arc<Glance>> {
         if self.view.borrow().broken.as_deref() != Some(OPENING) {
             return None;
         }
         let glance = self.glance.decided().await?;
         // Opened meanwhile: the agent answers for itself.
-        if self.view.borrow().broken.as_deref() != Some(OPENING) {
-            return None;
-        }
-        let read = tokio::task::spawn_blocking(move || {
-            let now = glance.clock.now_ms();
-            let mut actor = glance.actor.lock().unwrap_or_else(PoisonError::into_inner);
-            read(&mut actor, now).map_err(|error| unavailable(&error))
-        })
-        .await;
-        Some(read.unwrap_or_else(|error| Err(Unavailable::new(error.to_string()))))
+        (self.view.borrow().broken.as_deref() == Some(OPENING)).then_some(glance)
     }
 
     /// Keeps a plain send of the owner's for this agent while it is being opened (issue 935): on
@@ -1401,11 +1430,16 @@ impl AgentHandle {
 
     /// Everything that is shown of the agent's turn as it runs.
     pub async fn shown(&self) -> Result<Value, Unavailable> {
-        if let Some(read) = self
-            .read_glance(|actor, now| Ok(actor.shown_whole(now)))
-            .await
-        {
-            return read;
+        if let Some(glance) = self.opening_glance().await {
+            return glance
+                .read(|glance, now| match &glance.live {
+                    Some(live) => live
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .snapshot(now),
+                    None => Ok(glance.actor().shown_whole(now)),
+                })
+                .await;
         }
         self.ask(|answer| Ask::Shown { answer }).await
     }
@@ -6238,10 +6272,8 @@ impl Worker {
         phases.begin("publish");
         // The glance is there before its view says so: whoever sees the view finds it.
         if let Some(actor) = self.actor.take() {
-            self.glance.set(Some(Arc::new(Glance {
-                actor: Mutex::new(actor),
-                clock: self.setup.clock.clone(),
-            })));
+            self.glance
+                .set(Some(Arc::new(Glance::new(actor, self.setup.clock.clone()))));
         }
         if let Some(view) = view {
             self.view.send_replace(view);
@@ -7419,10 +7451,9 @@ mod mailbox_tests {
         let clock: Arc<dyn Clock + Send + Sync> = Arc::new(clarp_ports::clock::SystemClock);
 
         // The glance is read, and its view says so; the opening is still held.
-        handle.glance.set(Some(Arc::new(Glance {
-            actor: Mutex::new(glance),
-            clock,
-        })));
+        handle
+            .glance
+            .set(Some(Arc::new(Glance::new(glance, clock))));
         view_tx.send_replace(Arc::new(View {
             glanced: true,
             ..opening

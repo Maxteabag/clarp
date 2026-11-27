@@ -1850,6 +1850,27 @@ fn a_glance_shows_the_running_turn_and_the_conversation_as_committed_and_writes_
     );
     let glanced_page = glance.tail(10).unwrap();
     let glanced_live = glance.shown_whole(now);
+
+    // The independently rendered live view keeps the request's clock and the
+    // committed journal state, including the tools reconstructed from the spool.
+    let read = world
+        .engine
+        .read_committed(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mut separated = Actor::glance(
+        world.profile.clone(),
+        world.backend.clone(),
+        read,
+        now,
+        &mut clarp_actor::Phases::default(),
+    )
+    .unwrap();
+    let mut view = separated.take_glance_live().unwrap();
+    assert_eq!(view.snapshot(now).unwrap(), glanced_live);
+    let later = now + 30_000;
+    assert_eq!(view.snapshot(later).unwrap(), glance.shown_whole(later));
+    assert_eq!(chat(&separated.tail(10).unwrap()), chat(&glanced_page));
+    assert_eq!(writer.last_seq().unwrap(), committed);
     drop(writer);
 
     // Its opening shows the same.
