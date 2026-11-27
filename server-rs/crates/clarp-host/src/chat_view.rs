@@ -1,14 +1,14 @@
 //! The user's view preference for one chat.
 
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use clarp_kernel::chat_view::{View, setting_key};
 use clarp_kernel::python;
 use serde_json::{Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::Directory;
 
 pub(crate) fn preference(directory: &Directory, agent: &str) -> View {
@@ -20,10 +20,11 @@ pub(crate) fn preference(directory: &Directory, agent: &str) -> View {
 
 pub(crate) async fn set(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if crate::coordination::from_an_agent(&headers) {
+    if principal.is_agent_request(&headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     let bad = |words: &str| ApiError::new(StatusCode::BAD_REQUEST, words);

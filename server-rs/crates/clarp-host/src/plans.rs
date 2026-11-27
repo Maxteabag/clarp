@@ -13,13 +13,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::{Extension, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::Member;
 use crate::goaltool::{self, Ask};
 
@@ -111,6 +111,7 @@ fn said(data: &serde_json::Map<String, Value>, key: &str) -> String {
 /// then is, or 409 with the rule that refused.
 async fn action(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
@@ -133,6 +134,18 @@ async fn action(
         }
         None => None,
     };
+    let member = owner(&app, &plan_id);
+    if principal == Principal::Tools {
+        let caller = caller.as_ref().ok_or_else(|| {
+            ApiError::new(StatusCode::FORBIDDEN, "verified turn identity required")
+        })?;
+        let reader = crate::bound_privacy::Reader::agent(&caller.record);
+        if let Some(member) = &member
+            && !crate::bound_privacy::may_read(&reader, &member.record)
+        {
+            return Err(crate::bound_privacy::words_refused(&member.record.persona));
+        }
+    }
     let action = said(given, "action");
     let data = given.get("data").cloned().unwrap_or(Value::Null);
     let (ask, attribution) = match caller {
@@ -155,7 +168,7 @@ async fn action(
             crate::agent::GoalCaller::Default,
         ),
     };
-    let answered = match owner(&app, &plan_id) {
+    let answered = match member {
         Some(member) => member.agent.goal_as(ask, attribution).await?,
         None => goaltool::nobody(&ask, app.clock.now_ms()),
     };

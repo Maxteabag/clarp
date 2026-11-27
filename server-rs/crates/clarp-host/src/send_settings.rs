@@ -3,14 +3,14 @@
 //! app (`send-settings-updated`). It is kept among the Host's settings, so it is the same in
 //! every app; each app sends it as `while_busy` with the owner's sends.
 
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use clarp_kernel::while_busy::{KEY, NOT_A_VALUE, WhileBusy};
 use serde_json::{Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 
 /// The kind of the event every app is told a change by.
 pub(crate) const CHANGED: &str = "send-settings-updated";
@@ -30,15 +30,14 @@ pub(crate) async fn get(State(app): State<App>) -> Json<Value> {
 }
 
 /// `POST /send-settings` with `{"while_busy": ...}`: only the owner changes it, with his token or
-/// a full device; a limited device and an agent's tools are kept out by their scope, and a
-/// request that names a turn or a peer Host is refused here, as the owner's other settings
-/// refuse it. Every app is told of a change.
+/// a full device. Every app is told of a change.
 pub(crate) async fn set(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if crate::coordination::from_an_agent(&headers) {
+    if principal.is_agent_request(&headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     let asked = serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null);

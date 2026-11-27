@@ -93,6 +93,12 @@ effect until the server restarts.
 
 ## Choosing a voice
 
+On Rust Hosts advertising `agent_token_api` (contract 216), use the local
+`CLARP_TOOL_TOKEN` as the bearer for `/cartesia-voices`, `/agents/<session>`,
+`/agent-voice` and `/personas/update`. Send the current turn's
+`CLARP_PROVIDER_TURN` in `X-Clarp-Turn` for attribution. These requests retain
+the agent's identity and the endpoint's usual privacy and ownership checks.
+
 `GET /cartesia-voices` returns the English catalog: `name`, `tagline`,
 `description`, `gender`, `country`, `preview_url`, `selection_value`, and
 `taken_by`. Play `preview_url` for the shortlist and let the user pick; do not

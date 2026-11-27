@@ -11,14 +11,14 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use serde_json::{Map, Value, json};
 
 use crate::cold_starts::Counted;
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::lane::{self, Holding, MIB, Memory, Mode, Settings, Tool};
 
 /// The kind of the event every app is told a change by: it reads `GET /lane-settings` again.
@@ -214,15 +214,14 @@ pub(crate) async fn get(State(app): State<App>) -> Result<Json<Value>, ApiError>
     now(&app).await.map(Json)
 }
 
-/// `POST /lane-settings`: only the owner changes it. An agent's tools are kept out by their
-/// token's scope; a request that names a turn or a peer Host is refused here, as the owner's
-/// other settings refuse it.
+/// `POST /lane-settings`: only the owner changes it, as with his other settings.
 pub(crate) async fn set(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    if crate::coordination::from_an_agent(&headers) {
+    if principal.is_agent_request(&headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     let wanted = asked(&body)?;

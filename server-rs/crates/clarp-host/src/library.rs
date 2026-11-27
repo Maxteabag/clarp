@@ -1202,6 +1202,18 @@ async fn post_artifact(
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
     let path = rest.trim_matches('/');
+    if principal == Principal::Tools {
+        if path.ends_with("/submit") {
+            return Err(refused(StatusCode::FORBIDDEN, "owner submission required"));
+        }
+        let id = path.split('/').next().unwrap_or_default();
+        if let Some(member) = Fleet::of(&app).holder(id, true) {
+            let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await?;
+            if !crate::bound_privacy::may_read(&reader, &member.record) {
+                return Err(crate::bound_privacy::words_refused(&member.record.persona));
+            }
+        }
+    }
     if let Some(id) = path.strip_suffix("/events") {
         events::full(&principal)?;
         let data = clarp_kernel::artifacts::form_events::posted(&body)
@@ -1548,6 +1560,7 @@ fn push_request(app: &App, artifact: &Value) {
 /// `POST /decisions/<id>/resolve`, `/dismiss` and `/withdraw`.
 async fn post_decision(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Path(rest): Path<String>,
     headers: HeaderMap,
     body: axum::body::Bytes,
@@ -1556,7 +1569,38 @@ async fn post_decision(
     let turn = headers
         .get(crate::turn_identity::HEADER)
         .map(|token| token.to_str().unwrap_or_default());
-    Ok(Json(decide(&app, &rest, turn, &object(&body)?).await?))
+    let data = object(&body)?;
+    if principal == Principal::Tools
+        && let Some((id, action)) = rest.trim_matches('/').rsplit_once('/')
+    {
+        match action {
+            "resolve" if turn.is_none() => {
+                return Err(refused(
+                    StatusCode::FORBIDDEN,
+                    "verified turn identity required",
+                ));
+            }
+            "dismiss" => return Err(refused(StatusCode::FORBIDDEN, "owner dismissal required")),
+            "withdraw" => {
+                let member = crate::turn_identity::presented(&app, turn).await?;
+                let session = data.get("session").and_then(Value::as_str).map(str::trim);
+                if !member.is_some_and(|member| session == Some(member.record.session.as_str())) {
+                    return Err(refused(
+                        StatusCode::FORBIDDEN,
+                        "only the requesting agent may withdraw",
+                    ));
+                }
+            }
+            _ => {}
+        }
+        if let Some(member) = Fleet::holding(&app, id).asker(id) {
+            let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await?;
+            if !crate::bound_privacy::may_read(&reader, &member.record) {
+                return Err(crate::bound_privacy::words_refused(&member.record.persona));
+            }
+        }
+    }
+    Ok(Json(decide(&app, &rest, turn, &data).await?))
 }
 
 /// Ends a request: the user answers or discards it, the agent takes it back. `rest` is what

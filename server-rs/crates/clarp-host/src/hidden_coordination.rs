@@ -2,15 +2,15 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use axum::Json;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use clarp_kernel::hidden_coordination::{self as rules, Visibility};
 use clarp_kernel::python;
 use serde_json::{Value, json};
 
-use crate::edge::{ApiError, App};
+use crate::edge::{ApiError, App, Principal};
 use crate::fleet::{AgentRecord, Directory};
 
 #[derive(Default)]
@@ -119,8 +119,8 @@ pub(crate) fn hides(directory: &Directory, agent_id: &str) -> bool {
         .map_or(roster.global == Visibility::Hide, |chat| chat.hides)
 }
 
-fn owner(headers: &HeaderMap) -> Result<(), ApiError> {
-    if crate::coordination::from_an_agent(headers) {
+fn owner(principal: &Principal, headers: &HeaderMap) -> Result<(), ApiError> {
+    if principal.is_agent_request(headers) {
         return Err(ApiError::new(StatusCode::FORBIDDEN, "agents_may_not"));
     }
     Ok(())
@@ -137,10 +137,11 @@ pub(crate) async fn get(State(app): State<App>) -> Json<Value> {
 
 pub(crate) async fn set(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    owner(&headers)?;
+    owner(&principal, &headers)?;
     let asked = serde_json::from_slice::<Value>(&body).unwrap_or_default();
     let asked = asked
         .get("coordination_visibility")
@@ -155,10 +156,11 @@ pub(crate) async fn set(
 
 pub(crate) async fn set_chat(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    owner(&headers)?;
+    owner(&principal, &headers)?;
     let asked = serde_json::from_slice::<Value>(&body)
         .ok()
         .filter(Value::is_object)
