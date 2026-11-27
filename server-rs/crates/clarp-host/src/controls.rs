@@ -3,13 +3,60 @@
 //! Who acts and why is the kernel's rule ([`clarp_kernel::control`]); this finds out whose turn a
 //! token is, asks the agent, and answers in the Python Host's shapes and words.
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use clarp_kernel::control::{self, Control};
 use clarp_kernel::python;
 use clarp_protocol::responses::StopResponse;
 use serde_json::{Map, Value, json};
 
-use crate::edge::{ApiError, App, Principal};
+use crate::bound_privacy::{self, Reader};
+use crate::edge::{ApiError, App, Principal, turn_of};
+use crate::fleet::AgentRecord;
+
+/// The caller of a mutation that needs attribution or touches a particular agent's state.
+pub(crate) struct MutationCaller {
+    pub actor: String,
+    reader: Reader,
+}
+
+impl MutationCaller {
+    pub(crate) async fn from_request(
+        app: &App,
+        principal: &Principal,
+        headers: &HeaderMap,
+    ) -> Result<Self, ApiError> {
+        match crate::turn_identity::presented(app, turn_of(headers)).await? {
+            Some(member) => Ok(Self {
+                actor: format!("agent:{}", member.record.session),
+                reader: Reader::agent(&member.record),
+            }),
+            None if *principal == Principal::Tools => Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "verified turn identity required",
+            )),
+            None => Ok(Self {
+                actor: control::USER.to_owned(),
+                reader: Reader::Owner,
+            }),
+        }
+    }
+
+    pub(crate) fn agent_id(&self) -> Option<&str> {
+        self.reader.agent_id()
+    }
+
+    pub(crate) fn may_read(&self, record: &AgentRecord) -> bool {
+        bound_privacy::may_read(&self.reader, record)
+    }
+
+    pub(crate) fn require_readable(&self, record: &AgentRecord) -> Result<(), ApiError> {
+        if self.may_read(record) {
+            Ok(())
+        } else {
+            Err(bound_privacy::words_refused(&record.persona))
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum Caller {
