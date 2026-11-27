@@ -201,7 +201,9 @@ printf '%s\n' '{"type":"result","subtype":"success","session_id":"voice-fixture"
         "/personas/update",
         json!({"original_name":"Voice Contact","name":"Voice Contact","voice_id":contact_voice}),
     );
-    assert_eq!(edited["persona"]["voice_id"], contact_voice);
+    let voices: Value =
+        serde_json::from_str(edited["persona"]["voice_id"].as_str().unwrap()).unwrap();
+    assert_eq!(voices["elevenlabs"], "new-voice");
     let agent = made["agent"]["agent_id"].as_str().unwrap();
     wait_for("agent-attributed audit of all four routes", || {
         let seen = host.heard.lock().unwrap();
