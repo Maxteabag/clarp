@@ -118,8 +118,6 @@ impl Shelf {
 
     fn link(&self, root: Root, skill: &str) -> Link {
         let place = self.place(root, skill);
-        let source = text(&resolve(&self.source(skill)));
-        let releases: Vec<&str> = self.releases.iter().map(String::as_str).collect();
         let resolved;
         let at = match std::fs::symlink_metadata(&place) {
             Err(_) => At::Nothing,
@@ -129,7 +127,55 @@ impl Shelf {
             }
             Ok(_) => At::Thing,
         };
+        self.state_of(at, skill)
+    }
+
+    /// How a place stands, given what is there: the kernel's rule.
+    fn state_of(&self, at: At, skill: &str) -> Link {
+        let source = text(&resolve(&self.source(skill)));
+        let releases: Vec<&str> = self.releases.iter().map(String::as_str).collect();
         rules::link_state(at, &source, &releases, skill)
+    }
+
+    /// The release a link listed in a tool's folder leads into, for the install record: Some
+    /// where it is a link of Clarp's, None where it is not (or is gone), and an error where
+    /// that cannot be told, since then it may lead into any release (issue 935). Unlike
+    /// `link`, which answers what the apps show, no error here is taken for nothing there.
+    fn release_of(&self, root: Root, skill: &str) -> io::Result<Option<String>> {
+        let place = self.place(root, skill);
+        let found = match std::fs::symlink_metadata(&place) {
+            Ok(found) => found,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        if !found.file_type().is_symlink() {
+            return Ok(None);
+        }
+        let resolved = text(&resolve_checked(&place)?);
+        Ok(match self.state_of(At::Link(&resolved), skill) {
+            Link::Healthy | Link::Outdated => Path::new(&resolved)
+                .parent()
+                .and_then(Path::parent)
+                .map(text),
+            _ => None,
+        })
+    }
+
+    /// Flushes the folders a change wrote links in, so that the links moved are on the disk
+    /// before the record says where they lead; and says each that could not be.
+    fn flush_folders(&self, roots: &[Root]) -> Vec<String> {
+        let mut unflushed = Vec::new();
+        for root in roots {
+            let folder = self.folder(*root);
+            match sync_dir(folder) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => unflushed.push(format!(
+                    "the folder {} could not be flushed: {error}",
+                    folder.display()
+                )),
+                _ => {}
+            }
+        }
+        unflushed
     }
 
     /// The rows of `GET /managed-skills`.
@@ -224,6 +270,16 @@ fn text_os(name: &std::ffi::OsStr) -> String {
 /// `Path.resolve(strict=False)` gives it: a part that is not there is kept as written, and a
 /// ring of links ends where it is found.
 pub fn resolve(path: &Path) -> PathBuf {
+    resolve_seen(path, false).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The same, where a part whose kind or link cannot be read is an error rather than taken as
+/// no link: a part that is not there is still kept as written.
+fn resolve_checked(path: &Path) -> io::Result<PathBuf> {
+    resolve_seen(path, true)
+}
+
+fn resolve_seen(path: &Path, checked: bool) -> io::Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -243,10 +299,24 @@ pub fn resolve(path: &Path) -> PathBuf {
             _ => {}
         }
         let next = done.join(&part);
-        let target = std::fs::symlink_metadata(&next)
-            .ok()
-            .filter(|found| found.file_type().is_symlink())
-            .and_then(|_| std::fs::read_link(&next).ok());
+        let target = match std::fs::symlink_metadata(&next) {
+            Ok(found) if found.file_type().is_symlink() => match std::fs::read_link(&next) {
+                Ok(target) => Some(target),
+                Err(error) if checked => return Err(error),
+                Err(_) => None,
+            },
+            Ok(_) => None,
+            Err(error)
+                if checked
+                    && !matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+            {
+                return Err(error);
+            }
+            Err(_) => None,
+        };
         match target {
             Some(target) if hops < 40 => {
                 hops += 1;
@@ -262,12 +332,17 @@ pub fn resolve(path: &Path) -> PathBuf {
                 for rest in todo.iter().rev() {
                     ring.push(rest);
                 }
-                return ring;
+                return Ok(ring);
             }
             None => done = next,
         }
     }
-    done
+    Ok(done)
+}
+
+/// Flushes a folder's entries (a rename or a link made in it) to the disk.
+fn sync_dir(dir: &Path) -> io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
 }
 
 fn parts(path: &Path) -> Vec<std::ffi::OsString> {
@@ -347,6 +422,10 @@ impl InstallState {
             steps.mark("sync");
             std::fs::rename(&beside, path)?;
             steps.mark("rename");
+            // The rename is on the disk only once the folder is: before a link is moved after
+            // it, and before the record is taken as said (issue 935).
+            sync_dir(path.parent().unwrap_or(Path::new(".")))?;
+            steps.mark("dirsync");
             Ok(())
         })();
         if write.is_err() {
@@ -453,9 +532,10 @@ async fn changed(app: &App, shelf: Shelf, skill: String, enabled: bool) -> Resul
         state.skills =
             rules::enrolled(&state.skills_off, &items).map_err(|Malformed| unavailable())?;
         let undo = shelf.apply(&skill, &acts).map_err(disk_error)?;
+        let unflushed = shelf.flush_folders(&written);
         let (after, unlisted) = shelf.linked_releases(&written);
-        state.linked_releases =
-            settled(state.linked_releases.as_deref(), after, unlisted.is_empty());
+        let whole = unlisted.is_empty() && unflushed.is_empty();
+        state.linked_releases = settled(state.linked_releases.as_deref(), after, whole);
         if let Err(error) = state.keep(&path) {
             undo.run();
             return Err(disk_error(error));
@@ -688,10 +768,13 @@ impl Shelf {
             }
         }
         steps.mark("links");
+        let unflushed = self.flush_folders(&roots);
+        steps.mark("folders");
         let (after, unlisted) = self.linked_releases(&roots);
-        state.linked_releases =
-            settled(state.linked_releases.as_deref(), after, unlisted.is_empty());
+        let whole = unlisted.is_empty() && unflushed.is_empty();
+        state.linked_releases = settled(state.linked_releases.as_deref(), after, whole);
         done.failed.extend(unlisted);
+        done.failed.extend(unflushed);
         done.releases = state.linked_releases.as_ref().map_or(0, Vec::len);
         steps.mark("scan");
         // The tests hold the reconciliation here, its links moved and its record not yet
@@ -779,18 +862,17 @@ impl Shelf {
                 }
             };
             for skill in names {
-                // A link listed whose target cannot be read (a folder that may be listed but not
-                // searched) may lead into any release: the folder counts as not listed.
-                let place = self.place(*root, &skill);
-                if let Err(error) = std::fs::read_link(&place) {
-                    let place = place.display();
-                    unlisted.push(format!("the link {place} could not be read: {error}"));
-                    continue;
-                }
-                if matches!(self.link(*root, &skill), Link::Healthy | Link::Outdated) {
-                    let resolved = resolve(&self.place(*root, &skill));
-                    if let Some(release) = resolved.parent().and_then(Path::parent) {
-                        releases.insert(text(release));
+                // A link listed that cannot be looked at or followed (a folder that may be
+                // listed but not searched) may lead into any release: not listed, then.
+                match self.release_of(*root, &skill) {
+                    Ok(Some(release)) => {
+                        releases.insert(release);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        let place = self.place(*root, &skill);
+                        let place = place.display();
+                        unlisted.push(format!("the link {place} could not be read: {error}"));
                     }
                 }
             }
