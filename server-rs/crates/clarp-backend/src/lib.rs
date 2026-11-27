@@ -254,6 +254,12 @@ pub trait Backend: Send + Sync {
 
     fn launch(&self, spec: &TurnSpec) -> Launch;
 
+    /// A fresh turn that answers beside the agent's work with transcript context.
+    /// It never takes up the work session or gives the model tools with side effects.
+    fn conversation_launch(&self, _spec: &TurnSpec) -> Option<Launch> {
+        None
+    }
+
     /// The named session is usable as soon as the tool starts, even if it prints nothing.
     fn binds_at_spawn(&self) -> bool {
         false
@@ -462,6 +468,11 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
     }
+}
+
+/// Which backends can answer a conversation without taking up the work session.
+pub fn has_conversation(backend: &str) -> bool {
+    matches!(backend, "claude" | "codex" | "opencode" | "deepseek")
 }
 
 /// Codex for one agent bound to a provider of its own ([`own_provider`]): it runs in that

@@ -113,7 +113,7 @@ impl World {
                         let now = self.tick();
                         asked.push(actor.spool_changed(now).unwrap());
                     }
-                    Action::Fork(order) => {
+                    Action::Fork { order, .. } => {
                         self.launch(&order);
                         self.forks.push(*order);
                         let now = self.tick();

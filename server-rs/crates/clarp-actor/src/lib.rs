@@ -270,7 +270,7 @@ pub enum Action {
     Steer { socket: PathBuf, input: Steering },
     /// Start a shim for a turn of the agent's conversation fork ([`fork`]), and then follow
     /// it as [`Action::Launch`] says. Its tool is the agent's own, under the fork's session.
-    Fork(Box<ShimOrder>),
+    Fork { order: Box<ShimOrder>, native: bool },
     /// Follow the shim of a turn of the fork that ran on while the Host was away.
     ForkFollow {
         turn: TurnId,

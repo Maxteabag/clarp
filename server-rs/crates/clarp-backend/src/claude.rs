@@ -239,6 +239,23 @@ impl Backend for Claude {
     /// one question (`backend/claude.py`, `routing_cmd`), and with none of the user's own
     /// MCP servers, which a question has no use for and would wait for. What it prints is
     /// its answer.
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        let mut launch = self.launch(spec);
+        launch
+            .args
+            .retain(|arg| arg != "--dangerously-skip-permissions");
+        launch.args.extend([
+            "--no-session-persistence".into(),
+            "--permission-mode".into(),
+            "dontAsk".into(),
+            "--tools".into(),
+            String::new(),
+            "--setting-sources".into(),
+            String::new(),
+        ]);
+        Some(launch)
+    }
+
     fn once(&self, question: &crate::Question) -> Option<Launch> {
         let mut args: Vec<String> = [
             "-p",
@@ -2288,6 +2305,7 @@ mod tests {
                 trace_id: None,
                 tools: vec!["toolu_1".to_string()],
                 backend_session: None,
+                conversation_reply: false,
             }),
             "what the agent had written is kept, with the tool it had called"
         );

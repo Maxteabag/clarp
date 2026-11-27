@@ -65,6 +65,60 @@ send("result", subtype="success", is_error=False, result="done")
 
 const OWNER: &str = "fixture-owner-token";
 
+const CODEX: &str = r#"#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import signal
+import sys
+import time
+
+if '--version' in sys.argv:
+    print('codex-cli 0.167.1')
+    raise SystemExit(0)
+
+root = pathlib.Path(__file__).resolve().parent
+prompt = sys.stdin.read()
+side = 'short-lived conversation session' in prompt
+thread = 'fresh-side' if side else 'work-thread'
+
+def say(kind, **fields):
+    print(json.dumps({'type':kind, **fields}), flush=True)
+
+def reply(text):
+    say('item.completed', item={'type':'agent_message', 'id':'words', 'text':text})
+
+def stopped(*_):
+    (root / ('side-stopped' if side else 'main-stopped')).touch()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGINT, stopped)
+signal.signal(signal.SIGTERM, stopped)
+say('thread.started',thread_id=thread)
+say('turn.started')
+if side:
+    assert '--ephemeral' in sys.argv and 'read-only' in sys.argv
+    assert 'resume' not in sys.argv and '--dangerously-bypass-approvals-and-sandbox' not in sys.argv
+    assert not os.environ.get('CLARP_TOOL_TOKEN') and not os.environ.get('CLARP_PROVIDER_TURN')
+    assert 'Owner work marker' in prompt and 'Earlier raw work' in prompt
+    (root / 'side-prompt').write_text(prompt)
+    reply('Reply from the fresh conversation.')
+    (root / 'side-running').touch()
+    while not ((root / 'finish-side').exists() or (root / 'finish').exists()):
+        time.sleep(0.02)
+elif 'Continue with the next work request.' in prompt:
+    if 'The fork replied: "Reply from the fresh conversation."' in prompt:
+        (root / 'note-read').touch()
+    reply('Next work turn.')
+else:
+    reply('Earlier raw work. <speak>Deliberate work announcement.</speak>')
+    (root / 'main-running').touch()
+    while not ((root / 'finish-main').exists() or (root / 'finish').exists()):
+        time.sleep(0.02)
+    (root / 'main-finished').touch()
+say('turn.completed', usage={'input_tokens':6,'output_tokens':4})
+"#;
+
 fn row(host: &Host, session: &str) -> Value {
     host.get("/agents/snapshot")["agents"]
         .as_array()
@@ -145,9 +199,13 @@ impl Drop for Finish {
 
 impl Forking {
     fn new(name: &str) -> Self {
+        Self::new_on(name, "claude", "CLARP_CLAUDE_PROGRAM", CLAUDE)
+    }
+
+    fn new_on(name: &str, backend: &str, program_env: &str, fixture: &str) -> Self {
         let place = Place::new(name);
-        let claude = place.root.join("claude");
-        program(&claude, CLAUDE);
+        let tool = place.root.join(backend);
+        program(&tool, fixture);
         let xdg = place.root.join("xdg");
         std::fs::create_dir_all(xdg.join("clarp-host")).unwrap();
         std::fs::write(
@@ -156,14 +214,14 @@ impl Forking {
         )
         .unwrap();
         let world = [
-            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            (program_env, tool.to_str().unwrap()),
             ("XDG_CONFIG_HOME", xdg.to_str().unwrap()),
         ];
         let finish = Finish(place.root.join("finish"));
         let host = place.start_in(OWNER, &[], &world);
         host.post(
             "/agents",
-            json!({"name": "Oak", "session": "oak", "backend": "claude"}),
+            json!({"name": "Oak", "session": "oak", "backend": backend}),
         );
         host.post(
             "/agent-chat-view",
@@ -222,6 +280,69 @@ impl Forking {
     fn grace(&self) {
         std::thread::sleep(Duration::from_millis(5_500));
     }
+}
+
+#[test]
+fn codex_conversation_reads_committed_context_and_leaves_work_and_projection_intact() {
+    let forking = Forking::new_on("codex-conversation", "codex", "CLARP_CODEX_PROGRAM", CODEX);
+    let host = &forking.host;
+    host.send("oak", "Owner work marker", "work");
+    waited(host, "the separate work turn", || {
+        forking.at("main-running").exists()
+    });
+    let main = live(host, "oak");
+    assert_ne!(main["conversation_turn"], true);
+    let main_id = main["turn"]["turn_id"].clone();
+    assert!(main_id.is_string());
+    host.post("/send", json!({
+        "session":"oak", "text":"Hello, how are you?", "client_msg_id":"greeting", "while_busy":"take_over",
+    }));
+    waited(host, "the fresh Codex conversation reply", || {
+        forking.at("side-running").exists()
+            && host
+                .turns("oak")
+                .iter()
+                .any(|row| row["text"] == "Reply from the fresh conversation.")
+    });
+    let shown = live(host, "oak");
+    assert_eq!(shown["conversation_turn"], true, "{shown}");
+    assert_eq!(shown["main_turn"]["turn_id"], main_id, "{shown}");
+    assert!(!forking.at("main-stopped").exists());
+    let rows = host.turns("oak");
+    let work = rows
+        .iter()
+        .find(|row| {
+            row["text"]
+                .as_str()
+                .is_some_and(|v| v.starts_with("Earlier raw work."))
+        })
+        .unwrap();
+    assert_eq!(
+        work["conversation_text"], "Deliberate work announcement.",
+        "{work}"
+    );
+    let answer = rows
+        .iter()
+        .find(|row| row["text"] == "Reply from the fresh conversation.")
+        .unwrap();
+    assert_eq!(
+        answer["conversation_text"],
+        "Reply from the fresh conversation."
+    );
+    std::fs::write(forking.at("finish-side"), "").unwrap();
+    waited(host, "the work live again", || {
+        live(host, "oak")["turn"]["turn_id"] == main_id
+    });
+    std::fs::write(forking.at("finish-main"), "").unwrap();
+    waited(host, "work finishes without stop", || {
+        forking.at("main-finished").exists() && row(host, "oak")["busy"] == false
+    });
+    host.send("oak", "Continue with the next work request.", "continue");
+    waited(
+        host,
+        "the next work prompt includes the conversation note",
+        || forking.at("note-read").exists(),
+    );
 }
 
 /// Waits for `ready`; when it does not come, says what the agent's chat, its live view, its

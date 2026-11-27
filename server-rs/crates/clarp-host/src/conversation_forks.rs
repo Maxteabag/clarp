@@ -19,10 +19,10 @@ impl Named {
         Self(table.and_then(|mut table| table.remove("conversation_forks")))
     }
 
-    /// Whether this agent may fork: Claude Code, and named by its session or its id. What
+    /// Whether this agent may answer beside its work: named by its session or its id. What
     /// the apps are told per agent (`conversation_fork` in the snapshot).
     pub(crate) fn allows(&self, backend: &str, agent_id: &str, session: &str) -> bool {
-        backend == "claude" && names(self.0.as_ref(), agent_id, session)
+        clarp_backend::has_conversation(backend) && names(self.0.as_ref(), agent_id, session)
     }
 }
 
@@ -42,12 +42,12 @@ fn names(section: Option<&toml::Value>, agent_id: &str, session: &str) -> bool {
         .any(|named| !named.is_empty() && (named == session || named == agent_id))
 }
 
-/// Whether a message of the user's to this agent may go to its fork: Claude Code, the chat
-/// seen in Conversation view (Session view is the one session, and is never forked), and the
-/// agent named in the owner's setting. Whether its tool has a running session to copy is the
-/// actor's to say ([`clarp_actor::Actor::fork_take`]).
+/// Whether a user's message may go to the conversation lane for a named agent. The actor
+/// chooses between a native fork and a fresh conversation on that backend.
 pub(crate) fn may_fork(backend: &str, view: View, agent_id: &str, session: &str) -> bool {
-    backend == "claude" && view == View::Conversation && named(agent_id, session)
+    clarp_backend::has_conversation(backend)
+        && view == View::Conversation
+        && named(agent_id, session)
 }
 
 /// Puts `extra` (Claude Code settings, JSON) into the turn's arguments: into the `--settings`
@@ -109,9 +109,9 @@ mod tests {
     }
 
     #[test]
-    fn session_view_and_other_tools_never_fork() {
+    fn session_view_and_unsupported_backends_never_fork() {
         // The setting is not read for these: nothing names them on a test machine either.
-        assert!(!may_fork("codex", View::Conversation, "a-1", "x"));
+        assert!(!may_fork("grok", View::Conversation, "a-1", "x"));
         assert!(!may_fork("claude", View::Session, "a-1", "x"));
     }
 

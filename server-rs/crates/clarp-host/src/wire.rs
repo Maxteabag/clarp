@@ -1854,6 +1854,11 @@ pub fn log_response(
     let conversation = conversation_id(record, status);
     let file = (record.backend == "claude" && !conversation.is_empty())
         .then(|| format!("{conversation}.jsonl"));
+    let clean = crate::conversation_forks::Named::read().allows(
+        &record.backend,
+        &record.agent_id,
+        &record.session,
+    );
     json!({
         "conversation_id": conversation,
         "turns": page.entries.iter().map(|version| {
@@ -1862,6 +1867,9 @@ pub fn log_response(
             // that cannot leave a note.
             if row.is_object() && (!hides || row.get("audience").is_none()) {
                 row["audience"] = json!(coordination::USER);
+            }
+            if clean && row.is_object() {
+                row["conversation_text"] = json!(conversation_text(&version.entry, &row));
             }
             if let Some(fields) = row.as_object_mut() {
                 use clarp_kernel::chat_view::View;
@@ -1900,6 +1908,20 @@ pub fn log_response(
         "file": file,
         "includes_automated": true,
     })
+}
+
+/// The text the Conversation view shows for an agent using the conversation lane.
+fn conversation_text(entry: &Entry, row: &Value) -> Option<String> {
+    let text = row["text"].as_str()?;
+    let shown = match entry {
+        Entry::Message(message) if message.origin.is_user_send() => text.to_owned(),
+        Entry::Note(_) => text.to_owned(),
+        Entry::Reply(reply) if reply.conversation_reply => text.to_owned(),
+        Entry::Reply(_) => markup::speak_blocks(text, false).join("\n\n"),
+        Entry::Imported(_) if row["role"] == "user" && row["origin"] == "user" => text.to_owned(),
+        _ => return None,
+    };
+    (!shown.trim().is_empty()).then_some(shown)
 }
 
 /// A text as a card's header shows it: 240 signs at most, the last of them an ellipsis.
@@ -2643,6 +2665,7 @@ mod tests {
             trace_id: None,
             tools: tools.iter().map(|call| call.id.clone()).collect(),
             backend_session: None,
+            conversation_reply: false,
         })
     }
 
@@ -4105,6 +4128,7 @@ mod tests {
                             origin: Origin::Agent { agent_id },
                             tools: Vec::new(),
                             backend_session: None,
+                            conversation_reply: false,
                         })
                     };
                     row(&version(entry, (n as u64 + 1) << 20, None))

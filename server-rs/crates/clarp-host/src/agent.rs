@@ -5779,7 +5779,7 @@ impl Worker {
                 self.write_followup(socket, input);
                 return;
             }
-            Action::Fork(order) => self.launch_fork(*order, tx),
+            Action::Fork { order, native } => self.launch_fork(*order, native, tx),
             // The check can take seconds: it runs on a thread of its own, and its answer
             // comes back as any other. One runs at a time: a check asked for meanwhile is
             // made when it is over, the newest of them only.
@@ -5849,27 +5849,30 @@ impl Worker {
         launcher::may_be_starting(&spools)
     }
 
-    /// Starts a turn of the agent's conversation fork: with the agent's own tool settings, so
-    /// that it reads what the provider cached for the agent's session, and as one of the
-    /// agent's turns for its tools. Nothing waits for an account, a terminal or a permit: the
+    /// Starts a conversation turn on the agent's provider. A native fork keeps its own work
+    /// settings and tool identity. A fresh conversation has only its transcript context.
+    /// Nothing waits for an account, a terminal or a permit: the
     /// fork's message is the agent's own again if it cannot start.
     fn launch_fork(
         &mut self,
         mut order: clarp_actor::ShimOrder,
+        native: bool,
         tx: mpsc::Sender<Ask>,
     ) -> std::io::Result<std::thread::JoinHandle<()>> {
-        if let Some(settings) = self
-            .setup
-            .launcher
-            .claude_settings(&self.setup.record.agent_id)
+        if native
+            && let Some(settings) = self
+                .setup
+                .launcher
+                .claude_settings(&self.setup.record.agent_id)
         {
             // Into the fork's own settings, which carry its edit guard: one `--settings`.
             crate::conversation_forks::add_settings(&mut order.args, &settings);
         }
-        if let Some(token) = self
-            .setup
-            .turns
-            .token(&self.setup.record.agent_id, order.turn.0)
+        if native
+            && let Some(token) = self
+                .setup
+                .turns
+                .token(&self.setup.record.agent_id, order.turn.0)
         {
             order
                 .env
@@ -5897,7 +5900,11 @@ impl Worker {
                 if let Some(pool) = pool {
                     pool.guard_turn(&mut order);
                 }
-                let _mcp = crate::mcp::configure(&mut order, strict, servers.as_deref());
+                let _mcp = if native {
+                    crate::mcp::configure(&mut order, strict, servers.as_deref())
+                } else {
+                    None
+                };
                 launcher
                     .launch_and_follow(&order, &starting, &|told| tell(&tx, turn, attempt, told));
             })

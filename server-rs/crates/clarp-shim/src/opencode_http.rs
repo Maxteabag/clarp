@@ -201,16 +201,7 @@ impl Client {
 
     pub(crate) fn open_session(&self, old: &str) -> Result<String> {
         if old.is_empty() {
-            let rules: Vec<_> = ["question", "plan_enter", "plan_exit"]
-                .iter()
-                .map(|rule| json!({"permission":rule,"pattern":"*","action":"deny"}))
-                .collect();
-            let result = self.post("/session", Some(&json!({"permission":rules})), 30)?;
-            return result["id"]
-                .as_str()
-                .filter(|id| clarp_tool_args::native_session_name(id))
-                .map(str::to_owned)
-                .ok_or_else(|| "OpenCode did not create a session".into());
+            return self.create_session(&["question", "plan_enter", "plan_exit"]);
         }
         if !clarp_tool_args::native_session_name(old) {
             return Err(format!("OpenCode session {old} not found").into());
@@ -222,6 +213,23 @@ impl Client {
             return Err(format!("OpenCode session {old} not found").into());
         }
         Ok(old.to_string())
+    }
+
+    pub(crate) fn open_conversation(&self) -> Result<String> {
+        self.create_session(&["*"])
+    }
+
+    fn create_session(&self, deny: &[&str]) -> Result<String> {
+        let rules: Vec<_> = deny
+            .iter()
+            .map(|rule| json!({"permission":rule,"pattern":"*","action":"deny"}))
+            .collect();
+        let result = self.post("/session", Some(&json!({"permission":rules})), 30)?;
+        result["id"]
+            .as_str()
+            .filter(|id| clarp_tool_args::native_session_name(id))
+            .map(str::to_owned)
+            .ok_or_else(|| "OpenCode did not create a session".into())
     }
 }
 
@@ -306,6 +314,18 @@ mod tests {
                 }
                 request.push_str(&line);
             }
+            let length = request
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap_or(0);
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            request.push_str("\r\n");
+            request.push_str(std::str::from_utf8(&body).unwrap());
             let _ = socket.write_all(&reply);
             request
         });
@@ -317,6 +337,25 @@ mod tests {
             },
             server,
         )
+    }
+
+    #[test]
+    fn a_conversation_creates_a_fresh_session_that_denies_model_tools() {
+        let body = r#"{"id":"ses_conversation"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (client, server) = answering(response.into_bytes());
+        assert_eq!(client.open_conversation().unwrap(), "ses_conversation");
+        let request = server.join().unwrap();
+        assert!(request.starts_with("POST /session?directory="));
+        let (_, json) = request.split_once("\r\n\r\n").unwrap();
+        let asked: Value = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            asked,
+            json!({"permission":[{"permission":"*","pattern":"*","action":"deny"}]})
+        );
     }
 
     #[test]

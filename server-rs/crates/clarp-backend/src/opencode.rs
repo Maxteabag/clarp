@@ -25,6 +25,33 @@ fn permissions() -> (String, String) {
     )
 }
 
+impl OpenCode {
+    fn live_turn(&self, spec: &TurnSpec, prompt: &str, conversation: bool) -> Launch {
+        let mut body = json!({
+            "model": spec.model.as_deref().unwrap_or(""),
+            "effort": spec.effort.as_deref().unwrap_or(""),
+            "prompt": prompt,
+            "session": spec.backend_session.as_deref().unwrap_or(""),
+        });
+        if conversation {
+            body["conversation"] = json!(true);
+        }
+        let permission = if conversation {
+            ("OPENCODE_PERMISSION".into(), r#"{"*":"deny"}"#.into())
+        } else {
+            permissions()
+        };
+        Launch {
+            program: "clarp-shim".into(),
+            args: vec!["opencode-turn".into(), self.1.clone()],
+            prompt_as_file: false,
+            before_stop: Some(("SIGUSR1", 3000)),
+            env: vec![(SESSION_ENV.into(), spec.session.clone()), permission],
+            stdin: body.to_string().into_bytes(),
+        }
+    }
+}
+
 impl Backend for OpenCode {
     fn id(&self) -> &'static str {
         self.0
@@ -54,18 +81,8 @@ impl Backend for OpenCode {
                 told::headed(&head, None, &spec.prompt)
             },
         );
-        let env = vec![(SESSION_ENV.into(), spec.session.clone()), permissions()];
         if live() {
-            return Launch {
-                program: "clarp-shim".into(),
-                args: vec!["opencode-turn".into(), self.1.clone()],
-                prompt_as_file: false,
-                before_stop: Some(("SIGUSR1", 3000)),
-                env,
-                stdin: json!({"model":model,"effort":effort,"prompt":prompt,"session":session})
-                    .to_string()
-                    .into_bytes(),
-            };
+            return self.live_turn(spec, &prompt, false);
         }
         let mut args = rules::command(session, model, effort, true);
         args.push(prompt);
@@ -74,9 +91,17 @@ impl Backend for OpenCode {
             prompt_as_file: false,
             before_stop: None,
             args,
-            env,
+            env: vec![(SESSION_ENV.into(), spec.session.clone()), permissions()],
             stdin: Vec::new(),
         }
+    }
+
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        let prompt = spec.told.as_ref().map_or_else(
+            || spec.prompt.clone(),
+            |told| told::headed(&told.at_head(&spec.session), None, &spec.prompt),
+        );
+        Some(self.live_turn(spec, &prompt, true))
     }
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(Stream {

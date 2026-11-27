@@ -144,6 +144,9 @@ pub struct Reply {
     pub id: String,
     pub turn: u64,
     pub text: String,
+    /// An answer from the conversation lane, rather than the work session.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub conversation_reply: bool,
     /// The trace of the turn that said it: the id the message was sent under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,

@@ -216,6 +216,36 @@ impl Backend for Codex {
         }
     }
 
+    fn conversation_launch(&self, spec: &TurnSpec) -> Option<Launch> {
+        let mut launch = self.launch(spec);
+        launch
+            .args
+            .retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox");
+        let restrictions = [
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--ignore-rules",
+            "--sandbox",
+            "read-only",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "web_search=\"disabled\"",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "mcp_servers={}",
+        ];
+        let features = NOTHING_TO_ACT_WITH
+            .iter()
+            .flat_map(|feature| ["--disable", *feature]);
+        launch.args.splice(
+            1..1,
+            restrictions.into_iter().chain(features).map(str::to_owned),
+        );
+        Some(launch)
+    }
+
     /// Codex's own directory (`CODEX_HOME`, else `.codex` at home; the agent's own home for
     /// one bound to a provider of its own) holds the login it runs with.
     fn login_file(&self, home: &Path) -> Option<PathBuf> {

@@ -1,10 +1,9 @@
 //! The agent's conversation fork (issue 718).
 //!
 //! In Conversation view, while the agent's own session is working, a message of the user's
-//! need not wait for it. The Host copies the tool's session (Claude
-//! Code's `--fork-session`, which keeps the context the provider has cached) and that copy,
-//! the fork, answers the user at once in the same chat, as the agent. Further messages of the
-//! user's go to the same fork. The agent's own session's next turn opens with a short note of
+//! need not wait for it. The Host copies Claude Code's work session when it has one. Otherwise
+//! it starts a short conversation with committed transcript context on the same backend.
+//! Further messages of the user's go to the same conversation lane. The next work turn opens with a short note of
 //! what the user said and what the fork answered and did; the fork's session is then closed
 //! and never used again.
 //!
@@ -51,6 +50,9 @@ pub const FORK_ATTEMPT: u32 = 1_001;
 /// How much of what was said a note keeps of each thing.
 const SHORT: usize = 600;
 
+/// Only the newest committed rows seed a fresh conversation. Tool output is left in the work session.
+const SEED_ROWS: usize = 12;
+
 /// What a fork's turn is told after the user's words. After them, so that everything before
 /// is what the agent's own session has cached.
 pub const BRIEF: &str = "<system-reminder>\nYou are a short-lived fork of your own session. \
@@ -60,6 +62,11 @@ user with clarp-admin tell-user, and relay work to other agents with clarp-admin
 Host refuses you file edits, helpers, background jobs and new agents. Do not start builds, \
 installs or other long work either. If something needs them, say so: your main session is told \
 what was said and done here before its next turn, and takes it up then.\n</system-reminder>";
+
+const SEEDED_BRIEF: &str = "<system-reminder>\nYou are the agent's short-lived conversation \
+session. The agent's work session continues separately. Use the recent conversation below as \
+background and reply to the user's latest message. Keep it short. Any new work the user asks for \
+is passed to the work session in a note.\n</system-reminder>";
 
 /// The tools of Claude Code that change files. A fork's are refused by a hook of its own: two
 /// sessions editing one working tree is what a fork must never do. A hook, and not a list of
@@ -152,6 +159,9 @@ struct Record {
     from: u64,
     /// The fork's own session with its tool.
     session: String,
+    /// The lane runs fresh short-lived turns instead of resuming a native copy of the work session.
+    #[serde(default)]
+    seeded: bool,
     /// The fork's session exists: its next turn takes it up instead of forking again.
     #[serde(default)]
     begun: bool,
@@ -209,6 +219,15 @@ struct Shown {
     events: Vec<serde_json::Value>,
     /// The `main_turn` last told, `Null` once told that none runs.
     told: Option<serde_json::Value>,
+}
+
+impl Shown {
+    fn give_events(&mut self, into: &mut Vec<serde_json::Value>) {
+        for event in &mut self.events {
+            event["conversation_turn"] = json!(true);
+        }
+        into.append(&mut self.events);
+    }
 }
 
 /// The operation that tells the agent's own turn beside the fork's (clarp-ios#139): a client
@@ -377,15 +396,14 @@ impl Actor {
         (running.turn.0 == turn).then(|| running.message.trace_id.clone().unwrap_or_default())
     }
 
-    /// The agent's own turn beside which a fork could answer the user now: one whose
-    /// Claude Code tool is running, has a session to copy, and has a usable fork.
+    /// The work turn beside which a conversation can answer now.
     fn fork_beside(&self) -> Option<TurnId> {
-        if self.backend.id() != "claude" {
+        if !clarp_backend::has_conversation(self.backend.id()) {
             return None;
         }
         let agent = self.recorder.agent();
         let live = agent.live().filter(|live| live.has_process())?;
-        if agent.stopping().is_some() || agent.backend_session().is_none() {
+        if agent.stopping().is_some() {
             return None;
         }
         let broken = self.fork.record.as_ref().is_some_and(|record| {
@@ -400,7 +418,7 @@ impl Actor {
     }
 
     /// Whether a message of the user's that waits is taken by the agent's fork, which answers
-    /// beside the agent's running Claude Code turn. The Host decides which agents and
+    /// beside the agent's running work turn. The Host decides which agents and
     /// chat views use this route. `false`: nothing changed, and the message is
     /// what it would have been without a fork.
     pub fn fork_take(&mut self, turn: TurnId, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
@@ -439,6 +457,8 @@ impl Actor {
                 Record {
                     from: main.0,
                     session,
+                    seeded: self.backend.id() != "claude"
+                        || self.recorder.agent().backend_session().is_none(),
                     begun: false,
                     broken: false,
                     asked: Vec::new(),
@@ -487,6 +507,43 @@ impl Actor {
         Ok((true, out))
     }
 
+    /// Recent committed conversation text for a fresh backend session.
+    fn conversation_seed(&self) -> String {
+        let page = conversation::tail(
+            self.recorder.log(),
+            &[],
+            self.span(),
+            SEED_ROWS,
+            conversation::Which::All,
+        );
+        let Ok(page) = page else {
+            return String::new();
+        };
+        let said: Vec<_> = page
+            .entries
+            .iter()
+            .filter_map(|row| {
+                let (by_the_user, text) = match &row.entry {
+                    Entry::Message(message) => (true, message.text.as_str()),
+                    Entry::Reply(reply) => (false, reply.text.as_str()),
+                    Entry::Note(note) => (false, note.text.as_str()),
+                    Entry::Imported(imported) => match imported.row["role"].as_str() {
+                        Some("user") => (true, imported.row["text"].as_str()?),
+                        Some("assistant") => (false, imported.row["text"].as_str()?),
+                        _ => return None,
+                    },
+                    _ => return None,
+                };
+                Some(clarp_kernel::fork::SaidThing {
+                    by_the_user,
+                    text: shortened(text),
+                    tools: Vec::new(),
+                })
+            })
+            .collect();
+        clarp_kernel::fork::seed(&said)
+    }
+
     /// Starts the fork's next turn, when it has a message waiting and nothing runs.
     fn fork_next(&mut self, out: &mut Outputs, now_ms: i64) -> Result<(), ActorError> {
         if self.fork.running.is_some() {
@@ -512,7 +569,10 @@ impl Actor {
         let turn = TurnId(record.asked[index].turn);
         let message = self.message_at(record.asked[index].message_seq)?;
         // The first turn copies the agent's own session; the next take up the copy.
-        let resumed = if record.begun {
+        let native = !record.seeded;
+        let resumed = if !native {
+            None
+        } else if record.begun {
             Some(record.session.clone())
         } else {
             self.recorder.agent().backend_session().map(str::to_owned)
@@ -520,7 +580,16 @@ impl Actor {
         let told = self.profile.told.as_ref();
         // The agent's own model and effort: what its session's cache was made with.
         let preferences = self.launch_preferences(&message);
-        let mut launch = self.backend.launch(&TurnSpec {
+        let prompt = if native {
+            format!("{}\n\n{BRIEF}", message.text)
+        } else {
+            let recent = self.conversation_seed();
+            format!(
+                "{}\n\n{SEEDED_BRIEF}\n\n<recent-conversation>\n{recent}\n</recent-conversation>",
+                message.text
+            )
+        };
+        let spec = TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
             turn: turn.0,
@@ -528,7 +597,7 @@ impl Actor {
             trace_id: message.trace_id.clone(),
             takeover: None,
             cwd: self.profile.cwd.clone(),
-            prompt: format!("{}\n\n{BRIEF}", message.text),
+            prompt,
             backend_session: resumed,
             new_session: None,
             model: preferences.model.clone(),
@@ -540,17 +609,27 @@ impl Actor {
                 call: None,
                 text_ack: self.text_turn_ack(&message),
             }),
-        });
-        if !record.begun {
+        };
+        let Some(mut launch) = (if native {
+            Some(self.backend.launch(&spec))
+        } else {
+            self.backend.conversation_launch(&spec)
+        }) else {
+            // A reserved message stays durable and returns when its work turn ends.
+            return Ok(());
+        };
+        if native && !record.begun {
             launch.args.extend([
                 "--fork-session".to_owned(),
                 "--session-id".to_owned(),
                 record.session.clone(),
             ]);
         }
-        launch
-            .args
-            .extend(["--settings".to_owned(), edit_guard().to_string()]);
+        if native {
+            launch
+                .args
+                .extend(["--settings".to_owned(), edit_guard().to_string()]);
+        }
         let stdin_file = self.profile.stdin_path_of(turn, FORK_ATTEMPT);
         write_whole(&stdin_file, &launch.stdin)?;
         record.asked[index].stage = Stage::Running;
@@ -573,27 +652,30 @@ impl Actor {
         let env = launch
             .env
             .into_iter()
-            .chain(self.profile.tool_env.iter().cloned())
+            .chain(self.profile.tool_env.iter().filter(|_| native).cloned())
             .chain([(FORK_ENV.to_owned(), "1".to_owned())])
             .collect();
-        out.actions.push(Action::Fork(Box::new(ShimOrder {
-            before_stop: launch.before_stop,
-            opening: None,
-            turn,
-            attempt: FORK_ATTEMPT,
-            spool: self.profile.spool_path_of(turn, FORK_ATTEMPT),
-            socket: self.fork_socket(turn),
-            stdin_file,
-            prompt_as_file: launch.prompt_as_file,
-            streams_input: false,
-            named_session: None,
-            model: preferences.model,
-            effort: preferences.effort,
-            cwd: self.profile.cwd.clone(),
-            program: launch.program,
-            args: launch.args,
-            env,
-        })));
+        out.actions.push(Action::Fork {
+            order: Box::new(ShimOrder {
+                before_stop: launch.before_stop,
+                opening: None,
+                turn,
+                attempt: FORK_ATTEMPT,
+                spool: self.profile.spool_path_of(turn, FORK_ATTEMPT),
+                socket: self.fork_socket(turn),
+                stdin_file,
+                prompt_as_file: launch.prompt_as_file,
+                streams_input: false,
+                named_session: None,
+                model: preferences.model,
+                effort: preferences.effort,
+                cwd: self.profile.cwd.clone(),
+                program: launch.program,
+                args: launch.args,
+                env,
+            }),
+            native,
+        });
         out.changed.status = true;
         Ok(())
     }
@@ -670,6 +752,7 @@ impl Actor {
                                 continue;
                             }
                             reply.turn = turn.0;
+                            reply.conversation_reply = true;
                             reply.trace_id.clone_from(&message.trace_id);
                             reply.origin = message.origin.clone();
                             reply.backend_session = Some(session.clone());
@@ -1205,7 +1288,7 @@ impl Actor {
             let op = json!({"op": MAIN_TURN_OP, "conv": conversation, MAIN_TURN_OP: null});
             shown.events.extend(shown.hub.tell(op, now_ms));
         }
-        self.fork.ready.append(&mut shown.events);
+        shown.give_events(&mut self.fork.ready);
         // What the agent's own hub said meanwhile was not sent: its snapshot has it.
         self.shown_events.clear();
         self.shown.continue_after(shown.hub.lseq());
@@ -1216,7 +1299,7 @@ impl Actor {
         let mut out = std::mem::take(&mut self.fork.ready);
         match self.fork.shown.as_mut() {
             Some(shown) => {
-                out.append(&mut shown.events);
+                shown.give_events(&mut out);
                 // The agent's own turn is told beside the fork's, as `main_turn`.
                 self.shown_events.clear();
             }
@@ -1232,6 +1315,7 @@ impl Actor {
         let (mut snapshot, events) = shown.hub.snapshot(now_ms)?;
         shown.events.extend(events);
         snapshot[MAIN_TURN_OP] = main.unwrap_or(serde_json::Value::Null);
+        snapshot["conversation_turn"] = json!(true);
         Some(snapshot)
     }
 

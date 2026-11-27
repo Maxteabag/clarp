@@ -99,7 +99,11 @@ fn emit(value: &Value) -> Result<()> {
 }
 
 fn serve(client: Client, request: &Value, stop: &Mutex<Stop>) -> Result<()> {
-    let sid = client.open_session(request["session"].as_str().unwrap_or_default())?;
+    let sid = if request["conversation"] == true {
+        client.open_conversation()?
+    } else {
+        client.open_session(request["session"].as_str().unwrap_or_default())?
+    };
     emit(&json!({"type":"session", "sessionID":sid}))?;
     let session = format!("/session/{}", component(&sid));
     let stream = client.subscribe()?;

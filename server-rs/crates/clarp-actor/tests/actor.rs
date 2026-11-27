@@ -124,7 +124,7 @@ impl World {
                     Action::FollowExit { turn, .. } => self.followed.push(turn.0),
                     Action::Stop { turn, .. } => self.stopped.push(turn.0),
                     Action::Steer { .. } => panic!("the scripted tool cannot be steered"),
-                    Action::Fork(_) | Action::ForkFollow { .. } => {
+                    Action::Fork { .. } | Action::ForkFollow { .. } => {
                         panic!("these agents have no fork")
                     }
                     Action::CheckNetwork { turn, attempts } => {
@@ -6732,6 +6732,7 @@ fn fill(world: &World, turns: u64, marked_newest: u64) {
             origin,
             tools: Vec::new(),
             backend_session: None,
+            conversation_reply: false,
         });
         items.push(reply.to_item(at).unwrap());
         let end = Entry::TurnEnd(TurnEnd {
