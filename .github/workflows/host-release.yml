@@ -11,10 +11,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - arm: before
-            commit: 4de6bbd8a51f6b48545b7b544506bd2fb0e0c493
           - arm: after
-            commit: 61b493c68f349d4203612265a9ac746ee85a62a0
+            commit: d350fe3d26c20c3cf5352f01eab4b68d1601f8ba
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
