@@ -2130,6 +2130,8 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
         artifacts_told: BTreeMap::new(),
         clock_seen: (Instant::now(), now_ms),
         stall: Stall::default(),
+        permitted_launch: None,
+        worker_started_ms: now_ms,
         alive: alive.clone(),
         glance: GlanceProducer(glance.clone()),
         route: route.clone(),
@@ -2253,6 +2255,10 @@ struct Worker {
     /// The two clocks as they were read together last: what tells a sleep of the machine.
     clock_seen: (Instant, i64),
     stall: Stall,
+    /// The launch permit most recently awarded by this worker.
+    permitted_launch: Option<(TurnId, u32)>,
+    /// Older reserved turns might have received a permit in a previous Host.
+    worker_started_ms: i64,
     /// The running turn's last sign of life, shared with the agent's handle.
     alive: Arc<AtomicI64>,
     /// Where the agent's glance is kept while it is opened, shared with its handle.
@@ -4173,8 +4179,8 @@ impl Worker {
                     let refused = actor.refuse_leader_launch(turn, now)?;
                     self.after(refused);
                     let _ = answer.send(false);
-                } else {
-                    let _ = answer.send(true);
+                } else if answer.send(true).is_ok() {
+                    self.permitted_launch = Some((turn, attempt));
                 }
                 return Ok(());
             }
@@ -6123,6 +6129,17 @@ impl Worker {
             let out = actor.spool_changed(now)?;
             self.after(out);
         }
+        if self.behind_terminal.is_none()
+            && self.held.is_none()
+            && let Some(actor) = self.actor.as_mut()
+            && let Some((turn, attempt, since)) = actor.starting_call()
+            && self.permitted_launch != Some((turn, attempt))
+            && since > self.worker_started_ms
+            && now.saturating_sub(since) >= self.setup.stalled_turn_ms
+        {
+            let out = actor.fail_call_start(turn, attempt, now)?;
+            self.after(out);
+        }
         Ok(())
     }
 
@@ -6131,29 +6148,42 @@ impl Worker {
         let Some(actor) = &self.actor else {
             return false;
         };
-        let stall = actor.running_silence_since().and_then(|quiet| {
-            let queue = actor.queue_state();
-            if self.stall.queue_revision != Some(queue.revision) {
-                let waiting = actor.queue().ok()?;
-                self.stall.oldest_user = waiting
-                    .iter()
-                    .filter(|row| {
-                        row.status != clarp_actor::QueueItemStatus::Started
-                            && clarp_kernel::experience::is_user_wait(
-                                &row.origin,
-                                &row.client_id,
-                                row.sender_agent_id.is_some(),
-                            )
-                    })
-                    .map(|row| row.accepted_at_ms)
-                    .min();
-                self.stall.queue_revision = Some(queue.revision);
-            }
-            let oldest = self.stall.oldest_user?;
-            let at = quiet.saturating_add(self.setup.stalled_turn_ms).max(oldest);
-            Some((quiet, at))
-        });
-        self.stall.due = stall.map(|(_, at)| at).filter(|at| *at > now);
+        let call = actor
+            .starting_call()
+            .filter(|_| self.behind_terminal.is_none() && self.held.is_none());
+        let stall = if let Some((_, _, quiet)) = call {
+            Some((quiet, quiet.saturating_add(self.setup.stalled_turn_ms)))
+        } else {
+            actor.running_silence_since().and_then(|quiet| {
+                let queue = actor.queue_state();
+                if self.stall.queue_revision != Some(queue.revision) {
+                    let waiting = actor.queue().ok()?;
+                    self.stall.oldest_user = waiting
+                        .iter()
+                        .filter(|row| {
+                            row.status != clarp_actor::QueueItemStatus::Started
+                                && clarp_kernel::experience::is_user_wait(
+                                    &row.origin,
+                                    &row.client_id,
+                                    row.sender_agent_id.is_some(),
+                                )
+                        })
+                        .map(|row| row.accepted_at_ms)
+                        .min();
+                    self.stall.queue_revision = Some(queue.revision);
+                }
+                let oldest = self.stall.oldest_user?;
+                let at = quiet.saturating_add(self.setup.stalled_turn_ms).max(oldest);
+                Some((quiet, at))
+            })
+        };
+        let unissued = stall.is_some_and(|(_, at)| at <= now)
+            && call.is_some_and(|(turn, attempt, since)| {
+                since > self.worker_started_ms
+                    && self.permitted_launch != Some((turn, attempt))
+                    && actor.before_call_launch(turn, attempt)
+            });
+        self.stall.due = stall.map(|(_, at)| at).filter(|at| *at > now || unissued);
         let since = stall.filter(|(_, at)| *at <= now).map(|(quiet, _)| quiet);
         std::mem::replace(&mut self.stall.since, since) != since
     }

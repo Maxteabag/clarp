@@ -2500,6 +2500,68 @@ impl Actor {
             Some(Turn::Starting(state)) if state.id == turn && state.attempt == attempt)
     }
 
+    /// A normal call turn whose tool has yet to start.
+    /// Call openings, deliberate holds and processes giving up the conversation
+    /// have their own lifecycle.
+    pub fn starting_call(&self) -> Option<(TurnId, u32, i64)> {
+        let agent = self.recorder.agent();
+        let Turn::Starting(starting) = agent.live()? else {
+            return None;
+        };
+        let live = self.live.as_ref()?;
+        (live.turn == starting.id
+            && live.attempt == starting.attempt
+            && live.in_call
+            && !live.opening
+            && !live.over
+            && !live.for_account
+            && live.origin.is_user_send()
+            && !starting.ran_before
+            && starting.moved_at_ms > 0
+            && agent.stopping().is_none()
+            && agent.selected_takeover().is_none()
+            && !agent.import_held()
+            && self.moved().is_none()
+            && !self.held_for_an_account
+            && !self.fork_runs()
+            && !self.lingers())
+        .then_some((starting.id, starting.attempt, starting.moved_at_ms))
+    }
+
+    /// A worker may retire its unissued launch only while no shim has a receipt.
+    pub fn before_call_launch(&self, turn: TurnId, attempt: u32) -> bool {
+        matches!(self.starting_call(), Some((id, tries, _)) if id == turn && tries == attempt)
+            && matches!(
+                self.profile.spool_path_of(turn, attempt).try_exists(),
+                Ok(false)
+            )
+            && matches!(
+                self.profile.socket_path_of(turn, attempt).try_exists(),
+                Ok(false)
+            )
+    }
+
+    /// Called by the worker before it has granted the matching launch permit.
+    /// The resulting failure releases the turn slot and rejects a late permit.
+    pub fn fail_call_start(
+        &mut self,
+        turn: TurnId,
+        attempt: u32,
+        now_ms: i64,
+    ) -> Result<Outputs, ActorError> {
+        if !self.before_call_launch(turn, attempt) {
+            return Ok(Outputs::default());
+        }
+        self.ended_outside_the_spool(
+            turn,
+            Command::StartFailed {
+                turn,
+                reason: "the call turn did not reach its tool".into(),
+            },
+            now_ms,
+        )
+    }
+
     pub fn refuse_moved_launch(
         &mut self,
         turn: TurnId,

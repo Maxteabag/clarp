@@ -2566,6 +2566,50 @@ fn a_restart_at_any_point_of_the_day_loses_nothing_and_repeats_nothing() {
 }
 
 #[test]
+fn a_call_with_no_launch_receipt_can_fail_and_let_the_next_utterance_start() {
+    let mut world = World::new("call-start-receipt");
+    let mut actor = world.open();
+    let mut first = message("u-1", "first utterance");
+    first.call = Some("call context".into());
+    let now = world.tick();
+    let (_, out) = actor.send(&first, Admission::Queue, now).unwrap();
+    let original = r121_launch(&out).unwrap();
+    assert_eq!(
+        actor.starting_call(),
+        Some((original.turn, original.attempt, now))
+    );
+
+    let mut next = message("u-2", "next utterance");
+    next.call.clone_from(&first.call);
+    let (sent, _) = actor.send(&next, Admission::Queue, world.tick()).unwrap();
+    assert!(sent.queued);
+
+    // Even a socket whose first record has not been read fences expiry.
+    std::fs::create_dir_all(original.socket.parent().unwrap()).unwrap();
+    let socket = std::os::unix::net::UnixListener::bind(&original.socket).unwrap();
+    assert!(!actor.before_call_launch(original.turn, original.attempt));
+    let still_starting = actor
+        .fail_call_start(original.turn, original.attempt, world.tick())
+        .unwrap();
+    assert!(still_starting.actions.is_empty());
+    assert!(actor.launch_pending(original.turn, original.attempt));
+    drop(socket);
+    std::fs::remove_file(&original.socket).unwrap();
+
+    let expired = actor
+        .fail_call_start(original.turn, original.attempt, world.tick())
+        .unwrap();
+    assert_eq!(
+        r121_launch(&expired).map(|order| order.turn),
+        Some(TurnId(2))
+    );
+    assert!(!actor.launch_pending(original.turn, original.attempt));
+    assert!(actor.tail(10).unwrap().entries.iter().any(|row| {
+        matches!(&row.entry, Entry::TurnEnd(end) if end.turn == 1 && end.status == "failed")
+    }));
+}
+
+#[test]
 fn a_restart_rejoins_a_running_turn_and_starts_one_that_no_shim_took() {
     // A turn that was decided, with the server gone before any shim took it: started on return.
     let mut world = World::new("rejoin");
