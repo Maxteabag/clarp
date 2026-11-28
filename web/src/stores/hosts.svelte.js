@@ -109,22 +109,26 @@ async function readPeersOnce() {
     return;
   }
   const entries = Object.entries((body && body.peers) || {}).filter(([, p]) => p && typeof p === 'object');
+  const priorPeers = new Map(hostsState.peers.map(p => [p.id, p.name]));
   hostsState.peers = entries.map(([key, p]) => ({
-    id: 'peer:' + key, url: String(p.url || ''), name: String(p.name || key),
+    id: 'peer:' + key, url: String(p.url || ''),
+    name: p.reachable ? String(p.name || key) : String(priorPeers.get('peer:' + key) || p.name || key),
     serverId: String(p.server_id || ''), via: 'host',
   }));
   for (const [key, p] of entries) {
     const id = 'peer:' + key;
     const prior = hostsState.live[id];
+    // A peer that does not answer is named by its registry key; keep the name it last gave.
+    const name = p.reachable ? String(p.name || key) : String(prior?.name || p.name || key);
     hostsState.live[id] = {
       state: p.reachable ? 'live' : p.error === 'refused' ? 'refused' : 'offline',
-      name: String(p.name || key), serverId: String(p.server_id || ''),
+      name, serverId: String(p.server_id || ''),
       rows: p.reachable ? rowsFromSnapshot(p.snapshot) : (prior?.rows || []), at: Date.now(),
     };
     // Whether it answers, per Host (stores/reach.svelte.js). The serving Host read it, so a
     // failure here says nothing of this device's own network.
     trackHost(id, {
-      label: String(p.name || key), url: String(p.url || ''), key: String(p.server_id || '') || id,
+      label: name, url: String(p.url || ''), key: String(p.server_id || '') || id,
       via: 'host', probe: readPeers,
     });
     if (p.reachable) noteOk(id);
