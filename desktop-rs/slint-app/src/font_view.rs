@@ -11,6 +11,9 @@ use clarp_core::reading_theme::{self as reading, FontFamily, FontOverride};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::{App, AppWindow, FontBridge, FontItem, FontKey, Hint, commands};
+use clarp_core::tr;
+
+// i18n-screen: font picker
 
 pub const OVERLAY: &str = "fonts";
 
@@ -45,6 +48,25 @@ const KEYS: &[(&str, &str, &str, &[&str])] = &[
     ("Ctrl+R", "Theme default", "reset", &["Ctrl+R"]),
     ("Esc", "Cancel", "cancel", &["Escape"]),
 ];
+
+/// A picker key's label (`KEYS`) in the app's language.
+fn key_label(action: &str, english: &str) -> String {
+    match action {
+        // i18n: shortcut bar label: moves the selection (imperative verb)
+        "move" => tr!("verb" => "Move"),
+        // i18n: font picker, shortcut bar label: Enter takes the font (imperative verb)
+        "choose" => tr!("verb" => "Choose"),
+        // i18n: font picker, shortcut bar label: list only fixed-width fonts
+        "monospace" => tr!("Monospace only"),
+        // i18n: font picker, shortcut bar label: Ctrl+arrows change the size (noun)
+        "size" => tr!("font" => "Size"),
+        // i18n: font picker, shortcut bar label: back to the theme's own font
+        "reset" => tr!("Theme default"),
+        // i18n: shortcut bar label: cancels the confirmation (imperative verb)
+        "cancel" => tr!("verb" => "Cancel"),
+        _ => english.to_owned(),
+    }
+}
 
 pub fn is_open() -> bool {
     PICKER.with(|p| p.borrow().open)
@@ -108,7 +130,8 @@ fn show(app: &App, window: &AppWindow) {
     PICKER.with(|p| {
         let p = p.borrow();
         let label = reading::theme(&p.theme).get("label").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
-        bridge.set_title(format!("Font · {label} theme").into());
+        // i18n: font picker title; {} is the reading theme's name
+        bridge.set_title(tr!("Font · {} theme", label).into());
         let saved = p.saved.as_ref().map(|s| s.family.as_str()).unwrap_or_default();
         let items: Vec<FontItem> =
             p.shown.iter().map(|f| FontItem { name: f.name.as_str().into(), monospace: f.monospace, saved: f.name == saved }).collect();
@@ -117,18 +140,27 @@ fn show(app: &App, window: &AppWindow) {
         bridge.set_monospace_only(p.monospace_only);
         let default = theme_size(&p.theme);
         let size = match p.size {
-            Some(size) if size != default => format!("{size} px (theme {default} px)"),
-            _ => format!("{default} px"),
+            // i18n: font picker, the chosen size and the theme's own; {0} the chosen size, {1} the theme's (pixels)
+            Some(size) if size != default => tr!("{0} px (theme {1} px)", size, default),
+            // i18n: font picker, the size in pixels; {} is the number
+            _ => tr!("{} px", default),
         };
         bridge.set_size_text(size.into());
         let missing = p.saved.as_ref().filter(|s| !s.family.is_empty() && !p.fonts.iter().any(|f| f.name == s.family));
-        bridge.set_note(missing.map_or_else(String::new, |s| format!("{} is not installed; the theme's own font is used", s.family)).into());
+        // i18n: font picker note: the saved font is missing on this computer; {} is the font's name
+        bridge.set_note(missing.map_or_else(String::new, |s| tr!("{} is not installed; the theme's own font is used", s.family)).into());
         let theme_font = crate::view::theme_font(reading::theme(&p.theme));
         let keys: Vec<FontKey> = KEYS
             .iter()
             .map(|(keys, label, action, _)| FontKey {
                 keys: (*keys).into(),
-                label: (if *action == "reset" { format!("Reset to theme default ({theme_font} {default} px)") } else { (*label).to_owned() }).into(),
+                label: (if *action == "reset" {
+                    // i18n: font picker, button: back to the theme's font and size; {0} the font's name, {1} its size in pixels
+                    tr!("Reset to theme default ({0} {1} px)", theme_font, default)
+                } else {
+                    key_label(action, label)
+                })
+                .into(),
                 action: (*action).into(),
             })
             .filter(|k| k.action != "move")
@@ -140,7 +172,7 @@ fn show(app: &App, window: &AppWindow) {
 
 /// The shortcut bar while the picker has the keyboard.
 pub fn hints() -> Vec<Hint> {
-    KEYS.iter().map(|(keys, label, _, _)| Hint { keys: (*keys).into(), label: (*label).into() }).collect()
+    KEYS.iter().map(|(keys, label, action, _)| Hint { keys: (*keys).into(), label: key_label(action, label).into() }).collect()
 }
 
 /// A key while the picker is open: true when it was the picker's (letters
