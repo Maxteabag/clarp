@@ -229,6 +229,7 @@ NOTIFY_EVENTS = [("reply", True), ("needs_you", True), ("failed", True), ("updat
 # decision_undo: answers held for Undo, by decision id -> (revision, attention item).
 held_answers = {}
 chat_read_receipts = []
+chat_read_release = threading.Event()
 notification_settings = {
     "events": [{"id": i, "message_key": f"notify.event.{i}", "default": d, "on": d} for i, d in NOTIFY_EVENTS],
     "agents": {},
@@ -3118,9 +3119,14 @@ class Handler(BaseHTTPRequestHandler):
                 document = json.loads(json.dumps(notification_settings))
             broadcast({"type": "notification-settings-changed", **document})
             return self.reply(200, document)
+        if url.path == "/__control/release-chat-read":
+            chat_read_release.set()
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/chat-read-receipt":
             # Deliver this receipt by HTTP alone so the check can delay its SSE echo.
             with state_lock:
+                if body.get("hold"):
+                    chat_read_release.clear()
                 chat_read_receipts.append(body)
             return self.reply(200, {"ok": True})
         if url.path == "/chat-read":
@@ -3133,6 +3139,8 @@ class Handler(BaseHTTPRequestHandler):
             if ordered is None:
                 broadcast({"type": "chat-read", **receipt})
             else:
+                if ordered.pop("hold", False) and not chat_read_release.wait(15):
+                    return self.reply(503, {"error": "fixture did not release chat-read"})
                 receipt.update(ordered)
             return self.reply(200, {"ok": True, **receipt})
         if url.path == "/tool-explanations/settings":

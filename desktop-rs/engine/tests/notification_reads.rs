@@ -131,4 +131,9 @@ fn bounded_notification_reads() {
         vec![("@fake-host-2/mike".to_owned(), "peer-a".to_owned())]
     );
     assert!(unread(&d, "@fake-host-2/mike"));
+    // A push-style identity on primary SSE cannot redirect a clear to the peer.
+    let mut conflict = read("chat-read", 100);
+    conflict["server_instance_id"] = "fake-host-2".into();
+    deliver(&mut d, &primary, &[conflict]);
+    assert!(unread(&d, "@fake-host-2/mike"));
 }

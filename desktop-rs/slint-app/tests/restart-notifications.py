@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from urllib.request import Request, urlopen
 
 from gi.repository import Gio, GLib
 
@@ -23,6 +24,7 @@ log = Path(os.environ["CLARP_RESTART_LOG"])
 info = Gio.DBusNodeInfo.new_for_xml(XML)
 visible = {}
 serial = 100
+pinned_button = None
 old_button = None
 current_button = None
 button_id = None
@@ -34,7 +36,7 @@ def record(**fields):
 
 
 def method(connection, sender, path, interface, member, args, invocation):
-    global serial, old_button, current_button, button_id
+    global serial, old_button, current_button, button_id, pinned_button
     if member == "CloseNotification":
         ident, = args.unpack()
         record(close=visible.pop(ident, None), ident=ident)
@@ -47,6 +49,8 @@ def method(connection, sender, path, interface, member, args, invocation):
     record(body=body, replaces=replaces, ident=ident)
     invocation.return_value(GLib.Variant("(u)", (ident,)))
     mark = next((key for key in actions[::2] if key.endswith(":mark-read")), None)
+    if body == "Vera A":
+        pinned_button = (ident, mark)
     if body == "before restart":
         old_button = mark
     if body == "after restart":
@@ -65,11 +69,21 @@ def launch():
     return subprocess.Popen(sys.argv[1:], env={**os.environ, "CLARP_CHECK_PASS": phase})
 
 
+# Source-derived Host identity and chat; both persist across app launches.
+for route, data in (("server-id", {"server_id": "host-1"}), ("add-agent", {"session": "vera", "persona": "Vera"})):
+    request = Request(os.environ["CLARP_BASE_URL"] + "/__control/" + route,
+                      data=json.dumps(data).encode(), headers={"Content-Type": "application/json"})
+    with urlopen(request) as response:
+        assert response.status == 200
 child = launch()
 
 
 def progress():
     global child, phase, serial, result
+    pinned = log.with_suffix(".pinned")
+    if pinned.exists() and pinned_button:
+        pinned.unlink()
+        bus.emit_signal(None, PATH, INTERFACE, "ActionInvoked", GLib.Variant("(us)", pinned_button))
     for command, key in (("stale", old_button), ("current", current_button)):
         trigger = log.with_suffix("." + command)
         if trigger.exists() and button_id is not None:
