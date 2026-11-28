@@ -1,0 +1,118 @@
+# Clarp desktop: hi. Edit with tools/i18n-import; see docs/i18n.md.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: hi\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. Settings > Language picker, line under the System option: the app follows the computer's language; {} is that language's own name, e.g. "Norsk bokmål"
+msgid "Follows this computer: {}"
+msgstr "इस कंप्यूटर के अनुसार: {}"
+
+#. relative time for something under a minute ago, shown alone as a timestamp
+msgid "Just now"
+msgstr "अभी-अभी"
+
+#. Settings > Appearance, row label (noun): the setting that picks the app's language
+msgid "Language"
+msgstr "भाषा"
+
+#. Settings page, title at the top (noun), written in capitals where the script has them
+msgid "SETTINGS"
+msgstr "सेटिंग्स"
+
+#. Settings > Language picker, first option (noun): use the language the computer is set to
+msgid "System"
+msgstr "सिस्टम"
+
+#. Settings > Appearance, the Language row's current value when it follows the computer; {} is that language's own name
+msgid "System ({})"
+msgstr "सिस्टम ({})"
+
+#. Settings > Appearance, description line under the Language row; "System" is the picker's first option
+msgid "The language of the app. System follows this computer's languages."
+msgstr "ऐप की भाषा। सिस्टम इस कंप्यूटर की भाषाओं के अनुसार चलता है।"
+
+#. day heading in the transcript and chat-list stamp for a message sent today (adverb, capitalised as a heading)
+msgid "Today"
+msgstr "आज"
+
+#. day heading for something due tomorrow
+msgid "Tomorrow"
+msgstr "कल"
+
+#. day heading in the transcript and chat-list stamp for a message sent yesterday
+msgid "Yesterday"
+msgstr "कल"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} day"
+msgid_plural "in {n} days"
+msgstr[0] "{n} दिन में"
+msgstr[1] "{n} दिन में"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} hour"
+msgid_plural "in {n} hours"
+msgstr[0] "{n} घंटे में"
+msgstr[1] "{n} घंटे में"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} minute"
+msgid_plural "in {n} minutes"
+msgstr[0] "{n} मिनट में"
+msgstr[1] "{n} मिनट में"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} month"
+msgid_plural "in {n} months"
+msgstr[0] "{n} महीने में"
+msgstr[1] "{n} महीने में"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} week"
+msgid_plural "in {n} weeks"
+msgstr[0] "{n} सप्ताह में"
+msgstr[1] "{n} सप्ताह में"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} year"
+msgid_plural "in {n} years"
+msgstr[0] "{n} वर्ष में"
+msgstr[1] "{n} वर्ष में"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "{n} दिन पहले"
+msgstr[1] "{n} दिन पहले"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "{n} घंटा पहले"
+msgstr[1] "{n} घंटे पहले"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "{n} मिनट पहले"
+msgstr[1] "{n} मिनट पहले"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} month ago"
+msgid_plural "{n} months ago"
+msgstr[0] "{n} महीना पहले"
+msgstr[1] "{n} महीने पहले"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} week ago"
+msgid_plural "{n} weeks ago"
+msgstr[0] "{n} सप्ताह पहले"
+msgstr[1] "{n} सप्ताह पहले"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} year ago"
+msgid_plural "{n} years ago"
+msgstr[0] "{n} वर्ष पहले"
+msgstr[1] "{n} वर्ष पहले"

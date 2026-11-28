@@ -5,6 +5,8 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 # pair runs the command line, not the window (and runs on macOS too).
 [ "$1" = pair ] && exec slint-app/tests/pair-check.sh "${2:-slint-app/docs/checks/pair}"
+# screens-LANG: the main screens in one language, for translation review.
+case $1 in screens-*) exec slint-app/tests/screens.sh "${1#screens-}" "${2:-slint-app/docs/checks/$1}" ;; esac
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
 case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac

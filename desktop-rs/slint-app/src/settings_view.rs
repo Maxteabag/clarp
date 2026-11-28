@@ -25,7 +25,7 @@ fn row(app: &App, setting: &crate::catalogue::Setting) -> SettingRow {
         kind: kind.into(),
         id: setting.id().into(),
         label: setting.label(app).into(),
-        description: setting.entry.description.into(),
+        description: setting.description(app).into(),
         detail: if kind == "toggle" { String::new() } else { setting.value(app) }.into(),
         on: setting.on(app),
         ..SettingRow::default()
