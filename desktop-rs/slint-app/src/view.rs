@@ -396,6 +396,34 @@ fn highlighted(markdown: &str, parsed: &slint::StyledText) -> Option<slint::Styl
     (get_raw_text(&styled) == get_raw_text(parsed)).then_some(styled)
 }
 
+/// Interpolate literal code into the mark spans. Only the wrapper is parsed
+/// as Markdown, so indentation, newlines and markup in the code are literal.
+fn styled_code(text: &str) -> slint::StyledText {
+    use i_slint_common::styled_text::MARKDOWN_INTERPOLATION_PLACEHOLDER as SLOT;
+    HIGHLIGHT.with_borrow(|highlight| {
+        let Some(mark) = highlight else { return slint::StyledText::from_plain_text(text) };
+        let ranges = clarp_core::chat_find::ranges(text, &mark.terms);
+        if ranges.is_empty() {
+            return slint::StyledText::from_plain_text(text);
+        }
+        let mut template = String::new();
+        let mut parts = Vec::new();
+        let mut end = 0;
+        for range in ranges {
+            template.push(SLOT);
+            parts.push(slint::StyledText::from_plain_text(&text[end..range.start]));
+            template.push_str(&mark.open);
+            template.push(SLOT);
+            parts.push(slint::StyledText::from_plain_text(&text[range.clone()]));
+            template.push_str(&mark.close);
+            end = range.end;
+        }
+        template.push(SLOT);
+        parts.push(slint::StyledText::from_plain_text(&text[end..]));
+        i_slint_core::styled_text::parse_markdown(&template, &parts)
+    })
+}
+
 pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) -> MessageBlock {
     use clarp_engine::blocks::Block;
     let empty = || ModelRc::new(VecModel::<TableRow>::default());
@@ -409,7 +437,7 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
             rows: empty(),
             ..MessageBlock::default()
         },
-        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
+        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: styled_code(text), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Table(rows) => {
             let columns = table_columns(rows);

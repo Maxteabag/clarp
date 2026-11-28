@@ -37,6 +37,7 @@ slint = { version = "1.18", default-features = false, features = [
 i-slint-backend-testing = { version = "=1.18.1", default-features = false }
 # Wheel and touchpad input with the gesture phases winit sends (the public
 # PointerScrolled event jumps instead of animating like a real wheel).
+i-slint-common = { version = "=1.18.1", default-features = false, features = ["markdown"] }
 i-slint-core = { version = "=1.18.1", default-features = false }
 # The attach dialog: the desktop's file-chooser portal on Linux, the
 # native panel on macOS.

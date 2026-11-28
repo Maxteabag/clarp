@@ -707,16 +707,15 @@ export component Block inherits VerticalLayout {
         min-width: code-text.min-width + 20px;
         preferred-width: code-text.preferred-width + 20px;
         height: code-text.preferred-height + 20px;
-        code-text := Text {
+        code-text := StyledText {
             x: 10px;
             y: 10px;
             width: parent.width - 20px;
             height: parent.height - 20px;
-            text: root.block.text;
-            font-family: Palette.code-family;
-            font-size: root.body-size * Look.code-scale;
-            color: Palette.text;
-            wrap: word-wrap;
+            text: root.block.styled;
+            default-font-family: Palette.code-family;
+            default-font-size: root.body-size * Look.code-scale;
+            default-color: Palette.text;
         }
     }
     if root.block.kind == "quote": Rectangle {

@@ -991,6 +991,7 @@ dependencies = [
  "fontdb",
  "futures-util",
  "i-slint-backend-testing",
+ "i-slint-common",
  "i-slint-core",
  "image",
  "ksni",

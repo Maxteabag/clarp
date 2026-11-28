@@ -523,8 +523,52 @@ fn marked_words(id: &str) -> Option<bool> {
     Some(block.styled != plain)
 }
 
+const CODE: &str = "fn survey() {\n    let heron = \"<Héron> & **lake**\";\n\n    record(heron);\n}";
+
+fn fenced_message() -> String {
+    format!("```rust\n{CODE}\n```")
+}
+
+/// Check the actual code rectangle in the frame, excluding the find bar and the row ring.
+fn fenced_frame(out: &str, name: &str, window: &crate::AppWindow) {
+    use i_slint_backend_testing::ElementQuery;
+    use slint::ComponentHandle;
+
+    shot(out, name);
+    let row = ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().as_deref() == Some("row:o-300")).find_first();
+    let rect = row.and_then(|e| e.query_descendants().match_id("Block::code-text").find_first());
+    let Some(rect) = rect else {
+        check(false, "the active fenced code is drawn");
+        return;
+    };
+    let pos = rect.absolute_position();
+    let size = rect.size();
+    let scale = window.window().scale_factor();
+    let mark = window.global::<crate::Palette>().get_warning();
+    let Ok(frame) = image::open(format!("{out}/{name}.png")) else {
+        check(false, "the fenced-code screenshot can be read");
+        return;
+    };
+    let frame = frame.to_rgb8();
+    let x = (pos.x * scale).round() as u32;
+    let y = (pos.y * scale).round() as u32;
+    let width = ((size.width * scale).round() as u32).min(frame.width().saturating_sub(x));
+    let height = ((size.height * scale).round() as u32).min(frame.height().saturating_sub(y));
+    if width == 0 || height == 0 {
+        check(false, "the active code is inside the frame");
+        return;
+    }
+    let crop = image::imageops::crop_imm(&frame, x, y, width, height).to_image();
+    check(crop.pixels().any(|p| p.0 == [mark.red(), mark.green(), mark.blue()]), "the code itself contains pixels in the find highlight colour");
+    let zoom = image::imageops::resize(&crop, width * 2, height * 2, image::imageops::FilterType::Nearest);
+    check(zoom.save(format!("{out}/{name}-code.png")).is_ok(), "saved the enlarged code and its active highlight");
+    let block = app_now().active_messages().and_then(|rows| rows.iter().find(|r| r.id == "o-300")?.blocks.row_data(0));
+    check(block.is_some_and(|b| i_slint_core::styled_text::get_raw_text(&b.styled) == CODE), "the displayed code keeps its literal text and spacing");
+}
+
 pub fn find_in_chat_check(out: String) {
     use slint::platform::Key;
+    let stepped = out.clone();
     let (out1, out2, out3, out3b, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     // Oscar's long chat: four rows hold "heron", the oldest far above what
     // opening the chat loads.
@@ -538,9 +582,9 @@ pub fn find_in_chat_check(out: String) {
             }
             let turns: Vec<Value> = (0..700)
                 .map(|i| {
-                    let role = if i % 2 == 0 { "user" } else { "assistant" };
-                    let at = format!("2026-11-20T{:02}:{:02}:{:02}Z", 8 + i / 3600, (i / 60) % 60, i % 60);
-                    let text = if MATCHES.contains(&i) { format!("Row {i}: the heron survey of the northern lakes.") } else { format!("Row {i}: a routine note about the build.") };
+                    let role = if i != 300 && i % 2 == 0 { "user" } else { "assistant" };
+                    let at = format!("2020-03-20T{:02}:{:02}:{:02}Z", 8 + i / 3600, (i / 60) % 60, i % 60);
+                    let text = if i == 300 { fenced_message() } else if MATCHES.contains(&i) { format!("Row {i}: the heron survey of the northern lakes.") } else { format!("Row {i}: a routine note about the build.") };
                     json!({"id": id(i), "role": role, "text": text, "timestamp": at})
                 })
                 .collect();
@@ -630,12 +674,13 @@ pub fn find_in_chat_check(out: String) {
             headless::press_with(&[Key::Shift], Key::Return);
             true
         })),
-        ("newer", Box::new(|_, window, elapsed| {
+        ("newer", Box::new(move |_, window, elapsed| {
             let (_, count, ..) = find_bar(window);
-            if !(count == "2/4" && app_now().marked_row() == "o-300") {
+            if !(count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300") && elapsed >= Duration::from_millis(300)) {
                 check(elapsed < Duration::from_secs(5), &format!("Shift+Enter goes to the newer match, 2/4: {count:?}"));
                 return elapsed >= Duration::from_secs(5);
             }
+            fenced_frame(&stepped, "find-in-chat-02b-fenced-step", window);
             headless::type_text(" zebra");
             true
         })),
@@ -743,6 +788,19 @@ pub fn find_in_chat_check(out: String) {
                 return elapsed >= Duration::from_secs(3);
             }
             check(window.get_switcher_note().is_empty() && window.get_switcher_hint().is_empty(), "the page says nothing more");
+            let app = app_now();
+            let mut engine = app.engine.borrow_mut();
+            let original = clarp_core::i18n::current();
+            for (tag, month) in [("en", "Mar"), ("fr", "mars")] {
+                clarp_core::i18n::set_current(tag);
+                let local = crate::search_view::items(&mut engine, "heron", 50).0;
+                let host = crate::search_view::found(&mut engine, "heron").items;
+                for hits in [local, host] {
+                    check(hits.iter().any(|r| r.label.contains(month) && r.label.contains("2020")), &format!("search timestamps use the {tag} month and year"));
+                }
+            }
+            clarp_core::i18n::set_current(original);
+            drop(engine);
             shot(&out4, "find-in-chat-04-search-page");
             // Newest first: the third is o-300.
             window.invoke_switcher_chosen(2);
@@ -751,14 +809,20 @@ pub fn find_in_chat_check(out: String) {
         ("opened at the hit", Box::new(move |_, window, elapsed| {
             use slint::ComponentHandle;
             let (open, count, ..) = find_bar(window);
-            let done = open && count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300");
+            let done = open && count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300") && elapsed >= Duration::from_millis(300);
             if !done {
                 check(elapsed < Duration::from_secs(8), &format!("the hit opens with the bar at it: {open} {count:?} {:?}", app_now().marked_row()));
                 return elapsed >= Duration::from_secs(8);
             }
             check(window.global::<crate::FindBridge>().get_text() == "heron", "the bar holds the words searched");
             check(marked_words("o-300") == Some(true), "and the words are marked");
-            shot(&out5, "find-in-chat-05-from-search");
+            fenced_frame(&out5, "find-in-chat-05-from-search", window);
+            if let Some(file) = std::env::var_os("CLARP_TEST_CLIPBOARD") {
+                window.invoke_copy_message(app_now().active_id(), "o-300".into());
+                check(std::fs::read(file).ok().as_deref() == Some(fenced_message().as_bytes()), "copy keeps the original fences, whitespace and markup byte for byte");
+            } else {
+                check(false, "the isolated check clipboard is configured");
+            }
             true
         })),
     ];
