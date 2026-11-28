@@ -484,7 +484,7 @@
  },
  {
   "id": "teams-dark",
-  "label": "Teams Dark",
+  "label": "Teams dark",
   "detail": "Microsoft Teams dark: Segoe UI in off-white on Teams' near-black surfaces, a light lavender Teams purple and a brand-tinted own-message bubble.",
   "fontFamilies": [
    "Segoe UI",

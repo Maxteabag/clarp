@@ -125,9 +125,9 @@ fn chats() -> Vec<Setting> {
             e(
                 "reduced-motion",
                 // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Disable animations and shimmer.
-                en::tr!("Reduce Motion"),
+                en::tr!("Reduce motion"),
                 "appearance",
-                // i18n: Settings page and Ctrl+K, the line under the setting “Reduce Motion” saying what it does
+                // i18n: Settings page and Ctrl+K, the line under the setting “Reduce motion” saying what it does
                 en::tr!("Disable animations and shimmer."),
                 &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"],
             ),
