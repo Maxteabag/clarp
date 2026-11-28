@@ -465,41 +465,74 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
     let mut out: Vec<(String, String)> = Vec::new();
     let confirm = bridge.get_confirm();
     if !confirm.is_empty() {
-        out.push((key("profile-enter"), if confirm == "release" { "Release" } else { "Compact" }.into()));
-        out.push((key("escape"), "Cancel".into()));
+        let label = if confirm == "release" {
+            // i18n: agent profile, shortcut bar label confirming Release (imperative verb: let the agent's process go)
+            tr!("verb" => "Release")
+        } else {
+            // i18n: agent profile, shortcut bar label confirming Compact (imperative verb: shorten the agent's context)
+            tr!("verb" => "Compact")
+        };
+        out.push((key("profile-enter"), label));
+        // i18n: shortcut bar label: cancels the confirmation (imperative verb)
+        out.push((key("escape"), tr!("verb" => "Cancel")));
     } else {
         let cursor = bridge.get_cursor().to_string();
-        let on = |flag: bool| if flag { "Turn off" } else { "Turn on" };
+        let on = |flag: bool| {
+            if flag {
+                // i18n: agent profile, shortcut bar label on a switch: turns it off (imperative)
+                tr!("Turn off")
+            } else {
+                // i18n: agent profile, shortcut bar label on a switch: turns it on (imperative)
+                tr!("Turn on")
+            }
+        };
+        // Shortcut bar labels for Enter on the agent profile's row under the cursor.
         let entry: Option<String> = match cursor.as_str() {
-            "files" => Some("Open files".into()),
-            "terminal" => Some("Open terminal".into()),
-            "voice" => Some("Voice".into()),
-            "backend" if info.backend_enabled => Some("Change backend".into()),
-            "history-more" if !info.prompts_loading => Some("Load older".into()),
-            "heartbeat" => Some(on(info.heartbeat).into()),
-            "dreaming" => Some(on(info.dreaming).into()),
-            "push-alerts" => Some(on(info.push_alerts).into()),
-            "compact" if !info.compacting => Some("Compact".into()),
-            "queue" => Some("Manage queue".into()),
-            "relaunch" => Some("Relaunch".into()),
-            "release" => Some("Release…".into()),
-            "publications" => Some("All publications".into()),
-            "images" => Some("Images".into()),
-            id if id.starts_with("mcp:") => index_of(id, "mcp:").and_then(|i| bridge.get_mcp().row_data(i)).map(|s| on(s.on).into()),
-            id if id.starts_with("schedule:") => index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)).map(|s| on(s.on).into()),
+            // i18n: agent profile, shortcut bar label: opens the agent's folder (imperative)
+            "files" => Some(tr!("Open files")),
+            // i18n: agent profile, shortcut bar label: opens the agent's terminal (imperative)
+            "terminal" => Some(tr!("Open terminal")),
+            // i18n: agent profile, shortcut bar label: opens the voice choice (noun)
+            "voice" => Some(tr!("Voice")),
+            // i18n: agent profile, shortcut bar label: moves the agent to another backend (imperative)
+            "backend" if info.backend_enabled => Some(tr!("Change backend")),
+            // i18n: agent profile, shortcut bar label: loads older prompts (imperative)
+            "history-more" if !info.prompts_loading => Some(tr!("Load older")),
+            "heartbeat" => Some(on(info.heartbeat)),
+            "dreaming" => Some(on(info.dreaming)),
+            "push-alerts" => Some(on(info.push_alerts)),
+            // i18n: agent profile, shortcut bar label: shortens the agent's context (imperative verb)
+            "compact" if !info.compacting => Some(tr!("verb" => "Compact")),
+            // i18n: agent profile, shortcut bar label: opens the waiting messages (imperative)
+            "queue" => Some(tr!("Manage queue")),
+            // i18n: agent profile, shortcut bar label: starts the agent's process again (imperative verb)
+            "relaunch" => Some(tr!("verb" => "Relaunch")),
+            // i18n: agent profile, shortcut bar label: asks before letting the agent's process go (imperative verb with ellipsis)
+            "release" => Some(tr!("Release…")),
+            // i18n: agent profile, shortcut bar label: opens everything the agent published
+            "publications" => Some(tr!("All publications")),
+            // i18n: artifacts gallery, filter chip: pictures (plural noun)
+            "images" => Some(tr!("Images")),
+            id if id.starts_with("mcp:") => index_of(id, "mcp:").and_then(|i| bridge.get_mcp().row_data(i)).map(|s| on(s.on)),
+            id if id.starts_with("schedule:") => index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)).map(|s| on(s.on)),
             _ => None,
         };
         let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort");
-        out.push(("1-9".into(), "Sections".into()));
-        out.push((pair("profile-up", "profile-down"), "Move".into()));
-        out.push((key("profile-next-card"), "Next card".into()));
+        // i18n: agent profile, shortcut bar label: digits 1-9 jump to the profile's sections (plural noun)
+        out.push(("1-9".into(), tr!("Sections")));
+        // i18n: shortcut bar label: moves the selection (imperative verb)
+        out.push((pair("profile-up", "profile-down"), tr!("verb" => "Move")));
+        // i18n: agent profile, shortcut bar label: goes to the next card (imperative-like, "next card")
+        out.push((key("profile-next-card"), tr!("Next card")));
         if choice {
-            out.push((pair("profile-left", "profile-right"), "Change".into()));
+            // i18n: agent profile, shortcut bar label: left/right change the choice (imperative verb)
+            out.push((pair("profile-left", "profile-right"), tr!("verb" => "Change")));
         }
         if let Some(label) = entry {
             out.push((key("profile-enter"), label));
         }
-        out.push((key("escape"), "Close".into()));
+        // i18n: shortcut bar label: Esc closes the panel (imperative verb)
+        out.push((key("escape"), tr!("verb" => "Close")));
     }
     out.into_iter().filter(|(keys, _)| !keys.is_empty()).map(|(keys, label)| crate::Hint { keys: keys.into(), label: label.into() }).collect()
 }
@@ -674,7 +707,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let flag = |key: &str| details.get(key).and_then(Value::as_bool).unwrap_or(false);
     let count = |key: &str| details.get(key).and_then(Value::as_i64).unwrap_or(0);
     let backend = value("backend");
-    let name = first(&[value("name")], "Agent");
+    // i18n: agent profile, the agent's name when it has none (noun)
+    let name = first(&[value("name")], &tr!("Agent"));
 
     // Model and effort, as the catalog lists them. What the agent runs
     // (its roster row) is always among them: a model or effort the catalog
@@ -709,9 +743,11 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .map(|item| {
             let steps = item.get("subtasks").and_then(Value::as_array).map_or(0, Vec::len);
             PlanItem {
-                title: first(&[text(item, "title")], "Task").into(),
+                // i18n: agent profile, plan card: a task without a title (noun)
+                title: first(&[text(item, "title")], &tr!("Task")).into(),
                 status: text(item, "status").into(),
-                steps: if steps > 0 { format!("{steps} steps") } else { String::new() }.into(),
+                // i18n: agent profile, plan card: how many steps a task has; {n} is the count
+                steps: if steps > 0 { tr!("{n} step" | "{n} steps" % steps) } else { String::new() }.into(),
             }
         })
         .collect();
@@ -724,7 +760,14 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .iter()
         .map(|p| {
             let channel = first(&[p.get("prompt_origin").map(|o| text(o, "channel")).unwrap_or_default()], "chat");
-            let stamp = text(p, "created_at");
+            let stamp = clarp_core::time_format::epoch_ms(&text(p, "created_at"))
+                .and_then(|ms| chrono::DateTime::from_timestamp_millis(ms))
+                .map(|t| {
+                    let local = t.with_timezone(&chrono::Local);
+                    let tag = clarp_core::i18n::current();
+                    format!("{} {}", clarp_core::i18n::format::date_short(tag, local.date_naive()), clarp_core::i18n::format::time(tag, local.time(), clarp_core::i18n::format::Clock::H24))
+                })
+                .unwrap_or_else(|| text(p, "created_at"));
             PromptItem {
                 text: first(&[text(p, "text"), text(p, "preview")], "").into(),
                 meta: if stamp.is_empty() { channel } else { format!("{stamp}  ·  {channel}") }.into(),
@@ -740,7 +783,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .map(|h| SharedString::from(first(&[text(h, "text")], "Heartbeat check")))
+        // i18n: agent profile, heartbeat card: a heartbeat run without words of its own (noun)
+        .map(|h| SharedString::from(first(&[text(h, "text")], &tr!("Heartbeat check"))))
         .collect();
     bridge.set_heartbeat_history(ModelRc::new(VecModel::from(history)));
     let teams: Vec<NamedItem> = details
@@ -764,7 +808,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .flatten()
         .map(|s| NamedItem {
             id: text(s, "schedule_id").into(),
-            name: first(&[text(s, "name")], "Scheduled task").into(),
+            // i18n: agent profile and overview, a scheduled task without a name (noun)
+            name: first(&[text(s, "name")], &tr!("Scheduled task")).into(),
             detail: text(s, "cron_expression").into(),
             on: s.get("enabled").and_then(Value::as_bool).unwrap_or(false),
         })
@@ -777,7 +822,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         .artifacts_for_session(session)
         .iter()
         .map(|a| ProfileArtifact {
-            title: first(&[text(a, "title")], "Artifact").into(),
+            // i18n: artifact card title when it has none (noun: something an agent published)
+            title: first(&[text(a, "title")], &tr!("Artifact")).into(),
             kind: first(&[text(a, "type")], "item").to_uppercase().into(),
             summary: text(a, "summary").into(),
         })
@@ -797,7 +843,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         symbol: SharedString::new(),
         portrait,
         backend: backend.into(),
-        folder: first(&[value("working_directory")], "Unavailable").into(),
+        // i18n: agent profile, the agent's folder when the Host does not say it
+        folder: first(&[value("working_directory")], &tr!("Unavailable")).into(),
         state: first(&[state.clone()], "offline").into(),
         model_index: model_index as i32,
         effort_index: effort_index as i32,
@@ -810,19 +857,37 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
             None => -1.0,
         },
         context_used: match tokens {
-            Some(tokens) => format!("{tokens} / {} tokens", if window_size > 0 { window_size.to_string() } else { "unknown".into() }),
+            Some(tokens) => {
+                let tag = clarp_core::i18n::current();
+                let used = clarp_core::i18n::format::number(tag, tokens);
+                if window_size > 0 {
+                    // i18n: agent profile, context gauge: tokens used of the model's window; {0} used, {1} the window
+                    tr!("{0} / {1} tokens", used, clarp_core::i18n::format::number(tag, window_size))
+                } else {
+                    // i18n: agent profile, context gauge: tokens used when the window size is not known; {} used
+                    tr!("{} / unknown tokens", used)
+                }
+            }
             // Unknown usage says nothing: the row is left out.
             None => String::new(),
         }
         .into(),
         compacting: state == "compacting",
-        queue_text: if queue == 0 { "Nothing waiting".to_owned() } else { format!("{queue} waiting") }.into(),
+        queue_text: if queue == 0 {
+            // i18n: agent profile, queue row: no messages wait for the agent
+            tr!("Nothing waiting")
+        } else {
+            // i18n: chat, line above the composer: how many of the user's messages wait behind the running turn; {n} is the count
+            tr!("{n} waiting" | "{n} waiting" % queue)
+        }
+        .into(),
         plan_shown: engine.profile_loading() || !plan.is_empty(),
         plan_loading: engine.profile_loading(),
         plan_title: text(&plan_value, "title").into(),
         plan_progress: format!("{}/{}", number("completed_count"), number("total_count")).into(),
         // The Heartbeat switch says on or off; only a dormant one adds a word.
-        heartbeat_note: if scheduled("dormant") { "Dormant" } else { "" }.into(),
+        // i18n: agent profile, beside the Heartbeat switch: the heartbeat is set but sleeping (adjective)
+        heartbeat_note: if scheduled("dormant") { tr!("Dormant") } else { String::new() }.into(),
         prompts_loading: engine.profile_prompts_loading(),
         prompts_more: engine.profile_prompts_have_more(),
         prompts_shown: engine.profile_prompts_offered(),
