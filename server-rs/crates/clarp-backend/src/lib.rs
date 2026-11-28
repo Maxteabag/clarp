@@ -395,6 +395,26 @@ pub const CODEX_PROGRAM_ENV: &str = "CLARP_CODEX_PROGRAM";
 /// The same for Antigravity.
 pub const AGY_PROGRAM_ENV: &str = "CLARP_AGY_PROGRAM";
 
+/// The old execution id is still stored in journals written before ACP became
+/// Antigravity's only transport.
+pub const LEGACY_AGY: &str = "agy";
+
+/// Resolve old Antigravity selections to the backend used for new work.
+pub fn canonical_id(id: &str) -> &str {
+    match id {
+        LEGACY_AGY | "antigravity" | "antigravity-acp" | "agy_acp" => agy_acp::ID,
+        other => other,
+    }
+}
+
+/// Read and finish attempts already owned by a standalone Antigravity shim.
+/// New selections must go through [`by_id`].
+pub fn legacy_agy() -> Arc<dyn Backend> {
+    Arc::new(agy::Agy::with_program(
+        named(AGY_PROGRAM_ENV).unwrap_or_else(|| LEGACY_AGY.to_string()),
+    ))
+}
+
 /// The program an environment variable names, when it names one.
 fn named(variable: &str) -> Option<String> {
     std::env::var(variable)
@@ -409,7 +429,6 @@ fn named(variable: &str) -> Option<String> {
 pub const PROGRAMS: &[(&str, &str, &str)] = &[
     ("claude", CLAUDE_PROGRAM_ENV, "claude"),
     ("codex", CODEX_PROGRAM_ENV, "codex"),
-    ("agy", AGY_PROGRAM_ENV, "agy"),
     ("agy-acp", AGY_PROGRAM_ENV, "agy"),
     ("grok", "CLARP_GROK_PROGRAM", "grok"),
     ("opencode", "CLARP_OPENCODE_PROGRAM", "opencode"),
@@ -420,13 +439,15 @@ pub const PROGRAMS: &[(&str, &str, &str)] = &[
 /// The program a tool is started as: the one its environment variable names, else the
 /// tool's own name, found on the path. `None` for what is no tool a person installs.
 pub fn program(id: &str) -> Option<String> {
-    let &(_, variable, name) = PROGRAMS.iter().find(|(tool, _, _)| *tool == id)?;
+    let &(_, variable, name) = PROGRAMS
+        .iter()
+        .find(|(tool, _, _)| *tool == canonical_id(id))?;
     Some(named(variable).unwrap_or_else(|| name.to_string()))
 }
 
 /// The backend with this name, as built in.
 pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
-    match id {
+    match canonical_id(id) {
         "claude" => Some(Arc::new(match named(CLAUDE_PROGRAM_ENV) {
             Some(program) => claude::Claude::with_program(program),
             None => claude::Claude::new(),
@@ -434,10 +455,6 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "codex" => Some(Arc::new(match named(CODEX_PROGRAM_ENV) {
             Some(program) => codex::Codex::with_program(program),
             None => codex::Codex::new(),
-        })),
-        "agy" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
-            Some(program) => agy::Agy::with_program(program),
-            None => agy::Agy::new(),
         })),
         "agy-acp" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
             Some(program) => agy_acp::AgyAcp::with_program(program),
@@ -481,7 +498,7 @@ pub fn store_of(id: &str) -> Option<&'static str> {
 /// only between `agy` and `agy-acp`, one program with one store. Other cards that run through
 /// one program (`deepseek` through `opencode`) move as any two tools do, with the Host's record.
 pub fn same_store(from: &str, to: &str) -> bool {
-    matches!((from, to), ("agy", agy_acp::ID) | (agy_acp::ID, "agy"))
+    matches!((from, to), (LEGACY_AGY, agy_acp::ID)) && clarp_acp::agy::profile().is_none()
 }
 
 /// The context window of the backend with this name, when it declares one.

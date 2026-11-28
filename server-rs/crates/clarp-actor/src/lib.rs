@@ -1613,7 +1613,7 @@ impl Actor {
         log: Box<dyn AgentLog>,
         now_ms: i64,
     ) -> Result<(Self, Outputs), ActorError> {
-        Self::open_with_teams(profile, backend, log, now_ms, None, None)
+        Self::open_with_teams(profile, backend, log, now_ms, None, None, false)
     }
 
     pub fn open_with_teams(
@@ -1623,6 +1623,7 @@ impl Actor {
         now_ms: i64,
         teams: Option<Arc<dyn teams::Runtime>>,
         launch_defaults: Option<LaunchDefaults>,
+        transit_held: bool,
     ) -> Result<(Self, Outputs), ActorError> {
         let (mut actor, older_imports) = Self::read_books(
             profile,
@@ -1633,6 +1634,9 @@ impl Actor {
             launch_defaults,
             &mut Phases::off(),
         )?;
+        // A recovered spool can finish a turn while opening. Fence its next
+        // launch before reading that spool, not after the agent is open.
+        actor.recorder.hold_for_transit(transit_held);
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
         actor.recover_imported_accounts(older_imports, now_ms)?;
@@ -5973,6 +5977,20 @@ impl Actor {
                 let held = self.hold_unsent_for_move(turn, now_ms)?;
                 out.changed.status |= held.changed.status;
                 out.changed.queue |= held.changed.queue;
+                return Ok(());
+            }
+            if starting
+                && self.backend.id() == clarp_backend::LEGACY_AGY
+                && self.recorder.transit_held()
+                && matches!(self.recorder.agent().live(), Some(Turn::Starting(state)) if !state.ran_before)
+            {
+                // No shim ever took this attempt. Keep the message and let
+                // the ACP actor take it after the same-store move.
+                out.absorb(self.hold_unsent(
+                    turn,
+                    Command::HoldUnsentForTransit { turn },
+                    now_ms,
+                )?);
                 return Ok(());
             }
             if starting && self.moved().is_none() && !self.recorder.agent().import_held() {

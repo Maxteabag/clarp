@@ -30,8 +30,8 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 8] = [
-    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
+const TOOLS: [&str; 7] = [
+    "claude", "codex", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 /// How long a tool has to answer one question about itself, where nothing else is declared
 /// of the question (Antigravity fetches its list of models, and is given longer).
@@ -47,7 +47,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app; over ACP, steering is not advertised, as for
 /// Claude Code, and a message sent to a running turn is read into it all the same.
-const NOT_YET: [(&str, &[&str]); 5] = [
+const NOT_YET: [(&str, &[&str]); 4] = [
     (
         "claude",
         &["supports_steer", "supports_auth", "supports_usage"],
@@ -63,10 +63,8 @@ const NOT_YET: [(&str, &[&str]); 5] = [
             "supports_usage",
         ],
     ),
-    ("agy", &["supports_compact"]),
-    // Antigravity over ACP does not advertise steering, whatever the `agy` row it is made
-    // from says: as for Claude Code, a message sent while its turn runs is offered to that turn
-    // by the Host (`Backend::steers`), and no app asks for it.
+    // As for Claude Code, the Host offers steering while a turn runs. The app
+    // does not need to ask for steering itself.
     ("agy-acp", &["supports_compact", "supports_steer"]),
     ("grok", &["supports_compact", "supports_auth"]),
 ];
@@ -266,7 +264,8 @@ impl Shelf {
     }
 
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
-        if !matches!(tool, "codex" | "agy") {
+        let tool = clarp_backend::canonical_id(tool);
+        if !matches!(tool, "codex" | "agy-acp") {
             return None;
         }
         let kept = self
@@ -278,7 +277,7 @@ impl Shelf {
             .map(|k| &k.told["providers"][tool])
             .filter(|r| r["source"]["kind"] == "cli_probe");
         let bundled = catalogue::declared(tool);
-        let row = observed.or_else(|| (tool == "agy").then_some(&bundled))?;
+        let row = observed.or_else(|| (tool == "agy-acp").then_some(&bundled))?;
         let mut ids: Vec<_> = row["models"]
             .as_array()
             .into_iter()
@@ -289,7 +288,7 @@ impl Shelf {
             return None;
         }
         let reason = "Invalid provider model identifier";
-        if tool == "agy" {
+        if tool == "agy-acp" {
             return Some(reason.into());
         }
         ids.sort_unstable();
@@ -339,8 +338,7 @@ impl Shelf {
 
 /// The configured model for a backend when the agent has selected none.
 pub(crate) async fn default_for(app: &App, backend: &str) -> Option<String> {
-    let key = format!("{backend}_model");
-    if let Some(model) = crate::owner::text_at(&app.mouth.owners(), &["agents", &key]) {
+    if let Some(model) = crate::telling::configured_model(&app.mouth.owners(), backend) {
         return Some(model);
     }
     let backend = backend.to_owned();
