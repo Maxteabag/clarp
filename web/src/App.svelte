@@ -10,6 +10,7 @@
   import AgentSwitcher from './lib/AgentSwitcher.svelte';
   import OrchestratorDialog from './lib/OrchestratorDialog.svelte';
   import ChatSettingsDialog from './lib/ChatSettingsDialog.svelte';
+  import BlockViewer from './lib/BlockViewer.svelte';
   import QuickSwitch from './lib/QuickSwitch.svelte';
   import Overview from './lib/Overview.svelte';
   import StartDialog from './lib/StartDialog.svelte';
@@ -286,6 +287,7 @@
 
 <OrchestratorDialog bind:open={orchestratorOpen} />
 <ChatSettingsDialog bind:open={chatSettingsOpen} />
+<BlockViewer />
 
 <QuickSwitch
   bind:open={quickOpen}

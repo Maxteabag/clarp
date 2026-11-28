@@ -1187,6 +1187,69 @@ body.chat-open .status { display: none !important; }
   word-break: break-word;
   overflow-x: auto;
 }
+/* A fenced code block (web/src/lib/blocks.js): a thin line above the code
+   with the fence's language and a copy icon, then the code, which scrolls
+   sideways and is never covered. A tap or click opens it full screen. */
+.turn .body .code-block {
+  margin: 4px 0;
+  background: rgba(0, 0, 0, .25);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.turn .body .code-block > pre {
+  margin: 0;
+  background: transparent;
+  border-radius: 0;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  -webkit-overflow-scrolling: touch;
+  cursor: zoom-in;
+}
+.turn .body .blk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  padding: 0 2px 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink-edge) 60%, transparent);
+}
+.turn .body .blk-lang {
+  font: 400 11px/1 var(--font-mono);
+  color: var(--washi-low);
+  letter-spacing: .02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn .body .blk-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--washi-low);
+  cursor: pointer;
+}
+.turn .body .blk-btn svg { width: 15px; height: 15px; }
+.turn .body .blk-btn:hover { color: var(--washi); }
+.turn .body .blk-btn.copied { color: var(--moss); }
+/* A table's line holds only the expand icon, and only when the table is
+   wider than the message. */
+.turn .body .table-block { margin: 6px 0; }
+.turn .body .table-block > .blk-head {
+  display: none;
+  justify-content: flex-end;
+  border-bottom: 0;
+  padding: 0;
+}
+.turn .body .table-block.wide > .blk-head { display: flex; }
+.turn .body .table-block > .table-wrap { margin: 0; }
 .turn .body pre code {
   background: transparent;
   padding: 0;
@@ -1196,6 +1259,19 @@ body.chat-open .status { display: none !important; }
   margin: 6px 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+}
+/* A wide table fades at the edge that has more to scroll to. */
+.turn .body .table-wrap.fade-r {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+          mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.turn .body .table-wrap.fade-l {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+          mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.turn .body .table-wrap.fade-l.fade-r {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+          mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 .turn .body img {
   display: block;
@@ -1226,18 +1302,22 @@ body.chat-open .status { display: none !important; }
   border-radius: 6px;
 }
 .turn .body table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
   font: 400 14px/1.4 var(--font-body);
 }
+/* Cells keep a readable width; a table with more columns than fit scrolls
+   sideways instead of squeezing every cell to one word per line. */
 .turn .body th,
 .turn .body td {
   border: 1px solid var(--ink-edge);
   padding: 4px 8px;
   text-align: left;
   vertical-align: top;
-  word-break: break-word;
+  min-width: 7em;
+  overflow-wrap: break-word;
 }
+.turn .body th { white-space: nowrap; }
 .turn .body th {
   background: rgba(255, 255, 255, .05);
   color: var(--washi);
