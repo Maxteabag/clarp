@@ -109,6 +109,20 @@ fn jwt_payload(token: &str) -> Option<Value> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Stable machine login at Codex dispatch. Token rotation within a membership is irrelevant.
+pub(crate) fn codex_membership() -> Option<[u8; 32]> {
+    let file = crate::past::codex_home(&crate::config::home()).join("auth.json");
+    let login: Value = serde_json::from_slice(&std::fs::read(file).ok()?).ok()?;
+    let tokens = &login["tokens"];
+    let workspace = tokens["account_id"].as_str().filter(|s| !s.is_empty())?;
+    let claims = jwt_payload(tokens["id_token"].as_str()?)?;
+    let member = claims["https://api.openai.com/auth"]["chatgpt_user_id"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| claims["sub"].as_str().filter(|s| !s.is_empty()))?;
+    Some(Sha256::digest(json!([workspace, member]).to_string()).into())
+}
+
 /// Whether a program can be started: a path that is a file, or a name found on the path.
 pub(crate) fn installed(program: &str) -> bool {
     if program.contains('/') {
