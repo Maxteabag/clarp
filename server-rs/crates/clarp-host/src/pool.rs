@@ -60,11 +60,16 @@ impl Service {
         clock: Arc<dyn Clock + Send + Sync>,
         login_lock: Option<std::path::PathBuf>,
     ) -> Arc<Self> {
+        let pool = if tool == "codex" {
+            Pool::for_codex()
+        } else {
+            Pool::new()
+        };
         Arc::new(Self {
             login_lock,
             tool,
             command,
-            pool: Mutex::new(Pool::new().ending_plans_after(accounts::PLAN_CHECKS_HERE)),
+            pool: Mutex::new(pool.ending_plans_after(accounts::PLAN_CHECKS_HERE)),
             clock,
             fleet: OnceLock::new(),
             selector_most: SELECTOR_MOST,
