@@ -104,6 +104,8 @@ mod explorer_checks;
 // ---- a narrow window: the panes stay inside it
 #[path = "narrow_checks.rs"]
 mod narrow_checks;
+#[path = "polish_checks.rs"]
+mod polish_checks;
 // ---- the Host's kept processes in the settings (lane_settings)
 #[path = "lanes_checks.rs"]
 mod lanes_checks;
@@ -611,6 +613,7 @@ pub fn start_check(name: &str, out: String) {
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "narrow" => narrow_checks::narrow_check(out),
+        "polish" => polish_checks::polish_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
         "playback" => playback_checks::playback_check(out, false),
