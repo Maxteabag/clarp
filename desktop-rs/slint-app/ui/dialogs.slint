@@ -182,11 +182,13 @@ export component ConnectionPage inherits Modal {
     callback cancel();
     // Leaves a saved Host out of the list.
     callback remove(string);
-    public function open() {
-        server.text = root.base-url;
+    private property <string> switch-from;
+    public function open-for(url: string, action: string) {
+        root.switch-from = action == "switch" ? url : "";
+        server.text = url;
         token.text = "";
         code.text = "";
-        server.focus();
+        if (action == "pair") { code.focus(); } else { server.focus(); }
     }
     card-width: 520px;
     card-height: 470px + (root.hosts.length > 0 ? 28px + root.hosts.length * 48px : 0px);
@@ -200,7 +202,8 @@ export component ConnectionPage inherits Modal {
         if root.hosts.length > 0: Text { text: @tr("Saved Hosts"); color: Palette.muted; font-size: 11 * Look.unit; }
         // At most six (the app sends no more); Ctrl+K finds every saved Host.
         for host in root.hosts: HorizontalLayout {
-            height: 40px;
+            visible: host.url != root.switch-from;
+            height: self.visible ? 40px : 0px;
             spacing: 8px;
             VerticalLayout {
                 horizontal-stretch: 1;
@@ -217,11 +220,11 @@ export component ConnectionPage inherits Modal {
                 }
                 Text { text: host.url; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
             }
-            if !host.current: Button {
+            if !host.current || root.switch-from != "": Button {
                 // i18n: Connection page, saved Host row, button (verb): connect to this Host
                 text: @tr("Connect");
                 enabled: !root.connecting;
-                clicked => { root.connect(host.url, ""); }
+                clicked => { if (host.current) { root.cancel(); } else { root.connect(host.url, ""); } }
             }
             Button {
                 // i18n: Connection page, saved Host row, button (verb): forget this saved Host
@@ -294,7 +297,7 @@ export component ConnectionPage inherits Modal {
             Rectangle { horizontal-stretch: 1; }
             // i18n: Connection page, button (verb): close the page without connecting
             if root.can-cancel: Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
-            if root.stored: Button {
+            if root.stored && server.text == root.base-url: Button {
                 // i18n: Connection page, button (verb phrase): delete the access token this computer has saved
                 text: @tr("Forget device token");
                 enabled: !root.connecting;

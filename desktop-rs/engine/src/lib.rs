@@ -284,6 +284,7 @@ pub struct Engine {
     outage: outage::OutageState,
     server_name: String,
     server_version: String,
+    server_contract: Option<u32>,
 
     roster: Roster,
     archived: Roster,
@@ -464,6 +465,7 @@ impl Engine {
             outage: Default::default(),
             server_name: String::new(),
             server_version: String::new(),
+            server_contract: None,
             roster: Roster::default(),
             archived: Roster::archived(),
             rooms: Vec::new(),
@@ -623,10 +625,6 @@ impl Engine {
     }
     pub fn error(&self) -> &str {
         &self.error
-    }
-    /// The error is the Host's being out of reach (no HTTP answer).
-    pub fn transport_error(&self) -> bool {
-        self.error_is_transport
     }
     pub fn server_version(&self) -> &str {
         &self.server_version
@@ -980,6 +978,7 @@ impl Engine {
     }
 
     pub fn reconnect(&mut self) {
+        self.host_down.started = true;
         self.rooms_unsupported = false;
         let endpoint = match Url::parse(&self.base_url) {
             Ok(url) if url.host_str().is_some_and(|h| !h.is_empty()) => url,
@@ -1772,6 +1771,7 @@ impl Engine {
             self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
+            self.server_contract = object.get("contract").and_then(|c| c.get("host").unwrap_or(c).as_u64()).and_then(|n| u32::try_from(n).ok());
             self.changes.push(Change::ServerInfo);
             // A Host that answered is kept for switching back to it.
             let before = clarp_core::hosts::list(&self.settings);

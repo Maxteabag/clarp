@@ -180,7 +180,7 @@ pub fn classify(attempt: &Attempt, context: &Context) -> Reason {
     }
     match attempt {
         Attempt::Http(401 | 403) => return Reason::AuthExpired,
-        Attempt::NameNotFound | Attempt::Tls | Attempt::NotThisHost | Attempt::Http(404) => return Reason::WrongAddress,
+        Attempt::NameNotFound | Attempt::Tls | Attempt::NotThisHost | Attempt::Http(300..=399 | 404) => return Reason::WrongAddress,
         Attempt::Refused => return Reason::ServerStopped,
         _ => {}
     }
@@ -427,7 +427,7 @@ mod tests {
         let lan = context(AddressKind::Lan);
         assert_eq!(classify(&Attempt::Http(401), &lan), Reason::AuthExpired);
         assert_eq!(classify(&Attempt::Http(403), &lan), Reason::AuthExpired);
-        for wrong in [Attempt::NameNotFound, Attempt::Tls, Attempt::NotThisHost, Attempt::Http(404)] {
+        for wrong in [Attempt::NameNotFound, Attempt::Tls, Attempt::NotThisHost, Attempt::Http(302), Attempt::Http(404)] {
             assert_eq!(classify(&wrong, &lan), Reason::WrongAddress, "{wrong:?}");
         }
         assert_eq!(classify(&Attempt::Refused, &context(AddressKind::Tailnet)), Reason::ServerStopped);

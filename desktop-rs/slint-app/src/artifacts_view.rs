@@ -541,7 +541,7 @@ type PictureKey = (String, String);
 
 thread_local! {
     static PICTURES: std::cell::RefCell<std::collections::HashMap<PictureKey, Picture>> = std::cell::RefCell::default();
-    static PICTURE_REQUESTS: std::cell::RefCell<std::collections::HashMap<PictureKey, TranscriptImageRequest>> = std::cell::RefCell::default();
+    static PICTURE_REQUESTS: std::cell::RefCell<std::collections::HashMap<PictureKey, (TranscriptImageRequest, Option<u64>)>> = std::cell::RefCell::default();
     /// Bumped whenever a picture lands, so rows with images are drawn again.
     static PICTURES_LANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -562,8 +562,7 @@ fn settle_pictures(app: &App) {
     if retried {
         PICTURES_LANDED.with(|landed| landed.set(landed.get() + 1));
     }
-    PICTURE_REQUESTS.with(|requests| requests.borrow_mut().retain(|key, request| {
-        let epoch = engine.live_epoch(&key.0);
+    PICTURE_REQUESTS.with(|requests| requests.borrow_mut().retain(|key, (request, epoch)| {
         match engine.take_transcript_image(request) {
             TranscriptImageReply::Pending => return true,
             TranscriptImageReply::Abandoned => {
@@ -574,7 +573,7 @@ fn settle_pictures(app: &App) {
                 store_picture(key.clone(), picture_pixels(&bytes), None);
             }
             TranscriptImageReply::Received(Ok(bytes)) => decode_picture_later(key.clone(), bytes),
-            TranscriptImageReply::Received(Err(error)) => store_picture(key.clone(), Err(error), epoch),
+            TranscriptImageReply::Received(Err(error)) => store_picture(key.clone(), Err(error), *epoch),
         }
         false
     }));
@@ -720,7 +719,11 @@ fn message_image(alt: &str, reference: &str, session: &str, host: Option<&str>) 
         Some(Picture::Loading) => {}
         None => {
             if let Some(app) = crate::app()
-                && let Some(request) = app.engine.borrow_mut().fetch_transcript_image(session, host, &key.1)
+                && let Some(request) = {
+                    let mut engine = app.engine.borrow_mut();
+                    let epoch = engine.live_epoch(host);
+                    engine.fetch_transcript_image(session, host, &key.1).map(|request| (request, epoch))
+                }
             {
                 PICTURES.with(|p| p.borrow_mut().insert(key.clone(), Picture::Loading));
                 PICTURE_REQUESTS.with(|f| f.borrow_mut().insert(key, request));

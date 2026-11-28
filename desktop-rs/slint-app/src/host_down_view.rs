@@ -189,18 +189,22 @@ pub fn wire(window: &AppWindow) {
             crate::pump_now(&app);
         }
     });
-    bridge.on_act(|_url, action| {
+    bridge.on_act(|url, action| {
         let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
         match action.as_str() {
             // Pairing and the address are the connection page's.
-            "pair" | "address" => open_connection(&app, &window),
+            "pair" | "address" => {
+                open_connection(&app, &window);
+                window.invoke_open_host_action(url, action);
+            }
             "tailscale" => crate::view::open_link(TAILSCALE_PAGE),
             other => eprintln!("clarp-slint: no Host-down action {other}"),
         }
     });
-    bridge.on_switch_host(|| {
+    bridge.on_switch_host(|url| {
         if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
             open_connection(&app, &window);
+            window.invoke_open_host_action(url, "switch".into());
         }
     });
     bridge.on_copy_diagnostics(|url| {

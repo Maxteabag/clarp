@@ -27,6 +27,7 @@ const LAST_OK_SAVE: Duration = Duration::from_secs(300);
 struct Down {
     since_ms: i64,
     attempts: u32,
+    backoff_step: u32,
     last: Option<Attempt>,
     reason: Reason,
     next_at: Option<Instant>,
@@ -51,6 +52,7 @@ struct Watch {
 
 #[derive(Default)]
 pub(crate) struct HostDown {
+    pub(crate) started: bool,
     watches: Vec<Watch>,
     network: DeviceNetwork,
     fingerprint: Option<String>,
@@ -142,7 +144,7 @@ impl Engine {
 
     /// After each pump: notices Hosts that stopped or started answering.
     pub(crate) fn watch_hosts(&mut self) {
-        if self.peer {
+        if self.peer || !self.host_down.started {
             return;
         }
         let states = self.host_states();
@@ -189,7 +191,7 @@ impl Engine {
                     let since_ms = if watch.seen_live { wall } else { watch.last_ok_ms.unwrap_or(wall) };
                     watch.generation += 1;
                     watch.back_until = None;
-                    watch.down = Some(Down { since_ms, attempts: 0, last: None, reason: Reason::Unknown, next_at: None, in_flight: false, answered: false });
+                    watch.down = Some(Down { since_ms, attempts: 0, backoff_step: 0, last: None, reason: Reason::Unknown, next_at: None, in_flight: false, answered: false });
                     if let Some(at) = watch.last_ok_ms {
                         self.settings.set(&format!("{LAST_OK}{url}"), at);
                     }
@@ -243,7 +245,8 @@ impl Engine {
         let Some(down) = watch.down.as_mut() else { return };
         down.in_flight = false;
         down.attempts += 1;
-        let delay = host_down::backoff(down.attempts);
+        down.backoff_step += 1;
+        let delay = host_down::backoff(down.backoff_step);
         down.next_at = Some(Instant::now() + delay);
         let answered = matches!(probe, Probe::Answered { .. });
         match probe {
@@ -366,7 +369,7 @@ impl Engine {
         if let Some(watch) = self.host_down.watches.iter_mut().find(|w| w.url == url)
             && let Some(down) = watch.down.as_mut()
         {
-            down.attempts = 0;
+            down.backoff_step = 0;
             if down.in_flight {
                 return;
             }
@@ -422,7 +425,7 @@ impl Engine {
             host_id_or_url: if server_id.is_empty() { url } else { &server_id },
             base_url: url,
             host_version: &host_version,
-            contract: watch.contract,
+            contract: watch.contract.or_else(|| engine.and_then(|e| e.server_contract)),
             down_since_ms: down.map_or(now_ms(), |d| d.since_ms),
             now_ms: now_ms(),
             reason: down.map_or(Reason::Unknown, |d| d.reason),

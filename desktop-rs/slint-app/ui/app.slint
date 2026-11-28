@@ -441,7 +441,8 @@ export component AppWindow inherits Window {
     callback pair-host(string, string);
     callback forget-host();
     callback remove-saved-host(string);
-    public function open-connection-page() { connection-page.open(); }
+    public function open-connection-page() { connection-page.open-for(root.base-url, ""); }
+    public function open-host-action(url: string, action: string) { connection-page.open-for(url, action); }
     public function open-font-picker() { font-picker.open(); }
     // ---- preview versions
     in property <bool> preview-enabled;

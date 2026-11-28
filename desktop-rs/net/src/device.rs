@@ -28,7 +28,7 @@ fn virtual_name(name: &str) -> bool {
 }
 
 fn vpn_name(name: &str) -> bool {
-    ["tailscale", "utun", "tun", "wg", "ppp", "ipsec", "zt"].iter().any(|prefix| name.starts_with(prefix))
+    ["tailscale", "utun", "tun", "wg", "ipsec", "zt"].iter().any(|prefix| name.starts_with(prefix))
 }
 
 fn usable(address: IpAddr) -> bool {
@@ -47,10 +47,10 @@ pub fn network_of(interfaces: &[Interface]) -> DeviceNetwork {
     let online = !physical.is_empty();
     let kind = if physical.iter().any(|i| i.wireless) {
         Some("wifi")
+    } else if physical.iter().any(|i| i.name.starts_with("ppp")) {
+        Some("cellular")
     } else if cfg!(target_os = "linux") && online {
         Some("ethernet")
-    } else if online && vpn {
-        Some("vpn")
     } else {
         None
     };

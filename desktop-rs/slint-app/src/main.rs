@@ -528,7 +528,7 @@ impl App {
         });
         // A Host that does not answer has its panel: its raw connection
         // error is not shown over the chats (only in its diagnostics).
-        let primary_down = engine.host_down(engine.base_url()).is_some() && engine.transport_error();
+        let primary_down = engine.host_down(engine.base_url()).is_some();
         let chat_down = engine.host_down_for_session(&selected).is_some();
         let conversation_error = conversation_error.filter(|_| !chat_down);
         let error = if engine.error().is_empty() || primary_down { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };

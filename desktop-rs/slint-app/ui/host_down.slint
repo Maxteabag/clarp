@@ -54,7 +54,7 @@ export global HostDownBridge {
     in property <bool> copied;
     callback try-again(string);
     callback act(string, string);
-    callback switch-host();
+    callback switch-host(string);
     callback copy-diagnostics(string);
     callback open(string);
     callback close();
@@ -179,7 +179,7 @@ component Actions inherits HorizontalLayout {
         // i18n: Host-down panel, button (verb): open the list of saved Hosts to use another
         text: @tr("host_down.action.switch_host" => "Switch Host");
         accessible-id: "host-down-switch";
-        clicked => { HostDownBridge.switch-host(); }
+        clicked => { HostDownBridge.switch-host(root.panel.url); }
     }
     TextButton {
         // i18n: Host-down panel, button (verb): copies a short private-data-free report to the clipboard
