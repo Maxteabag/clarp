@@ -213,8 +213,12 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
         })
         .map(|mut row| {
             if every {
-                let harness = row["id"].as_str().and_then(clarp_backend::by_id);
-                row["runs_through"] = json!(harness.and_then(|backend| backend.runs_through()));
+                let id = row["id"].as_str();
+                let through = id
+                    .and_then(clarp_backend::by_id)
+                    .and_then(|backend| backend.runs_through())
+                    .filter(|through| Some(*through) != id);
+                row["runs_through"] = json!(through);
             }
             row
         })
