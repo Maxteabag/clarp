@@ -80,7 +80,8 @@ An app that does not know the feature keeps showing `text` as today.
 | `network_gone` | the computer had no network for 15 minutes | error | retry |
 | `provider_busy` | overloaded, rate limited, 429/5xx after the Host's own retries | warning | retry, switch_model, copy_details |
 | `provider_down` | the model's provider is unavailable | error | retry, switch_model, copy_details |
-| `invalid_request` | the provider rejected the request as malformed (bad tool or call ids, invalid payload, 400) | error | retry, switch_model, copy_details |
+| `invalid_request` | the provider rejected the request as malformed (bad tool or call ids, an empty tool result, invalid payload, 400). Trying the same session again replays the same history, so the first action starts a fresh one | error | fresh_retry, switch_model, copy_details |
+| `refused` | the model refused (a safety filter blocked the answer) | warning | switch_model, copy_details |
 | `prompt_too_long` | the conversation no longer fits the model | warning | compact_retry, switch_model |
 | `timeout` | the backend stopped responding | error | retry, copy_details |
 | `runner_exit` | the backend's process ended unexpectedly | error | retry, copy_details |
@@ -88,7 +89,7 @@ An app that does not know the feature keeps showing `text` as today.
 | `not_started` | the Host could not start the turn | error | retry, copy_details |
 | `folder_missing` | the agent's folder is gone | error | copy_details |
 | `provider_mismatch` | the agent ran on another provider than it is bound to | error | copy_details |
-| `session_locked` | the backend's session is held by another process | warning | retry |
+| `session_locked` | the backend's session is held by another process (a Codex thread with another active writer, a locked Grok session) | warning | retry |
 | `moved` | the agent moved to another Host | info | (none) |
 | `unknown` | anything else | error | retry, switch_model, copy_details |
 
@@ -98,12 +99,13 @@ An app that does not know the feature keeps showing `text` as today.
 |---|---|
 | `retry` | `POST /turn-retry {"session", "message_id"}`: the Host sends the same message again (text and attachments) as a new turn. |
 | `retry_at` | `POST /turn-retry {"session", "message_id", "at_ms"}`: the Host sends it again at that time. The card then reads the label's time as scheduled. |
+| `fresh_retry` | `POST /turn-retry {"session", "message_id", "fresh": true}`: the Host writes the conversation into a new session of the same backend and model (the way a backend change carries it), then sends the message again. For a session whose history the provider rejects. |
 | `compact_retry` | `POST /turn-retry {"session", "message_id", "compact": true}`: the Host compacts the conversation, then sends the message again. |
 | `switch_model` | Open the app's model/backend picker for this agent. |
 | `sign_in` | Open the app's sign-in for `backend` (the action carries `"backend"`). Leave it out if the app has none. |
 | `copy_details` | Copy `copy_text` to the clipboard. |
 
-`POST /turn-retry` answers `{"ok": true, "status": "queued" | "scheduled" | "compacting"}`, or 404
+`POST /turn-retry` answers `{"ok": true, "status": "queued" | "scheduled" | "compacting" | "refreshing"}`, or 404
 when the message is not in the agent's conversation, 409 when it has a newer answer already.
 
 ## Drawing it
