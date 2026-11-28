@@ -149,9 +149,9 @@ impl Engine {
         }
     }
 
-    /// Answers a question from a popup's button. False when the question's
-    /// revision is not known here (not in Updates): the caller opens the
-    /// chat at it instead.
+    /// Answers a question from a popup's button, at the newest revision the
+    /// desktop knows (Updates', else the push's). False when none is known:
+    /// the caller opens the chat at it instead.
     pub fn answer_from_notification(&mut self, decision_id: &str, response_type: &str, option: &str) -> bool {
         on_peer!(self.owner_mut(decision_id), |engine, _local| engine.answer_from_notification(decision_id, response_type, option));
         if response_type == ANSWERED {
@@ -167,8 +167,10 @@ impl Engine {
             .and_then(|q| q.notification.options.iter().find(|c| c.id == option))
             .map(|c| c.label.clone())
             .unwrap_or_else(|| option.to_owned());
-        let revision = self.attention_items().iter().filter_map(Value::as_object).find(|item| json::string(item, "decision_id") == decision_id).map(|item| json::integer(item, "revision"));
-        let Some(revision) = revision.filter(|r| *r > 0) else { return false };
+        // The newest the desktop knows: Updates' (live), else the push's.
+        let listed = self.attention_items().iter().filter_map(Value::as_object).find(|item| json::string(item, "decision_id") == decision_id).map(|item| json::integer(item, "revision"));
+        let pushed = self.notifications.questions.iter().rev().find(|q| q.notification.decision_id == decision_id).and_then(|q| q.notification.revision);
+        let Some(revision) = listed.max(pushed).filter(|r| *r > 0) else { return false };
         match response_type {
             "approval" => {
                 let choice = match option {
@@ -185,14 +187,12 @@ impl Engine {
                 if let Some(undo_ms) = undo_ms {
                     body["undo_ms"] = json!(undo_ms);
                 }
-                match self.decision_artifact(decision_id) {
-                    Some(artifact) => {
-                        self.send_decision(&artifact, decision_id, "resolve", body, revision);
-                        self.notifications.answers.insert(decision_id.to_owned(), (words, None));
-                        true
-                    }
-                    None => false,
-                }
+                // Not in Updates yet: the decision alone (the artifact only
+                // names the card's status line there).
+                let artifact = self.decision_artifact(decision_id).unwrap_or_default();
+                self.send_decision(&artifact, decision_id, "resolve", body, revision);
+                self.notifications.answers.insert(decision_id.to_owned(), (words, None));
+                true
             }
             _ => false,
         }

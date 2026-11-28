@@ -234,6 +234,9 @@ pub struct Incoming {
     /// needs_you: `approval`, `single_choice` or `text_input`.
     pub response_type: String,
     pub decision_id: String,
+    /// needs_you: the decision's revision when the push says it; else the
+    /// app reads it from Updates.
+    pub revision: Option<i64>,
     /// failed: what went wrong, for the words and the button.
     pub failure: Option<Failure>,
 }
@@ -334,13 +337,21 @@ impl Failure {
 impl Incoming {
     pub fn parse(event: &Object) -> Incoming {
         let first = |keys: &[&str]| keys.iter().map(|k| json::string(event, k)).find(|v| !v.is_empty()).unwrap_or_default();
-        let options = json::array(event, "options")
+        let mut options: Vec<Choice> = json::array(event, "options")
             .iter()
             .filter_map(Value::as_object)
             .map(|o| Choice { id: json::string(o, "id"), label: json::string(o, "label") })
             .filter(|c| !c.id.is_empty() && !c.label.is_empty())
             .take(4)
             .collect();
+        let response_type = json::string(event, "response_type");
+        // An approval from a Host that sends no answers: Yes and No.
+        if options.is_empty() && response_type == "approval" {
+            options = vec![
+                Choice { id: "accepted".into(), label: text("notify.action.yes").into() },
+                Choice { id: "rejected".into(), label: text("notify.action.no").into() },
+            ];
+        }
         let event_id = json::string(event, "event");
         Incoming {
             event: if event_id.is_empty() { "reply".into() } else { event_id },
@@ -354,8 +365,9 @@ impl Incoming {
             // The Host's English fallback where it has no preview (a failure's sentence).
             preview: first(&["preview", "body"]),
             options,
-            response_type: json::string(event, "response_type"),
+            response_type,
             decision_id: json::string(event, "decision_id"),
+            revision: event.get("revision").and_then(Value::as_i64).filter(|r| *r > 0),
             failure: Failure::parse(event),
         }
     }
@@ -444,6 +456,8 @@ pub const STRINGS: &[(&str, &str, &str)] = &[
     ("notify.action.mark_read", "Mark read", "Desktop notification: button (verb) that marks the chat read without opening it"),
     ("notify.action.mute", "Mute {name}", "Desktop notification: button (verb); {name} is the contact's name; no more notifications from them"),
     ("notify.action.settings", "Settings", "Desktop notification: button (noun) that opens Settings > Notifications"),
+    ("notify.action.yes", "Yes", "Desktop notification: button that approves an agent's request, when the Host names no label of its own"),
+    ("notify.action.no", "No", "Desktop notification: button that declines an agent's request, when the Host names no label of its own"),
     ("notify.action.undo", "Undo", "Desktop notification: button (verb) that takes back the answer just given to an agent's question"),
     ("notify.body.answered", "You answered {answer}", "Desktop notification: body after answering from the notification; {answer} is the chosen answer's label"),
     ("notify.body.too_late", "Too late to undo: the answer was sent", "Desktop notification: body when Undo came after the agent got the answer"),
@@ -643,6 +657,21 @@ mod tests {
         let error = unknown.turn_error("m1", "Something new broke.");
         assert_eq!(error.sentence_in("en", 0), "Something new broke.");
         assert!(error.actions.is_empty(), "no Copy diagnostics in a popup");
+    }
+
+    #[test]
+    fn an_approval_answers_yes_or_no_and_keeps_its_revision() {
+        let named = Incoming::parse(&object(json!({
+            "event": "needs_you", "decision_id": "d2", "response_type": "approval", "revision": 5,
+            "options": [{"id": "accepted", "label": "Ship it"}, {"id": "rejected", "label": "Hold"}],
+        })));
+        assert_eq!(named.options.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(), ["Ship it", "Hold"]);
+        assert_eq!(named.revision, Some(5));
+        let older = Incoming::parse(&object(json!({"event": "needs_you", "decision_id": "d3", "response_type": "approval"})));
+        assert_eq!(older.options, [Choice { id: "accepted".into(), label: "Yes".into() }, Choice { id: "rejected".into(), label: "No".into() }]);
+        assert_eq!(older.revision, None);
+        let typed = Incoming::parse(&object(json!({"event": "needs_you", "decision_id": "d4", "response_type": "text_input"})));
+        assert!(typed.options.is_empty(), "a text answer has no buttons");
     }
 
     #[test]
