@@ -14,8 +14,8 @@
   import { hostsState, knownHosts, updateHost } from '../stores/hosts.svelte.js';
   import { app, flash } from '../stores/app.svelte.js';
   import { APP_VERSION, setAuthToken } from './net.js';
-  import { i18n, t } from '../stores/i18n.svelte.js';
-  import { formatRelative } from './i18n/format.js';
+  import { t } from '../stores/i18n.svelte.js';
+  import { formatCountdown, formatRelative } from './i18n/format.js';
 
   let { id, full = false } = $props();
 
@@ -150,7 +150,7 @@
         <p class="hd-reason">{reasonBody(rec.reason, label, t)}</p>
         <p class="hd-meta">
           {#if rec.lastOk}<span>{t('host_down.last_seen', { when: formatRelative(rec.lastOk, reach.now) })}</span><span class="hd-sep">·</span>{/if}
-          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t, i18n.locale)}</span>
+          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t, formatCountdown)}</span>
         </p>
         <div class="hd-actions">
           <button type="button" class="hd-btn primary" onclick={() => retry(id)}>{t('host_down.action.retry')}</button>

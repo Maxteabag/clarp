@@ -3,10 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
+import { formatCountdown } from '../../web/src/lib/i18n/format.js';
 import {
   BACKOFF_MS, EN, english, addressKind, answerFailure, attemptLabel, backoffDelay, blankReach, classify,
   diagnosticsText, fetchFailure, lastSeenAt, peerAttempt, reachFail, reachOk, reasonBody,
-  reasonGist, reasonSeverity, reasonTitle, retryIn, sha256Hex, statusLine,
+  reasonGist, reasonSeverity, reasonTitle, sha256Hex, statusLine,
 } from '../../static/lib/host-reach.js';
 
 vi.mock('../../web/src/lib/net.js', () => ({ clog: vi.fn() }));
@@ -136,17 +137,18 @@ describe('copy', () => {
     const tr = (key, p) => `<${key}${p ? ':' + Object.values(p).join(',') : ''}>`;
     expect(reasonTitle('host_asleep', 'Studio', tr)).toBe('<host_down.host_asleep.title:Studio>');
     const down = { ...blankReach(), down: true, nextAt: 30_000 };
-    expect(statusLine(down, 0, tr, 'nb')).toBe('<host_down.status.retry_in:om 30 sekunder>');
+    expect(statusLine(down, 0, tr, ms => formatCountdown(ms, 'long', 'nb'))).toBe('<host_down.status.retry_in:om 30 sekunder>');
   });
 
   it('keeps the status line quiet and counting, by the relative formatter', () => {
     const down = { ...blankReach(), down: true, nextAt: 10_000 };
     expect(statusLine({ ...down, inFlight: true }, 0)).toBe('Reconnecting automatically…');
-    expect(statusLine(down, 5_000)).toBe('Trying again in 5 seconds');
-    expect(statusLine({ ...down, nextAt: 125_000 }, 5_000)).toBe('Trying again in 2 minutes');
+    const en = ms => formatCountdown(ms, 'long', 'en');
+    expect(statusLine(down, 5_000, english, en)).toBe('Trying again in 5 seconds');
+    expect(statusLine({ ...down, nextAt: 125_000 }, 5_000, english, en)).toBe('Trying again in 2 minutes');
     expect(statusLine({ ...blankReach(), backUntil: 2000 }, 1000)).toBe('Back online');
     expect(statusLine(blankReach(), 5000)).toBe('');
-    expect(retryIn(1000)).toBe('in 1 second');
+    expect(formatCountdown(1000, 'long', 'en')).toBe('in 1 second');
   });
 
   it('says when the Host last answered: last_ok, else down_since', () => {

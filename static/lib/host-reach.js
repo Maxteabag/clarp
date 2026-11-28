@@ -312,34 +312,16 @@ export function classify(attempt, { deviceOnline = true, address = 'unknown', vi
 
 // ---- time -------------------------------------------------------------------------------------
 
-const rtfs = new Map();
-function relative(locale, numeric) {
-  const k = `${locale}|${numeric}`;
-  let f = rtfs.get(k);
-  if (!f) {
-    try { f = new Intl.RelativeTimeFormat(locale, { numeric }); } catch (_) { f = new Intl.RelativeTimeFormat('en', { numeric }); }
-    rtfs.set(k, f);
-  }
-  return f;
-}
-
 /**
- * "in 30 seconds", "in 1 minute": the wait before the next attempt, by Intl in the app's
- * language. Seconds stay seconds (a relative formatter's "now" would say nothing).
+ * The quiet status line under the panel. `formatIn(ms)` writes the wait ({in}, "in 30 seconds"):
+ * the web app's formatCountdown (web/src/lib/i18n/format.js), so the language's own words.
  */
-export function retryIn(ms, locale = 'en') {
-  const s = Math.max(1, Math.ceil(ms / 1000));
-  if (s < 60) return relative(locale, 'always').format(s, 'second');
-  return relative(locale, 'always').format(Math.round(s / 60), 'minute');
-}
-
-/** The quiet status line under the panel. `locale` is the app's language for {in}. */
-export function statusLine(rec, now = Date.now(), tr = english, locale = 'en') {
+export function statusLine(rec, now = Date.now(), tr = english, formatIn = ms => `${Math.ceil(ms / 1000)} s`) {
   if (!rec) return '';
   if (!rec.down && rec.backUntil > now) return tr('host_down.status.back_online');
   if (!rec.down) return '';
   if (rec.inFlight || !rec.nextAt) return tr('host_down.status.reconnecting');
-  return tr('host_down.status.retry_in', { in: retryIn(rec.nextAt - now, locale) });
+  return tr('host_down.status.retry_in', { in: formatIn(rec.nextAt - now) });
 }
 
 /** When the Host last answered, for "Last answered {when}" and the list row: last_ok, else down_since. */
