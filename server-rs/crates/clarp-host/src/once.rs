@@ -420,12 +420,19 @@ async fn run_with(
         // the question: its own words are kept only where they hold none of it. The status as
         // the reference reads it: a signal is its negative.
         use std::os::unix::process::ExitStatusExt as _;
+        let acp_error = if launch.program == "clarp-shim"
+            && clarp_backend::canonical_id(backend) == clarp_backend::agy_acp::ID
+        {
+            clarp_backend::agy_acp::question_failure(&printed)
+        } else {
+            None
+        };
         let complained = String::from_utf8_lossy(&done.stderr);
-        let said = if complained.is_empty() {
+        let said = acp_error.as_deref().unwrap_or(if complained.is_empty() {
             &printed
         } else {
             &complained
-        };
+        });
         let status = done
             .status
             .code()
