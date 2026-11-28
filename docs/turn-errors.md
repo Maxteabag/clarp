@@ -56,8 +56,11 @@ An app that does not know the feature keeps showing `text` as today.
 - `code`: stable, from the list below. Apps may pick an icon by it; never parse `text`.
 - `key` and `params`: the sentence's key in the app's own catalog and what fills it (see Catalog
   keys below). **An app says the sentence from its catalog, in the user's chosen language**, and
-  formats `time_ms` with the platform's formatter in that locale. It falls back to `text` only
-  for a key it does not have, or when a placeholder its string uses is empty in `params`.
+  formats `time_ms` with the platform's formatter in that locale. It falls back to `text` for a
+  key it does not have **in the user's language** (a catalog that holds only the English source
+  so far counts as not having it: a Norwegian user then reads `text.nb`, not English), or when a
+  placeholder its string uses is empty in `params`. For a language the Host has no text of, the
+  fallback is `text.en`.
 - `text`: the Host's own sentence in English and Norwegian, the fallback above (`nb` for a
   Norwegian app language, `en` otherwise).
 - `severity`: `error` (red), `warning` (amber: a limit or wait, nothing broken), `info` (grey).
@@ -173,7 +176,9 @@ sent now drops the planned one.
   that holds `detail`, then `backend · model · trace_id` in small monospace, selectable.
 - **Repeats collapse.** Rows whose `error.fingerprint` is the same, with no reply of the agent's
   between them (user messages and system rows may lie between), are drawn as one card at the
-  newest of them, with a count ("3×"). The older ones are hidden; the user's messages stay.
+  newest of them, with a count ("3×"). Automated rows (`automated: true`: a heartbeat, a goal
+  wake) count neither as a failure of the run nor as a reply that ends it, so a failed wake never
+  takes the user's own failure's buttons away. The older ones are hidden; the user's messages stay.
 - **A failure the Host recovers from is not an error.** Retries, account switches and waits for
   the network or an account show on the working line ("Reconnecting", "Waiting for an account
   until 18:27"), never as a card.
