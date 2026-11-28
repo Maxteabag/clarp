@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse"
+                "claude", "codex", "agy-acp", "grok", "opencode", "deepseek", "muse"
             ]
         );
         for (id, variable, name) in PROGRAMS {
@@ -582,11 +582,11 @@ mod tests {
             [CLAUDE_PROGRAM_ENV, CODEX_PROGRAM_ENV, AGY_PROGRAM_ENV],
             [PROGRAMS[0].1, PROGRAMS[1].1, PROGRAMS[2].1]
         );
-        // The two OpenCode cards are the one program, and so are the two Antigravity cards.
-        let (opencode, deepseek) = (PROGRAMS[5], PROGRAMS[6]);
+        // The two OpenCode cards are the one program. The old Antigravity id
+        // remains usable wherever the binary itself is needed.
+        let (opencode, deepseek) = (PROGRAMS[4], PROGRAMS[5]);
         assert_eq!((opencode.1, opencode.2), (deepseek.1, deepseek.2));
-        let (agy, acp) = (PROGRAMS[2], PROGRAMS[3]);
-        assert_eq!((agy.1, agy.2), (acp.1, acp.2));
+        assert_eq!(program("agy"), program("agy-acp"));
         for id in ["scripted", "zoxide", "", "Claude"] {
             assert_eq!(program(id), None, "{id}");
         }
@@ -601,7 +601,9 @@ mod tests {
             (Some(1_000_000), None),
             "Codex compacts on its own: there is no gauge to show"
         );
-        assert_eq!(by_id("agy").unwrap().id(), "agy");
+        assert_eq!(by_id("agy").unwrap().id(), "agy-acp");
+        assert_eq!(by_id("antigravity").unwrap().id(), "agy-acp");
+        assert_eq!(legacy_agy().id(), "agy");
         assert_eq!(efforts("agy"), ["low", "medium", "high"]);
         assert_eq!(by_id("agy-acp").unwrap().id(), "agy-acp");
         assert_eq!(efforts("agy-acp"), efforts("agy"));
@@ -611,7 +613,11 @@ mod tests {
 
     #[test]
     fn antigravity_and_antigravity_over_acp_keep_one_store() {
-        assert!(same_store("agy", "agy-acp") && same_store("agy-acp", "agy"));
+        assert_eq!(
+            same_store("agy", "agy-acp"),
+            clarp_acp::agy::profile().is_none()
+        );
+        assert!(!same_store("agy-acp", "agy"));
         // One program, but not approved to share a conversation: it still carries.
         assert!(!same_store("opencode", "deepseek") && !same_store("deepseek", "opencode"));
         for (from, to) in [

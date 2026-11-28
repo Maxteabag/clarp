@@ -77,7 +77,7 @@ const TOOL_NAMES: [(&str, &str); 13] = [
 /// is silently begun anew. Such a question is therefore asked in a home of its own that has
 /// Antigravity's login, linked, and its settings, copied, and nothing else: as the Python
 /// Host does (`backend/agy.py`, `isolated_home`).
-const OWN_HOME: OwnHome = OwnHome {
+pub(crate) const OWN_HOME: OwnHome = OwnHome {
     linked: &[
         ".gemini/oauth_creds.json",
         ".gemini/google_accounts.json",
@@ -90,6 +90,7 @@ const OWN_HOME: OwnHome = OwnHome {
         ".gemini/antigravity-cli/cache/onboarding.json",
     ],
 };
+pub(crate) const EFFORTS: &[&str] = &["low", "medium", "high"];
 /// How long Antigravity gives itself for a question it only reads for.
 const READS_WITHIN: &str = "120s";
 /// Where Antigravity keeps what is its own, under its user's home.
@@ -146,7 +147,7 @@ impl Backend for Agy {
     /// As the Python Host declares them. (agy 1.5.10 takes `xhigh` and `max` too, by its own
     /// help; a model's name carries its effort anyway.)
     fn efforts(&self) -> &'static [&'static str] {
-        &["low", "medium", "high"]
+        EFFORTS
     }
 
     fn launch(&self, spec: &TurnSpec) -> Launch {
