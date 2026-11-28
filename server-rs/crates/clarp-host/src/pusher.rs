@@ -24,6 +24,7 @@ use tokio::time::Instant;
 
 use clarp_kernel::alert_routes::{Path, Routes};
 use clarp_kernel::devices::PushRow;
+use clarp_kernel::notify_events::{Event, Loc, Settings};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::push::{self, Asked, Told};
 use clarp_ports::clock::Clock;
@@ -46,6 +47,125 @@ pub fn preview_of(record: &crate::fleet::AgentRecord, said: &str) -> String {
     }
 }
 
+/// The actions of a reply's notification: answer from the banner, play it.
+pub const REPLY_CATEGORY: &str = "agent-turn";
+/// The actions of a failed turn's notification: try again, open.
+pub const FAILED_CATEGORY: &str = "turn-failed";
+
+/// The key of a reply's banner where the Host wrote it ([`preview_of`]): of a bound agent.
+pub fn preview_loc(record: &crate::fleet::AgentRecord) -> Option<Loc> {
+    record
+        .bound()
+        .then(|| Loc::new("notify.body.answered", &[display_name(record)]))
+}
+
+/// The key a reply's or a note's banner is translated by, and what the push carries of its
+/// preview line beside its English (`preview_parts`, from the Host's preview formatter, where
+/// the event the apps were told has it). Of a bound agent only that it answered: its words go
+/// to no push service.
+pub fn preview_keys(
+    record: &crate::fleet::AgentRecord,
+    told: &Value,
+) -> (Option<Loc>, serde_json::Map<String, Value>) {
+    let mut extra = serde_json::Map::new();
+    if let Some(answered) = preview_loc(record) {
+        return (Some(answered), extra);
+    }
+    let parts = &told["preview_parts"];
+    if !parts.is_null() {
+        extra.insert("preview_parts".into(), parts.clone());
+    }
+    (clarp_kernel::notify_events::preview_loc(parts), extra)
+}
+
+/// What a bound agent's failed turn says on a phone.
+const WITHHELD_FAILURE: &str = "notify.body.failed_withheld";
+
+/// The push of a turn that failed, from what the apps were told of it
+/// ([`crate::wire::failed_notification`]): the same key, arguments and English.
+///
+/// An agent bound to a model provider of its own sends none of its turn's words to a push
+/// service, nor what they name (a working folder, the provider's message): its push says only
+/// that the turn did not finish, and carries codes and ids, never the sentence or its arguments.
+pub fn failed(record: &crate::fleet::AgentRecord, told: &Value) -> TurnDone {
+    let title = Loc::new("notify.body.failed_title", &[display_name(record)]);
+    let body = if record.bound() {
+        Loc::new(WITHHELD_FAILURE, &[])
+    } else {
+        Loc {
+            key: told["body_loc_key"]
+                .as_str()
+                .unwrap_or("error.unknown")
+                .to_string(),
+            args: told["body_loc_args"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        }
+    };
+    let preview = if record.bound() {
+        body.english()
+    } else {
+        told["preview"].as_str().unwrap_or("").to_string()
+    };
+    let mut extra = serde_json::Map::new();
+    for key in [
+        "error_kind",
+        "error_code",
+        "turn_id",
+        "time_ms",
+        "primary_action",
+    ] {
+        if !told[key].is_null() {
+            extra.insert(key.into(), told[key].clone());
+        }
+    }
+    let message_id = told["cause_message_id"].as_str().unwrap_or("").to_string();
+    TurnDone {
+        badge: true,
+        unread: true,
+        session: record.session.clone(),
+        persona: record.persona.clone(),
+        notification_id: told["notification_id"].as_str().unwrap_or("").to_string(),
+        preview,
+        title: title.english(),
+        event: Event::Failed,
+        agent_id: record.agent_id.clone(),
+        message_id,
+        category: FAILED_CATEGORY.to_string(),
+        title_loc: Some(title),
+        body_loc: Some(body),
+        extra,
+        ..TurnDone::default()
+    }
+}
+
+/// The push of a job that ended, from what the apps were told of it
+/// ([`crate::wire::job_notification`]).
+pub fn job_done(record: &crate::fleet::AgentRecord, told: &Value) -> TurnDone {
+    let key = if told["job_status"] == "failed" {
+        "notify.body.job_failed"
+    } else {
+        "notify.body.job_succeeded"
+    };
+    let arg = told["body_loc_args"][0].as_str().unwrap_or("");
+    let body = Loc::new(key, &[arg]);
+    let mut extra = serde_json::Map::new();
+    extra.insert("job_id".into(), told["job_id"].clone());
+    extra.insert("job_status".into(), told["job_status"].clone());
+    TurnDone {
+        session: record.session.clone(),
+        persona: record.persona.clone(),
+        notification_id: told["notification_id"].as_str().unwrap_or("").to_string(),
+        preview: body.english(),
+        event: Event::JobDone,
+        agent_id: record.agent_id.clone(),
+        body_loc: Some(body),
+        extra,
+        ..TurnDone::default()
+    }
+}
+
 /// The name a neutral line of a bound agent gives it.
 pub fn display_name(record: &crate::fleet::AgentRecord) -> &str {
     if record.persona.is_empty() {
@@ -58,6 +178,7 @@ pub fn display_name(record: &crate::fleet::AgentRecord) -> &str {
 /// A finished turn the user is told of.
 #[derive(Debug, Clone, Default)]
 pub struct TurnDone {
+    pub order: Order,
     pub badge: bool,
     pub unread: bool,
     pub session: String,
@@ -67,6 +188,20 @@ pub struct TurnDone {
     pub preview: String,
     /// The agent still waits for an answer from the user: the push makes a sound.
     pub needs_response: bool,
+    /// What the owner switches it by ([`clarp_kernel::notify_events`]).
+    pub event: Event,
+    pub agent_id: String,
+    /// The row a tap opens.
+    pub message_id: String,
+    /// The actions the app offers on it. Empty: none.
+    pub category: String,
+    /// The banner's title where it is not the agent's name.
+    pub title: String,
+    /// The keys of what the Host wrote itself, where it did.
+    pub title_loc: Option<Loc>,
+    pub body_loc: Option<Loc>,
+    /// Fields of its own the event adds (`error_kind`, `job_id`, ...).
+    pub extra: serde_json::Map<String, Value>,
 }
 
 /// A request an agent just made of its user.
@@ -82,7 +217,26 @@ pub struct Requested {
     pub text_input: bool,
     pub revision: i64,
     pub expires_at: Option<i64>,
+    pub agent_id: String,
+    /// `approval`, `single_choice` or `text_input`.
+    pub response_type: String,
+    /// The choices of a `single_choice`, or the yes and no of an `approval`. A bound agent's
+    /// choices are its words and go to no push service; its yes and no are Yes and No.
+    pub options: Vec<Value>,
+    /// The keys of what the Host wrote itself, where it did.
+    pub title_loc: Option<Loc>,
+    pub body_loc: Option<Loc>,
+    /// It was held back while a desk was present, and is sent to the phones now, desk or no
+    /// desk: its chat was not opened and it still waits ([`ESCALATE_AFTER`]).
+    pub escalated: bool,
+    /// When it was handed over, by the Host's clock: a chat opened after it saw it.
+    pub order: Order,
 }
+
+/// How long a request the desk held back waits for its chat to be opened before the phones
+/// are told after all. The desk is where the user is; a question nobody looked at there may
+/// have caught them away from it.
+pub const ESCALATE_AFTER: Duration = Duration::from_secs(180);
 
 /// A ring of an agent as it is now, and what happened to it: `ring` for the incoming call,
 /// then `answered`, `declined`, `missed` or `cancelled`.
@@ -155,6 +309,74 @@ enum Job {
     BadgeWake,
     /// A ring, and who waits to hear what became of its pushes.
     Ring(Box<Rung>, Option<tokio::sync::oneshot::Sender<Rang>>),
+    /// A chat was read elsewhere: its notifications are taken down.
+    Read(Read),
+}
+
+/// A chat read on some device, or a request in it that is answered: the silent push that
+/// takes its notifications down on every phone.
+#[derive(Debug, Clone, Default)]
+pub struct Read {
+    pub order: Order,
+    pub session: String,
+    /// The request that was answered, dismissed or withdrawn. Empty: the chat was read.
+    pub decision_id: String,
+}
+
+/// Host observation order. Only compare wire values within one Host generation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Order {
+    at_ms: i64,
+    seq: u64,
+}
+
+impl Order {
+    /// Sample the Host clock and allocate the complete stamp at one serialization point.
+    pub fn observe(clock: &dyn clarp_ports::clock::Clock) -> Self {
+        static LAST: std::sync::Mutex<Order> = std::sync::Mutex::new(Order {
+            at_ms: i64::MIN,
+            seq: 0,
+        });
+        Self::allocate(&LAST, || clock.now_ms())
+    }
+
+    fn allocate(last: &std::sync::Mutex<Self>, sample: impl FnOnce() -> i64) -> Self {
+        let mut last = last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let next = Self {
+            at_ms: last.at_ms.max(sample()),
+            seq: last.seq + 1,
+        };
+        *last = next;
+        next
+    }
+
+    fn put(self, v: &mut Value, read: bool) {
+        static EPOCH: std::sync::LazyLock<String> =
+            std::sync::LazyLock::new(|| crate::ids::hex(16));
+        if self.seq == 0 {
+            return;
+        }
+        v["order_epoch"] = serde_json::json!(&*EPOCH);
+        v[if read {
+            "read_through_ms"
+        } else {
+            "event_at_ms"
+        }] = self.at_ms.into();
+        v[if read {
+            "read_through_seq"
+        } else {
+            "event_seq"
+        }] = self.seq.into();
+    }
+
+    pub fn event(self, v: &mut Value) {
+        self.put(v, false);
+    }
+    pub fn boundary(self, v: &mut Value) {
+        self.put(v, true);
+    }
 }
 
 /// The way to the pusher's thread. Handing it something never waits.
@@ -180,6 +402,11 @@ impl Pusher {
 
     pub fn requested(&self, asked: Requested) {
         let _ = self.tx.send(Job::Request(asked));
+    }
+
+    /// A chat was read, or a request in it ended: the phones take its notifications down.
+    pub fn read(&self, read: Read) {
+        let _ = self.tx.send(Job::Read(read));
     }
 
     /// The phone's local unread list may count this chat differently now.
@@ -264,6 +491,7 @@ pub struct Works {
 impl Waiting {
     /// Starts the pusher's thread.
     pub fn run(self, works: Works) -> Result<(), String> {
+        let escalations = self.badge_jobs.clone();
         works
             .runtime
             .spawn(badge_wakes(self.badge_wake, self.badge_jobs));
@@ -276,17 +504,49 @@ impl Waiting {
             .name("pusher".to_string())
             .spawn(move || {
                 let mut lanes = android_lanes::Lanes::default();
+                let mut reads = Reads::default();
+                let mut rings = RingAlerts::default();
                 let works = Arc::new(works);
                 for job in self.rx {
+                    if let Job::Request(asked) = &job {
+                        let now = works.clock.now_ms();
+                        if asked.escalated {
+                            // Its chat was opened since, or it was answered, changed or ran
+                            // out: the desk had it, and the phones are not told.
+                            if reads.opened_since(&asked.session, asked.order)
+                                || !still_waits(&works, asked, now)
+                            {
+                                continue;
+                            }
+                        } else if desk_present(&works) {
+                            // Held back for the desk, where it is shown: the phones are told
+                            // later if nobody opens its chat ([`ESCALATE_AFTER`]).
+                            escalate_later(&works, &escalations, asked);
+                            continue;
+                        }
+                    }
                     if matches!(job, Job::BadgeWake) {
                         deliver(&works, &job, Targets::Apple);
                         continue;
+                    }
+                    match &job {
+                        Job::Read(read) if !reads.due(read) => continue,
+                        _ => {}
                     }
                     let (job, told) = match job {
                         Job::Ring(rung, told) => (Job::Ring(rung, None), told),
                         Job::Turn(done, told) => (Job::Turn(done, None), told),
                         other => (other, None),
                     };
+                    if let Job::Ring(rung, _) = &job {
+                        let on = calls_on(&works, &rung.ring.agent_id);
+                        if !rings.pushed(rung.kind, &rung.ring.ring_id, on) {
+                            if let Some(told) = told {
+                                let _ = told.send(Rang::default());
+                            }
+                            continue;
+                        }
+                    }
                     let mut rang = Rang::default();
                     // A ring is pushed as an incoming call first, to the phones the desk names
                     // for it: the phones of a ring that begins to ring, and none for what
@@ -332,6 +592,123 @@ impl Waiting {
             })
             .map(|_| ())
             .map_err(|error| format!("the pusher's thread could not be started: {error}"))
+    }
+}
+
+/// Whether a user sits at a desk with the app open now.
+fn desk_present(works: &Works) -> bool {
+    let directory = works.fleet.directory();
+    let now = works.clock.now_ms();
+    works
+        .desks
+        .lock()
+        .is_ok_and(|desks| desks.active(now, &|owner| directory.can_receive(owner)))
+}
+
+/// Hands a request the desk holds back to the pusher again after [`ESCALATE_AFTER`], by a
+/// timer of the Host's runtime. What it finds then decides: see the pusher's loop.
+fn escalate_later(works: &Works, jobs: &mpsc::Sender<Job>, asked: &Requested) {
+    let later = Requested {
+        escalated: true,
+        ..asked.clone()
+    };
+    let jobs = jobs.clone();
+    works.runtime.spawn(async move {
+        tokio::time::sleep(ESCALATE_AFTER).await;
+        let _ = jobs.send(Job::Request(later));
+    });
+}
+
+/// Whether a request held for the desk is still the one to push: it waits for the user, at the
+/// revision it was asked at, and has not run out.
+fn still_waits(works: &Works, asked: &Requested, now_ms: i64) -> bool {
+    let directory = works.fleet.directory();
+    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+    everyone.any(|member| {
+        let view = member.agent.view();
+        view.books
+            .artifacts
+            .of_decision(&asked.decision_id)
+            .and_then(|artifact| artifact.decision.as_ref())
+            .is_some_and(|decision| {
+                waits(
+                    (&decision.status, decision.revision, decision.expires_at),
+                    asked.revision,
+                    now_ms,
+                )
+            })
+    })
+}
+
+/// The rule of [`still_waits`]: pending, at the same revision, and not past its end.
+fn waits(decision: (&str, i64, Option<i64>), asked_revision: i64, now_ms: i64) -> bool {
+    let (status, revision, expires_at) = decision;
+    status == "pending" && revision == asked_revision && expires_at.is_none_or(|at| at > now_ms)
+}
+
+/// Whether the owner lets this agent's rings reach the phones (`notify_events`, event `call`,
+/// as the agent's own choice). The ring switch for every agent is held where a ring is placed.
+fn calls_on(works: &Works, agent_id: &str) -> bool {
+    let directory = works.fleet.directory();
+    let settings = Settings::stored(directory.setting(clarp_kernel::notify_events::KEY));
+    settings.alerts(Event::Call, agent_id, false, true)
+}
+
+/// Which changes of rings are pushed. A ring that begins to ring is pushed where calls of its
+/// agent are on; what became of it (answered, declined, missed, cancelled) follows to the
+/// phones, also when the switch changed since, unless the ring itself was held back. A ring
+/// this Host never saw begin (one from before a restart) is told what became of it.
+#[derive(Default)]
+struct RingAlerts {
+    /// The rings whose beginning was held back by the switch.
+    withheld: std::collections::HashSet<String>,
+}
+
+impl RingAlerts {
+    fn pushed(&mut self, kind: &str, ring_id: &str, calls_on: bool) -> bool {
+        if kind != "ring" {
+            return !self.withheld.contains(ring_id);
+        }
+        if calls_on {
+            self.withheld.remove(ring_id);
+        } else {
+            self.withheld.insert(ring_id.to_string());
+        }
+        calls_on
+    }
+}
+
+/// Which read pushes are worth sending. A chat read takes down everything shown of the chat:
+/// once one was sent, the same push says nothing new until something is shown of that chat
+/// again. A request's end takes down that request's notification only: each request's once,
+/// beside any other, and it is not a reading of the chat.
+#[derive(Default)]
+struct Reads {
+    /// The requests whose end was pushed.
+    ended: std::collections::HashSet<String>,
+    /// When each chat was last opened or read on some device.
+    opened: std::collections::HashMap<String, Order>,
+}
+
+impl Reads {
+    fn due(&mut self, read: &Read) -> bool {
+        if read.decision_id.is_empty() {
+            let previous = self.opened.entry(read.session.clone()).or_default();
+            if read.order <= *previous {
+                return false;
+            }
+            *previous = read.order;
+            true
+        } else {
+            self.ended.insert(read.decision_id.clone())
+        }
+    }
+
+    /// Whether the chat was opened or read at or after this moment.
+    fn opened_since(&self, session: &str, order: Order) -> bool {
+        self.opened
+            .get(session)
+            .is_some_and(|opened| *opened >= order)
     }
 }
 
@@ -425,10 +802,11 @@ fn called(works: &Works, rung: &Rung) -> Value {
 /// a picture of the agent's own.
 fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a str) {
     let (avatar_url, avatar_custom) = face;
-    match job {
-        Job::Turn(told, _) => (
-            push::turn_done(&Told {
+    let (mut value, id): (Value, &str) = match job {
+        Job::Turn(told, _) => {
+            let mut payload = push::turn_done(&Told {
                 persona: &told.persona,
+                title: &told.title,
                 session: &told.session,
                 body: &told.preview,
                 avatar_url,
@@ -436,9 +814,18 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
                 notification_id: &told.notification_id,
                 server_instance_id: server_id,
                 needs_response: told.needs_response,
-            }),
-            &told.notification_id,
-        ),
+                event: told.event.id(),
+                message_id: &told.message_id,
+                agent_id: &told.agent_id,
+                category: &told.category,
+                title_loc: told.title_loc.as_ref(),
+                body_loc: told.body_loc.as_ref(),
+            });
+            for (key, value) in &told.extra {
+                payload[key.as_str()] = value.clone();
+            }
+            (payload, &told.notification_id)
+        }
         Job::Request(asked) => (
             push::decision(&Asked {
                 persona: &asked.persona,
@@ -454,10 +841,19 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
                 avatar_url,
                 avatar_custom,
                 server_instance_id: server_id,
+                agent_id: &asked.agent_id,
+                response_type: &asked.response_type,
+                options: &asked.options,
+                title_loc: asked.title_loc.as_ref(),
+                body_loc: asked.body_loc.as_ref(),
             }),
             &asked.decision_id,
         ),
         Job::BadgeWake => (push::badge_wake(server_id), "badge-sync"),
+        Job::Read(read) => (
+            push::read(&read.session, server_id, &read.decision_id),
+            &read.session,
+        ),
         Job::Ring(rung, _) => (
             push::ring(&push::Rung {
                 ring_id: &rung.ring.ring_id,
@@ -476,7 +872,14 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
             }),
             &rung.ring.ring_id,
         ),
+    };
+    match job {
+        Job::Turn(done, _) => done.order.event(&mut value),
+        Job::Request(asked) => asked.order.event(&mut value),
+        Job::Read(read) if read.decision_id.is_empty() => read.order.boundary(&mut value),
+        _ => {}
     }
+    (value, id)
 }
 
 /// Freeze ownership at submission; revalidate it when a queued ring is sent.
@@ -511,6 +914,11 @@ fn live_rings(rx: mpsc::Receiver<Rung>, works: &Works) {
     while let Some(rung) = queued.pop_front().or_else(|| rx.recv().ok()) {
         queued.extend(rx.try_iter());
         if !works.android.configured() {
+            continue;
+        }
+        // A ring that begins to ring reaches only phones the owner lets this agent ring; what
+        // became of one goes to the phones it was pushed to ([`LiveRings::targets`]).
+        if rung.kind == "ring" && !calls_on(works, &rung.ring.agent_id) {
             continue;
         }
         let current = live_rows(&works.fleet.directory(), &rung.without, &rung.ring);
@@ -570,6 +978,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         Job::Turn(told, _) => (told.session.as_str(), told.persona.as_str()),
         Job::Request(asked) => (asked.session.as_str(), asked.persona.as_str()),
         Job::Ring(rung, _) => (rung.ring.session.as_str(), rung.ring.persona.as_str()),
+        Job::Read(read) => (read.session.as_str(), ""),
         Job::BadgeWake => ("", ""),
     };
     let about = directory.by_session(session).map(|member| &member.record);
@@ -591,7 +1000,11 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
     };
     // A user who sits at a desk with the app open sees it there. A ring goes to the phones
     // all the same: an agent calling is the interruption its user chose to allow.
-    let desk_can_suppress = matches!(job, Job::Turn(..) | Job::Request(_));
+    let desk_can_suppress = match job {
+        Job::Turn(..) => true,
+        Job::Request(asked) => !asked.escalated,
+        _ => false,
+    };
     let at_a_desk = desk_can_suppress
         && works
             .desks
@@ -601,6 +1014,29 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         enabled: true,
         ..Counted::default()
     };
+    // The owner's choice for this event of this agent (`notify_events`). A muted agent pages
+    // nobody. Rings are switched in the pusher's loop ([`RingAlerts`]), so that what became of
+    // a ring follows it.
+    let switched = match job {
+        Job::Turn(told, _) => Some((told.event, about.is_some_and(|record| record.muted))),
+        Job::Request(_) => Some((Event::NeedsYou, about.is_some_and(|record| record.muted))),
+        Job::Ring(..) | Job::BadgeWake | Job::Read(_) => None,
+    };
+    if let Some((event, muted)) = switched {
+        let agent = match job {
+            // A janitor's notice names it: it is no member a session finds.
+            Job::Turn(told, _) if !told.agent_id.is_empty() => told.agent_id.as_str(),
+            _ => agent_id,
+        };
+        let settings = Settings::stored(directory.setting(clarp_kernel::notify_events::KEY));
+        if !settings.alerts(event, agent, muted, true) {
+            eprintln!(
+                "clarp-host: push {name}: not sent, {} is switched off",
+                event.id()
+            );
+            return counted;
+        }
+    }
     if at_a_desk {
         eprintln!("clarp-host: push {name}: not sent, a desktop is active");
         return counted;
@@ -619,7 +1055,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
             Targets::Apple => {
                 routes.enabled()
                     && row.provider != "fcm"
-                    && (!matches!(job, Job::BadgeWake) || row.platform == "ios")
+                    && (!matches!(job, Job::BadgeWake | Job::Read(_)) || row.platform == "ios")
             }
             Targets::Android(named) => {
                 android
@@ -663,11 +1099,11 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         if matches!(targets, Targets::Live(_)) {
             payload["conversation_mode"] = serde_json::json!("agent_live_v1");
         }
-        let background = matches!(job, Job::BadgeWake);
-        let collapse_id = if background {
-            "badge-sync".into()
-        } else {
-            push::collapse_id(&payload)
+        let background = matches!(job, Job::BadgeWake | Job::Read(_));
+        let collapse_id = match job {
+            Job::BadgeWake => "badge-sync".into(),
+            Job::Read(read) => push::read_collapse_id(&read.session, &read.decision_id),
+            _ => push::collapse_id(&payload),
         };
         let push = Push {
             payload: &payload,
@@ -686,7 +1122,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
                     &row.token,
                     &payload,
                     &context,
-                    "10",
+                    if background { "5" } else { "10" },
                     &collapse_id,
                     false,
                 ),
@@ -775,4 +1211,196 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
     eprintln!("clarp-host: push {name}: sent {sent}, failed {failed}, disabled {disabled}");
     (counted.sent, counted.failed, counted.disabled) = (sent, failed, disabled);
     counted
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod read_tests {
+    use super::*;
+
+    fn read(session: &str, decision_id: &str, at: i64) -> Read {
+        Read {
+            order: Order { at_ms: at, seq: 1 },
+            session: session.to_string(),
+            decision_id: decision_id.to_string(),
+        }
+    }
+
+    #[test]
+    fn delayed_reads_preserve_the_observed_boundary_and_a_later_decision_escalates() {
+        let mut reads = Reads::default();
+        let first = read("vera", "", 1000);
+        let decision = Order {
+            at_ms: 2000,
+            seq: 2,
+        };
+        // A read observed at t1 arrives in the worker at t3, after the decision at t2.
+        assert!(reads.due(&first));
+        assert!(!reads.opened_since("vera", decision));
+        let newer = read("vera", "", 3000);
+        assert!(reads.due(&newer));
+        assert!(!reads.due(&first));
+        assert!(reads.opened_since("vera", newer.order));
+    }
+
+    #[test]
+    fn wall_clock_rollback_preserves_a_new_alert_and_its_escalation() {
+        let last = std::sync::Mutex::new(Order::default());
+        let read = Read {
+            session: "vera".into(),
+            order: Order::allocate(&last, || 1000),
+            ..Default::default()
+        };
+        let alert = Order::allocate(&last, || 999);
+        let mut reads = Reads::default();
+        assert!(reads.due(&read));
+        assert!(!reads.opened_since("vera", alert));
+
+        let boundary = payload(&Job::Read(read), "host-1", ("", false)).0;
+        let shown = payload(
+            &Job::Request(Requested {
+                session: "vera".into(),
+                order: alert,
+                ..Default::default()
+            }),
+            "host-1",
+            ("", false),
+        )
+        .0;
+        assert_eq!(shown["order_epoch"], boundary["order_epoch"]);
+        let through = (
+            boundary["read_through_ms"].as_i64().unwrap(),
+            boundary["read_through_seq"].as_u64().unwrap(),
+        );
+        let event = (
+            shown["event_at_ms"].as_i64().unwrap(),
+            shown["event_seq"].as_u64().unwrap(),
+        );
+        assert_eq!(through, (1000, 1));
+        assert_eq!(event, (1000, 2));
+        assert!(event > through);
+    }
+
+    #[test]
+    fn delayed_chat_read_leaves_the_newer_alert_even_in_the_same_millisecond() {
+        let stamp = |seq| Order { at_ms: 1000, seq };
+        let alert = |seq| {
+            payload(
+                &Job::Turn(
+                    TurnDone {
+                        order: stamp(seq),
+                        session: "vera".into(),
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                "host-1",
+                ("", false),
+            )
+            .0
+        };
+        let clear = |id: &str| {
+            payload(
+                &Job::Read(Read {
+                    order: stamp(2),
+                    session: "vera".into(),
+                    decision_id: id.into(),
+                }),
+                "host-1",
+                ("", false),
+            )
+            .0
+        };
+        let (a, b, r) = (alert(1), alert(3), clear(""));
+        assert_eq!(a["order_epoch"], r["order_epoch"]);
+        assert_eq!(b["order_epoch"], r["order_epoch"]);
+        assert_eq!(a["event_at_ms"], r["read_through_ms"]);
+        assert_eq!(b["event_at_ms"], r["read_through_ms"]);
+        assert_eq!(
+            (
+                a["event_seq"].as_u64(),
+                r["read_through_seq"].as_u64(),
+                b["event_seq"].as_u64()
+            ),
+            (Some(1), Some(2), Some(3))
+        );
+        let data = |v| clarp_kernel::fcm::data(v, &Value::Null, "", 9999).unwrap();
+        assert_eq!(data(&a)["event_seq"], "1");
+        assert_eq!(data(&b)["event_seq"], "3");
+        assert_eq!(data(&r)["read_through_seq"], "2");
+        assert_eq!(data(&r)["read_through_ms"], "1000");
+        assert!(clear("d1").get("read_through_seq").is_none());
+    }
+
+    #[test]
+    fn two_cards_in_one_chat_are_each_taken_down_once_and_neither_reads_the_chat() {
+        let mut reads = Reads::default();
+        assert!(reads.due(&read("vera", "d1", 1_000)));
+        assert!(
+            reads.due(&read("vera", "d2", 1_100)),
+            "another card, at once"
+        );
+        assert!(
+            !reads.due(&read("vera", "d1", 1_200)),
+            "the same card again"
+        );
+        // A card's end is no reading of the chat: a real read after it is still sent, and
+        // the chat was not opened by it.
+        assert!(!reads.opened_since("vera", Order { at_ms: 0, seq: 1 }));
+        assert!(reads.due(&read("vera", "", 1_300)));
+        assert!(reads.opened_since(
+            "vera",
+            Order {
+                at_ms: 1_300,
+                seq: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn a_held_card_reaches_the_phones_unless_its_chat_was_opened_or_it_changed() {
+        let mut reads = Reads::default();
+        // Card d2 was held for the desk at 1 000; d1 in the same chat was answered after.
+        assert!(reads.due(&read("vera", "d1", 1_500)));
+        assert!(
+            !reads.opened_since(
+                "vera",
+                Order {
+                    at_ms: 1_000,
+                    seq: 1
+                }
+            ),
+            "d2 goes to the phones"
+        );
+        assert!(waits(("pending", 1, None), 1, 2_000));
+        assert!(
+            !waits(("pending", 2, None), 1, 2_000),
+            "it changed: not this push"
+        );
+        assert!(!waits(("resolved", 1, None), 1, 2_000));
+        assert!(!waits(("pending", 1, Some(1_999)), 1, 2_000), "it ran out");
+        assert!(waits(("pending", 1, Some(2_001)), 1, 2_000));
+        // Its chat opened after it was held: the desk had it.
+        assert!(reads.due(&read("vera", "", 1_800)));
+        assert!(reads.opened_since(
+            "vera",
+            Order {
+                at_ms: 1_000,
+                seq: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn what_became_of_a_ring_follows_it_whatever_the_switch_says_now() {
+        let mut rings = RingAlerts::default();
+        // Rung while calls were on, then switched off: its end still goes.
+        assert!(rings.pushed("ring", "r1", true));
+        assert!(rings.pushed("missed", "r1", false));
+        // Held back while off: nothing of it goes, also once the switch is back on.
+        assert!(!rings.pushed("ring", "r2", false));
+        assert!(!rings.pushed("cancelled", "r2", true));
+        // A ring from before a restart is told what became of it.
+        assert!(rings.pushed("answered", "r0", false));
+    }
 }

@@ -141,8 +141,15 @@ async fn mute(State(app): State<App>, body: Bytes) -> Answered {
     let Some(muted) = asked.get("muted") else {
         return Err(bad("muted required"));
     };
+    // Whether an agent is muted is part of the owner's notification choices: a change of it is
+    // one change of those, with a version of its own, and every app is told the choices.
+    let _writing = app.notification_writer.lock().await;
+    crate::notify_settings::next_version(&app)
+        .await
+        .map_err(ApiError::from)?;
     // Muted is what is plainly true. Anything else is not.
     let record = amend(&app, session, Amend::Mute(*muted == Value::Bool(true))).await?;
+    crate::notify_settings::tell_changed(&app).await;
     Ok(Json(
         json!({ "ok": true, "session": session, "muted": record.muted }),
     ))

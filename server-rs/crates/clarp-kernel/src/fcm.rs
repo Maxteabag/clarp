@@ -285,3 +285,44 @@ pub fn slow_queue_victim(
     }
     Some(decisions.position(|decision| !decision).unwrap_or(0))
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::notify_events::Loc;
+    use crate::push::{self, Told};
+
+    #[test]
+    fn android_data_carries_the_event_its_row_and_the_keys_as_strings() {
+        let loc = Loc::new("error.auth", &[]);
+        let title = Loc::new("notify.body.failed_title", &["Vera"]);
+        let payload = push::turn_done(&Told {
+            persona: "Vera",
+            session: "vera",
+            body: "The sign-in ran out.",
+            notification_id: "failed-1",
+            event: "failed",
+            message_id: "m-1",
+            agent_id: "a1",
+            category: "turn-failed",
+            title_loc: Some(&title),
+            body_loc: Some(&loc),
+            ..Told::default()
+        });
+        let sent = data(&payload, &json!({"badge": true}), "failed-1", 5).unwrap();
+        assert_eq!(sent["event"], "failed");
+        assert_eq!(sent["message_id"], "m-1");
+        assert_eq!(sent["agent_id"], "a1");
+        assert_eq!(sent["category"], "turn-failed");
+        assert_eq!(sent["title_loc_key"], "notify.body.failed_title");
+        assert_eq!(sent["title_loc_args"], r#"["Vera"]"#);
+        assert_eq!(sent["body_loc_key"], "error.auth");
+        assert_eq!(sent["body_loc_args"], "[]");
+        assert_eq!(sent["collapse_id"], "failed-1");
+        let read = data(&push::read("vera", "h1", ""), &json!({}), "read-vera", 5).unwrap();
+        assert_eq!(read["kind"], "read");
+        assert_eq!(read["session"], "vera");
+        assert_eq!(read["server_instance_id"], "h1");
+    }
+}

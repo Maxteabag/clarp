@@ -493,6 +493,7 @@ pub(crate) mod at_the_port {
                 blobs,
                 gallery,
                 form_event_writer: Arc::default(),
+                notification_writer: Arc::default(),
                 skill_links: Arc::default(),
                 turns: Arc::default(),
                 server_id: "test-host".into(),

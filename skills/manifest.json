@@ -4,6 +4,7 @@
     {"id": "clarp-media", "pack": "core", "description": "Publish files into Clarp chat"},
     {"id": "clarp-sessions", "pack": "core", "description": "Resolve Clarp agents and sessions, and search past messages"},
     {"id": "clarp-oracle-contact", "pack": "core", "description": "Put a live Oracle call through to an agent and back"},
+    {"id": "clarp-notifications", "pack": "core", "description": "Read or change what the user is notified of, per event and per agent, and mark chats read"},
     {"id": "clarp-calls", "pack": "core", "description": "Call the user yourself, or add, remove, hold and switch agents in the user's group call"},
     {"id": "clarp-adopt", "pack": "core", "description": "Resume a terminal CLI conversation as a Clarp agent"},
     {"id": "clarp-status-fork", "pack": "core", "description": "Status from, or questions to, a busy agent through a read-only fork"},

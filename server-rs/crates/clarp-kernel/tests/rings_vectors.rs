@@ -316,6 +316,30 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
     );
 }
 
+/// What the notification events added to a push (`notify_events`): fields the Python Host
+/// never sent, taken off before its payloads are compared. Everything else still matches.
+fn as_recorded(mut ours: Value, theirs: &Value) -> Value {
+    for key in [
+        "event",
+        "title_loc_key",
+        "title_loc_args",
+        "body_loc_key",
+        "body_loc_args",
+    ] {
+        if theirs.get(key).is_none()
+            && let Some(fields) = ours.as_object_mut()
+        {
+            fields.remove(key);
+        }
+    }
+    if theirs["aps"].get("relevance-score").is_none()
+        && let Some(aps) = ours["aps"].as_object_mut()
+    {
+        aps.remove("relevance-score");
+    }
+    ours
+}
+
 #[test]
 fn a_phone_is_pushed_what_the_python_host_pushes_for_a_ring() {
     let vectors = vectors();
@@ -338,7 +362,7 @@ fn a_phone_is_pushed_what_the_python_host_pushes_for_a_ring() {
             avatar_custom: case["avatar_custom"].as_bool().unwrap(),
             server_instance_id: case["server_instance_id"].as_str().unwrap(),
         };
-        let payload = push::ring(&rung);
+        let payload = as_recorded(push::ring(&rung), &case["payload"]);
         assert_eq!(payload, case["payload"], "{case}");
         assert_eq!(
             json!(push::ring_notification_id(rung.ring_id)),

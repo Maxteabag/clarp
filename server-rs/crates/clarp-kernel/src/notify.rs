@@ -81,6 +81,13 @@ pub fn id(agent_id: &str, done_ms: i64) -> String {
     format!("pn-{}", &mark[..20])
 }
 
+/// Whether a turn that failed of this origin is told the user: not talk between agents, not
+/// routine, not maintenance. What a person or the Host on the user's behalf began is.
+pub fn tells_failure(origin: &str) -> bool {
+    let origin = origin.trim();
+    origin != "janitor" && !AGENT_CHATTER.contains(&origin)
+}
+
 fn suppress(reason: impl Into<String>) -> Decision {
     Decision::Suppress {
         reason: reason.into(),
