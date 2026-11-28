@@ -233,6 +233,53 @@ pub struct Incoming {
     /// needs_you: `approval`, `single_choice` or `text_input`.
     pub response_type: String,
     pub decision_id: String,
+    /// failed: what went wrong, for the words and the button.
+    pub failure: Option<Failure>,
+}
+
+/// A failed turn's notification (the turn-error contract): its code, the
+/// catalog key and arguments of its sentence (`error.<code>`, or
+/// `error.usage_limit_until` with `time_ms` the client formats), and the
+/// one action it offers beside Open.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Failure {
+    pub code: String,
+    pub body_loc_key: String,
+    pub body_loc_args: Vec<String>,
+    pub time_ms: Option<i64>,
+    /// `retry`, `retry_at`, `fresh_retry`, `compact_retry`, `switch_model`
+    /// or `sign_in`; empty when none.
+    pub action: String,
+    /// `retry_at`: when.
+    pub action_at_ms: Option<i64>,
+}
+
+impl Failure {
+    fn parse(event: &Object) -> Option<Failure> {
+        let code = json::string(event, "error_code");
+        let body_loc_key = json::string(event, "body_loc_key");
+        if code.is_empty() && !body_loc_key.starts_with("error.") {
+            return None;
+        }
+        let args = json::array(event, "body_loc_args")
+            .iter()
+            .map(|a| a.as_str().map_or_else(|| a.to_string(), str::to_owned))
+            .collect();
+        // `primary_action`: the id, or {id, at_ms}.
+        let (action, at_ms) = match event.get("primary_action") {
+            Some(Value::String(id)) => (id.clone(), None),
+            Some(Value::Object(o)) => (json::string(o, "id"), o.get("at_ms").and_then(Value::as_i64)),
+            _ => (String::new(), None),
+        };
+        let at_ms = at_ms.or_else(|| event.get("at_ms").and_then(Value::as_i64));
+        Some(Failure { code, body_loc_key, body_loc_args: args, time_ms: event.get("time_ms").and_then(Value::as_i64), action, action_at_ms: at_ms })
+    }
+
+    /// The action sends the message again (`POST /turn-retry`); the others
+    /// (switch_model, sign_in) open the chat.
+    pub fn retries(&self) -> bool {
+        matches!(self.action.as_str(), "retry" | "retry_at" | "fresh_retry" | "compact_retry")
+    }
 }
 
 impl Incoming {
@@ -260,6 +307,7 @@ impl Incoming {
             options,
             response_type: json::string(event, "response_type"),
             decision_id: json::string(event, "decision_id"),
+            failure: Failure::parse(event),
         }
     }
 
@@ -501,6 +549,24 @@ mod tests {
         assert!(!asked.sound(false));
         assert!(!Incoming::parse(&object(json!({"event": "reply", "alert": true}))).sound(true));
         assert!(Incoming::parse(&object(json!({"preview": "older Host"}))).sound(true));
+    }
+
+    #[test]
+    fn a_failure_brings_its_key_time_and_action() {
+        let failed = Incoming::parse(&object(json!({
+            "event": "failed", "alert": true, "error_code": "usage_limit", "body_loc_key": "error.usage_limit_until",
+            "body_loc_args": ["Claude", 1795800000000i64], "time_ms": 1795800000000i64, "body": "Your Claude account is out of usage.",
+            "primary_action": {"id": "retry_at", "at_ms": 1795800000000i64}, "message_id": "m9",
+        })));
+        let failure = failed.failure.clone().unwrap();
+        assert_eq!(failure.body_loc_key, "error.usage_limit_until");
+        assert_eq!(failure.body_loc_args, ["Claude", "1795800000000"]);
+        assert_eq!((failure.time_ms, failure.action.as_str(), failure.action_at_ms), (Some(1795800000000), "retry_at", Some(1795800000000)));
+        assert!(failure.retries());
+        assert_eq!(failed.preview, "Your Claude account is out of usage.");
+        let plain = Incoming::parse(&object(json!({"event": "failed", "error_code": "auth", "primary_action": "sign_in"})));
+        assert!(!plain.failure.unwrap().retries());
+        assert_eq!(Incoming::parse(&object(json!({"event": "reply"}))).failure, None);
     }
 
     #[test]
