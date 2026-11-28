@@ -379,7 +379,7 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         );
         let mixed = host.post(
             "/agents",
-            json!({"name":"mixed","cwd":product,"backend":"scripted"}),
+            json!({"name":"mixed","cwd":product,"backend":"claude"}),
         );
         (
             lead["agent"]["agent_id"].clone(),
@@ -391,7 +391,16 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         json!({"parent_ids":[owner_id], "mixed_parents":{(mixed_id):[product]}, "selection":selection}).to_string(),
     )
     .unwrap();
-    let host = place.start_with("", &["--config", place.root.to_str().unwrap()]);
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
+    );
+    let host = place.start_in(
+        "helper-test",
+        &["--config", place.root.to_str().unwrap()],
+        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
     for (name, parent, cwd, expected) in [
         ("product-child", "mixed", &product, "codex"),
         ("film-child", "mixed", &unrelated, "claude"),
@@ -408,23 +417,76 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             expected == "codex"
         );
     }
-    let explicit = host.post("/agents", json!({"name":"model-only","role":"helper","parent":"mixed","cwd":product,"model":"claude-opus-5-5"}));
-    assert_eq!(explicit["agent"]["backend"], "claude");
-    assert_eq!(explicit["agent"]["model"], "claude-opus-5-5");
-
-    host.send("mixed", r#"{"session":"s-mixed","reply":"ready"}"#, "ready");
+    // Exercise the installed launcher's Python entry point and real admin transport.
+    let tools = place.root.join("tools");
+    std::fs::create_dir(&tools).unwrap();
+    program(
+        &tools.join("clarp-admin"),
+        &format!(
+            "#!/bin/sh\nexec '{}' tool clarp-admin \"$@\"\n",
+            env!("CARGO_BIN_EXE_clarp-host")
+        ),
+    );
+    let prompt = place.root.join("brief");
+    std::fs::write(&prompt, "fixture").unwrap();
+    for (name, options, model, backend) in [
+        (
+            "model-only",
+            vec!["--model", "claude-opus-5-5"],
+            "claude-opus-5-5",
+            "claude",
+        ),
+        ("omitted", vec![], "gpt-6.2-astra", "codex"),
+    ] {
+        let output = place
+            .command(on_path("python3").unwrap())
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../skills/clarp-sub-agents/scripts/sub_agent.py"
+            ))
+            .args(["start", name])
+            .arg(&product)
+            .arg(&prompt)
+            .arg("--clarp-agent")
+            .args(options)
+            .env("CLARP_SESSION", "mixed")
+            .env("CLARP_HOST_ADDR", &host.address)
+            .env("CLARP_HOST_TOKEN", &host.token)
+            .env("PATH", &tools)
+            .env("CLARP_SUB_AGENT_DIR", place.root.join("helpers"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let kept = host.get("/agents/snapshot");
+        let agent = kept["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == name)
+            .unwrap();
+        assert_eq!(agent["backend"], backend);
+        assert_eq!(agent["model"], model);
+        if backend == "codex" {
+            assert_eq!(agent["effort"], "medium");
+        }
+    }
+    host.send("mixed", "ready", "ready");
     wait_for("mixed parent conversation", || {
         host.state("mixed") == "done"
     });
     let forked = host.post(
         "/agents/mixed/fork",
         json!({"children":[
-            {"name":"explicit-fork","task":"fixture","cwd":product,"model":"scripted-model"},
+            {"name":"explicit-fork","task":"fixture","cwd":product,"model":"claude-opus-5-5"},
             {"name":"default-fork","task":"fixture","cwd":product},
             {"name":"film-fork","task":"fixture","cwd":unrelated}
         ]}),
     );
-    for (index, backend) in ["scripted", "codex", "scripted"].iter().enumerate() {
+    for (index, backend) in ["claude", "codex", "claude"].iter().enumerate() {
         assert_eq!(forked["children"][index]["backend"], *backend, "{forked}");
     }
     // The restart rig creates a top-level agent for the backend under test.
