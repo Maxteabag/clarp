@@ -201,7 +201,7 @@
   "overview.state.working": "jobber",
   "overview.state.thinking": "tenker",
   "overview.state.responding": "svarer",
-  "overview.state.tool": "verktøy",
+  "overview.state.tool": "kjører verktøy",
   "overview.state.new_reply": "nytt svar",
   "overview.state.idle": "inaktiv",
   "overview.refresh_failed": "Kunne ikke oppdatere denne datamaskinen.",
@@ -305,7 +305,7 @@
     "one": "{path} ({count} oppstart)",
     "other": "{path} ({count} oppstarter)"
   },
-  "start.harness": "Harness",
+  "start.harness": "Backend",
   "start.locked": "{name} er låst til {backend}",
   "start.required": "Påkrevd",
   "start.model_provider": "Modelleverandør",
