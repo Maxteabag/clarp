@@ -3,6 +3,7 @@
   // elapsed on the first line, the explanation (or the raw command) on a
   // reserved second line, and a short output tail with a count of the rest.
   import { isOpen, toggle } from './expanded.svelte.js';
+  import { t } from '../../stores/i18n.svelte.js';
 
   let { row, explanations = true } = $props();
 
@@ -27,7 +28,7 @@
     <span class="lv-label">{row.label}</span>
     {#if row.diff}<span class="lv-diff">{#each row.diff.split(' ') as part}<span class:add={part.startsWith('+')} class:del={!part.startsWith('+')}>{part}</span>{/each}</span>{/if}
     {#if row.exit}<span class="lv-exit">{row.exit}</span>{/if}
-    {#if row.status === 'interrupted'}<span class="lv-exit">interrupted</span>{/if}
+    {#if row.status === 'interrupted'}<span class="lv-exit">{t('live.interrupted')}</span>{/if}
     {#if row.elapsed}<span class="lv-time">{row.elapsed}</span>{/if}
   </button>
   {#if reserve}<div class="lv-sub" title={row.secondary}>{row.secondary}</div>{/if}
@@ -37,12 +38,12 @@
 </span>{/each}</pre>
     {:else if output && output.tail && output.tail.length}
       <pre class="lv-out lv-full">{output.tail.join('\n')}</pre>
-      {#if output.truncated}<div class="lv-more">+{output.total_lines - output.tail.length} earlier lines</div>{/if}
+      {#if output.truncated}<div class="lv-more">{t('live.earlier_lines', { count: output.total_lines - output.tail.length })}</div>{/if}
     {:else if input}
       <pre class="lv-out">{JSON.stringify(input, null, 2)}</pre>
     {/if}
   {:else if row.tail.length}
     <pre class="lv-out">{row.tail.join('\n')}</pre>
-    {#if row.more}<div class="lv-more">+{row.more} lines</div>{/if}
+    {#if row.more}<div class="lv-more">{t('live.more_lines', { count: row.more })}</div>{/if}
   {/if}
 </div>

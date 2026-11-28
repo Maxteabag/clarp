@@ -2,6 +2,11 @@
 // the reducer's items, the settled-turn fold and the status line. Pure, so
 // the timing rules (600 ms output delay, quick-command collapse, Host-clock
 // timers) are tested without a browser.
+//
+// Words come from the web app's catalog: each builder takes `tr(key, params)` and `duration(ms)`
+// (the component passes t and format.js formatDuration); both default to English.
+
+import { english, englishDuration } from './i18n-en.js';
 
 /** A running command shows its output only after this long. */
 export const TAIL_DELAY_MS = 600;
@@ -12,14 +17,8 @@ export const SETTLED_TAIL_LINES = 3;
 
 const pad2 = n => String(n).padStart(2, '0');
 
-/** `4s`, `1m 05s`, `1h 02m`: a settled duration. */
-export function formatDuration(ms) {
-  const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${pad2(s % 60)}s`;
-  return `${Math.floor(m / 60)}h ${pad2(m % 60)}m`;
-}
+/** `4s`, `1m 05s`, `1h 02m`: a settled duration in English (the app uses format.js). */
+export const formatDuration = englishDuration;
 
 /** `0:12`, `1:02:03`: a ticking timer. */
 export function clock(ms) {
@@ -29,21 +28,8 @@ export function clock(ms) {
   return h ? `${h}:${pad2(m)}:${pad2(s % 60)}` : `${m}:${pad2(s % 60)}`;
 }
 
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-const VERBS = {
-  exec: ['Running', 'Ran'],
-  read: ['Reading', 'Read'],
-  list: ['Listing', 'Listed'],
-  search: ['Searching', 'Searched'],
-  edit: ['Editing', 'Edited'],
-  write: ['Writing', 'Wrote'],
-  fetch: ['Fetching', 'Fetched'],
-  todo: ['Updating plan', 'Updated plan'],
-  mcp: ['Calling', 'Called'],
-  agent: ['Delegating', 'Delegated'],
-  other: ['Calling', 'Called'],
-};
+/** Tool categories with words of their own (live.tool.<category>.running / .done). */
+const VERBS = new Set(['exec', 'read', 'list', 'search', 'edit', 'write', 'fetch', 'todo', 'mcp', 'agent', 'other']);
 
 const isRunning = item => item.status === 'running' || item.status === 'pending';
 
@@ -77,10 +63,10 @@ function outputTail(item, ms) {
   return { tail, more: Math.max(0, (Number(out.total_lines) || out.tail.length) - tail.length) };
 }
 
-function toolRow(item, { explanations, hostNow }) {
+function toolRow(item, { explanations, hostNow, tr, duration }) {
   const tool = item.tool || {};
   const running = isRunning(item);
-  const [live, done] = VERBS[tool.category] || VERBS.other;
+  const category = VERBS.has(tool.category) ? tool.category : 'other';
   const ms = elapsedMs(item, hostNow);
   const exitCode = tool.output && tool.output.exit_code;
   const diff = tool.diff && (tool.diff.added || tool.diff.removed)
@@ -92,11 +78,11 @@ function toolRow(item, { explanations, hostNow }) {
     running,
     category: tool.category || 'other',
     name: tool.name || '',
-    verb: running ? live : done,
+    verb: tr(`live.tool.${category}.${running ? 'running' : 'done'}`),
     label: tool.label || tool.name || '',
     secondary: secondaryLine(tool, explanations),
-    elapsed: item.started_at_ms ? formatDuration(ms) : '',
-    exit: item.status === 'failed' && exitCode != null && exitCode !== 0 ? `exit ${exitCode}` : '',
+    elapsed: item.started_at_ms ? duration(ms) : '',
+    exit: item.status === 'failed' && exitCode != null && exitCode !== 0 ? tr('live.exit_code', { code: String(exitCode) }) : '',
     diff,
     diffPreview: (tool.diff && tool.diff.preview) || '',
     ...outputTail(item, ms),
@@ -104,24 +90,25 @@ function toolRow(item, { explanations, hostNow }) {
   };
 }
 
-function reasoningRow(item, hostNow) {
+function reasoningRow(item, hostNow, tr, duration) {
   const running = isRunning(item);
-  const title = item.title ? `: ${item.title}` : '';
+  const title = item.title ? String(item.title) : '';
+  const time = duration(elapsedMs(item, hostNow));
   const label = running
-    ? `Thinking${title}`
-    : `Thought for ${formatDuration(elapsedMs(item, hostNow))}${title}`;
+    ? (title ? tr('live.thinking_titled', { title }) : tr('live.status.thinking'))
+    : (title ? tr('live.thought_for_titled', { time, title }) : tr('live.thought_for', { time }));
   return { type: 'reasoning', id: item.id, status: item.status, running, label,
     text: String(item.text || ''), item };
 }
 
-function exploreSummary(members) {
+function exploreSummary(members, tr) {
   const counts = { read: 0, search: 0, list: 0 };
   for (const m of members) counts[m.category] = (counts[m.category] || 0) + 1;
   const parts = [];
-  if (counts.read) parts.push(plural(counts.read, 'file'));
-  if (counts.search) parts.push(plural(counts.search, 'search', 'searches'));
-  if (counts.list) parts.push(plural(counts.list, 'listing'));
-  return parts.length ? `Explored ${parts.join(', ')}` : 'Explored';
+  if (counts.read) parts.push(tr('live.explored.files', { count: counts.read }));
+  if (counts.search) parts.push(tr('live.explored.searches', { count: counts.search }));
+  if (counts.list) parts.push(tr('live.explored.listings', { count: counts.list }));
+  return parts.length ? tr('live.explored_parts', { parts: parts.join(tr('live.list_separator')) }) : tr('live.explored');
 }
 
 function worstStatus(members) {
@@ -136,12 +123,13 @@ function worstStatus(members) {
  * `group` become one explore row whose id is the group id, so it keeps its
  * place (and its expand state) while it grows.
  */
-export function liveRows(items, { explanations = true, now = Date.now(), skewMs = 0 } = {}) {
+export function liveRows(items, { explanations = true, now = Date.now(), skewMs = 0, tr = english,
+  duration = englishDuration } = {}) {
   const hostNow = now + skewMs;
   const rows = [];
   for (const item of items) {
     if (item.kind === 'tool') {
-      const row = toolRow(item, { explanations, hostNow });
+      const row = toolRow(item, { explanations, hostNow, tr, duration });
       const group = item.tool && item.tool.group;
       const last = rows[rows.length - 1];
       if (group && last && last.type === 'explore' && last.id === group) {
@@ -152,7 +140,7 @@ export function liveRows(items, { explanations = true, now = Date.now(), skewMs 
         rows.push(row);
       }
     } else if (item.kind === 'reasoning') {
-      rows.push(reasoningRow(item, hostNow));
+      rows.push(reasoningRow(item, hostNow, tr, duration));
     } else if (item.kind === 'message') {
       rows.push({ type: 'message', id: item.id, status: item.status, phase: item.phase || '',
         streaming: isRunning(item), text: String(item.text || ''), rowId: item.row_id || '', item });
@@ -164,7 +152,7 @@ export function liveRows(items, { explanations = true, now = Date.now(), skewMs 
     if (row.type !== 'explore') continue;
     row.status = worstStatus(row.members);
     row.running = row.status === 'running';
-    row.label = row.running ? 'Exploring' : exploreSummary(row.members);
+    row.label = row.running ? tr('live.exploring') : exploreSummary(row.members, tr);
   }
   return rows;
 }
@@ -177,7 +165,7 @@ const SETTLED_TURN = new Set(['completed', 'failed', 'interrupted']);
  * in view (text written before a tool call is a reply too).
  * Null while the turn runs.
  */
-export function settledFold(turn, rows) {
+export function settledFold(turn, rows, { tr = english, duration = englishDuration } = {}) {
   if (!turn || !SETTLED_TURN.has(turn.status)) return null;
   let answer = -1;
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -194,9 +182,11 @@ export function settledFold(turn, rows) {
     : (turn.ended_at_ms && turn.started_at_ms ? turn.ended_at_ms - turn.started_at_ms : 0);
   const tools = turn.tool_count != null ? turn.tool_count
     : rows.reduce((n, r) => n + (r.type === 'explore' ? r.members.length : r.type === 'tool' ? 1 : 0), 0);
-  const lead = { interrupted: 'Stopped after', failed: 'Failed after' }[turn.status] || 'Worked for';
-  const label = `${lead} ${formatDuration(worked)}${tools ? ` · ${plural(tools, 'tool')}` : ''}`;
-  return { label, folded, visible, error: turnError(turn) };
+  const lead = { interrupted: 'live.fold.stopped_after', failed: 'live.fold.failed_after' }[turn.status]
+    || 'live.fold.worked_for';
+  const time = tr(lead, { time: duration(worked) });
+  const label = tools ? tr('live.fold.with_tools', { time, tools: tr('live.fold.tools', { count: tools }) }) : time;
+  return { label, folded, visible, error: turnError(turn, tr) };
 }
 
 /**
@@ -209,20 +199,20 @@ export function settledFold(turn, rows) {
  * turn (`wholeRows`, every part's rows; default this part's) is folded, so an
  * earlier part's folded work can always be opened.
  */
-export function partFold(turn, rows, { last = true, wholeRows = null } = {}) {
-  const fold = settledFold(turn, rows);
+export function partFold(turn, rows, { last = true, wholeRows = null, tr = english, duration = englishDuration } = {}) {
+  const fold = settledFold(turn, rows, { tr, duration });
   if (!fold) return null;
   if (!last) return { ...fold, label: null, error: null, opens: false };
-  const whole = wholeRows && wholeRows !== rows ? settledFold(turn, wholeRows) : fold;
+  const whole = wholeRows && wholeRows !== rows ? settledFold(turn, wholeRows, { tr, duration }) : fold;
   return { ...fold, opens: whole.folded.length > 0 };
 }
 
 /** Why a failed turn failed (`turn.error`, Host contract 54); older Hosts
  * send no reason, and the turn still must not read as one that answered. */
-function turnError(turn) {
+function turnError(turn, tr) {
   if (turn.status !== 'failed') return null;
   const e = turn.error || {};
-  return { message: String(e.message || 'Turn failed'), detail: String(e.detail || '') };
+  return { message: String(e.message || tr('live.turn_failed')), detail: String(e.detail || '') };
 }
 
 /**
@@ -239,24 +229,17 @@ export function systemNotice(row) {
     : { message: text.slice(0, cut).trim(), detail: text.slice(cut + 2).trim() };
 }
 
-const STATUS_TEXT = {
-  thinking: 'Thinking',
-  responding: 'Responding',
-  tool: 'Working',
-  compacting: 'Compacting',
-  waiting: 'Needs your attention',
-  background: 'Background work',
-  limited: 'Waiting for the usage limit',
-};
+/** States with a status line of their own (live.status.<state>). */
+const STATUS_TEXT = new Set(['thinking', 'responding', 'tool', 'compacting', 'waiting', 'background', 'limited']);
 const INTERRUPTIBLE = new Set(['thinking', 'responding', 'tool', 'compacting']);
 
 /**
  * The one status line: what is happening now, a timer from the Host clock
  * and whether it can be interrupted. Null when nothing runs.
  */
-export function statusLine(activity, { now = Date.now(), skewMs = 0 } = {}) {
+export function statusLine(activity, { now = Date.now(), skewMs = 0, tr = english } = {}) {
   const state = activity && activity.state;
-  if (!state || !STATUS_TEXT[state]) return null;
+  if (!state || !STATUS_TEXT.has(state)) return null;
   const hostNow = now + skewMs;
   const tool = state === 'tool' ? activity.tool : null;
   const since = (tool && tool.started_at_ms) || activity.turn_started_ms || activity.since_ms || 0;
@@ -264,7 +247,7 @@ export function statusLine(activity, { now = Date.now(), skewMs = 0 } = {}) {
   return {
     state,
     key: `${state}:${(tool && tool.item_id) || ''}`,
-    text: activity.headline || STATUS_TEXT[state],
+    text: activity.headlineKey ? tr(activity.headlineKey) : activity.headline || tr(`live.status.${state}`),
     since,
     time: since ? clock(hostNow - since) : '',
     more: tool && running > 1 ? `+${running - 1}` : '',
@@ -340,12 +323,15 @@ export function activityFromStatus(s) {
   const turnStarted = a.turn_started_ms || (s.turn_started_at ? s.turn_started_at * 1000 : null);
   const summary = String(s.activity_summary || a.summary || '').trim();
   const action = String(s.activity_action || a.action || '').trim();
-  let headline = { compacting: 'Compacting', responding: 'Responding' }[state] || 'Thinking';
-  if (state === 'tool' && summary) headline = action ? `${action} ${summary}` : summary;
+  // The state's own words come from the catalog when the line is drawn (headlineKey); a tool's
+  // summary is the Host's.
+  let headline = '';
+  let headlineKey = `live.status.${state === 'tool' ? 'thinking' : state}`;
+  if (state === 'tool' && summary) { headline = action ? `${action} ${summary}` : summary; headlineKey = ''; }
   const tool = state === 'tool' && a.started_at_ms
     ? { started_at_ms: a.started_at_ms, item_id: a.call_id || '', label: summary }
     : null;
-  return { state, headline, tool, running_tools: state === 'tool' ? 1 : 0,
+  return { state, headline, headlineKey, tool, running_tools: state === 'tool' ? 1 : 0,
     turn_started_ms: turnStarted, since_ms: turnStarted };
 }
 

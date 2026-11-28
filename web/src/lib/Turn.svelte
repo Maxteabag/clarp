@@ -6,6 +6,7 @@
   import { cellRow, systemNotice } from '@core/live-present.js';
   import CellRow from './live/CellRow.svelte';
   import TurnNotice from './live/TurnNotice.svelte';
+  import { turnErrorText } from './turn-error.js';
 
   // `strip`: the tool calls, cells and commentary the turn's work row took
   // (static/lib/history-fold.js).
@@ -45,7 +46,7 @@
      costs no layout or paint. -->
 {#if empty}
 {:else if notice}
-<div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} /></div>
+<div class="turn notice"><TurnNotice message={turnErrorText(turn.error, notice.message)} detail={notice.detail} /></div>
 {:else}
 <div
   class="turn {turn.role}"

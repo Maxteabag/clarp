@@ -67,7 +67,7 @@ describe('agent overview view model', () => {
 
   it('formats recent activity without pretending missing timestamps are recent', () => {
     expect(formatRelativeActivity(0, 1000)).toBe('No activity yet');
-    expect(formatRelativeActivity(970, 1000)).toBe('Just now');
-    expect(formatRelativeActivity(700, 1000)).toBe('5m ago');
+    expect(formatRelativeActivity(970, 1000)).toBe('now');
+    expect(formatRelativeActivity(700, 1000)).toBe('5 minutes ago');
   });
 });
