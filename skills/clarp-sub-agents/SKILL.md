@@ -77,27 +77,18 @@ advertises it in `helper-state` with feature `helper_state_backend` (contract
 152). On older Hosts and the Python Host, the helper's model settings supply
 the backend instead.
 
-### Antigravity (`--backend agy`)
+### Antigravity (`--backend agy-acp`)
 
-AGY runs Claude Opus/Sonnet 5.5 and Gemini on the Antigravity account, so
-its quota is separate from your Claude and Codex accounts. Pass the model with
-`--model`, e.g. `claude-opus-5-5-high`, `gemini-4-argon-high` or
-`gemini-3.8-flash-low`.
-
-AGY has built-in web search and page fetch (`search_web`, `read_url_content`),
-shown as WebSearch/WebFetch rows in the helper's chat.
-
-Effort is part of the model id (`claude-opus-5-5-low|medium|high`,
-`claude-sonnet-5-5-*`, `gemini-4-argon-*`, `gemini-3.8-flash-*`); a bare
-`claude-opus-5-5` or a separate `--effort` is rejected. `agy models` lists what your account
-offers. An AGY child of a fork is always a `seed` fork (see below), and AGY
-streams no thinking text, so its chat shows messages and tool rows only.
+Antigravity helpers use their Antigravity login and quota. Use the model ID
+shown by the Host's `/agent-model-options` ACP row, with `--effort` where ACP
+offers a separate thinking level. A legacy folded model ID can still name its
+thinking level when ACP offers both parts. Antigravity helpers use a seeded fork.
 
 ```bash
 clarp-sub-agent start research /path/to/wt prompt.md --clarp-agent \
-  --backend agy --model claude-opus-5-5-high --title "Research"
-clarp-sub-agent fork probe --cwd /path/to/wt --backend agy \
-  --model claude-opus-5-5-high --task "Search the web for X and report."
+  --backend agy-acp --model gemini-4-neon --effort medium --title "Research"
+clarp-sub-agent fork probe --cwd /path/to/wt --backend agy-acp \
+  --model gemini-4-neon --effort medium --task "Search the web for X and report."
 ```
 
 ## Fork: a helper that starts from your conversation
@@ -199,7 +190,7 @@ start, and the command exits 1.
    instructions to report back via `clarp-admin prompt --to <you> --from
    <helper>`, and starts a small watcher unit that holds the background job
    until the helper reports (job finished) or fails or is abandoned (job
-   failed). Any Clarp backend works (`claude`, `codex`, `grok`, `agy`,
+   failed). Any Clarp backend works (`claude`, `codex`, `grok`, `agy-acp`,
    `opencode`, `deepseek`), except under an agent bound to a model provider of
    its own (`codex_provider` on its row): its helpers must be `--backend codex`,
    and are bound to its home and provider (another backend is refused, 409

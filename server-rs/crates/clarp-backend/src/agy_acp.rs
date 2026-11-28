@@ -221,19 +221,77 @@ impl Backend for AgyAcp {
     }
 
     fn once(&self, question: &Question) -> Option<Launch> {
-        self.agy.once(question)
+        Some(self.question(question, false))
     }
 
     fn answered(&self, printed: &str) -> Result<String, String> {
-        self.agy.answered(printed)
+        let answer = printed
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["type"] == "result")
+            .last()
+            .ok_or_else(|| "Antigravity ACP returned no result".to_string())?;
+        let text = text_of(&answer["result"]).trim();
+        if answer["is_error"] == true {
+            return Err(shorten(text, 300));
+        }
+        if text.is_empty() {
+            return Err("Antigravity ACP returned no answer".to_string());
+        }
+        Ok(text.to_string())
     }
 
     fn reads(&self, reading: &Reading) -> Option<Apart> {
-        self.agy.reads(reading)
+        let question = Question {
+            prompt: format!(
+                "{}\n\n{}\n\nReturn only a JSON answer matching this schema: {}",
+                reading.instructions, reading.asked, reading.schema
+            ),
+            model: reading.model.clone(),
+            effort: reading.effort.clone(),
+        };
+        Some(Apart {
+            launch: self.question(&question, true),
+            files: Vec::new(),
+            keeps: agy::KEPT_APART.to_vec(),
+        })
     }
 
     fn own_home(&self) -> Option<OwnHome> {
         self.agy.own_home()
+    }
+}
+
+impl AgyAcp {
+    fn question(&self, question: &Question, read_only: bool) -> Launch {
+        let order = Order {
+            prompt: question.prompt.clone(),
+            model: question
+                .model
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            effort: question
+                .effort
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            ..Order::default()
+        };
+        let mut args = vec![shared::DRIVER.to_string(), self.program.clone()];
+        if read_only {
+            args.push(shared::READ_ONLY.to_string());
+        }
+        Launch {
+            prompt_as_file: false,
+            before_stop: None,
+            program: "clarp-shim".to_string(),
+            args,
+            env: Vec::new(),
+            stdin: format!("{}\n", order.to_json()).into_bytes(),
+        }
     }
 }
 

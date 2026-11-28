@@ -2026,6 +2026,9 @@ pub(crate) fn backend_of(record: &AgentRecord) -> Result<Arc<dyn clarp_backend::
         Ok(None) => {}
         Err(why) => return Err(format!("agent {}: {why}", record.session)),
     }
+    if record.backend == clarp_backend::LEGACY_AGY {
+        return Ok(clarp_backend::legacy_agy());
+    }
     clarp_backend::by_id(&record.backend)
         .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))
 }
@@ -3633,6 +3636,7 @@ impl Fleet {
             asked if asked.is_empty() => before.backend.clone(),
             asked => asked,
         };
+        let backend = clarp_backend::canonical_id(&backend).to_string();
         if clarp_backend::by_id(&backend).is_none() {
             return Err(format!("this Host has no backend named `{backend}`").into());
         }
@@ -3642,7 +3646,7 @@ impl Fleet {
                 session: owner.session.clone(),
             });
         }
-        let another_tool = backend != before.backend;
+        let another_tool = backend != clarp_backend::canonical_id(&before.backend);
         let model = match &request.model {
             Some(model) => model.trim().to_string(),
             None if another_tool => String::new(),
@@ -3911,6 +3915,12 @@ impl Fleet {
         contact: Option<ContactAsked>,
         catalogue: &VoiceCatalogue,
     ) -> Result<AgentRecord, NotMade> {
+        if let Some(backend) = request.backend.as_mut() {
+            let canonical = clarp_backend::canonical_id(backend.trim());
+            if canonical != backend {
+                *backend = canonical.to_owned();
+            }
+        }
         if let Some(parent) = request
             .parent
             .as_deref()
@@ -4186,7 +4196,7 @@ impl Fleet {
             agent_id,
             session: seed.session,
             persona: seed.persona,
-            backend: seed.backend,
+            backend: clarp_backend::canonical_id(&seed.backend).to_string(),
             cwd: cwd.display().to_string(),
             model: seed.model,
             effort: seed.effort,

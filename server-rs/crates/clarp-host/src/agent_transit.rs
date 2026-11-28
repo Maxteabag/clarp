@@ -46,7 +46,7 @@ use crate::hub::Hub;
 use crate::roster::{Fields, Refusal};
 
 /// The tools an agent can be moved to: those that keep a conversation of their own.
-pub const TARGETS: [&str; 6] = ["claude", "codex", "agy", "agy-acp", "grok", "opencode"];
+pub const TARGETS: [&str; 5] = ["claude", "codex", "agy-acp", "grok", "opencode"];
 
 /// How many changes the Host remembers, the finished ones forgotten first.
 const KEPT: usize = 256;
@@ -594,6 +594,14 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .cloned()
         .filter(|member| !member.record.is_janitor)
         .ok_or_else(|| Refusal::Plain(ApiError::new(StatusCode::NOT_FOUND, "no such agent")))?;
+    start_for(app, member, asked).await
+}
+
+async fn start_for(
+    app: &App,
+    member: Arc<crate::fleet::Member>,
+    asked: &Fields,
+) -> Result<String, Refusal> {
     let before = member.record.clone();
     let request = optional(asked, "request_id")?
         .filter(|id| !id.is_empty())
@@ -606,6 +614,7 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     let backend = optional(asked, "backend")?
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let backend = clarp_backend::canonical_id(&backend).to_owned();
     // An agent bound to a provider of its own stays on it: moving it to another tool would
     // carry its conversation, and the summary of it, to other services. Its models are its
     // provider's deployments, which no catalogue lists.
@@ -732,6 +741,68 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     });
     let _ = ready.await;
     Ok(id)
+}
+
+/// Drain standalone Antigravity attempts on their original shim, then change the
+/// transport through Transit. The opening actor fences fresh work before replay.
+pub fn retire_legacy_agy(app: &App) {
+    let directory = app.fleet.directory();
+    for member in directory.members.iter().chain(&directory.janitors) {
+        if member.record.backend != clarp_backend::LEGACY_AGY {
+            continue;
+        }
+        if !clarp_backend::same_store(clarp_backend::LEGACY_AGY, clarp_backend::agy_acp::ID) {
+            eprintln!(
+                "clarp-host: {} needs a Transit across Antigravity profiles",
+                member.record.session
+            );
+            continue;
+        }
+        let (app, member) = (app.clone(), member.clone());
+        tokio::spawn(async move {
+            let session = member.record.session.clone();
+            if let Err(why) = retire_legacy_agent(&app, member).await {
+                eprintln!("clarp-host: cannot move {session} to Antigravity ACP: {why}");
+            }
+        });
+    }
+}
+
+async fn retire_legacy_agent(app: &App, member: Arc<crate::fleet::Member>) -> Result<(), String> {
+    // The request waits for the actor to open. It can already have recovered
+    // a journaled switch which the fleet never heard before a restart.
+    member
+        .agent
+        .hold_for_transit(true)
+        .await
+        .map_err(|why| why.0)?;
+    if member.agent.view().backend == clarp_backend::agy_acp::ID {
+        let amended = app
+            .fleet
+            .amend_any(
+                member.record.agent_id.clone(),
+                Amend::Tool(clarp_backend::agy_acp::ID.to_string()),
+            )
+            .await;
+        member
+            .agent
+            .hold_for_transit(false)
+            .await
+            .map_err(|why| why.0)?;
+        amended
+            .map_err(|why| why.0)?
+            .map_err(|why| format!("{why:?}"))?;
+        return Ok(());
+    }
+    let asked = Fields::from_iter([
+        ("backend".to_string(), json!(clarp_backend::agy_acp::ID)),
+        ("model".to_string(), json!(member.record.model)),
+        ("effort".to_string(), json!(member.record.effort)),
+    ]);
+    start_for(app, member, &asked)
+        .await
+        .map_err(|why| why.answered().1.to_string())?;
+    Ok(())
 }
 
 struct Shown {
@@ -899,7 +970,7 @@ async fn carry_at_boundary(
     // on the new tool all the same, and its record is put right when the Host next opens it.
     let _ = app
         .fleet
-        .amend(
+        .amend_any(
             before.agent_id.clone(),
             Amend::ToolChanged {
                 backend: goal.backend.clone(),

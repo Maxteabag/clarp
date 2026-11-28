@@ -68,7 +68,7 @@ impl Telling {
             _ => return choices,
         };
         if let Some(file) = self.owner.read() {
-            choices.model = owner::text_at(&file, &["agents", &format!("{backend}_model")]);
+            choices.model = configured_model(&file, backend);
             choices.effort = effort_key.and_then(|key| owner::text_at(&file, &["agents", &key]));
         }
         choices
@@ -116,6 +116,18 @@ impl Telling {
             },
         }
     }
+}
+
+/// The ACP-specific choice wins. A Host that only set an Antigravity model
+/// before consolidation keeps the same default.
+pub(crate) fn configured_model(file: &toml::Table, backend: &str) -> Option<String> {
+    owner::text_at(file, &["agents", &format!("{backend}_model")]).or_else(|| {
+        if backend == clarp_backend::agy_acp::ID {
+            owner::text_at(file, &["agents", "agy_model"])
+        } else {
+            None
+        }
+    })
 }
 
 #[cfg(test)]
