@@ -11,6 +11,9 @@ use clarp_engine::{Change, Engine, TranscriptImageReply, TranscriptImageRequest}
 use slint::Model;
 
 use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, CardHint};
+use clarp_core::tr;
+
+// i18n-screen: artifacts
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -38,29 +41,44 @@ pub fn clock_now() -> i32 {
 
 /// iOS `CountdownDisplay`: before the target the time remaining, for a
 /// minute after it "Now", then the time since.
-pub fn countdown(target: i64, now: i64) -> (&'static str, String) {
+pub fn countdown(target: i64, now: i64) -> (String, String) {
     let delta = target - now;
     let clock = |seconds: i64| {
         let (days, rest) = (seconds / 86_400, seconds % 86_400);
         let hms = format!("{:02}:{:02}:{:02}", rest / 3600, rest % 3600 / 60, rest % 60);
-        if days > 0 { format!("{days}d {hms}") } else { hms }
+        if days > 0 {
+            let tag = clarp_core::i18n::current();
+            let days = clarp_core::i18n::format::span(tag, clarp_core::i18n::format::Span::Days, &clarp_core::i18n::format::number(tag, days), "");
+            format!("{days} {hms}")
+        } else {
+            hms
+        }
     };
     if delta > 0 {
-        ("Remaining", clock(delta))
+        // i18n: countdown card, label above the time left
+        (tr!("Remaining"), clock(delta))
     } else if delta > -60 {
-        ("Target reached", "Now".to_owned())
+        // i18n: countdown card, label once the target time is reached; with "Now" under it
+        let label = tr!("Target reached");
+        // i18n: countdown card, shown in place of the time for the first minute after the target (adverb)
+        (label, tr!("countdown" => "Now"))
     } else {
-        ("Since target", clock(-delta))
+        // i18n: countdown card, label above the time passed since the target
+        (tr!("Since target"), clock(-delta))
     }
 }
 
 /// The status worth a badge (iOS shows draft, failed, cancelled, expired).
 fn badge(status: &str) -> String {
     match status {
-        "draft" | "failed" | "cancelled" | "expired" => {
-            let mut chars = status.chars();
-            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
-        }
+        // i18n: artifact card, status badge (adjective)
+        "draft" => tr!("badge" => "Draft"),
+        // i18n: artifact card, status badge (past participle)
+        "failed" => tr!("badge" => "Failed"),
+        // i18n: artifact card, status badge (past participle)
+        "cancelled" => tr!("badge" => "Cancelled"),
+        // i18n: artifact card, status badge (past participle)
+        "expired" => tr!("badge" => "Expired"),
         _ => String::new(),
     }
 }
@@ -80,18 +98,23 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
     let progress = if !matches!(kind.as_str(), "plan" | "workflow_run") {
         String::new()
     } else if total > 0 {
-        format!("{} / {} completed", completed.max(0), total)
+        // i18n: plan or workflow card: steps finished of all; {0} finished, {1} in all
+        tr!("{0} / {1} completed", completed.max(0), total)
     } else if outcome == "active" {
-        "In progress".into()
+        // i18n: plan or workflow card: work under way
+        tr!("In progress")
     } else {
         String::new()
     };
     // iOS names only a file card for its file.
     let named = if kind == "file" { text(artifact, "file_name") } else { String::new() };
-    let title = [named, text(artifact, "title"), text(artifact, "file_name")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "Artifact".into());
+    let title = [named, text(artifact, "title"), text(artifact, "file_name")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| {
+        // i18n: artifact card title when it has none (noun: something an agent published)
+        tr!("Artifact")
+    });
     let mut item = ArtifactItem {
         id: text(artifact, "artifact_id").into(),
-        label: kind.replace('_', " ").to_uppercase().into(),
+        label: card_label(&kind).into(),
         kind: kind.clone().into(),
         outcome: outcome.into(),
         failed,
@@ -114,18 +137,25 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             let relative = text(artifact, "relative_path");
             item.repo = relative.clone().into();
             if relative_ok(&relative) && matches!(text(artifact, "root").as_str(), "workspace" | "home") {
-                item.action = "Open folder".into();
+                // i18n: folder card, button: open the folder in the file manager (imperative)
+                item.action = tr!("Open folder").into();
             } else {
-                item.file_info = "Folder unavailable".into();
+                // i18n: folder card, note: the folder is not on this computer
+                item.file_info = tr!("Folder unavailable").into();
             }
         }
         "workflow_run" => {
             // iOS: the step under way and completed/total, a bar when it
             // counts, an indeterminate one while active.
             let (total, done) = (number(artifact, "total_steps"), number(artifact, "completed_steps"));
-            item.label = "WORKFLOW RUN".into();
+            item.label = card_label("workflow_run").into();
             item.current = text(artifact, "current_step").into();
-            item.repo = [text(artifact, "workflow_name"), format!("run {}", text(artifact, "run_id"))].into_iter().filter(|p| !p.is_empty() && p != "run ").collect::<Vec<_>>().join(" · ").into();
+            item.repo = [text(artifact, "workflow_name"), if text(artifact, "run_id").is_empty() {
+                String::new()
+            } else {
+                // i18n: workflow run card: which run of the workflow; {} is its number
+                tr!("run {}", text(artifact, "run_id"))
+            }].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ").into();
             if total > 0 {
                 item.progress_value = done.clamp(0, total) as f32 / total as f32;
                 item.progress_count = format!("{done}/{total}").into();
@@ -135,12 +165,16 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.progress_value = -1.0;
             }
             if text(artifact, "run_url").starts_with("https://github.com/") {
-                item.action = "Open in GitHub".into();
+                // i18n: workflow run card, button (imperative; GitHub stays)
+                item.action = tr!("Open in GitHub").into();
             }
         }
         "release" => {
             // iOS's operation body: version ?? commit ?? "Unknown revision".
-            item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| "Unknown revision".into()).into();
+            item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| {
+                // i18n: release card, in place of a version or commit it does not name
+                tr!("Unknown revision")
+            }).into();
             item.release_state = match status.as_str() {
                 "ready" | "completed" => "ready",
                 "failed" => "failed",
@@ -148,7 +182,8 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 _ => "other",
             }
             .into();
-            item.action = "Open release".into();
+            // i18n: release card, button (imperative)
+            item.action = tr!("Open release").into();
         }
         "file" => {
             // iOS's detail: the kind (from the type or the name) and size.
@@ -156,21 +191,27 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             let mime = text(artifact, "mime_type");
             let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
             let sub = mime.rsplit('/').next().unwrap_or_default().to_uppercase();
-            let kind = if !ext.is_empty() && ext.len() <= 5 { ext } else if !sub.is_empty() { sub } else { "File".into() };
+            // i18n: file card, the file's kind when neither its name nor its type says one (noun)
+            let kind = if !ext.is_empty() && ext.len() <= 5 { ext } else if !sub.is_empty() { sub } else { tr!("File") };
             let size = number(artifact, "size_bytes");
+            let tag = clarp_core::i18n::current();
             let size = if size >= 1 << 20 {
-                format!("{:.1} MB", size as f64 / f64::from(1 << 20))
+                // i18n: file card, the file's size in megabytes; {} is the number ("1.5")
+                tr!("{} MB", clarp_core::i18n::format::decimal(tag, size as f64 / f64::from(1 << 20), 1))
             } else if size > 0 {
-                format!("{:.1} KB", size as f64 / 1024.0)
+                // i18n: file card, the file's size in kilobytes; {} is the number ("12.5")
+                tr!("{} KB", clarp_core::i18n::format::decimal(tag, size as f64 / 1024.0, 1))
             } else {
                 String::new()
             };
             let info = [kind, size].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
             if host_path(&text(artifact, "url")).is_some() {
                 item.file_info = info.into();
-                item.action = "Open file".into();
+                // i18n: file card, button (imperative)
+                item.action = tr!("Open file").into();
             } else {
-                item.file_info = format!("File unavailable · {info}").into();
+                // i18n: file card, note: the file is not on this computer; {} is its kind and size ("PDF · 1.5 MB")
+                item.file_info = tr!("File unavailable · {}", info).into();
             }
         }
         "video" => {
@@ -179,9 +220,11 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.media_length = format!("{}:{:02}", length / 60, length % 60).into();
             }
             if host_path(&text(artifact, "url")).is_some() {
-                item.action = "Play video".into();
+                // i18n: video card, button (imperative)
+                item.action = tr!("Play video").into();
             } else {
-                item.media_text = "Video unavailable".into();
+                // i18n: video card, note: the video is not on this computer
+                item.media_text = tr!("Video unavailable").into();
             }
         }
         "audio" => {
@@ -193,9 +236,11 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.media_seconds = length as i32;
             }
             if host_path(&text(artifact, "url")).is_some() {
-                item.action = "Play".into();
+                // i18n: audio card, button (imperative verb)
+                item.action = tr!("verb" => "Play").into();
             } else {
-                item.media_text = "Audio unavailable".into();
+                // i18n: audio card, note: the audio is not on this computer
+                item.media_text = tr!("Audio unavailable").into();
             }
         }
         "data" => data_fields(&mut item, artifact),
@@ -204,11 +249,13 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             // and lines changed.
             let repository = text(artifact, "repository");
             let branch = text(artifact, "branch");
-            let repo = if repository.is_empty() { "Repository".to_owned() } else { repository };
+            // i18n: code change card, in place of a repository it does not name (noun)
+            let repo = if repository.is_empty() { tr!("Repository") } else { repository };
             item.repo = if branch.is_empty() { repo } else { format!("{repo} · {branch}") }.into();
             if artifact.get("files_changed").is_some() {
                 let files = number(artifact, "files_changed");
-                item.files = format!("{files} file{}", if files == 1 { "" } else { "s" }).into();
+                // i18n: code change card: how many files changed; {n} is the count
+                item.files = tr!("{n} file" | "{n} files" % files).into();
             }
             if artifact.get("additions").is_some() {
                 item.additions = format!("+{}", number(artifact, "additions")).into();
@@ -217,7 +264,8 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.deletions = format!("−{}", number(artifact, "deletions")).into();
             }
             if !text(artifact, "diff").is_empty() || text(artifact, "source_url").starts_with("https://") {
-                item.action = "Open change".into();
+                // i18n: code change card, button: open the change (imperative)
+                item.action = tr!("Open change").into();
             }
         }
         "document" | "research" => {
@@ -227,33 +275,91 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 let html = clarp_core::text::looks_like_html_report(&content);
                 let markdown = if html { crate::updates_view::html_markdown(&content) } else { content };
                 item.preview = preview_text(&markdown).chars().take(600).collect::<String>().into();
-                item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
+                item.action = if kind == "document" {
+                    // i18n: document card, button (imperative)
+                    tr!("Open document")
+                } else {
+                    // i18n: research card, button: open the research brief (imperative)
+                    tr!("Open research")
+                }
+                .into();
                 item.browser = html;
             }
             let sources = https_sources(artifact).len();
             if sources > 0 {
-                item.sources = format!("{sources} source{}", if sources == 1 { "" } else { "s" }).into();
+                // i18n: research card: how many sources it cites; {n} is the count
+                item.sources = tr!("{n} source" | "{n} sources" % sources).into();
             }
         }
         "render_spec" => {
             // A native form: drawn in the card once read (`spec_fields`).
             // Drawn in the card once read (`form_view`), when the Host
             // sent this client the kind (its marker); otherwise a plain card.
-            item.label = "FORM".into();
+            item.label = card_label("render_spec").into();
             if crate::form_view::drawn(artifact) {
                 item.spec_state = "loading".into();
             }
         }
         "html_form" => {
             let report = is_report(artifact);
-            item.label = if report { "REPORT" } else { "FORM" }.into();
-            item.action = if report { "Open report" } else { "Open form" }.into();
+            item.label = card_label(if report { "report" } else { "html_form" }).into();
+            item.action = if report {
+                // i18n: report card, button (imperative)
+                tr!("Open report")
+            } else {
+                // i18n: form card, button (imperative)
+                tr!("Open form")
+            }
+            .into();
             item.form = false;
             item.browser = report && !opens_in_browser(artifact);
         }
         _ => {}
     }
     item
+}
+
+/// The small capitals over a card: its kind ("CODE CHANGE"), in the app's
+/// language for the kinds the desktop knows.
+fn card_label(kind: &str) -> String {
+    // Each line: a card's kind, shown small in capitals above its title (keep it short; capitals where the script has them).
+    match kind {
+        // i18n: artifact card kind label, small capitals: a plan
+        "plan" => tr!("PLAN"),
+        // i18n: artifact card kind label, small capitals: a CI workflow run
+        "workflow_run" => tr!("WORKFLOW RUN"),
+        // i18n: artifact card kind label, small capitals: a software release (noun)
+        "release" => tr!("RELEASE"),
+        // i18n: artifact card kind label, small capitals: a file (noun)
+        "file" => tr!("FILE"),
+        // i18n: artifact card kind label, small capitals: a video
+        "video" => tr!("VIDEO"),
+        // i18n: artifact card kind label, small capitals: an audio recording
+        "audio" => tr!("AUDIO"),
+        // i18n: artifact card kind label, small capitals: a table or chart (noun)
+        "data" => tr!("DATA"),
+        // i18n: artifact card kind label, small capitals: a change to code
+        "code_change" => tr!("CODE CHANGE"),
+        // i18n: artifact card kind label, small capitals: a document
+        "document" => tr!("DOCUMENT"),
+        // i18n: artifact card kind label, small capitals: a research brief (noun)
+        "research" => tr!("RESEARCH"),
+        // i18n: artifact card kind label, small capitals: a form to fill in (noun)
+        "render_spec" | "html_form" => tr!("FORM"),
+        // i18n: artifact card kind label, small capitals: a report (noun)
+        "report" => tr!("REPORT"),
+        // i18n: artifact card kind label, small capitals: a countdown to a time
+        "countdown" => tr!("COUNTDOWN"),
+        // i18n: artifact card kind label, small capitals: a decision to make (noun)
+        "decision" => tr!("DECISION"),
+        // i18n: artifact card kind label, small capitals: a question to answer (noun)
+        "question" => tr!("QUESTION"),
+        // i18n: artifact card kind label, small capitals: a folder
+        "directory" => tr!("DIRECTORY"),
+        // i18n: artifact card kind label, small capitals: anything else (noun)
+        "item" => tr!("ITEM"),
+        other => other.replace('_', " ").to_uppercase(),
+    }
 }
 
 /// The Markdown body the card shows under its summary.
@@ -313,12 +419,20 @@ pub fn settle_downloads(app: &App, session: &str) {
             ("poster", Err(error)) => eprintln!("clarp-slint: no poster for {id}: {error}"),
             (_, Ok(bytes)) => {
                 let said = match save_and_open(&id, &name, &bytes) {
-                    Ok(()) => if purpose == "video" { "Opened in your video player" } else { "Opened" }.to_owned(),
-                    Err(error) => format!("Couldn't open it: {error}"),
+                    Ok(()) => if purpose == "video" {
+                        // i18n: artifact card status after opening a video in the computer's player
+                        tr!("Opened in your video player")
+                    } else {
+                        // i18n: artifact card status after opening its file (past participle)
+                        tr!("artifact" => "Opened")
+                    },
+                    // i18n: artifact card status: the file could not be opened; {} is the reason
+                    Err(error) => tr!("Couldn't open it: {}", error),
                 };
                 app.engine.borrow_mut().set_artifact_status(&id, &said);
             }
-            (_, Err(error)) => app.engine.borrow_mut().set_artifact_status(&id, &format!("Couldn't download it: {error}")),
+            // i18n: artifact card status: the file could not be downloaded from the Host; {} is the reason
+            (_, Err(error)) => app.engine.borrow_mut().set_artifact_status(&id, &tr!("Couldn't download it: {}", error)),
         }
     }
 }
@@ -327,7 +441,8 @@ pub fn settle_downloads(app: &App, session: &str) {
 /// own name) and opens it with the desktop's app for it; checks record it
 /// to `CLARP_TEST_OPEN_URL` instead.
 fn save_and_open(id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
-    let root = clarp_core::media::cache_dir().ok_or("no cache folder")?;
+    // i18n: artifact card status after "Couldn't open it:": this computer has no cache folder (lowercase)
+    let root = clarp_core::media::cache_dir().ok_or_else(|| tr!("no cache folder"))?;
     let safe = |s: &str| s.chars().map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' }).collect::<String>();
     let file = std::path::Path::new(name).file_name().map(|n| safe(&n.to_string_lossy())).filter(|n| !n.is_empty() && n != "." && n != "..").unwrap_or_else(|| "artifact".into());
     let folder = root.join("artifacts").join(safe(id));
@@ -391,8 +506,10 @@ fn open_directory(app: &App, artifact: &Value) {
         .and_then(|p| std::fs::canonicalize(p).ok())
         .filter(|p| p.is_dir() && root.as_ref().is_some_and(|r| p.starts_with(r)));
     let Some(folder) = local else {
-        let root = if text(artifact, "root") == "home" { "~" } else { "the agent's folder" };
-        app.engine.borrow_mut().set_artifact_status(&id, &format!("On the Host: {root}/{relative}"));
+        // i18n: folder card status, in place of the agent's working folder in a path ("On the Host: the agent's folder/docs")
+        let root = if text(artifact, "root") == "home" { "~".to_owned() } else { tr!("the agent's folder") };
+        // i18n: folder card status: the folder is only on the Host; {0} is its root ("~" or the agent's folder), {1} the path under it
+        app.engine.borrow_mut().set_artifact_status(&id, &tr!("On the Host: {0}/{1}", root, relative));
         return;
     };
     match url::Url::from_file_path(&folder) {
@@ -651,10 +768,14 @@ fn media_fields(item: &mut ArtifactItem) {
     }
     use crate::platform::audio::MediaState;
     let (state, said, action) = match &media.state {
-        MediaState::Preparing => ("preparing", "Preparing audio…".to_owned(), "Play"),
-        MediaState::Playing => ("playing", "Playing".to_owned(), "Pause"),
-        MediaState::Paused => ("paused", "Paused".to_owned(), "Play"),
-        MediaState::Failed(why) => ("failed", why.clone(), "Play"),
+        // i18n: audio card, state while the audio loads
+        MediaState::Preparing => ("preparing", tr!("Preparing audio…"), tr!("verb" => "Play")),
+        // i18n: audio card, state (verb, ongoing) and its button (imperative verb)
+        MediaState::Playing => ("playing", tr!("Playing"), tr!("verb" => "Pause")),
+        // i18n: audio card, state (past participle) and its button (imperative verb)
+        MediaState::Paused => ("paused", tr!("Paused"), tr!("verb" => "Play")),
+        // i18n: audio card button after playback failed (imperative verb)
+        MediaState::Failed(why) => ("failed", why.clone(), tr!("verb" => "Play")),
     };
     item.media_state = state.into();
     item.media_text = said.into();
@@ -749,16 +870,23 @@ fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<
         // Before a choice Send is a button with no key (a click says to
         // choose first).
         if item.editing {
-            hints.push(hint("Enter", "Send", "send"));
+            // i18n: decision card, key hint label: sends the answer (imperative verb)
+            hints.push(hint("Enter", &tr!("verb" => "Send"), "send"));
         } else if (0..answers as i32).contains(&item.chosen) {
-            hints.push(hint(&format!("{} again", item.chosen + 1), "Send", "send"));
+            // i18n: decision card, key hint: press the chosen answer's number again; {} is that number
+            let again = tr!("{} again", item.chosen + 1);
+            // i18n: decision card, key hint label: sends the answer (imperative verb)
+            hints.push(hint(&again, &tr!("verb" => "Send"), "send"));
         } else if answers > 0 {
-            hints.push(hint("", "Send", "send"));
+            // i18n: decision card, key hint label: sends the answer (imperative verb)
+            hints.push(hint("", &tr!("verb" => "Send"), "send"));
         }
         if item.editing {
-            hints.push(hint("Esc", "Keep draft", "keep-draft"));
+            // i18n: decision card, key hint label: Esc leaves the typed answer kept as a draft (imperative)
+            hints.push(hint("Esc", &tr!("Keep draft"), "keep-draft"));
         } else {
-            hints.push(hint(&key("artifact-discard"), "Discard", "discard"));
+            // i18n: decision card, key hint label: discards the decision (imperative verb)
+            hints.push(hint(&key("artifact-discard"), &tr!("verb" => "Discard"), "discard"));
         }
         return hints;
     }
@@ -767,11 +895,14 @@ fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<
     }
     hints.push(hint(&key("artifact-open"), &item.action, "open"));
     if item.browser {
-        hints.push(hint(&key("open-in-browser"), "Open in browser", "browser"));
+        // i18n: artifact card, key hint label (imperative)
+        hints.push(hint(&key("open-in-browser"), &tr!("Open in browser"), "browser"));
     }
     if item.kind == "audio" {
-        hints.push(hint(&format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), "Seek", "seek"));
-        hints.push(hint(&key("artifact-stop"), "Stop", "stop"));
+        // i18n: audio card, key hint label: arrow keys move back or forward in the audio (imperative verb)
+        hints.push(hint(&format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), &tr!("verb" => "Seek"), "seek"));
+        // i18n: audio card, key hint label: stops playback (imperative verb)
+        hints.push(hint(&key("artifact-stop"), &tr!("verb" => "Stop"), "stop"));
     }
     hints
 }
@@ -803,8 +934,10 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
     let options: Vec<ArtifactOption> = if item.approval {
         let label = |key: &str, fallback: &str| Some(text(decision, key)).filter(|l| !l.is_empty()).unwrap_or_else(|| fallback.to_owned());
         vec![
-            ArtifactOption { id: "yes".into(), label: label("yes_label", "Yes").into(), ..ArtifactOption::default() },
-            ArtifactOption { id: "no".into(), label: label("no_label", "No").into(), ..ArtifactOption::default() },
+            // i18n: decision card, answer button that approves, when the agent names none
+            ArtifactOption { id: "yes".into(), label: label("yes_label", &tr!("answer" => "Yes")).into(), ..ArtifactOption::default() },
+            // i18n: decision card, answer button that declines, when the agent names none
+            ArtifactOption { id: "no".into(), label: label("no_label", &tr!("answer" => "No")).into(), ..ArtifactOption::default() },
         ]
     } else {
         let recommended = text(decision, "recommended_option_id");
@@ -838,17 +971,25 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         }
         match text(decision, "response_effort").as_str() {
             "quick" | "" => {}
-            "short" => meta.push("About a minute".into()),
-            _ => meta.push("Needs a closer look".into()),
+            // i18n: decision card, how long answering takes
+            "short" => meta.push(tr!("About a minute")),
+            // i18n: decision card, how long answering takes: more than a quick look
+            _ => meta.push(tr!("Needs a closer look")),
         }
         let deadline = chrono::DateTime::parse_from_rfc3339(&text(decision, "deadline_at"));
         if let Ok(deadline) = deadline {
-            meta.insert(0, format!("Due {}", deadline.with_timezone(&chrono::Local).format("%b %-d at %H:%M")));
+            let local = deadline.with_timezone(&chrono::Local);
+            let tag = clarp_core::i18n::current();
+            let (day, at) = (clarp_core::i18n::format::day_month(tag, local.date_naive()), clarp_core::i18n::format::time(tag, local.time(), clarp_core::i18n::format::Clock::H24));
+            // i18n: decision card, when the answer is due ("Due Nov 26 at 14:05"); {0} is the day, {1} the time
+            meta.insert(0, tr!("Due {0} at {1}", day, at));
         } else if text(decision, "urgency") == "time_sensitive" {
-            meta.push("Time sensitive".into());
+            // i18n: decision card: the answer is urgent
+            meta.push(tr!("Time sensitive"));
         }
         if !item.approval && response != "single_choice" {
-            meta.push("Update Clarp to answer this kind of question".into());
+            // i18n: decision card: this app is too old for the kind of question asked
+            meta.push(tr!("Update Clarp to answer this kind of question"));
         }
         item.meta = meta.join(" · ").into();
         if item.approval {
@@ -857,17 +998,24 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         return;
     }
     let (resolved, ok) = match status.as_str() {
-        "answered" => ("Answer saved", true),
-        "accepted" => ("Approved", true),
-        "rejected" => ("Declined", false),
+        // i18n: decision card once answered: the answer was kept
+        "answered" => (tr!("Answer saved"), true),
+        // i18n: chat, chip on a resolved decision card: the user approved it (past participle)
+        "accepted" => (tr!("preview.decision.approved" => "Approved"), true),
+        // i18n: chat, chip on a resolved decision card: the user declined it (past participle)
+        "rejected" => (tr!("preview.decision.declined" => "Declined"), false),
         // Host contract 28: why it was cancelled (iOS's labels).
         "cancelled" => match text(decision, "resolved_choice").as_str() {
-            "withdrawn" => ("Withdrawn by agent", false),
-            "superseded" => ("Closed by your reply", false),
-            _ => ("Discarded", false),
+            // i18n: decision card: the agent took the question back
+            "withdrawn" => (tr!("Withdrawn by agent"), false),
+            // i18n: decision card: the user's chat message answered it instead
+            "superseded" => (tr!("Closed by your reply"), false),
+            // i18n: chat, chip on a decision card the user discarded (past participle)
+            _ => (tr!("preview.decision.discarded" => "Discarded"), false),
         },
-        "expired" => ("Expired", false),
-        _ => ("", false),
+        // i18n: chat, chip on a decision card that ran out of time (past participle)
+        "expired" => (tr!("preview.decision.expired" => "Expired"), false),
+        _ => (String::new(), false),
     };
     item.resolved = resolved.into();
     item.resolved_ok = ok;
@@ -886,7 +1034,8 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         item.chosen = index as i32;
     }
     if decision.get("delivery_pending").and_then(Value::as_bool) == Some(true) {
-        item.delivery = "Saved. Waiting to deliver to the agent.".into();
+        // i18n: decision card: the answer is kept and will reach the agent when it runs
+        item.delivery = tr!("Saved. Waiting to deliver to the agent.").into();
     }
 }
 
@@ -919,7 +1068,8 @@ pub fn send(app: &App, id: &str) {
         // iOS caps an answer of one's own at 4,000 characters.
         let written: String = app.artifact_drafts.borrow().get(id).map(|d| d.trim().chars().take(4000).collect()).unwrap_or_default();
         if written.is_empty() {
-            app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first: write one");
+            // i18n: decision card status: Send was pressed with the own-answer field empty
+            app.engine.borrow_mut().set_artifact_status(id, &tr!("Choose an answer first: write one"));
             app.refresh(&[Change::Updates]);
             return;
         }
@@ -931,7 +1081,8 @@ pub fn send(app: &App, id: &str) {
         return;
     }
     let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
-        app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first (1-9)");
+        // i18n: decision card status: Send was pressed before an answer was chosen (keys 1 to 9 choose)
+        app.engine.borrow_mut().set_artifact_status(id, &tr!("Choose an answer first (1-9)"));
         app.refresh(&[Change::Updates]);
         return;
     };
@@ -1002,8 +1153,10 @@ fn preview_text(markdown: &str) -> String {
 fn scalar(value: &Value) -> String {
     match value {
         Value::Null => "—".into(),
-        Value::Bool(true) => "Yes".into(),
-        Value::Bool(false) => "No".into(),
+        // i18n: table card, a yes/no cell
+        Value::Bool(true) => tr!("answer" => "Yes"),
+        // i18n: table card, a yes/no cell
+        Value::Bool(false) => tr!("answer" => "No"),
         Value::String(text) => text.clone(),
         other => other.to_string(),
     }
@@ -1034,7 +1187,8 @@ fn clipped(cells: &[String], rest: impl Fn(usize) -> String) -> Vec<slint::Share
 /// iOS's data card: the header and the first row, and how many rows.
 fn data_fields(item: &mut ArtifactItem, artifact: &Value) {
     let Some((columns, rows)) = table(artifact) else {
-        item.data_note = "Structured data unavailable".into();
+        // i18n: table card, note: the table could not be read
+        item.data_note = tr!("Structured data unavailable").into();
         return;
     };
     let model = |cells: Vec<slint::SharedString>| slint::ModelRc::new(slint::VecModel::from(cells));
@@ -1042,8 +1196,10 @@ fn data_fields(item: &mut ArtifactItem, artifact: &Value) {
     if let Some(first) = rows.first() {
         item.first_row = model(clipped(first, |_| "…".into()));
     }
-    item.rows_count = format!("{} row{}", rows.len(), if rows.len() == 1 { "" } else { "s" }).into();
-    item.action = "Open table".into();
+    // i18n: table card: how many rows the table has; {n} is the count
+    item.rows_count = tr!("{n} row" | "{n} rows" % rows.len()).into();
+    // i18n: table card, button (imperative)
+    item.action = tr!("Open table").into();
 }
 
 /// A Markdown table of `rows` under `head`.
@@ -1073,7 +1229,8 @@ fn plan_items(plan: &Value) -> Vec<(usize, Value)> {
 fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
     let Some(plan) = artifact.get("plan").filter(|p| p.is_object()) else {
         item.progress_value = -1.0;
-        item.current = "Plan details unavailable".into();
+        // i18n: plan card, note: the plan's steps could not be read
+        item.current = tr!("Plan details unavailable").into();
         return;
     };
     let items = plan_items(plan);
@@ -1092,7 +1249,8 @@ fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
             item.current_blocked = true;
         }
     }
-    item.action = "Open plan".into();
+    // i18n: plan card, button (imperative)
+    item.action = tr!("Open plan").into();
 }
 
 /// A research artifact's sources that open: titled https links (iOS shows
@@ -1117,14 +1275,17 @@ const HISTORY_SHOWN: usize = 50;
 /// it out; the viewer has it read and says so meanwhile.
 fn goal_history(app: &App, id: &str, plan: &Value) -> Vec<String> {
     let Some(goal) = plan.get("goal").filter(|g| g.is_object()) else { return Vec::new() };
-    let mut lines = vec![String::new(), "## Goal history".to_owned(), String::new()];
+    // i18n: plan viewer, heading over the goal's past events (Markdown heading text)
+    let mut lines = vec![String::new(), format!("## {}", tr!("Goal history")), String::new()];
     let Some(history) = goal.get("history").and_then(Value::as_array) else {
         if goal.get("history_omitted").is_none() {
             return Vec::new();
         }
         lines.push(match app.engine.borrow().artifact_hydration(id) {
-            clarp_engine::Hydration::Failed(why) => format!("*Not loaded: {why}*"),
-            _ => "*Loading…*".to_owned(),
+            // i18n: plan viewer: the goal history did not load; {} is why
+            clarp_engine::Hydration::Failed(why) => format!("*{}*", tr!("Not loaded: {}", why)),
+            // i18n: plan viewer: the goal history is being read
+            _ => format!("*{}*", tr!("Loading…")),
         });
         return lines;
     };
@@ -1133,12 +1294,19 @@ fn goal_history(app: &App, id: &str, plan: &Value) -> Vec<String> {
     }
     for entry in history.iter().rev().take(HISTORY_SHOWN) {
         let at = entry.get("at").and_then(Value::as_i64).and_then(chrono::DateTime::from_timestamp_millis);
-        let when = at.map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+        let when = at
+            .map(|t| {
+                let local = t.with_timezone(&chrono::Local);
+                let tag = clarp_core::i18n::current();
+                format!("{} {}", clarp_core::i18n::format::date_short(tag, local.date_naive()), clarp_core::i18n::format::time(tag, local.time(), clarp_core::i18n::format::Clock::H24))
+            })
+            .unwrap_or_default();
         let kind = text(entry, "kind").replace('_', " ");
         lines.push(format!("- {}", [when, kind].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")));
     }
     if history.len() > HISTORY_SHOWN {
-        lines.push(format!("- *{} earlier*", history.len() - HISTORY_SHOWN));
+        // i18n: plan viewer, goal history: how many older events are not listed; {n} is the count
+        lines.push(format!("- *{}*", tr!("{n} earlier" | "{n} earlier" % (history.len() - HISTORY_SHOWN))));
     }
     lines
 }
@@ -1153,24 +1321,33 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
     let (summary, body) = match text(&artifact, "type").as_str() {
         "plan" => {
             let plan = artifact.get("plan").filter(|p| p.is_object())?;
-            let summary = [text(plan, "title"), text(plan, "goal"), format!("{} done", card.progress_count)]
+            // i18n: plan viewer summary: steps done of all; {} is "3/5"
+            let summary = [text(plan, "title"), text(plan, "goal"), tr!("{} done", card.progress_count)]
                 .into_iter()
                 .filter(|p| !p.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ");
             // A table: one row per item and subtask, the state beside it.
             let cell = |t: String| t.replace('|', "\\|");
-            let mut rows = vec!["| Step | State |".to_owned(), "|---|---|".to_owned()];
+            // i18n: plan viewer, table column header: the plan's step (noun)
+            let step = tr!("plan table" => "Step");
+            // i18n: plan viewer, table column header: the step's state (noun)
+            let state_head = tr!("plan table" => "State");
+            let mut rows = vec![format!("| {step} | {state_head} |"), "|---|---|".to_owned()];
             for (depth, i) in plan_items(plan) {
                 let (mark, state) = match text(&i, "status").as_str() {
-                    "completed" => ("✓", "done"),
-                    "in_progress" => ("▶", "under way"),
-                    "blocked" | "failed" => ("✕", "blocked"),
-                    _ => ("○", "to do"),
+                    // i18n: plan viewer, a step's state: finished
+                    "completed" => ("✓", tr!("plan step" => "done")),
+                    // i18n: plan viewer, a step's state: being worked on
+                    "in_progress" => ("▶", tr!("plan step" => "under way")),
+                    // i18n: plan viewer, a step's state: stuck or failed
+                    "blocked" | "failed" => ("✕", tr!("plan step" => "blocked")),
+                    // i18n: plan viewer, a step's state: not started
+                    _ => ("○", tr!("plan step" => "to do")),
                 };
                 let detail = text(&i, "detail");
                 let indent = "↳ ".repeat(depth);
-                let state = if detail.is_empty() { state.to_owned() } else { format!("{state} · *{}*", cell(detail)) };
+                let state = if detail.is_empty() { state } else { format!("{state} · *{}*", cell(detail)) };
                 rows.push(format!("| {indent}{mark} {} | {state} |", cell(text(&i, "title"))));
             }
             let mut lines = rows;
@@ -1188,18 +1365,30 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             if !sources.is_empty() {
                 let escape = |t: &str| t.replace('[', "\\[").replace(']', "\\]");
                 let list: Vec<String> = sources.iter().map(|(title, url)| format!("- [{}]({url})", escape(title))).collect();
-                markdown = format!("{markdown}\n\n## Sources\n\n{}", list.join("\n"));
+                // i18n: research viewer, heading over the list of sources (Markdown heading text)
+                markdown = format!("{markdown}\n\n## {}\n\n{}", tr!("Sources"), list.join("\n"));
             }
             (text(&artifact, "summary"), markdown)
         }
         "release" => {
-            let facts: Vec<Vec<String>> = [("Version", "version"), ("Build", "build"), ("Revision", "commit"), ("Repository", "repository")]
+            let labels = [
+                // i18n: release viewer, table row label (noun)
+                (tr!("Version"), "version"),
+                // i18n: release viewer, table row label: the build number (noun)
+                (tr!("release" => "Build"), "build"),
+                // i18n: release viewer, table row label: the commit (noun)
+                (tr!("Revision"), "commit"),
+                // i18n: release viewer, table row label (noun)
+                (tr!("Repository"), "repository"),
+            ];
+            let facts: Vec<Vec<String>> = labels
                 .iter()
-                .filter_map(|(label, key)| Some(text(&artifact, key)).filter(|v| !v.is_empty()).map(|v| vec![(*label).to_owned(), v]))
+                .filter_map(|(label, key)| Some(text(&artifact, key)).filter(|v| !v.is_empty()).map(|v| vec![label.clone(), v]))
                 .collect();
             let mut parts = Vec::new();
             if !facts.is_empty() {
-                parts.push(markdown_table(&["Release".to_owned(), card.title.to_string()], &facts));
+                // i18n: release viewer, table header over the release's facts (noun)
+                parts.push(markdown_table(&[tr!("Release"), card.title.to_string()], &facts));
             }
             let notes = text(&artifact, "content");
             if !notes.trim().is_empty() {
@@ -1207,10 +1396,12 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             let source = text(&artifact, "source_url");
             if source.starts_with("https://") {
-                parts.push(format!("[Open source]({source})"));
+                // i18n: release viewer, link to the release's source page (imperative)
+                parts.push(format!("[{}]({source})", tr!("Open source")));
             }
             let build = text(&artifact, "build");
-            (if build.is_empty() { card.revision.to_string() } else { format!("{} · build {build}", card.revision) }, parts.join("\n\n"))
+            // i18n: release viewer summary: the revision, then its build; {0} the revision, {1} the build number
+            (if build.is_empty() { card.revision.to_string() } else { tr!("{0} · build {1}", card.revision, build) }, parts.join("\n\n"))
         }
         "code_change" => {
             let commit = text(&artifact, "commit");
@@ -1226,7 +1417,8 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             let source = text(&artifact, "source_url");
             if source.starts_with("https://") {
-                parts.push(format!("[Open source]({source})"));
+                // i18n: code change viewer, link to the change's source page (imperative)
+                parts.push(format!("[{}]({source})", tr!("Open source")));
             }
             (summary, parts.join("\n\n"))
         }
@@ -1248,7 +1440,9 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             // The grid, as iOS caps it: 500 rows.
             parts.push(markdown_table(&columns, &rows[..rows.len().min(500)]));
-            (format!("{} · {} columns", card.rows_count, columns.len()), parts.join("\n\n"))
+            // i18n: table viewer summary: rows, then how many columns; {n} is the column count
+            let columns_said = tr!("{n} column" | "{n} columns" % columns.len());
+            (format!("{} · {}", card.rows_count, columns_said), parts.join("\n\n"))
         }
         _ => return None,
     };
@@ -1615,20 +1809,25 @@ pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     let key = |action: &str| card_key(action, &overrides);
     if id.starts_with("live:") {
         let open = live_row(app, &id).is_some_and(|r| r.live.expanded);
-        return Some(vec![(key("artifact-open"), if open { "Collapse" } else { "Expand" }.to_owned())]);
+        // i18n: chat, key hint on a selected item (imperative verb): fold or unfold it
+        return Some(vec![(key("artifact-open"), if open { tr!("Collapse") } else { tr!("Expand") })]);
     }
     if id.starts_with("receipt:") {
-        return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![(key("artifact-open"), "Show decision".to_owned())] } else { Vec::new() });
+        // i18n: chat, key hint on a decision receipt: scroll to its decision card (imperative)
+        return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![(key("artifact-open"), tr!("Show decision"))] } else { Vec::new() });
     }
     if id.starts_with(clarp_core::agent_prompt::PREFIX) {
         let open = app.active_messages()?.iter().any(|r| r.prompt.key == id && r.prompt.expanded);
-        return Some(vec![(key("artifact-open"), if open { "Collapse" } else { "Expand" }.to_owned())]);
+        // i18n: chat, key hint on a selected item (imperative verb): fold or unfold it
+        return Some(vec![(key("artifact-open"), if open { tr!("Collapse") } else { tr!("Expand") })]);
     }
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
-        let mut hints = vec![(key("artifact-open"), "Enlarge".to_owned())];
+        // i18n: chat, key hint on a selected picture: show it large (imperative verb)
+        let mut hints = vec![(key("artifact-open"), tr!("Enlarge"))];
         if gallery {
-            hints.push((format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), "Tile".into()));
+            // i18n: chat, key hint on a picture gallery: arrow keys move between tiles (here a verb-like hint: step through the tiles)
+            hints.push((format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), tr!("verb" => "Tile")));
         }
         return Some(hints);
     }
@@ -1931,7 +2130,8 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                         Ok(key) => Some(crate::form_server::Events { store: engine.form_event_store(), key, origin: engine.form_event_origin() }),
                         Err(error) => {
                             eprintln!("clarp-slint: the form's event log is unavailable: {error}");
-                            engine.set_artifact_status(id, &format!("Event log: {error}"));
+                            // i18n: form card status: the form's event recording failed; {} is the error
+                            engine.set_artifact_status(id, &tr!("Event log: {}", error));
                             None
                         }
                     }
@@ -1947,7 +2147,8 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 }
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");
-                    app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
+                    // i18n: artifact card status: the form or report did not open; {} is the reason
+                    app.engine.borrow_mut().set_artifact_status(id, &tr!("Not opened: {}", error));
                 }
             }
         }
@@ -2085,7 +2286,8 @@ pub fn open_in_browser(app: &App, id: &str) -> bool {
         }
         Err(error) => {
             eprintln!("clarp-slint: {error}");
-            app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
+            // i18n: artifact card status: the form or report did not open; {} is the reason
+            app.engine.borrow_mut().set_artifact_status(id, &tr!("Not opened: {}", error));
             false
         }
     }
@@ -2163,7 +2365,8 @@ pub fn settle_hydration(app: &App) {
                 }
             });
         }
-        Hydration::Failed(why) => app.engine.borrow_mut().set_artifact_status(&id, &format!("Not loaded: {why}")),
+        // i18n: artifact card status: its full content did not load; {} is why
+        Hydration::Failed(why) => app.engine.borrow_mut().set_artifact_status(&id, &tr!("Not loaded: {}", why)),
         // Deleted: the engine took its card away and said so.
         Hydration::Gone | Hydration::Unknown | Hydration::Loading | Hydration::Omitted => {}
     }
@@ -2194,17 +2397,23 @@ pub fn html_report(app: &App, id: &str) -> Option<clarp_core::json::Object> {
 /// own offset (the Host requires one) with the zone it names.
 fn countdown_fields(item: &mut ArtifactItem, artifact: &Value, status: &str) {
     if status == "cancelled" {
-        item.countdown_note = "Cancelled".into();
+        // i18n: countdown card, note: the countdown was cancelled (past participle)
+        item.countdown_note = tr!("countdown" => "Cancelled").into();
         return;
     }
     let Ok(target) = chrono::DateTime::parse_from_rfc3339(&text(artifact, "target_at")) else {
-        item.countdown_note = "Countdown unavailable".into();
+        // i18n: countdown card, note: its target time cannot be read
+        item.countdown_note = tr!("Countdown unavailable").into();
         return;
     };
     let zone = text(artifact, "time_zone");
     item.countdown_set = true;
     item.countdown_at = (target.timestamp() - epoch()).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
-    item.countdown_line = format!("{} · {}", target.format("%b %-d, %Y at %H:%M"), if zone.is_empty() { "UTC" } else { &zone }).into();
+    let tag = clarp_core::i18n::current();
+    let (day, at) = (clarp_core::i18n::format::date(tag, target.date_naive()), clarp_core::i18n::format::time(tag, target.time(), clarp_core::i18n::format::Clock::H24));
+    // i18n: countdown card, the target as a date and time ("Nov 26, 2026 at 14:05"); {0} is the date, {1} the time
+    let when = tr!("{0} at {1}", day, at);
+    item.countdown_line = format!("{} · {}", when, if zone.is_empty() { "UTC" } else { &zone }).into();
 }
 
 /// The bridge's clock and callbacks.
@@ -2339,11 +2548,12 @@ mod tests {
 
     #[test]
     fn a_countdown_counts_down_then_up() {
-        assert_eq!(countdown(100 + 86_400 + 3 * 3600 + 4 * 60 + 5, 100), ("Remaining", "1d 03:04:05".to_owned()));
-        assert_eq!(countdown(100, 99), ("Remaining", "00:00:01".to_owned()));
-        assert_eq!(countdown(100, 100), ("Target reached", "Now".to_owned()));
-        assert_eq!(countdown(100, 159), ("Target reached", "Now".to_owned()));
-        assert_eq!(countdown(100, 160), ("Since target", "00:01:00".to_owned()));
+        let pair = |a: &str, b: &str| (a.to_owned(), b.to_owned());
+        assert_eq!(countdown(100 + 86_400 + 3 * 3600 + 4 * 60 + 5, 100), pair("Remaining", "1d 03:04:05"));
+        assert_eq!(countdown(100, 99), pair("Remaining", "00:00:01"));
+        assert_eq!(countdown(100, 100), pair("Target reached", "Now"));
+        assert_eq!(countdown(100, 159), pair("Target reached", "Now"));
+        assert_eq!(countdown(100, 160), pair("Since target", "00:01:00"));
     }
 
     #[test]
