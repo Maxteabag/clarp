@@ -37,7 +37,9 @@ use axum::Json;
 use axum::extract::{Extension, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use clarp_actor::conversation::{Page, Versioned, Which};
-use clarp_store_sqlite::search::{Asked, Found, Mark, Row, SearchError, SearchIndex, SearchReader};
+use clarp_store_sqlite::search::{
+    Asked, Found, Mark, Matched, Row, SearchError, SearchIndex, SearchReader, Whole,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Semaphore, broadcast, oneshot};
@@ -165,6 +167,7 @@ impl Desk {
         agents: Vec<String>,
         limit: usize,
         before: Option<String>,
+        whole: Whole,
     ) -> Result<Found, SearchError> {
         let _turn = self
             .readers
@@ -186,6 +189,7 @@ impl Desk {
                 agents: &agents,
                 limit,
                 before: before.as_deref(),
+                whole,
             })
         })
         .await
@@ -807,6 +811,8 @@ pub(crate) struct Asking {
     session: Option<String>,
     limit: Option<usize>,
     before: Option<String>,
+    /// `1`: with `session`, where each matching row of that chat stands.
+    positions: Option<String>,
 }
 
 /// `GET /search`: the rows of the conversations this caller may read that have every word of
@@ -835,6 +841,28 @@ pub(crate) async fn find(app: &App, reader: &Reader, asking: Asking) -> Result<V
         .session
         .map(|session| session.trim().to_string())
         .filter(|session| !session.is_empty());
+    let positions = match asking.positions.as_deref().map(str::trim) {
+        None | Some("" | "0" | "false") => false,
+        Some("1" | "true") => true,
+        Some(_) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "positions must be 1 or 0",
+            ));
+        }
+    };
+    if positions && session.is_none() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "positions needs session",
+        ));
+    }
+    // One chat's search counts its matches; with `positions`, it says where each stands.
+    let whole = match (session.is_some(), positions) {
+        (false, _) => Whole::Not,
+        (true, false) => Whole::Count,
+        (true, true) => Whole::Positions,
+    };
     let withheld = Withheld::of(app, reader);
     let directory = app.fleet.directory();
     let searched: Vec<&std::sync::Arc<Member>> = directory
@@ -859,7 +887,7 @@ pub(crate) async fn find(app: &App, reader: &Reader, asking: Asking) -> Result<V
         .collect();
     let found = app
         .search
-        .search(words.clone(), agents, limit, asking.before)
+        .search(words.clone(), agents, limit, asking.before, whole)
         .await
         .map_err(|why| match why {
             SearchError::Asked(why) => ApiError::new(StatusCode::BAD_REQUEST, why),
@@ -893,16 +921,41 @@ pub(crate) async fn find(app: &App, reader: &Reader, asking: Asking) -> Result<V
             }))
         })
         .collect();
-    Ok(json!({
+    let mut answer = json!({
         "q": words,
         "hits": hits,
         "next_before": found.next,
         "partial": found.partial,
-    }))
+    });
+    // A chat the Host does not have, or one moved away, has none. An index not made yet has
+    // none so far, and says `partial`.
+    if whole != Whole::Not {
+        answer["total"] = json!(found.whole.total().unwrap_or(0));
+    }
+    if whole == Whole::Positions {
+        let truncated = found.whole.truncated();
+        let newest = match found.whole {
+            Matched::Positions { newest, .. } => newest,
+            Matched::Not | Matched::Count(_) => Vec::new(),
+        };
+        let positions: Vec<Value> = newest
+            .iter()
+            .map(|at| {
+                json!({
+                    "message_id": at.row_id,
+                    "revision": at.revision,
+                    "timestamp": wire::iso(at.ts_ms),
+                })
+            })
+            .collect();
+        answer["positions"] = json!(positions);
+        answer["positions_truncated"] = json!(truncated);
+    }
+    Ok(answer)
 }
 
-/// `clarp-admin search WORDS... [--session S] [--limit N] [--before CURSOR]`: the same search
-/// for an agent, as the reader its turn is.
+/// `clarp-admin search WORDS... [--session S] [--limit N] [--before CURSOR] [--positions]`:
+/// the same search for an agent, as the reader its turn is.
 pub(crate) async fn tool(
     app: &App,
     call: &crate::tools::ToolCall,
@@ -914,12 +967,15 @@ pub(crate) async fn tool(
     let names: Vec<&str> = std::iter::once("words")
         .chain(std::iter::repeat_n("[words]", args.len()))
         .collect();
-    let parsed =
-        match crate::artifact_tool::parse(args, &["--session", "--limit", "--before"], &[], &names)
-        {
-            Ok(parsed) => parsed,
-            Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
-        };
+    let parsed = match crate::artifact_tool::parse(
+        args,
+        &["--session", "--limit", "--before"],
+        &["--positions"],
+        &names,
+    ) {
+        Ok(parsed) => parsed,
+        Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
+    };
     let limit = match parsed.whole("--limit") {
         Ok(limit) => limit.map(|limit| usize::try_from(limit.max(1)).unwrap_or(1)),
         Err(why) => return ToolAnswer::said(2, format!("clarp-admin search: error: {why}")),
@@ -932,6 +988,10 @@ pub(crate) async fn tool(
         session: parsed.option("--session").map(str::to_string),
         limit,
         before: parsed.option("--before").map(str::to_string),
+        positions: parsed
+            .flags
+            .contains("--positions")
+            .then(|| "1".to_string()),
     };
     match find(app, &reader, asking).await {
         Ok(found) => {

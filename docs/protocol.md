@@ -1206,6 +1206,9 @@ client then searches only what it has loaded.
   have finds nothing.
 - `limit`: hits per page, 20 by default, at most 100.
 - `before`: the `next_before` of the page before, an opaque string. A cursor that is not one is refused, 400.
+- `positions=1` (feature `search_positions`, Rust Host contract 218): with `session`, the answer
+  also says where every matching row of that chat stands (below). Without `session` it is
+  refused, 400 `positions needs session`; a value other than `1`/`true`/`0`/`false`, 400.
 
 ```json
 {
@@ -1240,6 +1243,37 @@ client then searches only what it has loaded.
   that brings search, or after its index was thrown away). What it has read is answered; older
   rows of an agent may be missing. Ask again later for the rest.
 
+**One chat's matches, for a search bar in the chat** (feature `search_positions`, Rust Host
+contract 218). A search with `session` also answers `total`, the number of rows of that chat
+that match (0 for an agent the Host does not have or that moved to another Host). A `session`
+the reader may not read is refused as before, 403 `bound_conversation`, with no count. With
+`positions=1` it also answers where each one stands:
+
+```json
+{
+  "q": "oslo", "hits": [ … ], "next_before": "…", "partial": false,
+  "total": 7,
+  "positions": [
+    {"message_id": "…", "revision": 52428800, "timestamp": "2026-11-25T10:02:03.000Z"}
+  ],
+  "positions_truncated": false
+}
+```
+
+- `positions` lists every matching row of that chat in chat order, oldest first, at most 2000;
+  beyond that the newest 2000 are kept and `positions_truncated` is `true` (`total` still counts
+  them all). `message_id` is the row's `id` in `GET /log`; `revision` and `timestamp` are the
+  hit's own, as in `hits`.
+- Chat order is the order of the rows' `timestamp`s, and of rows of one millisecond their
+  `revision`s. `/log` writes rows as they happen, so this is nearly always its order. Where a
+  row's `timestamp` is not when it entered the conversation, it is placed by its `timestamp`,
+  and a client that needs `/log`'s exact place reads it there. The 2000-row cap uses the
+  same timestamp and revision order.
+- `hits`, `next_before` and `partial` are the page as without `positions`; `partial: true` also
+  means `total` and `positions` may miss older rows.
+- On a Host without the feature: page `GET /search?q&session=S&limit=100` through `next_before`
+  and sort the returned hits by timestamp, then revision, for the same order.
+
 The index is kept by the Host as rows change, in a file of its own beside its data
 (`search.db`); it is never built by reading the logs at a request. A row whose words change
 (a revision) is found by its new words only. A removed agent, an agent moved to another Host,
@@ -1252,7 +1286,8 @@ read them (another agent, another Host, a tool that cannot say whose turn it is)
 limited access searches as it reads `/log`. From Rust Host contract 216 (`agent_token_api`),
 the local agents' tools token (`CLARP_TOOL_TOKEN`) can search and read `/log` with the
 same privacy checks. `X-Clarp-Turn` identifies the reader. On older Hosts, an agent
-searches with `clarp-admin search WORDS... [--session S] [--limit N] [--before CURSOR]`.
+searches with `clarp-admin search WORDS... [--session S] [--limit N] [--before CURSOR]`
+(`--positions` with `--session` from contract 218).
 
 ### 3. Stay in sync: `GET /events` (SSE)
 

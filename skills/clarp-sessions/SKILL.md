@@ -33,10 +33,19 @@ searched; tool output and the Host's notices are not. `message_id` is the row's
 `id` in `GET /log?session=<session>`. `partial: true` means the Host is still
 reading older history into its index: what is older may be missing, so say so
 or ask again later. An agent bound to a model provider of its own is not
-searched for you unless you may read it, and naming it with `--session` is
-refused (`bound_conversation`).
+searched for you unless you may read it. The CLI omits unreadable chats. A scoped
+HTTP search for an unreadable bound chat returns `bound_conversation` (403).
 
-Apps call `GET /search?q=WORDS[&session=][&limit=][&before=]` with the same
+With `--session`, a Host with feature `search_positions` (contract 218) also
+prints `total`, how many rows of that chat match. Add `--positions` to list where
+each one is, oldest first (`positions`: `message_id`, `revision`, `timestamp`;
+the newest 2000, `positions_truncated` beyond):
+
+```bash
+clarp-admin search kontoret --session lena-1a3f --positions
+```
+
+Apps call `GET /search?q=WORDS[&session=][&limit=][&before=][&positions=1]` with the same
 answer. A Python Host and Rust Hosts before contract 196 have no search: read
 `GET /log` of the likely agents instead.
 
